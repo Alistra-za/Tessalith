@@ -406,6 +406,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             let view = set_editor::View {
                 switch: state.set3d.enabled,
                 three_d,
+                noise_uv: three_d.then(|| state.set3d.mato_noise_uv_scale()).flatten(),
             };
             set_editor::draw(
                 ui,

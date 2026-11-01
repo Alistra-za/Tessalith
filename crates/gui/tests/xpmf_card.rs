@@ -435,3 +435,89 @@ fn xpmf_card_screenshots() {
         }
     }
 }
+
+/// The card's amber line after a refusal only `prepare` used to know (final review M1): a hand-edited value the
+/// schema refuses.
+#[test]
+fn schema_refusal_shows_on_the_card() {
+    use sdc_gui::model::xpmf_json::card_values;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, json!({"shelterFade": 40}));
+    assert_eq!(card_values(&m, ID).refusal, None);
+    set_block(&mut m, json!({"shelterFade": 500}));
+    let why = card_values(&m, ID).refusal.clone().expect("refused");
+    assert!(
+        why.starts_with(&format!("{ID}: XPMF profile not written: ")),
+        "{why}"
+    );
+    let mut h = tall(m);
+    h.run_steps(4);
+    assert!(has(&h, &why), "the amber line shows it");
+}
+
+/// Final review M1: two sets that fold to one file both say so on their cards, not only in the export note.
+#[test]
+fn fold_clash_shows_on_both_cards() {
+    use sdc_gui::model::xpmf_json::card_values;
+    let d = tempfile::tempdir().unwrap();
+    let sub = d.path().join("textures/landscape/sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| image::Rgb([x as u8, y as u8, 7u8]))
+        .save(sub.join("Rock01.png"))
+        .unwrap();
+    let mut m = opened(d.path());
+    let views = set_views(&m);
+    let other = views
+        .iter()
+        .find(|v| v.id != ID && v.id.to_lowercase().ends_with("/rock01"))
+        .expect("a second rock01 set");
+    let (other_id, other_key) = (other.id.clone(), other.key.clone());
+    let own_key = views.iter().find(|v| v.id == ID).unwrap().key.clone();
+    set_block(&mut m, json!({}));
+    let b = json!({"editorIds": ["MatoC"]}).as_object().unwrap().clone();
+    m.sets_doc.as_mut().unwrap().set_xpmf(&other_id, Some(b));
+    let say = |a: &str, b: &str| {
+        format!("{a}: XPMF profile not written: tessalith_rock01.json is also the file of {b}")
+    };
+    assert_eq!(
+        card_values(&m, ID).refusal,
+        Some(say(ID, &other_id)),
+        "{:?}",
+        card_values(&m, ID)
+    );
+    assert_eq!(card_values(&m, &other_id).refusal, Some(say(&other_id, ID)));
+    let mut h = tall(m);
+    for (key, line) in [
+        (own_key, say(ID, &other_id)),
+        (other_key, say(&other_id, ID)),
+    ] {
+        h.state_mut().select_set(&key);
+        h.run_steps(4);
+        assert!(has(&h, &line), "{line}");
+    }
+}
+
+/// Final review M2: a block on a set that is no longer landscape keeps its toggle and amber line (and no rows), so
+/// the block can be removed.
+#[test]
+fn a_block_on_a_non_landscape_set_can_be_removed() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, json!({"shelterFade": 40}));
+    m.set_shader(ID, Some(Shader::Pbr));
+    idle(&mut m);
+    let mut h = tall(m);
+    h.run_steps(4);
+    assert!(has(&h, TOGGLE), "the toggle stays");
+    assert!(has(
+        &h,
+        &format!("{ID}: not a landscape set; XPMF profile not written")
+    ));
+    assert!(!has(&h, "Shelter fade"), "no rows");
+    h.get_by_label(TOGGLE).click();
+    h.run_steps(4);
+    assert_eq!(block(h.state()), None, "the block is gone");
+    h.run_steps(2);
+    assert!(!has(&h, TOGGLE), "and with it the card");
+}

@@ -8,7 +8,6 @@ use crate::model::xpmf_json::{card_values, Field, FieldKind, FIELDS};
 use crate::model::AppModel;
 use eframe::egui;
 use engine::sets::same_id;
-use engine::shader::Shader;
 use serde_json::{json, Map, Value};
 
 pub const CARD: &str = "XPMF profile";
@@ -16,7 +15,8 @@ pub const TOGGLE: &str = "Write XPMF profile";
 pub const NOT_PREVIEWED: &str = "Not shown in the preview";
 const TOGGLE_HOVER: &str =
     "Writes SKSE\\Plugins\\XPMF\\tessalith_<set>.json on Export. A row left at its greyed \
-                            default is written as Tessalith fills it, or left to XPMF.";
+                            default is written as Tessalith fills it, or left to XPMF. Turning it off removes the \
+                            block's values; Undo brings them back.";
 const RESET_HOVER: &str = "Back to the default";
 /// The disabled card's hover when the model gives no reason.
 const READ_ONLY: &str = "sdc-project.toml is read-only";
@@ -33,17 +33,19 @@ enum Act {
     Value(&'static str, Option<Value>),
 }
 
-/// The card's sets: Landscape and PBR Landscape, on either target.
-pub fn shows(v: &SetView) -> bool {
-    v.shader
-        .as_ref()
-        .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+/// The sets whose card has rows: Landscape and PBR Landscape, on either target.
+pub use crate::model::xpmf_json::is_landscape as shows;
+
+/// What a row needs besides its own value.
+struct Cx<'a> {
+    m: &'a AppModel,
+    v: &'a SetView,
+    /// M8: the preview's picked record's `noiseUVScale`, where the Override starts.
+    noise_uv: Option<f32>,
 }
 
-pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
-    if !shows(v) {
-        return;
-    }
+/// `noise_uv`: the 3D preview's picked MATO record's noise UV scale, if it has one (M8).
+pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f32>) {
     let mut acts = vec![];
     let m: &AppModel = model;
     let block = m.sets_doc.as_ref().and_then(|d| {
@@ -52,6 +54,10 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             .find(|e| same_id(&e.id, &v.id))
             .and_then(|e| e.xpmf.clone())
     });
+    // M2: a block on a set that lost its landscape shader keeps a toggle to remove it.
+    if !shows(v) && block.is_none() {
+        return;
+    }
     // The model's own check, so the card is never enabled while its edits are dropped.
     let editable = m.sets_editable();
     let why = m
@@ -73,9 +79,13 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 return;
             };
             let c = card_values(m, &v.id);
-            if let Err(e) = &c.profile {
+            if let Some(e) = c.profile.as_ref().err().or(c.refusal.as_ref()) {
                 ui.colored_label(AMBER, e);
             }
+            if !shows(v) {
+                return;
+            }
+            let cx = Cx { m, v, noise_uv };
             let none = Map::new();
             let defaults = c.defaults.as_ref().unwrap_or(&none);
             // X9: the effective pbr, the block's over the default.
@@ -84,7 +94,7 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 if f.key == "specularMult" && pbr {
                     continue;
                 }
-                row(ui, m, v, f, b.get(f.key), defaults.get(f.key), &mut acts);
+                row(ui, &cx, f, b.get(f.key), defaults.get(f.key), &mut acts);
             }
         })
         .response
@@ -144,8 +154,7 @@ fn typed(kind: FieldKind, v: &Value) -> bool {
 
 fn row(
     ui: &mut egui::Ui,
-    m: &AppModel,
-    v: &SetView,
+    cx: &Cx,
     f: &'static Field,
     cur: Option<&Value>,
     dflt: Option<&Value>,
@@ -164,9 +173,9 @@ fn row(
             }
             _ => match f.kind {
                 FieldKind::Bool => bool_value(ui, f, cur, dflt, acts),
-                FieldKind::Number { .. } => number_value(ui, f, cur, dflt, acts),
-                FieldKind::Text | FieldKind::Texture => text_value(ui, v, f, cur, dflt, acts),
-                FieldKind::Patterns => patterns_value(ui, m, v, f, cur, dflt, acts),
+                FieldKind::Number { .. } => number_value(ui, cx, f, cur, dflt, acts),
+                FieldKind::Text | FieldKind::Texture => text_value(ui, cx.v, f, cur, dflt, acts),
+                FieldKind::Patterns => patterns_value(ui, cx.m, cx.v, f, cur, dflt, acts),
             },
         }
         if cur.is_some() {
@@ -225,8 +234,35 @@ fn range(kind: FieldKind) -> Option<std::ops::RangeInclusive<f64>> {
     }
 }
 
+/// M8: where Override starts. `noiseUVScale` takes the picked record's value, else vanilla's usual 48 (vanilla runs
+/// 20 to 1500, so 1 would be a long drag away); the other keys take XPMF's numeric default where it has one, else 1.
+/// Always inside the range.
+fn override_start(
+    f: &Field,
+    noise_uv: Option<f32>,
+    r: &Option<std::ops::RangeInclusive<f64>>,
+) -> f64 {
+    let start = if f.key == "noiseUVScale" {
+        noise_uv.map_or(48.0, f64::from)
+    } else {
+        f.default.and_then(|d| d.parse().ok()).unwrap_or(1.0)
+    };
+    r.as_ref()
+        .map_or(start, |r| start.clamp(*r.start(), *r.end()))
+}
+
+/// About 256 drag steps over a bounded range; a key with no finite maximum scales with its value (M8), so 1500 is not
+/// a 150,000 px drag.
+fn drag_speed(r: &Option<std::ops::RangeInclusive<f64>>, x: f64) -> f64 {
+    match r {
+        Some(r) if r.end() - r.start() < 1e6 => (r.end() - r.start()) / 256.0,
+        _ => (x.abs() * 0.005).max(0.01),
+    }
+}
+
 fn number_value(
     ui: &mut egui::Ui,
+    cx: &Cx,
     f: &'static Field,
     cur: Option<&Value>,
     dflt: Option<&Value>,
@@ -239,21 +275,16 @@ fn number_value(
             .small_button("Override")
             .on_hover_text("Write a value of your own");
         if named(b, egui::WidgetType::Button, format!("Override {}", f.key)).clicked() {
-            // XPMF's numeric default where it has one, else 1 (inside the range).
-            let start: f64 = f.default.and_then(|d| d.parse().ok()).unwrap_or(1.0);
-            let start = r
-                .clone()
-                .map_or(start, |r| start.clamp(*r.start(), *r.end()));
-            acts.push(Act::Value(f.key, Some(json!(start))));
+            acts.push(Act::Value(
+                f.key,
+                Some(json!(override_start(f, cx.noise_uv, &r))),
+            ));
         }
         return;
     };
-    // About 256 drag steps over a bounded range; a stored value outside the range stays until the user edits it
-    // (typed values always clamp, egui `clamp_value_to_range`).
-    let speed = match &r {
-        Some(r) if r.end() - r.start() < 1e6 => (r.end() - r.start()) / 256.0,
-        _ => 0.01,
-    };
+    // A stored value outside the range stays until the user edits it (typed values always clamp, egui
+    // `clamp_value_to_range`).
+    let speed = drag_speed(&r, x);
     let mut d = egui::DragValue::new(&mut x)
         .speed(speed)
         .clamp_existing_to_range(false);
@@ -444,8 +475,9 @@ fn picks(r: &crate::model::cs_pbr::ScanRecords, typed: &str) -> Vec<(String, Str
 
 #[cfg(test)]
 mod tests {
-    use super::picks;
+    use super::{drag_speed, override_start, picks};
     use crate::model::cs_pbr::ScanRecords;
+    use crate::model::xpmf_json::FIELDS;
     use modscan::plugin_store::WinRec;
 
     fn rec(edid: &str, flags: Option<u32>) -> WinRec {
@@ -475,5 +507,46 @@ mod tests {
         assert_eq!(got, ["SnowMat1P"]);
         let got: Vec<String> = picks(&r, "MAT1p").into_iter().map(|(e, _)| e).collect();
         assert_eq!(got, ["SnowMat1P", "AshMat1P"]);
+    }
+
+    /// M7: turning the toggle off drops the block's values, and the hover says so and names Undo.
+    #[test]
+    fn toggle_hover_says_off_removes_the_values() {
+        assert!(super::TOGGLE_HOVER.contains("Turning it off removes the block's values"));
+        assert!(super::TOGGLE_HOVER.contains("Undo brings them back"));
+    }
+
+    fn field(key: &str) -> &'static crate::model::xpmf_json::Field {
+        FIELDS.iter().find(|f| f.key == key).unwrap()
+    }
+
+    /// M8: the noise scale starts at 48 (or the record's value), not 1; other keys are as before.
+    #[test]
+    fn noise_uv_scale_override_starts_at_a_vanilla_value() {
+        let f = field("noiseUVScale");
+        let r = super::range(f.kind);
+        assert_eq!(override_start(f, None, &r), 48.0);
+        assert_eq!(override_start(f, Some(170.5), &r), 170.5);
+        assert_eq!(override_start(f, Some(-3.0), &r), 0.01, "inside the range");
+        assert_eq!(
+            override_start(
+                field("shelterFade"),
+                Some(170.5),
+                &super::range(field("shelterFade").kind)
+            ),
+            64.0
+        );
+        assert_eq!(override_start(field("falloffScale"), None, &None), 1.0);
+    }
+
+    /// M8: a key with no finite maximum drags in proportion to its value; a bounded one in 256 steps.
+    #[test]
+    fn unbounded_drag_speed_scales_with_the_value() {
+        let r = super::range(field("noiseUVScale").kind);
+        assert_eq!(drag_speed(&r, 0.5), 0.01);
+        assert_eq!(drag_speed(&r, 1000.0), 5.0);
+        assert_eq!(drag_speed(&None, -1000.0), 5.0);
+        let b = super::range(field("shelterFade").kind);
+        assert_eq!(drag_speed(&b, 1000.0), 0.5);
     }
 }

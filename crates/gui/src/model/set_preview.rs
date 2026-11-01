@@ -2913,6 +2913,13 @@ impl SetPreview {
         self.xpmf_resume &= self.xpmf_cycle;
     }
 
+    /// The picked MATO record's `noiseUVScale` when it is usable (finite and above 0, as the layer takes it), for the
+    /// XPMF card's Override (M8).
+    pub fn mato_noise_uv_scale(&self) -> Option<f32> {
+        let x = self.mato_data.as_ref()?.noise_uv_scale;
+        (x.is_finite() && x > 0.0).then_some(x)
+    }
+
     /// The followed set has a `cs_mato` block (as of the last sync): the toggle shows only then.
     pub fn mato_available(&self) -> bool {
         self.mato_block.is_some()

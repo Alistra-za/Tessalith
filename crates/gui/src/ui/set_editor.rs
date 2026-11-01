@@ -89,6 +89,8 @@ pub struct View {
     pub switch: bool,
     /// The 3D panel shows this set: the slot rows are left out, the TruePBR settings stay.
     pub three_d: bool,
+    /// The 3D preview's picked MATO record's `noiseUVScale`, where the XPMF card's Override starts (M8).
+    pub noise_uv: Option<f32>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -171,7 +173,7 @@ pub fn draw(
             });
             under_grid(ui, model, v);
             ui.add_space(6.0);
-            tabs(ui, model, v, advanced);
+            tabs(ui, model, v, advanced, view.noise_uv);
         });
     let (mut select, mut expand) = (None, None);
     for a in acts {
@@ -304,6 +306,7 @@ fn tabs(
     model: &mut AppModel,
     v: &SetView,
     advanced: &mut super::advanced::AdvancedState,
+    noise_uv: Option<f32>,
 ) {
     let json = shows_json_panel(v, model.target);
     let mut open = model.settings.advanced_open;
@@ -335,7 +338,7 @@ fn tabs(
         return;
     }
     super::cs_pbr::card(ui, model, v);
-    super::xpmf::card(ui, model, v);
+    super::xpmf::card(ui, model, v, noise_uv);
     // K12: on a JSON set that is not PBR Landscape the CS PBR records sit between Matching and Advanced TruePBR
     // settings; `pgp_panel` (a PBR Landscape set's) draws both halves itself.
     let split = json && !(model.target == Target::Cs && crate::model::sets::is_pbr_landscape(v));
