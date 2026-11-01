@@ -622,7 +622,12 @@ fn xpmf_shas_live_in_sidecar() {
     assert_eq!(s.xpmf_shas(), shas);
     let side: serde_json::Value =
         serde_json::from_slice(&std::fs::read(s.sidecar_path()).unwrap()).unwrap();
-    assert_eq!(side["xpmf"]["SKSE/Plugins/XPMF/tessalith_a.json"], "00");
+    assert_eq!(
+        side["xpmf_sha256"]["SKSE/Plugins/XPMF/tessalith_a.json"],
+        "00"
+    );
+    // Note FC11 (ruling R9): a writable document also carries the readable `[project]` copy.
+    assert!(s.text().contains("xpmf_sha256") && s.text().contains("tessalith_a.json"));
     assert_eq!(
         SetsDoc::open(d.path()).xpmf_shas(),
         shas,
@@ -630,6 +635,10 @@ fn xpmf_shas_live_in_sidecar() {
     );
     s.set_xpmf_shas(BTreeMap::new()).unwrap();
     assert!(s.xpmf_shas().is_empty());
+    assert!(
+        !s.text().contains("xpmf_sha256"),
+        "the empty table is removed"
+    );
 
     let (b, mut r) = doc(Some("[[sets]\nbroken"));
     assert!(r.read_only());
@@ -645,4 +654,57 @@ fn xpmf_shas_live_in_sidecar() {
         shas,
         "the sidecar holds it"
     );
+}
+
+/// XPMF: a hand-edited block keeps its `#` comment lines and a member the GUI cannot convert (an array of tables)
+/// when another key changes; keys absent from the wanted map are removed.
+#[test]
+fn set_xpmf_updates_the_block_key_by_key() {
+    let (_d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\n[sets.xpmf]\n# why snow\nname = \"snow\" # inline note\nshelterFade = 40\n\
+         waterFade = true\n[[sets.xpmf.rows]]\nx = 1\n",
+    ));
+    assert_eq!(
+        s.entries()[0].xpmf,
+        Some(map(
+            json!({"name": "snow", "shelterFade": 40, "waterFade": true})
+        )),
+        "the array of tables is not a value"
+    );
+    s.set_xpmf(
+        "a/one",
+        Some(map(json!({"name": "snow", "shelterFade": 50}))),
+    );
+    let t = s.text();
+    assert!(
+        t.contains("# why snow") && t.contains("# inline note"),
+        "{t}"
+    );
+    assert!(t.contains("[[sets.xpmf.rows]]"), "{t}");
+    assert!(!t.contains("waterFade"), "an absent key is removed: {t}");
+    assert_eq!(
+        s.entries()[0].xpmf,
+        Some(map(json!({"name": "snow", "shelterFade": 50})))
+    );
+}
+
+/// XPMF: a `null` member is not stored; a nested object is written as an inline table and reads back from both an
+/// inline and a standard table.
+#[test]
+fn xpmf_null_is_dropped_and_nested_objects_round_trip() {
+    let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
+    let b = map(json!({"name": "n", "falloffBias": null, "extra": {"a": 1, "b": {"c": "x"}}}));
+    s.set_xpmf("a/one", Some(b));
+    let want = map(json!({"name": "n", "extra": {"a": 1, "b": {"c": "x"}}}));
+    assert_eq!(s.entries()[0].xpmf.as_ref(), Some(&want));
+    assert!(!s.text().contains("falloffBias"));
+    s.save(false).unwrap();
+    assert_eq!(
+        SetsDoc::open(d.path()).entries()[0].xpmf.as_ref(),
+        Some(&want)
+    );
+    let (_d2, s2) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\n[sets.xpmf]\nname = \"n\"\n[sets.xpmf.extra]\na = 1\n[sets.xpmf.extra.b]\nc = \"x\"\n",
+    ));
+    assert_eq!(s2.entries()[0].xpmf.as_ref(), Some(&want));
 }

@@ -47,9 +47,9 @@ const PGP_SHA: &str = "pgp_json_sha256";
 /// Note BV3: `[project] copy_sha256`, absolute lower-case path → hash of the vanilla borrowed-slot copy sdc last
 /// wrote there.
 const COPY_SHA: &str = "copy_sha256";
-/// XPMF profile export: `[project] xpmf` (and the sidecar table of the same name), path under the export root → hash
+/// XPMF profile export: `[project] xpmf_sha256` (and the sidecar table of the same name), path under the export root → hash
 /// of the profile JSON sdc last wrote there.
-const XPMF_SHA: &str = "xpmf";
+const XPMF_SHA: &str = "xpmf_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 14] = [
     "id",
@@ -1268,7 +1268,7 @@ impl SetsDoc {
     }
 
     /// XPMF profile export: replace set `set`'s `[sets.xpmf]` with `block` (`Some`, even empty, is a block), or remove it
-    /// with `None`. `null` members are not stored (absent is the default). An equal write is no edit.
+    /// with `None`. `null` members are not stored (absent is the default). An existing block is updated key by key (comments and\n    /// unconvertible members stay). An equal write is no edit.
     pub fn set_xpmf(&mut self, set: &str, block: Option<serde_json::Map<String, Json>>) {
         if self.read_only() {
             return;
@@ -1278,35 +1278,53 @@ impl SetsDoc {
             .into_iter()
             .find(|e| same_id(&e.id, set))
             .and_then(|e| e.xpmf);
-        let new = block.map(|b| {
-            let mut t = Table::new();
-            for (k, v) in &b {
-                if let Some(v) = json_to_toml_deep(v) {
-                    t.insert(k, Item::Value(v));
-                }
-            }
-            t
+        // The values as TOML holds them: what a reread gives, so `null` and anything TOML cannot hold drop out.
+        let wanted = block.map(|b| {
+            b.into_iter()
+                .filter_map(|(k, v)| Some((k, json_to_toml_deep(&v)?)))
+                .collect::<Vec<_>>()
         });
-        let wanted = new.as_ref().map(|t| {
-            t.iter()
-                .filter_map(|(k, i)| Some((k.to_string(), item_json(i)?)))
+        let wanted_json = wanted.as_ref().map(|w| {
+            w.iter()
+                .filter_map(|(k, v)| Some((k.clone(), item_json(&Item::Value(v.clone()))?)))
                 .collect::<serde_json::Map<_, _>>()
         });
-        if wanted == now {
+        if wanted_json == now {
             return;
         }
         let t = self.table_mut(set);
-        match new {
-            Some(b) => {
-                t.insert("xpmf", Item::Table(b));
-            }
+        match wanted {
             None => {
                 t.remove("xpmf");
+            }
+            Some(w) => {
+                // Update an existing block key by key, so comments and members the GUI cannot convert (item_json
+                // None: an array of tables) stay.
+                if let Some(old) = t.get_mut("xpmf").and_then(Item::as_table_like_mut) {
+                    let gone: Vec<String> = old
+                        .iter()
+                        .filter(|(k, i)| !w.iter().any(|(wk, _)| wk == k) && item_json(i).is_some())
+                        .map(|(k, _)| k.to_string())
+                        .collect();
+                    for k in gone {
+                        old.remove(&k);
+                    }
+                    for (k, v) in w {
+                        if old.get(&k).and_then(item_json) != item_json(&Item::Value(v.clone())) {
+                            set_value(old, &k, v);
+                        }
+                    }
+                } else {
+                    let mut b = Table::new();
+                    for (k, v) in w {
+                        b.insert(&k, Item::Value(v));
+                    }
+                    t.insert("xpmf", Item::Table(b));
+                }
             }
         }
         self.f.touch();
     }
-
     /// Tick or untick the export (D3). Unticking writes `export = false` and keeps the values, so ticking again
     /// restores them.
     pub fn set_cm_export(&mut self, id: &str, on: bool) {
