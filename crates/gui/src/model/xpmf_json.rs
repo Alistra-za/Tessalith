@@ -201,6 +201,33 @@ pub fn profile(m: &AppModel, set: &SetEntry) -> Result<Map<String, Value>, Strin
 
 /// `profile` with the set views computed once by the caller (`prepare`).
 fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String, Value>, String> {
+    let mut doc = defaults_in(m, vs, set)?;
+    if let Some(b) = &set.xpmf {
+        // R13: an empty `name` or `editorIds` is unset, so the default above stays. Other empty keys drop the
+        // default below (`noiseTexture = ""` is the game's own).
+        let unset = |k: &str, v: &Value| matches!(k, "name" | "editorIds") && empty(v);
+        doc.extend(
+            b.iter()
+                .filter(|(k, v)| !unset(k, v))
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+    }
+    doc.retain(|_, v| !empty(v));
+    if doc.get("pbr") == Some(&json!(true)) {
+        doc.remove("specularMult");
+    }
+    if !doc.contains_key("editorIds") {
+        return Err(format!(
+            "{}: no editorIds; XPMF profile not written",
+            set.id
+        ));
+    }
+    Ok(doc)
+}
+
+/// The values Tessalith fills while the block leaves a key unset (X2-X5): `name`, `editorIds` (maybe empty), `pbr`
+/// and the textures of filled slots. `profile` lays the block over these; the card shows them greyed.
+fn defaults_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String, Value>, String> {
     let Some(v) = vs
         .iter()
         .find(|v| same_id(&v.id, &set.id) && !v.members.is_empty())
@@ -235,27 +262,96 @@ fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String
             doc.insert(key.into(), json!(rel));
         }
     }
-    if let Some(b) = &set.xpmf {
-        // R13: an empty `name` or `editorIds` is unset, so the default above stays. Other empty keys drop the
-        // default below (`noiseTexture = ""` is the game's own).
-        let unset = |k: &str, v: &Value| matches!(k, "name" | "editorIds") && empty(v);
-        doc.extend(
-            b.iter()
-                .filter(|(k, v)| !unset(k, v))
-                .map(|(k, v)| (k.clone(), v.clone())),
-        );
-    }
-    doc.retain(|_, v| !empty(v));
-    if doc.get("pbr") == Some(&json!(true)) {
-        doc.remove("specularMult");
-    }
-    if !doc.contains_key("editorIds") {
-        return Err(format!(
-            "{}: no editorIds; XPMF profile not written",
-            set.id
-        ));
-    }
     Ok(doc)
+}
+
+/// What the card shows for one set: the defaults (greyed) and the profile (its `Err` is the card's amber line).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CardValues {
+    pub defaults: Result<Map<String, Value>, String>,
+    pub profile: Result<Map<String, Value>, String>,
+}
+
+/// `CardValues` of set `set` (an id), cached with the set views (ui-rules §9.1): the card asks every frame.
+pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
+    let key = m.view_key();
+    {
+        let c = m.views.borrow();
+        if c.key.as_ref() == Some(&key) {
+            if let Some((id, v)) = &c.xpmf_card {
+                if id == set {
+                    return v.clone();
+                }
+            }
+        }
+    }
+    // No borrow is held here: `views` fills the same cell.
+    let vs = views(m);
+    let none = || Err(format!("{set}: no such set"));
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let v = std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
+        Some(e) => CardValues {
+            defaults: defaults_in(m, &vs, e),
+            profile: profile_in(m, &vs, e),
+        },
+        None => CardValues {
+            defaults: none(),
+            profile: none(),
+        },
+    });
+    let mut c = m.views.borrow_mut();
+    if c.key.as_ref() != Some(&key) {
+        *c = super::ViewCache {
+            key: Some(key),
+            ..Default::default()
+        };
+    }
+    c.xpmf_card = Some((set.to_string(), v.clone()));
+    v
+}
+
+/// The X4 Problems row's hover.
+pub const SKIP_HOVER: &str = "Only this project's cs_mato blocks are checked; PBRMaterialObjects files from other mods are not scanned.";
+
+/// X4: per set with a block whose profile has `pbr` on, each exact EDID (no `*` or `?`) of its `editorIds` that no
+/// `cs_mato` block of the project names, case-insensitively as `refusals` compares them: (set key, set id, EDID).
+/// Read by `bottom::build_problems`, which is cached.
+pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
+    let Some(doc) = m.sets_doc.as_ref() else {
+        return vec![];
+    };
+    let entries = doc.entries();
+    if entries.iter().all(|e| e.xpmf.is_none()) {
+        return vec![];
+    }
+    let mato: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| e.cs_mato.as_ref())
+        .flat_map(|b| b.edids.iter().map(|x| x.to_lowercase()))
+        .collect();
+    let vs = views(m);
+    let mut out = vec![];
+    for (i, e) in entries.iter().enumerate() {
+        if e.xpmf.is_none() || entries[..i].iter().any(|o| same_id(&o.id, &e.id)) {
+            continue;
+        }
+        let (Ok(p), Some(v)) = (
+            profile_in(m, &vs, e),
+            vs.iter().find(|v| same_id(&v.id, &e.id)),
+        ) else {
+            continue;
+        };
+        if p.get("pbr") != Some(&json!(true)) {
+            continue;
+        }
+        let ids = p.get("editorIds").and_then(Value::as_array);
+        for x in ids.into_iter().flatten().filter_map(Value::as_str) {
+            if !x.contains(['*', '?']) && !mato.contains(&x.to_lowercase()) {
+                out.push((v.key.clone(), v.id.clone(), x.to_string()));
+            }
+        }
+    }
+    out
 }
 
 fn slot_output(m: &AppModel, fill: Option<&SlotFill>) -> Option<PathBuf> {
@@ -445,6 +541,49 @@ pub fn finish(
 }
 
 impl AppModel {
+    /// The card's toggle (Task 7): an empty `[sets.xpmf]` block, or none. One undo step.
+    pub fn set_xpmf_on(&mut self, set: &str, on: bool) {
+        if !self.sets_editable() {
+            return;
+        }
+        let label = if on {
+            "Write XPMF profile"
+        } else {
+            "Stop writing XPMF profile"
+        };
+        let s = set.to_string();
+        self.edit_docs(label, None, false, move |_, d| {
+            d.set_xpmf(&s, on.then(Map::new))
+        });
+    }
+
+    /// Set (or with `None` reset) key `key` of the set's block; nothing without a block. Drags of one key merge into
+    /// one undo step.
+    pub fn set_xpmf_value(&mut self, set: &str, key: &str, v: Option<Value>) {
+        if !self.sets_editable() {
+            return;
+        }
+        let Some(mut b) = self.sets_doc.as_ref().and_then(|d| {
+            d.entries()
+                .iter()
+                .find(|e| same_id(&e.id, set))
+                .and_then(|e| e.xpmf.clone())
+        }) else {
+            return;
+        };
+        match v {
+            Some(v) => b.insert(key.to_string(), v),
+            None => b.remove(key),
+        };
+        let s = set.to_string();
+        self.edit_docs(
+            &format!("Change {key}"),
+            Some(format!("{set}:xpmf:{key}")),
+            false,
+            move |_, d| d.set_xpmf(&s, Some(b)),
+        );
+    }
+
     /// The export ended. After a clean export (none cancelled or failed), write the profiles of `p` (taken from
     /// `pending_xpmf` by the caller) and record their hashes (saved, like the complex-material record). Otherwise
     /// only add a note.

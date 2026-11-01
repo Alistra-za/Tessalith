@@ -335,6 +335,7 @@ fn tabs(
         return;
     }
     super::cs_pbr::card(ui, model, v);
+    super::xpmf::card(ui, model, v);
     // K12: on a JSON set that is not PBR Landscape the CS PBR records sit between Matching and Advanced TruePBR
     // settings; `pgp_panel` (a PBR Landscape set's) draws both halves itself.
     let split = json && !(model.target == Target::Cs && crate::model::sets::is_pbr_landscape(v));

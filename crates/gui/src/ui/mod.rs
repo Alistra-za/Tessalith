@@ -40,6 +40,7 @@ pub mod status;
 pub mod thumbs;
 pub mod type_picker;
 pub mod viewport3d;
+pub mod xpmf;
 
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::{AppModel, CentreTab, Selection};

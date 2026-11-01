@@ -275,6 +275,8 @@ pub(crate) struct ViewCache {
     pub half_size: Option<(ProblemsKey, Arc<Vec<review::HalfSizeRow>>)>,
     /// The keys `bottom::set_ready` looks up; reset with every `problems` build.
     pub flagged: Option<Arc<bottom::Flagged>>,
+    /// Note GI: the XPMF card's values of one set (by id), `xpmf_json::card_values`.
+    pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
 }
 
 #[derive(Clone, PartialEq)]
