@@ -206,7 +206,8 @@ impl AppModel {
     /// FC11 (fix round 1): the JSON files with a hash record that this project no longer writes (AG90's PGPatcher JSON
     /// under an earlier name or off the CS target, AD5's CS PBR JSON no block binds, AT3's complex-material JSON no
     /// set writes, Note GI's XPMF profiles likewise), as `stale` rows. The recorded SHA-256 is their baseline: ours
-    /// when the file still hashes to it. Run when a plan settles and after an export's JSON step, never per frame (it hashes the files).
+    /// when the file still hashes to it. Run when a plan settles and after an export's JSON step, never per frame (it
+    /// hashes the files).
     pub(crate) fn refresh_stale_json(&mut self) {
         let old = std::mem::take(&mut self.stale_json);
         self.stale.retain(|s| !old.contains_key(&s.path));

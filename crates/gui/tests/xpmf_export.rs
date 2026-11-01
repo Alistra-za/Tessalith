@@ -192,6 +192,13 @@ fn stale_profile_row() {
         "{}",
         notes(&m)
     );
+    // `finish` keeps the orphan's record, so the row stays, still without Delete.
+    let s = m
+        .stale
+        .iter()
+        .find(|s| s.path == f)
+        .expect("stale after the export");
+    assert!(!s.ours, "{:?}", m.stale);
 }
 
 /// FC12: the zip estimate counts the profile.
@@ -209,7 +216,93 @@ fn zip_counts_profile() {
     assert_eq!(m.zip_estimate().unwrap().entries, before + 1);
 }
 
-/// A failed or cancelled export writes no profile.
+/// The entry names of a zip, from its central directory (copied from `also_export.rs`).
+fn zip_names(path: &Path) -> Vec<String> {
+    let z = std::fs::read(path).unwrap();
+    let u16le = |at: usize| u16::from_le_bytes([z[at], z[at + 1]]) as usize;
+    let u32le = |at: usize| u32::from_le_bytes(z[at..at + 4].try_into().unwrap()) as usize;
+    let eocd = z.len() - 22;
+    let mut at = u32le(eocd + 16);
+    (0..u16le(eocd + 10))
+        .map(|_| {
+            let (n, x, c) = (u16le(at + 28), u16le(at + 30), u16le(at + 32));
+            let name = String::from_utf8(z[at + 46..at + 46 + n].to_vec()).unwrap();
+            at += 46 + n + x + c;
+            name
+        })
+        .collect()
+}
+
+/// Final review I2 for profiles: with Also and its zip on, the profile written into the PBR folder is in the PBR zip.
+#[test]
+fn the_pbr_zip_holds_the_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_also_settings(|c| c.zip = true);
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    idle(&mut m);
+    assert!(m.also_on(), "{}", m.status_line);
+    set_block(&mut m, Some(json!({})));
+    export(&mut m);
+    let pbr = m.also_folders()[0].clone();
+    assert!(pbr.join(FILE).is_file(), "{}", notes(&m));
+    let name = pbr.file_name().unwrap().to_string_lossy().into_owned();
+    let names = zip_names(&m.also_location().join(format!("{name}.zip")));
+    let entry = format!("{name}/{FILE}");
+    assert!(names.contains(&entry), "{entry}: {names:?}");
+}
+
+/// End to end: a cancelled export, and one with a failed job, write no profile and record no hash.
+#[test]
+fn a_cancelled_or_failed_export_writes_no_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, Some(json!({})));
+    idle(&mut m);
+    let f = profile_path(&m);
+    support::export_through(&mut m);
+    assert!(m.export.running.is_some(), "the export started");
+    m.cancel_export();
+    idle(&mut m);
+    let s = m.export.summary.as_ref().expect("a cancelled export ends");
+    assert!(!s.cancelled.is_empty(), "the cancel came too late: {s:?}");
+    assert!(!f.exists(), "{}", notes(&m));
+    assert!(
+        notes(&m).contains("XPMF profiles not written: the export did not finish"),
+        "{}",
+        notes(&m)
+    );
+    assert!(m.sets_doc.as_ref().unwrap().xpmf_shas().is_empty());
+    // A failed job: a planned source that no longer decodes, with its size and mtime kept so the export does not
+    // re-plan it first.
+    let src = d.path().join("textures/landscape/rock01_roughness.png");
+    let mtime = std::fs::metadata(&src).unwrap().modified().unwrap();
+    let mut bytes = std::fs::read(&src).unwrap();
+    bytes[..8].copy_from_slice(b"notapng!");
+    std::fs::write(&src, &bytes).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&src)
+        .unwrap()
+        .set_modified(mtime)
+        .unwrap();
+    export(&mut m);
+    let s = m.export.summary.as_ref().unwrap();
+    assert!(
+        s.cancelled.is_empty() && s.failed > 0,
+        "{s:?}; {}",
+        notes(&m)
+    );
+    assert!(!f.exists(), "{}", notes(&m));
+    assert!(
+        notes(&m).contains("XPMF profiles not written: the export did not finish"),
+        "{}",
+        notes(&m)
+    );
+    assert!(m.sets_doc.as_ref().unwrap().xpmf_shas().is_empty());
+}
+
+/// A failed or cancelled export writes no profile (`finish_xpmf` on its own).
 #[test]
 fn failed_export_writes_no_profile() {
     let d = tempfile::tempdir().unwrap();
