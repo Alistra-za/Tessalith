@@ -1647,11 +1647,17 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
+            // Note GI (X13): a PBR Landscape `_detail` layer is typed again as the set's detail normal.
+            let landscape_detail = matches!(
+                &old.status,
+                JobStatus::NormalLayer { term } if term.layer == crate::config::LayerId::Detail
+            );
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
                 p.shader.has_member_defaults()
                     || (p.provenance == crate::shader::ShaderOrigin::Set && is_gras)
+                    || (p.shader == crate::shader::Shader::PbrLandscape && landscape_detail)
             }) && !pack::plan::chosen_skin(&ctx, set)
             {
                 old.warnings.extend(grass_note(&old));

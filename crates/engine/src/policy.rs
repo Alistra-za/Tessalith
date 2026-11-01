@@ -2510,7 +2510,28 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
             d.provenance,
             Provenance::User | Provenance::Rule(_) | Provenance::ProjectFile
         ) {
-            return normal_layer_job(ctx, f, *term);
+            // Note GI (X13): a landscape set's `_detail` is its own detail normal, unless `rnm.target` keeps it a layer.
+            let landscape = ctx.shaders.get(&f.set.key).map(|p| p.shader).filter(|s| {
+                matches!(
+                    s,
+                    crate::shader::Shader::Landscape | crate::shader::Shader::PbrLandscape
+                )
+            });
+            match landscape {
+                Some(s)
+                    if term.layer == LayerId::Detail
+                        && !term.mask
+                        && rnm_target_requested(ctx, f.input).is_none() =>
+                {
+                    d = SubtypeDecision {
+                        subtype: Subtype::DetailNormal,
+                        provenance: Provenance::Shader(s.id().into()),
+                        decided: true,
+                        suggestions: d.suggestions,
+                    };
+                }
+                _ => return normal_layer_job(ctx, f, *term),
+            }
         }
     }
     if gras_diffuse {
