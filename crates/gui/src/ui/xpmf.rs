@@ -45,7 +45,7 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     });
     let editable = m.sets_doc.as_ref().is_some_and(|d| !d.read_only());
     let why = m.banner.clone().unwrap_or_default();
-    let head = egui::RichText::new(if block.is_some() { "written" } else { "off" }).weak();
+    let head = egui::RichText::new(if block.is_some() { "on" } else { "off" }).weak();
     super::group::group(ui, ("xpmf", v.id.as_str()), CARD, Some(head), true, |ui| {
         ui.add_enabled_ui(editable, |ui| {
             let mut on = block.is_some();
@@ -219,7 +219,7 @@ fn number_value(
     let Some(mut x) = cur.and_then(Value::as_f64) else {
         ui.weak(format!("default: {}", default_text(f, dflt)));
         if ui
-            .small_button("Set")
+            .small_button("Override")
             .on_hover_text("Write a value of your own")
             .clicked()
         {
@@ -265,7 +265,7 @@ fn text_value(
     let mut text = ui
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| cur.and_then(Value::as_str).unwrap_or_default().to_string());
-    let hint = if cur == Some(&json!("")) {
+    let hint = if f.kind == FieldKind::Texture && cur == Some(&json!("")) {
         "the game's".to_string()
     } else if dflt.is_some() || f.default.is_some() {
         default_text(f, dflt)

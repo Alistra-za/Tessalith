@@ -174,7 +174,8 @@ fn x4_problem_row() {
     let mut m = opened(d.path());
     set_block(
         &mut m,
-        json!({"editorIds": ["MatoA", "NoSuchMato", "*snow*", "Ash?Mat"]}),
+        // A repeat in other case is one row.
+        json!({"editorIds": ["MatoA", "NoSuchMato", "*snow*", "Ash?Mat", "nosuchmato"]}),
     );
     let rows = x4_rows(&m);
     assert_eq!(rows.len(), 1, "{rows:?}");

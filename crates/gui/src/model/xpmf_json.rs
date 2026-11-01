@@ -346,7 +346,10 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
         }
         let ids = p.get("editorIds").and_then(Value::as_array);
         for x in ids.into_iter().flatten().filter_map(Value::as_str) {
-            if !x.contains(['*', '?']) && !mato.contains(&x.to_lowercase()) {
+            let new = !out.iter().any(|(_, id, e): &(String, String, String)| {
+                *id == v.id && e.eq_ignore_ascii_case(x)
+            });
+            if new && !x.contains(['*', '?']) && !mato.contains(&x.to_lowercase()) {
                 out.push((v.key.clone(), v.id.clone(), x.to_string()));
             }
         }
