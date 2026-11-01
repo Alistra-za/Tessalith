@@ -310,8 +310,8 @@ pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
     v
 }
 
-/// Note GI10 (X10): set `set`'s profile for the MATO preview, while the set has an `[sets.xpmf]` block whose profile
-/// can be built (cached with the card's values).
+/// Note GI10 (X10): the profile of the set with id `set` for the MATO preview, while the set has an `[sets.xpmf]`
+/// block whose profile can be built (cached with the card's values).
 pub fn preview_profile(m: &AppModel, set: &str) -> Option<Map<String, Value>> {
     let has_block = m
         .sets_doc

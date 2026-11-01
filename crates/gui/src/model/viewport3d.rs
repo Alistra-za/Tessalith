@@ -2441,10 +2441,13 @@ fn render_loop(
                     None
                 }
                 V3Cmd::SetProjectedLayer(l) => {
-                    // Off then on stay two steps (Note GI11): only a None to Some change resolves the textures again.
+                    // Off then on stay two steps (Note GI17): only a None to Some change resolves the textures again.
+                    // At most two are kept: whether an off came, then the final value.
                     match layer_due.last_mut() {
-                        Some(prev) if prev.is_some() == l.is_some() => *prev = l,
-                        _ => layer_due.push(l),
+                        None => layer_due.push(l),
+                        Some(_) if l.is_none() => layer_due = vec![None],
+                        Some(prev @ Some(_)) => *prev = l,
+                        Some(None) => layer_due.push(l),
                     }
                     None
                 }

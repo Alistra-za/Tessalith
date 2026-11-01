@@ -46,7 +46,7 @@ Suffixes are matched case-insensitively, longest first, so `_msn` wins over `_n`
 | `_cnr`, `_crn` | `coat_normal` | High |
 | `_f` | `pbr_fuzz` | High |
 | `_flow` | `flow` (hair flow) | High |
-| `_noise` | `projected_noise` (landscape sets) | Medium |
+| `_noise` | `projected_noise` (a landscape set decides it itself; elsewhere you confirm it) | Medium |
 | `_b`, `_bl` | `backlight_tint` | High |
 | `_sk` | `skin_sk` in an Advanced skin set; otherwise `backlight_tint` | High, Low |
 | `_i` | `diffuse` (multilayer inner layer) | Medium |
