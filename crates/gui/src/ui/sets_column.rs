@@ -339,12 +339,16 @@ fn member_chip(
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             if let Some(k) = kind {
-                let title = match k.slot_number() {
-                    Some(n) => format!("Slot {n}: {}", k.label()),
-                    None => k.label().to_string(),
-                };
-                if let Some(a) = bulk_menu(ui, &title, &model.slot_menu(&v.id, k)) {
-                    acts.push(Act::Slot(a));
+                let entries = model.slot_menu(&v.id, k);
+                // The XPMF maps' slot menu is empty: the chip keeps only "Remove from set".
+                if !entries.is_empty() {
+                    let title = match k.slot_number() {
+                        Some(n) => format!("Slot {n}: {}", k.label()),
+                        None => k.label().to_string(),
+                    };
+                    if let Some(a) = bulk_menu(ui, &title, &entries) {
+                        acts.push(Act::Slot(a));
+                    }
                 }
             }
             if drag {

@@ -1379,7 +1379,11 @@ impl AppModel {
         match choice {
             DropChoice::Move if self.is_packed(item) => Err(PACKED_MOVE.into()),
             // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
-            DropChoice::Share if slot.and_then(SlotKind::slot_number).is_none() => Err(
+            DropChoice::Share if slot.is_some_and(|s| s.slot_number().is_none()) => Err(
+                "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
+                    .into(),
+            ),
+            DropChoice::Share if slot.is_none() => Err(
                 "only a finished texture can be shared; duplicate the source to use it in two sets"
                     .into(),
             ),

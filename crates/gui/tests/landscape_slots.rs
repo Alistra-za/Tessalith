@@ -162,3 +162,51 @@ fn detail_normal_card_says_cs_does_not_draw_it() {
         .next()
         .is_some());
 }
+
+/// Fix round 1: the Projected noise card has no slot commands, lock or borrow, so a right-click opens no menu (the
+/// Diffuse card's still does).
+#[test]
+fn right_click_on_the_projected_noise_card_opens_no_menu() {
+    use eframe::egui::Popup;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path(), Some("rock01_noise.png"), None);
+    let key = view(&m).key;
+    m.select_set(&key);
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(1400.0, 2400.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run_steps(4);
+    h.get_by_label("Projected noise thumbnail")
+        .click_secondary();
+    h.run_steps(4);
+    assert!(
+        !Popup::is_any_open(&h.ctx),
+        "no menu on the Projected noise card"
+    );
+    h.get_by_label("Diffuse thumbnail").click_secondary();
+    h.run_steps(4);
+    assert!(Popup::is_any_open(&h.ctx), "the Diffuse card's menu opens");
+}
+
+/// Fix round 1: sharing a Projected noise into another set is refused with its own reason.
+#[test]
+fn sharing_a_projected_noise_is_refused() {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path(), Some("rock01_noise.png"), None);
+    assert!(filled(&view(&m), SlotKind::ProjectedNoise));
+    let other = set_views(&m)
+        .into_iter()
+        .find(|v| v.id != ID && !v.key.is_empty())
+        .expect("another set")
+        .id;
+    let out = m.drop_choice("landscape/rock01_noise.png", &other, DropChoice::Share);
+    assert_eq!(
+        out,
+        DropOutcome::Refused(
+            "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
+                .into()
+        )
+    );
+}

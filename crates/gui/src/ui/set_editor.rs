@@ -1057,6 +1057,10 @@ fn slot_menu(
     slot: SlotKind,
     acts: &mut Vec<Act>,
 ) {
+    // The XPMF maps have no slot commands, lock or borrow: no menu.
+    if slot.slot_number().is_none() {
+        return;
+    }
     resp.context_menu(|ui| {
         if let Some(a) = bulk_menu(ui, slot_label(slot, ""), &model.slot_menu(&v.id, slot)) {
             acts.push(Act::Slot(a));
