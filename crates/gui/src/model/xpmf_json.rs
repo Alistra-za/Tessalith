@@ -2,7 +2,7 @@
 //! block, written after a clean export with the CS PBR export's guard. No egui types.
 use super::history::{orphans, record_key, recorded, records_at, remove_own_case_twin, sha256_of};
 use super::pbr_export::file_name_problem;
-use super::sets::{is_pbr_landscape, views, SlotFill, SlotKind};
+use super::sets::{is_pbr_landscape, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
 use crate::sets_doc::SetEntry;
 use engine::config::Target;
@@ -41,10 +41,22 @@ pub struct Field {
     pub kind: FieldKind,
     /// The MATO preview shows it (X10); the card's other rows say "Not shown in the preview".
     pub preview: bool,
+    /// What XPMF does while the key is unset, as display text (research §1); `None` where it has no default.
+    pub default: Option<&'static str>,
 }
 
-const fn f(key: &'static str, kind: FieldKind, preview: bool) -> Field {
-    Field { key, kind, preview }
+const fn f(
+    key: &'static str,
+    kind: FieldKind,
+    preview: bool,
+    default: Option<&'static str>,
+) -> Field {
+    Field {
+        key,
+        kind,
+        preview,
+        default,
+    }
 }
 
 const fn num(min: f64, max: Option<f64>) -> FieldKind {
@@ -55,20 +67,32 @@ const fn num(min: f64, max: Option<f64>) -> FieldKind {
     }
 }
 
-/// Every schema key but `$schema`, in schema order; the trailing comment is XPMF's default (research §1).
-/// `falloffScale` and `falloffBias` have no schema bounds: `min` is `-inf`.
+use FieldKind::{Bool, Patterns, Text, Texture};
+
+/// Every schema key but `$schema`, in schema order. `falloffScale` and `falloffBias` have no schema bounds: `min` is
+/// `-inf`. `name` and `editorIds` are required (no XPMF default; Tessalith fills the set id and the cs_mato EDIDs).
 pub const FIELDS: &[Field] = &[
-    f("comment", FieldKind::Text, false),                  // none
-    f("name", FieldKind::Text, false),                     // required; Tessalith: the set id
-    f("editorIds", FieldKind::Patterns, false),            // required; Tessalith: the cs_mato EDIDs
-    f("excludeEditorIds", FieldKind::Patterns, false),     // none
-    f("pbr", FieldKind::Bool, false),                      // false; Tessalith: PBR Landscape on CS
-    f("diffuseTexture", FieldKind::Texture, true),         // the game's
-    f("normalTexture", FieldKind::Texture, true),          // the game's
-    f("noiseTexture", FieldKind::Texture, true),           // the game's
-    f("detailNormalTexture", FieldKind::Texture, true),    // the game's
-    f("falloffScale", num(f64::NEG_INFINITY, None), true), // the record's
-    f("falloffBias", num(f64::NEG_INFINITY, None), true),  // the record's
+    f("comment", Text, false, None),
+    f("name", Text, false, None),
+    f("editorIds", Patterns, false, None),
+    f("excludeEditorIds", Patterns, false, None),
+    f("pbr", Bool, false, Some("false")),
+    f("diffuseTexture", Texture, true, Some("the game's")),
+    f("normalTexture", Texture, true, Some("the game's")),
+    f("noiseTexture", Texture, true, Some("the game's")),
+    f("detailNormalTexture", Texture, true, Some("the game's")),
+    f(
+        "falloffScale",
+        num(f64::NEG_INFINITY, None),
+        true,
+        Some("the record's"),
+    ),
+    f(
+        "falloffBias",
+        num(f64::NEG_INFINITY, None),
+        true,
+        Some("the record's"),
+    ),
     f(
         "noiseUVScale",
         FieldKind::Number {
@@ -77,23 +101,45 @@ pub const FIELDS: &[Field] = &[
             exclusive_min: true,
         },
         true,
-    ), // the record's
-    f("maxAngle", num(0.0, Some(180.0)), false),           // each static's
-    f("lodIdentifier", FieldKind::Text, false),            // obj<name>
-    f("lodMaterial", FieldKind::Text, false),              // none
-    f("lodMaterialHD", FieldKind::Text, false),            // = lodMaterial
-    f("neutralizeVertexColors", FieldKind::Bool, false),   // true
-    f("neutralizeVertexColorsSkip", FieldKind::Patterns, false), // none
-    f("neutralizeVertexAlpha", FieldKind::Bool, false),    // true
-    f("neutralizeVertexAlphaSkip", FieldKind::Patterns, false), // none
-    f("roofShelter", FieldKind::Bool, false),              // true
-    f("roofShelterSkip", FieldKind::Patterns, false),      // none
-    f("roofShelterFixVertices", FieldKind::Bool, false),   // true
-    f("shelterFade", num(0.0, Some(128.0)), false),        // 64
-    f("shelterRandomness", num(0.0, Some(128.0)), false),  // 32
-    f("waterFade", FieldKind::Bool, false),                // false
-    f("waterFadeRandomness", num(0.0, Some(64.0)), false), // 16
-    f("specularMult", num(0.0, Some(10.0)), false), // as the mesh has it; hidden while pbr (X9)
+        Some("the record's"),
+    ),
+    f(
+        "maxAngle",
+        num(0.0, Some(180.0)),
+        false,
+        Some("each static's"),
+    ),
+    f("lodIdentifier", Text, false, Some("obj<name>")),
+    f("lodMaterial", Text, false, None),
+    f("lodMaterialHD", Text, false, Some("= lodMaterial")),
+    f("neutralizeVertexColors", Bool, false, Some("true")),
+    f("neutralizeVertexColorsSkip", Patterns, false, None),
+    f("neutralizeVertexAlpha", Bool, false, Some("true")),
+    f("neutralizeVertexAlphaSkip", Patterns, false, None),
+    f("roofShelter", Bool, false, Some("true")),
+    f("roofShelterSkip", Patterns, false, None),
+    f("roofShelterFixVertices", Bool, false, Some("true")),
+    f("shelterFade", num(0.0, Some(128.0)), false, Some("64")),
+    f(
+        "shelterRandomness",
+        num(0.0, Some(128.0)),
+        false,
+        Some("32"),
+    ),
+    f("waterFade", Bool, false, Some("false")),
+    f(
+        "waterFadeRandomness",
+        num(0.0, Some(64.0)),
+        false,
+        Some("16"),
+    ),
+    // Hidden while pbr is on (X9).
+    f(
+        "specularMult",
+        num(0.0, Some(10.0)),
+        false,
+        Some("as the mesh has it"),
+    ),
 ];
 
 /// The texture keys and the slots that fill them by default (X5, X12).
@@ -117,10 +163,12 @@ pub fn file_name(set_id: &str) -> Result<String, String> {
             _ => '_',
         })
         .collect();
-    let name = format!("tessalith_{fold}");
+    // As the brief orders: the whole name, then `file_name_problem` (its device check reads the part before the
+    // first dot, so the `.json` changes nothing).
+    let name = format!("tessalith_{fold}.json");
     match file_name_problem("XPMF file name", &name) {
         Some(why) => Err(why),
-        None => Ok(format!("{name}.json")),
+        None => Ok(name),
     }
 }
 
@@ -148,17 +196,27 @@ fn empty(v: &Value) -> bool {
 /// The set's profile (X2-X9): the block's values over the defaults from the set, null and empty values dropped,
 /// `specularMult` dropped while `pbr` is on. `Err` is the export note.
 pub fn profile(m: &AppModel, set: &SetEntry) -> Result<Map<String, Value>, String> {
-    let vs = views(m);
-    let v = vs.iter().find(|v| same_id(&v.id, &set.id));
+    profile_in(m, &views(m), set)
+}
+
+/// `profile` with the set views computed once by the caller (`prepare`).
+fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String, Value>, String> {
+    let Some(v) = vs
+        .iter()
+        .find(|v| same_id(&v.id, &set.id) && !v.members.is_empty())
+    else {
+        return Err(format!("{}: no files; XPMF profile not written", set.id));
+    };
     let landscape = v
-        .and_then(|v| v.shader.as_ref())
+        .shader
+        .as_ref()
         .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape));
-    let Some(v) = v.filter(|_| landscape) else {
+    if !landscape {
         return Err(format!(
             "{}: not a landscape set; XPMF profile not written",
             set.id
         ));
-    };
+    }
     let mut doc = Map::new();
     doc.insert("name".into(), json!(set.id));
     let edids = set
@@ -178,7 +236,14 @@ pub fn profile(m: &AppModel, set: &SetEntry) -> Result<Map<String, Value>, Strin
         }
     }
     if let Some(b) = &set.xpmf {
-        doc.extend(b.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // R13: an empty `name` or `editorIds` is unset, so the default above stays. Other empty keys drop the
+        // default below (`noiseTexture = ""` is the game's own).
+        let unset = |k: &str, v: &Value| matches!(k, "name" | "editorIds") && empty(v);
+        doc.extend(
+            b.iter()
+                .filter(|(k, v)| !unset(k, v))
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
     }
     doc.retain(|_, v| !empty(v));
     if doc.get("pbr") == Some(&json!(true)) {
@@ -251,6 +316,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
         root: m.output_root(),
         ..Default::default()
     };
+    let vs = views(m);
     let names: Vec<Result<String, String>> = blocks.iter().map(|e| file_name(&e.id)).collect();
     let outputs: BTreeMap<String, String> = m
         .items
@@ -281,7 +347,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
                 others.join(" and ")
             ))
         } else {
-            profile(m, e).and_then(|doc| {
+            profile_in(m, &vs, e).and_then(|doc| {
                 let text = to_text(&doc);
                 let parsed: Value = serde_json::from_str(&text).expect("to_text writes JSON");
                 crate::pgp::validate::validate_xpmf(&parsed)

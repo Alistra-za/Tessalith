@@ -345,10 +345,52 @@ fn no_block_no_pending() {
     assert_eq!(prepare(&m), None);
 }
 
-/// The validator's new keywords on the XPMF schema (the keyword coverage itself is pinned in pgp.rs):
-/// `minLength`, `exclusiveMinimum`, and `$ref` into `#/definitions/...` (including through `oneOf`).
+fn keywords_in(v: &Json, out: &mut std::collections::BTreeSet<String>, under_properties: bool) {
+    match v {
+        Json::Object(m) => {
+            for (k, x) in m {
+                if !under_properties {
+                    out.insert(k.clone());
+                }
+                // `default` holds instance data, not schema.
+                if under_properties || k != "default" {
+                    keywords_in(x, out, k == "properties" || k == "definitions");
+                }
+            }
+        }
+        Json::Array(a) => a.iter().for_each(|x| keywords_in(x, out, false)),
+        _ => {}
+    }
+}
+
+/// Every keyword XPMF's schema uses is implemented by validate.rs or is an annotation.
 #[test]
 fn validator_knows_xpmf_keywords() {
+    use sdc_gui::pgp::validate::KEYWORDS;
+    let schema: Json = serde_json::from_str(XPMF_SCHEMA_JSON).unwrap();
+    let mut used = std::collections::BTreeSet::new();
+    keywords_in(&schema, &mut used, false);
+    let annotations = [
+        "$schema",
+        "$id",
+        "title",
+        "description",
+        "default",
+        "definitions",
+        "properties",
+    ];
+    for k in used {
+        assert!(
+            KEYWORDS.contains(&k.as_str()) || annotations.contains(&k.as_str()),
+            "xpmf_profile.schema.json uses '{k}', which validate.rs does not implement"
+        );
+    }
+}
+
+/// The validator's new keywords at work on the XPMF schema: `minLength`, `exclusiveMinimum`, and `$ref` into
+/// `#/definitions/...` (including through `oneOf`).
+#[test]
+fn validator_checks_xpmf_keywords() {
     let ok = |v: Json| validate_xpmf(&v);
     assert_eq!(ok(json!({"name": "n", "editorIds": ["x"]})), Ok(()));
     assert_eq!(
@@ -412,9 +454,16 @@ fn fields_cover_the_schema() {
             "noiseUVScale"
         ]
     );
-    // The ranges follow the schema.
+    // The ranges and the defaults follow the schema (research §1 gives the text where the schema's is null).
     for f in FIELDS {
         let s = &schema["properties"][f.key];
+        match s.get("default") {
+            Some(Json::Null) | None => {}
+            Some(d) => assert_eq!(f.default, Some(d.to_string().as_str()), "{}", f.key),
+        }
+        if ["name", "editorIds"].contains(&f.key) {
+            assert_eq!(f.default, None, "{}: required, no XPMF default", f.key);
+        }
         if let FieldKind::Number {
             min,
             max,
@@ -435,4 +484,66 @@ fn fields_cover_the_schema() {
             );
         }
     }
+}
+
+/// R13: an empty `name` or `editorIds` in the block is unset, so Tessalith's default applies. With `name` defaulted
+/// to the set id, the schema's `minLength` cannot fail from a block; an empty name writes the file under the set id.
+#[test]
+fn empty_name_and_editor_ids_mean_unset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path(), true);
+    set_block(&mut m, ID, json!({"name": "", "editorIds": []}));
+    let doc = profile(&m, &entry(&m, ID)).unwrap();
+    assert_eq!(doc["name"], json!(ID));
+    assert_eq!(doc["editorIds"], json!(["MatoA", "MatoB"]));
+    let p = prepare(&m).unwrap();
+    assert_eq!(p.files.len(), 1, "{:?}", p.notes);
+    assert!(p.files[0].1.contains("\"MatoA\""), "{}", p.files[0].1);
+}
+
+/// `pbr` defaults to false off a PBR Landscape set on CS: a plain Landscape set, and a PBR Landscape set on vanilla.
+#[test]
+fn pbr_default_off_unless_pbr_landscape_on_cs() {
+    use engine::shader::Shader;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path(), true);
+    set_block(&mut m, ID, json!({}));
+    m.set_target(engine::config::Target::Vanilla);
+    m.set_shader(ID, Some(Shader::PbrLandscape));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    // On vanilla PBR Landscape is not available: the pick falls back (`wanted` keeps it), so the set is not a
+    // landscape set and writes no profile; `pbr` can only be on under CS.
+    let v = set_views(&m).into_iter().find(|v| v.id == ID).unwrap();
+    let pick = v.shader.unwrap();
+    assert_eq!(pick.wanted, Some(Shader::PbrLandscape), "{pick:?}");
+    assert_ne!(pick.shader, Shader::PbrLandscape);
+    assert_eq!(
+        profile(&m, &entry(&m, ID)),
+        Err(format!(
+            "{ID}: not a landscape set; XPMF profile not written"
+        ))
+    );
+    m.set_target(engine::config::Target::Cs);
+    m.set_shader(ID, Some(Shader::Landscape));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let v = set_views(&m).into_iter().find(|v| v.id == ID).unwrap();
+    assert_eq!(v.shader.map(|p| p.shader), Some(Shader::Landscape));
+    let doc = profile(&m, &entry(&m, ID)).unwrap();
+    assert_eq!(doc["pbr"], json!(false), "Landscape on CS");
+}
+
+/// A block on a set with no files gets a note that says so, not "not a landscape set".
+#[test]
+fn set_without_files_note() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path(), true);
+    set_block(&mut m, "nowhere/ghost", json!({"editorIds": ["X"]}));
+    let p = prepare(&m).unwrap();
+    assert!(p.files.is_empty(), "{:?}", p.files);
+    assert!(
+        p.notes
+            .contains(&"nowhere/ghost: no files; XPMF profile not written".to_string()),
+        "{:?}",
+        p.notes
+    );
 }
