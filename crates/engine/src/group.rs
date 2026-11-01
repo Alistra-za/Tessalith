@@ -4,10 +4,11 @@ use crate::discover::{InputFile, InputKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Spec §6.1 suffix list, longest first so `_msn` wins over `_n` and `_envmask` over `_m`. `_i` (multilayer inner layer) added in M6 (DECISIONS Note S-shader-6). `_wet` is not on it:
-/// it is a suffix only in a cs Advanced skin set ([`join_skin_wet`], final review I3).
-pub const SUFFIXES: [&str; 20] = [
-    "envmask", "rmaos", "rfaos", "flow", "msn", "cnr", "crn", "em", "bl", "sk", "n", "p", "m", "g",
-    "s", "f", "b", "d", "e", "i",
+/// it is a suffix only in a cs Advanced skin set ([`join_skin_wet`], final review I3). `_noise` (projected noise,
+/// Note GI) joins a set like any other suffix.
+pub const SUFFIXES: [&str; 21] = [
+    "envmask", "rmaos", "rfaos", "noise", "flow", "msn", "cnr", "crn", "em", "bl", "sk", "n", "p",
+    "m", "g", "s", "f", "b", "d", "e", "i",
 ];
 
 /// The marker of a file Tessalith generated (v2 Generate from normal map, DECISIONS Note CO).

@@ -36,6 +36,10 @@ resize = "half"
 resize = "half"
 [subtypes.height]
 resize = "half"
+[subtypes.projected_noise]
+resize = "half"
+[subtypes.detail_normal]
+resize = "half"
 [subtypes.msn_specular]
 resize = "half"
 [subtypes.skin_sk]

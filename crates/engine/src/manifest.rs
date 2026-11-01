@@ -57,6 +57,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         Subtype::Cubemap => "1.1.0",
         // Note FF4: the two sub-types whose default is BC6H; Slowest/Max use the peak mode.
         Subtype::PbrEmissive | Subtype::HdrSky => "1.2.0",
+        // XPMF landscape maps (Note GI): new sub-types, first built at 1.2.0.
+        Subtype::ProjectedNoise | Subtype::DetailNormal => "1.2.0",
     }
 }
 

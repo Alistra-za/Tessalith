@@ -4078,6 +4078,15 @@ fn two_d_outputs_unchanged() {
     for st in [Subtype::PbrEmissive, Subtype::HdrSky] {
         assert_eq!(encode_version(st), "1.2.0", "{st:?}: a BC6H arm (Note FF)");
     }
+    // Note GI: the XPMF landscape sub-types are new, so they were first built at 1.2.0 (no earlier output changed).
+    let new_at_120 = |st: Subtype| matches!(st, Subtype::ProjectedNoise | Subtype::DetailNormal);
+    for st in [Subtype::ProjectedNoise, Subtype::DetailNormal] {
+        assert_eq!(
+            encode_version(st),
+            "1.2.0",
+            "{st:?}: new in 1.2.0 (Note GI)"
+        );
+    }
     let pins: BTreeMap<String, serde_json::Value> = serde_json::from_str(
         &std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/encode_versions/encode_inputs.json"),
@@ -4087,7 +4096,7 @@ fn two_d_outputs_unchanged() {
     .unwrap();
     for (key, pin) in &pins {
         let st: engine::config::Subtype = serde_json::from_value(pin["subtype"].clone()).unwrap();
-        if st != Subtype::Cubemap && !bc6h(st) {
+        if st != Subtype::Cubemap && !bc6h(st) && !new_at_120(st) {
             assert_eq!(
                 encode_version(st),
                 LEGACY_ENCODE_VERSION,

@@ -2298,6 +2298,8 @@
         "skin_wet",
         "complex_grass",
         "cubemap",
+        "projected_noise",
+        "detail_normal",
         "rfaos"
       ],
       "type": "string"

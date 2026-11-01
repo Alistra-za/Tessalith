@@ -149,6 +149,8 @@ fn compact_and_fast_preview_resolve_as_designed() {
         Subtype::SkinWet,
         Subtype::Envmask,
         Subtype::Height,
+        Subtype::ProjectedNoise,
+        Subtype::DetailNormal,
         Subtype::MsnSpecular,
         Subtype::SkinSk,
         Subtype::ComplexMaterial,

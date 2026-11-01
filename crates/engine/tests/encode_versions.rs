@@ -247,7 +247,9 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
             ComplexGrass => (format!("{id}.png"), grass64()),
             // These store no alpha: an alpha source is blocked by LOSS-ALPHA-DATA.
             PbrEmissive | Glow | SubsurfaceTint | BacklightTint | Msn | Envmask | Flow | Height
-            | MsnSpecular | GenericTwoChannel | SkinSk => (format!("{id}.png"), rgb(64)),
+            | MsnSpecular | GenericTwoChannel | SkinSk | ProjectedNoise => {
+                (format!("{id}.png"), rgb(64))
+            }
             // DECISIONS DS8: a one-file cube needs a layout, so a 6:1 h-strip of 64-px faces.
             Cubemap => (
                 format!("{id}.png"),

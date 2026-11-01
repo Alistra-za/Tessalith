@@ -40,6 +40,7 @@ fn sizes_per_format_including_sub_block_levels() {
         (Subtype::Diffuse, Format::Bc3, 16),
         (Subtype::Diffuse, Format::Bc1, 8),
         (Subtype::Envmask, Format::Bc4, 8),
+        (Subtype::ProjectedNoise, Format::Bc4, 8),
         (Subtype::Flow, Format::Bc5, 16),
     ] {
         let mut p = profile(st);
