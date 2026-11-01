@@ -123,6 +123,75 @@ fn rnm_target_keeps_layer() {
     }
 }
 
+/// Ruling R6: an `n_`/`cnr_` base prefix in the name targets a base by hand, so the file stays an RNM layer.
+#[test]
+fn prefixed_detail_stays_layer() {
+    for (target, shader) in [
+        (Target::Cs, Shader::PbrLandscape),
+        (Target::Vanilla, Shader::Landscape),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        for n in [
+            "foo.png",
+            "foo_n.png",
+            "foo_n_detail.png",
+            "foo_cnr_detail.png",
+        ] {
+            png(d.path(), n);
+        }
+        let (p, _) = plan(d.path(), target, shader, &[]);
+        for name in ["foo_n_detail.png", "foo_cnr_detail.png"] {
+            let j = job(&p, name);
+            assert!(is_layer(j), "{shader:?} {name}: {:?}", j.status);
+        }
+        assert_eq!(layer_files(job(&p, "foo_n.png")), ["foo_n_detail.png"]);
+    }
+}
+
+/// Ruling R5: a landscape set's `_noise` is decided ProjectedNoise by its shader, with or without a `_detail`.
+#[test]
+fn landscape_noise_is_decided() {
+    for (target, shader) in [
+        (Target::Cs, Shader::PbrLandscape),
+        (Target::Vanilla, Shader::Landscape),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        png(d.path(), "foo.png");
+        flat(d.path(), "foo_n.png");
+        grey(d.path(), "foo_noise.png");
+        let (p, _) = plan(d.path(), target, shader, &[]);
+        let j = job(&p, "foo_noise.png");
+        assert!(
+            matches!(j.status, JobStatus::Ready),
+            "{shader:?}: {:?}",
+            j.status
+        );
+        assert_eq!(j.profile.subtype, Subtype::ProjectedNoise);
+        assert_eq!(
+            j.provenance.get("subtype").map(|p| p.to_string()),
+            Some(format!("shader:{}", shader.id())),
+            "{shader:?}"
+        );
+    }
+}
+
+/// Ruling R5: outside a landscape set `_noise` stays a Medium suggestion, undecided.
+#[test]
+fn pbr_set_noise_stays_undecided() {
+    let d = tempfile::tempdir().unwrap();
+    png(d.path(), "foo.png");
+    flat(d.path(), "foo_n.png");
+    grey(d.path(), "foo_noise.png");
+    let (p, _) = plan(d.path(), Target::Cs, Shader::Pbr, &[]);
+    let j = job(&p, "foo_noise.png");
+    assert!(
+        matches!(j.status, JobStatus::Unresolved { .. }),
+        "{:?}",
+        j.status
+    );
+    assert!(j.warnings.iter().any(|w| w.code == Code::SugLowConfidence));
+}
+
 /// Review Focus 4: the mask and Detail2 stay layers whose base is gone; no panic, no Error, no new blocker.
 #[test]
 fn detail_mask_and_detail2_stay_layers() {
@@ -173,13 +242,7 @@ fn mato_only_set_exports_clean() {
     flat(d.path(), "foo_n.png");
     flat(d.path(), "foo_detail.png");
     grey(d.path(), "foo_noise.png");
-    // `_noise` is a Medium suggestion (Task 1), so the sub-type is given as the GUI's noise slot writes it.
-    let (p, ev) = plan(
-        d.path(),
-        Target::Cs,
-        Shader::PbrLandscape,
-        &["file:foo_noise.png.subtype=projected_noise"],
-    );
+    let (p, ev) = plan(d.path(), Target::Cs, Shader::PbrLandscape, &[]);
     let mut codes: Vec<(Code, Severity)> = p
         .jobs
         .iter()
