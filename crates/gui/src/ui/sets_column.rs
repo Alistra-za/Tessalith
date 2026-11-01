@@ -330,15 +330,19 @@ fn member_chip(
     member_menu: &mut bool,
 ) -> Option<egui::Response> {
     let item = model.item(mk)?;
-    let locked = kind.is_some_and(|k| v.locks.contains(&k.slot_number()));
-    let pgp = kind.is_some_and(|k| crate::pgp::prefix::pgp_locked(&v.settings, k.slot_number()));
+    let n = kind.and_then(SlotKind::slot_number);
+    let locked = n.is_some_and(|n| v.locks.contains(&n));
+    let pgp = n.is_some_and(|n| crate::pgp::prefix::pgp_locked(&v.settings, n));
     let r = member(ui, item, sel_items.contains(mk), locked, pgp, thumbs, note);
     // Note DU5: an own member (`drag`) can leave the set from its chip; a borrowed one has the slot's Clear.
     if kind.is_some() || drag {
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             if let Some(k) = kind {
-                let title = format!("Slot {}: {}", k.slot_number(), k.label());
+                let title = match k.slot_number() {
+                    Some(n) => format!("Slot {n}: {}", k.label()),
+                    None => k.label().to_string(),
+                };
                 if let Some(a) = bulk_menu(ui, &title, &model.slot_menu(&v.id, k)) {
                     acts.push(Act::Slot(a));
                 }

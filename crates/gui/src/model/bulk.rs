@@ -1255,7 +1255,11 @@ impl AppModel {
         let Some(v) = views.iter().find(|v| same_id(&v.id, set)) else {
             return vec![];
         };
-        let (id, n) = (v.id.clone(), kind.slot_number());
+        // The XPMF maps have no PGPatcher slot, so no slot command, borrow or lock.
+        let Some(n) = kind.slot_number() else {
+            return vec![];
+        };
+        let id = v.id.clone();
         let locked = v.locks.contains(&n);
         let read_only = self
             .sets_doc
@@ -1279,7 +1283,7 @@ impl AppModel {
             .filter_map(|(o, k)| {
                 let it = self
                     .item(k)
-                    .filter(|i| slot_of(i).map(SlotKind::slot_number) == Some(n))?;
+                    .filter(|i| slot_of(i).and_then(SlotKind::slot_number) == Some(n))?;
                 Some(MenuEntry {
                     action: MenuAction::SlotLink {
                         set: id.clone(),

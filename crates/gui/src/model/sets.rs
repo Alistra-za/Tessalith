@@ -33,11 +33,14 @@ pub enum SlotKind {
     Coat,
     Fuzz,
     Subsurface,
+    // Note GI (X12): the landscape sets' XPMF maps; no PGPatcher slot. Last, so the others keep their order.
+    ProjectedNoise,
+    DetailNormal,
 }
 
 impl SlotKind {
     /// Every slot kind, in the slot commands' order. The set editor orders its cards by `slot_row` (F1 spec §5).
-    pub const ALL: [SlotKind; 9] = [
+    pub const ALL: [SlotKind; 11] = [
         SlotKind::Diffuse,
         SlotKind::Normal,
         SlotKind::Rmaos,
@@ -47,10 +50,13 @@ impl SlotKind {
         SlotKind::Subsurface,
         SlotKind::Coat,
         SlotKind::Fuzz,
+        SlotKind::ProjectedNoise,
+        SlotKind::DetailNormal,
     ];
-    /// PGPatcher's 1-based `slotN` (DECISIONS P6).
-    pub fn slot_number(self) -> u8 {
-        match self {
+    /// PGPatcher's 1-based `slotN` (DECISIONS P6); `None` for the XPMF maps, which no PGPatcher slot, CS TXST, NIF
+    /// slot, lock or borrow holds (Note GI).
+    pub fn slot_number(self) -> Option<u8> {
+        Some(match self {
             SlotKind::Diffuse => 1,
             SlotKind::Normal => 2,
             SlotKind::Emissive | SlotKind::SkinSk => 3,
@@ -58,7 +64,15 @@ impl SlotKind {
             SlotKind::Rmaos => 6,
             SlotKind::Coat | SlotKind::Fuzz => 7,
             SlotKind::Subsurface => 8,
-        }
+            SlotKind::ProjectedNoise | SlotKind::DetailNormal => return None,
+        })
+    }
+    /// One card: the same kind, or two kinds of one PGPatcher slot (3 or 7, Note AO).
+    pub fn shares_card(self, o: SlotKind) -> bool {
+        self == o
+            || self
+                .slot_number()
+                .is_some_and(|n| o.slot_number() == Some(n))
     }
     /// The canonical file suffix under the prefix (`""` for the diffuse).
     pub fn suffix(self) -> &'static str {
@@ -72,6 +86,8 @@ impl SlotKind {
             SlotKind::Coat => "cnr",
             SlotKind::Fuzz => "f",
             SlotKind::Subsurface => "s",
+            SlotKind::ProjectedNoise => "noise",
+            SlotKind::DetailNormal => "detail",
         }
     }
     pub fn label(self) -> &'static str {
@@ -85,9 +101,15 @@ impl SlotKind {
             SlotKind::Coat => "Coat _cnr",
             SlotKind::Fuzz => "Fuzz _f",
             SlotKind::Subsurface => "Subsurface _s",
+            SlotKind::ProjectedNoise => "Projected noise",
+            SlotKind::DetailNormal => "Detail normal",
         }
     }
 }
+
+/// Note GI (X16): the Detail normal card's hover in a landscape set.
+pub const DETAIL_NORMAL_HOVER: &str =
+    "Community Shaders doesn't draw the projected detail normal in this build; it shows without CS.";
 
 /// The card title of `slot` holding item `key`: a `_coat` source in the Subsurface slot is the coat colour + strength
 /// (M6 Track E spec §3.1, DECISIONS Note U2), decided by the file name.
@@ -100,8 +122,8 @@ pub fn slot_label(slot: SlotKind, key: &str) -> &'static str {
         Some((_, v)) if slot == SlotKind::Subsurface && v.role == VocabRole::CoatColour => {
             "Coat colour + strength"
         }
-        _ if slot.slot_number() == 7 => SLOT7_CARD,
-        _ if key.is_empty() && slot.slot_number() == 3 => SLOT3_CARD,
+        _ if slot.slot_number() == Some(7) => SLOT7_CARD,
+        _ if key.is_empty() && slot.slot_number() == Some(3) => SLOT3_CARD,
         _ => slot.label(),
     }
 }
@@ -115,7 +137,7 @@ pub const SLOT3_CARD: &str = "Emissive / Skin (slot 3)";
 pub fn slot_kinds_label(slot: SlotKind) -> String {
     let kinds: Vec<&str> = SlotKind::ALL
         .iter()
-        .filter(|k| k.slot_number() == slot.slot_number())
+        .filter(|k| k.shares_card(slot))
         .map(|k| k.label())
         .collect();
     kinds.join(" or ")
@@ -149,7 +171,7 @@ pub fn slot_matches(v: &SetView) -> (Vec<SlotMatch>, Vec<SlotMatch>) {
         .filter(|(_, f)| !matches!(f, SlotFill::Empty))
         .map(|(k, _)| *k)
         .collect();
-    let name = |n: u8| match filled.iter().find(|k| k.slot_number() == n) {
+    let name = |n: u8| match filled.iter().find(|k| k.slot_number() == Some(n)) {
         Some(k) => k.label().to_string(),
         None if n == 1 => SlotKind::Diffuse.label().to_string(),
         None if n == 2 => SlotKind::Normal.label().to_string(),
@@ -181,7 +203,7 @@ pub fn slot_matches(v: &SetView) -> (Vec<SlotMatch>, Vec<SlotMatch>) {
             path: filled
                 .iter()
                 .find(|k| {
-                    k.slot_number() == n
+                    k.slot_number() == Some(n)
                         && slot_suffixes(n).contains(&format!("_{}", k.suffix()).as_str())
                 })
                 .map_or_else(String::new, |k| slot_match_path(derived, k.suffix())),
@@ -377,6 +399,8 @@ pub fn slot_kind(st: Subtype) -> Option<SlotKind> {
         Subtype::CoatNormal => SlotKind::Coat,
         Subtype::PbrFuzz => SlotKind::Fuzz,
         Subtype::PbrSubsurface => SlotKind::Subsurface,
+        Subtype::ProjectedNoise => SlotKind::ProjectedNoise,
+        Subtype::DetailNormal => SlotKind::DetailNormal,
         _ => return None,
     })
 }
@@ -423,7 +447,8 @@ pub fn slot_row(pick: Option<&ShaderPick>, slots: &BTreeMap<SlotKind, SlotFill>)
         .into_iter()
         .filter(|k| filled(k) || usable.as_ref().is_some_and(|u| u.contains(k)))
         .collect();
-    kinds.sort_by_key(|k| (k.slot_number(), *k));
+    // The XPMF maps (no PGPatcher slot) come last.
+    kinds.sort_by_key(|k| (k.slot_number().unwrap_or(u8::MAX), *k));
     let mut cells: Vec<SlotCell> = vec![];
     for kind in kinds {
         let cell = SlotCell {
@@ -433,7 +458,7 @@ pub fn slot_row(pick: Option<&ShaderPick>, slots: &BTreeMap<SlotKind, SlotFill>)
             clash: None,
         };
         match cells.last_mut() {
-            Some(c) if c.kind.slot_number() == kind.slot_number() => {
+            Some(c) if c.kind.shares_card(kind) => {
                 if filled(&c.kind) && filled(&kind) {
                     c.clash = Some(kind);
                 } else if filled(&kind) {
@@ -604,7 +629,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             };
             let hit = src
                 .iter()
-                .find(|(k, f)| k.slot_number() == *slot && matches!(f, SlotFill::Own { .. }));
+                .find(|(k, f)| k.slot_number() == Some(*slot) && matches!(f, SlotFill::Own { .. }));
             if let Some((kind, SlotFill::Own { item })) = hit {
                 v.slots.insert(
                     *kind,
@@ -1005,7 +1030,7 @@ pub const SLOT_LOCKED: &str = "slot locked";
 
 /// Why `slot` of `v` takes no change: it is locked (F3a Task 8).
 fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
-    match slot.map(SlotKind::slot_number) {
+    match slot.and_then(SlotKind::slot_number) {
         Some(n) if v.locks.contains(&n) => {
             Err(format!("slot {n} of {} is locked; unlock it first", v.id))
         }
@@ -1029,7 +1054,7 @@ pub fn locked_items(m: &AppModel) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for v in views(m).iter() {
         for (k, f) in &v.slots {
-            if !v.locks.contains(&k.slot_number()) {
+            if !k.slot_number().is_some_and(|n| v.locks.contains(&n)) {
                 continue;
             }
             match f {
@@ -1056,7 +1081,7 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
     };
     let names: Vec<String> = SlotKind::ALL
         .iter()
-        .filter(|s| s.slot_number() == n)
+        .filter(|s| s.slot_number() == Some(n))
         .filter_map(|s| match v.slots.get(s)? {
             SlotFill::Own { item } => m.item(item).map(|i| i.name.clone()),
             _ => None,
@@ -1119,7 +1144,7 @@ fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Opti
     match existing {
         Some(SlotFill::Own { item }) => s.remove_member(id, item),
         Some(SlotFill::Borrowed { .. }) => {
-            if let Some(n) = slot.map(SlotKind::slot_number) {
+            if let Some(n) = slot.and_then(SlotKind::slot_number) {
                 s.set_borrow(id, n, None);
             }
         }
@@ -1353,7 +1378,8 @@ impl AppModel {
         }
         match choice {
             DropChoice::Move if self.is_packed(item) => Err(PACKED_MOVE.into()),
-            DropChoice::Share if slot.is_none() => Err(
+            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
+            DropChoice::Share if slot.and_then(SlotKind::slot_number).is_none() => Err(
                 "only a finished texture can be shared; duplicate the source to use it in two sets"
                     .into(),
             ),
@@ -1403,7 +1429,7 @@ impl AppModel {
                     ));
                 }
                 let fid = self.set_of_item(item).map(|f| f.id).unwrap_or_default();
-                let n = slot.map(SlotKind::slot_number).unwrap_or_default();
+                let n = slot.and_then(SlotKind::slot_number).unwrap_or_default();
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {
                     clear_slot(s, &id, slot, &existing);
                     s.set_borrow(&id, n, Some(&fid));
@@ -2015,7 +2041,7 @@ impl AppModel {
         let key = it.key.clone();
         match slot_of(it) {
             // Note AO: a card is a PGPatcher slot; slot 7's takes `_cnr` or `_f`.
-            Some(k) if k.slot_number() == slot.slot_number() => {}
+            Some(k) if k.shares_card(slot) => {}
             Some(k) => {
                 return refused(format!(
                     "{name} goes in the {} slot, not {}",
@@ -2144,7 +2170,7 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
                 }
                 _ => None,
             };
-            let blocked = if v.locks.contains(&slot.slot_number()) {
+            let blocked = if slot.slot_number().is_some_and(|n| v.locks.contains(&n)) {
                 Some("locked".to_string())
             } else if !taken.insert(slot) {
                 Some("another file above takes this slot".to_string())

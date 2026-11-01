@@ -239,7 +239,9 @@ fn packed_outputs_and_locked_slots_are_skipped_in_inputs_mode() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     let set = set_id_of(&m, ROCK);
-    let diffuse = sdc_gui::model::sets::SlotKind::Diffuse.slot_number();
+    let diffuse = sdc_gui::model::sets::SlotKind::Diffuse
+        .slot_number()
+        .unwrap();
     m.set_slot_lock(&set, diffuse, true).unwrap();
     idle(&mut m);
     m.click_set(&set_key_of(&m, ROCK), false, false);
@@ -781,7 +783,9 @@ fn the_plan_rows_and_collision_messages_are_pinned() {
         ])
     );
     // A locked slot skips its texture.
-    let rock_diffuse = sdc_gui::model::sets::SlotKind::Diffuse.slot_number();
+    let rock_diffuse = sdc_gui::model::sets::SlotKind::Diffuse
+        .slot_number()
+        .unwrap();
     m.set_slot_lock(&rock, rock_diffuse, true).unwrap();
     dialog(&mut m).typed.clear();
     dialog(&mut m).recipe.prefix = "y_".into();

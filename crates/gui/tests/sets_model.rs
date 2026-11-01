@@ -248,22 +248,25 @@ fn emissive_and_skin_sk_cannot_share_a_set() {
 
 #[test]
 fn slot_numbers_follow_p6() {
-    let n: Vec<(SlotKind, u8, &str)> = SlotKind::ALL
+    let n: Vec<(SlotKind, Option<u8>, &str)> = SlotKind::ALL
         .iter()
         .map(|k| (*k, k.slot_number(), k.suffix()))
         .collect();
     assert_eq!(
         n,
         vec![
-            (SlotKind::Diffuse, 1, ""),
-            (SlotKind::Normal, 2, "n"),
-            (SlotKind::Rmaos, 6, "rmaos"),
-            (SlotKind::Height, 4, "p"),
-            (SlotKind::Emissive, 3, "g"),
-            (SlotKind::SkinSk, 3, "sk"),
-            (SlotKind::Subsurface, 8, "s"),
-            (SlotKind::Coat, 7, "cnr"),
-            (SlotKind::Fuzz, 7, "f"),
+            (SlotKind::Diffuse, Some(1), ""),
+            (SlotKind::Normal, Some(2), "n"),
+            (SlotKind::Rmaos, Some(6), "rmaos"),
+            (SlotKind::Height, Some(4), "p"),
+            (SlotKind::Emissive, Some(3), "g"),
+            (SlotKind::SkinSk, Some(3), "sk"),
+            (SlotKind::Subsurface, Some(8), "s"),
+            (SlotKind::Coat, Some(7), "cnr"),
+            (SlotKind::Fuzz, Some(7), "f"),
+            // Note GI: the XPMF maps have no PGPatcher slot.
+            (SlotKind::ProjectedNoise, None, "noise"),
+            (SlotKind::DetailNormal, None, "detail"),
         ]
     );
 }
@@ -1820,7 +1823,10 @@ fn one_card_per_pgpatcher_slot_and_the_slot_7_card_holds_cnr_or_f() {
     };
     let fuzz: BTreeMap<SlotKind, SlotFill> = [(SlotKind::Fuzz, own("f"))].into_iter().collect();
     let row = slot_row(Some(&pbr), &fuzz);
-    let seven: Vec<_> = row.iter().filter(|c| c.kind.slot_number() == 7).collect();
+    let seven: Vec<_> = row
+        .iter()
+        .filter(|c| c.kind.slot_number() == Some(7))
+        .collect();
     assert_eq!(seven.len(), 1);
     assert_eq!(
         (seven[0].kind, &seven[0].fill, seven[0].clash),
@@ -1832,13 +1838,33 @@ fn one_card_per_pgpatcher_slot_and_the_slot_7_card_holds_cnr_or_f() {
         .collect();
     for pick in [None, Some(&pbr)] {
         let row = slot_row(pick, &both);
-        assert!(row.len() <= 8, "{} cards", row.len());
-        let seven = row.iter().find(|c| c.kind.slot_number() == 7).unwrap();
+        // One card per PGPatcher slot, plus the two XPMF maps (Note GI), each a card of its own.
+        let numbered = row.iter().filter(|c| c.kind.slot_number().is_some());
+        assert!(numbered.count() <= 8, "{} cards", row.len());
+        let xpmf: Vec<_> = row
+            .iter()
+            .filter(|c| c.kind.slot_number().is_none())
+            .map(|c| (c.kind, c.clash))
+            .collect();
+        assert_eq!(
+            xpmf,
+            [
+                (SlotKind::ProjectedNoise, None),
+                (SlotKind::DetailNormal, None)
+            ]
+        );
+        let seven = row
+            .iter()
+            .find(|c| c.kind.slot_number() == Some(7))
+            .unwrap();
         assert_eq!(
             (seven.kind, seven.clash),
             (SlotKind::Coat, Some(SlotKind::Fuzz))
         );
-        let three = row.iter().find(|c| c.kind.slot_number() == 3).unwrap();
+        let three = row
+            .iter()
+            .find(|c| c.kind.slot_number() == Some(3))
+            .unwrap();
         assert!(three.clash.is_some());
         assert!(slot_clash_text(seven).unwrap().contains("slot 7"));
     }

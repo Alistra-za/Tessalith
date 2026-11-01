@@ -190,12 +190,15 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
         match entry {
             None => paths.push(plain_path(*kind)),
             Some(e) => {
+                // The XPMF maps have no `slotN`: only their own prefix path.
                 let n = kind.slot_number();
-                let user = v
-                    .settings
-                    .get(&format!("slot{n}"))
-                    .is_some_and(|x| x.is_string());
-                if let Some(p) = e.slots.get(&n).filter(|p| !user && !p.is_empty()) {
+                let user = n.is_some_and(|n| {
+                    v.settings
+                        .get(&format!("slot{n}"))
+                        .is_some_and(|x| x.is_string())
+                });
+                let entry_path = n.and_then(|n| e.slots.get(&n));
+                if let Some(p) = entry_path.filter(|p| !user && !p.is_empty()) {
                     paths.push(canon(p));
                 }
                 if let (true, Some(pre)) = (own, &v.prefix) {
