@@ -1659,8 +1659,9 @@ pub fn layer_from_block(
 struct XpmfTex {
     /// The canonical `textures/effects/...` path the layer resolves.
     canonical: &'static str,
-    /// The profile's path as written (the grey line names it) and in canonical form (the lookup key).
+    /// The profile's path as written (the grey line names it).
     shown: String,
+    /// The same path in canonical form (the lookup key).
     path: String,
     /// The set's own member that writes `path`: its preview path, and the id of the bytes it shows now (a new
     /// encode is a new id, so it cycles the layer).
@@ -1907,7 +1908,7 @@ impl SetPreview {
             || self.querying.is_some()
             || self.loading.is_some()
             || self.mato_running.is_some()
-            || self.xpmf_resume
+            || (self.xpmf_resume && (self.shown || self.visible))
             || (self.want_scene && !self.enc.paused && (self.shown || self.visible))
     }
 
