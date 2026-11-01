@@ -114,7 +114,7 @@ A set can add detail normal maps that are blended into its base normal (`_n`, or
 | detail2 | `_detailnorm2`, `_detail2` | `_detailnormmask2`, `_detail2_mask` | 0.3 |
 | bent | `_bent` | `_bentmask`, `_bent_mask` | 0.35 |
 
-Any of these can be prefixed `n_` or `cnr_` (for example `iron_cnr_bump.png`) to say which base it feeds. Without a prefix it feeds `_n`, or `_cnr` when the set has no `_n`. Override with `rnm.target` on the layer file.
+Any of these can be prefixed `n_` or `cnr_` (for example `iron_cnr_bump.png`) to say which base it feeds. Without a prefix it feeds `_n`, or `_cnr` when the set has no `_n`. Override with `rnm.target` on the layer file. In a landscape set a plain `_detail` or `_detailnorm` file is the set's detail normal, not a layer ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)).
 
 The blend order is [`rnm.order`](Project-Config-Fields.md#rnm-normal-layers). The `bent` layer by default weights itself by occlusion read from a raw `_ao` map, the R channel of an `_orm`, or the B channel of `_rmaos`/`_rfaos`; supply normal AO (white = open), Tessalith inverts it.
 
