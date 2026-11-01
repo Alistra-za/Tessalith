@@ -543,3 +543,106 @@ fn restore_keeping_json_sha_back_to_the_saved_text_is_clean() {
     s.set_shader("a/one", Some(engine::shader::Shader::Pbr));
     assert!(s.is_dirty());
 }
+
+fn map(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    v.as_object().unwrap().clone()
+}
+
+/// XPMF: the `[sets.xpmf]` block keeps every key (unknown ones too); editing and saving round-trips it.
+#[test]
+fn xpmf_block_round_trips() {
+    let (d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\nparallax = true\n[sets.xpmf]\nname = \"snow\"\neditorIds = [\"*snow*\"]\n\
+         shelterFade = 40\nfalloffScale = 0.5\npbr = true\ncomment = \"mine\"\n\n\
+         [[sets]]\nid = \"b/two\"\n",
+    ));
+    let want = map(
+        json!({"name": "snow", "editorIds": ["*snow*"], "shelterFade": 40,
+        "falloffScale": 0.5, "pbr": true, "comment": "mine"}),
+    );
+    let e = s.entries();
+    assert_eq!(e[0].xpmf.as_ref(), Some(&want));
+    assert_eq!(e[1].xpmf, None, "no block, no value");
+    assert!(
+        !e[0]
+            .settings
+            .keys()
+            .any(|k| k.contains("xpmf") || k == "name"),
+        "the block is not a JSON setting"
+    );
+    assert_eq!(e[0].settings["parallax"], json!(true));
+    drop(e);
+    let mut edited = want.clone();
+    edited.insert("shelterFade".into(), json!(64.5));
+    edited.insert("waterFade".into(), json!(true));
+    s.set_xpmf("a/one", Some(edited.clone()));
+    assert!(s.is_dirty());
+    assert_eq!(s.entries()[0].xpmf.as_ref(), Some(&edited));
+    s.set_xpmf("a/one", Some(edited.clone()));
+    s.save(false).unwrap();
+    s.set_xpmf("a/one", Some(edited.clone()));
+    assert!(!s.is_dirty(), "an equal write is no edit");
+    let back = SetsDoc::open(d.path());
+    assert_eq!(back.entries()[0].xpmf.as_ref(), Some(&edited));
+    assert_eq!(back.entries()[0].xpmf.as_ref().unwrap()["comment"], "mine");
+    assert_eq!(back.entries()[0].settings["parallax"], json!(true));
+}
+
+/// XPMF: `None` removes the block; a block that is present but empty is kept as `Some(empty)`.
+#[test]
+fn xpmf_block_none_removes_it() {
+    let (_d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n[sets.xpmf]\n"));
+    assert_eq!(s.entries()[0].xpmf, Some(serde_json::Map::new()));
+    s.set_xpmf("a/one", Some(serde_json::Map::new()));
+    assert!(!s.is_dirty(), "the empty block is already there");
+    s.set_xpmf("a/one", None);
+    assert!(s.is_dirty());
+    assert_eq!(s.entries()[0].xpmf, None);
+    assert!(!s.text().contains("xpmf"));
+    s.save(false).unwrap();
+    s.set_xpmf("a/one", None);
+    s.set_xpmf("zz/none", None);
+    assert!(!s.is_dirty(), "removing an absent block is no edit");
+    assert_eq!(s.entries().len(), 1, "and creates no set");
+    s.set_xpmf("a/one", Some(serde_json::Map::new()));
+    assert_eq!(s.entries()[0].xpmf, Some(serde_json::Map::new()));
+}
+
+/// XPMF: the hash record lives in `_sdc/generated.json` table `xpmf` (Note FC11); a read-only document takes it
+/// there and is left as it was.
+#[test]
+fn xpmf_shas_live_in_sidecar() {
+    use std::collections::BTreeMap;
+    let shas = BTreeMap::from([(
+        "SKSE/Plugins/XPMF/tessalith_a.json".to_string(),
+        "00".to_string(),
+    )]);
+    let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
+    s.set_xpmf_shas(shas.clone()).unwrap();
+    assert_eq!(s.xpmf_shas(), shas);
+    let side: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.sidecar_path()).unwrap()).unwrap();
+    assert_eq!(side["xpmf"]["SKSE/Plugins/XPMF/tessalith_a.json"], "00");
+    assert_eq!(
+        SetsDoc::open(d.path()).xpmf_shas(),
+        shas,
+        "read back on open"
+    );
+    s.set_xpmf_shas(BTreeMap::new()).unwrap();
+    assert!(s.xpmf_shas().is_empty());
+
+    let (b, mut r) = doc(Some("[[sets]\nbroken"));
+    assert!(r.read_only());
+    r.set_xpmf("a/one", Some(map(json!({"name": "x"}))));
+    r.set_xpmf_shas(shas.clone()).unwrap();
+    assert!(!r.is_dirty() && r.entries().is_empty(), "no edit");
+    assert_eq!(r.xpmf_shas(), shas);
+    assert!(r.sidecar_path().is_file());
+    let text = std::fs::read_to_string(b.path().join("sdc-project.toml")).unwrap();
+    assert_eq!(text, "[[sets]\nbroken", "the broken file is not touched");
+    assert_eq!(
+        SetsDoc::open(b.path()).xpmf_shas(),
+        shas,
+        "the sidecar holds it"
+    );
+}
