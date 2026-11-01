@@ -47,8 +47,8 @@ const PGP_SHA: &str = "pgp_json_sha256";
 /// Note BV3: `[project] copy_sha256`, absolute lower-case path → hash of the vanilla borrowed-slot copy sdc last
 /// wrote there.
 const COPY_SHA: &str = "copy_sha256";
-/// XPMF profile export: `[project] xpmf_sha256` (and the sidecar table of the same name), path under the export root → hash
-/// of the profile JSON sdc last wrote there.
+/// XPMF profile export: `[project] xpmf_sha256` (and the sidecar table of the same name), path under the export
+/// root → hash of the profile JSON sdc last wrote there.
 const XPMF_SHA: &str = "xpmf_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 14] = [
@@ -1268,7 +1268,8 @@ impl SetsDoc {
     }
 
     /// XPMF profile export: replace set `set`'s `[sets.xpmf]` with `block` (`Some`, even empty, is a block), or remove it
-    /// with `None`. `null` members are not stored (absent is the default). An existing block is updated key by key (comments and\n    /// unconvertible members stay). An equal write is no edit.
+    /// with `None`. `null` members are not stored (absent is the default). An existing block is updated key by key
+    /// (comments and unconvertible members stay). An equal write is no edit.
     pub fn set_xpmf(&mut self, set: &str, block: Option<serde_json::Map<String, Json>>) {
         if self.read_only() {
             return;
@@ -1325,6 +1326,7 @@ impl SetsDoc {
         }
         self.f.touch();
     }
+
     /// Tick or untick the export (D3). Unticking writes `export = false` and keeps the values, so ticking again
     /// restores them.
     pub fn set_cm_export(&mut self, id: &str, on: bool) {
