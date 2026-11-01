@@ -270,6 +270,139 @@ fn card_values_are_cached_by_revision() {
     assert_eq!(b.defaults.as_ref().unwrap()["name"], ID);
 }
 
+// ---- Task 7 fix round 1 ----
+
+/// The text box whose placeholder (greyed default) is `hint`.
+fn input_with_hint<'a>(h: &'a H, hint: &str) -> egui_kittest::Node<'a> {
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| n.accesskit_node().placeholder() == Some(hint))
+        .unwrap_or_else(|| panic!("no text box hinted {hint:?}"))
+}
+
+/// The text box in the row labelled `label` (the pattern boxes all share one hint).
+fn input_in_row<'a>(h: &'a H, label: &str) -> egui_kittest::Node<'a> {
+    let row = row_rect(h, label);
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| (row.top() - 4.0..=row.bottom() + 4.0).contains(&n.rect().center().y))
+        .unwrap_or_else(|| panic!("no text box in row {label:?}"))
+}
+
+/// The diffuse texture Tessalith fills, as the card shows it greyed.
+fn diffuse_default(m: &AppModel) -> String {
+    let c = sdc_gui::model::xpmf_json::card_values(m, ID);
+    c.defaults.as_ref().unwrap()["diffuseTexture"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Review I1: tabbing through (focus, then leave) an unset texture row Tessalith fills changes nothing.
+#[test]
+fn texture_focus_and_blur_changes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, json!({}));
+    let hint = diffuse_default(&m);
+    let mut h = tall(m);
+    h.run_steps(4);
+    input_with_hint(&h, &hint).focus();
+    h.run_steps(4);
+    input_with_hint(&h, ID).focus(); // the Name box
+    h.run_steps(4);
+    assert_eq!(block(h.state()), Some(Map::new()), "the block is unchanged");
+}
+
+/// The Texture path flow: a typed path is stored; clearing it stores "" (the game's own); Reset (named by its key)
+/// goes back to Tessalith's texture.
+#[test]
+fn texture_path_flow_and_reset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, json!({}));
+    let hint = diffuse_default(&m);
+    let mut h = tall(m);
+    h.run_steps(4);
+    input_with_hint(&h, &hint).focus();
+    h.run_steps(4);
+    h.event(egui::Event::Text("landscape/snow01".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(
+        block(h.state()).unwrap().get("diffuseTexture"),
+        Some(&json!("landscape/snow01"))
+    );
+    input_in_row(&h, "Diffuse texture").focus();
+    h.run_steps(4);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    h.key_press(egui::Key::Backspace);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(
+        block(h.state()).unwrap().get("diffuseTexture"),
+        Some(&json!("")),
+        "cleared: the game's own"
+    );
+    h.get_by_role_and_label(Role::Button, "Reset diffuseTexture")
+        .click();
+    h.run_steps(4);
+    assert_eq!(block(h.state()), Some(Map::new()), "back to the default");
+    let es = h.state().sets_doc.as_ref().unwrap().entries();
+    let e = es.iter().find(|e| e.id == ID).unwrap();
+    let p = sdc_gui::model::xpmf_json::profile(h.state(), e).unwrap();
+    assert_eq!(p.get("diffuseTexture"), Some(&json!(hint)));
+}
+
+/// ui-rules 8.4 (review I2): every repeated control is named by its key; Reset restores the default.
+#[test]
+fn controls_are_named_by_their_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(
+        &mut m,
+        json!({"shelterFade": 40, "roofShelter": false, "editorIds": ["MatoA", "NoSuchMato"]}),
+    );
+    let mut h = tall(m);
+    h.run_steps(4);
+    // Each lookup panics on a duplicate name.
+    h.get_by_role_and_label(Role::Button, "Override maxAngle");
+    h.get_by_role_and_label(Role::Button, "Add pattern to editorIds");
+    h.get_by_role_and_label(Role::Button, "Add pattern to roofShelterSkip");
+    h.get_by_role_and_label(Role::Button, "Remove pattern NoSuchMato from editorIds");
+    h.get_by_role_and_label(Role::CheckBox, "Roof shelter enabled");
+    h.get_by_role_and_label(Role::CheckBox, "Water fade enabled");
+    h.get_by_role_and_label(Role::Button, "Reset shelterFade")
+        .click();
+    h.run_steps(4);
+    let b = block(h.state()).unwrap();
+    assert!(!b.contains_key("shelterFade"), "{b:?}");
+    assert!(
+        has(&h, "default: 64"),
+        "shelterFade shows its default again"
+    );
+}
+
+/// Enter in a pattern box adds the pattern.
+#[test]
+fn enter_in_pattern_box_adds() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, json!({}));
+    let mut h = tall(m);
+    h.run_steps(4);
+    input_in_row(&h, "Exclude editor IDs").focus();
+    h.run_steps(4);
+    h.event(egui::Event::Text("*ash*".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(
+        block(h.state()).unwrap().get("excludeEditorIds"),
+        Some(&json!(["*ash*"]))
+    );
+}
 /// Task 7 Step 4: the card at 1100, 1280 and 1600 px wide, for checking against egui-ui-rules groups 2 and 3. Needs
 /// a GPU; writes `xpmf-card-<w>-{top,bottom}.png` into `XPMF_SHOTS`: `cargo test -p sdc-gui --test xpmf_card -- --ignored`.
 #[test]

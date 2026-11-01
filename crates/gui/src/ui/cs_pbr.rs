@@ -8,7 +8,7 @@ use crate::model::cs_pbr::{
     templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics, StaticsStatus,
     GLINT_FIELDS, LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX, PGP_BOX_UNAVAILABLE,
 };
-use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS};
+use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
 use crate::model::plugin_refs::set_key;
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
@@ -416,7 +416,7 @@ pub(super) fn mato_picks(r: &ScanRecords, typed: &str, single_pass: bool) -> Vec
     let q = typed.to_lowercase();
     r.mato
         .iter()
-        .filter(|w| !single_pass || w.mato_flags.is_some_and(|f| f & 1 == 1))
+        .filter(|w| !single_pass || w.mato_flags.is_some_and(|f| f & SINGLE_PASS != 0))
         .filter(|w| w.edid.to_lowercase().contains(&q))
         .take(50)
         .map(|w| {

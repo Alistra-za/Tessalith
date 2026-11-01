@@ -346,10 +346,12 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
         }
         let ids = p.get("editorIds").and_then(Value::as_array);
         for x in ids.into_iter().flatten().filter_map(Value::as_str) {
+            // One case-fold rule (Unicode, as the cs_mato set above) for the match and the dedupe.
+            let low = x.to_lowercase();
             let new = !out.iter().any(|(_, id, e): &(String, String, String)| {
-                *id == v.id && e.eq_ignore_ascii_case(x)
+                *id == v.id && e.to_lowercase() == low
             });
-            if new && !x.contains(['*', '?']) && !mato.contains(&x.to_lowercase()) {
+            if new && !x.contains(['*', '?']) && !mato.contains(&low) {
                 out.push((v.key.clone(), v.id.clone(), x.to_string()));
             }
         }

@@ -18,6 +18,15 @@ const TOGGLE_HOVER: &str =
     "Writes SKSE\\Plugins\\XPMF\\tessalith_<set>.json on Export. A row left at its greyed \
                             default is written as Tessalith fills it, or left to XPMF.";
 const RESET_HOVER: &str = "Back to the default";
+/// The disabled card's hover when the model gives no reason.
+const READ_ONLY: &str = "sdc-project.toml is read-only";
+
+/// ui-rules 8.4: a repeated control gets a name with its key (call after `ui.add`).
+fn named(r: egui::Response, kind: egui::WidgetType, name: String) -> egui::Response {
+    let on = r.enabled();
+    r.widget_info(|| egui::WidgetInfo::labeled(kind, on, name.clone()));
+    r
+}
 
 enum Act {
     On(bool),
@@ -43,8 +52,12 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             .find(|e| same_id(&e.id, &v.id))
             .and_then(|e| e.xpmf.clone())
     });
-    let editable = m.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = m.banner.clone().unwrap_or_default();
+    // The model's own check, so the card is never enabled while its edits are dropped.
+    let editable = m.sets_editable();
+    let why = m
+        .sets_read_only_reason()
+        .or_else(|| m.banner.clone())
+        .unwrap_or_else(|| READ_ONLY.into());
     let head = egui::RichText::new(if block.is_some() { "on" } else { "off" }).weak();
     super::group::group(ui, ("xpmf", v.id.as_str()), CARD, Some(head), true, |ui| {
         ui.add_enabled_ui(editable, |ui| {
@@ -156,13 +169,12 @@ fn row(
                 FieldKind::Patterns => patterns_value(ui, m, v, f, cur, dflt, acts),
             },
         }
-        if cur.is_some()
-            && ui
-                .small_button("Reset")
-                .on_hover_text(RESET_HOVER)
-                .clicked()
-        {
-            acts.push(Act::Value(f.key, None));
+        if cur.is_some() {
+            let r = ui.small_button("Reset").on_hover_text(RESET_HOVER);
+            let name = format!("Reset {}", f.key);
+            if named(r, egui::WidgetType::Button, name).clicked() {
+                acts.push(Act::Value(f.key, None));
+            }
         }
     });
 }
@@ -183,7 +195,12 @@ fn bool_value(
     } else {
         egui::RichText::new("default").weak()
     };
-    if ui.checkbox(&mut on, text).changed() {
+    let r = ui.checkbox(&mut on, text);
+    let (enabled, name) = (r.enabled(), format!("{} enabled", label_of(f.key)));
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, name.clone())
+    });
+    if r.changed() {
         acts.push(Act::Value(f.key, Some(json!(on))));
     }
 }
@@ -218,11 +235,10 @@ fn number_value(
     let r = range(f.kind);
     let Some(mut x) = cur.and_then(Value::as_f64) else {
         ui.weak(format!("default: {}", default_text(f, dflt)));
-        if ui
+        let b = ui
             .small_button("Override")
-            .on_hover_text("Write a value of your own")
-            .clicked()
-        {
+            .on_hover_text("Write a value of your own");
+        if named(b, egui::WidgetType::Button, format!("Override {}", f.key)).clicked() {
             // XPMF's numeric default where it has one, else 1 (inside the range).
             let start: f64 = f.default.and_then(|d| d.parse().ok()).unwrap_or(1.0);
             let start = r
@@ -294,9 +310,12 @@ fn text_value(
         ui.data_mut(|d| d.insert_temp(id, text.clone()));
     }
     if r.lost_focus() {
-        ui.data_mut(|d| d.remove::<String>(id));
+        // Review I1: only text changed during this focus is an edit; tabbing through an unset row writes nothing.
+        let edited = ui.data_mut(|d| d.remove_temp::<String>(id)).is_some();
         let t = text.trim();
-        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && cur.and_then(Value::as_str) != Some(t)
+        if edited
+            && !ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && cur.and_then(Value::as_str) != Some(t)
         {
             let game = f.kind == FieldKind::Texture && dflt.is_some();
             let new = match t {
@@ -340,11 +359,9 @@ fn patterns_value(
     } else {
         for (i, p) in list.iter().enumerate() {
             ui.monospace(p);
-            if ui
-                .small_button("×")
-                .on_hover_text("Remove this pattern")
-                .clicked()
-            {
+            let r = ui.small_button("×").on_hover_text("Remove this pattern");
+            let name = format!("Remove pattern {p} from {}", f.key);
+            if named(r, egui::WidgetType::Button, name).clicked() {
                 let mut l = list.clone();
                 l.remove(i);
                 acts.push(set(l));
@@ -353,39 +370,110 @@ fn patterns_value(
     }
     let id = egui::Id::new(("xpmf-pattern", f.key, v.id.as_str()));
     let mut text: String = ui.data(|d| d.get_temp(id).unwrap_or_default());
-    ui.add(
+    let r = ui.add(
         egui::TextEdit::singleline(&mut text)
             .hint_text("EditorID or *wildcard*")
             .desired_width(140.0),
     );
+    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let add = ui.small_button("Add");
+    let add = named(
+        add,
+        egui::WidgetType::Button,
+        format!("Add pattern to {}", f.key),
+    );
     let t = text.trim().to_string();
-    if ui.small_button("Add").clicked() && !t.is_empty() && !list.contains(&t) {
+    if (add.clicked() || enter) && !t.is_empty() && !list.contains(&t) {
         let mut l = list.clone();
         l.push(t);
         acts.push(set(l));
         text.clear();
     }
-    let picks = if matches!(f.key, "editorIds" | "excludeEditorIds") {
-        m.scan_records()
-            .map(|r| super::cs_pbr::mato_picks(&r, &text, true))
-            .unwrap_or_default()
+    let picks = if matches!(f.key, "editorIds" | "excludeEditorIds") && !text.trim().is_empty() {
+        cached_picks(ui, id, m, &text)
     } else {
-        vec![]
+        Default::default()
     };
     ui.data_mut(|d| d.insert_temp(id, text));
-    let new: Vec<_> = picks
-        .into_iter()
-        .filter(|(e, _)| !list.contains(e))
-        .collect();
+    let new: Vec<_> = picks.iter().filter(|(e, _)| !list.contains(e)).collect();
     if !new.is_empty() {
         ui.end_row();
         ui.weak("From the scan:");
         for (e, label) in new {
-            if ui.small_button(format!("+ {label}")).clicked() {
+            let r = ui.small_button(format!("+ {label}"));
+            if named(r, egui::WidgetType::Button, format!("Add {e} to {}", f.key)).clicked() {
                 let mut l = list.clone();
-                l.push(e);
+                l.push(e.clone());
                 acts.push(set(l));
             }
         }
+    }
+}
+
+/// ui-rules 9: the picks are rebuilt only when the typed text or the scan (its cached `Arc`) changes, not by
+/// lower-casing every scanned EDID each frame.
+fn cached_picks(
+    ui: &egui::Ui,
+    id: egui::Id,
+    m: &AppModel,
+    text: &str,
+) -> std::sync::Arc<Vec<(String, String)>> {
+    type Cached = (String, usize, std::sync::Arc<Vec<(String, String)>>);
+    let Ok(r) = m.scan_records() else {
+        return Default::default();
+    };
+    let scan = std::sync::Arc::as_ptr(&r) as usize;
+    let key = id.with("picks");
+    if let Some((t, s, p)) = ui.data(|d| d.get_temp::<Cached>(key)) {
+        if t == text && s == scan {
+            return p;
+        }
+    }
+    let p = std::sync::Arc::new(picks(&r, text));
+    ui.data_mut(|d| d.insert_temp::<Cached>(key, (text.to_string(), scan, p.clone())));
+    p
+}
+
+/// The XPMF picker's rows for the typed text: none until something is typed, single-pass material objects only.
+fn picks(r: &crate::model::cs_pbr::ScanRecords, typed: &str) -> Vec<(String, String)> {
+    if typed.trim().is_empty() {
+        return vec![];
+    }
+    super::cs_pbr::mato_picks(r, typed, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::picks;
+    use crate::model::cs_pbr::ScanRecords;
+    use modscan::plugin_store::WinRec;
+
+    fn rec(edid: &str, flags: Option<u32>) -> WinRec {
+        WinRec {
+            formid: 1,
+            edid: edid.into(),
+            plugin: "Test.esp".into(),
+            mato_flags: flags,
+        }
+    }
+
+    /// Review I3: nothing until something is typed; then single-pass material objects only.
+    #[test]
+    fn picker_needs_a_query_and_keeps_single_pass() {
+        let r = ScanRecords {
+            txst: vec![],
+            mato: vec![
+                rec("SnowMat1P", Some(1)),
+                rec("SnowMatMulti", Some(0)),
+                rec("SnowMatOld", None),
+                rec("AshMat1P", Some(3)),
+            ],
+        };
+        assert!(picks(&r, "").is_empty(), "an empty query lists nothing");
+        assert!(picks(&r, "  ").is_empty());
+        let got: Vec<String> = picks(&r, "snow").into_iter().map(|(e, _)| e).collect();
+        assert_eq!(got, ["SnowMat1P"]);
+        let got: Vec<String> = picks(&r, "MAT1p").into_iter().map(|(e, _)| e).collect();
+        assert_eq!(got, ["SnowMat1P", "AshMat1P"]);
     }
 }
