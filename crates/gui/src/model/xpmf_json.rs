@@ -299,9 +299,11 @@ fn fold_path(p: &str) -> String {
 }
 
 /// Design X2-X9: one profile per set with a block, validated against the vendored schema. `None` when no set has a
-/// block. Two sets whose ids fold to one file name are both refused.
+/// block and nothing is recorded; with a record and no block it is empty, so the old profiles are reported (Task 5
+/// ruling). Two sets whose ids fold to one file name are both refused.
 pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
-    let entries = m.sets_doc.as_ref()?.entries();
+    let doc = m.sets_doc.as_ref()?;
+    let entries = doc.entries();
     // The first entry with an id decides, as in cm_json.
     let blocks: Vec<&SetEntry> = entries
         .iter()
@@ -309,13 +311,13 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
         .filter(|(i, e)| e.xpmf.is_some() && !entries[..*i].iter().any(|o| same_id(&o.id, &e.id)))
         .map(|(_, e)| e)
         .collect();
-    if blocks.is_empty() {
-        return None;
-    }
     let mut p = PendingXpmf {
         root: m.output_root(),
         ..Default::default()
     };
+    if blocks.is_empty() {
+        return (!doc.xpmf_shas().is_empty()).then_some(p);
+    }
     let vs = views(m);
     let names: Vec<Result<String, String>> = blocks.iter().map(|e| file_name(&e.id)).collect();
     let outputs: BTreeMap<String, String> = m
@@ -440,4 +442,50 @@ pub fn finish(
         ));
     }
     out
+}
+
+impl AppModel {
+    /// The export ended. After a clean export (none cancelled or failed), write the profiles of `p` (taken from
+    /// `pending_xpmf` by the caller) and record their hashes (saved, like the complex-material record). Otherwise
+    /// only add a note.
+    #[doc(hidden)]
+    pub fn finish_xpmf(&mut self, p: Option<PendingXpmf>) {
+        let Some(p) = p else {
+            return;
+        };
+        let ok = self.export.error.is_none()
+            && self
+                .export
+                .summary
+                .as_ref()
+                .is_some_and(|s| s.cancelled.is_empty() && s.failed == 0);
+        if !ok {
+            if !p.files.is_empty() {
+                self.export
+                    .notes
+                    .push("XPMF profiles not written: the export did not finish".into());
+            }
+            return;
+        }
+        let recorded = match self.sets_doc.as_ref() {
+            Some(d) => d.xpmf_shas(),
+            None => return,
+        };
+        let shas = finish(&p, &recorded, &mut self.export.notes);
+        self.also_json
+            .extend(super::also::current_files(&p.root, &p.files));
+        if shas == recorded {
+            return;
+        }
+        let Some(d) = self.sets_doc.as_mut() else {
+            return;
+        };
+        let was_dirty = d.is_dirty();
+        let side = d.set_xpmf_shas(shas);
+        if d.read_only() {
+            self.export.notes.push(super::sidecar_only_note(&side));
+            return;
+        }
+        self.save_hash_record(was_dirty);
+    }
 }
