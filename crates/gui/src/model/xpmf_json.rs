@@ -183,6 +183,13 @@ pub(super) fn data_rel(root: &std::path::Path, output: &std::path::Path) -> Opti
     )
 }
 
+/// The sets that can have a profile: Landscape and PBR Landscape, on either target.
+pub fn is_landscape(v: &SetView) -> bool {
+    v.shader
+        .as_ref()
+        .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+}
+
 /// An empty value means XPMF's default (X7).
 fn empty(v: &Value) -> bool {
     match v {
@@ -234,11 +241,7 @@ fn defaults_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<Strin
     else {
         return Err(format!("{}: no files; XPMF profile not written", set.id));
     };
-    let landscape = v
-        .shader
-        .as_ref()
-        .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape));
-    if !landscape {
+    if !is_landscape(v) {
         return Err(format!(
             "{}: not a landscape set; XPMF profile not written",
             set.id
@@ -270,6 +273,8 @@ fn defaults_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<Strin
 pub struct CardValues {
     pub defaults: Result<Map<String, Value>, String>,
     pub profile: Result<Map<String, Value>, String>,
+    /// M1: why a built profile would still not be written (fold clash, schema); the card's amber line after `profile`'s.
+    pub refusal: Option<String>,
 }
 
 /// `CardValues` of set `set` (an id), cached with the set views (ui-rules §9.1): the card asks every frame.
@@ -290,13 +295,21 @@ pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
     let none = || Err(format!("{set}: no such set"));
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let v = std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
-        Some(e) => CardValues {
-            defaults: defaults_in(m, &vs, e),
-            profile: profile_in(m, &vs, e),
-        },
+        Some(e) => {
+            let profile = profile_in(m, &vs, e);
+            CardValues {
+                defaults: defaults_in(m, &vs, e),
+                refusal: profile
+                    .as_ref()
+                    .ok()
+                    .and_then(|doc| refusal(&vs, &entries, e, doc).err()),
+                profile,
+            }
+        }
         None => CardValues {
             defaults: none(),
             profile: none(),
+            refusal: None,
         },
     });
     let mut c = m.views.borrow_mut();
@@ -414,6 +427,46 @@ fn fold_path(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
 }
 
+/// What refuses a built profile `doc` of `e` (M1; `prepare` and the card both ask): a file name that folds like another
+/// landscape set's, then the schema. `Ok` is the file's text. Sets that are not landscape write nothing, so they
+/// cannot clash (M2).
+fn refusal(
+    vs: &[SetView],
+    entries: &[SetEntry],
+    e: &SetEntry,
+    doc: &Map<String, Value>,
+) -> Result<String, String> {
+    let name =
+        file_name(&e.id).map_err(|why| format!("{}: XPMF profile not written: {why}", e.id))?;
+    let landscape = |id: &str| {
+        vs.iter()
+            .any(|v| same_id(&v.id, id) && !v.members.is_empty() && is_landscape(v))
+    };
+    let others: Vec<&str> = entries
+        .iter()
+        .enumerate()
+        .filter(|(i, o)| {
+            o.xpmf.is_some()
+                && !same_id(&o.id, &e.id)
+                && !entries[..*i].iter().any(|x| same_id(&x.id, &o.id))
+                && file_name(&o.id).as_ref() == Ok(&name)
+                && landscape(&o.id)
+        })
+        .map(|(_, o)| o.id.as_str())
+        .collect();
+    if !others.is_empty() {
+        return Err(format!(
+            "{}: XPMF profile not written: {name} is also the file of {}",
+            e.id,
+            others.join(" and ")
+        ));
+    }
+    let text = to_text(doc);
+    let parsed: Value = serde_json::from_str(&text).expect("to_text writes JSON");
+    crate::pgp::validate::validate_xpmf(&parsed)
+        .map(|()| text)
+        .map_err(|errs| format!("{}: XPMF profile not written: {}", e.id, errs.join("; ")))
+}
 /// Design X2-X9: one profile per set with a block, validated against the vendored schema. `None` when no set has a
 /// block and nothing is recorded; with a record and no block it is empty, so the old profiles are reported (Task 5
 /// ruling). Two sets whose ids fold to one file name are both refused.
@@ -435,15 +488,16 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
         return (!doc.xpmf_shas().is_empty()).then_some(p);
     }
     let vs = views(m);
-    let names: Vec<Result<String, String>> = blocks.iter().map(|e| file_name(&e.id)).collect();
     let outputs: BTreeMap<String, String> = m
         .items
         .iter()
         .filter_map(|i| data_rel(&p.root, &i.job.as_ref()?.output))
         .map(|r| (fold_path(&r), r))
         .collect();
-    for (e, name) in blocks.iter().zip(&names) {
-        let name = match name {
+    // I1 (GI27): the Vanilla folder of an Also export gets none of a PBR Landscape set's profile files.
+    let vanilla = m.also_ticks().0 && m.also_root().is_some();
+    for e in &blocks {
+        let name = match file_name(&e.id) {
             Ok(n) => n,
             Err(why) => {
                 p.notes
@@ -452,29 +506,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
             }
         };
         let rel = format!("{FOLDER}/{name}");
-        let others: Vec<&str> = blocks
-            .iter()
-            .zip(&names)
-            .filter(|(o, n)| o.id != e.id && n.as_ref() == Ok(name))
-            .map(|(o, _)| o.id.as_str())
-            .collect();
-        let refused = if !others.is_empty() {
-            Err(format!(
-                "{}: XPMF profile not written: {name} is also the file of {}",
-                e.id,
-                others.join(" and ")
-            ))
-        } else {
-            profile_in(m, &vs, e).and_then(|doc| {
-                let text = to_text(&doc);
-                let parsed: Value = serde_json::from_str(&text).expect("to_text writes JSON");
-                crate::pgp::validate::validate_xpmf(&parsed)
-                    .map(|()| (doc, text))
-                    .map_err(|errs| {
-                        format!("{}: XPMF profile not written: {}", e.id, errs.join("; "))
-                    })
-            })
-        };
+        let refused = profile_in(m, &vs, e)
+            .and_then(|doc| refusal(&vs, &entries, e, &doc).map(|text| (doc, text)));
         match refused {
             Ok((doc, text)) => {
                 let own: Vec<String> = TEXTURES
@@ -486,6 +519,17 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
                     p.own_textures.insert(rel.clone(), own);
                 }
                 p.files.push((rel, text));
+                if vanilla
+                    && !m.also_skipped(&e.id)
+                    && vs
+                        .iter()
+                        .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v))
+                {
+                    p.notes.push(format!(
+                        "{}: the Vanilla folder gets neither the Projected noise nor the Detail normal map, and no XPMF profile",
+                        e.id
+                    ));
+                }
             }
             Err(note) => {
                 if !p.refused.contains(&rel) {

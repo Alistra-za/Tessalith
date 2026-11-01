@@ -216,6 +216,45 @@ fn zip_counts_profile() {
     assert_eq!(m.zip_estimate().unwrap().entries, before + 1);
 }
 
+/// Final review I1 (Note GI27): with Vanilla ticked, a PBR Landscape set's profile and its two new maps stay out of
+/// the Vanilla folder, and the export says so. No tick, or a skipped set, no note.
+#[test]
+fn also_vanilla_says_the_profile_and_maps_stay_in_the_pbr_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, Some(json!({})));
+    idle(&mut m);
+    let note = |m: &AppModel| {
+        prepare(m)
+            .unwrap()
+            .notes
+            .into_iter()
+            .find(|n| n.contains("Vanilla folder"))
+    };
+    assert_eq!(note(&m), None, "no tick, no note");
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    idle(&mut m);
+    assert!(m.also_on(), "{}", m.status_line);
+    let n = note(&m).expect("a note with Vanilla ticked");
+    assert!(
+        n.starts_with(&format!("{ID}: "))
+            && n.contains("neither the Projected noise nor the Detail normal map")
+            && n.contains("no XPMF profile"),
+        "{n}"
+    );
+    m.set_skip_also(ID, true);
+    idle(&mut m);
+    assert_eq!(note(&m), None, "a set left out of Vanilla needs no note");
+    // The note reaches the export report.
+    m.set_skip_also(ID, false);
+    idle(&mut m);
+    export(&mut m);
+    assert!(
+        notes(&m).contains("the Vanilla folder gets neither"),
+        "{}",
+        notes(&m)
+    );
+}
 /// The entry names of a zip, from its central directory (copied from `also_export.rs`).
 fn zip_names(path: &Path) -> Vec<String> {
     let z = std::fs::read(path).unwrap();

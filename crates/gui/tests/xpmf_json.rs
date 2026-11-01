@@ -226,16 +226,14 @@ fn identical_file_adopted() {
     );
 }
 
-/// Review Focus 1: two sets that fold to one file name are both refused.
-#[test]
-fn two_sets_one_name_refused() {
-    let d = tempfile::tempdir().unwrap();
-    let sub = d.path().join("textures/landscape/sub");
+/// `opened` plus a second set whose id folds to the same file name (`landscape/sub/Rock01`); returns its id.
+fn two_sets(dir: &Path) -> (AppModel, String) {
+    let sub = dir.join("textures/landscape/sub");
     std::fs::create_dir_all(&sub).unwrap();
     ImageBuffer::from_fn(64, 64, |x, y| Rgb([x as u8, y as u8, 7u8]))
         .save(sub.join("Rock01.png"))
         .unwrap();
-    let mut m = opened(d.path(), true);
+    let m = opened(dir, true);
     let other = set_views(&m)
         .into_iter()
         .find(|v| v.id != ID && v.id.to_lowercase().ends_with("/rock01"))
@@ -246,6 +244,14 @@ fn two_sets_one_name_refused() {
             )
         })
         .id;
+    (m, other)
+}
+
+/// Review Focus 1: two sets that fold to one file name are both refused.
+#[test]
+fn two_sets_one_name_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, other) = two_sets(d.path());
     set_block(&mut m, ID, json!({}));
     set_block(&mut m, &other, json!({"editorIds": ["MatoC"]}));
     let p = prepare(&m).unwrap();
@@ -262,6 +268,26 @@ fn two_sets_one_name_refused() {
     }
 }
 
+/// Final review M2: a set that is not landscape writes nothing, so it does not take a landscape set's file name away.
+#[test]
+fn non_landscape_set_is_left_out_of_the_fold_clash() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, other) = two_sets(d.path());
+    m.set_shader(&other, Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    set_block(&mut m, ID, json!({}));
+    set_block(&mut m, &other, json!({"editorIds": ["MatoC"]}));
+    let p = prepare(&m).unwrap();
+    assert_eq!(p.files.len(), 1, "{:?}", p.notes);
+    assert_eq!(p.files[0].0, FILE);
+    assert!(
+        p.notes.iter().all(|n| !n.contains("is also the file")),
+        "{:?}",
+        p.notes
+    );
+    let note = format!("{other}: not a landscape set; XPMF profile not written");
+    assert!(p.notes.contains(&note), "{:?}", p.notes);
+}
 /// Review Focus 3: a hand-edited out-of-range or wrongly typed value writes nothing and the note quotes the error.
 #[test]
 fn invalid_value_not_written() {
