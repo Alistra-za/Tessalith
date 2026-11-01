@@ -1,7 +1,7 @@
 //! A draft-07 subset validator for the vendored schemas (DECISIONS P12): exactly the keywords they use, PGPatcher's
 //! `pbr.schema.json` and `complex_material.schema.json` and XPMF's `xpmf_profile.schema.json` (Note GI). A test
 //! fails if one starts using another keyword.
-//! For the PGPatcher JSON validation is a safety net that should never fire: those writers build documents from the
+//! For the PGPatcher JSON, validation is a safety net that should never fire: those writers build documents from the
 //! same key tables. An XPMF profile carries the `[sets.xpmf]` block's values as the user typed them, so a failure
 //! there is expected and refuses the file with a note.
 use super::schema::SCHEMA_JSON;
