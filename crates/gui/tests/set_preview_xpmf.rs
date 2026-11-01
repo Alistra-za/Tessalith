@@ -203,6 +203,33 @@ fn texture_change_cycles_layer() {
     assert!(s.v3.projected().is_some());
 }
 
+/// Final review M4: a texture change on the frame after a cycle's scene push must not turn the layer on. The scene
+/// push of the frame before has set the resume flag, but the new map is only pushed later in the frame, so a layer
+/// sent on now would be resolved against the old one (the model's readback after the frame cannot tell, hence the
+/// layer itself is checked): each frame that changes the noise path ends with the layer off.
+#[test]
+fn a_texture_change_right_after_the_scene_push_keeps_the_layer_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut m, mut s) = opened(dir.path(), None);
+    m.set_xpmf_on(ID, true);
+    s.set_mato_layer(true);
+    run(&mut s, &m);
+    assert!(s.v3.projected().is_some());
+    assert!(source(&s, NOISE).is_some(), "the default is the own member");
+    let mut default_path = true;
+    for i in 0..8 {
+        // Alternate between a path nothing serves and the default (the own member), one change per frame.
+        let v = (i % 2 == 0).then(|| json!("textures/landscape/elsewhere.dds"));
+        default_path = v.is_none();
+        m.set_xpmf_value(ID, "noiseTexture", v);
+        frame(&mut s, &m);
+        assert_eq!(s.v3.projected(), None, "frame {i}: the layer is on");
+        assert_eq!(source(&s, NOISE).is_some(), default_path, "frame {i}");
+    }
+    run(&mut s, &m);
+    assert!(s.v3.projected().is_some(), "on again at the end");
+    assert_eq!(source(&s, NOISE).is_some(), default_path);
+}
 /// A new encode of the member the noise key names is a new texture: the layer takes it without being toggled.
 #[test]
 fn re_encoding_the_own_member_refreshes_the_texture() {
@@ -220,7 +247,35 @@ fn re_encoding_the_own_member_refreshes_the_texture() {
         m.wait_idle(Duration::from_secs(60)),
         "planning did not finish"
     );
-    run(&mut s, &m);
+    // Final review M3: the layer is on until the new encode is shown, goes off on some frame after it, then comes
+    // on again. Only that None to Some step makes the renderer read the new texture; the new bytes alone in the map
+    // would not.
+    let shown = |s: &SetPreview| {
+        s.enc.members[&SlotKind::ProjectedNoise]
+            .state
+            .shown()
+            .map(|e| e.id)
+    };
+    let old_id = shown(&s);
+    let t = Instant::now();
+    let (mut landed, mut on_before, mut off_after) = (false, false, false);
+    loop {
+        frame(&mut s, &m);
+        landed |= shown(&s) != old_id;
+        on_before |= !landed && s.v3.projected().is_some();
+        off_after |= landed && s.v3.projected().is_none();
+        if !s.busy() {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(90),
+            "the preview did not settle"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(landed, "the new encode was never shown");
+    assert!(on_before, "the layer was not on before the encode");
+    assert!(off_after, "the layer was not pushed off after the encode");
     assert!(s.v3.projected().is_some());
     let after = source(&s, NOISE);
     assert_ne!(after, before, "the new bytes reached the layer");

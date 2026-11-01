@@ -2800,7 +2800,9 @@ impl SetPreview {
                 // The scene's texture map holds them: push it again, and turn the layer off and on if it is on.
                 self.xpmf_tex = tex;
                 self.want_scene = true;
-                self.xpmf_cycle |= self.v3.projected().is_some();
+                // Also right after a cycle's scene push (`xpmf_resume`): the layer is still off, but the new map is not
+                // pushed yet, so a layer turned on now would read the old one.
+                self.xpmf_cycle |= self.v3.projected().is_some() || self.xpmf_resume;
             }
         }
         if let (true, Some(b)) = (self.mato_layer, &self.mato_block) {
