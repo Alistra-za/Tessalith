@@ -13,7 +13,11 @@ The plugins save one image at a time. They do not read `sdc.toml`, sets or a mod
 
 All of them are Windows x64 only. They are not code-signed, so Windows may block the zip or warn when you run it. Right-click the zip, choose **Properties**, tick **Unblock**, then unzip.
 
-Each zip holds a README with the full guide. The same guides are in the repository: [Photoshop](../../photoshop/README.md), [GIMP](../../gimp/README.md), [Paint.NET](../../paintdotnet/README.md), [chaiNNer](../../chainner/README.md).
+Each zip holds a README with the full guide. The same guides are on the `host-plugins` branch: [Photoshop](https://github.com/Alistra-za/Tessalith/tree/host-plugins/photoshop/README.md), [GIMP](https://github.com/Alistra-za/Tessalith/tree/host-plugins/gimp/README.md), [Paint.NET](https://github.com/Alistra-za/Tessalith/tree/host-plugins/paintdotnet/README.md), [chaiNNer](https://github.com/Alistra-za/Tessalith/tree/host-plugins/chainner/README.md).
+
+## Where the plugins live
+
+The plugins' source (`photoshop/`, `gimp/`, `paintdotnet/`, `chainner/` and the shared `crates/psdds`) is on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins), not on `main`. Plugin bug fixes go to that branch. The plugins are built against the engine version on that branch (1.2.0) and are not updated with later engine versions, so a later Tessalith release can encode some textures differently from the plugins. To build a plugin, check out `host-plugins` and follow its build steps there.
 
 ## Install
 
@@ -62,7 +66,7 @@ Photoshop, GIMP and Paint.NET show the same options in a dialog when you save. T
 | **Format** | Colour: BC1, BC3, BC7 or RGBA8 (uncompressed). Normal map adds BC5. Linear mask adds BC4. For 16 and 32-bit images, Colour also offers BC6H and RGBA16F (see [HDR](#16-bit-32-bit-and-hdr)). |
 | **Discard transparency** | Saves the texture opaque, whatever the pixels hold. Always on for BC1, BC4, BC5 and BC6H, which store no alpha. |
 | **Alpha is transparency** | Off by default. See [Alpha](#alpha-data-or-transparency). |
-| **Mipmaps** and **Filter** | A full mip chain, or none. The filter (Box, Tent, Mitchell, Kaiser) sets how mips are shrunk. It is greyed, showing Box, where the encoder uses Box anyway. |
+| **Mipmaps** and **Filter** | A full mip chain, or none, and the [mip filter](Project-Config-Fields.md#mipmaps); it is greyed, showing Box, where the encoder uses Box anyway. |
 | **Quality** | How hard the encoder works for the chosen format. Greyed for RGBA8. |
 
 Your last choices are remembered for the next save. Photoshop and GIMP accept images up to 16384 x 16384, the most Skyrim supports; Paint.NET names its limit in the error message. Large images need a lot of free memory: saving at the largest size takes about 10 GB in Photoshop and Paint.NET. Close other programs or save at 8192 x 8192 if it fails.
@@ -100,7 +104,7 @@ The `_rmaos` layout is on the [Texture types](Texture-Types.md) page.
 ## Things to know
 
 - **Layers.** Photoshop saves the merged image of the visible layers. GIMP saves a merged copy of the visible layers and never changes your image. Paint.NET flattens the image first (it asks). Keep your layered file.
-- **Photoshop alpha.** The first alpha channel wins over layer transparency. Extra alpha channels and spot channels are not saved; the save dialog then says `Only the first alpha channel is written`. A layered document with no alpha channel and no transparency saves opaque, and the dialog says `No alpha channel: the DDS is written opaque`.
+- **Photoshop alpha.** The first alpha channel wins over layer transparency. <!-- D:DC42 --> Extra alpha channels and spot channels are not saved; the save dialog then says `Only the first alpha channel is written`. A layered document with no alpha channel and no transparency saves opaque, and the dialog says `No alpha channel: the DDS is written opaque`.
 - **GIMP Overwrite.** The first File > Overwrite or Export to on a DDS you opened in this session shows the dialog, preset with the file's own format, sRGB tag and mipmaps (BC5 opens as Normal map, BC4 as Linear mask). After you confirm it once, later Overwrites of that image reuse those settings without asking.
 - **A missing or wrong `psdds.dll`.** GIMP and Paint.NET show one message with the DLL's path and the ABI version the plugin needs: GIMP when you open or export, Paint.NET in its error box under a greyed options dialog. Reinstall the plugin. Paint.NET keeps a failed load until it restarts, so restart it after replacing the DLL.
 - **Paint.NET Open.** Paint.NET always opens `.dds` with its own reader. To save with Tessalith again, use Save As once and pick **Tessalith DDS**; after that Ctrl+S uses it.

@@ -1,5 +1,7 @@
 # Local encoder benchmark
 
+Written 2026-10-16 (commit 1bae037b).
+
 The [encoder survey](encoder-survey.md) found that nobody had published a fair comparison of the main BC7 encoders at their top settings, or any good data on alpha, BC4, BC5 or BC6H. So the project ran its own benchmark in three rounds (8 to 9 October 2026), plus a later test of the BC4/BC5 search radius (12 October 2026). This page merges them. Where round 3 re-measured a claim on 100 images, its number is the one shown.
 
 ## The questions
@@ -44,7 +46,7 @@ The [encoder survey](encoder-survey.md) found that nobody had published a fair c
 
 ### Protocol
 
-- **One decoder for every output**, mip 0 only, compared with the source in 8-bit code values. No colour-space conversion on either side. BC1 colours were decoded as `round((2a+b)/3)` ("IdealRound4").
+- **One decoder for every output**, mip 0 only, compared with the source in 8-bit code values. No colour-space conversion on either side. BC1 colours were decoded as `round((2a+b)/3)` ("IdealRound4"). BC4 interpolants (BC4, BC5, BC3 alpha) were decoded rounded down, as upstream rgbcx does, where GPUs round to nearest; [BC3, BC4 and BC5](#bc3-bc4-and-bc5-tessaliths-encoder-against-the-others-2026-10-31) rescores them both ways.
 - **Normal maps** were scored the way a BC5 shader reads them: X and Y decoded, Z rebuilt. BC7 was also scored with its stored Z.
 - **BC6H** used identical fp16 input for every tool. mPSNR uses 13 exposures from 2⁻⁶ to 2⁶. Peak ratio is decoded peak luminance divided by source peak; 1.0 means the brightest highlight survives.
 - **Alpha flags were set the way a real pipeline would**: NVTT `-noalpha` on opaque sets and `-alpha` on alpha sets; ISPC alpha profiles on alpha sets.
@@ -259,7 +261,7 @@ Round 3, n = 100, against NVTT Production:
 
 ## BC7 at the `max` level (2026-10-31)
 
-`bc7e_max` is Tessalith's `Bc7Level::Max` (bc7e patch 0002, [bc7e tuning](bc7e-tuning.md)), run on every BC7 image of all three rounds through `sdc-bench encode-one --format bc7 --level max`. Its settings are the ones every built-in preset resolves to on these sets: perceptual off, no exact-opaque flag, no custom weights (`presets/sdc-base.toml`). The source PNG goes in unchanged, as for every other encoder, and the output goes through the same decoder and scorer. The engine's lossless rotated-block alpha fix is not applied, so alpha scores compare like with like against bc7enc's `-u6`.
+`bc7e_max` is Tessalith's `Bc7Level::Max` (bc7e patch 0002, [bc7e tuning](bc7e-tuning.md)), run on every BC7 image of all three rounds through `sdc-bench encode-one --format bc7 --level max`. It writes the bytes the engine writes: it calls `engine::encode::encode_level` with the default preset's profile at effort `max` (perceptual off, no exact-opaque flag, no custom weights, `presets/sdc-base.toml`), so the lossless rotated-block alpha fix is included. The source PNG goes in unchanged, as for every other encoder, and the output goes through the same decoder and scorer. On these 925 images the fix changed one block in one file (a mode-4 block in `data_real`, whose alpha is not scored); at `max` bc7e already writes opaque alpha in rotated blocks, so every score is the same as raw bc7e Max.
 
 Round 3, mean Δ of `bc7e_max` against the other encoder [95% t-interval], wins out of n (+ = `max` better; angles in degrees, sign flipped):
 
@@ -281,7 +283,52 @@ Round 3, mean Δ of `bc7e_max` against the other encoder [95% t-interval], wins 
 - Against bc7e u6 perceptual it loses luma, as linear mode always does (`rgb_real` luma PSNR −3.5 dB).
 - **Speed.** Round 1: 0.9 to 1.5× the time of bc7e u6 per set, 8.7 s against 8.2 s over all 39 images (process start included; 2.5 s against 2.2 s for the 7 `rgb_real` images). In round 3 `max` measured 0.64 to 0.83× the time of u6, but the round-3 r1 and r2 passes that wrote the u6 rows ran at the same time (their logs overlap on 9 October), while `max` ran alone. Those ratios favour `max` and are not a speed claim.
 
-The full per-set tables for all three rounds (including bc7e u6 perceptual, and the seconds) are in the bench folder, `results/summary_maxpeak.md`, written by `scripts/analyze_maxpeak.py`.
+The full per-set tables for all three rounds (including bc7e u6 perceptual, and the seconds) are in the bench folder, `results/summary_maxpeak.md` (`scripts/analyze_maxpeak.py`) and `results/summary_engine_bytes.md` (`scripts/analyze_engine_bytes.py`).
+
+## BC3, BC4 and BC5: Tessalith's encoder against the others (2026-10-31)
+
+`sdc rgbcx (rounded)` (CSV ids `sdc_bc3_rounded`, `sdc_bc4_rounded`, `sdc_bc5_rounded`) is the engine's own BC3, BC4 and BC5 encode, through `sdc-bench encode-one --format bc3|bc4|bc5 --level default` (`engine::encode::encode_level`). That is the vendored rgbcx with the round-to-nearest BC4 model (DECISIONS T13), level 18, BC4/BC5 search radius 5, the default preset's settings. BC4 uses a `height` profile, BC5 a `flow` profile. BC3 has no built-in sub-type, so it is a `diffuse` profile with the format set to BC3, as a user override would set it. Its BC3 colour is encoded for the engine's default BC1 model (`ideal`). The rows ran on every set that has BC3, BC4 or BC5 rows, in all three rounds.
+
+**The bench decoder floors BC4 interpolants.** `bcdecode` is built on upstream rgbcx, which decodes the six interpolated BC4 values as `(6a + b) / 7` and so on, rounded down. bcdec and GPUs round to nearest. This affects BC4, both BC5 channels and BC3 alpha, and every row in the [BC1 and BC3](#bc1-and-bc3), [BC4](#bc4-single-channel-masks) and [BC5](#normal-maps-bc5-against-bc7) tables above was scored this way. Upstream rgbcx (the `bc3_rgbcx_*`, `bc4_rgbcx*` and `bc5_rgbcx*` rows) models the same floor, so those rows score well under this decoder. Those rows also use level 18 and radius 5 (bc7enc's default; `-hr10` is radius 10), so against Tessalith's rows the decoder model is the only difference. Every BC3, BC4 and BC5 output was therefore scored twice: with the bench decoder (**floor**), and with the same files decoded with bcdec's round-to-nearest weights (**round**, `scripts/rescore_rounded.py`). BC3 colour is decoded as IdealRound4 in both.
+
+Round 3, mean Δ of `sdc rgbcx (rounded)` against the other encoder [95% t-interval], wins/losses (+ = Tessalith better):
+
+| Set (n), metric | Against | Floor decoder | Round decoder |
+|---|---|---|---|
+| `mask_real` (93), BC4 PSNR (dB) | rgbcx `-4` | −1.79 [±0.72], 0/93 | +1.65 [±0.45], 93/0 |
+| | rgbcx `-hr10` | −1.93 [±0.72], 0/93 | +1.71 [±0.56], 84/9 |
+| | NVTT `-highest` | −0.46 [±0.28], 9/84 | −0.07 [±0.09], 28/65 |
+| | NVTT default | −0.07 [±0.29], 74/19 | +0.73 [±0.13], 88/5 |
+| | Compressonator | −0.60 [±0.37], 17/76 | +0.30 [±0.16], 74/19 |
+| | ISPC | +1.19 [±0.10], 93/0 | +1.82 [±0.11], 93/0 |
+| | texconv | +1.14 [±0.11], 92/1 | +2.11 [±0.59], 92/1 |
+| `normal_real` (93), BC5 mean angle, Z rebuilt (°) | rgbcx `-5` | −0.068 [±0.009], 4/87 | +0.080 [±0.008], 90/1 |
+| | rgbcx `-hr10` | −0.076 [±0.010], 7/84 | +0.094 [±0.015], 90/3 |
+| | NVTT `-highest` | −0.004 [±0.007], 46/45 | +0.005 [±0.004], 73/18 |
+| | Compressonator | −0.028 [±0.010], 16/75 | +0.010 [±0.007], 74/17 |
+| | ISPC | +0.073 [±0.020], 82/10 | +0.102 [±0.022], 81/10 |
+| | texconv | +0.075 [±0.010], 85/7 | +0.093 [±0.011], 87/5 |
+| `alpha_real` (96), BC3 premultiplied PSNR (dB) | rgbcx L18 | −0.06 [±0.02], 22/74 | +0.15 [±0.03], 94/2 |
+| | rgbcx L18 `-r` | −0.12 [±0.02], 7/89 | +0.06 [±0.03], 74/22 |
+| | NVTT `-highest` | −0.20 [±0.14], 47/49 | −0.18 [±0.13], 46/50 |
+| | Compressonator | +0.33 [±0.18], 66/30 | +0.37 [±0.17], 67/29 |
+| | ISPC | +1.07 [±0.10], 96/0 | +1.08 [±0.11], 96/0 |
+| `cutout_real` (95), BC3 alpha PSNR (dB) | rgbcx L18 | −0.15 [±0.01], 0/95 | +0.14 [±0.01], 95/0 |
+| | NVTT `-highest` | −2.12 [±0.46], 1/94 | −2.01 [±0.45], 3/92 |
+| | Compressonator | −2.33 [±0.45], 0/95 | −2.19 [±0.45], 0/95 |
+| `packed_real` (95), BC3 alpha PSNR (dB) | rgbcx L18 | −2.40 [±0.75], 0/95 | +2.05 [±0.45], 95/0 |
+| | NVTT `-highest` | −0.23 [±0.34], 74/21 | +0.87 [±0.16], 94/1 |
+| | Compressonator | −0.89 [±0.41], 12/83 | +0.43 [±0.17], 87/8 |
+
+- **Under the rounding decoder Tessalith's rgbcx beats upstream rgbcx** on BC4 (+1.7 dB), BC5 (+0.08°) and BC3 alpha (+0.14 to +2.0 dB), on almost every image. Under the floor decoder the order reverses, by about the same amount. Each scores about the same under the model it targets (BC4 mean 48.95 dB rounded for Tessalith, 48.90 dB floored for upstream), so the gap is the decoder model, not the search.
+- **NVTT `-highest` is the only close rival.** On BC4 it is ahead by 0.07 dB [±0.09] and wins 65 of 93 images; on BC5 Tessalith is ahead by 0.005°. Every other encoder is behind under both decoders.
+- **The wider search radius gains nothing once decoding rounds.** Upstream rgbcx `-hr10` against `-4` is +0.13 dB [±0.07] under the floor decoder and −0.06 dB [±0.16] under the rounding one; BC5 `-hr10` is −0.014° [±0.016].
+- **BC3 alpha on cutouts is rgbcx's weak spot.** NVTT and Compressonator are about 2 dB ahead there under both decoders, while visible RGB is within 0.1 dB.
+- **BC3 colour is exactly upstream rgbcx L18's** (Δ 0 on every image). Encoded for `ideal`, it is 0.10 to 0.32 dB behind `-r` under the bench's IdealRound4 colour decoder; that gap is the BC1 model setting, not the encoder.
+- Rounds 1 and 2 (2 to 7 images per set) point the same way. BC4 `mask_real` (n = 6) against rgbcx: −1.59 dB floor, +1.14 dB round; against NVTT `-highest`: −1.02 / −0.39 dB. BC5 `normal_real` (n = 7) against rgbcx: −0.078° / +0.056°.
+- Speed: on `mask_real` the BC4 encode took 0.78× the time of bc7enc's `-4` (13.1 s against 16.8 s over 93 images, process start included), with another build running on the machine.
+
+Per-set tables for all three rounds, with the mean of each variant under both decoders and the seconds, are in `results/summary_engine_bytes.md`.
 
 ## BC6H (HDR)
 
@@ -361,14 +408,14 @@ Round 3 was paused to free the CPU. These claims rest on the small round-1 and r
 ## What Tessalith does because of this
 
 - **bc7e at `veryslow` (level 5) is the default BC7 encoder.** Level 5 matches level 6 at 1.5× the speed. Level 4 is not offered, because level 3 beats it on gradients. The levels are in [`crates/engine/src/encode.rs`](../../crates/engine/src/encode.rs) and the default in [`presets/sdc-base.toml`](../../presets/sdc-base.toml). The `fast-preview` preset uses `fast`.
-- **The vendored encoders reproduce the bench.** Spike S3 matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB, 39 of 39 block payloads byte-identical) and rgbcx BC4 bit for bit ([DECISIONS](../DECISIONS.md), Spike S3 and Phase 0 exit).
+- **The vendored encoders reproduce the bench.** Spike S3 matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB, 39 of 39 block payloads byte-identical) and rgbcx BC4 bit for bit ([DECISIONS](../../.claude/DECISIONS.md), Spike S3 and Phase 0 exit).
 - **rgbcx level 18 for BC1 and BC3, rgbcx for BC4 and BC5, ISPC `veryslow` for BC6H.** BC3 is never picked to save space, because it is the same size as BC7.
-- **The BC1 decoder model is one batch-wide setting, default Ideal**, with NVIDIA, AMD and IdealRound4 selectable ([DECISIONS](../DECISIONS.md) Note F). The bench's `-r` gain applies when the decoder rounds.
+- **The BC1 decoder model is one batch-wide setting, default Ideal**, with NVIDIA, AMD and IdealRound4 selectable ([DECISIONS](../../.claude/DECISIONS.md) Note F). The bench's `-r` gain applies when the decoder rounds.
 - **BC4/BC5 search radius 5 is the default; radius 4 is the `fast` setting** used by the compact and preview presets; radius 10 is `max` ([`crates/encoders-sys/src/rgbcx.rs`](../../crates/encoders-sys/src/rgbcx.rs)). rgbcx is patched to round its BC4 palette like the decoder; the patch and its test are described in [`README-VENDOR.md`](../../crates/encoders-sys/vendor/README-VENDOR.md).
 - **Normals are BC7, not BC5**, because Skyrim does not rebuild Z. BC4 or BC5 on a normal map is the blocking warning `FMT-BC5-NORMAL`. BC5 is the default only for `_flow` and the user-picked `generic_two_channel`.
 - **Perceptual mode is off by default** and refused for anything but colour without data in alpha (`FMT-PERCEPTUAL-DATA`).
-- **The `remove` alpha policy drops the alpha channel before mips and encoding.** Source alpha whose lowest value is 251 or more is treated as opaque (`ALPHA-NEAR-OPAQUE`, [DECISIONS](../DECISIONS.md) Note L).
-- **Exact alpha 255 where alpha is read.** The encode stage always applies a lossless fix to BC7 mode-4/5 blocks whose input alpha is 255. With `alpha.exact_opaque` on, a patched bc7e restricts mode-6 p-bits to 1 so alpha decodes to exactly 255. Spike S5 measured the RGB cost of that constraint at −0.515 dB on `rgb_real` and −1.020 dB on `rgb_grad`, too much to turn on everywhere, so it is on by default only for `_m` and environment masks. Spike S6 found 7 of 28 real `_m` files with 40% or more of their alpha off 255 without it, so turning it off on a BC7 `_m` is the blocking code `ALPHA-EXACT-OFF-M` ([DECISIONS](../DECISIONS.md) Notes A and D, Spikes S5 and S6; [`crates/encoders-sys/src/bc7_fixup.rs`](../../crates/encoders-sys/src/bc7_fixup.rs)).
-- **NVTT is an opt-in quality option for BC7 and BC6H, at Production only**, run as the user's own `nvcompress.exe`. Spike S7 showed that feeding each engine-built mip level to its own `-nomips` process matched a direct encode exactly at mip 0, and that `-nocuda` gives byte-identical output while saving about 0.13 s per process. Spike S7b showed nvcompress reads uncompressed DX10 DDS input as garbage, so levels are fed with a legacy header ([DECISIONS](../DECISIONS.md) Spikes S7 and S7b, Note NV; [`crates/engine/src/nvtt.rs`](../../crates/engine/src/nvtt.rs); [NVTT backend](../wiki/NVTT-Backend.md)).
+- **The `remove` alpha policy drops the alpha channel before mips and encoding.** Source alpha whose lowest value is 251 or more is treated as opaque (`ALPHA-NEAR-OPAQUE`, [DECISIONS](../../.claude/DECISIONS.md) Note L).
+- **Exact alpha 255 where alpha is read.** The encode stage always applies a lossless fix to BC7 mode-4/5 blocks whose input alpha is 255. With `alpha.exact_opaque` on, a patched bc7e restricts mode-6 p-bits to 1 so alpha decodes to exactly 255. Spike S5 measured the RGB cost of that constraint at −0.515 dB on `rgb_real` and −1.020 dB on `rgb_grad`, too much to turn on everywhere, so it is on by default only for `_m` and environment masks. Spike S6 found 7 of 28 real `_m` files with 40% or more of their alpha off 255 without it, so turning it off on a BC7 `_m` is the blocking code `ALPHA-EXACT-OFF-M` ([DECISIONS](../../.claude/DECISIONS.md) Notes A and D, Spikes S5 and S6; [`crates/encoders-sys/src/bc7_fixup.rs`](../../crates/encoders-sys/src/bc7_fixup.rs)).
+- **NVTT is an opt-in quality option for BC7 and BC6H, at Production only**, run as the user's own `nvcompress.exe`. Spike S7 showed that feeding each engine-built mip level to its own `-nomips` process matched a direct encode exactly at mip 0, and that `-nocuda` gives byte-identical output while saving about 0.13 s per process. Spike S7b showed nvcompress reads uncompressed DX10 DDS input as garbage, so levels are fed with a legacy header ([DECISIONS](../../.claude/DECISIONS.md) Spikes S7 and S7b, Note NV; [`crates/engine/src/nvtt.rs`](../../crates/engine/src/nvtt.rs); [NVTT backend](../wiki/NVTT-Backend.md)).
 - **BC6H is used only under the `cs` target** (vanilla has no BC6H path), for `hdr_sky` and for a `pbr_emissive` whose source is a float image that peaks above 1.0. Validation warns when the decoded peak ratio falls below 0.8 (`VAL-BC6H-PEAK`).
 - **The bench lives on as gates.** `cargo run --release -p sdc-bench -- gate …` reruns the parity and exact-opaque checks; `radius45` reruns the search-radius test.
