@@ -363,6 +363,54 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
     assert!(!item.decisions.is_empty(), "the decision is open again");
 }
 
+/// Note F?: on a large project the re-plan after an answer takes seconds, and the panel shows the last plan until it
+/// lands. Its controls are off meanwhile, with the reason, so a second click does not cancel and restart that plan
+/// and nothing looks like it reverted. (`ui::draw` does not poll, so the plan stays in flight until `settle`.)
+#[test]
+fn the_texture_panel_waits_for_the_plan_its_answer_started() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_item("landscape/leaf.png");
+    let mut h = harness(model);
+    h.run();
+    assert!(!h.get_by_label("Blend").accesskit_node().is_disabled());
+    press(&mut h, "Cutout");
+    assert!(h.state().busy(), "the answer's plan is in flight");
+    for label in ["Remove", "Blend", "Data"] {
+        let n = h.query_all_by_label(label).next().unwrap();
+        assert!(n.accesskit_node().is_disabled(), "{label} is enabled");
+    }
+    // The field combos are off too: the Alpha one still shows the last plan's value.
+    let meanings = ["Remove", "Cutout", "Blend", "Cutout + Blend", "Data"];
+    let alpha = h
+        .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+        .find(|n| {
+            n.accesskit_node()
+                .value()
+                .as_deref()
+                .is_some_and(|v| meanings.contains(&v))
+        })
+        .expect("the Alpha combo");
+    assert!(
+        alpha.accesskit_node().is_disabled(),
+        "the Alpha combo is enabled"
+    );
+    h.get_by_label("Wait for the plan to finish");
+    settle(&mut h);
+    assert!(h.query_by_label("Undecided").is_none());
+    assert!(h.query_by_label("Wait for the plan to finish").is_none());
+    let alpha = h
+        .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+        .find(|n| n.accesskit_node().value().as_deref() == Some("Cutout"))
+        .expect("the Alpha combo shows the answer");
+    assert!(!alpha.accesskit_node().is_disabled());
+}
+
 #[test]
 fn the_threshold_commits_when_the_drag_stops_not_while_dragging() {
     use eframe::egui::{Event, Modifiers, PointerButton};

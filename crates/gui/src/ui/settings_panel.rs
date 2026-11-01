@@ -592,7 +592,8 @@ pub struct Ctx<'a> {
     pub target: Target,
     pub busy: bool,
     pub compact: bool,
-    /// Why `sdc.toml` cannot be edited, when it is read-only.
+    /// Why `sdc.toml` cannot be edited, when it is read-only; the texture panel also gives "Wait for the plan to
+    /// finish" while a plan is in flight (`AppModel::fix_off`, Note F?).
     pub toml_read_only: Option<String>,
     /// The item's warnings (the Compression group shows the HDR reason).
     pub warnings: &'a [Warning],
@@ -870,6 +871,9 @@ fn decision_box(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.colored_label(AMBER, egui::RichText::new("Undecided").strong());
+            if let Some(why) = &cx.toml_read_only {
+                ui.weak(why);
+            }
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
@@ -1193,6 +1197,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     let (target, busy) = (model.target, model.busy());
     let read_only = model.project.as_ref().is_some_and(|p| p.read_only());
     let toml_read_only = toml_read_only_reason(model);
+    // Note F?: the answers and fields show the last plan; while the next one is in flight they are off, as Problems'
+    // fix buttons are (CA12), so a click is not lost to a stale view nor cancels the plan an answer started.
+    let edit_off = model.fix_off();
     let header = model.dds_header(key);
     let confirming = model.dds_patch.confirming.as_deref() == Some(key);
     let last = model.dds_patch.last_for(key).map(str::to_string);
@@ -1339,7 +1346,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 target,
                 busy,
                 compact,
-                toml_read_only: toml_read_only.clone(),
+                toml_read_only: edit_off.clone(),
                 warnings: &warnings,
                 nvtt_found: model.nvtt_found(),
             };
@@ -1395,7 +1402,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 });
             }
             if !decisions.is_empty() {
-                decision_box(ui, &cx, &decisions, &warnings, &mut actions);
+                ui.add_enabled_ui(edit_off.is_none(), |ui| {
+                    decision_box(ui, &cx, &decisions, &warnings, &mut actions)
+                });
             }
             if kind == ItemKind::Packed && !compact {
                 channels(ui, job);
@@ -1404,9 +1413,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 size_line(ui, model, key);
             }
             let shown: &[&str] = if compact { &COMPACT_GROUPS } else { &GROUPS };
-            for g in shown {
-                group(ui, g, &cx, &mut actions);
-            }
+            ui.add_enabled_ui(edit_off.is_none(), |ui| {
+                for g in shown {
+                    group(ui, g, &cx, &mut actions);
+                }
+            });
             if !compact {
                 super::rnm_section::rnm_section(ui, model, key);
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
