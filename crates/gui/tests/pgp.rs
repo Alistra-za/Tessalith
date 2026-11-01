@@ -933,6 +933,10 @@ fn the_validator_covers_every_keyword_the_schema_uses() {
     for (name, text) in [
         ("pbr.schema.json", sdc_gui::pgp::schema::SCHEMA_JSON),
         ("complex_material.schema.json", CM_SCHEMA_JSON),
+        (
+            "xpmf_profile.schema.json",
+            sdc_gui::pgp::validate::XPMF_SCHEMA_JSON,
+        ),
     ] {
         let schema: Value = serde_json::from_str(text).unwrap();
         let mut used = std::collections::BTreeSet::new();

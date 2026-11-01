@@ -1,5 +1,6 @@
-//! A draft-07 subset validator for the vendored PGPatcher schemas (DECISIONS P12): exactly the keywords those schemas
-//! use, `pbr.schema.json` and `complex_material.schema.json`. A test fails if either starts using another one.
+//! A draft-07 subset validator for the vendored schemas (DECISIONS P12): exactly the keywords they use, PGPatcher's
+//! `pbr.schema.json` and `complex_material.schema.json` and XPMF's `xpmf_profile.schema.json` (Note GI). A test
+//! fails if one starts using another keyword.
 //! Validation is a safety net that should never fire: the writers build documents from the same key tables.
 use super::schema::SCHEMA_JSON;
 use serde_json::Value;
@@ -8,8 +9,13 @@ use std::sync::OnceLock;
 /// PGPatcher's complex material schema (tag 2.3.1, with the `disabled` key; Note GE9), vendored byte for byte.
 pub const CM_SCHEMA_JSON: &str = include_str!("../../assets/complex_material.schema.json");
 
+/// XPMF's profile schema (0.8.1, commit 8078e1f; Note GI), vendored byte for byte.
+pub const XPMF_SCHEMA_JSON: &str = include_str!("../../assets/xpmf_profile.schema.json");
+
 pub const KEYWORDS: &[&str] = &[
     "type",
+    "minLength",
+    "exclusiveMinimum",
     "properties",
     "additionalProperties",
     "required",
@@ -108,6 +114,18 @@ fn check(root: &Value, s: &Value, v: &Value, at: &str, errs: &mut Vec<String>) {
             .is_some_and(|m| x > m)
         {
             errs.push(format!("{at}: above the maximum"));
+        }
+        // draft-07's numeric form (XPMF's noiseUVScale > 0).
+        if s.get("exclusiveMinimum")
+            .and_then(Value::as_f64)
+            .is_some_and(|m| x <= m)
+        {
+            errs.push(format!("{at}: not above the exclusive minimum"));
+        }
+    }
+    if let (Some(n), Some(t)) = (s.get("minLength").and_then(Value::as_u64), v.as_str()) {
+        if (t.chars().count() as u64) < n {
+            errs.push(format!("{at}: shorter than {n} characters"));
         }
     }
     if let (Some(req), Some(o)) = (s.get("required").and_then(Value::as_array), v.as_object()) {
@@ -213,4 +231,17 @@ pub fn validate(doc: &Value) -> Result<(), Vec<String>> {
 /// A PGPatcher complex material JSON (`<texture>_m.json`) against its vendored schema.
 pub fn validate_cm(doc: &Value) -> Result<(), Vec<String>> {
     run(cm_schema(), doc)
+}
+
+fn xpmf_schema() -> &'static Value {
+    static S: OnceLock<Value> = OnceLock::new();
+    S.get_or_init(|| {
+        serde_json::from_str(XPMF_SCHEMA_JSON).expect("the vendored XPMF schema parses")
+    })
+}
+
+/// An XPMF profile (`SKSE/Plugins/XPMF/*.json`) against its vendored schema. `$ref`s into `#/definitions/...`
+/// resolve like any other `#/` pointer.
+pub fn validate_xpmf(doc: &Value) -> Result<(), Vec<String>> {
+    run(xpmf_schema(), doc)
 }

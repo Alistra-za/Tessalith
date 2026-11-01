@@ -53,6 +53,7 @@ pub mod used_by;
 pub mod uv_coverage;
 pub mod view;
 pub mod viewport3d;
+pub mod xpmf_json;
 
 use crate::project::{ProjectDoc, SaveError};
 use crate::settings::GuiSettings;
