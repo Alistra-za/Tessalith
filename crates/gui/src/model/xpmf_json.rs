@@ -173,7 +173,7 @@ pub fn file_name(set_id: &str) -> Result<String, String> {
 }
 
 /// The Data-relative path of an output (`textures/...`, `/`-separated), if it lies under the export root.
-fn data_rel(root: &std::path::Path, output: &std::path::Path) -> Option<String> {
+pub(super) fn data_rel(root: &std::path::Path, output: &std::path::Path) -> Option<String> {
     Some(
         output
             .strip_prefix(root)
@@ -308,6 +308,21 @@ pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
     }
     c.xpmf_card = Some((set.to_string(), v.clone()));
     v
+}
+
+/// Note GI10 (X10): set `set`'s profile for the MATO preview, while the set has an `[sets.xpmf]` block whose profile
+/// can be built (cached with the card's values).
+pub fn preview_profile(m: &AppModel, set: &str) -> Option<Map<String, Value>> {
+    let has_block = m
+        .sets_doc
+        .as_ref()?
+        .entries()
+        .iter()
+        .any(|e| same_id(&e.id, set) && e.xpmf.is_some());
+    if !has_block {
+        return None;
+    }
+    card_values(m, set).profile.clone().ok()
 }
 
 /// The X4 Problems row's hover.

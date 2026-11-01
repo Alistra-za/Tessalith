@@ -1654,6 +1654,9 @@ pub fn layer_from_block(
     }
 }
 
+/// One projected texture a profile names (see `SetPreview::xpmf_tex`).
+type XpmfTex = (&'static str, String, Option<String>);
+
 pub struct SetPreview {
     /// Its own viewport (D2: a second D3D device; the shader cache on disk is shared).
     pub v3: Viewport3d,
@@ -1731,6 +1734,14 @@ pub struct SetPreview {
     mato_due: bool,
     /// The next pick runs even for an unchanged record (the layer turned on): its plugin may have changed on disk.
     mato_repick: bool,
+    /// Note GI10: the followed set's XPMF profile (`None`: no block, or one that cannot be built).
+    xpmf_doc: Option<serde_json::Map<String, Value>>,
+    /// The projected textures the profile names: (the canonical `textures/effects/...` path the layer resolves, the
+    /// profile's path in canonical form, the preview path of the set's own member that writes it).
+    xpmf_tex: Vec<XpmfTex>,
+    /// Note GI11: the profile's texture paths changed with the layer on. The layer is pushed off until the next
+    /// scene push, then on again, because the renderer reads the textures only when the layer turns on.
+    xpmf_cycle: bool,
 }
 
 impl Default for SetPreview {
@@ -1808,6 +1819,9 @@ impl SetPreview {
             mato_reader: Arc::new(|p: &Path| std::fs::read(p)),
             mato_due: false,
             mato_repick: false,
+            xpmf_doc: None,
+            xpmf_tex: vec![],
+            xpmf_cycle: false,
         }
     }
 
@@ -2353,6 +2367,7 @@ impl SetPreview {
                 let (material, row) = self.builtin_scene();
                 let mut textures = memory;
                 self.add_vfs(&mut textures, &[&material]);
+                self.apply_xpmf_textures(&mut textures);
                 let same = self.on_screen == Some(Shown::Builtin(b));
                 self.next += 1;
                 self.v3.set_content(
@@ -2392,6 +2407,7 @@ impl SetPreview {
                     &rows.iter().map(|r| &r.material).collect::<Vec<_>>(),
                 );
                 textures.extend(memory);
+                self.apply_xpmf_textures(&mut textures);
                 let same = self.on_screen == Some(Shown::Nif(c.load_copy_id));
                 self.next += 1;
                 self.v3.set_content(
@@ -2409,6 +2425,7 @@ impl SetPreview {
                 self.rows = rows;
             }
         }
+        self.xpmf_cycle = false;
         self.reset_tex_mirror();
         self.timings.push_ms = Some(ms(t0));
     }
@@ -2600,6 +2617,48 @@ fn slot_norms(materials: &[&MaterialState]) -> HashSet<String> {
         .collect()
 }
 
+/// Note GI10: the profile's `falloffScale`, `falloffBias` and `noiseUVScale` replace the record's values. A key that
+/// is missing, not a finite number, or (for the noise scale) not a usable divisor keeps the value `layer` has.
+pub fn apply_profile(layer: &mut ProjectedLayer, doc: &serde_json::Map<String, Value>) {
+    let num = |k: &str| {
+        doc.get(k)
+            .and_then(Value::as_f64)
+            .map(|x| x as f32)
+            .filter(|x| x.is_finite())
+    };
+    if let Some(x) = num("falloffScale") {
+        layer.falloff_scale = x;
+    }
+    if let Some(x) = num("falloffBias") {
+        layer.falloff_bias = x;
+    }
+    if let Some(x) = num("noiseUVScale").filter(|x| *x > 0.0 && (1.0 / x).is_finite()) {
+        layer.noise_uv_scale = x;
+    }
+}
+
+/// The projected texture slots a profile fills: (canonical path the layer resolves, the profile key).
+const XPMF_TEXTURES: [(u32, &str); 4] = [
+    (3, "diffuseTexture"),
+    (8, "normalTexture"),
+    (10, "detailNormalTexture"),
+    (11, "noiseTexture"),
+];
+
+/// The canonical projected path and canonical profile path of each texture key the profile sets.
+fn xpmf_textures(doc: &serde_json::Map<String, Value>) -> Vec<(&'static str, String)> {
+    XPMF_TEXTURES
+        .iter()
+        .filter_map(|(reg, key)| {
+            let path = doc.get(*key)?.as_str().filter(|s| !s.is_empty())?;
+            let (_, canonical) = render3d::textures::PROJECTED
+                .iter()
+                .find(|(r, _)| r == reg)?;
+            Some((*canonical, canon(path)))
+        })
+        .collect()
+}
+
 /// Note GG: the material-object layer.
 impl SetPreview {
     /// The "Material object layer" toggle. Turning it on picks the record again on the next shown frame (its plugin
@@ -2627,6 +2686,42 @@ impl SetPreview {
         self.mato_due = true;
     }
 
+    /// The preview path under which the set's own member that writes `want` (a canonical Data-relative path) is
+    /// served, so a profile naming this project's output shows this session's bytes before anything is exported.
+    fn own_member_path(&self, m: &AppModel, root: &Path, want: &str) -> Option<String> {
+        self.enc
+            .members
+            .values()
+            .find(|mem| {
+                m.item(&mem.slot.item)
+                    .and_then(|i| i.job.as_ref())
+                    .and_then(|j| super::xpmf_json::data_rel(root, &j.output))
+                    .is_some_and(|r| canon(&r) == want)
+            })
+            .and_then(|mem| mem.slot.paths.first().cloned())
+    }
+
+    /// Note GI10: each projected texture the profile names is served from the set's own member that writes it
+    /// (this session's bytes), else the load order's copy of the profile's path. A path neither has is removed from
+    /// the map, so the layer shows its plain fallback and the grey line names the path.
+    fn apply_xpmf_textures(&self, textures: &mut HashMap<String, FileSource>) {
+        for (canonical, path, own) in &self.xpmf_tex {
+            let src = own
+                .as_ref()
+                .and_then(|o| textures.get(o).cloned())
+                .or_else(|| textures.get(path).cloned())
+                .or_else(|| self.vfs_lookup(path));
+            match src {
+                Some(s) => {
+                    textures.insert(canonical.to_string(), s);
+                }
+                None => {
+                    textures.remove(*canonical);
+                }
+            }
+        }
+    }
+
     /// The followed set's block, and with the layer on its record (design D3): the first EDID of `edids` the scan
     /// has as a winning MATO (ASCII case-insensitive, as `esp::mato_data` matches it). Then the layer is pushed.
     fn sync_mato(&mut self, m: &AppModel) {
@@ -2634,6 +2729,30 @@ impl SetPreview {
             .fp
             .as_ref()
             .and_then(|f| m.cs_block(&f.label, cs_pbr::Kind::Mato));
+        // Note GI10: the layer needs the cs_mato block; the profile only adds to it.
+        self.xpmf_doc = self
+            .fp
+            .as_ref()
+            .filter(|_| self.mato_block.is_some())
+            .and_then(|f| super::xpmf_json::preview_profile(m, &f.label));
+        let root = m.output_root();
+        let tex: Vec<XpmfTex> = self
+            .xpmf_doc
+            .as_ref()
+            .map(xpmf_textures)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(c, p)| {
+                let own = self.own_member_path(m, &root, &p);
+                (c, p, own)
+            })
+            .collect();
+        if tex != self.xpmf_tex {
+            // The scene's texture map holds them: push it again, and turn the layer off and on if it is on.
+            self.xpmf_tex = tex;
+            self.want_scene = true;
+            self.xpmf_cycle |= self.v3.projected().is_some();
+        }
         if let (true, Some(b)) = (self.mato_layer, &self.mato_block) {
             // A scan read error is no record (the CS PBR card reports scan errors).
             let rec = m.scan_records().ok().and_then(|r| {
@@ -2722,11 +2841,20 @@ impl SetPreview {
     fn push_layer(&mut self) {
         // shortcut: the four textures are resolved only when the layer turns on (ruling a), so a rescan while it is on
         // shows after the user turns it off and on; upgrade: push None then Some after the scene push a requery makes.
+        if !self.mato_layer {
+            self.xpmf_cycle = false;
+        }
         let want = self
             .mato_block
             .as_ref()
-            .filter(|_| self.mato_layer)
-            .map(|b| layer_from_block(&b.values, self.mato_data.as_ref()));
+            .filter(|_| self.mato_layer && !self.xpmf_cycle)
+            .map(|b| {
+                let mut l = layer_from_block(&b.values, self.mato_data.as_ref());
+                if let Some(d) = &self.xpmf_doc {
+                    apply_profile(&mut l, d);
+                }
+                l
+            });
         self.v3.set_projected_layer(want);
     }
 
