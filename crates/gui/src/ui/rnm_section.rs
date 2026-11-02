@@ -162,7 +162,8 @@ fn bent(ui: &mut egui::Ui, model: &AppModel, key: &str, job: &ResolvedJob, edits
     }
 }
 
-pub fn rnm_section(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
+/// `off`: why the edits wait (`AppModel::fix_off`, Note FK); the header and the blended preview stay usable.
+pub fn rnm_section(ui: &mut egui::Ui, model: &mut AppModel, key: &str, off: &Option<String>) {
     let Some(item) = model.item(key) else { return };
     let Some(job) = item.job.clone().filter(|j| j.rnm.is_some()) else {
         return;
@@ -191,7 +192,12 @@ pub fn rnm_section(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
         .default_open(true)
         .show(ui, |ui| {
             let mut on = job.profile.rnm.enabled;
-            if ui.checkbox(&mut on, "RNM").changed() {
+            let r = ui.add_enabled(off.is_none(), egui::Checkbox::new(&mut on, "RNM"));
+            let r = match off {
+                Some(why) => r.on_disabled_hover_text(why),
+                None => r,
+            };
+            if r.changed() {
                 // Re-ticking drops the key rather than writing `true`, the default.
                 edits.push((
                     key.into(),
@@ -202,11 +208,22 @@ pub fn rnm_section(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
             if job.active_rnm().is_some() {
                 blended_preview(ui, model, key);
             }
-            for r in &rows {
-                row(ui, model, key, r, both, &job, &mut edits);
-                if r.id == LayerId::Bent {
-                    bent(ui, model, key, &job, &mut edits);
+            let layers = ui.add_enabled_ui(off.is_none(), |ui| {
+                for r in &rows {
+                    row(ui, model, key, r, both, &job, &mut edits);
+                    if r.id == LayerId::Bent {
+                        bent(ui, model, key, &job, &mut edits);
+                    }
                 }
+            });
+            if let Some(why) = off {
+                // A disabled row shows no hover of its own: the reason covers the layer rows.
+                ui.interact(
+                    layers.response.rect,
+                    ui.id().with(("rnm-why", key)),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text(why);
             }
             for w in warnings
                 .iter()
