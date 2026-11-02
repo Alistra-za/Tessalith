@@ -24,14 +24,14 @@ Options a texture cannot use are greyed out, with the reason on hover.
 
 **Output size.** The settings start with a line such as *Output: BC7 · 2048×2048 · 12 mips · 5.3 MiB ≈ VRAM*: the format, the size after any resize, the number of mip levels and the bytes of the whole chain (hover for the exact bytes, the header and the file size). The status line under the header and the bulk panel add *≈ VRAM: selection … · folder …*, the total over the selected textures and over every texture that is, or will be once decided, written. A compressed size is also what the texture takes in video memory. A source whose size cannot be read cheaply (a PSD) has no estimate and is counted as "unsized", as is a texture whose size is still being read in the background. A size read that fails is tried again once, at the next plan; after that the file stays unsized for the session, and the Messages log says so.
 
-**Compression.** For an emissive it shows the `FMT-HDR-SOURCE` reason (why it is BC6H or BC7 sRGB). The format dropdown also lists the uncompressed formats (`RGBA8`, `R8`, `RG8`, and `RGBA16F` only under `cs`); Effort is locked for them.
+**Compression.** For an emissive it shows the `FMT-HDR-SOURCE` reason (why it is BC6H or BC7 sRGB). Effort is locked for the uncompressed formats.
 
-**Encoder** is **Built-in** or **NVTT Production**. NVTT is a quality option for BC7 and BC6H only, 40 to 60 times slower ([NVTT backend](NVTT-Backend.md)).
+**Encoder.** NVTT Production is a quality option for BC7 and BC6H only, 40 to 60 times slower ([NVTT backend](NVTT-Backend.md)).
 
 - When the row is locked or hidden, and what a format change does: [In the GUI](NVTT-Backend.md#in-the-gui).
 - A failed nvcompress fails that file (`ENC-NVTT-FAILED`); there is no silent fallback.
 
-**Mipmaps: Filter and Edge.** *Filter* picks *Box* (the default), *Tent*, *Mitchell* or *Kaiser*. Tent, Mitchell and Kaiser are only for sRGB colour without alpha weighting (not cutout or blend); an HDR texture (BC6H or RGBA16F) may use Box or Tent only. *Edge* (*Wrap*, the default, or *Clamp*) is locked while the filter is Box, because only Tent, Mitchell and Kaiser read past the edge.
+**Mipmaps: Filter and Edge.** The default filter is *Box*. Tent, Mitchell and Kaiser are only for sRGB colour without alpha weighting (not cutout or blend); an HDR texture (BC6H or RGBA16F) may use Box or Tent only. *Edge* (*Wrap* by default) is locked while the filter is Box, because only Tent, Mitchell and Kaiser read past the edge.
 
 **Normal base level** (normal maps only) stores mip 0 at unit length by default; choose *Keep as authored* for a normal map whose short normals are deliberate. A PBR set's normal map also bakes its detail into the set's `_rmaos`/`_rfaos` roughness (including a normal map shared into another set, which bakes into that set's own roughness); its Normal handling row then reads *decided by the texture set*. A `_cnr` bakes its detail into its own coat roughness by default, so its row reads *built-in default*.
 
@@ -86,7 +86,7 @@ A texture that still needs an answer has an **amber border**: a Medium or Low su
 | An info line "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press *Treat as OpenGL (flip green)* if it is an OpenGL map; an OpenGL file then shows *Green: OpenGL (flipped)* with a *Treat as DirectX* button that undoes it. |
 | A blocking warning | **Acknowledge for this texture**. For `DIM-NPOT` (a size that is not a power of two) there is also **Resize to a power of two**, which writes `resize = "pot-down"` and clears the block. |
 
-Each answer is written to `sdc.toml`, as a field value or as an `allow` code on the file's `[files]` entry, so it stays in your project file. A choice you make always wins over a suggestion. The **Sub-type** field opens the same type picker as the Problems tab's **Set type…**, with the engine's suggestion on top.
+Each answer is written to `sdc.toml`, as a field value or as an `allow` code on the file's `[files]` entry, so it stays in your project file. A choice you make always wins over a suggestion.
 
 ### Alpha from the meshes
 
@@ -105,7 +105,7 @@ The Alpha row then reads *from the meshes that use this texture*. A texture with
 
 Any field in the centre column can be changed. The change goes into `sdc.toml` as a `[files."<path>"]` entry, keyed by the file's path relative to the folder holding `sdc.toml`. Packed outputs are keyed without an extension, for example `landscape/rock01_rmaos`.
 
-**After an edit** the folder is planned again in two steps. A quick plan of the sets the edit touches shows the change first, then the whole plan lands behind it. Until the quick plan lands, the centre column's edit controls and the fix buttons in Problems and Review are greyed out, with "Wait for the plan to finish" on hover; the next edit can be made as soon as it lands. Edits a quick plan cannot cover wait for the whole plan instead: set edits, the preset, the Mode, settings, and per-file changes that move files between sets or change which outputs a set writes (a helper role, the sub-type of a PBR set's member, a packing recipe, re-encoding a DDS). <!-- D:F?6 --> While the whole plan runs, the status line reads "· planning…" after the counts, and **Export** waits for it, then checks again ([Review and export](GUI-Review-and-Export.md#review)).
+**After an edit** the folder is planned in two steps: a quick plan of the sets the edit touches shows the change, then the whole plan lands behind it. Until the quick plan lands, the centre column's edit controls and the fix buttons in Problems and Review are greyed out ("Wait for the plan to finish"); the next edit can be made once it lands. These wait for the whole plan instead: set edits, the preset, the Mode, settings, per-file changes that move files between sets or change a set's outputs (a helper role, a PBR member's sub-type, a packing recipe, re-encoding a DDS), and any edit made before such an edit's whole plan has landed. <!-- D:F?6 --> Export blocks and warnings come from the whole plan, so their fix buttons stay greyed ("Being rechecked") until it lands. While it runs, the status line reads "· planning…" after the counts, and **Export** waits for it, then checks again ([Review and export](GUI-Review-and-Export.md#review)).
 
 The GUI writes only `target`, `preset`, the `[files.*]` tables, `[inputs.*]` aliases and `defaults.packing.fill.*`. Comments, ordering, rules and every other table in your `sdc.toml` are left byte for byte as they were.
 

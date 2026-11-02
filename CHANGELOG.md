@@ -24,7 +24,7 @@
   - The 2D and set previews update when a helper's Invert or Read changes, or when a bake, cube face or derive source changes.
   - Renaming a large selection no longer slows down quadratically.
   - Dragging the Alpha threshold slider on a shared alpha property no longer loses the split.
-  - An edit on a large project no longer blocks the texture panel for a whole re-plan: a quick plan of the sets it touches shows it first. On a 10,000-texture project the panel takes the next edit 0.22 s after one (was 10.4 s on an idle machine, about 18 s under load), and the whole plan lands after 3.5 s.
+  - An edit on a large project no longer blocks the texture panel for a whole re-plan: a quick plan of the sets it touches shows it first. On a 10,000-texture project the panel takes the next edit 0.13 s after one (was 10.4 s on an idle machine, about 18 s under load), and the whole plan lands after 3.3 s with a 0.09 s frame (was 0.4 s); the scan-database read after it no longer greys the panel.
 
 ## 1.1.0
 
