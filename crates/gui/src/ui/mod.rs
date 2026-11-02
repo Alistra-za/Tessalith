@@ -40,6 +40,7 @@ pub mod status;
 pub mod thumbs;
 pub mod type_picker;
 pub mod viewport3d;
+pub mod xpmf;
 
 use crate::model::picker::PickerPurpose;
 use crate::model::{AppModel, CentreTab, Selection};
@@ -435,6 +436,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
                 switch: state.set3d.enabled,
                 three_d,
                 to_top: switched_to(ui.ctx(), CentreShown::Set(key.clone())),
+                noise_uv: three_d.then(|| state.set3d.mato_noise_uv_scale()).flatten(),
             };
             set_editor::draw(
                 ui,

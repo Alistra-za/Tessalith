@@ -450,7 +450,10 @@ impl AppModel {
             GenMap::Ao => Some(SlotKind::Rmaos),
             GenMap::Curvature => None,
         };
-        if slot.is_some_and(|s| v.locks.contains(&s.slot_number())) {
+        if slot
+            .and_then(SlotKind::slot_number)
+            .is_some_and(|n| v.locks.contains(&n))
+        {
             return Err(SLOT_LOCKED.into());
         }
         let normal = self.normal_of(v, aliases).ok_or(NO_NORMAL)?;

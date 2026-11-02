@@ -2345,7 +2345,7 @@ fn render_loop(
     let mut want_deferred = false;
     let mut last_coverage: Option<String> = None;
     // A material-object layer not applied yet: it waits for content, whose texture map resolves its textures.
-    let mut layer_due: Option<Option<ProjectedLayer>> = None;
+    let mut layer_due: Vec<Option<ProjectedLayer>> = vec![];
     while let Ok(first) = rx.recv() {
         // Dropped at the end of the batch, after every other reply: answers each features/settings command.
         let mut ack = ReconfAck(0, &send);
@@ -2441,7 +2441,14 @@ fn render_loop(
                     None
                 }
                 V3Cmd::SetProjectedLayer(l) => {
-                    layer_due = Some(l);
+                    // Off then on stay two steps (Note GI17): only a None to Some change resolves the textures again.
+                    // At most two are kept: whether an off came, then the final value.
+                    match layer_due.last_mut() {
+                        None => layer_due.push(l),
+                        Some(_) if l.is_none() => layer_due = vec![None],
+                        Some(prev @ Some(_)) => *prev = l,
+                        Some(None) => layer_due.push(l),
+                    }
                     None
                 }
                 V3Cmd::SetDebug(d) => {
@@ -2504,12 +2511,13 @@ fn render_loop(
             }
         }
         // Before a load in this batch, so the load builds every shape with the layer once.
-        if let (Some(_), Some((_, c))) = (&layer_due, &last) {
-            let l = layer_due.take().expect("checked above");
-            let bsas = RefCell::new(HashMap::new());
-            let errors = RefCell::new(vec![]);
-            r.set_projected_layer(l, &resolver(c.textures(), &bsas, &errors));
-            send(V3Reply::ProjectedMissing(r.projected_missing()));
+        if let (false, Some((_, c))) = (layer_due.is_empty(), &last) {
+            for l in layer_due.drain(..) {
+                let bsas = RefCell::new(HashMap::new());
+                let errors = RefCell::new(vec![]);
+                r.set_projected_layer(l, &resolver(c.textures(), &bsas, &errors));
+                send(V3Reply::ProjectedMissing(r.projected_missing()));
+            }
             // Shapes re-permuted or rewritten: report them and redraw from the last camera (a load does both itself).
             compiled_changed |= !reload;
         }

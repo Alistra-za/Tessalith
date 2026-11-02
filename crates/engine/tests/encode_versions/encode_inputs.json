@@ -19,6 +19,10 @@
     "sha256": "e18b17801e6c9a01d1e29dc85eb4269d202d4a84fce23c8eb6870839937618c4",
     "subtype": "cubemap"
   },
+  "textures/h/detail_n.dds": {
+    "sha256": "40d2e58090d7c07b2fb0349ad0f1bf3cd78b5ed67a7e65b1713e02d699d80f69",
+    "subtype": "detail_normal"
+  },
   "textures/h/diffuse.dds": {
     "sha256": "0f6858894c807932a6342c39a5a18504335255f2cc5893eb177e88cf63e56ea6",
     "subtype": "diffuse"
@@ -91,6 +95,10 @@
     "sha256": "5b4b48f19ce1c173377d84f1f7e76804d07d43296cfe248ba37182b1674d8a41",
     "subtype": "pbr_subsurface"
   },
+  "textures/h/projected_noise.dds": {
+    "sha256": "7e4f10558d2483a8728deddf28b62f5ac770b4c10dda97289a599bb238009e36",
+    "subtype": "projected_noise"
+  },
   "textures/h/rmaos.dds": {
     "sha256": "c67536c1171c58d1dc84dc8f61a22c63afd7686743d1a60120aed9f9f9067cd4",
     "subtype": "rmaos"
@@ -159,6 +167,10 @@
     "sha256": "96ea6fa940411c06efda373afa1c4789afb6f2c37b2e34b1b9f1fd4d5d397aea",
     "subtype": "cubemap"
   },
+  "vanilla/textures/h/detail_n.dds": {
+    "sha256": "e98dc6991be4f213cd510be1eac96f332899e625fa435aeaddc2098f29e5b07e",
+    "subtype": "detail_normal"
+  },
   "vanilla/textures/h/diffuse.dds": {
     "sha256": "03df9bf27a4903ef2853f6618394c76398a3dd3ac4c3ce2a007ac138fecd2554",
     "subtype": "diffuse"
@@ -202,6 +214,10 @@
   "vanilla/textures/h/normal.dds": {
     "sha256": "42d35a11072af9b146a7b2096da4434760fd8c91dac23eccc3b5b3d24962228f",
     "subtype": "normal"
+  },
+  "vanilla/textures/h/projected_noise.dds": {
+    "sha256": "4ad8991698aefaabbca6d5c49c5aaab7f7aed3c69bf7df9e25d708a4fcf224b8",
+    "subtype": "projected_noise"
   },
   "vanilla/textures/h/subsurface_tint.dds": {
     "sha256": "16afe393b42fd4fe135a476e6bf505b6aca71e04d619c4b1ca95f42cd4685c69",

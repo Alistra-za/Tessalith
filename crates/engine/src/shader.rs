@@ -130,6 +130,8 @@ static PBR_LANDSCAPE: ShaderSpec = ShaderSpec {
     optional: &[
         role("_rmaos", &[Subtype::Rmaos]),
         role("_p", &[Subtype::Height]),
+        role("_noise", &[Subtype::ProjectedNoise]),
+        role("_detail", &[Subtype::DetailNormal]),
     ],
 };
 static ADVANCED_SKIN: ShaderSpec = ShaderSpec {
@@ -228,7 +230,11 @@ static LANDSCAPE: ShaderSpec = ShaderSpec {
         role("diffuse", &[Subtype::LandscapeDiffuse, Subtype::Diffuse]),
         role("_n", &[Subtype::LandscapeNormal, Subtype::Normal]),
     ],
-    optional: &[],
+    // Note GI (X12): the XPMF projected noise and detail normal.
+    optional: &[
+        role("_noise", &[Subtype::ProjectedNoise]),
+        role("_detail", &[Subtype::DetailNormal]),
+    ],
 };
 
 impl Shader {
@@ -1901,7 +1907,11 @@ mod tests {
         let spec = Shader::PbrLandscape.spec();
         let labels = |roles: &[MapRole]| roles.iter().map(|r| r.label).collect::<Vec<_>>();
         assert_eq!(labels(spec.required), ["albedo", "_n"]);
-        assert_eq!(labels(spec.optional), ["_rmaos", "_p"]);
+        assert_eq!(labels(spec.optional), ["_rmaos", "_p", "_noise", "_detail"]);
+        assert_eq!(
+            labels(Shader::Landscape.spec().optional),
+            ["_noise", "_detail"]
+        );
         assert!(!Shader::PbrLandscape.has_member_defaults());
         for st in [PbrAlbedo, Diffuse, LandscapeDiffuse, Rmaos, Height] {
             assert!(member_defaults(Shader::PbrLandscape, st).is_empty());

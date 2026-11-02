@@ -19,7 +19,7 @@ use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRo
 use crate::model::rnm::{rnm_active, rnm_rows};
 use crate::model::sets::{
     card_title, is_json_set, shows_json_panel, slot_clash_text, slot_label, slot_of, slot_row,
-    views, SetView, SlotCell, SlotFill, SlotKind,
+    views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
 use crate::pgp::prefix::{
@@ -29,6 +29,7 @@ use eframe::egui;
 use engine::config::{ColorTag, Format, PackRecipe, RawMap, Target};
 use engine::events::RecipeReport;
 use engine::pack::RecipeKind;
+use engine::shader::Shader;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -90,6 +91,8 @@ pub struct View {
     pub three_d: bool,
     /// The editor was not what the centre showed last frame: open at the top (Note FI6).
     pub to_top: bool,
+    /// The 3D preview's picked MATO record's `noiseUVScale`, where the XPMF card's Override starts (M8).
+    pub noise_uv: Option<f32>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -176,7 +179,7 @@ pub fn draw(
         });
         under_grid(ui, model, v);
         ui.add_space(6.0);
-        tabs(ui, model, v, advanced);
+        tabs(ui, model, v, advanced, view.noise_uv);
     });
     let (mut select, mut expand) = (None, None);
     for a in acts {
@@ -277,7 +280,10 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
 fn slot_changes(ctx: &egui::Context, drops: &mut DropState, v: &SetView) {
     let mut slots: Vec<Option<String>> = vec![];
     for (k, f) in &v.slots {
-        let n = k.slot_number() as usize;
+        // shortcut: the XPMF maps (no slot number) do not flash; key the flash by kind if they should.
+        let Some(n) = k.slot_number().map(usize::from) else {
+            continue;
+        };
         if slots.len() <= n {
             slots.resize(n + 1, None);
         }
@@ -306,6 +312,7 @@ fn tabs(
     model: &mut AppModel,
     v: &SetView,
     advanced: &mut super::advanced::AdvancedState,
+    noise_uv: Option<f32>,
 ) {
     let json = shows_json_panel(v, model.target);
     let mut open = model.settings.advanced_open;
@@ -337,6 +344,7 @@ fn tabs(
         return;
     }
     super::cs_pbr::card(ui, model, v);
+    super::xpmf::card(ui, model, v, noise_uv);
     // K12: on a JSON set that is not PBR Landscape the CS PBR records sit between Matching and Advanced TruePBR
     // settings; `pgp_panel` (a PBR Landscape set's) draws both halves itself.
     let split = json && !(model.target == Target::Cs && crate::model::sets::is_pbr_landscape(v));
@@ -559,7 +567,11 @@ fn row(
     let fill = &cell.fill;
     // K1: a Grid cell cannot hold the whole row, so last frame's row rect takes the right-click (F3a Task 8) and the
     // Explorer drop (item 17). It is registered before the cells, so they keep their own clicks.
-    let row_id = egui::Id::new(("slot-row", &v.id, slot.slot_number()));
+    // By slot number, as the R9 flash looks it up; the XPMF maps (no number) by kind, so their two rows differ.
+    let row_id = match slot.slot_number() {
+        Some(n) => egui::Id::new(("slot-row", &v.id, n)),
+        None => egui::Id::new(("slot-row", &v.id, slot)),
+    };
     if let Some(r) = ui.data(|d| d.get_temp::<egui::Rect>(row_id)) {
         let resp = ui.interact(r, row_id, egui::Sense::click());
         slot_menu(&resp, model, v, slot, acts);
@@ -587,7 +599,7 @@ fn row(
             .unwrap_or_default(),
         _ => vec![],
     };
-    let locked = v.locks.contains(&slot.slot_number());
+    let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
     let title = match fill {
         SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => {
             card_title(slot, item, v.shader.as_ref().map(|p| p.shader))
@@ -632,11 +644,21 @@ fn row(
         t.clone()
             .on_hover_text(format!("RNM: {}", rnm_layers.join(" → ")));
     }
+    // Note GI (X16): CS does not draw the projected detail normal in this build.
+    let landscape = v
+        .shader
+        .as_ref()
+        .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape));
+    if slot == SlotKind::DetailNormal && landscape {
+        t.clone().on_hover_text(DETAIL_NORMAL_HOVER);
+    }
     if let (false, Some(p)) = (cell.usable, &v.shader) {
+        let what = slot
+            .slot_number()
+            .map_or_else(|| "this map".to_string(), |n| format!("slot {n}"));
         t.on_hover_text(format!(
-            "{title}: the {} shader does not use slot {}",
+            "{title}: the {} shader does not use {what}",
             p.shader.label(),
-            slot.slot_number()
         ));
     }
 
@@ -662,7 +684,10 @@ fn row(
     };
     let shown = egui::Rect::from_center_size(rect.center(), rect.size() * scale);
     // A PGPatcher-locked slot has one hover, the lock's, in place of the thumbnail's path.
-    let lock_cross = pgp_locked(&v.settings, slot.slot_number()) && is_json_set(v, model.target);
+    let lock_cross = slot
+        .slot_number()
+        .is_some_and(|n| pgp_locked(&v.settings, n))
+        && is_json_set(v, model.target);
     let resp = if lock_cross {
         pgp_lock_hover(resp, model, v, slot, acts)
     } else {
@@ -921,7 +946,11 @@ fn row(
                 }
             }
             // A4: only a set that writes JSON gives PGPatcher the lock (review M2); otherwise a note.
-            if pgp_locked(&v.settings, slot.slot_number()) && !lock_cross {
+            if slot
+                .slot_number()
+                .is_some_and(|n| pgp_locked(&v.settings, n))
+                && !lock_cross
+            {
                 let r = ui
                     .add(egui::Label::new(egui::RichText::new("ⓘ").weak()))
                     .on_hover_text(PGP_LOCK_UNWRITTEN);
@@ -1002,7 +1031,10 @@ fn pgp_lock_hover(
     slot: SlotKind,
     acts: &mut Vec<Act>,
 ) -> egui::Response {
-    let n = slot.slot_number();
+    // Only a PGPatcher slot is locked (`lock_cross`).
+    let Some(n) = slot.slot_number() else {
+        return resp;
+    };
     resp.on_hover_ui(|ui| {
         ui.label(format!(
             "Kept by PGPatcher ({}): the mesh's original texture is used here",
@@ -1035,6 +1067,10 @@ fn slot_menu(
     slot: SlotKind,
     acts: &mut Vec<Act>,
 ) {
+    // The XPMF maps have no slot commands, lock or borrow: no menu.
+    if slot.slot_number().is_none() {
+        return;
+    }
     resp.context_menu(|ui| {
         if let Some(a) = bulk_menu(ui, slot_label(slot, ""), &model.slot_menu(&v.id, slot)) {
             acts.push(Act::Slot(a));
@@ -1385,7 +1421,8 @@ fn clash_rows(
         format!(
             "{} both use slot {}: remove one",
             names.join(" and "),
-            cell.kind.slot_number()
+            // A clash is two kinds of one PGPatcher slot, so it has a number.
+            cell.kind.slot_number().unwrap_or_default()
         ),
     );
     for i in both {

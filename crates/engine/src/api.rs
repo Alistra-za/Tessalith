@@ -1952,6 +1952,27 @@ impl Engine {
                 (s.key.clone(), pick)
             })
             .collect();
+        // Note GI27: a set whose `_noise` or `_detail` the Vanilla derive keeps is typed as its PBR phase typed it,
+        // so the 6c pass below re-types them (a detail layer into a detail normal, a medium `_noise`).
+        let kept_maps: BTreeSet<&Path> = (req.derive.iter())
+            .flat_map(|d| d.sets.iter().filter(|s| d.keeps_landscape(s)))
+            .flat_map(|s| s.kept_maps.iter().map(PathBuf::as_path))
+            .collect();
+        for s in &sets {
+            if s.members
+                .iter()
+                .any(|&i| kept_maps.contains(files[i].path.as_path()))
+            {
+                picks.insert(
+                    s.key.clone(),
+                    ShaderPick {
+                        shader: crate::shader::Shader::PbrLandscape,
+                        provenance: crate::shader::ShaderOrigin::Derived,
+                        wanted: None,
+                    },
+                );
+            }
+        }
         // The pass-1 context (no picks) is kept, so the derive step can rebuild it after adding its picks.
         let base_ctx = ctx;
         let ctx = ResolveCtx {
@@ -2003,11 +2024,20 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
+            // Note GI (X13, R5): a PBR Landscape `_detail` layer or `_noise` is typed again (detail normal, noise).
+            let landscape_retype = matches!(
+                &old.status,
+                JobStatus::NormalLayer { term } if term.layer == crate::config::LayerId::Detail
+            ) || old
+                .suggestions
+                .first()
+                .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
                 p.shader.has_member_defaults()
                     || (p.provenance == crate::shader::ShaderOrigin::Set && is_gras)
+                    || (p.shader == crate::shader::Shader::PbrLandscape && landscape_retype)
             }) && !pack::plan::chosen_skin(&ctx, set)
             {
                 old.warnings.extend(grass_note(&old));

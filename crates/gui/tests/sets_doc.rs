@@ -543,3 +543,168 @@ fn restore_keeping_json_sha_back_to_the_saved_text_is_clean() {
     s.set_shader("a/one", Some(engine::shader::Shader::Pbr));
     assert!(s.is_dirty());
 }
+
+fn map(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    v.as_object().unwrap().clone()
+}
+
+/// XPMF: the `[sets.xpmf]` block keeps every key (unknown ones too); editing and saving round-trips it.
+#[test]
+fn xpmf_block_round_trips() {
+    let (d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\nparallax = true\n[sets.xpmf]\nname = \"snow\"\neditorIds = [\"*snow*\"]\n\
+         shelterFade = 40\nfalloffScale = 0.5\npbr = true\ncomment = \"mine\"\n\n\
+         [[sets]]\nid = \"b/two\"\n",
+    ));
+    let want = map(
+        json!({"name": "snow", "editorIds": ["*snow*"], "shelterFade": 40,
+        "falloffScale": 0.5, "pbr": true, "comment": "mine"}),
+    );
+    let e = s.entries();
+    assert_eq!(e[0].xpmf.as_ref(), Some(&want));
+    assert_eq!(e[1].xpmf, None, "no block, no value");
+    assert!(
+        !e[0]
+            .settings
+            .keys()
+            .any(|k| k.contains("xpmf") || k == "name"),
+        "the block is not a JSON setting"
+    );
+    assert_eq!(e[0].settings["parallax"], json!(true));
+    drop(e);
+    let mut edited = want.clone();
+    edited.insert("shelterFade".into(), json!(64.5));
+    edited.insert("waterFade".into(), json!(true));
+    s.set_xpmf("a/one", Some(edited.clone()));
+    assert!(s.is_dirty());
+    assert_eq!(s.entries()[0].xpmf.as_ref(), Some(&edited));
+    s.set_xpmf("a/one", Some(edited.clone()));
+    s.save(false).unwrap();
+    s.set_xpmf("a/one", Some(edited.clone()));
+    assert!(!s.is_dirty(), "an equal write is no edit");
+    let back = SetsDoc::open(d.path());
+    assert_eq!(back.entries()[0].xpmf.as_ref(), Some(&edited));
+    assert_eq!(back.entries()[0].xpmf.as_ref().unwrap()["comment"], "mine");
+    assert_eq!(back.entries()[0].settings["parallax"], json!(true));
+}
+
+/// XPMF: `None` removes the block; a block that is present but empty is kept as `Some(empty)`.
+#[test]
+fn xpmf_block_none_removes_it() {
+    let (_d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n[sets.xpmf]\n"));
+    assert_eq!(s.entries()[0].xpmf, Some(serde_json::Map::new()));
+    s.set_xpmf("a/one", Some(serde_json::Map::new()));
+    assert!(!s.is_dirty(), "the empty block is already there");
+    s.set_xpmf("a/one", None);
+    assert!(s.is_dirty());
+    assert_eq!(s.entries()[0].xpmf, None);
+    assert!(!s.text().contains("xpmf"));
+    s.save(false).unwrap();
+    s.set_xpmf("a/one", None);
+    s.set_xpmf("zz/none", None);
+    assert!(!s.is_dirty(), "removing an absent block is no edit");
+    assert_eq!(s.entries().len(), 1, "and creates no set");
+    s.set_xpmf("a/one", Some(serde_json::Map::new()));
+    assert_eq!(s.entries()[0].xpmf, Some(serde_json::Map::new()));
+}
+
+/// XPMF: the hash record lives in `_sdc/generated.json` table `xpmf` (Note FC11); a read-only document takes it
+/// there and is left as it was.
+#[test]
+fn xpmf_shas_live_in_sidecar() {
+    use std::collections::BTreeMap;
+    let shas = BTreeMap::from([(
+        "SKSE/Plugins/XPMF/tessalith_a.json".to_string(),
+        "00".to_string(),
+    )]);
+    let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
+    s.set_xpmf_shas(shas.clone()).unwrap();
+    assert_eq!(s.xpmf_shas(), shas);
+    let side: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.sidecar_path()).unwrap()).unwrap();
+    assert_eq!(
+        side["xpmf_sha256"]["SKSE/Plugins/XPMF/tessalith_a.json"],
+        "00"
+    );
+    // Note FC11 (ruling R9): a writable document also carries the readable `[project]` copy.
+    assert!(s.text().contains("xpmf_sha256") && s.text().contains("tessalith_a.json"));
+    assert_eq!(
+        SetsDoc::open(d.path()).xpmf_shas(),
+        shas,
+        "read back on open"
+    );
+    s.set_xpmf_shas(BTreeMap::new()).unwrap();
+    assert!(s.xpmf_shas().is_empty());
+    assert!(
+        !s.text().contains("xpmf_sha256"),
+        "the empty table is removed"
+    );
+
+    let (b, mut r) = doc(Some("[[sets]\nbroken"));
+    assert!(r.read_only());
+    r.set_xpmf("a/one", Some(map(json!({"name": "x"}))));
+    r.set_xpmf_shas(shas.clone()).unwrap();
+    assert!(!r.is_dirty() && r.entries().is_empty(), "no edit");
+    assert_eq!(r.xpmf_shas(), shas);
+    assert!(r.sidecar_path().is_file());
+    let text = std::fs::read_to_string(b.path().join("sdc-project.toml")).unwrap();
+    assert_eq!(text, "[[sets]\nbroken", "the broken file is not touched");
+    assert_eq!(
+        SetsDoc::open(b.path()).xpmf_shas(),
+        shas,
+        "the sidecar holds it"
+    );
+}
+
+/// XPMF: a hand-edited block keeps its `#` comment lines and a member the GUI cannot convert (an array of tables)
+/// when another key changes; keys absent from the wanted map are removed.
+#[test]
+fn set_xpmf_updates_the_block_key_by_key() {
+    let (_d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\n[sets.xpmf]\n# why snow\nname = \"snow\" # inline note\nshelterFade = 40\n\
+         waterFade = true\n[[sets.xpmf.rows]]\nx = 1\n",
+    ));
+    assert_eq!(
+        s.entries()[0].xpmf,
+        Some(map(
+            json!({"name": "snow", "shelterFade": 40, "waterFade": true})
+        )),
+        "the array of tables is not a value"
+    );
+    s.set_xpmf(
+        "a/one",
+        Some(map(json!({"name": "snow", "shelterFade": 50}))),
+    );
+    let t = s.text();
+    assert!(
+        t.contains("# why snow") && t.contains("# inline note"),
+        "{t}"
+    );
+    assert!(t.contains("[[sets.xpmf.rows]]"), "{t}");
+    assert!(!t.contains("waterFade"), "an absent key is removed: {t}");
+    assert_eq!(
+        s.entries()[0].xpmf,
+        Some(map(json!({"name": "snow", "shelterFade": 50})))
+    );
+}
+
+/// XPMF: a `null` member is not stored; a nested object is written as an inline table and reads back from both an
+/// inline and a standard table.
+#[test]
+fn xpmf_null_is_dropped_and_nested_objects_round_trip() {
+    let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
+    let b = map(json!({"name": "n", "falloffBias": null, "extra": {"a": 1, "b": {"c": "x"}}}));
+    s.set_xpmf("a/one", Some(b));
+    let want = map(json!({"name": "n", "extra": {"a": 1, "b": {"c": "x"}}}));
+    assert_eq!(s.entries()[0].xpmf.as_ref(), Some(&want));
+    assert!(!s.text().contains("falloffBias"));
+    s.save(false).unwrap();
+    assert_eq!(
+        SetsDoc::open(d.path()).entries()[0].xpmf.as_ref(),
+        Some(&want)
+    );
+    let (_d2, s2) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\n[sets.xpmf]\nname = \"n\"\n[sets.xpmf.extra]\na = 1\n[sets.xpmf.extra.b]\nc = \"x\"\n",
+    ));
+    assert_eq!(s2.entries()[0].xpmf.as_ref(), Some(&want));
+}

@@ -54,6 +54,7 @@ pub mod used_by;
 pub mod uv_coverage;
 pub mod view;
 pub mod viewport3d;
+pub mod xpmf_json;
 
 use crate::project::{ProjectDoc, SaveError};
 use crate::settings::GuiSettings;
@@ -277,6 +278,8 @@ pub(crate) struct ViewCache {
     pub half_size: Option<(ProblemsKey, Arc<Vec<review::HalfSizeRow>>)>,
     /// The keys `bottom::set_ready` looks up; reset with every `problems` build.
     pub flagged: Option<Arc<bottom::Flagged>>,
+    /// Note GI: the XPMF card's values of one set (by id), `xpmf_json::card_values`.
+    pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -596,6 +599,8 @@ pub struct AppModel {
     pending_cs: Option<cs_pbr_export::PendingCs>,
     /// Complex material design §6: the `<texture>.json` files the running export writes afterwards.
     pending_cm: Option<cm_json::PendingCm>,
+    /// Note GI: the XPMF profiles the running export writes afterwards.
+    pending_xpmf: Option<xpmf_json::PendingXpmf>,
     /// C4: Review's answer for the edited PGPatcher JSON, for the running export only (K12).
     pending_json_answer: Option<review::JsonAnswer>,
     /// Note FC5: the NIF edits Review lists, as `app.rs` hands them over each frame (`MeshesModel::nif_review_rows`).
@@ -838,6 +843,7 @@ impl AppModel {
             pending_json: None,
             pending_cs: None,
             pending_cm: None,
+            pending_xpmf: None,
             pending_json_answer: None,
             nif_rows: vec![],
             nif_answer_request: None,
@@ -975,6 +981,7 @@ impl AppModel {
         self.pending_json = None;
         self.pending_cs = None;
         self.pending_cm = None;
+        self.pending_xpmf = None;
         self.pending_json_answer = None;
         self.nif_export_queued = false;
         self.nif_export_due = false;
@@ -1861,7 +1868,7 @@ impl AppModel {
         self.finish_export(completed, failure);
     }
 
-    /// After the export: the JSON/CS/CM files, the checks summary once, then what was asked while the export ran
+    /// After the export: the JSON/CS/CM/XPMF files, the checks summary once, then what was asked while the export ran
     /// (close, or open another folder), else its error as a dialog.
     fn finish_export(&mut self, completed: bool, failure: Option<String>) {
         // CL19: only a completed export gets the checks line; a cancel logs just "Export finished".
@@ -1873,6 +1880,8 @@ impl AppModel {
         self.finish_cs_pbr(cs);
         let cm = self.pending_cm.take();
         self.finish_cm_json(cm);
+        let xpmf = self.pending_xpmf.take();
+        self.finish_xpmf(xpmf);
         // FC11: the records just written decide which JSON files are stale.
         self.refresh_stale_json();
         // Final review I2: an Also export's walk, zips and report run now, on its worker, so the PBR zip holds the
@@ -2352,6 +2361,7 @@ impl AppModel {
         self.pending_json = pbr_export::prepare(self);
         self.pending_cs = cs_pbr_export::prepare(self);
         self.pending_cm = cm_json::prepare(self);
+        self.pending_xpmf = xpmf_json::prepare(self);
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
         self.review_json_cache.take();

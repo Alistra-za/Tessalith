@@ -1562,6 +1562,8 @@
         "skin_wet",
         "complex_grass",
         "cubemap",
+        "projected_noise",
+        "detail_normal",
         "rfaos"
       ],
       "type": "string"
@@ -1676,6 +1678,9 @@
         "cubemap": {
           "$ref": "#/$defs/PartialProfile"
         },
+        "detail_normal": {
+          "$ref": "#/$defs/PartialProfile"
+        },
         "diffuse": {
           "$ref": "#/$defs/PartialProfile"
         },
@@ -1728,6 +1733,9 @@
           "$ref": "#/$defs/PartialProfile"
         },
         "pbr_subsurface": {
+          "$ref": "#/$defs/PartialProfile"
+        },
+        "projected_noise": {
           "$ref": "#/$defs/PartialProfile"
         },
         "rfaos": {

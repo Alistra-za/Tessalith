@@ -68,6 +68,11 @@ encoder = { backend = "rgbcx" }
 [subtypes.height]
 format = "bc4"
 encoder = { backend = "rgbcx" }
+[subtypes.projected_noise]
+format = "bc4"
+encoder = { backend = "rgbcx" }
+[subtypes.detail_normal]
+alpha = { policy = "data" }
 [subtypes.msn_specular]
 format = "bc4"
 encoder = { backend = "rgbcx" }

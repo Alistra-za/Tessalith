@@ -5,10 +5,10 @@
 use super::columns::{AMBER, RED};
 use crate::model::cs_pbr::{
     check_edid, check_text, field_label, fields, pgp_box_text, single_pass_text, statics_text,
-    templates, CsBlock, EdidCheck, Field, FieldKind, Kind, Statics, StaticsStatus, GLINT_FIELDS,
-    LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX, PGP_BOX_UNAVAILABLE,
+    templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics, StaticsStatus,
+    GLINT_FIELDS, LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX, PGP_BOX_UNAVAILABLE,
 };
-use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS};
+use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
 use crate::model::plugin_refs::set_key;
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
@@ -388,23 +388,7 @@ fn edids(
             _ => vec![],
         },
         Kind::Mato => scanned
-            .map(|r| {
-                let q = text.to_lowercase();
-                r.mato
-                    .iter()
-                    .filter(|w| w.edid.to_lowercase().contains(&q))
-                    .take(50)
-                    .map(|w| {
-                        let label = format!(
-                            "{} · {} · {}",
-                            w.edid,
-                            w.plugin,
-                            single_pass_text(w.mato_flags)
-                        );
-                        (w.edid.clone(), label)
-                    })
-                    .collect()
-            })
+            .map(|r| mato_picks(r, &text, false))
             .unwrap_or_default(),
     };
     ui.data_mut(|d| d.insert_temp(id, text));
@@ -424,6 +408,27 @@ fn edids(
             }
         });
     }
+}
+
+/// The MATO picker's rows, (EDID, `EDID · plugin · single-pass`): the scan's material objects whose EDID contains
+/// `typed` (any case), at most 50. `single_pass` keeps only the single-pass ones (the XPMF card, Note GI).
+pub(super) fn mato_picks(r: &ScanRecords, typed: &str, single_pass: bool) -> Vec<(String, String)> {
+    let q = typed.to_lowercase();
+    r.mato
+        .iter()
+        .filter(|w| !single_pass || w.mato_flags.is_some_and(|f| f & SINGLE_PASS != 0))
+        .filter(|w| w.edid.to_lowercase().contains(&q))
+        .take(50)
+        .map(|w| {
+            let label = format!(
+                "{} · {} · {}",
+                w.edid,
+                w.plugin,
+                single_pass_text(w.mato_flags)
+            );
+            (w.edid.clone(), label)
+        })
+        .collect()
 }
 
 /// Note BM6: ticked = the set's PGPatcher entry is written (`pgp_written`). A click stores always/never; "Back to

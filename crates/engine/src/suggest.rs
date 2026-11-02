@@ -118,6 +118,7 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
         Some("i") => vec![s(Diffuse, Medium, "_i multilayer inner layer (colour)")],
         Some("b") | Some("bl") => vec![s(BacklightTint, High, "_b/_bl backlight")],
         Some("e") => vec![s(Cubemap, High, "_e environment cubemap")],
+        Some("noise") => vec![s(ProjectedNoise, Medium, "_noise projected noise")],
         None | Some("d") if crate::cube::checks::under_textures_cubemaps(c.game_path) => {
             vec![s(Cubemap, High, "under textures/cubemaps")]
         }
@@ -453,6 +454,26 @@ mod tests {
             AlphaContent::None,
         ));
         assert!(v.iter().all(|s| s.subtype != Subtype::Cubemap), "{v:?}");
+    }
+
+    #[test]
+    fn underscore_noise_suggests_projected_noise() {
+        let none = BTreeSet::new();
+        let v = suggest(&ctx(
+            Target::Cs,
+            Some("noise"),
+            "textures/a/foo_noise.png",
+            &none,
+            AlphaContent::None,
+        ));
+        assert_eq!(
+            (v[0].subtype, v[0].confidence, v[0].reason.as_str()),
+            (
+                Subtype::ProjectedNoise,
+                Confidence::Medium,
+                "_noise projected noise"
+            )
+        );
     }
 
     #[test]

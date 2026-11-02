@@ -268,9 +268,10 @@ fn fills_locked_slot(locked: &HashMap<&str, BTreeSet<u8>>, m: &AppModel, key: &s
     let Some(slot) = slot_of(it) else {
         return false;
     };
-    locked
-        .get(key)
-        .is_some_and(|l| l.contains(&slot.slot_number()))
+    let Some(n) = slot.slot_number() else {
+        return false;
+    };
+    locked.get(key).is_some_and(|l| l.contains(&n))
 }
 
 /// The index of the first set per folded id (`same_id`'s fold); the first one wins, as a front-to-back search did.

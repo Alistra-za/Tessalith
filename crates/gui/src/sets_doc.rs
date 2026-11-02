@@ -47,8 +47,11 @@ const PGP_SHA: &str = "pgp_json_sha256";
 /// Note BV3: `[project] copy_sha256`, absolute lower-case path → hash of the vanilla borrowed-slot copy sdc last
 /// wrote there.
 const COPY_SHA: &str = "copy_sha256";
+/// XPMF profile export: `[project] xpmf_sha256` (and the sidecar table of the same name), path under the export
+/// root → hash of the profile JSON sdc last wrote there.
+const XPMF_SHA: &str = "xpmf_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
-const RESERVED: [&str; 13] = [
+const RESERVED: [&str; 14] = [
     "id",
     "created",
     "renamed_from",
@@ -62,6 +65,7 @@ const RESERVED: [&str; 13] = [
     "cs_mato",
     "skin",
     "cm",
+    "xpmf",
 ];
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -85,6 +89,9 @@ pub struct SetEntry {
     pub cs_mato: Option<CsBlock>,
     /// Complex material design §3: the PGPatcher complex material JSON block (`[sets.cm]`).
     pub cm: Option<CmBlock>,
+    /// XPMF profile export: the `[sets.xpmf]` block, the profile's own (camelCase) keys. A key left out means the default;
+    /// a block present but empty is `Some` of an empty map. Unknown keys stay (`comment`); `null` is not stored.
+    pub xpmf: Option<serde_json::Map<String, Json>>,
     /// Task 10b: the Advanced skin card's explicit values (`skin.<CS key>`). Not PGPatcher settings; unknown keys stay.
     pub skin: Settings,
     pub settings: Settings,
@@ -208,6 +215,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
         cs_txst,
         cs_mato,
         cm: t.get("cm").and_then(Item::as_table_like).map(cm_block_of),
+        xpmf: t.get("xpmf").and_then(Item::as_table_like).map(|b| {
+            b.iter()
+                .filter_map(|(k, i)| Some((k.to_string(), item_json(i)?)))
+                .collect()
+        }),
         skin,
         settings,
     })
@@ -250,7 +262,7 @@ impl SetsDoc {
             let v = Value::from(s);
             self.set_project(LAST_SHA, Some(v));
         }
-        for k in [PGP_SHA, CS_SHA, CM_SHA, COPY_SHA] {
+        for k in [PGP_SHA, CS_SHA, CM_SHA, COPY_SHA, XPMF_SHA] {
             if self.side.contains_key(k) {
                 let m = self.shas(k);
                 self.set_shas(k, &m);
@@ -330,6 +342,7 @@ impl SetsDoc {
         let cm = self.doc_shas(CM_SHA);
         let pgp = self.doc_shas(PGP_SHA);
         let copies = self.doc_shas(COPY_SHA);
+        let xpmf = self.doc_shas(XPMF_SHA);
         let folder = self.export_folder();
         let generated = self.f.doc.get(GENERATED).cloned();
         let was_generated = self.doc_generated();
@@ -344,6 +357,7 @@ impl SetsDoc {
             (CS_SHA, &cs),
             (CM_SHA, &cm),
             (COPY_SHA, &copies),
+            (XPMF_SHA, &xpmf),
         ] {
             if self.doc_shas(k) != *m {
                 self.set_shas(k, m);
@@ -604,6 +618,14 @@ impl SetsDoc {
 
     pub fn set_cm_json_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
         self.record_shas(CM_SHA, shas)
+    }
+
+    pub fn xpmf_shas(&self) -> BTreeMap<String, String> {
+        self.shas(XPMF_SHA)
+    }
+
+    pub fn set_xpmf_shas(&mut self, shas: BTreeMap<String, String>) -> std::io::Result<()> {
+        self.record_shas(XPMF_SHA, &shas)
     }
 
     pub fn copy_shas(&self) -> BTreeMap<String, String> {
@@ -1245,6 +1267,66 @@ impl SetsDoc {
         }
     }
 
+    /// XPMF profile export: replace set `set`'s `[sets.xpmf]` with `block` (`Some`, even empty, is a block), or remove it
+    /// with `None`. `null` members are not stored (absent is the default). An existing block is updated key by key
+    /// (comments and unconvertible members stay). An equal write is no edit.
+    pub fn set_xpmf(&mut self, set: &str, block: Option<serde_json::Map<String, Json>>) {
+        if self.read_only() {
+            return;
+        }
+        let now = self
+            .parse_entries()
+            .into_iter()
+            .find(|e| same_id(&e.id, set))
+            .and_then(|e| e.xpmf);
+        // The values as TOML holds them: what a reread gives, so `null` and anything TOML cannot hold drop out.
+        let wanted = block.map(|b| {
+            b.into_iter()
+                .filter_map(|(k, v)| Some((k, json_to_toml_deep(&v)?)))
+                .collect::<Vec<_>>()
+        });
+        let wanted_json = wanted.as_ref().map(|w| {
+            w.iter()
+                .filter_map(|(k, v)| Some((k.clone(), item_json(&Item::Value(v.clone()))?)))
+                .collect::<serde_json::Map<_, _>>()
+        });
+        if wanted_json == now {
+            return;
+        }
+        let t = self.table_mut(set);
+        match wanted {
+            None => {
+                t.remove("xpmf");
+            }
+            Some(w) => {
+                // Update an existing block key by key, so comments and members the GUI cannot convert (item_json
+                // None: an array of tables) stay.
+                if let Some(old) = t.get_mut("xpmf").and_then(Item::as_table_like_mut) {
+                    let gone: Vec<String> = old
+                        .iter()
+                        .filter(|(k, i)| !w.iter().any(|(wk, _)| wk == k) && item_json(i).is_some())
+                        .map(|(k, _)| k.to_string())
+                        .collect();
+                    for k in gone {
+                        old.remove(&k);
+                    }
+                    for (k, v) in w {
+                        if old.get(&k).and_then(item_json) != item_json(&Item::Value(v.clone())) {
+                            set_value(old, &k, v);
+                        }
+                    }
+                } else {
+                    let mut b = Table::new();
+                    for (k, v) in w {
+                        b.insert(&k, Item::Value(v));
+                    }
+                    t.insert("xpmf", Item::Table(b));
+                }
+            }
+        }
+        self.f.touch();
+    }
+
     /// Tick or untick the export (D3). Unticking writes `export = false` and keeps the values, so ticking again
     /// restores them.
     pub fn set_cm_export(&mut self, id: &str, on: bool) {
@@ -1516,6 +1598,11 @@ mod tests {
                 Box::new(|s| s.set_cm_value("a/x", "glossiness", Some(json!(0.5)))),
             ),
             ("set_cm_export", Box::new(|s| s.set_cm_export("a/x", false))),
+            (
+                "set_xpmf",
+                Box::new(|s| s.set_xpmf("a/x", json!({"name": "n"}).as_object().cloned())),
+            ),
+            ("set_xpmf none", Box::new(|s| s.set_xpmf("a/x", None))),
             (
                 "set_order",
                 Box::new(|s| s.set_order(&["a/x".into(), "b/y".into()])),

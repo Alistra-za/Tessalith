@@ -2,7 +2,8 @@
 //! only what the user answered; blockers, undecided textures and pitfalls are read live from the model.
 use super::history::{record_key, records_at, sha256_of};
 use super::{
-    bottom::BottomTab, cm_json, cs_pbr_export, pbr_export, AppModel, Continue, ItemStatus,
+    bottom::BottomTab, cm_json, cs_pbr_export, pbr_export, xpmf_json, AppModel, Continue,
+    ItemStatus,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -53,6 +54,8 @@ pub enum JsonKind {
     PgPatcher,
     CsPbr,
     ComplexMaterial,
+    /// Note GI: an XPMF profile (`SKSE/Plugins/XPMF/tessalith_<set>.json`).
+    Xpmf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,8 +148,9 @@ impl AppModel {
     }
 
     /// Note FC12 (CN45): the PBR folder's zip, when "Also write a zip" is on: every file `finish_also` puts in it
-    /// (each planned output, which it zips by job key, plus the PGPatcher, CS PBR and complex-material JSON the export
-    /// writes into the folder; `_sdc` is never zipped), outputs at their estimated DDS size and JSON at its text size.
+    /// (each planned output, which it zips by job key, plus the PGPatcher, CS PBR, complex-material and XPMF JSON the
+    /// export writes into the folder; `_sdc` is never zipped), outputs at their estimated DDS size and JSON at its text
+    /// size.
     // shortcut: only the PBR folder's zip is counted (the Vanilla and CM zips hold at most about as many files, all
     // derived from the PBR sets) and an output whose source size the plan did not read counts 0 bytes; `write_zip`
     // still refuses what slips past, as a note. Count the other folders' plans if a mod gets past this row and fails
@@ -164,9 +168,10 @@ impl AppModel {
         let cm = super::cm_json::prepare(self)
             .into_iter()
             .flat_map(|p| p.files);
+        let xpmf = xpmf_json::prepare(self).into_iter().flat_map(|p| p.files);
         let json = pgp
             .into_iter()
-            .chain(cs.chain(cm).map(|(_, text)| text.len() as u64));
+            .chain(cs.chain(cm).chain(xpmf).map(|(_, text)| text.len() as u64));
         let sizes = self.items.iter().filter_map(|i| {
             let j = i.job.as_ref()?;
             if matches!(
@@ -204,8 +209,9 @@ impl AppModel {
 
     /// FC11 (fix round 1): the JSON files with a hash record that this project no longer writes (AG90's PGPatcher JSON
     /// under an earlier name or off the CS target, AD5's CS PBR JSON no block binds, AT3's complex-material JSON no
-    /// set writes), as `stale` rows. The recorded SHA-256 is their baseline: ours when the file still hashes to it.
-    /// Run when a plan settles and after an export's JSON step, never per frame (it hashes the files).
+    /// set writes, Note GI's XPMF profiles likewise), as `stale` rows. The recorded SHA-256 is their baseline: ours
+    /// when the file still hashes to it. Run when a plan settles and after an export's JSON step, never per frame (it
+    /// hashes the files).
     pub(crate) fn refresh_stale_json(&mut self) {
         let old = std::mem::take(&mut self.stale_json);
         self.stale.retain(|s| !old.contains_key(&s.path));
@@ -247,6 +253,18 @@ impl AppModel {
                 kinds.push((d.cm_json_shas(), p.root, made));
             }
             None => kinds.push((d.cm_json_shas(), root.clone(), vec![])),
+        }
+        // Note GI: as the CS files; `prepare` is `Some` while a profile is recorded, so the last block's removal
+        // lists its file.
+        if let Some(p) = xpmf_json::prepare(self) {
+            for f in p.folders() {
+                let made = f
+                    .files
+                    .iter()
+                    .map(|(r, _)| r.clone())
+                    .chain(f.refused.clone());
+                kinds.push((d.xpmf_shas(), f.root.clone(), made.collect()));
+            }
         }
         for (shas, root, made) in kinds {
             let shas = records_at(&shas, &root);
@@ -395,6 +413,12 @@ impl AppModel {
         if let (Some(p), Some(d)) = (cm_json::prepare(self), doc) {
             let rels = p.files.into_iter().map(|(r, _)| r).collect();
             files(JsonKind::ComplexMaterial, p.root, rels, d.cm_json_shas());
+        }
+        if let (Some(p), Some(d)) = (xpmf_json::prepare(self), doc) {
+            for f in p.folders() {
+                let rels = f.files.iter().map(|(r, _)| r.clone()).collect();
+                files(JsonKind::Xpmf, f.root.clone(), rels, d.xpmf_shas());
+            }
         }
         *self.review_json_cache.borrow_mut() = Some((key, Instant::now(), lines.clone()));
         lines

@@ -224,7 +224,7 @@ fn the_cubemap_lock_is_labelled_as_the_clear_it_is() {
     // No card has slot 5, so no menu offers it; the Texture locks group names what lock_cubemap does.
     let k = sdc_gui::pgp::schema::spec("lock_cubemap").unwrap();
     assert_eq!(k.label, "Clear cubemap");
-    assert!(!SlotKind::ALL.iter().any(|k| k.slot_number() == 5));
+    assert!(!SlotKind::ALL.iter().any(|k| k.slot_number() == Some(5)));
 }
 
 #[test]

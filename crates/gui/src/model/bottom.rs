@@ -521,6 +521,18 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    // Note GI (X4): an XPMF pbr profile's exact EDID with no PBRMaterialObjects JSON from this project.
+    for (key, id, edid) in super::xpmf_json::skipped_edids(m) {
+        out.push(Problem {
+            detail: Some(super::xpmf_json::SKIP_HOVER.into()),
+            ..row(
+                Level::Warning,
+                set_at(&key, &id),
+                format!("XPMF skips {edid}: no PBRMaterialObjects JSON from this project"),
+                None,
+            )
+        });
+    }
     for (k, ws) in &m.rnm_notes {
         let at = views
             .iter()

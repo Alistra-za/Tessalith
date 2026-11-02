@@ -6,6 +6,8 @@ pub fn subtype_name(st: engine::config::Subtype) -> String {
     use engine::config::Subtype;
     match st {
         Subtype::SkinRfaos => "Skin RFAOS".to_string(),
+        Subtype::ProjectedNoise => "Projected noise".to_string(),
+        Subtype::DetailNormal => "Detail normal".to_string(),
         _ => st.id().replace('_', " "),
     }
 }

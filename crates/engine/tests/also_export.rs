@@ -984,6 +984,35 @@ fn extra_files_written_after_the_phases_are_zipped() {
     assert!(!zip_names(&loc.join("Mod PBR.zip")).contains(&"Mod PBR/PBRNIFPatcher/Mod.json".into()));
 }
 
+/// Final review I1b (Note GI27): a file the GUI writes into the Vanilla folder after the phases (the XPMF profile copy)
+/// and passes as `extra` is zipped in the Vanilla zip as the PBR folder's is.
+#[test]
+fn extra_files_in_the_vanilla_folder_are_zipped() {
+    let (_d, m, loc) = project(steel);
+    let sp = zip_spec(&loc, &[AlsoTarget::Vanilla]);
+    let run = start_also(
+        &Engine::new().unwrap(),
+        &engine::session::AnalysisCache::default(),
+        request(&m, &loc),
+        &sp,
+        Arc::new(VecSink::default()),
+        &CancelToken::default(),
+    )
+    .unwrap();
+    let json = loc.join("Mod Vanilla/SKSE/Plugins/XPMF/tessalith_steel.json");
+    std::fs::create_dir_all(json.parent().unwrap()).unwrap();
+    std::fs::write(&json, b"{}").unwrap();
+    let s = finish_also(run, &sp, &[json], &CancelToken::default());
+    let want = "Mod Vanilla/SKSE/Plugins/XPMF/tessalith_steel.json".to_string();
+    assert!(zip_names(&loc.join("Mod Vanilla.zip")).contains(&want));
+    assert!(
+        !s.notes.iter().any(|n| n.contains("tessalith_steel")),
+        "{:?}",
+        s.notes
+    );
+    assert_eq!(s.exit_code(), 0, "{:?}", s.notes);
+}
+
 /// Final review M1: a cancel after the phases (while the GUI writes its JSON, or zips) leaves the earlier zip as it
 /// was, and no temporary file.
 #[test]

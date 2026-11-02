@@ -98,7 +98,7 @@ fn slot_paths(m: &AppModel, v: &SetView) -> Vec<(u8, String)> {
                 super::sets::SlotFill::Empty => return None,
             };
             let j = m.item(item)?.job.as_ref()?;
-            Some((kind.slot_number(), super::sets::written_game_path(j)))
+            Some((kind.slot_number()?, super::sets::written_game_path(j)))
         })
         .collect()
 }

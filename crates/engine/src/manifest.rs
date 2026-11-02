@@ -58,6 +58,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::MsnSpecular
         | Subtype::GenericTwoChannel
         | Subtype::SkinSk => "1.2.0",
+        // XPMF landscape maps (Note GI): new sub-types, first built at 1.2.0.
+        Subtype::ProjectedNoise | Subtype::DetailNormal => "1.2.0",
     }
 }
 

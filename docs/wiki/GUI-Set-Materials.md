@@ -34,6 +34,17 @@ The set editor shows a **PBR Landscape** card, open by default. It edits the sam
 
 The pill on the set's card says what the set writes (the [set card](GUI-Sets-Column.md#set-cards) hover has the long form). CS records are written for a block with at least one EDID. In the 3D preview a PBR Landscape set is shown on the plane, like a set with a texture-set block.
 
+## XPMF profile card
+
+A Landscape or PBR Landscape set (either target) gets an **XPMF profile** card in the set editor, with its header reading "on" or "off". What the profile is, the file it writes and each key are on [XPMF profiles](XPMF-Profiles.md).
+
+- **Write XPMF profile** adds or removes the set's `[sets.xpmf]` block, as one undo step. Turning it off removes the block's values; Undo brings them back. While it is off the card shows only the toggle.
+- With it on, the card has one row per key. A key you have not set shows the value Tessalith fills, or XPMF's own default, greyed. A number row has **Override**, which starts a value of your own; a text row takes a path or text; a list row takes patterns, and Enter adds one. **Reset** on a row drops your value.
+- **Editor IDs** and **Exclude editor IDs** offer the material object records of the scan (single-pass ones only) as you type.
+- A row the preview cannot show says "Not shown in the preview" on hover. `specularMult` is hidden while PBR is on.
+- An amber line at the top of the card says why the profile would not be written now (for example, no editor IDs, a value the schema refuses, or a set id that gives the same file name as another landscape set's). A set that is no longer a Landscape set but still has the block keeps this line and the toggle, so the block can be removed.
+- A set read-only on disk greys the card, with the reason on hover.
+
 ## Community Shaders PBR records
 
 A set can also write Community Shaders' own runtime files: a **PBR texture set** (`<export>\PBRTextureSets\<EDID>.json`) and a **PBR material object** (`<export>\PBRMaterialObjects\<EDID>.json`). Open **CS PBR records** (collapsed; its header reads "N records") in the set editor's Material tab and add either block.

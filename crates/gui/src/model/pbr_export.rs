@@ -102,8 +102,8 @@ fn slots_of(
             && v.prefix
                 .as_deref()
                 .is_some_and(|pre| path_lower(p) == path_lower(&output_rel(pre, kind.suffix())));
-        if borrowed || !at_own_path {
-            out.insert(kind.slot_number(), p.to_string_lossy().replace('/', "\\"));
+        if let (true, Some(n)) = (borrowed || !at_own_path, kind.slot_number()) {
+            out.insert(n, p.to_string_lossy().replace('/', "\\"));
         }
     }
     for n in 1..=8u8 {
@@ -130,7 +130,9 @@ fn unresolved_slots(
             SlotFill::Own { item } => (item, None),
             SlotFill::Empty => continue,
         };
-        let n = kind.slot_number();
+        let Some(n) = kind.slot_number() else {
+            continue;
+        };
         if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {
             continue;
         }

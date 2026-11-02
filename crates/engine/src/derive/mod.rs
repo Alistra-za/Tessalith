@@ -35,6 +35,9 @@ pub struct DeriveSet {
     pub height: Option<ChannelSource>,
     pub curves: Option<ChannelSource>,
     pub cavity: Option<ChannelSource>,
+    /// The set's `_noise` and `_detail` members (Note GI27): a landscape set's own jobs for them stay in the
+    /// Vanilla folder as its `_p` does (O6).
+    pub kept_maps: Vec<PathBuf>,
     pub gray: GraySource,
     /// Members the recipe needs that are DDS (never re-encoded, M9): the set is skipped.
     pub dds: Vec<PathBuf>,
@@ -50,6 +53,16 @@ pub struct DeriveRequest {
     pub drop: Vec<PathBuf>,
     /// The mesh votes were read (TA13): tells "no scan" from "no env-map mesh".
     pub scanned: bool,
+}
+
+impl DeriveRequest {
+    /// O6, Note GI27: the Vanilla folder keeps this derived PBR Landscape set's `_p`, `_noise` and `_detail` jobs.
+    pub fn keeps_landscape(&self, s: &DeriveSet) -> bool {
+        self.mode == DeriveMode::Vanilla
+            && s.shader == Shader::PbrLandscape
+            && s.dds.is_empty()
+            && (s.albedo.is_some() || s.normal.is_some())
+    }
 }
 
 /// How many trailing components of a path mirror `game_path` and sit below a `textures/pbr/` fold (TA12), or

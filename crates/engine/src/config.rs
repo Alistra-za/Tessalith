@@ -56,6 +56,9 @@ pub enum Subtype {
     ComplexGrass,
     // A single cubemap (`_e`, cubemap design 2026-10-26): six square faces, BC1/BC3/BC7/RGBA8 UNORM, `cubemap.*` keys.
     Cubemap,
+    // XPMF landscape maps (design 2026-10-31): `_noise` is a BC4 projected-noise map, `_detail` (landscape sets only) a detail normal.
+    ProjectedNoise,
+    DetailNormal,
 }
 
 /// The schema lists the deprecated id `rfaos` next to `skin_rfaos`, so an old file still validates.
@@ -511,7 +514,7 @@ impl Subtype {
         }
     }
 
-    pub const ALL: [Subtype; 30] = {
+    pub const ALL: [Subtype; 32] = {
         use Subtype::*;
         [
             Diffuse,
@@ -544,6 +547,8 @@ impl Subtype {
             SkinWet,
             ComplexGrass,
             Cubemap,
+            ProjectedNoise,
+            DetailNormal,
         ]
     };
 
@@ -554,8 +559,10 @@ impl Subtype {
             | PbrFuzz | SubsurfaceTint | BacklightTint | UiSky | SkinAlbedo | Cubemap => {
                 Category::Color
             }
-            Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | SkinWet => Category::Normal,
-            Envmask | Height | MsnSpecular | SkinSk => Category::Grayscale,
+            Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | SkinWet | DetailNormal => {
+                Category::Normal
+            }
+            Envmask | Height | MsnSpecular | SkinSk | ProjectedNoise => Category::Grayscale,
             ComplexMaterial | Rmaos | SkinRfaos | Flow | GenericTwoChannel | GenericData
             | ComplexGrass => Category::MixedPacked,
             HdrSky => Category::Hdr,
@@ -1033,11 +1040,50 @@ mod tests {
         }
     }
     #[test]
-    fn cubemap_is_the_last_subtype() {
-        assert_eq!(Subtype::ALL.len(), 30);
-        assert_eq!(Subtype::ALL.last(), Some(&Subtype::Cubemap));
+    fn subtype_all_order() {
+        assert_eq!(Subtype::ALL.len(), 32);
+        assert_eq!(
+            Subtype::ALL[Subtype::ALL.len() - 2..],
+            [Subtype::ProjectedNoise, Subtype::DetailNormal]
+        );
+        assert_eq!(Subtype::ALL[Subtype::ALL.len() - 3], Subtype::Cubemap);
         assert_eq!(Subtype::Cubemap.id(), "cubemap");
         assert_eq!(Subtype::Cubemap.category(), Category::Color);
+    }
+
+    #[test]
+    fn projected_noise_is_grayscale_bc4() {
+        use crate::presets::PresetRegistry;
+        assert_eq!(Subtype::ProjectedNoise.id(), "projected_noise");
+        assert_eq!(Subtype::ProjectedNoise.category(), Category::Grayscale);
+        let p = PresetRegistry::builtin()
+            .unwrap()
+            .profile("sdc-base", Target::Cs, Subtype::ProjectedNoise)
+            .unwrap();
+        assert_eq!(p.format, Format::Bc4);
+        assert_eq!(p.encoder.backend, Backend::Rgbcx);
+        assert_eq!(p.color.tag, ColorTag::Unorm);
+        assert_eq!(p.color.content, ColorContent::Linear);
+        assert_eq!(crate::dds::dxgi_format(Format::Bc4, false), 80);
+    }
+
+    #[test]
+    fn detail_normal_is_a_non_base_normal() {
+        use crate::presets::PresetRegistry;
+        assert_eq!(Subtype::DetailNormal.id(), "detail_normal");
+        assert_eq!(Subtype::DetailNormal.category(), Category::Normal);
+        assert_eq!(Subtype::DetailNormal.rnm_base(), None);
+        let r = PresetRegistry::builtin().unwrap();
+        for target in [Target::Cs, Target::Vanilla] {
+            let d = r
+                .profile("sdc-base", target, Subtype::DetailNormal)
+                .unwrap();
+            let mut l = r
+                .profile("sdc-base", target, Subtype::LandscapeNormal)
+                .unwrap();
+            l.subtype = Subtype::DetailNormal;
+            assert_eq!(d, l, "{target:?}");
+        }
     }
 
     #[test]

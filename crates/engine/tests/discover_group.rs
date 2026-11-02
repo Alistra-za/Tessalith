@@ -51,7 +51,33 @@ fn rfaos_and_envmask_are_recognised() {
         split_suffix("rock_envmask"),
         ("rock".into(), Some("envmask".into()))
     );
-    assert_eq!(SUFFIXES.len(), 20);
+    assert_eq!(SUFFIXES.len(), 21);
+}
+
+/// Note GI: `_noise` is a §6.1 suffix, so `foo_noise.png` joins set `foo` as its projected-noise member.
+#[test]
+fn noise_files_group_into_their_set() {
+    assert_eq!(
+        split_suffix("Foo_NOISE"),
+        ("Foo".into(), Some("noise".into()))
+    );
+    assert_eq!(split_suffix("_noise"), ("_noise".into(), None));
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("in");
+    for f in ["foo.png", "foo_n.png", "foo_noise.png"] {
+        touch(&src.join(f));
+    }
+    let files = discover(&[src], &d.path().join("out"), false).unwrap();
+    let (sets, dups) = group_sets(&files);
+    assert!(dups.is_empty());
+    assert_eq!(
+        sets.len(),
+        1,
+        "{:?}",
+        sets.iter().map(|s| &s.key).collect::<Vec<_>>()
+    );
+    assert_eq!(sets[0].members.len(), 3);
+    assert!(sets[0].key.ends_with("/foo") && sets[0].suffixes.contains("noise"));
 }
 
 #[test]

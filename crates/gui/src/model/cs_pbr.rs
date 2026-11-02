@@ -843,11 +843,14 @@ pub enum EdidCheck {
     SinglePassUnknown,
 }
 
+/// The MATO DATA flags bit that marks a single-pass material object (`WinRec::mato_flags`).
+pub const SINGLE_PASS: u32 = 1;
+
 pub fn check_edid(kind: Kind, edid: &str, recs: &[WinRec]) -> EdidCheck {
     match recs.iter().find(|r| r.edid == edid) {
         Some(r) if kind == Kind::Mato => match r.mato_flags {
             None => EdidCheck::SinglePassUnknown,
-            Some(f) if f & 1 == 0 => EdidCheck::NotSinglePass,
+            Some(f) if f & SINGLE_PASS == 0 => EdidCheck::NotSinglePass,
             Some(_) => EdidCheck::Found,
         },
         Some(_) => EdidCheck::Found,
@@ -874,7 +877,7 @@ pub fn check_text(c: &EdidCheck) -> Option<&'static str> {
 pub fn single_pass_text(flags: Option<u32>) -> &'static str {
     match flags {
         None => "single-pass unknown",
-        Some(f) if f & 1 == 0 => "not single-pass",
+        Some(f) if f & SINGLE_PASS == 0 => "not single-pass",
         Some(_) => "single-pass",
     }
 }
