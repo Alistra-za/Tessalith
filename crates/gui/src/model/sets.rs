@@ -555,8 +555,12 @@ pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
 
-/// What the views read of an item besides its key and set (`base_view`'s slot, `finish_view`'s sub-type): an item
-/// whose value of this is unchanged leaves its set's view as it was (final fix I2).
+/// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
+/// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
+/// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
+/// `finish_view` the diffuse's `job.profile.subtype` and its key (`mirrored_stem`). The keys are compared apart
+/// (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets document (in the
+/// views key). `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
 pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>) {
     (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
 }

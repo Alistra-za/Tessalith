@@ -619,6 +619,24 @@ fn views_after_a_full_plan_equal_a_fresh_build() {
     assert_eq!(*spliced, *views(&m));
 }
 
+/// Final fix round 2 (B): a full plan that changes a helper field (the roughness read as glossiness, packed into the
+/// rock's `_rmaos`) and no sub-type: the carried views equal a fresh build.
+#[test]
+fn views_after_a_helper_change_equal_a_fresh_build() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    let rough = "landscape/rock01_roughness.png";
+    let before = shape(&m);
+    let _ = views(&m);
+    m.hold_plan_results = false;
+    m.set_field(rough, "helper.role", json!("glossiness"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_ne!(shape(&m), before, "the plan changed an item");
+    let carried = views(&m);
+    m.invalidate_views();
+    assert_eq!(*carried, *views(&m));
+}
+
 /// Final fix (Minor 7): a partial whose sets are not all sets of the landed plan (planned on the skeleton of a full plan
 /// that has not landed here yet) is dropped; the panel waits for the full plan.
 #[test]

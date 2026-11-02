@@ -652,11 +652,10 @@ pub struct AppModel {
     /// Generation of the latest scan-database read, and (generation, continues `apply_plan`) while it is pending.
     votes_gen: u64,
     votes_pending: Option<(u64, bool)>,
-    /// Note F?: the inputs (mesh keys, database, its stamp) of the pending read, and of the last read that landed
-    /// from the database. A pending read with the landed read's inputs does not grey the panel (`plan_wait`).
+    /// Note F?6: the inputs (mesh keys, database, its stamp) of the pending read, and of the last read that landed
+    /// from the database. A post-plan read with the landed read's inputs lands at once (`refresh_mesh_votes`).
     votes_inputs: Option<VoteInputs>,
     votes_read: Option<VoteInputs>,
-    votes_grey: bool,
     generation: u64,
     planning: Option<CancelToken>,
     /// Fast re-plan (R2 §5): bumped by every `replan`; its partial and its full plan carry this value.
@@ -895,7 +894,6 @@ impl AppModel {
             votes_pending: None,
             votes_inputs: None,
             votes_read: None,
-            votes_grey: false,
             generation: 0,
             planning: None,
             edit_seq: 0,
@@ -1179,20 +1177,22 @@ impl AppModel {
             // And UV coverage, a session cache read from the scan.
             self.uv.clear();
         }
-        // Note F?: a post-plan read of the inputs the last landed read had returns the same evidence, so it does
-        // not grey the panel. A scan-finished read always does, and so does a read replacing a greyed one.
+        // Note F?6: a post-plan read of the inputs (mesh keys, database, stamp) the last landed read had would return
+        // the same evidence, so the kept evidence lands at once and the plan's tail runs now: no read is pending, so
+        // the panel never greys for it and no edit can drop that tail. Any other read goes to the worker.
         let inputs: VoteInputs = (keys.clone(), self.scan_db.clone(), self.scan_stamp);
-        self.votes_grey = (self.votes_pending.is_some() && self.votes_grey)
-            || !after_plan
-            || self.votes_read.as_ref() != Some(&inputs);
+        let same =
+            after_plan && self.votes_pending.is_none() && self.votes_read.as_ref() == Some(&inputs);
         self.votes_inputs = Some(inputs);
         let after_plan = after_plan || self.votes_pending.is_some_and(|(_, a)| a);
         self.votes_gen += 1;
         let generation = self.votes_gen;
         self.votes_pending = Some((generation, after_plan));
         // Wave 2 #6: the store reads empty while a scan runs or after one was cancelled; keep what we have.
-        if self.scan_store_unsettled {
-            self.votes_inputs = None;
+        if self.scan_store_unsettled || same {
+            if !same {
+                self.votes_inputs = None;
+            }
             let kept = MeshEvidence {
                 votes: self.mesh_votes.clone(),
                 alpha: self.mesh_alpha.clone(),
@@ -1273,7 +1273,6 @@ impl AppModel {
     fn drop_pending_votes(&mut self) {
         self.votes_gen += 1;
         self.votes_pending = None;
-        self.votes_grey = false;
     }
 
     /// The scan-database read of generation `generation` ended; a stale one is dropped.
@@ -1284,7 +1283,6 @@ impl AppModel {
         let Some((_, after_plan)) = self.votes_pending.take() else {
             return;
         };
-        self.votes_grey = false;
         let inputs = self.votes_inputs.take();
         self.votes_read = result.is_ok().then_some(inputs).flatten();
         let changed = match result {
@@ -1569,12 +1567,12 @@ impl AppModel {
     }
 
     /// Note F?: an edit waits for the plan. That is this edit's partial while it is out, or the full plan when this
-    /// edit has no partial shown (a global edit, a `NeedsFull`, a folder open); also a scan-database read whose
-    /// inputs changed (`refresh_mesh_votes`).
+    /// edit has no partial shown (a global edit, a `NeedsFull`, a folder open); also a scan-database read in flight
+    /// (one of unchanged inputs never is: `refresh_mesh_votes`).
     pub fn plan_wait(&self) -> bool {
         self.partial_pending
             || (self.planning.is_some() && !self.partial_shown())
-            || (self.votes_pending.is_some() && self.votes_grey)
+            || self.votes_pending.is_some()
     }
 
     /// Note F?: a full plan (or the scan-database votes) is still out; Review says "Planning…" and an Export click
@@ -4586,6 +4584,8 @@ mod tests {
                 }
                 other => other,
             };
+            // Evidence that differs on every read means the database changed: the next plan reads it again.
+            m.votes_read = None;
             m.handle(msg);
         }
         assert_eq!(reads, 3, "one read per plan");
@@ -4625,8 +4625,9 @@ mod tests {
         assert!(m.votes_pending.is_none(), "the pending read still settles");
     }
 
-    /// Note F? (final fixes I5): the post-plan read of unchanged inputs does not grey the panel; a changed database
-    /// stamp, or a scan-finished read, does. Review still waits for both (`full_plan_pending`).
+    /// Note F?6 (final fixes I5, round 2 A): the post-plan read of unchanged inputs lands at once, so the plan's tail
+    /// (`finish_plan`, here its queued export) runs before any edit can drop it and nothing greys the panel; a changed
+    /// database stamp, or a scan-finished read, goes to the worker and greys it.
     #[test]
     fn a_votes_read_of_unchanged_inputs_does_not_grey_the_panel() {
         let d = tempfile::tempdir().unwrap();
@@ -4643,10 +4644,17 @@ mod tests {
             result: Ok(Default::default()),
         });
         assert!(!m.plan_wait());
+        // The plan's own inputs, so `finish_plan` does not plan again first.
+        m.last_inputs = Some(EngineInputs::of(&m));
+        m.export_after_plan = true;
         m.refresh_mesh_votes(true);
-        assert!(m.votes_pending() && m.full_plan_pending());
-        assert!(!m.plan_wait(), "the same inputs grey the panel");
-        assert_eq!(m.fix_off(), None);
+        assert!(!m.export_after_plan, "the plan's tail ran at once");
+        assert!(
+            !m.votes_pending() && !m.plan_wait(),
+            "nothing pends or greys"
+        );
+        m.export_after_plan = false;
+        m.dialog = None;
         std::fs::write(&db, "another database, longer").unwrap();
         m.scan_stamp = cs_pbr::stamp(Some(&db));
         m.refresh_mesh_votes(true);
