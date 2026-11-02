@@ -17,7 +17,7 @@ use engine::presets::Provenance;
 use engine::sets::{fold_id, same_id, set_id, OutputKey, SetEdit};
 use engine::shader::{Shader, ShaderPick};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -884,21 +884,18 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     // Mirrored outputs: textures with no explicit path, now or in the plan on screen, write their job key. An owned
     // path on one is held back too (the engine would skip both as IN-DUPLICATE and the plan would not settle);
     // `path_collisions` reports it.
-    let explicit = |k: &OutputKey| {
-        candidates.iter().any(|(_, c, _)| c == k)
-            || named.iter().any(|(c, _)| c == k)
-            || m.last_inputs
-                .as_ref()
-                .is_some_and(|l| l.output_paths.contains_key(k))
-    };
+    let mut explicit: BTreeSet<&OutputKey> = candidates.iter().map(|(_, c, _)| c).collect();
+    explicit.extend(named.iter().map(|(c, _)| c));
+    let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
+    let owners = packed_owners(&views);
     let mirrored: BTreeSet<String> = m
         .items
         .iter()
         // Only a texture that will be written (skipped and failed files have no job, as in `path_collisions`).
         .filter(|it| it.job.is_some() && !it.job_key.is_empty())
         .filter(|it| {
-            let k = item_output_key(&views, it).unwrap_or(OutputKey::File(it.key.clone()));
-            !explicit(&k)
+            let k = item_output_key_in(&owners, it).unwrap_or(OutputKey::File(it.key.clone()));
+            !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
         .map(|it| it.job_key.replace('\\', "/").to_lowercase())
         .collect();
@@ -1068,11 +1065,16 @@ pub fn shader_options(target: Target) -> Vec<Shader> {
 /// the export root). Duplicate paths are kept here; `engine_inputs` drops them and `path_collisions` reports them.
 /// A path that fails `check_rel_path` is never a candidate: the engine joins these under the export folder as given.
 pub fn output_candidates(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey, PathBuf)> {
-    let pos = |id: &str| views.iter().position(|v| v.id == id).unwrap_or(usize::MAX);
+    // Every view of an id with its position, in display order: the first one is what a linear `find` would give.
+    let mut by_id: HashMap<&str, Vec<(usize, &SetView)>> = HashMap::new();
+    for (n, v) in views.iter().enumerate() {
+        by_id.entry(v.id.as_str()).or_default().push((n, v));
+    }
+    let pos = |id: &str| by_id.get(id).map_or(usize::MAX, |vs| vs[0].0);
     let mut out = vec![];
     for ((item_key, users), owner) in owners(views) {
         let Some(owner) = owner else { continue };
-        let Some(ov) = views.iter().find(|v| v.id == owner) else {
+        let Some(&(_, ov)) = by_id.get(owner.as_str()).and_then(|vs| vs.first()) else {
             continue;
         };
         let Some(prefix) = &ov.prefix else { continue };
@@ -1089,9 +1091,10 @@ pub fn output_candidates(m: &AppModel, views: &[SetView]) -> Vec<(String, Output
             let source = users
                 .iter()
                 .find(|id| {
-                    views.iter().any(|v| {
-                        &v.id == *id
-                            && matches!(v.slots.get(&slot), Some(SlotFill::Own { item }) if *item == item_key)
+                    by_id.get(id.as_str()).is_some_and(|vs| {
+                        vs.iter().any(|(_, v)| {
+                            matches!(v.slots.get(&slot), Some(SlotFill::Own { item }) if *item == item_key)
+                        })
                     })
                 })
                 .cloned()
@@ -1110,6 +1113,100 @@ pub fn output_candidates(m: &AppModel, views: &[SetView]) -> Vec<(String, Output
     }
     out.sort_by_key(|(o, _, _)| pos(o));
     out
+}
+
+/// The linear `engine_inputs` and `output_candidates` the indexed ones replaced (fast re-plan final fix I1), kept to
+/// pin that both give equal results (`model::tests::engine_inputs_equal_the_linear_scan`).
+#[cfg(test)]
+pub(crate) mod linear {
+    use super::*;
+
+    pub(crate) fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+        let (edits, _) = super::engine_inputs(m);
+        let mut paths = BTreeMap::new();
+        let views = views(m);
+        let named = output_name_paths(m, &views);
+        if m.target != Target::Cs {
+            paths.extend(named);
+            return (edits, paths);
+        }
+        let candidates = output_candidates(m, &views);
+        let explicit = |k: &OutputKey| {
+            candidates.iter().any(|(_, c, _)| c == k)
+                || named.iter().any(|(c, _)| c == k)
+                || m.last_inputs
+                    .as_ref()
+                    .is_some_and(|l| l.output_paths.contains_key(k))
+        };
+        let mirrored: BTreeSet<String> = m
+            .items
+            .iter()
+            .filter(|it| it.job.is_some() && !it.job_key.is_empty())
+            .filter(|it| {
+                let k = item_output_key(&views, it).unwrap_or(OutputKey::File(it.key.clone()));
+                !explicit(&k)
+            })
+            .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+            .collect();
+        let mut seen = BTreeSet::new();
+        let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
+        for (_, key, rel) in named.chain(candidates) {
+            if mirrored.contains(&rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+                continue;
+            }
+            if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+                paths.insert(key, rel);
+            }
+        }
+        (edits, paths)
+    }
+
+    pub(crate) fn output_candidates(
+        m: &AppModel,
+        views: &[SetView],
+    ) -> Vec<(String, OutputKey, PathBuf)> {
+        let pos = |id: &str| views.iter().position(|v| v.id == id).unwrap_or(usize::MAX);
+        let mut out = vec![];
+        for ((item_key, users), owner) in owners(views) {
+            let Some(owner) = owner else { continue };
+            let Some(ov) = views.iter().find(|v| v.id == owner) else {
+                continue;
+            };
+            let Some(prefix) = &ov.prefix else { continue };
+            let Some(item) = m.item(&item_key) else {
+                continue;
+            };
+            let Some(slot) = slot_of(item) else { continue };
+            let rel = output_rel(prefix, output_suffix(item, slot));
+            if check_rel_path(&rel.to_string_lossy(), "output path").is_err() {
+                continue;
+            }
+            let key = if item.kind == ItemKind::Packed {
+                let source = users
+                    .iter()
+                    .find(|id| {
+                        views.iter().any(|v| {
+                            &v.id == *id
+                                && matches!(v.slots.get(&slot), Some(SlotFill::Own { item }) if *item == item_key)
+                        })
+                    })
+                    .cloned()
+                    .unwrap_or(owner.clone());
+                let Some(suffix) = recipe_suffix(item) else {
+                    continue;
+                };
+                OutputKey::Packed {
+                    set: source,
+                    suffix,
+                }
+            } else {
+                OutputKey::File(item.key.clone())
+            };
+            out.push((owner, key, rel));
+        }
+        out.sort_by_key(|(o, _, _)| pos(o));
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2335,5 +2432,33 @@ pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKe
         })?
         .id
         .clone();
+    Some(OutputKey::Packed { set, suffix })
+}
+
+/// Item key → the id of the first view, in display order, holding it as its own: the set `item_output_key` names for
+/// a packed output, built once for a loop over every item.
+pub(crate) fn packed_owners(views: &[SetView]) -> HashMap<&str, &str> {
+    let mut out = HashMap::new();
+    for v in views {
+        for f in v.slots.values() {
+            if let SlotFill::Own { item } = f {
+                out.entry(item.as_str()).or_insert(v.id.as_str());
+            }
+        }
+    }
+    out
+}
+
+/// `item_output_key` with the owners `packed_owners` built.
+pub(crate) fn item_output_key_in(
+    owners: &HashMap<&str, &str>,
+    item: &TextureItem,
+) -> Option<OutputKey> {
+    slot_of(item)?;
+    if item.kind != ItemKind::Packed {
+        return Some(OutputKey::File(item.key.clone()));
+    }
+    let suffix = recipe_suffix(item)?;
+    let set = owners.get(item.key.as_str())?.to_string();
     Some(OutputKey::Packed { set, suffix })
 }

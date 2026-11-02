@@ -3,7 +3,8 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, item_output_key, output_candidates, set_views, SetView, SlotFill, SlotKind,
+    engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
+    set_views, SetView, SlotFill, SlotKind,
 };
 use super::{AppModel, ViewCache};
 use crate::pgp::prefix::{
@@ -16,7 +17,7 @@ use crate::pgp::writer::{document, to_text, EntryInput};
 use engine::config::Target;
 use engine::sets::{same_id, OutputKey};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -459,12 +460,13 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
         }
     }
     // Mirrored outputs: items that will write a file but have no explicit path.
-    let owned: Vec<&OutputKey> = candidates.iter().map(|(_, k, _)| k).collect();
+    let owned: BTreeSet<&OutputKey> = candidates.iter().map(|(_, k, _)| k).collect();
+    let owners = packed_owners(&views);
     for it in &m.items {
         if it.job.is_none() || it.job_key.is_empty() {
             continue;
         }
-        if item_output_key(&views, it).is_some_and(|k| owned.contains(&&k)) {
+        if item_output_key_in(&owners, it).is_some_and(|k| owned.contains(&k)) {
             continue;
         }
         if let Some((owner, k)) = seen.get(&it.job_key.replace('\\', "/").to_lowercase()) {

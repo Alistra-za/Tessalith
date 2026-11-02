@@ -4295,6 +4295,8 @@ pub fn export_finished_text(s: &engine::api::BatchSummary) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::sets::OutputKey;
+    use std::path::Path;
 
     pub(super) fn bare_model() -> AppModel {
         let session =
@@ -4310,12 +4312,91 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(1)));
     }
 
-    /// Task 5: a plan request borrows the cached set views, so building it deep-clones none.
+    /// An opened, planned project on `cs`: a PBR set whose `_rmaos` is packed (rock01, with a prefix, so its outputs
+    /// are explicit), a plain set with an output name (leaf) and a plain set that mirrors its source (moss).
+    fn packed_named_model(dir: &Path) -> AppModel {
+        let r = dir.join("textures/landscape");
+        std::fs::create_dir_all(&r).unwrap();
+        let rgb = |x: u32, y: u32| image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]);
+        for n in ["rock01.png", "leaf.png", "moss.png"] {
+            image::RgbImage::from_fn(64, 64, rgb)
+                .save(r.join(n))
+                .unwrap();
+        }
+        image::RgbImage::from_pixel(64, 64, image::Rgb([128, 128, 255]))
+            .save(r.join("rock01_normal.png"))
+            .unwrap();
+        for (n, v) in [("rock01_roughness.png", 120u8), ("rock01_ao.png", 200)] {
+            image::GrayImage::from_fn(64, 64, |x, _| image::Luma([v.wrapping_add(x as u8)]))
+                .save(r.join(n))
+                .unwrap();
+        }
+        let export = dir.join("export");
+        let settings = GuiSettings {
+            export_folder: Some(export.clone()),
+            ..GuiSettings::default()
+        };
+        let mut m = AppModel::new(
+            settings,
+            None,
+            Arc::new(Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        );
+        m.accept = AcceptSuggestions::None;
+        m.open_folder(dir.join("textures"));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        m.set_export_folder(export);
+        m.decide("landscape/rock01.png", Answer::Subtype(Subtype::PbrAlbedo));
+        m.decide(
+            "landscape/rock01_normal.png",
+            Answer::Subtype(Subtype::PbrNormal),
+        );
+        m.set_output_name("landscape/leaf", Some("maple")).unwrap();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(m.target, Target::Cs);
+        m
+    }
+
+    /// Final fix I1: the indexed `engine_inputs` and `output_candidates` equal the linear scans they replaced, on a
+    /// project with a packed output, explicit (prefix) outputs, a named set and mirrored outputs.
+    #[test]
+    fn engine_inputs_equal_the_linear_scan() {
+        let d = tempfile::tempdir().unwrap();
+        let m = packed_named_model(d.path());
+        let views = sets::views(&m);
+        let candidates = sets::output_candidates(&m, &views);
+        assert!(
+            candidates
+                .iter()
+                .any(|(_, k, _)| matches!(k, OutputKey::Packed { .. })),
+            "a packed candidate: {candidates:?}"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|(_, k, _)| matches!(k, OutputKey::File(_))),
+            "a file candidate"
+        );
+        assert!(
+            !sets::output_name_paths(&m, &views).is_empty(),
+            "a named set"
+        );
+        assert_eq!(candidates, sets::linear::output_candidates(&m, &views));
+        let inputs = sets::engine_inputs(&m);
+        assert!(
+            inputs.1.len() > candidates.len(),
+            "named and explicit paths: {inputs:?}"
+        );
+        assert_eq!(inputs, sets::linear::engine_inputs(&m));
+    }
+
+    /// Task 5: a plan request borrows the cached set views, so building it deep-clones none. On a planned `cs` project
+    /// (Minor 9): with `engine_inputs` cloning the views again, it fails.
     #[test]
     fn building_the_plan_request_clones_no_set_views() {
-        let m = bare_model();
+        let d = tempfile::tempdir().unwrap();
+        let m = packed_named_model(d.path());
         sets::SET_VIEWS_CLONES.with(|c| c.set(0));
-        let _ = m.request();
+        assert!(m.request().is_some_and(|r| !r.output_paths.is_empty()));
         let _ = EngineInputs::of(&m);
         assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
     }
