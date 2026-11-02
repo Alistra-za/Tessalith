@@ -549,8 +549,21 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
     (*views(m)).clone()
 }
 
+/// Tests: how many whole `build_views` builds ran (a splice is not one).
+#[doc(hidden)]
+pub fn view_builds(m: &AppModel) -> u64 {
+    m.view_builds.get()
+}
+
+/// What the views read of an item besides its key and set (`base_view`'s slot, `finish_view`'s sub-type): an item
+/// whose value of this is unchanged leaves its set's view as it was (final fix I2).
+pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>) {
+    (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
+}
+
 /// Every set, in display order, with its slots, ownership and prefix.
 fn build_views(m: &AppModel) -> Vec<SetView> {
+    m.view_builds.set(m.view_builds.get() + 1);
     let root = m.sets_root();
     let entries = m
         .sets_doc

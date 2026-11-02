@@ -575,7 +575,8 @@ impl AppModel {
         }
         self.check_state.items = items;
         self.check_state.sets = sets;
-        self.invalidate_views();
+        // Final fix I2: the checks change Problems' rows only; the set views of this plan stay.
+        self.rows_changed();
         true
     }
 }

@@ -365,8 +365,8 @@ pub fn spawn_plan(
 
 /// Fast re-plan (R2 §5): `Session::replan_sets` for `changed` (the current entry of every `[files]` key changed
 /// since the last landed full plan), sent as `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it.
-/// When `latest` (the newest `seq` issued) has moved past `seq` before the work starts, it is skipped and an `Err`
-/// is sent.
+/// When `latest` (the newest edit's `seq`, with a partial or not) has moved past `seq` before the work starts, it is
+/// skipped and an `Err` is sent.
 pub fn spawn_partial(
     tx: Sender<WorkerMsg>,
     session: Arc<Session>,

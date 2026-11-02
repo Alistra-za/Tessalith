@@ -4,7 +4,7 @@
 mod support;
 use engine::config::{AlphaPolicy, Subtype};
 use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
-use sdc_gui::model::sets::{views, SetView, SlotFill, SlotKind};
+use sdc_gui::model::sets::{view_builds, views, SetView, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::WorkerMsg;
@@ -270,6 +270,69 @@ fn undo_after_partial() {
     equals_a_fresh_open(d.path(), &mut m);
 }
 
+/// Final fix (parked from Task 6): a partial removes only the RNM keys no item outside its scope still reads.
+#[test]
+fn a_partial_keeps_the_rnm_keys_other_sets_read() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("m");
+    std::fs::create_dir_all(&r).unwrap();
+    for f in ["iron.png", "copper.png"] {
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+        })
+        .save(r.join(f))
+        .unwrap();
+    }
+    for f in [
+        "iron_n.png",
+        "iron_bump.png",
+        "iron_detailnorm.png",
+        "iron_detailnormmask.png",
+    ] {
+        image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([(x * 3) as u8]))
+            .save(r.join(f))
+            .unwrap();
+    }
+    let settings = GuiSettings {
+        export_folder: Some(d.path().join("export")),
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(d.path().to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    choose_export(&mut m, d.path().join("export"));
+    let rnm = m
+        .item("m/iron_n.png")
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap()
+        .rnm
+        .clone();
+    let rnm = rnm.expect("iron_n has layers");
+    let layer = rnm.layers[0].file.path.clone();
+    assert!(m.rnm_keys.contains_key(&layer));
+    // Copper, a set of its own, reads the same layer file.
+    let copper = m
+        .items
+        .iter()
+        .position(|i| i.key == "m/copper.png")
+        .unwrap();
+    m.items[copper].job.as_mut().expect("copper's job").rnm = Some(rnm);
+    m.invalidate_views();
+    m.hold_plan_results = true;
+    m.set_field("m/copper.png", "alpha.policy", json!(AlphaPolicy::Cutout));
+    let (partials, full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(&partials[0], WorkerMsg::Partial { result: Ok((_, scope)), .. } if scope.len() == 1),
+        "a partial of copper's set alone"
+    );
+    deliver(&mut m, partials);
+    assert!(m.rnm_keys.contains_key(&layer), "iron_n still reads it");
+    finish(&mut m, full);
+}
+
 #[test]
 fn needs_full_waits_for_full() {
     let d = tempfile::tempdir().unwrap();
@@ -458,6 +521,94 @@ fn views_after_a_partial_equal_a_fresh_build() {
     );
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
+}
+
+/// Final fix I2: a full plan builds again only the views of the sets it changed, with no whole build, and the result
+/// equals a fresh build. An edit of the sets document, or a plan that changes the engine inputs, builds them whole.
+#[test]
+fn views_after_a_full_plan_equal_a_fresh_build() {
+    // The leaf becomes a normal; only its full plan lands (its partial stays parked).
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    decided(&mut m, LEAF, Subtype::Diffuse);
+    let _ = views(&m);
+    let builds = view_builds(&m);
+    m.decide(LEAF, Answer::Subtype(Subtype::Normal));
+    let (_partials, full) = collect(&mut m, 1, 1);
+    finish(&mut m, full);
+    let spliced = views(&m);
+    assert!(view_of(&m, "landscape/leaf")
+        .slots
+        .contains_key(&SlotKind::Normal));
+    assert_eq!(
+        view_builds(&m),
+        builds,
+        "no whole build after the full plan"
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+
+    // The leaf borrows the wall's normal (a sets-document edit: built whole), then the wall's normal becomes `_sk`:
+    // the borrower outside the edited set follows.
+    m.hold_plan_results = false;
+    let builds = view_builds(&m);
+    m.edit_docs("borrow", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/wall"))
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let _ = views(&m);
+    assert!(
+        view_builds(&m) > builds,
+        "a sets-document edit builds whole"
+    );
+    assert!(matches!(
+        view_of(&m, "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    m.hold_plan_results = true;
+    let builds = view_builds(&m);
+    m.decide(WALL_N, Answer::Subtype(Subtype::SkinSk));
+    let (_partials, full) = collect(&mut m, 1, 1);
+    let inputs = m.plan_marks().0;
+    finish(&mut m, full);
+    let spliced = views(&m);
+    let leaf = view_of(&m, "landscape/leaf");
+    // The leaf (a normal itself since the first part) loses the borrowed one and lists the empty borrow.
+    assert!(
+        !matches!(
+            leaf.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ) && !leaf.missing.is_empty(),
+        "the borrower follows its source: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    // `_sk` changes the engine inputs (output paths), which re-plans once more and moves the views key outside the
+    // items: one whole build, as ruled.
+    assert!(m.plan_marks().0 > inputs, "the engine inputs changed");
+    assert_eq!(view_builds(&m), builds + 1, "built whole once");
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+}
+
+/// Final fix (Minor 7): a partial whose sets are not all sets of the landed plan (planned on the skeleton of a full plan
+/// that has not landed here yet) is dropped; the panel waits for the full plan.
+#[test]
+fn a_partial_with_an_unknown_set_is_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    cutout(&mut m, LEAF);
+    let (partials, full) = collect(&mut m, 1, 1);
+    let leaf_set = m.item(LEAF).unwrap().set_key.clone().unwrap();
+    m.sets.retain(|s| s.key != leaf_set);
+    m.invalidate_views();
+    let seq = m.applied_seq;
+    deliver(&mut m, partials);
+    assert_eq!(m.applied_seq, seq, "dropped");
+    assert_ne!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    assert_eq!(m.fix_off().as_deref(), Some(WAIT));
+    finish(&mut m, full);
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
 }
 
 /// Note F?: the partial alone updates the edited set's item rows: answering an undecided alpha removes its row.

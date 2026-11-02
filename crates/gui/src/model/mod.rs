@@ -471,6 +471,8 @@ pub struct AppModel {
     /// Review (R1): open while `Some`; it holds only what the user answered.
     pub review: Option<review::Review>,
     pub(crate) problem_builds: std::cell::Cell<u64>,
+    /// Final fix I2: whole `sets::build_views` builds (a splice is not one; see `sets::view_builds`).
+    pub(crate) view_builds: std::cell::Cell<u64>,
     pub(crate) filter_builds: std::cell::Cell<u64>,
     /// Task 6: `bottom::problems` calls and `export_files` builds (see `bottom::problem_lookups`).
     pub(crate) problem_lookups: std::cell::Cell<u64>,
@@ -793,6 +795,7 @@ impl AppModel {
             bottom: Default::default(),
             review: None,
             problem_builds: Default::default(),
+            view_builds: Default::default(),
             filter_builds: Default::default(),
             problem_lookups: Default::default(),
             export_files_builds: Default::default(),
@@ -1372,6 +1375,9 @@ impl AppModel {
     ) {
         self.edit_seq += 1;
         self.partial_pending = false;
+        // Final fix (Minor 2): every edit, with a partial or not, makes a queued older partial stale before it runs.
+        self.partial_latest
+            .store(self.edit_seq, std::sync::atomic::Ordering::SeqCst);
         let files = req
             .project_config_inline
             .as_ref()
@@ -1401,8 +1407,6 @@ impl AppModel {
             .collect();
         let Some(changed) = changed else { return };
         self.partial_pending = true;
-        self.partial_latest
-            .store(self.edit_seq, std::sync::atomic::Ordering::SeqCst);
         spawn_partial(
             self.tx.clone(),
             session.clone(),
@@ -1422,8 +1426,15 @@ impl AppModel {
         }
         match result {
             Ok((view, scope)) if seq > self.applied_seq => {
-                self.applied_seq = seq;
-                self.apply_partial(view, &scope);
+                // Final fix (Minor 7): the engine refuses a membership change, so the partial holds exactly the scope's
+                // sets and each is a set of the landed plan. A partial on the skeleton of a full plan that has not
+                // landed here yet may not be: it is dropped, and that full plan lands behind it.
+                let landed = |k: &String| self.sets.iter().any(|s| &s.key == k);
+                let keys: BTreeSet<&String> = view.sets.iter().map(|s| &s.key).collect();
+                if scope.iter().all(|k| keys.contains(k)) && keys.iter().all(|k| landed(k)) {
+                    self.applied_seq = seq;
+                    self.apply_partial(view, &scope);
+                }
             }
             _ => {}
         }
@@ -2624,15 +2635,18 @@ impl AppModel {
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
+        // Final fix I2: the views of the plan before, to splice (`carry_views` below).
+        let old_key = self.view_key();
+        let carried = std::mem::take(&mut *self.views.borrow_mut());
         self.target = view.target;
-        self.items = view.items;
+        let old_items = std::mem::replace(&mut self.items, view.items);
         self.refresh_game_paths();
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
         self.check_state.plans_applied += 1;
         self.invalidate_views();
-        self.sets = view.sets;
-        self.sets_root = Some(view.output_root);
+        let old_sets = std::mem::replace(&mut self.sets, view.sets);
+        let old_root = self.sets_root.replace(view.output_root);
         self.unmatched_keys = view.unmatched;
         self.rnm_notes = view.rnm_notes;
         self.rnm_keys = view.rnm_keys;
@@ -2642,6 +2656,11 @@ impl AppModel {
         self.unreadable = view.unreadable;
         self.recode = view.recode;
         self.stale = view.stale;
+        // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
+        // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (F?7).
+        if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
+            self.carry_views(carried, &old_key, &scope, false);
+        }
         // The JSON rows are added once the plan settles (`finish_plan`): they read the settled sets.
         self.stale_json.clear();
         // Fast re-plan: this plan ran on every edit so far.
@@ -2706,22 +2725,23 @@ impl AppModel {
             .as_deref()
             .and_then(|k| self.item(k))
             .is_some_and(in_scope);
-        // The scope sets' RNM layer, mask and AO paths (as `PlanView::build` collects them): the view's replace them.
-        let old_rnm: Vec<PathBuf> = self
-            .items
-            .iter()
-            .filter(|i| in_scope(i))
-            .filter_map(|i| i.job.as_ref()?.rnm.as_ref())
-            .flat_map(|r| {
-                r.layers
-                    .iter()
-                    .flat_map(|l| {
-                        std::iter::once(&l.file.path).chain(l.mask.as_ref().map(|m| &m.path))
-                    })
-                    .chain(r.ao.as_ref().map(|a| &a.file.path))
-                    .cloned()
-            })
-            .collect();
+        // The RNM layer, mask and AO paths of some items (as `PlanView::build` collects them).
+        fn rnm_paths<'a>(items: impl Iterator<Item = &'a TextureItem>) -> BTreeSet<PathBuf> {
+            items
+                .filter_map(|i| i.job.as_ref()?.rnm.as_ref())
+                .flat_map(|r| {
+                    r.layers
+                        .iter()
+                        .flat_map(|l| {
+                            std::iter::once(&l.file.path).chain(l.mask.as_ref().map(|m| &m.path))
+                        })
+                        .chain(r.ao.as_ref().map(|a| &a.file.path))
+                        .cloned()
+                })
+                .collect()
+        }
+        // The scope sets' paths: the view's replace them.
+        let old_rnm = rnm_paths(self.items.iter().filter(|i| in_scope(i)));
         // A failed file has no set: the partial's own item for its key replaces it.
         let new: BTreeSet<String> = view.items.iter().map(|i| i.key.clone()).collect();
         let mut items = view.items;
@@ -2733,25 +2753,15 @@ impl AppModel {
         // Stable, as `PlanView::build`'s sort.
         items.sort_by_cached_key(|i| i.key.to_lowercase());
         self.items = items;
-        // The engine refuses any edit that changes membership, so the view holds exactly the scope's sets, and
-        // each of them already exists.
-        debug_assert!(
-            scope.iter().all(|k| view.sets.iter().any(|s| &s.key == k)),
-            "every scope set is in the partial"
-        );
-        debug_assert!(
-            view.sets
-                .iter()
-                .all(|s| self.sets.iter().any(|x| x.key == s.key)),
-            "a partial adds no set"
-        );
+        // `partial_landed` checked that the view holds exactly the scope's sets, each a set of the landed plan.
         for s in view.sets {
-            match self.sets.iter_mut().find(|x| x.key == s.key) {
-                Some(x) => *x = s,
-                None => self.sets.push(s),
+            if let Some(x) = self.sets.iter_mut().find(|x| x.key == s.key) {
+                *x = s;
             }
         }
-        for p in &old_rnm {
+        // A path a set outside the scope still reads stays (final fix, parked from Task 6).
+        let kept = rnm_paths(self.items.iter().filter(|i| !in_scope(i)));
+        for p in old_rnm.difference(&kept) {
             self.rnm_keys.remove(p);
         }
         self.rnm_notes.retain(|k, _| !scope.contains(k));
@@ -2762,20 +2772,7 @@ impl AppModel {
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
         self.invalidate_views();
-        if carried.key.as_ref() == Some(&old_key) {
-            let views = carried.views.map(|v| {
-                let mut v = Arc::unwrap_or_clone(v);
-                sets::splice_views(self, &mut v, scope);
-                Arc::new(v)
-            });
-            *self.views.borrow_mut() = ViewCache {
-                key: Some(self.view_key()),
-                views,
-                blocks: carried.blocks,
-                asks: carried.asks,
-                ..Default::default()
-            };
-        }
+        self.carry_views(carried, &old_key, scope, true);
         self.refresh_game_paths();
         self.request_dds_thumbs();
         self.counts_status();
@@ -2975,6 +2972,93 @@ impl AppModel {
             .map(|(n, i)| (i.key.clone(), n))
             .rev()
             .collect();
+    }
+
+    /// Note F?7: after `invalidate_views`, keep the views cache that was built for `old_key` under the new key, with
+    /// the views of the `scope` sets built again (`sets::splice_views`); `blocks` keeps the export blocks and asks too.
+    /// Nothing is kept when the cache was built for another key, or when the key moved outside `items` (target,
+    /// roots, sets document, engine inputs, scan): the next frame builds everything.
+    fn carry_views(
+        &mut self,
+        carried: ViewCache,
+        old_key: &ViewKey,
+        scope: &BTreeSet<String>,
+        blocks: bool,
+    ) {
+        let key = self.view_key();
+        let same = ViewKey {
+            items: key.items,
+            ..old_key.clone()
+        } == key;
+        if !same || carried.key.as_ref() != Some(old_key) {
+            return;
+        }
+        let views = carried.views.map(|v| {
+            let mut v = Arc::unwrap_or_clone(v);
+            if !scope.is_empty() {
+                sets::splice_views(self, &mut v, scope);
+            }
+            Arc::new(v)
+        });
+        let (blocks, asks) = if blocks {
+            (carried.blocks, carried.asks)
+        } else {
+            (None, None)
+        };
+        *self.views.borrow_mut() = ViewCache {
+            key: Some(key),
+            views,
+            blocks,
+            asks,
+            ..Default::default()
+        };
+    }
+
+    /// `invalidate_views` for a change that leaves the items and sets as they are (the artist checks' results):
+    /// Problems builds again, the set views and the export blocks and asks (which read no check) are kept.
+    pub(crate) fn rows_changed(&mut self) {
+        let old_key = self.view_key();
+        let carried = std::mem::take(&mut *self.views.borrow_mut());
+        self.invalidate_views();
+        self.carry_views(carried, &old_key, &BTreeSet::new(), true);
+    }
+
+    /// Final fix I2: the sets whose views a landed full plan changed (a member's `sets::view_reads`, or the set's own
+    /// plan), or `None` when something the splice assumes moved: an item's key or set, the set keys, the sets root.
+    fn full_plan_changes(
+        &self,
+        old_items: &[TextureItem],
+        old_sets: &[SetItem],
+        old_root: Option<&std::path::Path>,
+    ) -> Option<BTreeSet<String>> {
+        if old_root != self.sets_root.as_deref()
+            || old_items.len() != self.items.len()
+            || old_sets.len() != self.sets.len()
+        {
+            return None;
+        }
+        let mut changed = BTreeSet::new();
+        // Both lists are sorted the same way (`PlanView::build`), so a pairwise compare finds any key change.
+        for (a, b) in old_items.iter().zip(&self.items) {
+            if a.key != b.key || a.set_key != b.set_key {
+                return None;
+            }
+            if sets::view_reads(a) != sets::view_reads(b) {
+                changed.extend(b.set_key.clone());
+            }
+        }
+        let old: std::collections::HashMap<&str, &SetItem> =
+            old_sets.iter().map(|s| (s.key.as_str(), s)).collect();
+        for s in &self.sets {
+            match old.get(s.key.as_str()) {
+                None => return None,
+                Some(o) if *o != s => {
+                    changed.insert(s.key.clone());
+                }
+                Some(_) => {}
+            }
+        }
+        Some(changed)
     }
 
     /// Replace the Tree_Anim scan evidence; the JSON editor's cache sees it (DECISIONS AG109).
@@ -3225,10 +3309,8 @@ impl AppModel {
         self.weighting_follow = None;
         self.reencode_follow = None;
         // Fast re-plan: a step that leaves the sets document as it is may send a partial (`replan` checks the rest).
-        let files_edit = self
-            .sets_doc
-            .as_ref()
-            .is_some_and(|d| d.text() == s.project);
+        // Compared as the edit path compares its snapshots (Minor 3: no sets document on both sides is unchanged).
+        let files_edit = Self::snapshot_of(None, self.sets_doc.as_ref()).project == s.project;
         // Only a document the step changed is restored: `restore` marks it dirty, and an untouched one must stay clean
         // (no empty sdc-project.toml on Save, no spurious changed-on-disk dialog).
         if let Some(p) = self.project.as_mut().filter(|p| p.text() != s.sdc_toml) {
@@ -4387,6 +4469,31 @@ mod tests {
             "named and explicit paths: {inputs:?}"
         );
         assert_eq!(inputs, sets::linear::engine_inputs(&m));
+    }
+
+    /// Final fix (parked from Task 8): a splice of more than 32 sets builds every view instead, and either way the
+    /// result equals a fresh build.
+    #[test]
+    fn a_splice_of_more_than_32_sets_builds_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let first = m.sets[0].clone();
+        m.sets = (0..40)
+            .map(|i| SetItem {
+                key: format!("{}{i:02}", first.key),
+                ..first.clone()
+            })
+            .collect();
+        m.invalidate_views();
+        let fresh = sets::views(&m);
+        for (n, whole) in [(32, false), (33, true)] {
+            let scope: BTreeSet<String> = m.sets.iter().take(n).map(|s| s.key.clone()).collect();
+            let mut v = (*fresh).clone();
+            let builds = m.view_builds.get();
+            sets::splice_views(&m, &mut v, &scope);
+            assert_eq!(m.view_builds.get() - builds, u64::from(whole), "{n} sets");
+            assert_eq!(v, *fresh, "{n} sets");
+        }
     }
 
     /// Task 5: a plan request borrows the cached set views, so building it deep-clones none. On a planned `cs` project

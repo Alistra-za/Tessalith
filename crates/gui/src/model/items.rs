@@ -73,7 +73,7 @@ pub struct TextureItem {
     pub helper: Option<std::sync::Arc<HelperReport>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SetItem {
     pub key: String,
     /// Item keys.
