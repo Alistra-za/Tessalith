@@ -952,7 +952,6 @@ fn parsed_content_loads_once_and_material_edits_follow_the_load() {
     assert_eq!(v.shapes.len(), 1);
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(3),
         result: Ok(EditKind::Cbuffer),
     });
     assert!(!v.busy());
@@ -1094,14 +1093,12 @@ fn a_stale_material_reply_does_not_touch_the_new_contents_edits() {
     // A's late reply (an error) must neither free B's pending edit nor show its error.
     v.handle(v3::V3Reply::MaterialSet {
         content: a,
-        id: ShapeId(0),
         result: Err("old".into()),
     });
     assert!(v.busy());
     assert!(v.render_error.is_none());
     v.handle(v3::V3Reply::MaterialSet {
         content: b,
-        id: ShapeId(0),
         result: Ok(EditKind::Same),
     });
     assert!(!v.busy());
@@ -1138,7 +1135,6 @@ fn a_failed_edit_on_the_only_shape_keeps_the_camera_live() {
     let _ = cmds.try_recv();
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(0),
         result: Err("compile".into()),
     });
     v.handle(v3::V3Reply::Shapes(vec![info(ShapeStatus::Failed {
@@ -1235,6 +1231,13 @@ fn femalebody_playback_holds_30_fps() {
             let (wall, render) = (wall / n as f64, render / n as f64);
             println!(
                 "deferred {deferred}, {w}x{h}: playback {wall:.2} ms/frame wall, {render:.2} ms render (FrameTiming)"
+            );
+            assert!(
+                v.edit_kinds
+                    .iter()
+                    .all(|k| *k == render3d::EditKind::Cbuffer),
+                "cbuffer edits only: {:?}",
+                v.edit_kinds
             );
             assert!(
                 wall < 33.3,
@@ -1623,7 +1626,6 @@ fn an_edit_waiting_for_its_shader_keeps_the_camera_live_on_the_old_draw() {
     let _ = cmds.try_recv();
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(0),
         result: Ok(EditKind::Permutation),
     });
     v.handle(v3::V3Reply::Shapes(vec![info(pending(true))]));
@@ -2147,11 +2149,7 @@ fn default_settings_define_linear_lighting_only() {
         cache.path().to_path_buf(),
     )
     .unwrap();
-    r.set_settings(CsSettings {
-        hash: "0123456789abcdef0123".into(),
-        notes: vec!["Info.ini missing".into()],
-        ..Default::default()
-    });
+    r.set_settings(CsSettings::default());
     assert_eq!(r.features(), ["ENABLE_LL"], "default settings: LL only");
 }
 

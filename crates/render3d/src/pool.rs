@@ -66,6 +66,7 @@ pub fn run_job(job: CompileJob) -> CompileDone {
         result: result.map(Arc::new),
     }
 }
+
 fn lower_priority() {
     use windows::Win32::System::Threading::{
         GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,

@@ -577,7 +577,6 @@ fn env_cube_is_built_once_per_yaw() {
     s.env_yaw = 0.5;
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 2);
-
     let mut plain = loaded(cache.path(), &feats(&[ADD]), vec![opaque()]);
     plain.set_deferred(true).unwrap();
     plain.render(&Scene::neutral(), 64, 64).unwrap();
@@ -651,7 +650,6 @@ fn failed_env_cube_build_is_not_retried_for_the_same_yaw() {
     assert!(e.contains("power of two"), "{e}");
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 0);
-
     s.env_yaw = 0.5;
     assert!(r.render(&s, 64, 64).is_err(), "a new yaw tries again");
     r.set_env_size(render3d::hdri::ENV_SIZE);

@@ -730,7 +730,6 @@ pub enum V3Reply {
     /// stays).
     MaterialSet {
         content: u64,
-        id: ShapeId,
         result: Result<EditKind, String>,
     },
     /// One `SwapTexture` applied (or why it was not: the old texture stays).
@@ -788,6 +787,9 @@ pub struct Viewport3d {
     /// Render-thread timing of the last frame; the ignored perf gates read it.
     #[cfg(feature = "test-hooks")]
     pub timing: Option<FrameTiming>,
+    /// The kind of every `SetMaterial` the render thread applied (`Ok` replies), for the perf gate.
+    #[cfg(feature = "test-hooks")]
+    pub edit_kinds: Vec<EditKind>,
     /// (adapter, software renderer).
     pub adapter: Option<(String, bool)>,
     /// Which panel owns this viewport: keys its frame texture in the UI.
@@ -885,6 +887,8 @@ impl Viewport3d {
             frame: None,
             #[cfg(feature = "test-hooks")]
             timing: None,
+            #[cfg(feature = "test-hooks")]
+            edit_kinds: vec![],
             adapter: None,
             panel: "meshes",
             render_error: None,
@@ -1734,17 +1738,19 @@ impl Viewport3d {
                     }
                 }
             }
-            V3Reply::MaterialSet {
-                content, result, ..
-            } => {
+            V3Reply::MaterialSet { content, result } => {
                 // A reply for content replaced since: its count was reset with the content.
                 if self.loaded.or(self.pending_load) != Some(content) {
                     return;
                 }
                 self.edits_done = (self.edits_done + 1).min(self.edits_sent);
-                // `Ok` carries the edit kind (nothing to do with it here).
-                if let Err(e) = result {
-                    self.render_error = Some(e);
+                match result {
+                    // The kind is only recorded for the perf gate ("cbuffer edits only").
+                    Ok(_kind) => {
+                        #[cfg(feature = "test-hooks")]
+                        self.edit_kinds.push(_kind);
+                    }
+                    Err(e) => self.render_error = Some(e),
                 }
             }
             V3Reply::TextureSwap {
@@ -2378,11 +2384,7 @@ fn render_loop(
                     if log_for_replay(&result) {
                         edits.insert(id, m);
                     }
-                    send(V3Reply::MaterialSet {
-                        content,
-                        id,
-                        result,
-                    });
+                    send(V3Reply::MaterialSet { content, result });
                 }
                 send(V3Reply::Shapes(r.shapes()));
             }
