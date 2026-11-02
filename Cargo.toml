@@ -41,6 +41,8 @@ flate2 = "1"
 
 [profile.dev]
 opt-level = 1
+# Line tables keep file:line in panics and backtraces; local-variable debugging needs CARGO_PROFILE_DEV_DEBUG=2 (Note FM2).
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
