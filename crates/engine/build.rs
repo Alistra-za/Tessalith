@@ -2,8 +2,8 @@
 //! with a `-dirty` suffix when tracked files differ from HEAD. Never fails the build: without git, or outside a
 //! git checkout, the commit is `unknown`.
 //!
-//! The dirty flag is evaluated whenever this script runs, which is when HEAD or a branch ref moves (or this file
-//! changes), not on every source edit; edits made after the last such run do not toggle it.
+//! The dirty flag is evaluated whenever this script runs, which is when this checkout's HEAD or its reflog moves (or
+//! this file changes), not on every source edit; edits made after the last such run do not toggle it.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -25,9 +25,12 @@ fn dirty(dir: &Path) -> bool {
     git(dir, &["status", "--porcelain", "--untracked-files=no"]).is_some()
 }
 
-/// Re-run only when the checked-out commit can change: `HEAD`, the branch refs (`refs/heads` is scanned, so a
-/// loose ref appearing or moving is seen), and `packed-refs`. cargo treats a missing watched path as always
-/// stale, so only paths that exist are named.
+/// Re-run only when this checkout's commit can change: `HEAD`, `packed-refs`, and the per-worktree reflog
+/// `<git_dir>/logs/HEAD`, which git appends to on every commit, reset or checkout made here and not for another
+/// worktree's branches (watching the shared `refs/heads` rebuilt every worktree on any commit).
+/// shortcut: with `core.logAllRefUpdates=false`, or a branch moved from outside this worktree, the commit string can
+/// go stale; upgrade by also watching the branch's own ref file. cargo treats a missing watched path as always stale,
+/// so only paths that exist are named.
 fn watch_git(dir: &Path) {
     let Some(git_dir) = git(dir, &["rev-parse", "--absolute-git-dir"]).map(PathBuf::from) else {
         return;
@@ -38,7 +41,7 @@ fn watch_git(dir: &Path) {
         .unwrap_or_else(|| git_dir.clone());
     for p in [
         git_dir.join("HEAD"),
-        common.join("refs").join("heads"),
+        git_dir.join("logs").join("HEAD"),
         common.join("packed-refs"),
     ] {
         if p.exists() {
