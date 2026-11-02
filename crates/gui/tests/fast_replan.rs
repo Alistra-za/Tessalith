@@ -1,0 +1,296 @@
+//! Fast re-plan (R2 §5): an edit to a `[files]` key shows a partial plan of the sets it reaches at once; the full
+//! plan lands behind it and always wins. `hold_plan_results` parks the plan messages so each test delivers them in
+//! the order it wants.
+mod support;
+use engine::config::AlphaPolicy;
+use sdc_gui::model::AppModel;
+use sdc_gui::settings::GuiSettings;
+use sdc_gui::worker::WorkerMsg;
+use serde_json::json;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use support::*;
+
+const LEAF: &str = "landscape/leaf.png";
+const ROCK: &str = "landscape/rock01.png";
+const DDS: &str = "landscape/plate.dds";
+
+/// The support fixture plus `extra`, opened with its export folder chosen, then holding plan results.
+fn open(dir: &Path, extra: impl FnOnce(&Path)) -> AppModel {
+    let root = mod_folder(dir);
+    extra(&root);
+    let mut m = fresh(dir, root);
+    m.hold_plan_results = true;
+    m
+}
+
+fn fresh(dir: &Path, root: PathBuf) -> AppModel {
+    let settings = GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(root);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    choose_export(&mut m, dir.join("export"));
+    m
+}
+
+fn is_partial(x: &WorkerMsg) -> bool {
+    matches!(x, WorkerMsg::Partial { .. })
+}
+
+fn seq_of(x: &WorkerMsg) -> u64 {
+    match x {
+        WorkerMsg::Partial { seq, .. } => *seq,
+        _ => u64::MAX,
+    }
+}
+
+/// Poll until at least `partials` partials and `planned` full plans are parked; returns them, partials by `seq`.
+fn collect(m: &mut AppModel, partials: usize, planned: usize) -> (Vec<WorkerMsg>, Vec<WorkerMsg>) {
+    let end = Instant::now() + Duration::from_secs(60);
+    let mut got = vec![];
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        let p = got.iter().filter(|x| is_partial(x)).count();
+        if p >= partials && got.len() - p >= planned {
+            let (mut p, f): (Vec<_>, Vec<_>) = got.into_iter().partition(is_partial);
+            p.sort_by_key(seq_of);
+            return (p, f);
+        }
+        assert!(Instant::now() < end, "plan messages did not arrive");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Handle `msgs` in this order in one poll, then hold again.
+fn deliver(m: &mut AppModel, msgs: Vec<WorkerMsg>) {
+    m.hold_plan_results = false;
+    for x in msgs {
+        m.sender().send(x).unwrap();
+    }
+    m.poll();
+    m.hold_plan_results = true;
+}
+
+/// Deliver the rest and let every plan run through.
+fn finish(m: &mut AppModel, msgs: Vec<WorkerMsg>) {
+    m.hold_plan_results = false;
+    for x in msgs {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+fn policy(m: &AppModel, key: &str) -> Option<AlphaPolicy> {
+    m.item(key)?.job.as_ref().map(|j| j.profile.alpha.policy)
+}
+
+/// What a fresh open must show the same: key, set, status, warnings and the whole job.
+fn shape(m: &AppModel) -> Vec<String> {
+    m.items
+        .iter()
+        .map(|i| {
+            format!(
+                "{} {:?} {:?} {:?} {}",
+                i.key,
+                i.set_key,
+                i.status,
+                i.warnings,
+                serde_json::to_value(&i.job).unwrap()
+            )
+        })
+        .collect()
+}
+
+/// Save, open the folder again in a new window, and compare its items with `m`'s.
+fn equals_a_fresh_open(dir: &Path, m: &mut AppModel) {
+    m.save().unwrap();
+    let again = fresh(dir, m.root.clone().unwrap());
+    assert_eq!(shape(m), shape(&again));
+}
+
+fn cutout(m: &mut AppModel, key: &str) {
+    m.set_field(key, "alpha.policy", json!(AlphaPolicy::Cutout));
+}
+
+#[test]
+fn partial_lands_before_full() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    assert_ne!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    let rock = policy(&m, ROCK);
+    let sdc = m.project.as_ref().unwrap().path().to_path_buf();
+    let on_disk = std::fs::read_to_string(&sdc).ok();
+    let marks = m.plan_marks();
+    cutout(&mut m, LEAF);
+    let text = m.project.as_ref().unwrap().text();
+    let marks_edit = m.plan_marks();
+    let rev = m.items_rev();
+    let (partials, full) = collect(&mut m, 1, 1);
+    assert_eq!(partials.len(), 1);
+    deliver(&mut m, partials);
+    assert_eq!(
+        policy(&m, LEAF),
+        Some(AlphaPolicy::Cutout),
+        "the partial shows the edit"
+    );
+    assert_eq!(policy(&m, ROCK), rock);
+    assert!(m.items_rev() > rev, "the views see the splice");
+    assert!(!m.partial_pending);
+    // Nothing but the edit's own `replan` moved: no `last_inputs` write, no checks run, no project write.
+    assert_eq!(m.plan_marks(), marks_edit);
+    assert_eq!(marks_edit.1, marks.1);
+    assert_eq!(m.project.as_ref().unwrap().text(), text);
+    assert_eq!(std::fs::read_to_string(&sdc).ok(), on_disk);
+    assert!(m.busy(), "the full plan is still due");
+    finish(&mut m, full);
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    assert!(
+        m.dirty_keys.is_empty(),
+        "the full plan clears the dirty keys"
+    );
+    equals_a_fresh_open(d.path(), &mut m);
+}
+
+#[test]
+fn two_partials_in_a_row_keep_both() {
+    for reversed in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open(d.path(), |_| {});
+        cutout(&mut m, LEAF);
+        cutout(&mut m, ROCK);
+        let (mut partials, full) = collect(&mut m, 2, 2);
+        let newest = seq_of(&partials[1]);
+        if reversed {
+            partials.reverse();
+        }
+        deliver(&mut m, partials);
+        assert_eq!(
+            policy(&m, LEAF),
+            Some(AlphaPolicy::Cutout),
+            "reversed: {reversed}"
+        );
+        assert_eq!(
+            policy(&m, ROCK),
+            Some(AlphaPolicy::Cutout),
+            "reversed: {reversed}"
+        );
+        assert_eq!(
+            m.applied_seq, newest,
+            "an older partial never applies after a newer one"
+        );
+        finish(&mut m, full);
+        equals_a_fresh_open(d.path(), &mut m);
+    }
+}
+
+#[test]
+fn a_partial_after_its_full_plan_is_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    cutout(&mut m, LEAF);
+    let (partials, full) = collect(&mut m, 1, 1);
+    finish(&mut m, full);
+    let (rev, seq) = (m.items_rev(), m.applied_seq);
+    finish(&mut m, partials);
+    assert_eq!(m.items_rev(), rev, "the full plan wins");
+    assert_eq!(m.applied_seq, seq);
+    equals_a_fresh_open(d.path(), &mut m);
+}
+
+#[test]
+fn edit_during_full_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    cutout(&mut m, LEAF);
+    let (p1, f1) = collect(&mut m, 1, 1);
+    deliver(&mut m, p1);
+    // A second edit while the first full plan is out: that plan is stale now.
+    cutout(&mut m, ROCK);
+    let (p2, f2) = collect(&mut m, 1, 1);
+    deliver(&mut m, f1);
+    assert!(m.busy(), "the stale full plan was dropped");
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    deliver(&mut m, p2);
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    assert_eq!(policy(&m, ROCK), Some(AlphaPolicy::Cutout));
+    finish(&mut m, f2);
+    equals_a_fresh_open(d.path(), &mut m);
+}
+
+#[test]
+fn undo_after_partial() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    let before = policy(&m, LEAF);
+    cutout(&mut m, LEAF);
+    let (p1, f1) = collect(&mut m, 1, 1);
+    deliver(&mut m, p1);
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
+    m.undo();
+    let (p2, f2) = collect(&mut m, 1, 1);
+    assert!(m.dirty_keys.iter().any(|k| k == LEAF));
+    deliver(&mut m, p2);
+    assert_eq!(
+        policy(&m, LEAF),
+        before,
+        "the undo's partial takes the edit back"
+    );
+    let mut rest = f1;
+    rest.extend(f2);
+    finish(&mut m, rest);
+    assert_eq!(policy(&m, LEAF), before);
+    equals_a_fresh_open(d.path(), &mut m);
+}
+
+#[test]
+fn needs_full_waits_for_full() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |root| bc1_dds(&root.join(DDS)));
+    assert!(
+        m.item(DDS).is_some_and(|i| i.job.is_none()),
+        "a skipped DDS"
+    );
+    m.set_reencode(&[DDS.to_string()], true);
+    assert!(m.partial_pending, "a [files] edit sends a partial");
+    let rev = m.items_rev();
+    let (partials, full) = collect(&mut m, 1, 1);
+    let WorkerMsg::Partial {
+        result: Err(why), ..
+    } = &partials[0]
+    else {
+        panic!("reencode needs a full plan")
+    };
+    assert!(why.contains("reencode"), "{why}");
+    deliver(&mut m, partials);
+    assert!(!m.partial_pending);
+    assert_eq!(m.items_rev(), rev, "nothing changed");
+    assert!(m.item(DDS).is_some_and(|i| i.job.is_none()));
+    finish(&mut m, full);
+    assert!(
+        m.item(DDS).is_some_and(|i| i.job.is_some()),
+        "the full plan re-encodes it"
+    );
+}
+
+#[test]
+fn a_global_edit_sends_no_partial() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    // The export folder is outside `[files]`: the request differs from the landed one.
+    m.set_export_folder(d.path().join("export2"));
+    assert!(!m.partial_pending);
+    let (partials, full) = collect(&mut m, 0, 1);
+    assert!(partials.is_empty());
+    finish(&mut m, full);
+    // A `[files]` edit after it landed sends one again.
+    m.hold_plan_results = true;
+    cutout(&mut m, LEAF);
+    assert!(m.partial_pending);
+    let (_, full) = collect(&mut m, 1, 1);
+    finish(&mut m, full);
+}

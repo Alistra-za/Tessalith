@@ -43,6 +43,12 @@ pub enum WorkerMsg {
         generation: u64,
         result: Result<PlanView, PlanFailure>,
     },
+    /// Fast re-plan (R2 §5): the plan of the sets an edit reaches, with those set keys, for the `edit_seq` it was
+    /// sent at; `Err` (a `NeedsFull` reason or an engine error) leaves it to the full plan.
+    Partial {
+        seq: u64,
+        result: Result<(PlanView, std::collections::BTreeSet<String>), String>,
+    },
     /// A scan-database read for the plan's sets ended (stale generations are dropped).
     MeshVotes {
         generation: u64,
@@ -353,6 +359,34 @@ pub fn spawn_plan(
         drop(stop);
         let _ = ticker.join();
         let _ = tx.send(WorkerMsg::Planned { generation, result });
+    });
+}
+
+/// Fast re-plan (R2 §5): `Session::replan_sets` for `changed` (the current entry of every `[files]` key changed
+/// since the last landed full plan), sent as `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it.
+pub fn spawn_partial(
+    tx: Sender<WorkerMsg>,
+    session: Arc<Session>,
+    req: BatchRequest,
+    changed: Vec<(String, Option<toml::Table>)>,
+    seq: u64,
+    root: PathBuf,
+) {
+    spawn_guarded(tx, "partial plan", move |tx| {
+        let events = Arc::new(VecSink::default());
+        let rep = Reporter::new(events.clone(), engine::events::new_batch_id());
+        // A panic is this partial's failure: the full plan behind it reports for itself.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            session
+                .replan_sets(&req, &changed, &rep, &CancelToken::default())
+                .map(|p| {
+                    let view = PlanView::build(&p.plan, &events.take(), &session, &root);
+                    (view, p.scope)
+                })
+                .map_err(|e| e.to_string())
+        }))
+        .unwrap_or_else(|p| Err(format!("partial plan panicked: {}", panic_text(&*p))));
+        let _ = tx.send(WorkerMsg::Partial { seq, result });
     });
 }
 

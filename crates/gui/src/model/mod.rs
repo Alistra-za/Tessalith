@@ -58,7 +58,8 @@ pub mod viewport3d;
 use crate::project::{ProjectDoc, SaveError};
 use crate::settings::GuiSettings;
 use crate::worker::{
-    spawn_dds_thumbs, spawn_export, spawn_guarded, spawn_plan, MeshEvidence, PlanFailure, WorkerMsg,
+    spawn_dds_thumbs, spawn_export, spawn_guarded, spawn_partial, spawn_plan, MeshEvidence,
+    PlanFailure, WorkerMsg,
 };
 use engine::api::{BatchRequest, CancelToken};
 use engine::codes::Code;
@@ -68,6 +69,7 @@ use engine::presets::ConfigFile;
 use engine::session::{Session, Thumbnail};
 use items::*;
 use serde_json::json;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// The file an NVTT probe ran on: path, size and modified time (`AppModel::refresh_nvtt_if_changed`).
@@ -647,6 +649,27 @@ pub struct AppModel {
     votes_pending: Option<(u64, bool)>,
     generation: u64,
     planning: Option<CancelToken>,
+    /// Fast re-plan (R2 §5): bumped by every `replan`; its partial and its full plan carry this value.
+    pub edit_seq: u64,
+    /// The `edit_seq` of the newest partial or full plan that landed: an older partial is dropped.
+    pub applied_seq: u64,
+    /// The `[files]` keys changed since the last landed full plan (`apply_plan` clears it). A partial is sent the
+    /// current entries of all of them, so it is idempotent.
+    pub dirty_keys: BTreeSet<String>,
+    /// A partial of the current `edit_seq` is in flight.
+    pub partial_pending: bool,
+    /// One-shot, taken by `replan`: the edit it plans left the sets document as it was, so it may send a partial.
+    files_edit: bool,
+    /// `[files]` of the latest plan's request (`dirty_keys` grows by what differs from the next one).
+    plan_files: BTreeMap<String, serde_json::Value>,
+    /// `(edit_seq, request signature without [files])` of the full plan in flight.
+    plan_sig: (u64, u64),
+    /// The request signature of the last landed full plan: a partial is sent only while the request still has it.
+    landed_sig: Option<u64>,
+    /// Tests: `Partial` and `Planned` messages are parked (`take_held`) instead of handled, so a test can deliver
+    /// them in the order it wants.
+    pub hold_plan_results: bool,
+    held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
     /// While a folder's first plan is in flight: the folder open before it (`None`: none), Recent as it was, and that
@@ -859,6 +882,16 @@ impl AppModel {
             votes_pending: None,
             generation: 0,
             planning: None,
+            edit_seq: 0,
+            applied_seq: 0,
+            dirty_keys: Default::default(),
+            partial_pending: false,
+            files_edit: false,
+            plan_files: Default::default(),
+            plan_sig: (0, 0),
+            landed_sig: None,
+            hold_plan_results: false,
+            held: vec![],
             plan_progress: None,
             opening: None,
             open_cancelled: false,
@@ -952,6 +985,12 @@ impl AppModel {
         self.auto_replans = 0;
         self.reset_type_follow();
         self.drop_pending_votes();
+        // Fast re-plan: a partial of the previous folder in flight is dropped, and this folder starts unplanned.
+        self.applied_seq = self.edit_seq;
+        self.dirty_keys.clear();
+        self.plan_files.clear();
+        self.landed_sig = None;
+        self.partial_pending = false;
         // Another folder's item keys can be the same strings: its list must not show here.
         self.used_by.current = None;
         self.used_by.wanted = None;
@@ -1271,6 +1310,7 @@ impl AppModel {
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
+        let files_edit = std::mem::take(&mut self.files_edit);
         let (Some(session), Some(req), Some(root)) =
             (self.session.clone(), self.request(), self.root.clone())
         else {
@@ -1280,6 +1320,7 @@ impl AppModel {
             c.cancel();
         }
         self.generation += 1;
+        self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
         let (last, blame) = self.replan_pushes;
         let pushes = self.history.pushes;
@@ -1304,6 +1345,78 @@ impl AppModel {
             cs_txst_sets: req.cs_txst_sets.clone(),
         });
         spawn_plan(self.tx.clone(), session, req, cancel, self.generation, root);
+    }
+
+    /// Fast re-plan (R2 §5), the front of `replan`: bump `edit_seq`, add the `[files]` keys `req` changed to
+    /// `dirty_keys`, and send a partial of their current entries when `files_edit` (an edit that left the sets
+    /// document alone) and `req` equals the last landed full plan's request outside `[files]`. Any other edit (a
+    /// set edit, a preset, the target, a setting, mesh evidence, an undo of those) sends none.
+    fn send_partial(
+        &mut self,
+        files_edit: bool,
+        session: &Arc<Session>,
+        req: &BatchRequest,
+        root: &std::path::Path,
+    ) {
+        self.edit_seq += 1;
+        self.partial_pending = false;
+        let files = req
+            .project_config_inline
+            .as_ref()
+            .map(|c| c.files.clone())
+            .unwrap_or_default();
+        for k in self.plan_files.keys().chain(files.keys()) {
+            if self.plan_files.get(k) != files.get(k) {
+                self.dirty_keys.insert(k.clone());
+            }
+        }
+        self.plan_files = files;
+        let sig = req.sig_without_files();
+        self.plan_sig = (self.edit_seq, sig);
+        if !files_edit || self.landed_sig != Some(sig) || self.dirty_keys.is_empty() {
+            return;
+        }
+        // An entry that is not a table cannot be patched: the full plan reports it.
+        let changed: Option<Vec<_>> = self
+            .dirty_keys
+            .iter()
+            .map(|k| match self.plan_files.get(k) {
+                None => Some((k.clone(), None)),
+                Some(v) => serde_json::from_value::<toml::Table>(v.clone())
+                    .ok()
+                    .map(|t| (k.clone(), Some(t))),
+            })
+            .collect();
+        let Some(changed) = changed else { return };
+        self.partial_pending = true;
+        spawn_partial(
+            self.tx.clone(),
+            session.clone(),
+            req.clone(),
+            changed,
+            self.edit_seq,
+            root.to_path_buf(),
+        );
+    }
+
+    /// Fast re-plan (R2 §5): a partial landed. It applies only when no newer partial or full plan has; any `Err`
+    /// (`NeedsFull`, an engine error) changes nothing and the full plan lands behind it.
+    fn partial_landed(&mut self, seq: u64, result: Result<(PlanView, BTreeSet<String>), String>) {
+        if seq == self.edit_seq {
+            self.partial_pending = false;
+        }
+        match result {
+            Ok((view, scope)) if seq > self.applied_seq => {
+                self.applied_seq = seq;
+                self.apply_partial(view, &scope);
+            }
+            _ => {}
+        }
+    }
+
+    /// Tests: the `Partial` and `Planned` messages parked while `hold_plan_results` is on, in arrival order.
+    pub fn take_held(&mut self) -> Vec<WorkerMsg> {
+        std::mem::take(&mut self.held)
     }
 
     /// Item 13: the header offers Cancel while a folder's first plan is in flight (not for a re-plan, AG93).
@@ -1431,6 +1544,11 @@ impl AppModel {
                 WorkerMsg::DdsThumb { path, stamp, thumb } => {
                     thumbs_landed |= self.dds_thumb_landed(path, stamp, thumb)
                 }
+                msg @ (WorkerMsg::Partial { .. } | WorkerMsg::Planned { .. })
+                    if self.hold_plan_results =>
+                {
+                    self.held.push(msg)
+                }
                 msg => self.handle(msg),
             }
         }
@@ -1458,16 +1576,21 @@ impl AppModel {
                 self.planning = None;
                 self.plan_progress = None;
                 self.opening = None;
+                // The full plan always wins: no partial of its edit or an older one applies after it.
+                self.applied_seq = self.plan_sig.0;
+                self.partial_pending = false;
                 match result {
                     Ok(view) => {
                         // Note FC14: the edit planned fine; a later failure is not its fault.
                         self.replan_pushes.1 = None;
+                        self.landed_sig = Some(self.plan_sig.1);
                         self.apply_plan(view)
                     }
                     Err(f) => self.plan_failed(f),
                 }
             }
             WorkerMsg::Planned { .. } => {}
+            WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
             WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
             WorkerMsg::OriginalTextures {
@@ -1954,6 +2077,7 @@ impl AppModel {
             return false;
         }
         self.drop_undo_note();
+        self.files_edit = before.project == after.project;
         self.history.push(history::Command {
             label: label.into(),
             before,
@@ -2467,8 +2591,8 @@ impl AppModel {
         self.stale = view.stale;
         // The JSON rows are added once the plan settles (`finish_plan`): they read the settled sets.
         self.stale_json.clear();
-        // The count of undecided textures is shown (amber) in the Textures column header.
-        self.status_line = self.counts_line();
+        // Fast re-plan: this plan ran on every edit so far.
+        self.dirty_keys.clear();
         // The undo note stays through the plan the undo started, and goes with the next one.
         if matches!(self.undo_note_at, Some((_, true))) {
             self.drop_undo_note();
@@ -2476,9 +2600,7 @@ impl AppModel {
         if let Some((_, shown)) = self.undo_note_at.as_mut() {
             *shown = true;
         }
-        for n in [&self.status_note, &self.undo_note].into_iter().flatten() {
-            self.status_line = format!("{n} {}", self.status_line);
-        }
+        self.counts_status();
         self.prune_selection();
         // Keep the selection when its item or set still exists; else nothing.
         let gone = match &self.selection {
@@ -2511,6 +2633,54 @@ impl AppModel {
         // Output paths depend on this plan's sub-types (DECISIONS P1): plan once more when they changed. Bounded.
         // `export_after_plan` survives the return: export starts when the final plan lands.
         self.refresh_mesh_votes(true);
+    }
+
+    /// The counts (the undecided count is shown amber in the Textures column header), after any notes.
+    fn counts_status(&mut self) {
+        self.status_line = self.counts_line();
+        for n in [&self.status_note, &self.undo_note].into_iter().flatten() {
+            self.status_line = format!("{n} {}", self.status_line);
+        }
+    }
+
+    /// Fast re-plan (R2 §5): splice a partial plan of the `scope` sets into the last full plan's items and sets.
+    /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
+    /// `last_inputs`); the full plan lands behind it and replaces everything.
+    fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+        let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));
+        let expanded_in_scope = self
+            .expanded
+            .as_deref()
+            .and_then(|k| self.item(k))
+            .is_some_and(in_scope);
+        // A failed file has no set: the partial's own item for its key replaces it.
+        let new: BTreeSet<String> = view.items.iter().map(|i| i.key.clone()).collect();
+        let mut items = view.items;
+        items.extend(
+            std::mem::take(&mut self.items)
+                .into_iter()
+                .filter(|i| !in_scope(i) && !new.contains(&i.key)),
+        );
+        // Stable, as `PlanView::build`'s sort.
+        items.sort_by_cached_key(|i| i.key.to_lowercase());
+        self.items = items;
+        for s in view.sets {
+            match self.sets.iter_mut().find(|x| x.key == s.key) {
+                Some(x) => *x = s,
+                None => self.sets.push(s),
+            }
+        }
+        self.rnm_notes.retain(|k, _| !scope.contains(k));
+        self.rnm_notes.extend(view.rnm_notes);
+        self.rnm_keys.extend(view.rnm_keys);
+        self.invalidate_views();
+        self.refresh_game_paths();
+        self.request_dds_thumbs();
+        self.counts_status();
+        self.prune_selection();
+        if expanded_in_scope {
+            self.preview_after_plan();
+        }
     }
 
     /// Note FI1: a DDS tile with no image takes the cached one when its stamp matches; the rest are decoded on one
@@ -2650,6 +2820,11 @@ impl AppModel {
 
     pub fn items_rev(&self) -> u64 {
         self.items_rev
+    }
+
+    /// Tests: bumped whenever `last_inputs` is written, and per landed full plan (the checks' count).
+    pub fn plan_marks(&self) -> (u64, u64) {
+        (self.inputs_rev, self.check_state.plans_applied)
     }
 
     /// Note FI15: every item's output game path (a skipped DDS included), from its `textures/` component on, with
@@ -2860,6 +3035,7 @@ impl AppModel {
             return;
         }
         self.drop_undo_note();
+        let files_edit = before.project == after.project;
         self.history.push(history::Command {
             label: label.into(),
             before,
@@ -2869,6 +3045,7 @@ impl AppModel {
         });
         self.auto_replans = 0;
         if replan {
+            self.files_edit = files_edit;
             self.replan_after_edit();
         }
     }
@@ -2942,6 +3119,11 @@ impl AppModel {
         // Note FC8 ledger minor: a weighting re-write queued for the plan of the step undone no longer applies.
         self.weighting_follow = None;
         self.reencode_follow = None;
+        // Fast re-plan: a step that leaves the sets document as it is may send a partial (`replan` checks the rest).
+        let files_edit = self
+            .sets_doc
+            .as_ref()
+            .is_some_and(|d| d.text() == s.project);
         // Only a document the step changed is restored: `restore` marks it dirty, and an untouched one must stay clean
         // (no empty sdc-project.toml on Save, no spurious changed-on-disk dialog).
         if let Some(p) = self.project.as_mut().filter(|p| p.text() != s.sdc_toml) {
@@ -2952,6 +3134,7 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
+        self.files_edit = files_edit;
         self.replan_changed();
     }
 
