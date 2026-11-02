@@ -372,6 +372,41 @@ fn no_vanilla_copy_without_the_tick() {
     assert!(!m.also_folders()[1].exists());
     assert!(!notes(&m).contains("Vanilla"), "{}", notes(&m));
 }
+
+/// I1b fix round 1, Important 1: a main profile the schema refuses keeps its record as `refused`; the Vanilla copy of a
+/// set that qualifies does the same, so a recorded copy is not reported as an orphan (nor its record dropped).
+#[test]
+fn a_refused_profile_does_not_orphan_the_recorded_vanilla_copy() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_pbr_dir(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_xpmf(PBR_ID, json!({"shelterFade": 500}).as_object().cloned());
+    idle(&mut m);
+    assert!(m.also_on(), "{}", m.status_line);
+    let p = prepare(&m).unwrap();
+    assert!(
+        p.files.is_empty() && p.refused == [FILE.to_string()],
+        "{p:?}"
+    );
+    let van = p.vanilla.as_ref().expect("the tick gives a Vanilla child");
+    assert_eq!(van.refused, [FILE.to_string()]);
+    let path = van.root.join(FILE);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "{}\n").unwrap();
+    let rec: std::collections::BTreeMap<String, String> =
+        [(record_key(&path), sha256_of(&path).unwrap())].into();
+    let mut notes = vec![];
+    let out = sdc_gui::model::xpmf_json::finish(&p, &rec, &mut notes);
+    assert!(
+        !notes.iter().any(|n| n.contains("no set writes")),
+        "{notes:?}"
+    );
+    assert!(out.contains_key(&record_key(&path)), "{out:?}");
+}
+
 /// The entry names of a zip, from its central directory (copied from `also_export.rs`).
 fn zip_names(path: &Path) -> Vec<String> {
     let z = std::fs::read(path).unwrap();

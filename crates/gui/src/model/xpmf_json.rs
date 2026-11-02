@@ -509,6 +509,7 @@ fn refusal(
         .map(|()| text)
         .map_err(|errs| format!("{}: XPMF profile not written: {}", e.id, errs.join("; ")))
 }
+
 /// Design X2-X9: one profile per set with a block, validated against the vendored schema. `None` when no set has a
 /// block and nothing is recorded; with a record and no block it is empty, so the old profiles are reported (Task 5
 /// ruling). Two sets whose ids fold to one file name are both refused.
@@ -568,6 +569,12 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
                 .collect();
             Ok::<_, String>((text, own))
         };
+        // The set gets a copy in the Vanilla folder (when the tick is on).
+        let copy = !m.also_skipped(&e.id)
+            && vs
+                .iter()
+                .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v));
+        let van = p.vanilla.as_mut().filter(|_| copy);
         match build(false, &own_outputs) {
             Ok((text, own)) => {
                 if !own.is_empty() {
@@ -577,18 +584,17 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
             }
             Err(note) => {
                 if !p.refused.contains(&rel) {
-                    p.refused.push(rel);
+                    p.refused.push(rel.clone());
+                }
+                // As the main file: a refused set keeps its recorded copy out of the orphans.
+                if let Some(van) = van {
+                    van.refused.push(rel);
                 }
                 p.notes.push(note);
                 continue;
             }
         }
-        if let Some(van) = p.vanilla.as_mut().filter(|_| {
-            !m.also_skipped(&e.id)
-                && vs
-                    .iter()
-                    .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v))
-        }) {
+        if let Some(van) = van {
             match build(true, &vanilla_outputs) {
                 Ok((text, own)) => {
                     if !own.is_empty() {
@@ -605,6 +611,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
     }
     Some(p)
 }
+
 /// After a clean export: write each profile whose own textures are on disk, unless it was edited outside Tessalith,
 /// then report the recorded profiles this run did not write (never deleted). `shas` is the record (path → hash of
 /// what was last written there); returns the new record.
