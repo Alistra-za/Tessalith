@@ -3,6 +3,7 @@
 //! Everything starts from the upstream result and replaces it only on a strictly lower SSE, so ties keep its bytes.
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
+//! Also holds [`Rng`] and [`blocks`], the test inputs shared by the encoders-sys and engine BC4 reference tests.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
 
@@ -301,7 +302,6 @@ pub fn search(v: &[u8; 16], radius: u32, guard128: bool) -> [u8; 8] {
     b.bytes()
 }
 
-// Test inputs shared by the encoders-sys and engine BC4 reference tests.
 pub struct Rng(pub u64);
 impl Rng {
     pub fn next(&mut self) -> u64 {
