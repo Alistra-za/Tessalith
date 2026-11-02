@@ -67,14 +67,12 @@ fn collect(m: &mut AppModel, partials: usize, planned: usize) -> (Vec<WorkerMsg>
     }
 }
 
-/// Handle `msgs` in this order in one poll, then hold again.
+/// Handle `msgs` in this order, then poll with results still held (a plan message arriving meanwhile stays parked).
 fn deliver(m: &mut AppModel, msgs: Vec<WorkerMsg>) {
-    m.hold_plan_results = false;
     for x in msgs {
-        m.sender().send(x).unwrap();
+        m.handle_held(x);
     }
     m.poll();
-    m.hold_plan_results = true;
 }
 
 /// Deliver the rest and let every plan run through.
@@ -144,6 +142,10 @@ fn partial_lands_before_full() {
     assert!(!m.partial_pending);
     // Note F?: the panel takes the next edit at once; the status line still says the full plan runs.
     assert_eq!(m.fix_off(), None, "the panel waits only for the partial");
+    // Problems lists rows (the fixture's undecided textures), and its fix buttons are enabled by the same `fix_off`
+    // (`ui/problems.rs`), so they are live behind the partial too.
+    assert!(!sdc_gui::model::bottom::problems(&m).is_empty());
+    assert!(!m.plan_wait(), "Problems' fix buttons wait for nothing");
     assert!(m.status_line.ends_with(" · planning…"), "{}", m.status_line);
     let generation = m.generation();
     m.sender()
@@ -318,12 +320,13 @@ fn export_waits_for_full_after_partial() {
     assert!(m.export_queued(), "the click waits for the full plan");
     assert!(m.export.running.is_none() && m.review.is_none());
     finish(&mut m, full);
-    if m.review.is_some() {
-        m.acknowledge_all_asks();
-        m.export_from_review();
-        assert!(m.wait_idle(Duration::from_secs(60)));
-    }
+    // The queued click ran its checks on the full plan: this fixture's pitfalls open Review, and nothing was written.
     assert!(!m.export_queued());
+    assert!(m.review.is_some(), "the queued click opened Review");
+    assert!(m.export.summary.is_none(), "nothing exported before Review");
+    m.acknowledge_all_asks();
+    m.export_from_review();
+    assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(
         m.export.summary.is_some() && m.export.error.is_none(),
         "the export ran: {:?}",

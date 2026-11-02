@@ -742,12 +742,35 @@ mod tests {
             !Arc::ptr_eq(&first, &s.skeleton().unwrap()),
             "current: stored"
         );
-        // An export's plan never stores its skeleton.
-        let kept = s.skeleton().unwrap();
+    }
+
+    /// Fast re-plan (Note F?): an export plans on a token no re-plan cancels, so its plan never stores the skeleton.
+    #[test]
+    fn an_export_plan_never_stores_the_skeleton() {
+        use super::*;
+        use crate::config::Target;
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("in/textures");
+        std::fs::create_dir_all(&dir).unwrap();
+        image::ImageBuffer::from_fn(16, 16, |x, y| {
+            image::Rgb([x as u8 * 16, y as u8 * 16, 90u8])
+        })
+        .save(dir.join("a.png"))
+        .unwrap();
+        let mut req =
+            BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+        req.recursive = true;
+        let s = Session::new(Bc1Model::Ideal).unwrap();
+        let rep = Reporter::new(Arc::new(NullSink), "t");
         let plan = s
-            .plan_no_skeleton(req(), &rep, &CancelToken::default())
+            .plan_no_skeleton(req.clone(), &rep, &CancelToken::default())
             .unwrap();
         assert!(!plan.jobs.is_empty(), "it planned");
+        assert!(s.skeleton().is_none(), "none stored");
+        s.plan(req.clone(), &rep, &CancelToken::default()).unwrap();
+        let kept = s.skeleton().expect("a skeleton");
+        s.plan_no_skeleton(req, &rep, &CancelToken::default())
+            .unwrap();
         assert!(Arc::ptr_eq(&kept, &s.skeleton().unwrap()), "export: kept");
     }
 

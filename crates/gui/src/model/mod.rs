@@ -1431,6 +1431,13 @@ impl AppModel {
         std::mem::take(&mut self.held)
     }
 
+    /// Tests: handle one parked message now, without opening the channel (a message arriving meanwhile stays parked).
+    // Exists for tests only (crates/gui/tests/fast_replan.rs, ui_smoke.rs).
+    #[doc(hidden)]
+    pub fn handle_held(&mut self, msg: WorkerMsg) {
+        self.handle(msg);
+    }
+
     /// Item 13: the header offers Cancel while a folder's first plan is in flight (not for a re-plan, AG93).
     pub fn can_cancel_open(&self) -> bool {
         self.opening.is_some() && self.planning.is_some()
@@ -1509,18 +1516,24 @@ impl AppModel {
     }
 
     pub fn busy(&self) -> bool {
-        self.planning.is_some()
-            || self.votes_pending.is_some()
-            || self.export.running.is_some()
-            || self.preview.working()
-            || self.nvtt_pending
+        self.full_plan_pending() || self.non_plan_busy()
+    }
+
+    /// The work `busy()` and `edit_busy()` share besides the plan: an export, the preview, the NVTT probe.
+    fn non_plan_busy(&self) -> bool {
+        self.export.running.is_some() || self.preview.working() || self.nvtt_pending
+    }
+
+    /// Note F?: a full plan runs behind a partial of the current edit, which the items show.
+    fn partial_shown(&self) -> bool {
+        self.planning.is_some() && self.applied_seq >= self.edit_seq
     }
 
     /// Note F?: an edit waits for the plan. That is this edit's partial while it is out, or the full plan when this
     /// edit has no partial shown (a global edit, a `NeedsFull`, a folder open); also the scan-database votes.
     pub fn plan_wait(&self) -> bool {
         self.partial_pending
-            || (self.planning.is_some() && self.applied_seq < self.edit_seq)
+            || (self.planning.is_some() && !self.partial_shown())
             || self.votes_pending.is_some()
     }
 
@@ -1533,10 +1546,7 @@ impl AppModel {
     /// `busy()` with `plan_wait` for the plan: what the Advanced fields wait on. `busy()` itself stays true until the
     /// full plan lands, as the frame loop and `wait_idle` need.
     pub fn edit_busy(&self) -> bool {
-        self.plan_wait()
-            || self.export.running.is_some()
-            || self.preview.working()
-            || self.nvtt_pending
+        self.plan_wait() || self.non_plan_busy()
     }
 
     /// A v2 worker job is in flight (owner answer 8): the app's one poll line keeps frames coming and `wait_idle`
@@ -1605,7 +1615,7 @@ impl AppModel {
             } if generation == self.generation => {
                 self.plan_progress = Some((done, total));
                 // Note F?: a partial's "<counts> · planning…" stays until the full plan lands.
-                if self.planning.is_none() || self.applied_seq < self.edit_seq {
+                if !self.partial_shown() {
                     self.status_line = plan_bar_text(done, total);
                 }
             }

@@ -447,12 +447,17 @@ fn land_partial(h: &mut Harness<'static, AppModel>, full: &mut Vec<sdc_gui::work
             }
         }
     }
-    m.hold_plan_results = false;
-    m.sender().send(partial.unwrap()).unwrap();
-    m.poll();
-    m.hold_plan_results = true;
-    // A full plan polled in that one window was handled, not parked: the test would then not hold it.
-    assert!(m.busy(), "the full plan landed with the partial");
+    m.handle_held(partial.unwrap());
+    assert!(m.busy(), "the full plan is still out");
+}
+
+/// The Alpha combo showing `value`.
+fn alpha_combo<'a>(
+    h: &'a Harness<'static, AppModel>,
+    value: &str,
+) -> Option<egui_kittest::Node<'a>> {
+    h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+        .find(|n| n.accesskit_node().value().as_deref() == Some(value))
 }
 
 /// The owner's bug (Note FK1, fixed by Note F?): two alpha answers in a row. The second waits only for the first one's
@@ -478,11 +483,6 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
             .and_then(|i| i.job.as_ref())
             .map(|j| j.profile.alpha.policy)
     };
-    let alpha_combo = |h: &Harness<'static, AppModel>, value: &str| {
-        h.query_all_by_role(Role::ComboBox)
-            .find(|n| n.accesskit_node().value().as_deref() == Some(value))
-            .map(|n| (n.rect(), n.accesskit_node().is_disabled()))
-    };
     let mut full = vec![];
     h.get_by_role_and_label(Role::Button, "Cutout").hover();
     h.run();
@@ -496,18 +496,16 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
     h.run();
     assert_eq!(policy(&h), Some(AlphaPolicy::Cutout));
     assert!(h.query_by_label("Undecided").is_none());
-    let (_, off) = alpha_combo(&h, "Cutout").expect("the Alpha combo shows the answer");
+    let off = alpha_combo(&h, "Cutout")
+        .expect("the Alpha combo shows the answer")
+        .accesskit_node()
+        .is_disabled();
     assert!(!off, "the second answer waits for the full plan");
     assert!(h.state().busy(), "the first full plan is still out");
     // The second answer, through the Alpha combo.
-    fn combo<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
-        h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-            .find(|n| n.accesskit_node().value().as_deref() == Some("Cutout"))
-            .expect("the Alpha combo")
-    }
-    combo(&h).hover();
+    alpha_combo(&h, "Cutout").unwrap().hover();
     h.run();
-    combo(&h).click();
+    alpha_combo(&h, "Cutout").unwrap().click();
     h.run();
     h.get_by_label("Blend").hover();
     h.run();
@@ -517,7 +515,10 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
     land_partial(&mut h, &mut full);
     h.run();
     assert_eq!(policy(&h), Some(AlphaPolicy::Blend));
-    let (_, off) = alpha_combo(&h, "Blend").expect("the Alpha combo shows the second answer");
+    let off = alpha_combo(&h, "Blend")
+        .expect("the Alpha combo shows the second answer")
+        .accesskit_node()
+        .is_disabled();
     assert!(!off);
     // Review says the full plan is still out.
     h.state_mut().open_review();
