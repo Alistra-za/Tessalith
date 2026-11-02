@@ -10,7 +10,7 @@
 use std::f32::consts::{PI, TAU};
 use std::sync::OnceLock;
 
-/// The bundled HDRI file (6.3 MB).
+/// The bundled HDRI file (1.6 MB).
 static STUDIO_HDR: &[u8] = include_bytes!("../assets/hdri/studio_small_09_1k.hdr");
 
 /// Azimuth (radians) added to the world azimuth before the column lookup. Chosen so the image's brightest
