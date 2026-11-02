@@ -590,6 +590,21 @@ pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>)
     (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
 }
 
+/// Order: the saved `order` first (ids compared folded, the first listing of an id wins), then the rest by id. The
+/// order is folded into a map once, so each view costs one lookup, not a scan of `order` per comparison.
+fn sort_by_saved_order(views: &mut [SetView], order: &[String]) {
+    let mut at: HashMap<String, usize> = HashMap::with_capacity(order.len());
+    for (i, o) in order.iter().enumerate() {
+        at.entry(fold_id(o)).or_insert(i);
+    }
+    views.sort_by_cached_key(|v| {
+        (
+            at.get(&fold_id(&v.id)).copied().unwrap_or(usize::MAX),
+            v.id.clone(),
+        )
+    });
+}
+
 /// Every set, in display order, with its slots, ownership and prefix.
 fn build_views(m: &AppModel) -> Vec<SetView> {
     m.view_builds.set(m.view_builds.get() + 1);
@@ -609,14 +624,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             views.push(SetView::new(String::new(), e.id.clone(), vec![]));
         }
     }
-    // Order: the saved order first, then the rest by id.
-    let pos = |v: &SetView| {
-        order
-            .iter()
-            .position(|o| same_id(o, &v.id))
-            .unwrap_or(usize::MAX)
-    };
-    views.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.id.cmp(&b.id)));
+    sort_by_saved_order(&mut views, &order);
     // Entry data: created flag, settings, missing members, borrowed slots.
     let own_slots: Vec<(String, BTreeMap<SlotKind, SlotFill>)> = views
         .iter()
@@ -2508,4 +2516,73 @@ pub(crate) fn item_output_key_in(
     let suffix = recipe_suffix(item)?;
     let set = owners.get(item.key.as_str())?.to_string();
     Some(OutputKey::Packed { set, suffix })
+}
+
+/// `build_views`'s sort as it was before `sort_by_saved_order`: a linear `same_id` lookup per comparison.
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn linear_sort(views: &mut [SetView], order: &[String]) {
+        let pos = |v: &SetView| {
+            order
+                .iter()
+                .position(|o| same_id(o, &v.id))
+                .unwrap_or(usize::MAX)
+        };
+        views.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.id.cmp(&b.id)));
+    }
+
+    /// Audit §1 item 2 (Note FM7): the folded-map sort gives the order the linear one gave, on a dragged order with
+    /// Unicode-folded, back-slashed and slash-wrapped ids, an id listed twice, ids that are not listed, and views
+    /// whose ids differ only by case.
+    #[test]
+    fn the_saved_order_sort_equals_the_linear_one() {
+        let names = [
+            "Äpfel/Stein",
+            "ÄPFEL/stein",
+            "äpfel\\Holz",
+            "Öl/Fass",
+            "landscape/rock01",
+            "Landscape/Rock02",
+            "armor/Ωmega",
+            "armor/ωmega",
+            "/trim/lead",
+            "zeta",
+            "Alpha",
+            "alpha",
+        ];
+        let mut ids: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+        ids.extend((0..60).map(|i| format!("mod{}/Set{}", i % 7, i * 31 % 17)));
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as usize
+        };
+        for round in 0..20 {
+            // A dragged order: some ids (shuffled, some folded differently, one twice), then ids no view has.
+            let mut order: Vec<String> = ids.iter().filter(|_| next(3) != 0).cloned().collect();
+            for i in (1..order.len()).rev() {
+                order.swap(i, next(i + 1));
+            }
+            if let Some(o) = order.first().cloned() {
+                order.push(o.to_uppercase());
+            }
+            order.extend(["gone/one".to_string(), "Gone\\Two".to_string()]);
+            let mut views: Vec<SetView> = ids
+                .iter()
+                .map(|id| SetView::new(String::new(), id.clone(), vec![]))
+                .collect();
+            for i in (1..views.len()).rev() {
+                views.swap(i, next(i + 1));
+            }
+            let mut old = views.clone();
+            linear_sort(&mut old, &order);
+            sort_by_saved_order(&mut views, &order);
+            let ids_of = |v: &[SetView]| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+            assert_eq!(ids_of(&views), ids_of(&old), "round {round}: {order:?}");
+        }
+    }
 }
