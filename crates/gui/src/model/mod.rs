@@ -415,11 +415,6 @@ pub struct AppModel {
     sets_root: Option<PathBuf>,
     /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
     items_rev: u64,
-    /// Note F?: bumped by `invalidate_views` but not by a partial plan's splice: Problems keeps the set views, export
-    /// blocks and asks of this revision until the full plan lands (`bottom::problems`).
-    full_rev: u64,
-    /// Note F?: those three as Problems last read them, under `full_view_key` and `evidence_rev`.
-    pub(crate) problem_globals: std::cell::RefCell<Option<bottom::ProblemGlobals>>,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
     game_paths: (u64, Vec<String>),
     /// Note FI1: skipped DDS inputs' tile images by path, with the stamp they were decoded at; cleared on open and
@@ -765,8 +760,6 @@ impl AppModel {
             target: Target::Cs,
             items: vec![],
             items_rev: 0,
-            full_rev: 0,
-            problem_globals: Default::default(),
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
@@ -1357,7 +1350,8 @@ impl AppModel {
             gras_all_diffuses: req.gras_all_diffuses.clone(),
             cs_txst_sets: req.cs_txst_sets.clone(),
         });
-        // Note F?: only a changed value moves the views key, so a `[files]` edit keeps Problems' cached globals.
+        // Note F?8: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
+        // splices. The compare is O(size of these request maps), the same order as the clones above.
         if self.last_inputs != inputs {
             self.inputs_rev += 1;
             self.last_inputs = inputs;
@@ -2763,8 +2757,25 @@ impl AppModel {
         self.rnm_notes.retain(|k, _| !scope.contains(k));
         self.rnm_notes.extend(view.rnm_notes);
         self.rnm_keys.extend(view.rnm_keys);
-        // Not `invalidate_views`: `full_rev` stays, so Problems rebuilds its item rows only (Note F?).
-        self.items_changed();
+        // Note F?8: the views cache moves to the new key with only the scope sets' views built again (the frame after
+        // a partial must not rebuild 10k views); the export blocks and asks stay as of the last full plan.
+        let old_key = self.view_key();
+        let carried = std::mem::take(&mut *self.views.borrow_mut());
+        self.invalidate_views();
+        if carried.key.as_ref() == Some(&old_key) {
+            let views = carried.views.map(|v| {
+                let mut v = Arc::unwrap_or_clone(v);
+                sets::splice_views(self, &mut v, scope);
+                Arc::new(v)
+            });
+            *self.views.borrow_mut() = ViewCache {
+                key: Some(self.view_key()),
+                views,
+                blocks: carried.blocks,
+                asks: carried.asks,
+                ..Default::default()
+            };
+        }
         self.refresh_game_paths();
         self.request_dds_thumbs();
         self.counts_status();
@@ -2956,12 +2967,6 @@ impl AppModel {
 
     /// Call after writing `items` or `sets` in place (tests); a plan does it itself.
     pub fn invalidate_views(&mut self) {
-        self.full_rev += 1;
-        self.items_changed();
-    }
-
-    /// `items_rev` and the key index; a partial plan's splice calls only this.
-    fn items_changed(&mut self) {
         self.items_rev += 1;
         self.item_index = self
             .items
@@ -2996,14 +3001,6 @@ impl AppModel {
             self.evidence_rev,
             crate::model::pbr_export::json_name(self),
         )
-    }
-
-    /// `view_key` with the last full plan's items revision (Note F?): equal across a partial plan's splice only.
-    pub(crate) fn full_view_key(&self) -> ViewKey {
-        ViewKey {
-            items: self.full_rev,
-            ..self.view_key()
-        }
     }
 
     /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).

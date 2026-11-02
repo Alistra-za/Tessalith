@@ -1,7 +1,7 @@
 //! The user's texture sets (M3b spec §3, §6.1): views for the Sets column and set editor, shared-slot ownership,
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
-use super::items::{ItemKind, ItemStatus, TextureItem};
+use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
 use super::{AppModel, ViewCache};
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
@@ -17,7 +17,7 @@ use engine::presets::Provenance;
 use engine::sets::{fold_id, same_id, set_id, OutputKey, SetEdit};
 use engine::shader::{Shader, ShaderPick};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -559,24 +559,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         .unwrap_or_default();
     let order = m.sets_doc.as_ref().map(|d| d.order()).unwrap_or_default();
 
-    let mut views: Vec<SetView> = m
-        .sets
-        .iter()
-        .map(|s| {
-            let mut v = SetView::new(s.key.clone(), set_id(&root, &s.key), s.members.clone());
-            v.shader = s.shader.clone();
-            v.set_warnings = s.warnings.clone();
-            v.recipes = s.recipes.clone();
-            for mk in &s.members {
-                if let Some(slot) = m.item(mk).and_then(slot_of) {
-                    v.slots
-                        .entry(slot)
-                        .or_insert(SlotFill::Own { item: mk.clone() });
-                }
-            }
-            v
-        })
-        .collect();
+    let mut views: Vec<SetView> = m.sets.iter().map(|s| base_view(m, &root, s)).collect();
     // Created sets that have no members yet, and entries whose files have all gone (spec §7.1: shown as missing,
     // never silently dropped).
     for e in &entries {
@@ -597,86 +580,219 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         .iter()
         .map(|v| (v.id.clone(), v.slots.clone()))
         .collect();
+    let own = |from: &str| {
+        own_slots
+            .iter()
+            .find(|(id, _)| same_id(id, from))
+            .map(|(_, s)| s.clone())
+    };
     for v in &mut views {
-        let Some(e) = entry_of(&entries, &v.id) else {
-            continue;
-        };
-        v.created = e.created;
-        v.settings = e.settings.clone();
-        v.shader_choice = e.shader;
-        v.locks = e.lock.clone();
-        if v.key.is_empty() && !e.created {
-            v.missing.push(Missing::NoFilesLeft);
-        }
-        for f in e.add.iter().chain(&e.remove) {
-            if !m.items.iter().any(|i| path_key_matches(f, &i.key)) {
-                v.missing.push(Missing::File(f.clone()));
-            }
-        }
-        for (slot, from) in &e.borrow {
-            let borrow = |empty| Missing::Borrow {
-                slot: *slot,
-                from: from.clone(),
-                empty,
-            };
-            let Some((_, src)) = own_slots.iter().find(|(id, _)| same_id(id, from)) else {
-                v.missing.push(borrow(false));
-                continue;
-            };
-            let hit = src
-                .iter()
-                .find(|(k, f)| k.slot_number() == *slot && matches!(f, SlotFill::Own { .. }));
-            if let Some((kind, SlotFill::Own { item })) = hit {
-                v.slots.insert(
-                    *kind,
-                    SlotFill::Borrowed {
-                        from: from.clone(),
-                        item: item.clone(),
-                    },
-                );
-            } else {
-                v.missing.push(borrow(true));
-            }
+        if let Some(e) = entry_of(&entries, &v.id) {
+            entry_view(m, v, e, own);
         }
     }
     // PBR, derived match, prefix.
     for v in &mut views {
-        let diffuse = match v.slots.get(&SlotKind::Diffuse) {
-            Some(SlotFill::Own { item: k } | SlotFill::Borrowed { item: k, .. }) => m.item(k),
-            _ => None,
-        };
-        let st = diffuse
-            .and_then(|i| i.job.as_ref())
-            .map(|j| j.profile.subtype);
-        // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
-        v.pbr = st == Some(Subtype::PbrAlbedo);
-        v.skin = st == Some(Subtype::SkinAlbedo);
-        if is_pbr_grass(v) {
-            crate::pgp::settings::grass_view(&mut v.settings);
-        }
-        v.derived_match = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
-        match prefix_of(&v.settings, v.derived_match.as_deref().unwrap_or("")) {
-            Ok(p) => v.prefix = Some(p),
-            Err(e) => v.prefix_error = Some(e.0),
-        }
+        finish_view(m, v);
     }
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
-        v.owns = owners
-            .iter()
-            .filter(|((_, users), owner)| {
-                owner.as_deref() == Some(v.id.as_str()) && users.len() > 1
-            })
-            .filter_map(|((item, _), _)| {
-                v.slots
-                    .iter()
-                    .find(|(_, f)| matches!(f, SlotFill::Own { item: i } | SlotFill::Borrowed { item: i, .. } if i == item))
-                    .map(|(k, _)| *k)
-            })
-            .collect();
+        v.owns = owns_of(v, &owners);
     }
     views
+}
+
+/// A set's view from its plan alone: members, shader pick, warnings, recipes and its own (unborrowed) slots.
+fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
+    let mut v = SetView::new(s.key.clone(), set_id(root, &s.key), s.members.clone());
+    v.shader = s.shader.clone();
+    v.set_warnings = s.warnings.clone();
+    v.recipes = s.recipes.clone();
+    for mk in &s.members {
+        if let Some(slot) = m.item(mk).and_then(slot_of) {
+            v.slots
+                .entry(slot)
+                .or_insert(SlotFill::Own { item: mk.clone() });
+        }
+    }
+    v
+}
+
+/// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
+/// for no such set).
+fn entry_view(
+    m: &AppModel,
+    v: &mut SetView,
+    e: &SetEntry,
+    own: impl Fn(&str) -> Option<BTreeMap<SlotKind, SlotFill>>,
+) {
+    v.created = e.created;
+    v.settings = e.settings.clone();
+    v.shader_choice = e.shader;
+    v.locks = e.lock.clone();
+    if v.key.is_empty() && !e.created {
+        v.missing.push(Missing::NoFilesLeft);
+    }
+    for f in e.add.iter().chain(&e.remove) {
+        if !m.items.iter().any(|i| path_key_matches(f, &i.key)) {
+            v.missing.push(Missing::File(f.clone()));
+        }
+    }
+    for (slot, from) in &e.borrow {
+        let borrow = |empty| Missing::Borrow {
+            slot: *slot,
+            from: from.clone(),
+            empty,
+        };
+        let Some(src) = own(from) else {
+            v.missing.push(borrow(false));
+            continue;
+        };
+        let hit = src
+            .iter()
+            .find(|(k, f)| k.slot_number() == *slot && matches!(f, SlotFill::Own { .. }));
+        if let Some((kind, SlotFill::Own { item })) = hit {
+            v.slots.insert(
+                *kind,
+                SlotFill::Borrowed {
+                    from: from.clone(),
+                    item: item.clone(),
+                },
+            );
+        } else {
+            v.missing.push(borrow(true));
+        }
+    }
+}
+
+/// PBR, derived match, prefix.
+fn finish_view(m: &AppModel, v: &mut SetView) {
+    let diffuse = match v.slots.get(&SlotKind::Diffuse) {
+        Some(SlotFill::Own { item: k } | SlotFill::Borrowed { item: k, .. }) => m.item(k),
+        _ => None,
+    };
+    let st = diffuse
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.profile.subtype);
+    // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
+    v.pbr = st == Some(Subtype::PbrAlbedo);
+    v.skin = st == Some(Subtype::SkinAlbedo);
+    if is_pbr_grass(v) {
+        crate::pgp::settings::grass_view(&mut v.settings);
+    }
+    v.derived_match = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+    match prefix_of(&v.settings, v.derived_match.as_deref().unwrap_or("")) {
+        Ok(p) => v.prefix = Some(p),
+        Err(e) => v.prefix_error = Some(e.0),
+    }
+}
+
+/// The slots of `v` whose output it owns while another set also uses it.
+fn owns_of(v: &SetView, owners: &Ownership) -> Vec<SlotKind> {
+    owners
+        .iter()
+        .filter(|((_, users), owner)| owner.as_deref() == Some(v.id.as_str()) && users.len() > 1)
+        .filter_map(|((item, _), _)| {
+            v.slots
+                .iter()
+                .find(|(_, f)| matches!(f, SlotFill::Own { item: i } | SlotFill::Borrowed { item: i, .. } if i == item))
+                .map(|(k, _)| *k)
+        })
+        .collect()
+}
+
+/// The item a slot fill uses, if any.
+fn fill_item(f: &SlotFill) -> Option<&str> {
+    match f {
+        SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => Some(item),
+        SlotFill::Empty => None,
+    }
+}
+
+/// Note F?: `views` after a partial plan replaced the `scope` sets (the engine refuses any membership change, and the
+/// sets document is unchanged): the scope sets' views are built again, with every view that borrows from one of them
+/// and the ownership marks of every view sharing an output with them. Equal to `build_views` on the same model
+/// (pinned by `fast_replan::views_after_a_partial_equal_a_fresh_build`).
+pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTreeSet<String>) {
+    // shortcut: the lookups below are linear in the sets per scope set; a partial over many sets (a bulk edit)
+    // builds every view instead. Index the sets by key if a big bulk edit's frame shows in a profile.
+    if scope.len() > 32 {
+        *views = build_views(m);
+        return;
+    }
+    let root = m.sets_root();
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let scope_ids: Vec<String> = views
+        .iter()
+        .filter(|v| scope.contains(&v.key))
+        .map(|v| v.id.clone())
+        .collect();
+    let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
+    // A set's own slots by id, from the plan (what `build_views` reads before any borrow).
+    let own = |from: &str| {
+        let v = views.iter().find(|v| same_id(&v.id, from))?;
+        Some(set_of(&v.key).map_or_else(BTreeMap::new, |s| base_view(m, &root, s).slots))
+    };
+    let borrowers: Vec<&str> = entries
+        .iter()
+        .filter(|e| {
+            e.borrow
+                .values()
+                .any(|f| scope_ids.iter().any(|s| same_id(s, f)))
+        })
+        .map(|e| e.id.as_str())
+        .collect();
+    let affected: Vec<usize> = (0..views.len())
+        .filter(|&i| {
+            let v = &views[i];
+            scope.contains(&v.key) || borrowers.iter().any(|b| same_id(b, &v.id))
+        })
+        .collect();
+    let mut rebuilt = vec![];
+    for &i in &affected {
+        let old = &views[i];
+        let mut v = match set_of(&old.key) {
+            Some(s) => base_view(m, &root, s),
+            None => SetView::new(old.key.clone(), old.id.clone(), vec![]),
+        };
+        if let Some(e) = entry_of(&entries, &v.id) {
+            entry_view(m, &mut v, e, own);
+        }
+        finish_view(m, &mut v);
+        rebuilt.push(v);
+    }
+    // The outputs whose users may have changed: every item the rebuilt views used before or use now.
+    let mut touched: HashSet<String> = HashSet::new();
+    for (&i, v) in affected.iter().zip(&rebuilt) {
+        for f in views[i].slots.values().chain(v.slots.values()) {
+            touched.extend(fill_item(f).map(str::to_string));
+        }
+    }
+    for (&i, v) in affected.iter().zip(rebuilt) {
+        views[i] = v;
+    }
+    // Every view using a touched output gets its marks again; their marks read all their own outputs' users.
+    let marked: Vec<usize> = (0..views.len())
+        .filter(|&i| {
+            views[i]
+                .slots
+                .values()
+                .any(|f| fill_item(f).is_some_and(|it| touched.contains(it)))
+        })
+        .collect();
+    let items: HashSet<&str> = marked
+        .iter()
+        .flat_map(|&i| views[i].slots.values().filter_map(fill_item))
+        .collect();
+    let owners: Ownership = owners_of(views, |it| items.contains(it));
+    let owns: Vec<Vec<SlotKind>> = marked
+        .iter()
+        .map(|&i| owns_of(&views[i], &owners))
+        .collect();
+    for (i, o) in marked.into_iter().zip(owns) {
+        views[i].owns = o;
+    }
 }
 
 /// For each used output item: (item, the ids of the sets using it in display order) → the owner id, the first PBR
@@ -684,10 +800,18 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
 type Ownership = Vec<((String, Vec<String>), Option<String>)>;
 
 fn owners(views: &[SetView]) -> Ownership {
+    owners_of(views, |_| true)
+}
+
+/// `owners`, for the items `keep` takes only.
+fn owners_of(views: &[SetView], keep: impl Fn(&str) -> bool) -> Ownership {
     let mut users: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
     for v in views {
         for f in v.slots.values() {
             if let SlotFill::Own { item } | SlotFill::Borrowed { item, .. } = f {
+                if !keep(item) {
+                    continue;
+                }
                 users
                     .entry(item.clone())
                     .or_default()

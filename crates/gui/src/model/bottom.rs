@@ -228,7 +228,7 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
             }
         }
     }
-    let p = Arc::new(build_problems(m, &globals(m)));
+    let p = Arc::new(build_problems(m));
     m.problem_builds.set(m.problem_builds.get() + 1);
     let mut c = m.views.borrow_mut();
     if c.key.as_ref() != Some(&key) {
@@ -240,34 +240,6 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
     c.problems = Some((inner, p.clone()));
     c.flagged = None;
     p
-}
-
-/// Note F?: what Problems reads that costs most of a build on a big project (the set views, the export blocks, the
-/// asks), as of the last full plan. A partial plan's splice leaves them, so the build after it re-runs only the
-/// item and set loops; the scope sets' own set rows follow when the full plan lands.
-pub(crate) struct Globals {
-    views: Arc<Vec<sets::SetView>>,
-    blocks: Vec<pbr_export::ExportIssue>,
-    asks: Vec<pbr_export::ExportIssue>,
-}
-
-/// `Globals` under `full_view_key` and `evidence_rev` (the asks read the mesh evidence).
-pub(crate) type ProblemGlobals = ((super::ViewKey, u64), Arc<Globals>);
-
-fn globals(m: &AppModel) -> Arc<Globals> {
-    let key = (m.full_view_key(), m.evidence_rev);
-    if let Some((k, g)) = &*m.problem_globals.borrow() {
-        if *k == key {
-            return g.clone();
-        }
-    }
-    let g = Arc::new(Globals {
-        views: sets::views(m),
-        blocks: pbr_export::export_blocks(m),
-        asks: pbr_export::export_asks(m),
-    });
-    *m.problem_globals.borrow_mut() = Some((key, g.clone()));
-    g
 }
 
 /// What `problems` is keyed on inside the view-key cell; `export_files` shares it.
@@ -356,8 +328,8 @@ pub fn export_files_builds(m: &AppModel) -> u64 {
     m.export_files_builds.get()
 }
 
-fn build_problems(m: &AppModel, g: &Globals) -> Vec<Problem> {
-    let views = &g.views;
+fn build_problems(m: &AppModel) -> Vec<Problem> {
+    let views = sets::views(m);
     let set_at = |key: &str, id: &str| At::Set {
         key: key.into(),
         id: id.into(),
@@ -408,15 +380,15 @@ fn build_problems(m: &AppModel, g: &Globals) -> Vec<Problem> {
             )
         });
     }
-    for b in &g.blocks {
+    for b in pbr_export::export_blocks(m) {
         let at = if b.set_key.is_empty() {
             At::Project
         } else {
             set_at(&b.set_key, &b.set_id)
         };
         out.push(Problem {
-            fix: b.fix.clone(),
-            ..row(Level::Blocks, at, b.text.clone(), None)
+            fix: b.fix,
+            ..row(Level::Blocks, at, b.text, None)
         });
     }
     // Note FC3 (GD1): the NIF edit's rows, each with its level's group. A NIF Info is a row too: it has an action.
@@ -479,14 +451,14 @@ fn build_problems(m: &AppModel, g: &Globals) -> Vec<Problem> {
             ..row(Level::Decide, At::Texture(i.key.clone()), text, None)
         });
     }
-    for a in &g.asks {
+    for a in pbr_export::export_asks(m) {
         // FC7: a re-encode row is project-wide.
         let at = if a.set_id.is_empty() {
             At::Project
         } else {
             set_at(&a.set_key, &a.set_id)
         };
-        out.push(row(Level::Warning, at, a.text.clone(), None));
+        out.push(row(Level::Warning, at, a.text, None));
     }
     for i in m
         .items

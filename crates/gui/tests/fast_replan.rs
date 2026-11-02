@@ -4,6 +4,7 @@
 mod support;
 use engine::config::{AlphaPolicy, Subtype};
 use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
+use sdc_gui::model::sets::{views, SetView, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::WorkerMsg;
@@ -335,19 +336,128 @@ fn export_waits_for_full_after_partial() {
     assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Blend));
 }
 
-/// Note F?: after a partial and its full plan, Problems is what a fresh full build gives.
+/// A set of two plain files beside the fixture's: `wall.png` (a diffuse) and `wall_n.png` (a normal).
+fn wall(root: &Path) {
+    let r = root.join("landscape");
+    image::ImageBuffer::from_fn(64, 64, |x, y| image::Rgb([x as u8 * 4, y as u8 * 4, 90u8]))
+        .save(r.join("wall.png"))
+        .unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(r.join("wall_n.png"))
+        .unwrap();
+}
+
+const WALL: &str = "landscape/wall.png";
+const WALL_N: &str = "landscape/wall_n.png";
+
+/// Decide `key`'s sub-type and let every plan land, then hold plan results again.
+fn decided(m: &mut AppModel, key: &str, st: Subtype) {
+    m.hold_plan_results = false;
+    m.decide(key, Answer::Subtype(st));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+}
+
+fn view_of(m: &AppModel, id: &str) -> SetView {
+    views(m).iter().find(|v| v.id == id).expect(id).clone()
+}
+
+/// Note F?8: after a partial and its full plan, Problems is what a fresh full build gives. The edit adds an export
+/// block (`_g` beside `_sk` in slot 3): the partial shows the set's new slots at once, the block (a project-wide
+/// check) waits for the full plan, and the full plan must not keep the blocks of the plan before it.
 #[test]
 fn problems_after_partial_then_full_equal_fresh() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = open(d.path(), |_| {});
-    cutout(&mut m, LEAF);
+    let mut m = open(d.path(), wall);
+    decided(&mut m, WALL_N, Subtype::SkinSk);
+    let clash = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .any(|p| p.level == Level::Blocks && p.text.contains("_g and _sk both use slot 3"))
+    };
+    assert!(!clash(&m));
+    m.decide(WALL, Answer::Subtype(Subtype::Glow));
     let (partials, full) = collect(&mut m, 1, 1);
     deliver(&mut m, partials);
+    let v = view_of(&m, "landscape/wall");
+    assert!(
+        v.slots.contains_key(&SlotKind::Emissive) && v.slots.contains_key(&SlotKind::SkinSk),
+        "the partial shows the set's new slots: {:?}",
+        v.slots
+    );
+    assert!(
+        !clash(&m),
+        "the export blocks stay as of the last full plan until it lands"
+    );
     finish(&mut m, full);
+    assert!(clash(&m), "the full plan's blocks");
     let after = problems(&m);
     m.save().unwrap();
     let again = fresh(d.path(), m.root.clone().unwrap());
     assert_eq!(*after, *problems(&again));
+}
+
+/// Note F?8: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
+/// borrows from it, and Problems' set rows read them at once.
+#[test]
+fn views_after_a_partial_equal_a_fresh_build() {
+    // The leaf becomes a normal: its set's slot and its shader warning change.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    decided(&mut m, LEAF, Subtype::Diffuse);
+    m.decide(LEAF, Answer::Subtype(Subtype::Normal));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    assert!(view_of(&m, "landscape/leaf")
+        .slots
+        .contains_key(&SlotKind::Normal));
+    assert!(
+        problems(&m).iter().any(
+            |p| matches!(&p.at, At::Set { id, .. } if id == "landscape/leaf")
+                && p.text.contains("needs diffuse")
+        ),
+        "the set's shader row follows the partial"
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+
+    // The leaf borrows the wall's normal; the wall's normal becomes `_sk`, so the borrow finds nothing.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    m.hold_plan_results = false;
+    m.edit_docs("borrow", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/wall"))
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        matches!(
+            leaf.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ),
+        "{:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.decide(WALL_N, Answer::Subtype(Subtype::SkinSk));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(&partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "a partial"
+    );
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        !leaf.slots.contains_key(&SlotKind::Normal) && !leaf.missing.is_empty(),
+        "the borrower follows its source: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
 }
 
 /// Note F?: the partial alone updates the edited set's item rows: answering an undecided alpha removes its row.
@@ -373,8 +483,9 @@ fn problems_rows_of_the_edited_set_change_after_partial() {
     assert!(!undecided(&m), "the partial removed the leaf's Decide row");
 }
 
-/// Note F?: on a big project the build after a partial reuses the last full plan's set views, export blocks and
-/// asks, so it costs a small part of a full build (a ratio, as `rename_scale.rs`, not milliseconds).
+/// Note F?8: on a big project the first frame after a partial (the set views and Problems) costs a small part of the same frame after a full plan: the partial splices the scope sets' views into the cached
+/// ones and carries the export blocks and asks over, so nothing rebuilds all sets. The name is the brief's; the test
+/// measures that reuse (a ratio, as `rename_scale.rs`, not milliseconds).
 #[test]
 fn problems_rebuild_after_partial_is_per_set() {
     const N: usize = 4000;
@@ -402,34 +513,44 @@ fn problems_rebuild_after_partial_is_per_set() {
     }
     m.items.sort_by_cached_key(|i| i.key.to_lowercase());
     m.invalidate_views();
-    let timed = |m: &AppModel| {
+    // What a frame reads that a plan invalidates: the Sets column's views and Problems (which reads the export blocks
+    // and asks).
+    let frame = |m: &AppModel| {
         let n = problems_builds(m);
         let t = Instant::now();
+        let v = views(m);
         let p = problems(m);
         let e = t.elapsed();
         assert_eq!(problems_builds(m), n + 1, "the list was built");
-        assert!(!p.is_empty());
+        assert!(!p.is_empty() && v.len() > N);
         e
     };
     let full = (0..3)
         .map(|_| {
             m.invalidate_views();
-            timed(&m)
+            frame(&m)
         })
         .min()
         .unwrap();
-    let mut partial = Duration::MAX;
+    let (mut splice, mut partial) = (Duration::MAX, Duration::MAX);
     for p in [AlphaPolicy::Cutout, AlphaPolicy::Blend, AlphaPolicy::Cutout] {
         m.set_field(LEAF, "alpha.policy", json!(p));
         let (partials, _full) = collect(&mut m, 1, 0);
-        deliver(&mut m, partials);
+        let t = Instant::now();
+        for x in partials {
+            m.handle_held(x);
+        }
+        splice = splice.min(t.elapsed());
         assert_eq!(policy(&m, LEAF), Some(p), "the partial landed");
-        partial = partial.min(timed(&m));
+        partial = partial.min(frame(&m));
+        m.poll();
     }
-    eprintln!("{N} sets: full build {full:?}, after a partial {partial:?}");
+    eprintln!(
+        "{N} sets: frame after a full plan {full:?}; after a partial: apply {splice:?}, frame {partial:?}"
+    );
     assert!(
         partial * 10 < full,
-        "after a partial Problems took {partial:?}, not under a tenth of a full build's {full:?}"
+        "the frame after a partial took {partial:?}, not under a tenth of the {full:?} after a full plan"
     );
 }
 
