@@ -1350,7 +1350,7 @@ impl AppModel {
             gras_all_diffuses: req.gras_all_diffuses.clone(),
             cs_txst_sets: req.cs_txst_sets.clone(),
         });
-        // Note F?8: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
+        // Note F?7: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
         // splices. The compare is O(size of these request maps), the same order as the clones above.
         if self.last_inputs != inputs {
             self.inputs_rev += 1;
@@ -2757,7 +2757,7 @@ impl AppModel {
         self.rnm_notes.retain(|k, _| !scope.contains(k));
         self.rnm_notes.extend(view.rnm_notes);
         self.rnm_keys.extend(view.rnm_keys);
-        // Note F?8: the views cache moves to the new key with only the scope sets' views built again (the frame after
+        // Note F?7: the views cache moves to the new key with only the scope sets' views built again (the frame after
         // a partial must not rebuild 10k views); the export blocks and asks stay as of the last full plan.
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());

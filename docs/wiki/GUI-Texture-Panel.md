@@ -105,6 +105,8 @@ The Alpha row then reads *from the meshes that use this texture*. A texture with
 
 Any field in the centre column can be changed. The change goes into `sdc.toml` as a `[files."<path>"]` entry, keyed by the file's path relative to the folder holding `sdc.toml`. Packed outputs are keyed without an extension, for example `landscape/rock01_rmaos`.
 
+**After an edit** the folder is planned again in two steps. A quick plan of the sets the edit touches shows the change first, then the whole plan lands behind it. Until the quick plan lands, the centre column's edit controls and the fix buttons in Problems and Review are greyed out, with "Wait for the plan to finish" on hover; the next edit can be made as soon as it lands. Edits a quick plan cannot cover wait for the whole plan instead: set edits, the preset, the Mode, settings, and per-file changes that move files between sets or change which outputs a set writes (a helper role, the sub-type of a PBR set's member, a packing recipe, re-encoding a DDS). <!-- D:F?6 --> While the whole plan runs, the status line reads "· planning…" after the counts, and **Export** waits for it, then checks again ([Review and export](GUI-Review-and-Export.md#review)).
+
 The GUI writes only `target`, `preset`, the `[files.*]` tables, `[inputs.*]` aliases and `defaults.packing.fill.*`. Comments, ordering, rules and every other table in your `sdc.toml` are left byte for byte as they were.
 
 Per-texture `[files]` entries sit above preset and config rules and analysis, and below any `--set` on the command line, so `sdc convert <folder>` honours them ([Project config](Project-Config.md#files)).

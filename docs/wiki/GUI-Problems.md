@@ -45,7 +45,7 @@ An undecided texture with a suggested type shows it as one button, **Set type: s
 - **Accept all suggestions (n)** at the top of the list decides every texture that has a suggestion, as one undo step.
 - A row takes the keyboard (Tab, or Shift+Tab back). **Enter** or **Space** on a row with a suggestion accepts it and moves to the next row; on the last row the keyboard stays on the list. A row without a suggestion ignores both.
 - Every accept edits the project in memory, like any other edit: **Save** writes it to `sdc.toml`.
-- These buttons are greyed out, with the reason on hover, while `sdc.toml` is read-only ("Wait for the plan to finish" until an edit's quick plan of the sets it touches lands, or the whole plan after a project-wide change).
+- These buttons are greyed out, with the reason on hover, while `sdc.toml` is read-only or an edit's plan is still out ([after an edit](GUI-Texture-Panel.md#editing)).
 
 ## Every row has its action
 
@@ -71,7 +71,7 @@ A row you must act on never just reports; its fix is its button:
 | *matchN is empty and matches nothing* (Info: a set's stored `matchN = ""`, N from 2) | **Remove match**, which removes the key. |
 | *Preset <id> is not installed* (red) | **Choose preset…**, which opens the header's **Preset** menu ([Presets](GUI-Presets.md#saving)). |
 
-A set row keeps **Go to set** beside its fix. These buttons act only on their own click: Enter and Space never run them, and they are greyed while a plan runs or while the file they write is read-only.
+A set row keeps **Go to set** beside its fix. These buttons act only on their own click: Enter and Space never run them, and they are greyed while an edit's plan is still out or while the file they write is read-only.
 
 ### Skipped presets
 

@@ -362,7 +362,7 @@ fn view_of(m: &AppModel, id: &str) -> SetView {
     views(m).iter().find(|v| v.id == id).expect(id).clone()
 }
 
-/// Note F?8: after a partial and its full plan, Problems is what a fresh full build gives. The edit adds an export
+/// Note F?7: after a partial and its full plan, Problems is what a fresh full build gives. The edit adds an export
 /// block (`_g` beside `_sk` in slot 3): the partial shows the set's new slots at once, the block (a project-wide
 /// check) waits for the full plan, and the full plan must not keep the blocks of the plan before it.
 #[test]
@@ -397,7 +397,7 @@ fn problems_after_partial_then_full_equal_fresh() {
     assert_eq!(*after, *problems(&again));
 }
 
-/// Note F?8: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
+/// Note F?7: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
 /// borrows from it, and Problems' set rows read them at once.
 #[test]
 fn views_after_a_partial_equal_a_fresh_build() {
@@ -483,7 +483,7 @@ fn problems_rows_of_the_edited_set_change_after_partial() {
     assert!(!undecided(&m), "the partial removed the leaf's Decide row");
 }
 
-/// Note F?8: on a big project the first frame after a partial (the set views and Problems) costs a small part of the same frame after a full plan: the partial splices the scope sets' views into the cached
+/// Note F?7: on a big project the first frame after a partial (the set views and Problems) costs a small part of the same frame after a full plan: the partial splices the scope sets' views into the cached
 /// ones and carries the export blocks and asks over, so nothing rebuilds all sets. The name is the brief's; the test
 /// measures that reuse (a ratio, as `rename_scale.rs`, not milliseconds).
 #[test]
