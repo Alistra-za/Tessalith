@@ -937,6 +937,40 @@ pub(crate) struct Prepared {
     packed_outputs: BTreeMap<(String, String), PathBuf>,
 }
 
+/// The pass-1 `ResolveCtx` (no shader picks). `prepare` and `plan_sets` both build theirs here, so the two cannot
+/// drift.
+#[allow(clippy::too_many_arguments)]
+fn base_ctx<'a>(
+    req: &'a BatchRequest,
+    target: Target,
+    registry: &'a PresetRegistry,
+    preset_id: &'a str,
+    user_config: Option<&'a ConfigFile>,
+    project_config: Option<&'a ConfigFile>,
+    file_scopes: &'a FileScopes,
+    nvtt: &'a crate::nvtt::NvttCell,
+) -> ResolveCtx<'a> {
+    ResolveCtx {
+        target,
+        registry,
+        preset: preset_id,
+        user_config,
+        project_config,
+        overrides: &req.overrides,
+        accept: req.accept,
+        allow: &req.allow,
+        files: file_scopes,
+        shaders: &NO_SHADERS,
+        mesh_alpha: &req.mesh_alpha,
+        nvtt: Some(nvtt),
+    }
+}
+
+/// A DDS input that `ctx` re-encodes (otherwise it is IN-DDS-SKIPPED).
+fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
+    f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
+}
+
 impl Engine {
     pub fn new() -> Result<Self, EngineError> {
         Ok(Engine {
@@ -1066,7 +1100,9 @@ impl Engine {
     }
 
     /// The global half of [`Engine::plan_cached`]: setup, discover, grouping, `[files]` scopes, set edits, output
-    /// paths and duplicates. Emits `batch_started`, the setup warnings, `SET-EDIT-STALE` and `file_discovered`.
+    /// paths and duplicates. Emits, in order: `batch_started`; the CFG-PRESET-SKIPPED warnings, then the `[inputs]`
+    /// read-as warnings; one IN-UNREADABLE per unreadable file; one SET-EDIT-STALE per skipped set edit; one
+    /// `file_discovered` per input.
     pub(crate) fn prepare(
         &self,
         req: &BatchRequest,
@@ -1185,20 +1221,16 @@ impl Engine {
         };
         file_scopes.index(&files);
         let nvtt = crate::nvtt::NvttCell::new(req.nvtt.clone());
-        let ctx = ResolveCtx {
+        let ctx = base_ctx(
+            req,
             target,
-            registry: &registry,
-            preset: &preset_id,
-            user_config: user_config.as_ref(),
-            project_config: project_config.as_ref(),
-            overrides: &req.overrides,
-            accept: req.accept,
-            allow: &req.allow,
-            files: &file_scopes,
-            shaders: &NO_SHADERS,
-            mesh_alpha: &req.mesh_alpha,
-            nvtt: Some(&nvtt),
-        };
+            &registry,
+            &preset_id,
+            user_config.as_ref(),
+            project_config.as_ref(),
+            &file_scopes,
+            &nvtt,
+        );
         // Trace-debug 2026-10-16 #4: a raw map whose sub-type was requested is an ordinary file (spec §4.4), as
         // `plan_packing` treats it, so its role leaves the set's suffixes (unless another raw member has it) and
         // Advanced skin detection and the `auto` prediction below follow the recipe actually built.
@@ -1345,10 +1377,8 @@ impl Engine {
                 },
             );
         }
-        let reencode =
-            |f: &InputFile| f.kind == InputKind::Dds && crate::policy::reencode_requested(&ctx, f);
         let dups = crate::group::duplicate_outputs_with(&files, |f| {
-            !losers.contains(&f.path) && (f.kind != InputKind::Dds || reencode(f))
+            !losers.contains(&f.path) && (f.kind != InputKind::Dds || reencodes(&ctx, f))
         });
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
@@ -1390,22 +1420,16 @@ impl Engine {
         // Mutated below (predicted suffixes, replaced generated members); the prepared sets stay as built.
         let mut sets = p.sets.clone();
         let key = |out: &Path| output_key(&req.output_root, out);
-        let ctx = ResolveCtx {
+        let ctx = base_ctx(
+            req,
             target,
             registry,
-            preset: preset_id,
-            user_config: p.user_config.as_ref(),
-            project_config: p.project_config.as_ref(),
-            overrides: &req.overrides,
-            accept: req.accept,
-            allow: &req.allow,
-            files: file_scopes,
-            shaders: &NO_SHADERS,
-            mesh_alpha: &req.mesh_alpha,
-            nvtt: Some(nvtt),
-        };
-        let reencode =
-            |f: &InputFile| f.kind == InputKind::Dds && crate::policy::reencode_requested(&ctx, f);
+            preset_id,
+            p.user_config.as_ref(),
+            p.project_config.as_ref(),
+            file_scopes,
+            nvtt,
+        );
 
         // Spec §6.4 "Set membership", DECISIONS Note M7: a recipe's output joins its set before anything resolves.
         // Note AZ: a set explicitly given complex material predicts the complex `_m` (the auto pick comes later and
@@ -1450,7 +1474,7 @@ impl Engine {
                     continue;
                 }
                 if files[i].kind == InputKind::Dds {
-                    if !reencode(&files[i]) {
+                    if !reencodes(&ctx, &files[i]) {
                         skipped.push(SkippedFile {
                             path: files[i].path.clone(),
                             output: files[i].output.clone(),
@@ -3943,5 +3967,82 @@ mod tests {
             resolve_target(&req, None, None, &[]),
             (Target::Cs, Provenance::Builtin)
         );
+    }
+
+    /// Fast re-plan Task 2: one `Prepared` planned twice gives the same plan and events, so `plan_sets` neither
+    /// consumes nor changes what it borrows (the cloned `sets`, the probed NVTT cell).
+    #[test]
+    fn prepared_plans_twice_equal() {
+        use crate::events::VecSink;
+        use image::{ImageBuffer, Luma, Rgb};
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("in/textures/pbr");
+        std::fs::create_dir_all(&dir).unwrap();
+        ImageBuffer::from_fn(32, 32, |x, y| Rgb([(x * 7) as u8, (y * 5) as u8, 90]))
+            .save(dir.join("iron.png"))
+            .unwrap();
+        for (name, v) in [("iron_roughness.png", 120u8), ("iron_ao.png", 200)] {
+            ImageBuffer::from_fn(32, 32, |x, _| Luma([v.wrapping_add(x as u8)]))
+                .save(dir.join(name))
+                .unwrap();
+        }
+        let desc = crate::dds::DdsDesc {
+            width: 4,
+            height: 4,
+            format: crate::config::Format::Rgba8,
+            srgb: false,
+            header: crate::dds::ResolvedHeader::Dx10,
+        };
+        let dds = crate::dds::dds_bytes(&desc, &[vec![0u8; 64]]).unwrap();
+        std::fs::write(dir.join("plain.dds"), dds).unwrap();
+        let mut req =
+            BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+        req.recursive = true;
+        // An NVTT profile with a missing tool: the cell is probed (Missing) without starting a process.
+        req.nvtt = Some(d.path().join("no-nvcompress.exe"));
+        req.overrides =
+            vec![crate::overrides::parse_set("file:**/iron.png.encoder.backend=nvtt").unwrap()];
+        let engine = Engine::new().unwrap();
+        let cache = AnalysisCache::default();
+        let cancel = CancelToken::default();
+        let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+        let p = engine.prepare(&req, &rep, &cancel).unwrap();
+        let run = || {
+            let sink = Arc::new(VecSink::default());
+            let rep = Reporter::new(sink.clone(), "t");
+            let plan = engine.plan_sets(&p, None, &rep, &cancel, &cache).unwrap();
+            let events: Vec<Value> = sink
+                .take()
+                .into_iter()
+                .map(|e| {
+                    let mut v = serde_json::to_value(e).unwrap();
+                    v.as_object_mut().unwrap().remove("ts");
+                    v
+                })
+                .collect();
+            (
+                serde_json::to_value(&plan.jobs).unwrap(),
+                format!("{:?}", plan.skipped),
+                format!("{:?}", plan.failed),
+                format!("{:?}", plan.helpers),
+                plan.nvtt,
+                events,
+            )
+        };
+        let (a, b) = (run(), run());
+        let jobs = a.0.as_array().unwrap();
+        assert!(
+            jobs.iter()
+                .any(|j| j.get("pack").is_some_and(|v| !v.is_null())),
+            "a packed job"
+        );
+        assert!(a.1.contains("InDdsSkipped"), "a DDS skip: {}", a.1);
+        assert!(a.4.is_some(), "the NVTT cell was probed");
+        assert!(
+            a.5.iter()
+                .any(|e| e.to_string().contains("\"set_resolved\"")),
+            "set_resolved events"
+        );
+        assert_eq!(a, b);
     }
 }
