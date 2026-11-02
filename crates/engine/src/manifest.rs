@@ -622,21 +622,24 @@ pub fn recode_causes(recorded: &Manifest, plan: &crate::api::Plan) -> Vec<Recode
             },
             None if ours => continue,
             None => RecodeWhy::NewOutput { subtype: st },
-            Some(e) if e.encode_version.is_none() => RecodeWhy::FirstExport {
-                version: ENGINE_VERSION.into(),
+            Some(e) => match e.encode_version.as_deref() {
+                // A 1.x record: a stale baseline (Note FM9).
+                None => RecodeWhy::FirstExport {
+                    version: ENGINE_VERSION.into(),
+                },
+                Some(from) if from != now => RecodeWhy::EncodeVersion {
+                    subtype: st,
+                    from: from.into(),
+                    to: now.into(),
+                },
+                Some(_)
+                    if e.engine_version != ENGINE_VERSION
+                        && profile_sha256(&job.profile).is_ok_and(|h| h != e.profile_sha256) =>
+                {
+                    RecodeWhy::ProfileChanged { subtype: st }
+                }
+                Some(_) => continue,
             },
-            Some(e) if !crate::api::encode_current(e, now) => RecodeWhy::EncodeVersion {
-                subtype: st,
-                from: e.encode_version.clone().unwrap_or_default(),
-                to: now.into(),
-            },
-            Some(e)
-                if e.engine_version != ENGINE_VERSION
-                    && profile_sha256(&job.profile).is_ok_and(|h| h != e.profile_sha256) =>
-            {
-                RecodeWhy::ProfileChanged { subtype: st }
-            }
-            Some(_) => continue,
         };
         // One row per line: encode-version causes group by (sub-type, to), keeping the first `from`.
         let same = |a: &RecodeWhy| match (a, &why) {
@@ -805,6 +808,14 @@ mod tests {
                 version_key(v) <= engine,
                 "{st:?} = {v} is newer than ENGINE_VERSION {ENGINE_VERSION}"
             );
+        }
+    }
+
+    /// Note FM9: every sub-type has the one encode version, 2.0.0.
+    #[test]
+    fn every_subtype_has_the_one_encode_version() {
+        for st in Subtype::ALL {
+            assert_eq!(encode_version(st), "2.0.0", "{st:?}");
         }
     }
 

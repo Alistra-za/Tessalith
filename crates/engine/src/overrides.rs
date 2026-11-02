@@ -457,11 +457,11 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
         return Err(format!("--set '{s}': not a finite number"));
     }
     // A removed field or value gets its fix, before any "unknown" error. `subtype:<id>.<field>` scopes a table.
-    let scoped = key
-        .strip_prefix("subtype:")
-        .and_then(|r| r.split_once('.'))
-        .and_then(|(id, _)| crate::migrate::removed_set(&format!("subtypes.{id}"), ""));
-    if let Some(m) = crate::migrate::removed_set(key, raw).or(scoped) {
+    let removed = crate::migrate::removed_set(key, raw).or_else(|| {
+        let (id, _) = key.strip_prefix("subtype:")?.split_once('.')?;
+        crate::migrate::removed_set(&format!("subtypes.{id}"), "")
+    });
+    if let Some(m) = removed {
         return Err(format!("--set '{s}': {m}"));
     }
     let known = |f: &str| FIELD_PATHS.contains(&f);
@@ -573,6 +573,22 @@ pub fn to_patch(field: &str, value: &Value) -> Value {
 mod tests {
     use super::*;
     use crate::discover::InputKind;
+
+    #[test]
+    fn a_removed_sub_type_scope_names_the_fix() {
+        for s in [
+            "subtype:rfaos.format=bc7",
+            "subtype=rfaos",
+            "file:*.png.subtype=rfaos",
+        ] {
+            let e = parse_set(s).unwrap_err();
+            assert!(
+                e.contains("removed in 2.0") && e.contains("skin_rfaos"),
+                "{s}: {e}"
+            );
+        }
+        assert!(parse_set("subtype:skin_rfaos.format=bc7").is_ok());
+    }
 
     const ROOT: &str = "C:/proj/textures";
 
