@@ -330,6 +330,7 @@ const SECTIONS: &[Section] = &[
 /// timers, `DetailTexture`, `EnableVerboseJsonLogging`), consumed by a derivation (`diffuseMidReflectance` ->
 /// diffuseCurve, `enableLinearLighting` -> the LL switch) or unused by the shader (`enableACEScg`, `gameGamma`,
 /// 1.9 `emitColorMult`, `UseDynamicWetness`).
+#[cfg(feature = "test-hooks")]
 const NO_FIELD_KEYS: &[&str] = &[
     "SkinnedOnly",
     "enableACEScg",
@@ -346,6 +347,7 @@ const NO_FIELD_KEYS: &[&str] = &[
 ];
 
 /// Every `"Advanced Skin"` key [`pack_skin`] reads (profile or section root).
+#[cfg(feature = "test-hooks")]
 const SKIN_KEYS: &[&str] = &[
     "EnableSkin",
     "ExtraSkinWetness",
@@ -381,14 +383,16 @@ fn renamed<'a>(renames: &[(&str, &'a str)], key: &'a str) -> &'a str {
 
 /// What one program's settings write missed (03 report 6.3): reflected fields nothing wrote, and settings keys
 /// that matched no field.
+#[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Coverage {
     pub unset: BTreeSet<String>,
     pub unmatched: BTreeSet<String>,
 }
 
+#[cfg(feature = "test-hooks")]
 impl Coverage {
-    /// The panel line; `None` when there is nothing to report.
+    /// A one-line summary; `None` when there is nothing to report.
     pub fn line(&self) -> Option<String> {
         (!self.unset.is_empty() || !self.unmatched.is_empty()).then(|| {
             format!(
@@ -402,7 +406,9 @@ impl Coverage {
 
 /// `fields` (one program's [`reflected_fields`]) against `written` (its [`feature_data`]) and the settings. Checked
 /// fields: the 7 sections' structs, `skinData`, b7 and b8, minus `pad*`. Checked keys: the 7 sections', minus
-/// [`NO_FIELD_KEYS`], strings and objects; a section whose struct this build lacks is skipped.
+/// [`NO_FIELD_KEYS`], strings and objects; a section whose struct this build lacks is skipped. Test-only: the
+/// `cs_versions` tests use it to detect drift between CS builds (Note GJ).
+#[cfg(feature = "test-hooks")]
 pub fn coverage(
     s: &CsSettings,
     fields: &BTreeSet<String>,

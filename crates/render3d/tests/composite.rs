@@ -575,13 +575,9 @@ fn env_cube_is_built_once_per_yaw() {
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 1);
     s.env_yaw = 0.5;
-    let (_, events) = render3d::perf_log::capture(|| r.render(&s, 64, 64).unwrap());
+    r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 2);
-    let ev = events
-        .iter()
-        .find(|e| e["event"] == "env_cube")
-        .unwrap_or_else(|| panic!("no env_cube event in {events:?}"));
-    println!("env_cube build {} ms", ev["ms"]);
+
     let mut plain = loaded(cache.path(), &feats(&[ADD]), vec![opaque()]);
     plain.set_deferred(true).unwrap();
     plain.render(&Scene::neutral(), 64, 64).unwrap();
@@ -653,12 +649,9 @@ fn failed_env_cube_build_is_not_retried_for_the_same_yaw() {
     let mut s = Scene::neutral();
     let e = r.render(&s, 64, 64).unwrap_err();
     assert!(e.contains("power of two"), "{e}");
-    let (_, events) = render3d::perf_log::capture(|| r.render(&s, 64, 64).unwrap());
-    assert!(
-        events.iter().all(|e| e["event"] != "env_cube"),
-        "{events:?}"
-    );
+    r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 0);
+
     s.env_yaw = 0.5;
     assert!(r.render(&s, 64, 64).is_err(), "a new yaw tries again");
     r.set_env_size(render3d::hdri::ENV_SIZE);

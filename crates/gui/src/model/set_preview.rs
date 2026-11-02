@@ -36,9 +36,8 @@ use nif::material::MaterialState;
 use nif::path::TexPath;
 use pgpsim::{Badge, SimInput, SimResult};
 use render3d::builtin::Builtin;
-use render3d::perf_log;
 use render3d::{Glint, ParsedNif, ProjectedLayer, ShapeId, Variant};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -399,19 +398,6 @@ impl Member {
         self.alt = kept;
         self.alt_err = false;
     }
-}
-
-/// One `encode` line in the timing log for a finished encode.
-fn log_encode(kind: SlotKind, mode: PreviewMode, result: &Result<(Vec<u8>, f64), String>) {
-    let f = match result {
-        Ok((dds, ms)) => {
-            json!({"slot": kind.label(), "mode": format!("{mode:?}"), "ms": ms, "bytes": dds.len(), "ok": true})
-        }
-        Err(e) => {
-            json!({"slot": kind.label(), "mode": format!("{mode:?}"), "ok": false, "error": perf_log::first_line(e)})
-        }
-    };
-    perf_log::emit("encode", f);
 }
 
 /// The selected set's encodes, one per filled slot.
@@ -867,7 +853,6 @@ impl Encoder {
             };
             // The other mode's background encode.
             if token != 0 && mem.alt_token == token {
-                log_encode(kind, mode, &result);
                 mem.alt_cancel = None;
                 mem.alt_token = 0;
                 match result {
@@ -900,7 +885,6 @@ impl Encoder {
                 changed = true;
                 continue;
             }
-            log_encode(kind, mode, &result);
             mem.cancel = None;
             mem.token = 0;
             mem.state = match result {
@@ -1349,11 +1333,9 @@ pub struct LoadedNif {
     pub nif_path: String,
     pub parsed: ParsedNif,
     pub vfs: HashMap<String, FileSource>,
-    pub ms: f64,
 }
 
 fn load_nif(path: &Path, c: &Candidate) -> Result<LoadedNif, String> {
-    let t0 = Instant::now();
     let store = Store::open_read_only(path).map_err(|e| e.to_string())?;
     let (p, kind, root, _) = store
         .copy_location(c.load_copy_id)
@@ -1376,7 +1358,6 @@ fn load_nif(path: &Path, c: &Candidate) -> Result<LoadedNif, String> {
         nif_path: c.nif_path.clone(),
         parsed,
         vfs,
-        ms: ms(t0),
     })
 }
 
@@ -1538,19 +1519,10 @@ enum Shown {
     Builtin(Builtin),
 }
 
-/// Wall times for the verification (Task 17); encode times are on each member, edit times in `v3.last_edit`.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Timings {
-    pub query_ms: Option<f64>,
-    pub nif_ms: Option<f64>,
-    /// Simulation of every shape plus building the scene.
-    pub push_ms: Option<f64>,
-}
-
 enum SpMsg {
     Queried {
         token: u64,
-        result: Result<(Vec<Candidate>, f64), String>,
+        result: Result<Vec<Candidate>, String>,
     },
     NifLoaded {
         token: u64,
@@ -1697,7 +1669,6 @@ pub struct SetPreview {
     pub notices: Vec<String>,
     /// The NIF read's own notices (warnings, a failed read): dropped when the mesh pick changes.
     nif_notices: Vec<String>,
-    pub timings: Timings,
     /// Set by the panel each frame it draws; `poll` does nothing heavy otherwise.
     pub shown: bool,
     /// Set by the panel on a frame with input: the fingerprint is checked now instead of after `THROTTLE`.
@@ -1804,7 +1775,6 @@ impl SetPreview {
             rows: vec![],
             notices: vec![],
             nif_notices: vec![],
-            timings: Timings::default(),
             shown: false,
             input: false,
             checks: 0,
@@ -1936,7 +1906,7 @@ impl SetPreview {
 
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
-        self.v3.poll_at(now);
+        self.v3.poll();
         // A finished encode on a scene that is already loaded is swapped in (`sync_textures`); the scene is pushed
         // for a first load and when an encode failed (the game's copy of the texture must come back).
         let changed = self.enc.poll();
@@ -2097,10 +2067,9 @@ impl SetPreview {
         let prepared = pgpsim::prepare(&entry, &self.default);
         spawn(
             self.tx.clone(),
-            move || {
-                let t0 = Instant::now();
-                let result = query(&path, &key, &prepared).map(|c| (c, ms(t0)));
-                SpMsg::Queried { token, result }
+            move || SpMsg::Queried {
+                token,
+                result: query(&path, &key, &prepared),
             },
             move |e| SpMsg::Queried {
                 token,
@@ -2115,10 +2084,7 @@ impl SetPreview {
                 SpMsg::Queried { token, result } if self.querying == Some(token) => {
                     self.querying = None;
                     match result {
-                        Ok((c, t)) => {
-                            self.timings.query_ms = Some(t);
-                            self.candidates = Candidates::Ready(c);
-                        }
+                        Ok(c) => self.candidates = Candidates::Ready(c),
                         Err(e) => self.candidates = Candidates::Error(e),
                     }
                     self.want_scene = true;
@@ -2130,7 +2096,6 @@ impl SetPreview {
                     self.drop_nif_notices();
                     match result {
                         Ok(n) => {
-                            self.timings.nif_ms = Some(n.ms);
                             for e in n.parsed.errors.iter().chain(&n.parsed.warnings) {
                                 self.nif_notice(format!("{}: {e}", n.nif_path));
                             }
@@ -2380,7 +2345,6 @@ impl SetPreview {
     /// NIF before `LoadParsed` (no first-load edit burst), textures = the game's copies overlaid by the set's
     /// encodes. A NIF not read yet is read first (off the UI thread); the push repeats when it arrives.
     fn push_scene(&mut self) {
-        let t0 = Instant::now();
         self.want_scene = false;
         let memory = self.enc.memory_sources();
         self.v3.set_load_variant(variant_of(self.enc.mode()));
@@ -2456,7 +2420,6 @@ impl SetPreview {
         }
         self.xpmf_resume |= std::mem::take(&mut self.xpmf_cycle);
         self.reset_tex_mirror();
-        self.timings.push_ms = Some(ms(t0));
     }
 
     fn start_nif(&mut self, c: &Candidate) {

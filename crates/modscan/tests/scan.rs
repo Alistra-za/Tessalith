@@ -657,7 +657,6 @@ fn owner_timing() {
             t.elapsed().as_secs_f64()
         );
         println!("{pass}: phase_ms {:?}", r.phase_ms);
-        println!("{pass}: sub_ms {:?}", r.sub_ms);
     }
     let q = |sql: &str| -> i64 { store.conn().query_row(sql, [], |r| r.get(0)).unwrap() };
     println!(

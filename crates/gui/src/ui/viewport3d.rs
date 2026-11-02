@@ -400,7 +400,6 @@ pub fn image(ui: &mut egui::Ui, v: &mut Viewport3d) -> egui::Response {
     let tex = match cached {
         Some((fid, t)) if fid == frame.id => t,
         old => {
-            let t0 = std::time::Instant::now();
             let img = egui::ColorImage::from_rgba_unmultiplied(
                 [frame.width as usize, frame.height as usize],
                 &frame.rgba,
@@ -414,7 +413,6 @@ pub fn image(ui: &mut egui::Ui, v: &mut Viewport3d) -> egui::Response {
                     .ctx()
                     .load_texture("viewport3d", img, egui::TextureOptions::LINEAR),
             };
-            v.upload_ms = Some(t0.elapsed().as_secs_f64() * 1000.0);
             ui.ctx()
                 .data_mut(|d| d.insert_temp(id, (frame.id, t.clone())));
             t
@@ -497,20 +495,6 @@ fn footer(ui: &mut egui::Ui, v: &Viewport3d) {
     ui.horizontal_wrapped(|ui| {
         if let Some(off) = off_line(&v.off_in_preview) {
             ui.weak(off);
-        }
-        if let Some(c) = &v.coverage {
-            ui.weak(format!("· {c}"));
-        }
-        if let Some(t) = v.timing {
-            let up = v.upload_ms.unwrap_or(0.0);
-            ui.weak(format!(
-                "· frame {:.1} ms (draw {:.1} · GPU {:.1} · readback {:.1} · upload {:.1})",
-                t.draw_ms + t.gpu_ms + t.readback_ms + up,
-                t.draw_ms,
-                t.gpu_ms,
-                t.readback_ms,
-                up
-            ));
         }
         if let Some((name, warp)) = &v.adapter {
             if *warp {

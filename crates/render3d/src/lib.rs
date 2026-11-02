@@ -16,7 +16,6 @@ pub mod locate;
 pub mod material;
 pub mod mesh;
 pub mod parse;
-pub mod perf_log;
 pub mod permutation;
 pub mod pool;
 pub mod replay;
@@ -98,6 +97,7 @@ pub struct LoadReport {
 }
 
 /// Where the time of the last [`Renderer::render`] went, in milliseconds.
+#[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FrameTiming {
     /// CPU time to record the draws (cbuffer updates, state, `DrawIndexed`).
@@ -160,8 +160,6 @@ struct Wanted {
     src: Arc<ExpandedSource>,
     vs: Defines,
     ps: Defines,
-    /// When the shape started waiting (the `shape_ready` line's `ms_pending`).
-    since: std::time::Instant,
 }
 
 impl Wanted {
@@ -324,8 +322,6 @@ pub struct Renderer {
     features_on: bool,
     /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source, reset by `set_shaders`.
     old_ll: std::cell::OnceCell<bool>,
-    /// The last coverage of every program at hand (P1-D), for the panel line; dropped with the programs.
-    coverage: HashMap<ProgramKey, cs_settings::Coverage>,
     /// One expanded `Lighting.hlsl` per shaders folder (03 §5); dropped with the folder by `set_shaders`.
     sources: SourceSet,
     /// Device objects by pair key; dropped by `set_shaders` and by a device rebuild.
@@ -368,6 +364,7 @@ pub struct Renderer {
     fixed_pipeline: bool,
     target: Option<Target>,
     encode_srgb: bool,
+    #[cfg(feature = "test-hooks")]
     timing: FrameTiming,
     /// The GPU-idle event query, created once (03 §7).
     query: ID3D11Query,
@@ -538,7 +535,6 @@ impl Renderer {
             settings: CsSettings::default(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
-            coverage: HashMap::new(),
             programs: HashMap::new(),
             compiled: HashMap::new(),
             inflight: HashSet::new(),
@@ -561,6 +557,7 @@ impl Renderer {
             fixed_pipeline: false,
             target: None,
             encode_srgb: false,
+            #[cfg(feature = "test-hooks")]
             timing: FrameTiming::default(),
         })
     }
@@ -587,41 +584,6 @@ impl Renderer {
     pub fn set_settings(&mut self, s: CsSettings) {
         self.settings = s;
         self.apply_settings_defines();
-        self.refresh_coverage();
-    }
-
-    /// Re-reports every program at hand (settings or the features toggle changed what is written).
-    fn refresh_coverage(&mut self) {
-        let at_hand: Vec<(ProgramKey, BTreeSet<String>)> = self
-            .programs
-            .iter()
-            .filter_map(|(k, p)| p.as_ref().ok().map(|p| (k.clone(), program_fields(p))))
-            .collect();
-        for (k, f) in at_hand {
-            self.note_coverage(k, f);
-        }
-    }
-
-    /// The union of every program's coverage (P1-D): the panel shows `line()` when it is `Some`.
-    pub fn settings_coverage(&self) -> cs_settings::Coverage {
-        let mut all = cs_settings::Coverage::default();
-        for c in self.coverage.values() {
-            all.unset.extend(c.unset.iter().cloned());
-            all.unmatched.extend(c.unmatched.iter().cloned());
-        }
-        all
-    }
-
-    /// Logs and keeps one program's coverage (`settings_coverage` line). The coverage depends only on names, so
-    /// a non-head draw stands for the program.
-    fn note_coverage(&mut self, key: ProgramKey, fields: BTreeSet<String>) {
-        let values = cs_settings::feature_data(&self.settings, &fields, self.features_on, false);
-        let c = cs_settings::coverage(&self.settings, &fields, &values);
-        perf_log::emit(
-            "settings_coverage",
-            serde_json::json!({"key": perf_log::short(&key.0), "unset": c.unset, "unmatched": c.unmatched}),
-        );
-        self.coverage.insert(key, c);
     }
 
     pub fn settings(&self) -> &CsSettings {
@@ -633,7 +595,6 @@ impl Renderer {
     pub fn set_features_on(&mut self, on: bool) {
         self.features_on = on;
         self.apply_settings_defines();
-        self.refresh_coverage();
     }
 
     /// Features CS loaded (Info.ini, or the Features inis) that this preview does not compile, in name order, for
@@ -804,7 +765,6 @@ impl Renderer {
         self.programs.clear();
         self.composite = None;
         self.old_ll = std::cell::OnceCell::new();
-        self.coverage.clear();
         // The LL generation may have changed, so the display encode (follows linear_lighting) must be re-derived.
         self.encode_srgb = self.linear_lighting();
     }
@@ -930,7 +890,6 @@ impl Renderer {
     /// path), so the next frame is complete. A shape whose forward build fails is `Failed` without its old draw
     /// on screen: render never draws a DEFERRED program into a forward target.
     fn composite_failed(&mut self, e: String) {
-        perf_log::emit("composite_failed", serde_json::json!({ "error": &e }));
         self.composite = None;
         self.deferred = false;
         self.deferred_error = Some(format!("Deferred preview unavailable: {e}"));
@@ -1005,6 +964,7 @@ impl Renderer {
     }
 
     /// Timing of the last successful [`Renderer::render`].
+    #[cfg(feature = "test-hooks")]
     pub fn last_timing(&self) -> FrameTiming {
         self.timing
     }
@@ -1342,13 +1302,7 @@ impl Renderer {
             &program_key(&src, "main", "vs_5_0", &vs.0),
             &program_key(&src, "main", "ps_5_0", &ps.0),
         );
-        Ok(Wanted {
-            key,
-            src,
-            vs,
-            ps,
-            since: std::time::Instant::now(),
-        })
+        Ok(Wanted { key, src, vs, ps })
     }
 
     /// The program if it is at hand without compiling: device objects, a memoised result (made into device
@@ -1359,15 +1313,10 @@ impl Renderer {
         }
         if !self.compiled.contains_key(&w.key) {
             let dir = &self.cache_dir;
-            let t0 = std::time::Instant::now();
             if let (Some(vs), Some(ps)) = (
                 cached(&w.src, &w.vs, "vs_5_0", dir),
                 cached(&w.src, &w.ps, "ps_5_0", dir),
             ) {
-                perf_log::emit(
-                    "compile",
-                    serde_json::json!({"key": perf_log::short(&w.key.0), "ms": perf_log::ms_since(t0), "cache": "hit", "ok": true}),
-                );
                 self.compiled
                     .insert(w.key.clone(), Ok(Arc::new(CompiledPair { vs, ps })));
             }
@@ -1378,9 +1327,6 @@ impl Renderer {
             Some(Ok(pair)) => {
                 let built = create_program(&self.gpu, pair.vs.clone(), pair.ps.clone());
                 self.programs.insert(w.key.clone(), built.clone());
-                if let Ok(p) = &built {
-                    self.note_coverage(w.key.clone(), program_fields(p));
-                }
                 ready(&built)
             }
         }
@@ -1435,14 +1381,6 @@ impl Renderer {
             Lookup::Ready(p) => self.swap(id, &p, m, rep),
             Lookup::Failed(e) => self.fail(id, e, true),
             Lookup::Waiting => {
-                perf_log::emit(
-                    "shape_pending",
-                    serde_json::json!({
-                        "shape": id.0,
-                        "key": perf_log::short(&wanted.key.0),
-                        "showing_previous": self.shapes.get(&id).is_some_and(|s| s.draw.is_some()),
-                    }),
-                );
                 if self.inflight.insert(wanted.key.clone()) {
                     self.jobs
                         .push(wanted.job(&self.cache_dir, &self.load_epoch));
@@ -1480,7 +1418,6 @@ impl Renderer {
             let Some(w) = self.shapes.get_mut(id).and_then(|s| s.wanted.take()) else {
                 continue;
             };
-            let since = w.since;
             let m = self.shapes[id].material.clone();
             match self.lookup(&w) {
                 Lookup::Ready(p) => self.swap(*id, &p, &m, &mut LoadReport::default()),
@@ -1489,14 +1426,6 @@ impl Renderer {
                     self.fail(*id, "the program is missing after its compile".into(), true)
                 }
             }
-            perf_log::emit(
-                "shape_ready",
-                serde_json::json!({
-                    "shape": id.0,
-                    "ms_pending": perf_log::ms_since(since),
-                    "ok": self.shapes.get(id).is_some_and(|s| s.status == ShapeStatus::Drawing),
-                }),
-            );
         }
         // A worker panic is not a property of the program: forget it so the next edit retries.
         if matches!(self.compiled.get(&key), Some(Err(e)) if e.starts_with(pool::PANIC_PREFIX)) {
@@ -2438,6 +2367,7 @@ impl Renderer {
     /// [`Target::readback_display`]). Errors (device
     /// removed, allocation failure) are text; see [`device`] for the device-removed contract.
     pub fn render(&mut self, scene: &Scene, w: u32, h: u32) -> Result<Vec<u8>, String> {
+        #[cfg(feature = "test-hooks")]
         let t0 = std::time::Instant::now();
         let (w, h) = (w.max(1), h.max(1));
         // Features, settings or shaders changed the composite's defines: rebuild (disk cache), or fall back forward.
@@ -2500,7 +2430,6 @@ impl Renderer {
         // shortcut: a CPU rebuild per yaw change (~11-16 ms in release, D5 report: the 25 MB equirect gather, the f16
         // conversion and the upload); if a yaw drag stutters, build the cube on the GPU from the backdrop's texture.
         if want_env && self.env.as_ref().is_none_or(|e| e.0 != yaw) {
-            let t = std::time::Instant::now();
             self.env = None;
             match composite::EnvMaps::new(
                 &self.gpu,
@@ -2514,15 +2443,10 @@ impl Renderer {
                     {
                         self.env_builds += 1;
                     }
-                    perf_log::emit(
-                        "env_cube",
-                        serde_json::json!({ "ms": perf_log::ms_since(t) }),
-                    );
                 }
                 Err(e) => {
                     // Review M4: remembered for this yaw (the 2×2 black default: no reflection), so the next frames
                     // draw without rebuilding; a new yaw tries again. This frame reports the error.
-                    perf_log::emit("env_cube_failed", serde_json::json!({ "error": &e }));
                     let black = self.default_srv(SrvKind::Cube, [0, 0, 0, 255])?;
                     self.env = Some((
                         yaw,
@@ -2557,11 +2481,7 @@ impl Renderer {
         let mut uploads = 0;
         if scene.background == Background::Hdri && self.backdrop.is_none() {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
-            let made = Backdrop::new(&self.gpu);
-            if let Err(e) = &made {
-                perf_log::emit("backdrop_failed", serde_json::json!({ "error": e }));
-            }
-            self.backdrop = Some(made);
+            self.backdrop = Some(Backdrop::new(&self.gpu));
         }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
@@ -2716,19 +2636,28 @@ impl Renderer {
             ctx.RSSetState(&self.raster);
         }
         self.uploads = uploads;
-        let draw_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let t1 = std::time::Instant::now();
+        #[cfg(feature = "test-hooks")]
+        let (draw_ms, t1) = (
+            t0.elapsed().as_secs_f64() * 1000.0,
+            std::time::Instant::now(),
+        );
         wait_idle(gpu, &self.query)?;
-        let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
-        let t2 = std::time::Instant::now();
+        #[cfg(feature = "test-hooks")]
+        let (gpu_ms, t2) = (
+            t1.elapsed().as_secs_f64() * 1000.0,
+            std::time::Instant::now(),
+        );
         let px = target.readback_display(gpu, self.encode_srgb)?;
         // Only a fully successful frame may suppress the next one's writes.
         self.last_frame = Some((scene.clone(), view));
-        self.timing = FrameTiming {
-            draw_ms,
-            gpu_ms,
-            readback_ms: t2.elapsed().as_secs_f64() * 1000.0,
-        };
+        #[cfg(feature = "test-hooks")]
+        {
+            self.timing = FrameTiming {
+                draw_ms,
+                gpu_ms,
+                readback_ms: t2.elapsed().as_secs_f64() * 1000.0,
+            };
+        }
         Ok(px)
     }
 }

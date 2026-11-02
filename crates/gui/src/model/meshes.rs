@@ -15,9 +15,7 @@ use modscan::plugins::PluginStats;
 use modscan::scan::{Report, Source};
 use modscan::store::{check_code, DerivedState, ModRow, NifRow, ShapeView, Store, TexResolution};
 use modscan::ScanError;
-use render3d::perf_log;
 use rusqlite::OptionalExtension;
-use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
@@ -444,8 +442,8 @@ pub const UNUSED_NOTE: &str = "Textures that no NIF and no plugin record names. 
 /// The scan details line of the plugin pass (esp spec §4.3).
 pub fn plugins_line(p: &PluginStats) -> String {
     format!(
-        "Plugins: {} ({} cached), {} records, {} ms",
-        p.n, p.cached, p.records, p.ms
+        "Plugins: {} ({} cached), {} records",
+        p.n, p.cached, p.records
     )
 }
 
@@ -478,16 +476,6 @@ pub fn file_refs_lines(r: &FileRefs, unused: bool, filter: &str) -> Vec<String> 
             format!("{} ← {}{tail}", m.path, m.records.join("; "))
         })
         .collect()
-}
-
-/// Ruling R6: one timing log line per finished plugin pass.
-pub fn log_plugins(r: &Report) {
-    if let Some(p) = &r.plugins {
-        perf_log::emit(
-            "plugins",
-            json!({"n": p.n, "cached": p.cached, "records": p.records, "ms": p.ms}),
-        );
-    }
 }
 
 pub struct MeshesModel {
@@ -1094,7 +1082,6 @@ impl MeshesModel {
             Ok(report) => {
                 self.scan_rev += 1;
                 self.status = report_summary(&report);
-                log_plugins(&report);
                 self.file_refs = None;
                 self.refs_cache = None;
                 self.refs_inert_cache = None;

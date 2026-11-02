@@ -1267,7 +1267,6 @@ fn stats(
             .iter()
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect(),
-        sub_ms: vec![],
     }
 }
 
@@ -1289,7 +1288,7 @@ fn scan_details_show_the_plugin_line_and_problems() {
     h.run();
     h.get_by_label("Scan details").click();
     h.run();
-    h.get_by_label("Plugins: 3 (2 cached), 120 records, 45 ms");
+    h.get_by_label("Plugins: 3 (2 cached), 120 records");
     h.get_by_label("Plugin M.esp: missing master Missing.esm");
 }
 
@@ -1304,7 +1303,7 @@ fn scan_details_show_an_empty_plugin_pass() {
     h.run();
     h.get_by_label("Scan details").click();
     h.run();
-    h.get_by_label("Plugins: 0 (0 cached), 0 records, 0 ms");
+    h.get_by_label("Plugins: 0 (0 cached), 0 records");
 }
 
 /// esp spec §4.2: records that use the mesh, and per re-textured shape `shape → TXST EDID`. No PGPatcher warning.
@@ -1420,30 +1419,6 @@ fn plugin_file_references_when_nothing_is_listed() {
     h.run();
     h.get_by_label("Missing (0)");
     h.get_by_label("Nothing listed.");
-}
-
-/// Ruling R6: the timing log gets one `plugins` line per finished scan.
-#[test]
-fn a_finished_scan_logs_the_plugin_timing() {
-    use sdc_gui::model::meshes::log_plugins;
-    let r = Report {
-        plugins: Some(stats(3, 2, 120, 45, &[])),
-        ..Default::default()
-    };
-    let ((), ev) = render3d::perf_log::capture(|| log_plugins(&r));
-    assert_eq!(ev.len(), 1, "{ev:?}");
-    assert_eq!(ev[0]["event"], "plugins");
-    assert_eq!(
-        (
-            ev[0]["n"].as_u64(),
-            ev[0]["cached"].as_u64(),
-            ev[0]["records"].as_u64(),
-            ev[0]["ms"].as_u64()
-        ),
-        (Some(3), Some(2), Some(120), Some(45))
-    );
-    let ((), none) = render3d::perf_log::capture(|| log_plugins(&Report::default()));
-    assert!(none.is_empty());
 }
 
 /// Review I1: no read while a scan runs; a started scan drops the cached lists.
