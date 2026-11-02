@@ -52,22 +52,6 @@ These names do not say whether the green channel is DirectX or OpenGL. Tessalith
 
 The program is not code-signed yet. On first run, click **More info**, then **Run anyway**.
 
-## Host plugins
-
-**Paint.NET opens DDS files with its own reader**
-
-Paint.NET always opens `.dds` with its built-in support, even files Tessalith wrote ([saving with Tessalith again](Host-Plugins.md#things-to-know)).
-
-**chaiNNer: the nodes vanish after a chaiNNer update**
-
-Close chaiNNer and run `install.ps1` again ([why](Host-Plugins.md#chainner)).
-
-**Photoshop: a normal map converted from 16-bit to 32-bit**
-
-Photoshop makes the values linear during that conversion, and the plugin then saves them as raw data. Convert the document back to 16-bit before saving. A normal map that was made as 32-bit (for example a Marmoset bake) is fine.
-
-See [Host plugins](Host-Plugins.md) for more.
-
 ## Reporting a problem
 
 Open an issue on the Tessalith GitHub page. Please include:

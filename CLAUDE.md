@@ -10,7 +10,6 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 | `sdc` | crates/cli | CLI (`sdc.exe`) |
 | `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed |
 | `modscan`, `vfs`, `esp`, `nif`, `render3d`, `pgpsim` | crates/… | MO2 scan store, BSA reading, plugin/NIF parsing, 3D preview, PGPatcher simulation |
-| `sdc-bench` | crates/bench | Measurement harness, not shipped |
 
 A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim`. It works on `nif/*` branches; the owner merges `nif/main` into `main`. Change those crates only when the task says so. Record what you changed in a DECISIONS note and in a line for the NIF team's handoff file (see CLAUDE.local.md).
 

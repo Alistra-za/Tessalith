@@ -3,7 +3,7 @@
 These rules apply to every agent or person who writes documentation for Tessalith. They are owner rules (2026-10-31).
 
 They cover these files:
-- **User-facing docs:** README.md, docs/wiki/, docs/gui.md, and the plugin pages (docs/*-plugin.md).
+- **User-facing docs:** README.md, docs/wiki/, docs/gui.md.
 - **The ruling log:** .claude/DECISIONS.md.
 - **History:** CHANGELOG.md (versions) and docs/presets-changelog.md (presets).
 
@@ -35,7 +35,7 @@ Every fact has exactly one home: the one place where it is explained in full, wi
   - texture types: Texture-Types;
   - encoder choice: Research, which links to docs/research.
   
-  docs/gui.md and the plugin pages in docs/ either become the home for their topic, with the wiki linking to them, or shrink to a link. They never repeat the wiki.
+  docs/gui.md either becomes the home for its topic, with the wiki linking to it, or shrinks to a link. It never repeats the wiki.
 
 ## 3. Precise
 - **Name things exactly as the UI and CLI do.**

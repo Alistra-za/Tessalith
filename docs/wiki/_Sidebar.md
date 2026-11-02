@@ -12,8 +12,6 @@ Using it
 - [Project config fields](Project-Config-Fields.md)
 - [Presets and targets](Presets-and-Targets.md)
 - [NIF editing](GUI-NIF-Edit.md)
-- [Host plugins](Host-Plugins.md)
-- [Plugins compared](Plugins-Compared.md)
 
 GUI
 

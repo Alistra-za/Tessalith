@@ -22,7 +22,7 @@ Everything here was measured on 18 October 2026 in a Linux container; see "How t
 Public, redistributable images only: Poly Haven textures, all CC0 (https://polyhaven.com/license), 1k PNG,
 one asset per material family, fetched through the Poly Haven API on 18 October 2026. The download list with
 Poly Haven's MD5, the SHA-256 of each download and the SHA-256 of each PNG written is
-`bc7e-tuning/MANIFEST.tsv` next to this page.
+`docs/research/bc7e-tuning/MANIFEST.tsv` on branch `bench`.
 
 | Class | n | Source | Metric |
 |---|---|---|---|
@@ -71,7 +71,7 @@ objects were not rebuilt here.
 
 ## Results
 
-Raw rows are beside this page: `bc7e-tuning/headroom.csv` and `headroom-attribution.csv` (step 2),
+Raw rows are on branch `bench`, under `docs/research/bc7e-tuning/`: `headroom.csv` and `headroom-attribution.csv` (step 2),
 `normal-mode-transitions.csv`, `sweep-parameters.csv` (step 3, parameters only) and `sweep-patch0002.csv` (step 3,
 with the patch). Δ is the per-image difference against `base` (Tessalith's `veryslow`), mean with a 95% t
 interval; for angles the sign is flipped so + is better. Time is the summed encode time against `base`.
@@ -222,7 +222,7 @@ nearly every image, but two of the four criteria fail. The default stays as it i
   - **Colour, alpha-bearing:** the first 30. These go to `cutout` when at least 90% of texels have alpha
     exactly 0 or 255, and to `smooth` otherwise. That gives 16 cutout and 14 smooth.
 
-  The list is `bc7e-tuning/skyrim-sample.tsv`: class, corpus name, relative path, SHA-256 and alpha
+  The list is `docs/research/bc7e-tuning/skyrim-sample.tsv` on branch `bench`: class, corpus name, relative path, SHA-256 and alpha
   statistics. The raw rows are in `.superpowers/bc7e-ep-verify/skyrim-base-ep.csv`, which is gitignored.
 - **Metrics:** as in the study (Metrics above). Δ = `ep` − `base` per image, averaged per class, with a 95%
   Student-t interval. For angles the sign is flipped, so + is better. Time is the summed `ep` time over the
@@ -286,7 +286,7 @@ Same objects, sample and metrics as above, avx2 path, rayon on all 16 threads. T
   base, max, slowest, base, max, slowest, and so on. The fastest of the three is kept.
 - **Separate:** one run per variant over the whole sample, `--repeats 3`, fastest kept, run back to back.
 
-Per-image rows: `bc7e-tuning/skyrim-max.csv` (scores, fastest alternating time, fastest separate time).
+Per-image rows: `docs/research/bc7e-tuning/skyrim-max.csv` on branch `bench` (scores, fastest alternating time, fastest separate time).
 Δ is `max` − `base` on the class's primary metric (angle sign flipped), 95% t interval.
 
 | Class | n | Δ [95% CI] | Wins | `max` s/Mpix (alt / sep) | Ratio to `veryslow` (alt / sep) | `slowest` ratio (alt / sep) |

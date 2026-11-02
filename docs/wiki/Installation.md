@@ -29,8 +29,6 @@ The programs are not code-signed, so Windows SmartScreen may warn the first time
 
 To run `sdc` from any folder, add the unzipped folder to your `PATH`.
 
-The plugins for Photoshop, GIMP, Paint.NET and chaiNNer come in their own zips. See [Host plugins](Host-Plugins.md).
-
 ## Building from source
 
 ### Requirements
@@ -92,7 +90,6 @@ sdc encoders
 | `crates/gui` | The GUI, `tessalith.exe` (Cargo package `sdc-gui`). |
 | `crates/render3d` | Direct3D 11 renderer for the GUI's 3D set preview and mesh view. |
 | `crates/modscan`, `crates/nif`, `crates/esp`, `crates/vfs`, `crates/pgpsim` | Mod scanning: MO2 resolution, BSA archives, NIF meshes, ESP plugins, PGPatcher simulation. |
-| `crates/bench` | Benchmarks. |
 
 ## ISPC objects
 

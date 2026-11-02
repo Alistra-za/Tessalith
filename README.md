@@ -108,14 +108,10 @@ See [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
 | [Installation](docs/wiki/Installation.md) | [Texture types](docs/wiki/Texture-Types.md) (packing, TruePBR, RNM, grass) | [Project config](docs/wiki/Project-Config.md) |
 | [Getting started](docs/wiki/Getting-Started.md) | [Mod scanning](docs/wiki/Mod-Scanning.md) | [Presets and targets](docs/wiki/Presets-and-Targets.md) |
 | [FAQ](docs/wiki/FAQ.md) | [NVTT backend](docs/wiki/NVTT-Backend.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
-| [Troubleshooting](docs/wiki/Troubleshooting.md) | [Research behind the defaults](docs/wiki/Research.md) | [Host plugins](docs/wiki/Host-Plugins.md) |
+| [Troubleshooting](docs/wiki/Troubleshooting.md) | [Research behind the defaults](docs/wiki/Research.md) | |
 | | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | |
 
-Plugins for other programs, all optional (overview: [Host plugins](docs/wiki/Host-Plugins.md); their source is on branch `host-plugins`, which gets bug fixes but is not kept in step with the engine):
-- Photoshop: a [Tessalith DDS plugin](docs/photoshop-plugin.md) opens and saves DDS.
-- GIMP 3: a [Tessalith DDS plug-in](docs/gimp-plugin.md) opens and exports DDS.
-- Paint.NET: a [Tessalith DDS file type](docs/paintdotnet-plugin.md) saves DDS.
-- chaiNNer: three [Tessalith DDS nodes](https://github.com/Alistra-za/Tessalith/tree/host-plugins/chainner/README.md) save DDS. Their licences are in [Host plugins](docs/wiki/Host-Plugins.md#licences).
+Optional plugins for Photoshop, GIMP 3, Paint.NET and chaiNNer are on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins), which gets bug fixes but is not kept in step with the engine.
 
 Design records: [.claude/DECISIONS.md](.claude/DECISIONS.md), [docs/presets-changelog.md](docs/presets-changelog.md) and the research pages in [docs/research/](docs/research/README.md).
 

@@ -26,8 +26,7 @@ Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) c
 it renames the unused `bc7e_compress_block_params::m_unused0` to `m_exact_opaque_alpha` (same struct
 layout) and, when that flag is set, restricts the mode-6 encodes of opaque blocks to p-bits = 1 so bc7e
 optimises RGB under the constraint and alpha decodes to exactly 255. With the flag false the output is
-bit-identical to upstream (gate `sdc-bench gate exact-opaque-native`, reference
-`crates/bench/tests/data/pre-patch-bc7e.sha256`). The patch file is produced with
+bit-identical to upstream (the `exact-opaque-native` gate of the bench tool, which lives on branch `bench`). The patch file is produced with
 `git diff --no-index --text crates/encoders-sys/vendor/bc7enc_rdo/bc7e.ispc crates/encoders-sys/vendor/bc7e/bc7e.ispc`.
 Since patch 0001 the bc7e objects are built from the patched source and no longer match the bench's.
 
@@ -81,9 +80,8 @@ selectors), after the unchanged mode loop the block it chose is the start, and f
 a strictly lower error: a 6-value search around the inner range (values other than 0 and 255), least-squares endpoint
 refits of the best and of a fresh other-mode search, 6-value searches on trimmed inner ranges, and an exhaustive +-3
 around the best pair. `BC4_SDC_GUARD128` keeps the mode-loop block when the result would flip more texels across 128.
-The search equals `sdc_bench::bc4ref::search` byte for byte (`crates/bench/tests/bc4ref.rs`, including the bench corpus
-when `SDC_BENCH_ROOT` is set); its least-squares step is f64, so `build.rs` compiles with `/fp:precise`; do not add `/arch:AVX2` (or enable FP contraction) without re-running
-`ffi_equals_reference_on_corpus`. `BC4_SDC_SEARCH` requires `BC4_USE_ALL_MODES`. Without the new
+The search equals `search` in `crates/encoders-sys/tests/support/bc4ref.rs` byte for byte (proved by `crates/encoders-sys/tests/bc4ref.rs`; the engine path by `engine_bc4_bytes_equal_reference` in `crates/engine/tests/encode.rs`); its least-squares step is f64, so `build.rs` compiles with `/fp:precise`; do not add `/arch:AVX2` (or enable FP contraction) without re-running
+`ffi_equals_reference`. `BC4_SDC_SEARCH` requires `BC4_USE_ALL_MODES`. Without the new
 bits `encode_bc4_hq` is unchanged. The shim sets `BC4_SDC_SEARCH` for BC4 and both BC5 halves, plus `BC4_SDC_GUARD128`
 for BC3 alpha (`encode_bc3_hq` passes its flags through). Measurements: docs/research/bc4-family.md.
 Before this patch (round-to-nearest only) `rgbcx.cpp` had SHA-256 `6f4d4664daa957a9d49f9fe881eab4a04c3d7c58a381280da0ecea1cf354c51c`

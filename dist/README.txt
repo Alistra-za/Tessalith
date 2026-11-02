@@ -41,8 +41,7 @@ Help
 ----
   Documentation, known issues and bug reports:
     https://github.com/Alistra-za/Tessalith
-    Wiki pages: Known-Issues, Troubleshooting, GUI-Guide, CLI-Reference,
-    Host-Plugins (Photoshop, GIMP, Paint.NET and chaiNNer plugins)
+    Wiki pages: Known-Issues, Troubleshooting, GUI-Guide, CLI-Reference
   If the GUI crashes, attach the newest file in
     %LOCALAPPDATA%\sdc\logs\
   to your report.

@@ -14,10 +14,6 @@ No. Tessalith is Windows-only (x86-64, built with MSVC). The GUI also uses Direc
 
 There is a prebuilt zip, but no installer: unzip it anywhere and run `tessalith.exe` ([Installation](Installation.md#the-release-zip)).
 
-### Can I save DDS straight from Photoshop, GIMP, Paint.NET or chaiNNer?
-
-Yes, with the optional plugins. They use Tessalith's encoders and rules, so a file saves the same way it would from Tessalith. See [Host plugins](Host-Plugins.md).
-
 ### Can I edit a mesh (NIF)?
 
 Yes, in the GUI's Meshes view: shader fields and flags, alpha, extra data, controllers and animation clips. Review exports an edited copy, with your textures; the source file never changes. See [NIF editing](GUI-NIF-Edit.md).
@@ -86,7 +82,7 @@ No. NVTT is an optional encoder for BC7 and BC6H. See [NVTT backend](NVTT-Backen
 
 ### Which source formats work?
 
-PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB (merged image, saved with Maximize Compatibility), and Krita/OpenRaster (merged image). GIMP `.xcf` and Paint.NET `.pdn` are not read; export to PNG or TGA first, or save the DDS straight from GIMP or Paint.NET with the [plugin](Host-Plugins.md).
+PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB (merged image, saved with Maximize Compatibility), and Krita/OpenRaster (merged image). GIMP `.xcf` and Paint.NET `.pdn` are not read; export to PNG or TGA first.
 
 ### Can I run conversions from a script or another tool?
 
@@ -106,4 +102,4 @@ See the table in [GUI settings](GUI-Settings.md#where-settings-live).
 
 ### What licence is it under?
 
-See the licence line on [Home](Home.md) and, for the plugins, [Host plugins](Host-Plugins.md#licences). The vendored encoder libraries keep their own licences ([vendored files](Installation.md#ispc-objects)).
+See the licence line on [Home](Home.md). The vendored encoder libraries keep their own licences ([vendored files](Installation.md#ispc-objects)).

@@ -301,40 +301,54 @@ pub fn search(v: &[u8; 16], radius: u32, guard128: bool) -> [u8; 8] {
     b.bytes()
 }
 
-const ORACLE_PAD: i32 = 16;
-
-/// Exhaustive pairs over [min-16, max+16] (both modes), seeded with `b`; strict `<` keeps the earlier block on ties.
-pub fn oracle(v: &[u8; 16], b: &mut Best) {
-    if b.err == 0 {
-        return;
+// Test inputs shared by the encoders-sys and engine BC4 reference tests.
+pub struct Rng(pub u64);
+impl Rng {
+    pub fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
     }
-    let (mn, mx) = minmax(v);
-    let (lo, hi) = (
-        clampi(mn as i32 - ORACLE_PAD),
-        clampi(mx as i32 + ORACLE_PAD),
-    );
-    for e0 in lo..=hi {
-        for e1 in lo..=hi {
-            b.try_pair(v, e0, e1);
-        }
+    pub fn byte(&mut self) -> u8 {
+        (self.next() >> 24) as u8
     }
 }
 
-/// `max`: [`search`] at radius 10 without the guard, then the near-exhaustive pair search, then the guard last:
-/// when the result flips more texels at 128 than the upstream block, return the guarded radius-10 search instead.
-pub fn search_max(v: &[u8; 16], guard128: bool) -> [u8; 8] {
-    let base = v0(v, 10);
-    let mut b = from_bytes(&search(v, 10, false), v);
-    oracle(v, &mut b);
-    if guard128 && flips(v, &b) > flips(v, &base) {
-        return search(v, 10, true);
-    }
-    b.bytes()
-}
-
-/// Rebuild a [`Best`] (error and selectors) from encoded bytes by scoring that pair.
-fn from_bytes(bytes: &[u8; 8], v: &[u8; 16]) -> Best {
-    let mut b = Best::new();
-    b.try_pair(v, bytes[0], bytes[1]);
-    b
+/// Uniform, two-level 0/255 plus noise, ramps and near-constant blocks, in rotation.
+pub fn blocks(n: usize) -> Vec<[u8; 16]> {
+    let mut r = Rng(0x9E37_79B9_7F4A_7C15);
+    (0..n)
+        .map(|i| {
+            let mut v = [0u8; 16];
+            match i % 4 {
+                0 => v.iter_mut().for_each(|x| *x = r.byte()),
+                1 => v.iter_mut().for_each(|x| {
+                    let base = if r.next() & 1 == 0 { 0i32 } else { 255 };
+                    let noise = if r.next().is_multiple_of(3) {
+                        (r.byte() % 9) as i32
+                    } else {
+                        0
+                    };
+                    *x = (if base == 0 {
+                        base + noise
+                    } else {
+                        base - noise
+                    }) as u8;
+                }),
+                2 => {
+                    let (a, b) = (r.byte() as i32, r.byte() as i32);
+                    for (k, x) in v.iter_mut().enumerate() {
+                        *x = (a + (b - a) * k as i32 / 15) as u8;
+                    }
+                }
+                _ => {
+                    let c = r.byte();
+                    v.iter_mut()
+                        .for_each(|x| *x = c.saturating_add(r.byte() % 3).saturating_sub(1))
+                }
+            }
+            v
+        })
+        .collect()
 }

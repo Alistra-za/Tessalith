@@ -75,7 +75,7 @@ const SECTIONS = [
     paths: ['crates/vfs/src/', 'crates/pgpsim/src/', 'crates/cli/src/'],
     entry: 'hostile BSA archives -> bounded reader; PGPatcher simulation; CLI verbs -> exit codes and stdout/JSON' },
 ]
-// Not covered on purpose: crates/bench (measurement harness, not shipped). The Scout reports anything else unassigned.
+// The Scout reports anything unassigned.
 
 const FINDINGS = {
   type: 'object',
@@ -165,7 +165,7 @@ log(`Planned: 1 scout + ${pick.length * ROUNDS} tracers + up to ${MAX_REVIEWS} r
 
 phase('Scout')
 const scout = await agent(
-  `List every .rs file under crates/*/src with \`git ls-files 'crates/*/src/*.rs' 'crates/*/src/**/*.rs'\`. Here is the section table (a path ending in / means the whole folder; a bare file name belongs to the folder of the previous full path in the same list):\n${JSON.stringify(SECTIONS.map(s => ({ id: s.id, paths: s.paths })), null, 1)}\nReport files that match no section (ignore crates/bench), and for each the section it fits best by subsystem. Report every section path that no longer exists (renamed or deleted). Also report each section's real line count today (wc -l of its files). ${RULES_TRACE}`,
+  `List every .rs file under crates/*/src with \`git ls-files 'crates/*/src/*.rs' 'crates/*/src/**/*.rs'\`. Here is the section table (a path ending in / means the whole folder; a bare file name belongs to the folder of the previous full path in the same list):\n${JSON.stringify(SECTIONS.map(s => ({ id: s.id, paths: s.paths })), null, 1)}\nReport files that match no section, and for each the section it fits best by subsystem. Report every section path that no longer exists (renamed or deleted). Also report each section's real line count today (wc -l of its files). ${RULES_TRACE}`,
   { label: 'scout:coverage', schema: {
     type: 'object',
     properties: {

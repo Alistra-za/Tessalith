@@ -187,7 +187,7 @@ log(`Planned: 1 scout + ${pick.length} assessors + ${sweeps.length} sweeps + up 
 
 phase('Scout')
 const scout = await agent(
-  `List every .rs file under crates/*/src with \`git ls-files 'crates/*/src/*.rs' 'crates/*/src/**/*.rs'\`. Section table (a path ending in / is a whole folder; a bare file name is in the folder of the previous full path):\n${JSON.stringify(SECTIONS.map(s => ({ id: s.id, paths: s.paths })), null, 1)}\nReport files no section covers (ignore crates/bench) with the section each fits best, section paths that no longer exist, each section's line count today, and the 15 largest .rs files under crates/ by lines.
+  `List every .rs file under crates/*/src with \`git ls-files 'crates/*/src/*.rs' 'crates/*/src/**/*.rs'\`. Section table (a path ending in / is a whole folder; a bare file name is in the folder of the previous full path):\n${JSON.stringify(SECTIONS.map(s => ({ id: s.id, paths: s.paths })), null, 1)}\nReport files no section covers with the section each fits best, section paths that no longer exist, each section's line count today, and the 15 largest .rs files under crates/ by lines.
 Also: (a) compare the \`const SECTIONS = [...]\` literal in .claude/workflows/quality-audit.js and .claude/workflows/trace-debug.js and say whether they are identical; (b) find the newest earlier report \`${OUT}/*-report.md\` (if any) and return the one-line entries of its "Rejected" section verbatim (up to 150). ${RULES}`,
   { label: 'scout:coverage', phase: 'Scout', effort: 'low', schema: {
     type: 'object',
