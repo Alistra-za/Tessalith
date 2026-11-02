@@ -415,6 +415,11 @@ pub struct AppModel {
     sets_root: Option<PathBuf>,
     /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
     items_rev: u64,
+    /// Note F?: bumped by `invalidate_views` but not by a partial plan's splice: Problems keeps the set views, export
+    /// blocks and asks of this revision until the full plan lands (`bottom::problems`).
+    full_rev: u64,
+    /// Note F?: those three as Problems last read them, under `full_view_key` and `evidence_rev`.
+    pub(crate) problem_globals: std::cell::RefCell<Option<bottom::ProblemGlobals>>,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
     game_paths: (u64, Vec<String>),
     /// Note FI1: skipped DDS inputs' tile images by path, with the stamp they were decoded at; cleared on open and
@@ -429,7 +434,7 @@ pub struct AppModel {
     pub dds_thumb_requests: usize,
     /// The artist check results and what they were computed from (DECISIONS Note CL).
     pub(crate) check_state: checks::CheckState,
-    /// Bumped whenever `last_inputs` is written: `engine_inputs` (so the export blocks) reads it.
+    /// Bumped whenever `last_inputs` changes: `engine_inputs` (so the export blocks) reads it.
     inputs_rev: u64,
     /// `TextureItem::key` to its index in `items` (audit 7).
     item_index: std::collections::HashMap<String, usize>,
@@ -760,6 +765,8 @@ impl AppModel {
             target: Target::Cs,
             items: vec![],
             items_rev: 0,
+            full_rev: 0,
+            problem_globals: Default::default(),
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
@@ -1337,8 +1344,7 @@ impl AppModel {
         self.planning = Some(cancel.clone());
         self.plan_progress = None;
         self.status_line = "Planning…".into();
-        self.inputs_rev += 1;
-        self.last_inputs = Some(EngineInputs {
+        let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
             shared_roughness: req.shared_roughness.clone(),
@@ -1351,6 +1357,11 @@ impl AppModel {
             gras_all_diffuses: req.gras_all_diffuses.clone(),
             cs_txst_sets: req.cs_txst_sets.clone(),
         });
+        // Note F?: only a changed value moves the views key, so a `[files]` edit keeps Problems' cached globals.
+        if self.last_inputs != inputs {
+            self.inputs_rev += 1;
+            self.last_inputs = inputs;
+        }
         spawn_plan(self.tx.clone(), session, req, cancel, self.generation, root);
     }
 
@@ -2752,7 +2763,8 @@ impl AppModel {
         self.rnm_notes.retain(|k, _| !scope.contains(k));
         self.rnm_notes.extend(view.rnm_notes);
         self.rnm_keys.extend(view.rnm_keys);
-        self.invalidate_views();
+        // Not `invalidate_views`: `full_rev` stays, so Problems rebuilds its item rows only (Note F?).
+        self.items_changed();
         self.refresh_game_paths();
         self.request_dds_thumbs();
         self.counts_status();
@@ -2905,7 +2917,7 @@ impl AppModel {
         self.items_rev
     }
 
-    /// Tests: bumped whenever `last_inputs` is written, and per landed full plan (the checks' count).
+    /// Tests: bumped whenever `last_inputs` changes, and per landed full plan (the checks' count).
     pub fn plan_marks(&self) -> (u64, u64) {
         (self.inputs_rev, self.check_state.plans_applied)
     }
@@ -2944,6 +2956,12 @@ impl AppModel {
 
     /// Call after writing `items` or `sets` in place (tests); a plan does it itself.
     pub fn invalidate_views(&mut self) {
+        self.full_rev += 1;
+        self.items_changed();
+    }
+
+    /// `items_rev` and the key index; a partial plan's splice calls only this.
+    fn items_changed(&mut self) {
         self.items_rev += 1;
         self.item_index = self
             .items
@@ -2978,6 +2996,14 @@ impl AppModel {
             self.evidence_rev,
             crate::model::pbr_export::json_name(self),
         )
+    }
+
+    /// `view_key` with the last full plan's items revision (Note F?): equal across a partial plan's splice only.
+    pub(crate) fn full_view_key(&self) -> ViewKey {
+        ViewKey {
+            items: self.full_rev,
+            ..self.view_key()
+        }
     }
 
     /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).

@@ -2,8 +2,9 @@
 //! plan lands behind it and always wins. `hold_plan_results` parks the plan messages so each test delivers them in
 //! the order it wants.
 mod support;
-use engine::config::AlphaPolicy;
-use sdc_gui::model::AppModel;
+use engine::config::{AlphaPolicy, Subtype};
+use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
+use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::WorkerMsg;
 use serde_json::json;
@@ -332,6 +333,104 @@ fn export_waits_for_full_after_partial() {
         m.export.error
     );
     assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Blend));
+}
+
+/// Note F?: after a partial and its full plan, Problems is what a fresh full build gives.
+#[test]
+fn problems_after_partial_then_full_equal_fresh() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    cutout(&mut m, LEAF);
+    let (partials, full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    finish(&mut m, full);
+    let after = problems(&m);
+    m.save().unwrap();
+    let again = fresh(d.path(), m.root.clone().unwrap());
+    assert_eq!(*after, *problems(&again));
+}
+
+/// Note F?: the partial alone updates the edited set's item rows: answering an undecided alpha removes its row.
+#[test]
+fn problems_rows_of_the_edited_set_change_after_partial() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    m.hold_plan_results = false;
+    m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+    let undecided = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .any(|p| p.level == Level::Decide && p.at == At::Texture(LEAF.into()))
+    };
+    assert!(undecided(&m), "the leaf's alpha is undecided");
+    m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(undecided(&m), "nothing landed yet");
+    deliver(&mut m, partials);
+    assert!(m.busy(), "the full plan is still out");
+    assert!(!undecided(&m), "the partial removed the leaf's Decide row");
+}
+
+/// Note F?: on a big project the build after a partial reuses the last full plan's set views, export blocks and
+/// asks, so it costs a small part of a full build (a ratio, as `rename_scale.rs`, not milliseconds).
+#[test]
+fn problems_rebuild_after_partial_is_per_set() {
+    const N: usize = 4000;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    // N more single-texture sets, each a clone of the rock's diffuse under its own key, set and output.
+    let item = m.item(ROCK).expect("rock").clone();
+    let set = m
+        .sets
+        .iter()
+        .find(|s| item.set_key.as_ref() == Some(&s.key))
+        .expect("rock's set")
+        .clone();
+    for i in 0..N {
+        let key = format!("big/s{i:05}.png");
+        let mut it = item.clone();
+        it.key.clone_from(&key);
+        it.job_key = format!("big/s{i:05}.dds");
+        it.set_key = Some(format!("{}{i:05}", set.key));
+        let mut s = set.clone();
+        s.key = format!("{}{i:05}", set.key);
+        s.members = vec![key];
+        m.items.push(it);
+        m.sets.push(s);
+    }
+    m.items.sort_by_cached_key(|i| i.key.to_lowercase());
+    m.invalidate_views();
+    let timed = |m: &AppModel| {
+        let n = problems_builds(m);
+        let t = Instant::now();
+        let p = problems(m);
+        let e = t.elapsed();
+        assert_eq!(problems_builds(m), n + 1, "the list was built");
+        assert!(!p.is_empty());
+        e
+    };
+    let full = (0..3)
+        .map(|_| {
+            m.invalidate_views();
+            timed(&m)
+        })
+        .min()
+        .unwrap();
+    let mut partial = Duration::MAX;
+    for p in [AlphaPolicy::Cutout, AlphaPolicy::Blend, AlphaPolicy::Cutout] {
+        m.set_field(LEAF, "alpha.policy", json!(p));
+        let (partials, _full) = collect(&mut m, 1, 0);
+        deliver(&mut m, partials);
+        assert_eq!(policy(&m, LEAF), Some(p), "the partial landed");
+        partial = partial.min(timed(&m));
+    }
+    eprintln!("{N} sets: full build {full:?}, after a partial {partial:?}");
+    assert!(
+        partial * 10 < full,
+        "after a partial Problems took {partial:?}, not under a tenth of a full build's {full:?}"
+    );
 }
 
 #[test]
