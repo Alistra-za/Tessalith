@@ -10,6 +10,7 @@ use engine::manifest::{encode_version, ENGINE_VERSION, RELEASED_ENGINE_VERSION};
 use engine::policy::AcceptSuggestions;
 use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -17,14 +18,16 @@ use std::sync::Arc;
 /// Sub-types no forced fixture can encode, with the reason. Each one is also listed in Note DM.
 const UNGUARDED: &[(Subtype, &str)] = &[];
 
-/// Checks `observed` (output key -> (sub-type, hash)) against the pins in `file` and rewrites the file when the
-/// pinned map changes. A new key is pinned; a changed hash is accepted only when `bumped(subtype)`, else the old
-/// hash stays and a failure is returned; keys no longer observed are dropped.
-fn check_pins(
+/// Checks `observed` (output key -> object of pinned fields) against the pins in `file` and rewrites the file when
+/// the pinned map changes, field by field. A new key or field is pinned; a field whose value differs is accepted
+/// only when `accept(key, field)`, else the old value stays and `changed(key)` is returned once for that key; a
+/// field in the file that this run did not observe (another CPU's `payload_sha256@<isa>`) is kept; keys no longer
+/// observed are dropped.
+fn pin_fields(
     file: &Path,
-    observed: BTreeMap<String, (Subtype, String)>,
-    what: &str,
-    bumped: &dyn Fn(Subtype) -> bool,
+    observed: BTreeMap<String, Value>,
+    accept: &dyn Fn(&str, &str) -> bool,
+    changed: &dyn Fn(&str) -> String,
 ) -> Vec<String> {
     let old: BTreeMap<String, Value> = match std::fs::read_to_string(file) {
         Ok(s) => serde_json::from_str(&s).unwrap(),
@@ -33,21 +36,24 @@ fn check_pins(
     };
     let mut pins = BTreeMap::new();
     let mut failures = vec![];
-    for (key, (st, sha)) in observed {
-        let id = st.id();
-        match old.get(&key) {
-            Some(was) if was["sha256"] != sha.as_str() && !bumped(st) => {
-                failures.push(format!(
-                    "{id} output changed ({what} of {key}): set its encode_version arm in \
-                     crates/engine/src/manifest.rs to ENGINE_VERSION (and bump the engine version if it is \
-                     still the released version)"
-                ));
-                pins.insert(key, was.clone());
-            }
-            _ => {
-                pins.insert(key, json!({ "subtype": id, "sha256": sha }));
+    for (key, now) in observed {
+        let mut entry = old
+            .get(&key)
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+        let mut failed = false;
+        for (field, v) in now.as_object().unwrap() {
+            match entry.get(field) {
+                Some(was) if was != v && !accept(&key, field) => failed = true,
+                _ => {
+                    entry.insert(field.clone(), v.clone());
+                }
             }
         }
+        if failed {
+            failures.push(changed(&key));
+        }
+        pins.insert(key, Value::Object(entry));
     }
     // Compare the parsed map, not the bytes: the checkout is CRLF.
     if pins != old {
@@ -56,6 +62,84 @@ fn check_pins(
         write_atomic(file, text.as_bytes()).unwrap();
     }
     failures
+}
+
+/// `pin_fields` for `{ subtype, sha256 }` pins (output key -> (sub-type, hash)): a changed hash is accepted only when
+/// `bumped(subtype)`.
+fn check_pins(
+    file: &Path,
+    observed: BTreeMap<String, (Subtype, String)>,
+    what: &str,
+    bumped: &dyn Fn(Subtype) -> bool,
+) -> Vec<String> {
+    let subtypes: BTreeMap<String, Subtype> = observed
+        .iter()
+        .map(|(k, (st, _))| (k.clone(), *st))
+        .collect();
+    let observed = observed
+        .into_iter()
+        .map(|(k, (st, sha))| (k, json!({ "subtype": st.id(), "sha256": sha })))
+        .collect();
+    pin_fields(
+        file,
+        observed,
+        &|key, field| field != "sha256" || bumped(subtypes[key]),
+        &|key| {
+            format!(
+                "{} output changed ({what} of {key}): set its encode_version arm in \
+                 crates/engine/src/manifest.rs to ENGINE_VERSION (and bump the engine version if it is \
+                 still the released version)",
+                subtypes[key].id()
+            )
+        },
+    )
+}
+
+/// `pin_fields` with no change accepted: the byte-identity pins (Note FM1).
+fn check_strict(file: &Path, observed: BTreeMap<String, Value>) -> Vec<String> {
+    pin_fields(file, observed, &|_, _| false, &|key| {
+        format!(
+            "{key}: output changed. If intended, delete the key from identity.json, re-run, and name the key \
+             and the reason in the Note FM item."
+        )
+    })
+}
+
+/// The byte-identity pin of every output `observed` names (keys carry `prefix`), read back from the DDS that
+/// `run_target` wrote under `d`: sub-type, format, size and the SHA-256 of the pixel data. BC7 and BC6H bytes depend
+/// on the CPU's ISA path, so their hash is keyed `payload_sha256@<isa>`.
+fn identity_entries(
+    d: &Path,
+    prefix: &str,
+    observed: &BTreeMap<String, (Subtype, String)>,
+) -> BTreeMap<String, Value> {
+    use engine::dds::DdsPixelFormat::*;
+    observed
+        .iter()
+        .map(|(key, (st, _))| {
+            let path = out_dir(d, prefix).join(key.strip_prefix(prefix).unwrap());
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let dds = engine::dds::read_dds(&bytes).unwrap();
+            let by_isa = matches!(dds.format, Bc7 { .. } | Bc6hUf16 | Bc6hSf16);
+            let field = if by_isa {
+                format!("payload_sha256@{}", engine::manifest::dispatched_isa())
+            } else {
+                "payload_sha256".to_string()
+            };
+            let mut pin = json!({
+                "subtype": st.id(),
+                "format": format!("{:?}", dds.format),
+                "width": dds.width,
+                "height": dds.height,
+            });
+            pin[field] = hex::encode(Sha256::digest(&dds.data)).into();
+            (key.clone(), pin)
+        })
+        .collect()
+}
+
+fn out_dir(d: &Path, prefix: &str) -> std::path::PathBuf {
+    d.join(format!("out-{}", prefix.trim_end_matches('/')))
 }
 
 fn bumped(st: Subtype) -> bool {
@@ -159,6 +243,54 @@ fn rnm_fixture(dir: &Path) {
     );
 }
 
+/// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
+/// opaque BC1, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, plus BC4 and BC5. Returns the
+/// `[files]` overrides.
+fn coverage_fixture(dir: &Path) -> Vec<String> {
+    let mut sets = vec![];
+    let mut add = |name: &str, img: DynamicImage, fields: &[&str]| {
+        put(dir, &format!("textures/c/{name}.png"), img);
+        for f in fields {
+            sets.push(format!("file:**/c/{name}.png.{f}"));
+        }
+    };
+    // 0/255 checker alpha for the cutout policy; `rgba64` is the smooth ramp for blend.
+    let checker = || {
+        DynamicImage::ImageRgba8(ImageBuffer::from_fn(64, 64, |x, y| {
+            let a = if (x / 4 + y / 4) % 2 == 0 { 255 } else { 0 };
+            Rgba([(x * 4) as u8, (y * 4) as u8, 90, a])
+        }))
+    };
+    // BC1 stores no alpha (FMT-BC1-ALPHA), so it gets an opaque source.
+    add("opaque_bc1", rgb(64), &["subtype=diffuse", "format=bc1"]);
+    for f in ["bc3", "bc7"] {
+        let fmt = format!("format={f}");
+        add(
+            &format!("cutout_{f}"),
+            checker(),
+            &[
+                "subtype=diffuse",
+                &fmt,
+                "alpha.policy=cutout",
+                "mips.filter=box",
+            ],
+        );
+        add(
+            &format!("blend_{f}"),
+            rgba64(),
+            &["subtype=diffuse", &fmt, "alpha.policy=blend"],
+        );
+    }
+    add("gray_bc4", rgb(64), &["subtype=height", "format=bc4"]);
+    // A normal cannot be BC5 (FMT-BC5-NORMAL), so BC5 is a two-channel map.
+    add(
+        "rg_bc5",
+        rgb(64),
+        &["subtype=generic_two_channel", "format=bc5"],
+    );
+    sets
+}
+
 /// Sub-types vanilla refuses (CFG-UNAVAILABLE: cs-only, Note DM2), so the vanilla run cannot pin them; the cs run
 /// does.
 const CS_ONLY: &[Subtype] = &[
@@ -190,11 +322,7 @@ fn run_target(
     BTreeMap<String, (Subtype, String)>,
 ) {
     let hooks = tempfile::tempdir().unwrap();
-    let mut req = BatchRequest::new(
-        vec![d.join("in")],
-        d.join(format!("out-{}", prefix.trim_end_matches('/'))),
-        target,
-    );
+    let mut req = BatchRequest::new(vec![d.join("in")], out_dir(d, prefix), target);
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.on_existing = OnExisting::Overwrite;
@@ -291,6 +419,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         guarded().collect(),
         "sub-types with a cs encode-input pin"
     );
+    let mut identity = identity_entries(d.path(), "", &observed);
 
     // Vanilla has its own pixel paths (packing arms, no PBR), so it is pinned too, under `vanilla/`.
     let (summary, events, vanilla) = run_target(d.path(), &sets, Target::Vanilla, "vanilla/");
@@ -331,12 +460,90 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         guarded().filter(|st| !CS_ONLY.contains(st)).collect(),
         "sub-types with a vanilla encode-input pin"
     );
+    identity.extend(identity_entries(d.path(), "vanilla/", &vanilla));
     observed.extend(vanilla);
 
-    let file =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/encode_versions/encode_inputs.json");
-    let failures = check_pins(&file, observed, "encode input", &bumped);
+    // Byte-identity coverage (Note FM1): formats and alpha policies the fixtures above may not reach.
+    let c = tempfile::tempdir().unwrap();
+    let cov_sets = coverage_fixture(c.path());
+    let (summary, events, cov) = run_target(c.path(), &cov_sets, Target::Cs, "cov/");
+    assert_eq!(
+        (summary.failed, summary.skipped, summary.validation_failed),
+        (0, 0, 0),
+        "{events:#?}"
+    );
+    identity.extend(identity_entries(c.path(), "cov/", &cov));
+    let formats: BTreeSet<&str> = identity
+        .values()
+        .map(|p| p["format"].as_str().unwrap())
+        .collect();
+    for want in ["Bc1", "Bc3", "Bc4", "Bc5"] {
+        assert!(
+            formats.iter().any(|f| f.starts_with(want)),
+            "identity pins cover no {want} output: {formats:?}"
+        );
+    }
+    let covered = |name: &str| identity.keys().any(|k| k.contains(name));
+    for name in [
+        "opaque_bc1",
+        "cutout_bc3",
+        "cutout_bc7",
+        "blend_bc3",
+        "blend_bc7",
+    ] {
+        assert!(covered(name), "identity pins miss the {name} fixture");
+    }
+
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/encode_versions");
+    let failures = check_pins(
+        &dir.join("encode_inputs.json"),
+        observed,
+        "encode input",
+        &bumped,
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    let failures = check_strict(&dir.join("identity.json"), identity);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn check_strict_fails_any_change_and_adds_new_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("identity.json");
+    let read = || std::fs::read_to_string(&f).unwrap();
+    let one = |h: &str| BTreeMap::from([("a.dds".to_string(), json!({ "payload_sha256": h }))]);
+    assert!(check_strict(&f, one("x")).is_empty()); // new key pinned
+    assert!(check_strict(&f, one("x")).is_empty()); // unchanged
+    let fails = check_strict(&f, one("y"));
+    assert_eq!(fails.len(), 1);
+    assert!(fails[0].contains("a.dds") && fails[0].contains("Note FM"));
+    assert!(
+        read().contains("\"x\"") && !read().contains("\"y\""),
+        "old pin kept"
+    );
+
+    // Another CPU's ISA field survives a run that only observes this machine's, and a new field is added.
+    std::fs::write(
+        &f,
+        r#"{"b.dds": {"payload_sha256@avx512": "z", "payload_sha256@avx2": "p"}}"#,
+    )
+    .unwrap();
+    let here = BTreeMap::from([(
+        "b.dds".to_string(),
+        json!({ "payload_sha256@avx2": "p", "w": 4 }),
+    )]);
+    assert!(check_strict(&f, here).is_empty());
+    let pins: Value = serde_json::from_str(&read()).unwrap();
+    assert_eq!(
+        pins["b.dds"],
+        json!({ "payload_sha256@avx512": "z", "payload_sha256@avx2": "p", "w": 4 })
+    );
+    // This machine's own ISA field is still strict.
+    let changed = BTreeMap::from([("b.dds".to_string(), json!({ "payload_sha256@avx2": "q" }))]);
+    assert_eq!(check_strict(&f, changed).len(), 1);
+    // A key no run observed is dropped.
+    assert!(check_strict(&f, one("x")).is_empty());
+    assert!(!read().contains("b.dds"));
 }
 
 #[test]
