@@ -2,7 +2,7 @@
 //! `skin_sk` and `skin_wet`.
 use engine::api::*;
 use engine::codes::Code;
-use engine::config::{Format, MipKeyword, MipLevels, Subtype, Target};
+use engine::config::{Format, Subtype, Target};
 use engine::dds::{read_dds, DdsFile, DdsPixelFormat};
 use engine::decode::{decode_level, Decoded};
 use engine::events::*;
@@ -297,13 +297,10 @@ fn skin_sub_types_are_unavailable_off_cs() {
     );
 }
 
-/// The pre-rename id loads as `skin_rfaos` (JSON and a config table) and the new id is the one written.
+/// Note FM11: the pre-rename id `rfaos` is not read (JSON, a config table or `--set`); `skin_rfaos` is the id.
 #[test]
-fn the_old_rfaos_id_loads_as_skin_rfaos() {
-    assert_eq!(
-        serde_json::from_str::<Subtype>("\"rfaos\"").unwrap(),
-        Subtype::SkinRfaos
-    );
+fn the_old_rfaos_id_is_not_read() {
+    assert!(serde_json::from_str::<Subtype>("\"rfaos\"").is_err());
     assert_eq!(Subtype::SkinRfaos.id(), "skin_rfaos");
     assert_eq!(
         serde_json::to_string(&Subtype::SkinRfaos).unwrap(),
@@ -316,10 +313,22 @@ fn the_old_rfaos_id_loads_as_skin_rfaos() {
         "[subtypes.rfaos]\nmips = { levels = \"none\" }\n",
     )
     .unwrap();
-    let p = plan(&d, Target::Cs, &[]);
-    let j = job(&p, "x_rfaos.png");
-    assert_eq!(j.profile.subtype, Subtype::SkinRfaos);
-    assert_eq!(j.profile.mips.levels, MipLevels::Keyword(MipKeyword::None));
+    let rep = Reporter::new(Arc::new(NullSink), "skin-rfaos");
+    let err = Engine::new()
+        .unwrap()
+        .plan(req(&d, Target::Cs, &[]), &rep, &CancelToken::default())
+        .err()
+        .expect("a removed sub-type id is refused")
+        .to_string();
+    assert!(
+        err.contains("subtypes.rfaos: removed in 2.0") && err.contains("skin_rfaos"),
+        "{err}"
+    );
+    let e = engine::overrides::parse_set("subtype=rfaos").unwrap_err();
+    assert!(
+        e.contains("removed in 2.0") && e.contains("skin_rfaos"),
+        "{e}"
+    );
 }
 
 /// `_wet` is not a §6.1 suffix (only `join_skin_wet` splits it, in a cs Advanced skin set) and is no vocabulary term.

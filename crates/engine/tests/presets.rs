@@ -976,27 +976,39 @@ fn user_dir_retries_file_refused_by_a_skipped_preset() {
     }
 }
 
-/// Trace-debug #20 (Note BQ): `[subtypes.rfaos]` (the deprecated id) and `[subtypes.skin_rfaos]` in one file would
-/// fold into one table with one silently lost, so such a config or preset is refused; `rfaos` alone still loads.
+/// Note FM11: `[subtypes.rfaos]` (the removed id) is an error that names `skin_rfaos`, alone or beside
+/// `[subtypes.skin_rfaos]`, in a config and in a preset; `skin_rfaos` alone loads.
 #[test]
-fn config_with_rfaos_and_skin_rfaos_is_refused() {
-    let both = "[subtypes.rfaos]\nformat = \"bc3\"\n[subtypes.skin_rfaos]\nresize = \"half\"\n";
-    let e = engine::presets::ConfigFile::parse(both, "sdc.toml")
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("rfaos") && e.contains("skin_rfaos"), "{e}");
-    let c = engine::presets::ConfigFile::parse("[subtypes.rfaos]\nformat = \"bc3\"\n", "sdc.toml")
-        .unwrap();
+fn config_with_rfaos_is_refused_and_names_skin_rfaos() {
+    let alone = "[subtypes.rfaos]\nformat = \"bc3\"\n";
+    let both = format!("{alone}[subtypes.skin_rfaos]\nresize = \"half\"\n");
+    for text in [alone, both.as_str()] {
+        let e = engine::presets::ConfigFile::parse(text, "sdc.toml")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("sdc.toml: subtypes.rfaos: removed in 2.0;") && e.contains("skin_rfaos"),
+            "{e}"
+        );
+    }
+    let c =
+        engine::presets::ConfigFile::parse("[subtypes.skin_rfaos]\nformat = \"bc3\"\n", "sdc.toml")
+            .unwrap();
     assert!(c.subtypes.contains_key(&Subtype::SkinRfaos));
 
     let head = "schema_version = 1\nid = \"twin\"\nversion = \"1\"\nbase = \"cs-quality\"\n";
     let mut r = PresetRegistry::builtin().unwrap();
-    let e = r
-        .add_toml(&format!("{head}{both}"))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("skin_rfaos"), "{e}");
-    r.add_toml(&format!("{head}[subtypes.rfaos]\nformat = \"bc3\"\n"))
+    for text in [alone, both.as_str()] {
+        let e = r
+            .add_toml(&format!("{head}{text}"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("subtypes.rfaos: removed in 2.0") && e.contains("skin_rfaos"),
+            "{e}"
+        );
+    }
+    r.add_toml(&format!("{head}[subtypes.skin_rfaos]\nformat = \"bc3\"\n"))
         .unwrap();
 }
 

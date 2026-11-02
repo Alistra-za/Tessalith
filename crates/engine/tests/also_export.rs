@@ -249,13 +249,13 @@ fn a_second_export_is_all_up_to_date() {
 }
 
 #[test]
-fn a_1_0_0_twin_without_encode_version_is_copied_and_the_copy_records_the_current_version() {
+fn a_1x_twin_without_encode_version_is_re_encoded_and_the_copy_records_the_current_version() {
     let (_d, m, loc) = project(cup);
     let sp = spec(&loc, &[AlsoTarget::Vanilla]);
     also(request(&m, &loc), &sp).0.unwrap();
     let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
     let f = "textures/clutter/cup.dds";
-    // Make the PBR record look like a 1.0.0 one: engine 1.0.0 and no encode_version.
+    // Make the PBR record look like a 1.x one: engine 1.0.0 and no encode_version.
     let mut raw = record(&pbr, f).raw;
     raw.as_object_mut().unwrap().remove("encode_version");
     raw["engine_version"] = "1.0.0".into();
@@ -267,18 +267,8 @@ fn a_1_0_0_twin_without_encode_version_is_copied_and_the_copy_records_the_curren
     let s = s.unwrap();
     let failed = keys_of(&ev, |k| matches!(k, EventKind::FileFailed { .. }));
     assert!(failed.is_empty(), "{failed:?} {s:#?}");
-    // The legacy record counts as current, so the PBR twin is not re-encoded.
-    assert_eq!(phase(&s, Phase::Pbr).converted, 0, "{s:#?}");
-    let up = keys_of(&ev, |k| {
-        matches!(
-            k,
-            EventKind::FileSkipped {
-                kind: SkipKind::UpToDate,
-                ..
-            }
-        )
-    });
-    assert!(up.contains(&f.to_string()), "PBR twin up to date: {up:?}");
+    // The 1.x record is a stale baseline, so the PBR twin is re-encoded (and no OUT-UNKNOWN-EXISTING).
+    assert_eq!(phase(&s, Phase::Pbr).converted, 1, "{s:#?}");
     assert!(van.join(f).exists(), "the deleted Vanilla file is restored");
     let copy = record(&van, f);
     assert!(copy.raw.get("copied_from").is_some());

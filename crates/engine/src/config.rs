@@ -13,13 +13,11 @@ macro_rules! cfg_enum {
 
 cfg_enum!(Target, "lowercase" { Cs, Vanilla });
 cfg_enum!(Category, "snake_case" { Color, Normal, MixedPacked, Grayscale, Hdr });
-/// A texture sub-type. `skin_rfaos` was `rfaos` before the Advanced skin sub-types were prefixed (DECISIONS Note
-/// R-skin-1): the old id still loads, and the new one is written back.
+/// A texture sub-type.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-#[schemars(transform = subtype_schema)]
 pub enum Subtype {
     Diffuse,
     LandscapeDiffuse,
@@ -39,7 +37,6 @@ pub enum Subtype {
     Envmask,
     ComplexMaterial,
     Rmaos,
-    #[serde(alias = "rfaos")]
     SkinRfaos,
     Flow,
     Height,
@@ -52,7 +49,7 @@ pub enum Subtype {
     SkinWet,
     // Complex grass (design 2026-10-12): one 1:2 image, top = diffuse + alpha, bottom = normal + specular in alpha.
     // A `//` comment on purpose: a `///` doc on one variant makes schemars emit `oneOf` instead of the flat `enum`,
-    // which rewrites every schema and drops the `rfaos` alias `subtype_schema` pushes into `enum`.
+    // which rewrites every schema.
     ComplexGrass,
     // A single cubemap (`_e`, cubemap design 2026-10-26): six square faces, BC1/BC3/BC7/RGBA8 UNORM, `cubemap.*` keys.
     Cubemap,
@@ -61,18 +58,6 @@ pub enum Subtype {
     DetailNormal,
 }
 
-/// The schema lists the deprecated id `rfaos` next to `skin_rfaos`, so an old file still validates.
-fn subtype_schema(s: &mut schemars::Schema) {
-    if let Some(serde_json::Value::Array(ids)) = s.get_mut("enum") {
-        ids.push("rfaos".into());
-    }
-    s.insert(
-        "description".into(),
-        "A texture sub-type. `rfaos` is a deprecated alias of `skin_rfaos`: it still loads and is written back as \
-         `skin_rfaos`."
-            .into(),
-    );
-}
 cfg_enum!(ColorContent, "lowercase" { Srgb, Linear });
 cfg_enum!(ColorTag, "lowercase" { Srgb, Unorm, NotApplicable = "n/a" });
 cfg_enum!(AlphaPolicy, "snake_case" { Remove, Cutout, Blend, CutoutBlend, Data });

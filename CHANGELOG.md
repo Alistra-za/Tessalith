@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 2.0.0 re-encodes every output once (one encode version for every texture type). Output bytes do not change; records written by 1.x are stale, so the next export writes them again.
+- `rfaos` is no longer read as a sub-type: use `skin_rfaos`. A key or value that 2.0 removed is an error that names the key and the fix, in `sdc.toml`, presets and `--set`; the GUI opens such a file read-only.
 - BC3 alpha, BC4 and BC5: better block search (cutout alpha about +3 dB); existing BC3/BC4/BC5 outputs re-encode once. BC4 and BC5 encoding takes about 1.7 to 1.9 times as long and BC3 under 10 % longer; the `fast` presets are included.
 - XPMF profiles: a Landscape or PBR Landscape set can write `SKSE\Plugins\XPMF\tessalith_<set>.json` on Export, from an **XPMF profile** card in the set editor. Landscape sets get two optional maps, **Projected noise** (`_noise`, written as BC4) and **Detail normal**, that the profile points at, and the 3D preview's Material object layer shows the profile's textures and coverage. An Also export with Vanilla ticked writes those two maps and a `pbr = false` copy of the profile into the Vanilla folder too. See docs/wiki/XPMF-Profiles.md.
   - Upgrading from 1.1: in a landscape set, `_detail` and `_detailnorm` are the set's detail normal and no longer blend into `_n`; a landscape set's `_noise` is written as BC4 with no action by you. A set that had a `_detail` or `_noise` file now writes those outputs, and its `_n` changes (the detail blend is gone). A `_detail_mask` file stays an RNM layer and reports `RNM-MASK-ORPHAN`.

@@ -353,7 +353,7 @@ impl ProjectDoc {
         self.f.restore(text);
     }
 
-    /// The document as the engine parses it (migration hook included, spec §5).
+    /// The document as the engine parses it (version and removed-key checks included, Note FM10).
     pub fn config(&self) -> Result<ConfigFile, String> {
         ConfigFile::parse(&self.f.doc.to_string(), "sdc.toml").map_err(|e| e.to_string())
     }

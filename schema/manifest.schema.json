@@ -1078,7 +1078,7 @@
           ]
         },
         "fill": {
-          "description": "Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed\nsource read through an explicit `helper.read` (`read:g`) or the channels each source of a hand-placed recipe\nfeeds (`ch:ba`, `pack::source_fill`). Absent on every other source.",
+          "description": "Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed\nsource's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`). Absent on\nevery other source.",
           "type": [
             "string",
             "null"
@@ -1141,7 +1141,7 @@
       "type": "object"
     },
     "Subtype": {
-      "description": "A texture sub-type. `rfaos` is a deprecated alias of `skin_rfaos`: it still loads and is written back as `skin_rfaos`.",
+      "description": "A texture sub-type.",
       "enum": [
         "diffuse",
         "landscape_diffuse",
@@ -1174,8 +1174,7 @@
         "complex_grass",
         "cubemap",
         "projected_noise",
-        "detail_normal",
-        "rfaos"
+        "detail_normal"
       ],
       "type": "string"
     },
@@ -1305,7 +1304,7 @@
       "description": "Track A (Note CN): a Vanilla-folder copy of a PBR-folder output records the PBR file's `output_stamp` it was\ncopied from, so the copy is redone when the PBR file changes. Absent on every encoded output."
     },
     "encode_version": {
-      "description": "The `encode_version` of `profile.subtype` when this output was written; absent in records written by 1.0.0 and older.",
+      "description": "The `encode_version` of `profile.subtype` when this output was written; absent in records written by 1.x engines.",
       "type": [
         "string",
         "null"

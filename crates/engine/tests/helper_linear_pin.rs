@@ -107,7 +107,6 @@ fn fx() -> Fx {
             stamp: stamp(1),
             read: None,
         }],
-        hand_placed: false,
     });
     let jobs = vec![
         job(&files[0], Subtype::Diffuse, JobStatus::Ready, 2),

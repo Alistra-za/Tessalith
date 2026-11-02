@@ -66,7 +66,6 @@ fn plan(dir: &Path, rough: &Path, ao: &Path) -> Plan {
                 ChannelSource::Default { value: 1.0 },
             ],
             gray: GraySource::R,
-            hand_placed: false,
             sources: vec![source(rough, RawMap::Roughness), source(ao, RawMap::Ao)],
         }),
         bake: None,

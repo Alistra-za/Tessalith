@@ -461,6 +461,52 @@ fn a_record_without_an_output_stamp_is_stale_once() {
     assert_eq!((s.converted, s.up_to_date), (0, 2));
 }
 
+/// Note FM: a 1.x record (no `encode_version`, NVTT version, older engine and schema) is a known, stale baseline. The
+/// output is re-encoded and replaced, not kept as an unknown file (`OUT-UNKNOWN-EXISTING`).
+#[test]
+fn a_1x_manifest_record_is_known_and_stale() {
+    for (schema, engine) in [(1, "1.0.0"), (2, "1.1.0")] {
+        let d = tempfile::tempdir().unwrap();
+        fixtures(d.path());
+        run(request(d.path()));
+        let out = d.path().join("out/armor/iron.dds");
+        let first = std::fs::read(&out).unwrap();
+        let m = Manifest::at(&d.path().join("out"));
+        let old: String = std::fs::read_to_string(m.path())
+            .unwrap()
+            .lines()
+            .map(|l| {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                let o = v.as_object_mut().unwrap();
+                assert!(o.remove("encode_version").is_some());
+                o.insert("schema".into(), schema.into());
+                o.insert("engine_version".into(), engine.into());
+                o["encoders"]["nvtt"] = "3.2.5".into();
+                o["bc1_model"] = "ideal".into();
+                o["profile"]["encoder"]["backend"] = "bc7e".into();
+                format!("{v}\n")
+            })
+            .collect();
+        std::fs::write(m.path(), old).unwrap();
+        let (s, ev) = run(request(d.path()));
+        assert_eq!(
+            (s.converted, s.up_to_date),
+            (2, 0),
+            "schema {schema} {ev:#?}"
+        );
+        assert!(
+            !ev.iter().any(|e| matches!(
+                &e.kind,
+                EventKind::Warning(w) if w.code == Code::OutUnknownExisting
+            )),
+            "schema {schema}"
+        );
+        assert_eq!(std::fs::read(&out).unwrap(), first);
+        let (s, _) = run(request(d.path()));
+        assert_eq!((s.converted, s.up_to_date), (0, 2));
+    }
+}
+
 /// Audit 15 (Note Y2): `--sidecar` on a re-run writes the missing sidecar of an up-to-date output from its record.
 #[test]
 fn sidecar_is_written_for_an_up_to_date_output() {

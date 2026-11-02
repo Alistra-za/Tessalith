@@ -14,17 +14,14 @@ pub use crate::events::now_rfc3339;
 
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// What a manifest record without `encode_version` counts as, and only when its `engine_version` equals it.
-/// Fixed forever.
-pub const LEGACY_ENCODE_VERSION: &str = "1.0.0";
-
 /// The newest released engine version. The release commit sets it to [`ENGINE_VERSION`]; the encode-version guard
 /// accepts a changed hash only for an arm bumped in the current, unreleased cycle.
 pub const RELEASED_ENGINE_VERSION: &str = "1.1.0";
 
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
-/// changes no arm. No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// changes no arm. 2.0.0 re-encodes everything once, so every type shares one version (Note FM9). No `_` arm: a new
+/// `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
         Subtype::Diffuse
@@ -47,19 +44,18 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::SkinRfaos
         | Subtype::GenericData
         | Subtype::SkinWet
-        | Subtype::ComplexGrass => "1.0.0",
-        Subtype::Cubemap => "1.1.0",
-        // Note FF4: the two sub-types whose default is BC6H; Slowest/Max use the peak mode.
-        Subtype::PbrEmissive | Subtype::HdrSky => "1.2.0",
-        // Note FJ: BC4 search (BC4/BC5 defaults)
-        Subtype::Envmask
+        | Subtype::ComplexGrass
+        | Subtype::Cubemap
+        | Subtype::PbrEmissive
+        | Subtype::HdrSky
+        | Subtype::Envmask
         | Subtype::Flow
         | Subtype::Height
         | Subtype::MsnSpecular
         | Subtype::GenericTwoChannel
-        | Subtype::SkinSk => "1.2.0",
-        // XPMF landscape maps (Note GI): new sub-types, first built at 1.2.0.
-        Subtype::ProjectedNoise | Subtype::DetailNormal => "1.2.0",
+        | Subtype::SkinSk
+        | Subtype::ProjectedNoise
+        | Subtype::DetailNormal => "2.0.0",
     }
 }
 
@@ -211,8 +207,8 @@ pub struct SourceRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cube_face: Option<String>,
     /// Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed
-    /// source read through an explicit `helper.read` (`read:g`) or the channels each source of a hand-placed recipe
-    /// feeds (`ch:ba`, `pack::source_fill`). Absent on every other source.
+    /// source's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`). Absent on
+    /// every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<String>,
 }
@@ -291,7 +287,7 @@ pub struct ManifestRecord {
     /// RFC 3339, UTC.
     pub ts: String,
     pub engine_version: String,
-    /// The `encode_version` of `profile.subtype` when this output was written; absent in records written by 1.0.0 and older.
+    /// The `encode_version` of `profile.subtype` when this output was written; absent in records written by 1.x engines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encode_version: Option<String>,
     pub engine_commit: String,
@@ -508,12 +504,6 @@ impl Manifest {
             let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&line?) else {
                 continue;
             };
-            // Spec §5: every record passes the migration hook; a newer one is kept raw (`is_newer_schema`).
-            let raw = match crate::migrate::migrate_manifest_record(raw.clone()) {
-                Ok(v) => v,
-                Err(crate::migrate::MigrateError::Newer { .. }) => raw,
-                Err(_) => continue,
-            };
             if let Some(e) = ManifestEntry::from_value(raw) {
                 map.insert(e.output.clone(), e);
             }
@@ -579,7 +569,7 @@ pub enum RecodeWhy {
     ProfileChanged { subtype: Subtype },
     /// No record for this output, in a manifest no record of which this engine wrote.
     NewOutput { subtype: Subtype },
-    /// FC7 (Review Focus 5): no baseline: no manifest, or a record from before encode versions that is not 1.0.0's.
+    /// FC7 (Review Focus 5): no baseline: no manifest, or a record from before encode versions (a 1.x record).
     FirstExport { version: String },
 }
 
@@ -632,17 +622,12 @@ pub fn recode_causes(recorded: &Manifest, plan: &crate::api::Plan) -> Vec<Recode
             },
             None if ours => continue,
             None => RecodeWhy::NewOutput { subtype: st },
-            Some(e) if e.encode_version.is_none() && e.engine_version != LEGACY_ENCODE_VERSION => {
-                RecodeWhy::FirstExport {
-                    version: ENGINE_VERSION.into(),
-                }
-            }
+            Some(e) if e.encode_version.is_none() => RecodeWhy::FirstExport {
+                version: ENGINE_VERSION.into(),
+            },
             Some(e) if !crate::api::encode_current(e, now) => RecodeWhy::EncodeVersion {
                 subtype: st,
-                from: e
-                    .encode_version
-                    .clone()
-                    .unwrap_or_else(|| LEGACY_ENCODE_VERSION.into()),
+                from: e.encode_version.clone().unwrap_or_default(),
                 to: now.into(),
             },
             Some(e)
@@ -824,15 +809,8 @@ mod tests {
     }
 
     #[test]
-    fn the_legacy_version_is_a_released_version() {
-        assert_eq!(LEGACY_ENCODE_VERSION, "1.0.0");
-        assert!(version_key(LEGACY_ENCODE_VERSION) <= version_key(ENGINE_VERSION));
-    }
-
-    #[test]
     fn the_released_version_is_not_ahead_of_the_engine() {
         assert!(version_key(RELEASED_ENGINE_VERSION) <= version_key(ENGINE_VERSION));
-        assert!(version_key(LEGACY_ENCODE_VERSION) <= version_key(RELEASED_ENGINE_VERSION));
     }
 
     #[test]

@@ -118,7 +118,7 @@ There are 32 sub-types in five categories.
 | `skin_sk` | Grayscale | BC4 | UNORM | remove | `cs` Advanced skin; red channel only. |
 | `complex_material` | MixedPacked | BC7 | UNORM | data, exact opaque | Complex `_m`. Under every target. |
 | `rmaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |
-| `skin_rfaos` | MixedPacked | BC7 | UNORM | data | `cs` only. Also accepted as `rfaos`. |
+| `skin_rfaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |
 | `flow` | MixedPacked | BC5 | UNORM | remove | `cs` only. Hair flow; at 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
 | `generic_two_channel` | MixedPacked | BC5 | UNORM | remove | |
 | `generic_data` | MixedPacked | BC7 | UNORM | data | Use for any data map Tessalith has no type for. |

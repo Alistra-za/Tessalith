@@ -148,6 +148,23 @@ fn an_external_change_needs_force_and_an_invalid_file_is_read_only() {
     assert_eq!(bad.save(true), Err(SaveError::ReadOnly));
 }
 
+/// Note FM: a removed key makes the file read-only with the engine's fix in the error, and the file keeps its bytes.
+#[test]
+fn a_removed_key_opens_read_only_and_keeps_the_file() {
+    let text = "[subtypes.rfaos]\nformat = \"bc7\"\n";
+    let (d, mut doc) = doc_with(text);
+    assert!(doc.read_only());
+    let e = doc.error().unwrap();
+    assert!(e.contains("rfaos") && e.contains("skin_rfaos"), "{e}");
+    doc.set_target(Target::Cs);
+    assert!(!doc.is_dirty());
+    assert_eq!(doc.save(true), Err(SaveError::ReadOnly));
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("sdc.toml")).unwrap(),
+        text
+    );
+}
+
 #[test]
 fn a_missing_file_is_created_on_save() {
     let d = tempfile::tempdir().unwrap();

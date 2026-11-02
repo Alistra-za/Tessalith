@@ -1,9 +1,8 @@
-//! M6 Track D (spec 2026-10-12-sdc-m6-presets-design.md §5, DECISIONS Note T9): one migration hook per schema
-//! family. Each reads the stored version, applies the family's steps from that version up to the current one, and
-//! returns the upgraded value; the loaders deserialise only what a hook returns. A later bump adds one named function
-//! to its family's table.
-use crate::manifest::MANIFEST_SCHEMA;
+//! Version checks and the removed-key table for presets and configs (Note FM). A file is refused when its schema is
+//! newer than this sdc, and when it names a key or value that 2.0 removed: the error says where and what to write
+//! instead. Nothing is upgraded in place; there are no step tables. Every removal adds a row to [`REMOVED`].
 use crate::presets::SCHEMA_VERSION as PRESET_SCHEMA;
+use toml::Value;
 
 /// Version of `config.toml` / `sdc.toml`; an absent `schema_version` is 1.
 pub const CONFIG_SCHEMA: u32 = 1;
@@ -18,39 +17,135 @@ pub enum MigrateError {
         found: u32,
         current: u32,
     },
-    #[error("[subtypes.rfaos] and [subtypes.skin_rfaos] name the same sub-type (rfaos is the old id); keep one")]
-    DuplicateSubtypeAlias,
+    /// `<dotted path>: removed in 2.0; <hint>`.
+    #[error("{0}")]
+    Removed(String),
 }
 
-type TomlStep = fn(toml::Value) -> toml::Value;
-type JsonStep = fn(serde_json::Value) -> serde_json::Value;
-
-/// Entry `i` upgrades version `i + 1` to `i + 2`. Presets: v1 is current.
-const PRESET_STEPS: &[TomlStep] = &[];
-/// Configs: v1 is current.
-const CONFIG_STEPS: &[TomlStep] = &[];
-/// Manifest records: v1 → v2.
-const MANIFEST_STEPS: &[JsonStep] = &[manifest_v1_to_v2];
-
-// Every table reaches its family's current version.
-const _: () = assert!(PRESET_STEPS.len() as u32 == PRESET_SCHEMA - 1);
-const _: () = assert!(CONFIG_STEPS.len() as u32 == CONFIG_SCHEMA - 1);
-const _: () = assert!(MANIFEST_STEPS.len() as u32 == MANIFEST_SCHEMA - 1);
-
-/// v1 → v2: the reader already tolerates every field v2 added (`ManifestEntry::from_value` reads leniently), so
-/// only the version changes.
-fn manifest_v1_to_v2(mut v: serde_json::Value) -> serde_json::Value {
-    v["schema"] = 2.into();
-    v
+/// One key or value that 2.0 no longer reads. `key` is dot-separated segments compared with the last segments of
+/// each key's path, so `encoder.backend` matches under `[defaults]`, `[subtypes.X]`, `[files."k"]` and `[[rules]]`
+/// tables alike (array indices are not segments; a file key that contains dots is one segment). A table key matches
+/// too (`subtypes.rfaos`). `value: None` matches any value; `Some(v)` matches a string equal to `v` or an array
+/// holding the string `v`. The error names the key even when its value is harmless.
+pub struct Removed {
+    pub key: &'static str,
+    pub value: Option<&'static str>,
+    pub hint: &'static str,
 }
 
-fn run<V>(
-    mut v: V,
-    from: u32,
-    current: u32,
-    key: &'static str,
-    steps: &[fn(V) -> V],
-) -> Result<V, MigrateError> {
+pub const REMOVED: &[Removed] = &[
+    Removed {
+        key: "subtypes.rfaos",
+        value: None,
+        hint: "the sub-type is skin_rfaos",
+    },
+    Removed {
+        key: "subtype",
+        value: Some("rfaos"),
+        hint: "use skin_rfaos",
+    },
+    Removed {
+        key: "subtypes",
+        value: Some("rfaos"),
+        hint: "use skin_rfaos",
+    },
+];
+
+fn key_hit(r: &Removed, segs: &[&str]) -> bool {
+    let want: Vec<&str> = r.key.split('.').collect();
+    segs.ends_with(&want)
+}
+
+/// A key shown the way a TOML header writes it: quoted when it is not a bare key.
+fn shown_key(k: &str) -> String {
+    if !k.is_empty()
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        k.to_string()
+    } else {
+        format!("\"{k}\"")
+    }
+}
+
+fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String) -> Option<String> {
+    match v {
+        Value::Table(t) => {
+            for (k, child) in t {
+                let keep = shown.len();
+                if !shown.is_empty() {
+                    shown.push('.');
+                }
+                shown.push_str(&shown_key(k));
+                segs.push(k);
+                let value_hit = |w: &str| match child {
+                    Value::String(s) => s == w,
+                    Value::Array(a) => a.iter().any(|x| x.as_str() == Some(w)),
+                    _ => false,
+                };
+                let hit = REMOVED
+                    .iter()
+                    .find(|r| key_hit(r, segs) && r.value.is_none_or(value_hit));
+                if let Some(r) = hit {
+                    return Some(format!("{shown}: removed in 2.0; {}", r.hint));
+                }
+                if let Some(m) = walk(child, segs, shown) {
+                    return Some(m);
+                }
+                segs.pop();
+                shown.truncate(keep);
+            }
+        }
+        Value::Array(a) => {
+            for (i, child) in a.iter().enumerate() {
+                let keep = shown.len();
+                shown.push_str(&format!("[{i}]"));
+                if let Some(m) = walk(child, segs, shown) {
+                    return Some(m);
+                }
+                shown.truncate(keep);
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// First removed key or value in a config or preset table: `<dotted path>: removed in 2.0; <hint>`.
+pub fn removed_in(v: &Value) -> Option<String> {
+    walk(v, &mut vec![], &mut String::new())
+}
+
+/// The same for one `--set field=value`. `field` may carry a `file:<glob>.` prefix: only its last segments count.
+pub fn removed_set(field: &str, value: &str) -> Option<String> {
+    let segs: Vec<&str> = field.split('.').collect();
+    // `["a", "b"]` or `a`: the elements, unquoted.
+    let items: Vec<&str> = value
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|e| e.trim().trim_matches(['"', '\'']))
+        .collect();
+    let r = REMOVED
+        .iter()
+        .find(|r| key_hit(r, &segs) && r.value.is_none_or(|w| items.contains(&w)))?;
+    Some(format!("{field}: removed in 2.0; {}", r.hint))
+}
+
+fn toml_version(v: &Value, key: &'static str, absent: Option<u32>) -> Result<u32, MigrateError> {
+    match v.get(key) {
+        None => absent.ok_or(MigrateError::NoVersion(key)),
+        Some(x) => x
+            .as_integer()
+            .and_then(|i| u32::try_from(i).ok())
+            .ok_or(MigrateError::NoVersion(key)),
+    }
+}
+
+/// The version first (a newer file may use keys this sdc does not know), then the removed keys.
+fn check(v: Value, from: u32, current: u32) -> Result<Value, MigrateError> {
+    let key = "schema_version";
     if from == 0 {
         return Err(MigrateError::NoVersion(key));
     }
@@ -61,69 +156,33 @@ fn run<V>(
             current,
         });
     }
-    for step in &steps[(from - 1) as usize..(current - 1) as usize] {
-        v = step(v);
+    match removed_in(&v) {
+        Some(m) => Err(MigrateError::Removed(m)),
+        None => Ok(v),
     }
-    Ok(v)
-}
-
-fn toml_version(
-    v: &toml::Value,
-    key: &'static str,
-    absent: Option<u32>,
-) -> Result<u32, MigrateError> {
-    match v.get(key) {
-        None => absent.ok_or(MigrateError::NoVersion(key)),
-        Some(x) => x
-            .as_integer()
-            .and_then(|i| u32::try_from(i).ok())
-            .ok_or(MigrateError::NoVersion(key)),
-    }
-}
-
-/// Trace-debug #20 (Note BQ): serde folds the `rfaos` alias into `skin_rfaos`, so a `[subtypes]` table holding both
-/// would lose one silently; refuse it instead of merging.
-fn check_aliases(v: &toml::Value) -> Result<(), MigrateError> {
-    let st = v.get("subtypes").and_then(toml::Value::as_table);
-    if st.is_some_and(|t| t.contains_key("rfaos") && t.contains_key("skin_rfaos")) {
-        return Err(MigrateError::DuplicateSubtypeAlias);
-    }
-    Ok(())
 }
 
 /// A preset file's table; `schema_version` is required.
-pub fn migrate_preset(v: toml::Value) -> Result<toml::Value, MigrateError> {
+pub fn migrate_preset(v: Value) -> Result<Value, MigrateError> {
     let from = toml_version(&v, "schema_version", None)?;
-    check_aliases(&v)?;
-    run(v, from, PRESET_SCHEMA, "schema_version", PRESET_STEPS)
+    check(v, from, PRESET_SCHEMA)
 }
 
 /// A config file's table; an absent `schema_version` is 1.
-pub fn migrate_config(v: toml::Value) -> Result<toml::Value, MigrateError> {
+pub fn migrate_config(v: Value) -> Result<Value, MigrateError> {
     let from = toml_version(&v, "schema_version", Some(1))?;
-    check_aliases(&v)?;
-    run(v, from, CONFIG_SCHEMA, "schema_version", CONFIG_STEPS)
-}
-
-/// One manifest line; its version key is `schema`. A newer record is refused here and kept raw by the caller
-/// (`ManifestEntry::is_newer_schema`).
-pub fn migrate_manifest_record(v: serde_json::Value) -> Result<serde_json::Value, MigrateError> {
-    let from = v
-        .get("schema")
-        .and_then(serde_json::Value::as_u64)
-        .map(|s| u32::try_from(s).unwrap_or(u32::MAX))
-        .ok_or(MigrateError::NoVersion("schema"))?;
-    run(v, from, MANIFEST_SCHEMA, "schema", MANIFEST_STEPS)
+    check(v, from, CONFIG_SCHEMA)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    fn t(s: &str) -> toml::Value {
-        toml::Value::Table(toml::from_str(s).unwrap())
+    fn t(s: &str) -> Value {
+        Value::Table(toml::from_str(s).unwrap())
     }
+
+    const RULES_CASE: &str = "[[rules]]\nsubtype = \"rfaos\"\n[rules.match]\nsuffix = \"rfaos\"\n";
 
     #[test]
     fn presets_need_a_version_and_refuse_a_newer_one() {
@@ -168,24 +227,46 @@ mod tests {
     }
 
     #[test]
-    fn manifest_records_step_from_1_to_2_and_newer_ones_are_refused() {
-        assert_eq!(
-            migrate_manifest_record(json!({"schema": 1, "output": "a.dds"})),
-            Ok(json!({"schema": 2, "output": "a.dds"}))
+    fn a_removed_key_is_named_at_any_depth() {
+        for text in [
+            "[subtypes.rfaos]\nformat = \"bc7\"",
+            "[files.\"a/b.png\"]\nsubtype = \"rfaos\"",
+            RULES_CASE,
+        ] {
+            let e = migrate_config(t(text)).unwrap_err();
+            let MigrateError::Removed(m) = e else {
+                panic!("{text}")
+            };
+            assert!(m.contains("rfaos") && m.contains("skin_rfaos"), "{m}");
+        }
+        let m = removed_in(&t("[files.\"a.b/c.png\"]\nsubtype = \"rfaos\"")).unwrap();
+        assert!(
+            m.starts_with("files.\"a.b/c.png\".subtype: removed in 2.0;"),
+            "{m}"
         );
-        let v2 = json!({"schema": 2, "output": "a.dds"});
-        assert_eq!(migrate_manifest_record(v2.clone()), Ok(v2));
-        assert!(matches!(
-            migrate_manifest_record(json!({"schema": 3})),
-            Err(MigrateError::Newer {
-                found: 3,
-                current: 2,
-                ..
-            })
-        ));
-        assert_eq!(
-            migrate_manifest_record(json!({"output": "a.dds"})),
-            Err(MigrateError::NoVersion("schema"))
-        );
+        let m = removed_in(&t(RULES_CASE)).unwrap();
+        assert!(m.starts_with("rules[0].subtype:"), "{m}");
+        let m = removed_in(&t("[[rules]]\n[rules.match]\nsubtypes = [\"rfaos\"]")).unwrap();
+        assert!(m.starts_with("rules[0].match.subtypes:"), "{m}");
+        assert!(removed_in(&t("[subtypes.skin_rfaos]\nformat = \"bc7\"")).is_none());
+        assert!(removed_in(&t("[files.\"rfaos\"]\nformat = \"bc7\"")).is_none());
+    }
+
+    #[test]
+    fn a_preset_with_a_removed_key_is_refused_after_the_version_check() {
+        let e = migrate_preset(t("schema_version = 1\n[subtypes.rfaos]")).unwrap_err();
+        assert!(matches!(e, MigrateError::Removed(_)), "{e}");
+        let e = migrate_preset(t("schema_version = 2\n[subtypes.rfaos]")).unwrap_err();
+        assert!(matches!(e, MigrateError::Newer { .. }), "{e}");
+    }
+
+    #[test]
+    fn removed_set_names_the_fix() {
+        assert!(removed_set("subtype", "rfaos")
+            .unwrap()
+            .contains("skin_rfaos"));
+        assert!(removed_set("file:a.png.subtype", "\"rfaos\"").is_some());
+        assert_eq!(removed_set("format", "bc7"), None);
+        assert_eq!(removed_set("subtype", "diffuse"), None);
     }
 }

@@ -270,20 +270,20 @@ impl ConfigFile {
         Self::parse(&text, &path.display().to_string())
     }
 
-    /// A config file's text (`origin` names it in errors): BOM stripped, the migration hook (spec §5), then
+    /// A config file's text (`origin` names it in errors): BOM stripped, the version and removed-key checks, then
     /// deserialised.
     pub fn parse(text: &str, origin: &str) -> Result<ConfigFile, PresetError> {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let bad = |m: String| PresetError::Parse(format!("{origin}: {m}"));
         let raw: toml::Table = toml::from_str(text).map_err(|e| bad(e.to_string()))?;
-        let migrated =
+        let checked =
             crate::migrate::migrate_config(toml::Value::Table(raw)).map_err(|e| match e {
                 crate::migrate::MigrateError::Newer { found, .. } => {
                     PresetError::NewerConfigSchema(origin.to_string(), found)
                 }
                 e => bad(e.to_string()),
             })?;
-        migrated
+        checked
             .try_into()
             .map_err(|e: toml::de::Error| bad(e.to_string()))
     }
@@ -599,8 +599,7 @@ pub struct PresetRegistry {
     sources: BTreeMap<String, Source>,
     /// Id → the preset's TOML table as loaded (`presets export`, Note T8).
     tables: BTreeMap<String, toml::Table>,
-    /// Id → the preset's text as loaded, when the schema migration left it unchanged (`presets export` keeps
-    /// comments and order, Note FC10).
+    /// Id → the preset's text as loaded (`presets export` keeps comments and order, Note FC10).
     texts: BTreeMap<String, String>,
 }
 
@@ -625,17 +624,15 @@ impl PresetRegistry {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let raw: toml::Table =
             toml::from_str(text).map_err(|e| PresetError::Parse(e.to_string()))?;
-        // Spec §5: the migration hook runs before deserialising.
-        let unmigrated = toml::Value::Table(raw.clone());
-        let migrated =
+        // The version and removed-key checks run before deserialising.
+        let checked =
             crate::migrate::migrate_preset(toml::Value::Table(raw)).map_err(|e| match e {
                 crate::migrate::MigrateError::Newer { found, .. } => {
                     PresetError::NewerSchema(found)
                 }
-                e => PresetError::Parse(e.to_string()),
+                e => PresetError::Parse(format!("{}: {e}", source.label())),
             })?;
-        let kept_text = (migrated == unmigrated).then(|| text.to_string());
-        let toml::Value::Table(table) = migrated else {
+        let toml::Value::Table(table) = checked else {
             return Err(PresetError::Parse("a preset file is a TOML table".into()));
         };
         let p: PresetFile = toml::Value::Table(table.clone())
@@ -663,9 +660,7 @@ impl PresetRegistry {
         }
         self.sources.insert(id.clone(), source);
         self.tables.insert(id.clone(), table);
-        if let Some(t) = kept_text {
-            self.texts.insert(id.clone(), t);
-        }
+        self.texts.insert(id.clone(), text.to_string());
         self.presets.insert(id.clone(), p);
         Ok(id)
     }

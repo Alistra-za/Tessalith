@@ -15,7 +15,7 @@ use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
 use crate::manifest::{
     bc1_model_id, encode_version, output_key, profile_sha256, sha256_file, EncoderVersions,
-    Manifest, ManifestEntry, PresetRef, LEGACY_ENCODE_VERSION,
+    Manifest, ManifestEntry, PresetRef,
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
@@ -816,7 +816,7 @@ fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
                 None,
                 None,
                 None,
-                pack::source_fill(pk, s),
+                Some(pack::source_fill(pk, s)),
             ));
         }
     }
@@ -920,18 +920,15 @@ fn sidecar_present(output: &Path, e: &ManifestEntry) -> bool {
     }
 }
 
-/// Whether the record's encode version equals the type's version now. A record without one (written by 1.0.0)
-/// counts as `LEGACY_ENCODE_VERSION`, so it is current only when the type's version is still that.
+/// Whether the record's encode version equals the type's version now. A record without one (written by a 1.x
+/// engine) is a known, stale baseline: it is never current.
 pub(crate) fn encode_current(e: &ManifestEntry, now: &str) -> bool {
-    match &e.encode_version {
-        Some(v) => v == now,
-        None => e.engine_version == LEGACY_ENCODE_VERSION && now == LEGACY_ENCODE_VERSION,
-    }
+    e.encode_version.as_deref() == Some(now)
 }
 
 /// Whether a manifest entry proves the existing output is current (spec §8 `if-changed`, carry 13): same source
 /// (the bytes of every source and the channel each feeds, for a packed output), profile, the sub-type's encode
-/// version (DECISIONS Note DM; a record from 1.0.0 without one counts as 1.0.0) and encoders, a comparable record (known schema, encoders and preset present) and a passing validation, so a
+/// version (DECISIONS Note DM; a record without one is stale) and encoders, a comparable record (known schema, encoders and preset present) and a passing validation, so a
 /// failed output is re-encoded and reported again rather than counted as up to date
 /// (controller ruling O2). BC1 and BC3 outputs also need the same batch BC1 decoder model: rgbcx encodes their
 /// colour blocks against it (BC3's colour half is a BC1 block), and validation decodes BC1 with it (review I2).
@@ -4089,16 +4086,14 @@ mod tests {
             &job,
             Bc1Model::Ideal
         ));
-        // A 1.0.0 record has no encode_version: current exactly when the type's arm is still LEGACY_ENCODE_VERSION.
-        let legacy = with(&|e| {
-            e.encode_version = None;
-            e.engine_version = "1.0.0".into()
-        });
-        assert_eq!(
-            up(&legacy, &job, Bc1Model::Ideal),
-            crate::manifest::encode_version(job.profile.subtype)
-                == crate::manifest::LEGACY_ENCODE_VERSION
-        );
+        // A 1.x record has no encode_version: stale whatever the type's arm is.
+        for v in ["1.0.0", "1.1.0"] {
+            let legacy = with(&|e| {
+                e.encode_version = None;
+                e.engine_version = v.into()
+            });
+            assert!(!up(&legacy, &job, Bc1Model::Ideal), "{v}");
+        }
         // The BC1 model only matters for formats rgbcx encodes against it.
         assert!(up(&with(&|e| e.bc1_model = None), &job, Bc1Model::Nvidia));
         for format in [Format::Bc1, Format::Bc3] {
@@ -4214,13 +4209,12 @@ mod tests {
             copied_from: None,
             raw: serde_json::json!({}),
         };
-        let e = mk(Some("1.0.0"), "1.1.0");
-        assert!(encode_current(&e, "1.0.0")); // type unchanged in 1.1.0
-        assert!(!encode_current(&e, "1.1.0")); // type bumped in 1.1.0
-        let legacy = mk(None, "1.0.0");
-        assert!(encode_current(&legacy, "1.0.0"));
-        assert!(!encode_current(&legacy, "1.1.0"));
-        assert!(!encode_current(&mk(None, "0.9.0"), "1.0.0"));
+        let e = mk(Some("2.0.0"), "2.1.0");
+        assert!(encode_current(&e, "2.0.0")); // type unchanged in 2.1.0
+        assert!(!encode_current(&e, "2.1.0")); // type bumped in 2.1.0
+        for engine in ["0.9.0", "1.0.0", "1.1.0"] {
+            assert!(!encode_current(&mk(None, engine), "2.0.0"), "{engine}");
+        }
     }
 
     /// M1: with bytes to spare, the file cap alone holds the next admission until a file finishes.

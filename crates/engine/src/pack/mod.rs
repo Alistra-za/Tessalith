@@ -794,10 +794,6 @@ pub struct PackJob {
     /// was analysed (DECISIONS Note M6). Serialised, so it shows in `file_planned` and the manifest.
     pub gray: GraySource,
     pub sources: Vec<PackSource>,
-    /// Note DY21: a source of this recipe has a hand-set `helper.fills`, so the record names every source's channels
-    /// (`source_fill`). Absent otherwise, so no other job's JSON changes.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub hand_placed: bool,
 }
 
 /// Whether the channel `path` feeds is stored inverted (DECISIONS N7).
@@ -814,21 +810,17 @@ pub fn read_of(s: &PackSource) -> Option<String> {
 }
 
 /// What `SourceRef.fill` records for a packed source; the pipeline records it and `if-changed` compares it, so the
-/// two never drift. `read:<id>` as [`read_of`], then (Note DY21) `ch:<rgba>`, every channel the source feeds, on
-/// every source of a recipe a hand-set `helper.fills` placed (`PackJob::hand_placed`). A recipe built from
-/// suggestions alone adds nothing, so existing manifests stay up to date.
-pub fn source_fill(pk: &PackJob, s: &PackSource) -> Option<String> {
+/// two never drift. `read:<id>` as [`read_of`] when set, then `ch:<rgba>`, every channel the source feeds (Note
+/// DY21).
+pub fn source_fill(pk: &PackJob, s: &PackSource) -> String {
     let fed =
         |i: usize| matches!(&pk.channels[i], ChannelSource::Source { path, .. } if *path == s.path);
-    let ch = pk.hand_placed.then(|| {
-        let c: String = (0..4)
-            .filter(|&i| fed(i))
-            .map(|i| ['r', 'g', 'b', 'a'][i])
-            .collect();
-        format!("ch:{c}")
-    });
-    match (read_of(s), ch) {
-        (Some(r), Some(c)) => Some(format!("{r},{c}")),
-        (r, c) => r.or(c),
+    let c: String = (0..4)
+        .filter(|&i| fed(i))
+        .map(|i| ['r', 'g', 'b', 'a'][i])
+        .collect();
+    match read_of(s) {
+        Some(r) => format!("{r},ch:{c}"),
+        None => format!("ch:{c}"),
     }
 }

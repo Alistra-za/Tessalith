@@ -456,6 +456,14 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     if non_finite(&value) {
         return Err(format!("--set '{s}': not a finite number"));
     }
+    // A removed field or value gets its fix, before any "unknown" error. `subtype:<id>.<field>` scopes a table.
+    let scoped = key
+        .strip_prefix("subtype:")
+        .and_then(|r| r.split_once('.'))
+        .and_then(|(id, _)| crate::migrate::removed_set(&format!("subtypes.{id}"), ""));
+    if let Some(m) = crate::migrate::removed_set(key, raw).or(scoped) {
+        return Err(format!("--set '{s}': {m}"));
+    }
     let known = |f: &str| FIELD_PATHS.contains(&f);
     let (scope, field) = if let Some(rest) = key.strip_prefix("subtype:") {
         let (id, field) = rest

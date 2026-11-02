@@ -1890,7 +1890,7 @@
       "type": "string"
     },
     "Subtype": {
-      "description": "A texture sub-type. `rfaos` is a deprecated alias of `skin_rfaos`: it still loads and is written back as `skin_rfaos`.",
+      "description": "A texture sub-type.",
       "enum": [
         "diffuse",
         "landscape_diffuse",
@@ -1923,8 +1923,7 @@
         "complex_grass",
         "cubemap",
         "projected_noise",
-        "detail_normal",
-        "rfaos"
+        "detail_normal"
       ],
       "type": "string"
     },
@@ -2116,15 +2115,6 @@
         },
         "projected_noise": {
           "$ref": "#/$defs/PartialProfile"
-        },
-        "rfaos": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/PartialProfile"
-            }
-          ],
-          "deprecated": true,
-          "description": "Deprecated alias of skin_rfaos: it still loads and is written back as skin_rfaos."
         },
         "rmaos": {
           "$ref": "#/$defs/PartialProfile"

@@ -189,29 +189,17 @@ impl BakeJob {
     /// What the member's output depends on besides the `_n`'s bytes: the decode settings, how mip 0 is written, and
     /// the level shift (DECISIONS R12). Recorded in the manifest so `if-changed` re-encodes when any changes; the
     /// `_n`'s path and its own output settings (format, effort) are not part of it.
-    /// The `_n`'s `resize` joins the tuple only when set, so manifests written before it stay up to date (S-mips-7).
+    /// The `_n`'s `resize` is part of it; its RNM settings join only when layers apply (Note W18).
     pub fn identity_sha256(&self) -> String {
         let np = &self.normal_profile;
-        let base = (
+        crate::manifest::sha256_json(&(
             &np.channels,
             np.alpha.policy,
             np.mips.normal_base,
             self.shift,
-        );
-        // The RNM settings join only when layers apply (Note W18), so layer-free manifests stay up to date.
-        let resized = np.resize != crate::config::ResizeMode::None;
-        match (resized, self.rnm.is_some()) {
-            (false, false) => crate::manifest::sha256_json(&base),
-            (true, false) => {
-                crate::manifest::sha256_json(&(base.0, base.1, base.2, base.3, np.resize))
-            }
-            (false, true) => {
-                crate::manifest::sha256_json(&(base.0, base.1, base.2, base.3, &np.rnm))
-            }
-            (true, true) => {
-                crate::manifest::sha256_json(&(base.0, base.1, base.2, base.3, np.resize, &np.rnm))
-            }
-        }
+            np.resize,
+            self.rnm.as_ref().map(|_| &np.rnm),
+        ))
         .expect("a tuple of plain config values serialises")
     }
 
@@ -644,9 +632,9 @@ mod tests {
         assert_eq!(b.identity_sha256(), off.identity_sha256());
     }
 
-    /// S-mips-7: existing manifests stay up to date without resize; `pot-down` changes the identity.
+    /// S-mips-7: the `_n`'s `resize` changes the identity.
     #[test]
-    fn identity_is_unchanged_without_resize() {
+    fn identity_follows_resize() {
         let b = BakeJob {
             normal: "a/iron_n.png".into(),
             normal_profile: profile(Subtype::PbrNormal),
@@ -654,17 +642,8 @@ mod tests {
             stamp: None,
             rnm: None,
         };
-        let np = &b.normal_profile;
-        let four = crate::manifest::sha256_json(&(
-            &np.channels,
-            np.alpha.policy,
-            np.mips.normal_base,
-            b.shift,
-        ))
-        .unwrap();
-        assert_eq!(b.identity_sha256(), four);
         let mut resized = b.clone();
         resized.normal_profile.resize = crate::config::ResizeMode::PotDown;
-        assert_ne!(resized.identity_sha256(), four);
+        assert_ne!(resized.identity_sha256(), b.identity_sha256());
     }
 }

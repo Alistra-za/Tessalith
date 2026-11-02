@@ -438,7 +438,8 @@ fn configured_rfaos_builds_for_hand_fill_alone() {
 }
 
 /// Final review I2: `if-changed` sees a helper moved to another packed channel, added to a second one, or taken off
-/// one it shared; a suggested recipe records nothing, so an unchanged project stays up to date. The steps use G:
+/// one it shared; every record names the channels (Note FM12), so a hand fill on the suggested channel changes
+/// nothing. The steps use G:
 /// a move into A (the review's input) already re-encoded before this fix by another path, so it is checked last.
 #[test]
 fn if_changed_sees_a_packed_channel_move() {
@@ -467,14 +468,14 @@ fn if_changed_sees_a_packed_channel_move() {
         .unwrap();
     let e = m.values().next().unwrap();
     assert!(
-        e.sources.iter().all(|s| s.fill.is_none()),
-        "a default placement records nothing: {:?}",
+        e.sources
+            .iter()
+            .all(|s| s.fill.as_deref().is_some_and(|f| f.starts_with("ch:"))),
+        "a default placement records its channels: {:?}",
         e.sources
     );
-    // A hand fill on the suggested channel builds the same output, but a hand-placed recipe records every channel
-    // (Note DY21): one extra re-export, then up to date.
-    assert_eq!(run(Some("\"rmaos.b\"")), (1, 0), "hand-set, same channel");
-    assert_eq!(run(Some("\"rmaos.b\"")), (0, 1));
+    // A hand fill on the suggested channel is the same record.
+    assert_eq!(run(Some("\"rmaos.b\"")), (0, 1), "hand-set, same channel");
     assert_eq!(run(Some("\"rmaos.g\"")), (1, 0), "(a) B moved to G");
     assert_eq!(run(Some("\"rmaos.g\"")), (0, 1));
     assert_eq!(run(Some("\"rmaos.b\"")), (1, 0), "G moved back to B");
@@ -485,12 +486,7 @@ fn if_changed_sees_a_packed_channel_move() {
     );
     assert_eq!(run(Some("\"rmaos.b\", \"rmaos.g\"")), (0, 1));
     assert_eq!(run(Some("\"rmaos.b\"")), (1, 0), "(c) Value on G");
-    assert_eq!(
-        run(None),
-        (1, 0),
-        "suggested again: the record drops its channels"
-    );
-    assert_eq!(run(None), (0, 1));
+    assert_eq!(run(None), (0, 1), "suggested again: the same channels");
     assert_eq!(run(Some("\"rmaos.a\"")), (1, 0), "the review's B to A");
     assert_eq!(run(Some("\"rmaos.a\"")), (0, 1));
 }
@@ -531,62 +527,6 @@ fn if_changed_sees_a_channel_move_between_same_role_helpers() {
     assert_eq!(run(a1, b1), (0, 1), "nothing changed");
     assert_eq!(run(a2, b2), (1, 0), "B moved from x_metallic to x_ao");
     assert_eq!(run(a2, b2), (0, 1));
-}
-
-/// Final review I2: every recipe built without hand-set selectors records no placement, so existing manifests stay
-/// up to date.
-#[test]
-fn suggested_recipes_record_no_placement() {
-    let spec = PackingSpec {
-        enabled: true,
-        roughness_default: 0.5,
-        prefer: PackPrefer::Prepacked,
-        fill: FillSpec::default(),
-        recipe: Default::default(),
-    };
-    let roles: Vec<RawMap> = RawMap::INPUTS.into_iter().chain([Rmaos]).collect();
-    for mask in 0u32..(1 << roles.len()) {
-        let files: Vec<RawInput> = roles
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| mask & (1 << i) != 0)
-            .map(|(_, r)| RawInput {
-                path: PathBuf::from(format!("x_{}.png", r.id())),
-                role: *r,
-            })
-            .collect();
-        for target in [Target::Cs, Target::Vanilla] {
-            for recipe in [PackRecipe::Auto, PackRecipe::Rmaos, PackRecipe::Rfaos] {
-                for complex in [false, true] {
-                    for r in recipes_for_with(target, &files, recipe, complex).0 {
-                        let pk = PackJob {
-                            kind: r.kind,
-                            channels: resolve_channels(&r, &spec).0,
-                            gray: GraySource::R,
-                            sources: r
-                                .sources()
-                                .into_iter()
-                                .map(|(path, role)| PackSource {
-                                    path,
-                                    role,
-                                    stamp: None,
-                                    read: None,
-                                })
-                                .collect(),
-                            hand_placed: false,
-                        };
-                        for s in &pk.sources {
-                            assert_eq!(
-                                source_fill(&pk, s),
-                                None,
-                                "{target:?} {recipe:?} {complex} {s:?} in {pk:?}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[test]

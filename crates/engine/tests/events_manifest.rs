@@ -343,18 +343,6 @@ fn encoder_versions_come_from_the_encoders_crate() {
         e.rgbcx_patch.as_deref(),
         Some(format!("bc4-round-to-nearest+bc4-search@sha256:{rgbcx}").as_str())
     );
-    // Note FJ: the BC4/BC5-default sub-types re-encode once (BC4 search). Keep this list equal to the one in
-    // `golden.rs` (`two_d_outputs_unchanged`); the two test crates cannot share a const.
-    for st in [
-        Subtype::Envmask,
-        Subtype::Flow,
-        Subtype::Height,
-        Subtype::MsnSpecular,
-        Subtype::GenericTwoChannel,
-        Subtype::SkinSk,
-    ] {
-        assert_eq!(encode_version(st), "1.2.0", "{st:?}");
-    }
 }
 
 #[test]
@@ -639,10 +627,10 @@ fn the_shader_pick_round_trips_through_the_manifest_json() {
     assert!(serde_json::to_value(&none).unwrap().get("shader").is_none());
 }
 
-/// Spec §5: every manifest record passes the migration hook; a newer one is kept raw, a line without a schema is
-/// not a record.
+/// Note FM9: a manifest record is read as it is (a 1.x schema stays 1, no upgrade step); a newer one is kept raw, a
+/// line without a schema is not a record.
 #[test]
-fn manifest_records_pass_the_migration_hook() {
+fn manifest_records_load_as_they_are() {
     let d = tempfile::tempdir().unwrap();
     let m = Manifest::at(d.path());
     std::fs::create_dir_all(m.path().parent().unwrap()).unwrap();
@@ -652,7 +640,7 @@ fn manifest_records_pass_the_migration_hook() {
     )
     .unwrap();
     let e = m.load().unwrap();
-    assert_eq!(e["a.dds"].schema, 2);
+    assert_eq!(e["a.dds"].schema, 1);
     assert!(!e["a.dds"].is_newer_schema());
     assert!(e["b.dds"].is_newer_schema());
     assert_eq!(e["b.dds"].raw["x"], 1);
@@ -818,12 +806,13 @@ fn fill_source_is_recorded() {
     assert_eq!(fill[0].fill.as_deref(), Some("a:r"));
     let rmaos = rec("x_rmaos.dds");
     assert!(!rmaos.sources.is_empty());
+    // Note FM12: every packed source names the channels it feeds.
     assert!(
         rmaos.raw["sources"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|s| s.get("fill").is_none()),
+            .all(|s| s["fill"].as_str().is_some_and(|f| f.starts_with("ch:"))),
         "{}",
         rmaos.raw["sources"]
     );

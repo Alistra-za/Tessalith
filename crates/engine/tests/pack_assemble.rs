@@ -18,7 +18,6 @@ fn job(kind: RecipeKind, channels: [ChannelSource; 4], sources: &[(&PathBuf, Raw
         kind,
         channels,
         gray: GraySource::R,
-        hand_placed: false,
         sources: sources
             .iter()
             .map(|(p, role)| PackSource {
