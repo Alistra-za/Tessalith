@@ -173,9 +173,9 @@ impl ShapeDraw {
         uploads
     }
 
-    #[cfg(feature = "test-hooks")]
     /// P0's writer, kept as the reference for the pixel-identity test: the whole scene by name into every
     /// cbuffer, every frame, and every cbuffer uploaded. Returns the number of uploads.
+    #[cfg(feature = "test-hooks")]
     pub fn update_by_name(
         &mut self,
         gpu: &Gpu,

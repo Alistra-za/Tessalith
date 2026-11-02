@@ -1470,10 +1470,11 @@ impl NifEdit {
                     let cands = match &c.cands {
                         Some((slots, g, v)) if *slots == s.material.slots && *g == gen => v.clone(),
                         _ => {
-                            let (v, _tested) = candidates(files, &nif_path, &s.material.slots);
+                            #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))]
+                            let (v, tested) = candidates(files, &nif_path, &s.material.slots);
                             #[cfg(feature = "test-hooks")]
                             {
-                                self.match_tests += _tested;
+                                self.match_tests += tested;
                             }
                             c.cands = Some((s.material.slots.clone(), gen, v.clone()));
                             v

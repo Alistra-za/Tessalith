@@ -1505,6 +1505,18 @@ impl Viewport3d {
         self.content.as_ref()
     }
 
+    /// The shipped render thread: its command sender.
+    fn spawn_render_thread(&self, shaders: Fingerprint, cache: PathBuf) -> Sender<V3Cmd> {
+        let (ctx, crx) = channel();
+        let features = self.features_on;
+        let settings = self.settings.clone();
+        let me = ctx.clone();
+        spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
+            render_loop(crx, me, tx, shaders, cache, features, settings)
+        });
+        ctx
+    }
+
     fn ensure_thread(&mut self) -> bool {
         if self.thread.is_some() {
             return true;
@@ -1513,22 +1525,12 @@ impl Viewport3d {
             return false;
         };
         #[cfg(feature = "test-hooks")]
-        let fake = self.fake_thread.take();
-        #[cfg(not(feature = "test-hooks"))]
-        let fake: Option<Sender<V3Cmd>> = None;
-        let ctx = match fake {
+        let ctx = match self.fake_thread.take() {
             Some(t) => t,
-            None => {
-                let (ctx, crx) = channel();
-                let features = self.features_on;
-                let settings = self.settings.clone();
-                let me = ctx.clone();
-                spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
-                    render_loop(crx, me, tx, shaders, cache, features, settings)
-                });
-                ctx
-            }
+            None => self.spawn_render_thread(shaders, cache),
         };
+        #[cfg(not(feature = "test-hooks"))]
+        let ctx = self.spawn_render_thread(shaders, cache);
         self.load_variant_sent = Variant::Source; // a new thread starts at the default
         if self.debug != DebugView::Lit && ctx.send(V3Cmd::SetDebug(self.debug)).is_ok() {
             self.reconf_sent += 1;
@@ -2114,9 +2116,8 @@ impl Drop for Viewport3d {
 }
 
 /// Applies user CS settings (C11: a cbuffer rewrite, recompiles only when the defines change, never a reload) and
-/// writes the `settings` log line. The render thread calls it; public so a test can capture the line.
-#[doc(hidden)]
-pub fn apply_settings(r: &mut Renderer, s: CsSettings) {
+/// writes the `settings` log line. The render thread calls it.
+fn apply_settings_now(r: &mut Renderer, s: CsSettings) {
     let t0 = Instant::now();
     let hash: String = s.hash.chars().take(12).collect();
     let notes = s.notes.len();
@@ -2125,6 +2126,13 @@ pub fn apply_settings(r: &mut Renderer, s: CsSettings) {
         "settings",
         json!({"hash": hash, "defines": r.features(), "ms": perf_log::ms_since(t0), "notes": notes}),
     );
+}
+
+/// Test hook: [`apply_settings_now`], public so a test can capture the `settings` log line.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn apply_settings(r: &mut Renderer, s: CsSettings) {
+    apply_settings_now(r, s);
 }
 
 /// The texture resolver over `map` (canonical path → bytes); read errors are collected in `errors`.
@@ -2289,7 +2297,7 @@ fn render_loop(
         // AU3: render3d's fill (GUI suggestions item 3): colour slots only, so a missing normal no longer tints.
         r.set_missing_texture(Some([255, 0, 255, 255]));
         r.set_features_on(features);
-        apply_settings(&mut r, settings.clone());
+        apply_settings_now(&mut r, settings.clone());
         Ok(r)
     };
     let loaded = |r: &Renderer, id: u64, report: LoadReport| {
@@ -2408,7 +2416,7 @@ fn render_loop(
                     None
                 }
                 V3Cmd::SetSettings(s) => {
-                    apply_settings(&mut r, s);
+                    apply_settings_now(&mut r, s);
                     if want_deferred && !r.deferred() {
                         let _ = r.set_deferred(true);
                     }
