@@ -1,6 +1,6 @@
 # Bundled studio HDRI
 
-- File: `studio_small_09_2k.hdr` (Radiance RGBE, 2048 x 1024, equirectangular)
+- File: `studio_small_09_1k.hdr` (Radiance RGBE, 1024 x 512, equirectangular)
 - Source: https://polyhaven.com/a/studio_small_09
 - Author: Poly Haven (Oksana Lazebna / Poly Haven contributors; see the page)
 - Licence: CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/

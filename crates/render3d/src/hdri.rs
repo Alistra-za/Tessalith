@@ -1,4 +1,4 @@
-//! Radiance RGBE (`.hdr`) reader and the bundled studio HDRI (Poly Haven `studio_small_09`, 2K, CC0; see
+//! Radiance RGBE (`.hdr`) reader and the bundled studio HDRI (Poly Haven `studio_small_09`, 1K, CC0; see
 //! `assets/hdri/README.md`). The workspace `image` crate has no `hdr` feature, so the format is read here:
 //! header lines up to the blank line, the `-Y h +X w` resolution line, then new-style RLE scanlines (or flat
 //! RGBE pixels).
@@ -11,7 +11,7 @@ use std::f32::consts::{PI, TAU};
 use std::sync::OnceLock;
 
 /// The bundled HDRI file (6.3 MB).
-static STUDIO_HDR: &[u8] = include_bytes!("../assets/hdri/studio_small_09_2k.hdr");
+static STUDIO_HDR: &[u8] = include_bytes!("../assets/hdri/studio_small_09_1k.hdr");
 
 /// Azimuth (radians) added to the world azimuth before the column lookup. Chosen so the image's brightest
 /// region (its key light) lies at the azimuth of the default directional light (`Scene::neutral`), upper front
@@ -341,9 +341,9 @@ mod tests {
     }
 
     #[test]
-    fn bundled_asset_decodes_2k_finite_non_negative() {
+    fn bundled_asset_decodes_1k_finite_non_negative() {
         let s = studio();
-        assert_eq!((s.image.width, s.image.height), (2048, 1024));
+        assert_eq!((s.image.width, s.image.height), (1024, 512));
         assert!(s.image.rgb.iter().all(|v| v.is_finite() && *v >= 0.0));
         assert!(s
             .ambient6
