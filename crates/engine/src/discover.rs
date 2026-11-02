@@ -175,7 +175,7 @@ pub fn discover_reporting(
                                     format!("{}: file system loop to {}", p.display(), a.display())
                                 }
                                 (None, Some(io)) => format!("{}: {io}", p.display()),
-                                (None, None) => format!("{}: {err}", p.display()),
+                                (None, None) => err.to_string(),
                             },
                             None => {
                                 let v = dirs.borrow();

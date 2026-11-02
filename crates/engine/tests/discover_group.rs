@@ -350,18 +350,7 @@ fn a_dangling_link_is_skipped_as_its_path_then_the_reason() {
     std::fs::create_dir_all(&src).unwrap();
     std::fs::create_dir_all(&gone).unwrap();
     std::fs::write(src.join("a.png"), b"x").unwrap();
-    #[cfg(windows)]
-    {
-        let ok = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(&link)
-            .arg(&gone)
-            .output()
-            .unwrap();
-        assert!(ok.status.success(), "{ok:?}");
-    }
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&gone, &link).unwrap();
+    link_dir(&link, &gone);
     std::fs::remove_dir(&gone).unwrap();
     let (files, skipped) = discover_reporting(
         std::slice::from_ref(&src),
@@ -379,6 +368,48 @@ fn a_dangling_link_is_skipped_as_its_path_then_the_reason() {
     let want = format!("{}: ", link.display());
     assert!(skipped[0].starts_with(&want), "{skipped:?}");
 }
+
+/// Note FM5: a link to an ancestor folder is skipped as `<link path>: file system loop to <ancestor>`.
+#[test]
+fn a_link_loop_is_skipped_as_its_path_then_the_loop() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("in");
+    let link = src.join("loop");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("a.png"), b"x").unwrap();
+    link_dir(&link, &src);
+    let (files, skipped) = discover_reporting(
+        std::slice::from_ref(&src),
+        &d.path().join("out"),
+        true,
+        None,
+    )
+    .unwrap();
+    let rels: Vec<String> = files
+        .iter()
+        .map(|f| f.rel.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(rels, ["a.png"]);
+    let want = format!("{}: file system loop to {}", link.display(), src.display());
+    assert_eq!(skipped, [want]);
+}
+
+/// A directory link `link` to `target`: a junction on Windows (no admin rights), a symlink elsewhere.
+fn link_dir(link: &Path, target: &Path) {
+    #[cfg(windows)]
+    {
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(ok.status.success(), "{ok:?}");
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
 /// Audit 6: an unreadable input folder itself still fails (the child case is the test above).
 #[test]
 fn an_unreadable_root_is_still_an_error() {
