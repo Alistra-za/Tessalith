@@ -164,7 +164,7 @@ pub struct Problem {
     pub suggested: Option<engine::config::Subtype>,
     /// Note FC1: more for the row's hover (the combined row lists what it covers), one line each.
     pub detail: Option<String>,
-    /// Note F?: a block or ask row, checked on the last full plan (`AppModel::fix_off_for`).
+    /// Note FL: a block or ask row, checked on the last full plan (`AppModel::fix_off_for`).
     pub carried: bool,
 }
 

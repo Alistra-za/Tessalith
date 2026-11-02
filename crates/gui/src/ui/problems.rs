@@ -494,7 +494,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     },
                     |ui| {
                         // Right to left: the last widget added is the leftmost.
-                        // Note F?: a carried block or ask row's fix waits for the full plan.
+                        // Note FL: a carried block or ask row's fix waits for the full plan.
                         let off = if p.carried {
                             m.fix_off_for(p)
                         } else {

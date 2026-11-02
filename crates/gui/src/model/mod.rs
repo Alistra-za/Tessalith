@@ -652,7 +652,7 @@ pub struct AppModel {
     /// Generation of the latest scan-database read, and (generation, continues `apply_plan`) while it is pending.
     votes_gen: u64,
     votes_pending: Option<(u64, bool)>,
-    /// Note F?6: the inputs (mesh keys, database, its stamp) of the pending read, and of the last read that landed
+    /// Note FL6: the inputs (mesh keys, database, its stamp) of the pending read, and of the last read that landed
     /// from the database. A post-plan read with the landed read's inputs lands at once (`refresh_mesh_votes`).
     votes_inputs: Option<VoteInputs>,
     votes_read: Option<VoteInputs>,
@@ -1177,7 +1177,7 @@ impl AppModel {
             // And UV coverage, a session cache read from the scan.
             self.uv.clear();
         }
-        // Note F?6: a post-plan read of the inputs (mesh keys, database, stamp) the last landed read had would return
+        // Note FL6: a post-plan read of the inputs (mesh keys, database, stamp) the last landed read had would return
         // the same evidence, so the kept evidence lands at once and the plan's tail runs now: no read is pending, so
         // the panel never greys for it and no edit can drop that tail. Any other read goes to the worker.
         let inputs: VoteInputs = (keys.clone(), self.scan_db.clone(), self.scan_stamp);
@@ -1374,7 +1374,7 @@ impl AppModel {
             gras_all_diffuses: req.gras_all_diffuses.clone(),
             cs_txst_sets: req.cs_txst_sets.clone(),
         });
-        // Note F?7: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
+        // Note FL7: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
         // splices. The compare is O(size of these request maps), the same order as the clones above.
         if self.last_inputs != inputs {
             self.inputs_rev += 1;
@@ -1561,12 +1561,12 @@ impl AppModel {
         self.export.running.is_some() || self.preview.working() || self.nvtt_pending
     }
 
-    /// Note F?: a full plan runs behind a partial of the current edit, which the items show.
+    /// Note FL: a full plan runs behind a partial of the current edit, which the items show.
     fn partial_shown(&self) -> bool {
         self.planning.is_some() && self.applied_seq >= self.edit_seq
     }
 
-    /// Note F?: an edit waits for the plan. That is this edit's partial while it is out, or the full plan when this
+    /// Note FL: an edit waits for the plan. That is this edit's partial while it is out, or the full plan when this
     /// edit has no partial shown (a global edit, a `NeedsFull`, a folder open); also a scan-database read in flight
     /// (one of unchanged inputs never is: `refresh_mesh_votes`).
     pub fn plan_wait(&self) -> bool {
@@ -1575,7 +1575,7 @@ impl AppModel {
             || self.votes_pending.is_some()
     }
 
-    /// Note F?: a full plan (or the scan-database votes) is still out; Review says "Planning…" and an Export click
+    /// Note FL: a full plan (or the scan-database votes) is still out; Review says "Planning…" and an Export click
     /// queues behind it.
     pub fn full_plan_pending(&self) -> bool {
         self.planning.is_some() || self.votes_pending.is_some()
@@ -1652,7 +1652,7 @@ impl AppModel {
                 total,
             } if generation == self.generation => {
                 self.plan_progress = Some((done, total));
-                // Note F?: a partial's "<counts> · planning…" stays until the full plan lands.
+                // Note FL: a partial's "<counts> · planning…" stays until the full plan lands.
                 if !self.partial_shown() {
                     self.status_line = plan_bar_text(done, total);
                 }
@@ -2679,7 +2679,7 @@ impl AppModel {
         self.recode = view.recode;
         self.stale = view.stale;
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
-        // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (F?7).
+        // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (FL7).
         if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
             self.carry_views(carried, &old_key, &scope, false);
         }
@@ -2789,7 +2789,7 @@ impl AppModel {
         self.rnm_notes.retain(|k, _| !scope.contains(k));
         self.rnm_notes.extend(view.rnm_notes);
         self.rnm_keys.extend(view.rnm_keys);
-        // Note F?7: the views cache moves to the new key with only the scope sets' views built again (the frame after
+        // Note FL7: the views cache moves to the new key with only the scope sets' views built again (the frame after
         // a partial must not rebuild 10k views); the export blocks and asks stay as of the last full plan.
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
@@ -2798,7 +2798,7 @@ impl AppModel {
         self.refresh_game_paths();
         self.request_dds_thumbs();
         self.counts_status();
-        // Note F?: the full plan still runs behind the partial.
+        // Note FL: the full plan still runs behind the partial.
         if self.planning.is_some() {
             self.status_line.push_str(" · planning…");
         }
@@ -2996,7 +2996,7 @@ impl AppModel {
             .collect();
     }
 
-    /// Note F?7: after `invalidate_views`, keep the views cache that was built for `old_key` under the new key, with
+    /// Note FL7: after `invalidate_views`, keep the views cache that was built for `old_key` under the new key, with
     /// the views of the `scope` sets built again (`sets::splice_views`); `blocks` keeps the export blocks and asks too.
     /// Nothing is kept when the cache was built for another key, or when the key moved outside `items` (target,
     /// roots, sets document, engine inputs, scan): the next frame builds everything.
@@ -4625,7 +4625,7 @@ mod tests {
         assert!(m.votes_pending.is_none(), "the pending read still settles");
     }
 
-    /// Note F?6 (final fixes I5, round 2 A): the post-plan read of unchanged inputs lands at once, so the plan's tail
+    /// Note FL6 (final fixes I5, round 2 A): the post-plan read of unchanged inputs lands at once, so the plan's tail
     /// (`finish_plan`, here its queued export) runs before any edit can drop it and nothing greys the panel; a changed
     /// database stamp, or a scan-finished read, goes to the worker and greys it.
     #[test]

@@ -727,7 +727,7 @@ fn fill_item(f: &SlotFill) -> Option<&str> {
     }
 }
 
-/// Note F?: `views` after a partial plan replaced the `scope` sets (the engine refuses any membership change, and the
+/// Note FL: `views` after a partial plan replaced the `scope` sets (the engine refuses any membership change, and the
 /// sets document is unchanged): the scope sets' views are built again, with every view that borrows from one of them
 /// and the ownership marks of every view sharing an output with them. Equal to `build_views` on the same model
 /// (pinned by `fast_replan::views_after_a_partial_equal_a_fresh_build`).

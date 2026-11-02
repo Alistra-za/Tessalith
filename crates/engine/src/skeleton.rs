@@ -783,7 +783,7 @@ mod tests {
         assert!(!s.key_sets.is_empty());
     }
 
-    /// Note F?3: a partial whose plan writes one output twice, or writes one a set outside its scope wrote in the
+    /// Note FL3: a partial whose plan writes one output twice, or writes one a set outside its scope wrote in the
     /// last full plan, needs the full plan. No `[files]` edit the patch lets through moves an output (a cube face's
     /// edit pulls in the set its merged output meets), so the plan is edited by hand here.
     #[test]

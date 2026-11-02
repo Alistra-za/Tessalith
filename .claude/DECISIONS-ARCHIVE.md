@@ -1060,8 +1060,8 @@ ARCHIVED (superseded by Note FF1, 2026-10-31)
 
 ## Note FK — Every edit control on the texture panel waits for the plan (main team, 2026-11-01)
 
-ARCHIVED (wording before the edit; superseded in part by Note F?, 2026-11-02)
+ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 - **FK1 Cause (owner report 2026-11-01: "all of these buttons, and acknowledge do nothing ... changing alpha 'remove' reverts it back").** Reproduced on a copy of the owner's 10k-texture project (`B:\testdata\textures-10k`, 2920 sets, 9923 `[files]` entries) with the full `SdcApp` frame loop: a click on an alpha answer writes `alpha.policy` to the document at once, then the whole project re-plans for about 18 s. Until that plan lands, the texture panel draws the last plan's job, so the Undecided box, Acknowledge and the Alpha combo (back at `Remove`) look unchanged, and every further click starts a new plan that cancels the one in flight, so the wait starts over. The model, the engine's layering and the write were correct; nothing overwrote the value. This is a mitigation: each edit on such a project still blocks the panel for the length of a whole re-plan.
 
-ARCHIVED (wording before the edit; superseded in part by Note F?, 2026-11-02)
+ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 - **FK2 Fix.** Every edit control on the texture panel (`settings_panel::draw`: the centre panel, the preview's compact copy and the set preview's settings window) waits for the plan. It is off while `AppModel::fix_off()` (CA12) gives a reason: a read-only `sdc.toml` first, else "Wait for the plan to finish" while a plan or the scan-database votes are in flight. That covers the Undecided box, the setting groups' rows, the RNM and Cubemap sections, "Treat as OpenGL (flip green)" / "Treat as DirectX", "Re-encode this file" / "Stop re-encoding", and the Helper role row with its Reset. The reason is the disabled controls' hover text, as on Problems' fix buttons, so nothing moves when a plan starts or lands. `Ctx::edit_off` (was `toml_read_only`) carries it.

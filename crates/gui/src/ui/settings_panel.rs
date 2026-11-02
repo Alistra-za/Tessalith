@@ -1219,7 +1219,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     };
     let (target, busy) = (model.target, model.edit_busy());
     let read_only = model.project.as_ref().is_some_and(|p| p.read_only());
-    // Note FK: the panel shows the last plan; until the edit's partial plan lands (Note F?: or its full plan, when it
+    // Note FK: the panel shows the last plan; until the edit's partial plan lands (Note FL: or its full plan, when it
     // has no partial) every edit control is off, as Problems' fix buttons are (CA12), so a click is not lost to a
     // stale view. A read-only `sdc.toml` gives its own reason first.
     let edit_off = model.fix_off();

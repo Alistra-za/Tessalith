@@ -545,7 +545,7 @@ impl AppModel {
         })
     }
 
-    /// Note F?: `fix_off` for one Problems row. A block or ask row comes from the last full plan, so a partial plan
+    /// Note FL: `fix_off` for one Problems row. A block or ask row comes from the last full plan, so a partial plan
     /// may have made it stale: its fix stays off until the full plan lands.
     pub fn fix_off_for(&self, p: &super::bottom::Problem) -> Option<String> {
         self.fix_off().or_else(|| {

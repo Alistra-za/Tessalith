@@ -1,3 +1,3 @@
 id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
-FK1	FK		back	F?		partial	2026-11-02		goes: "each edit on such a project still blocks the panel for the length of a whole re-plan" (Note F? partial plans); stays: the cause and the reproduction
-FK2	FK		back	F?		partial	2026-11-02		goes: the controls wait for the whole plan; stays: the controls, the reason text and Ctx::edit_off, waiting for the edit's partial plan (Note F?6)
+FK1	FK		back	FL		partial	2026-11-02		goes: "each edit on such a project still blocks the panel for the length of a whole re-plan" (Note FL partial plans); stays: the cause and the reproduction
+FK2	FK		back	FL		partial	2026-11-02		goes: the controls wait for the whole plan; stays: the controls, the reason text and Ctx::edit_off, waiting for the edit's partial plan (Note FL6)

@@ -363,7 +363,7 @@ impl Session {
         Ok(self.engine.plan_full(&req, rep, cancel, &self.cache)?.0)
     }
 
-    /// `plan` that also replaces the session's skeleton when it is not cancelled (Note F?3). Only the GUI's edit
+    /// `plan` that also replaces the session's skeleton when it is not cancelled (Note FL3). Only the GUI's edit
     /// plans call it, each on a token the next edit's plan cancels before it starts: an export plans on its own
     /// token, which no re-plan cancels, so its skeleton could land after a newer edit's plan.
     pub fn plan_and_keep(
@@ -750,7 +750,7 @@ mod tests {
         );
     }
 
-    /// Fast re-plan (Note F?): an export plans on a token no re-plan cancels, so its plan never stores the skeleton.
+    /// Fast re-plan (Note FL): an export plans on a token no re-plan cancels, so its plan never stores the skeleton.
     #[test]
     fn an_export_plan_never_stores_the_skeleton() {
         use super::*;

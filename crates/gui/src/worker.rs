@@ -348,7 +348,7 @@ pub fn spawn_plan(
         let ticker = plan_ticker(tx.clone(), progress, generation, stop_rx);
         let rep = Reporter::new(events.clone(), engine::events::new_batch_id());
         let result = plan_result(|| {
-            // Note F?3: the one storing call; `replan` cancels this token before the next edit's plan starts.
+            // Note FL3: the one storing call; `replan` cancels this token before the next edit's plan starts.
             session
                 .plan_and_keep(req, &rep, &cancel)
                 .map(|plan| PlanView::build(&plan, &events.take(), &session, &root))

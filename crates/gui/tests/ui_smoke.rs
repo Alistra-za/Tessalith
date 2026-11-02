@@ -363,7 +363,7 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
     assert!(!item.decisions.is_empty(), "the decision is open again");
 }
 
-/// Note FK, as Note F? refines it: the panel shows the last plan until the answer's partial plan lands. Its controls
+/// Note FK, as Note FL refines it: the panel shows the last plan until the answer's partial plan lands. Its controls
 /// are off meanwhile, with the reason, so a click is not lost to a stale view and nothing looks like it reverted.
 /// (`ui::draw` does not poll, so the partial stays out until `settle`.)
 #[test]
@@ -460,7 +460,7 @@ fn alpha_combo<'a>(
         .find(|n| n.accesskit_node().value().as_deref() == Some(value))
 }
 
-/// The owner's bug (Note FK1, fixed by Note F?): two alpha answers in a row. The second waits only for the first one's
+/// The owner's bug (Note FK1, fixed by Note FL): two alpha answers in a row. The second waits only for the first one's
 /// partial plan, not for the full plan, which stays parked until the end.
 #[test]
 fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {

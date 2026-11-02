@@ -142,7 +142,7 @@ fn partial_lands_before_full() {
     assert_eq!(policy(&m, ROCK), rock);
     assert!(m.items_rev() > rev, "the views see the splice");
     assert!(!m.partial_pending);
-    // Note F?: the panel takes the next edit at once; the status line still says the full plan runs.
+    // Note FL: the panel takes the next edit at once; the status line still says the full plan runs.
     assert_eq!(m.fix_off(), None, "the panel waits only for the partial");
     // Problems lists rows (the fixture's undecided textures), and its fix buttons are enabled by the same `fix_off`
     // (`ui/problems.rs`), so they are live behind the partial too.
@@ -356,7 +356,7 @@ fn needs_full_waits_for_full() {
     assert!(!m.partial_pending);
     assert_eq!(m.items_rev(), rev, "nothing changed");
     assert!(m.item(DDS).is_some_and(|i| i.job.is_none()));
-    // Note F?: no partial for this edit, so the panel waits for the full plan (Note FK).
+    // Note FL: no partial for this edit, so the panel waits for the full plan (Note FK).
     assert_eq!(m.fix_off().as_deref(), Some(WAIT));
     finish(&mut m, full);
     assert_eq!(m.fix_off(), None);
@@ -366,7 +366,7 @@ fn needs_full_waits_for_full() {
     );
 }
 
-/// Note F?: a partial frees the texture panel only. Export clicked after it queues, Review says "Planning…",
+/// Note FL: a partial frees the texture panel only. Export clicked after it queues, Review says "Planning…",
 /// and the export runs on the full plan once it lands.
 #[test]
 fn export_waits_for_full_after_partial() {
@@ -425,7 +425,7 @@ fn view_of(m: &AppModel, id: &str) -> SetView {
     views(m).iter().find(|v| v.id == id).expect(id).clone()
 }
 
-/// Note F?7: after a partial and its full plan, Problems is what a fresh full build gives. The edit adds an export
+/// Note FL7: after a partial and its full plan, Problems is what a fresh full build gives. The edit adds an export
 /// block (`_g` beside `_sk` in slot 3): the partial shows the set's new slots at once, the block (a project-wide
 /// check) waits for the full plan, and the full plan must not keep the blocks of the plan before it.
 #[test]
@@ -460,7 +460,7 @@ fn problems_after_partial_then_full_equal_fresh() {
     assert_eq!(*after, *problems(&again));
 }
 
-/// Note F?7 (final fixes I3): a block row carried from the last full plan keeps its fix off ("being rechecked")
+/// Note FL7 (final fixes I3): a block row carried from the last full plan keeps its fix off ("being rechecked")
 /// while the full plan of an edit that resolved it is out; other rows' fixes work after the partial.
 #[test]
 fn a_carried_block_row_waits_for_the_full_plan() {
@@ -488,7 +488,7 @@ fn a_carried_block_row_waits_for_the_full_plan() {
     assert!(clash(&m).is_none(), "the full plan dropped the block");
 }
 
-/// Note F?7: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
+/// Note FL7: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
 /// borrows from it, and Problems' set rows read them at once.
 #[test]
 fn views_after_a_partial_equal_a_fresh_build() {
@@ -657,7 +657,7 @@ fn a_partial_with_an_unknown_set_is_dropped() {
     assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Cutout));
 }
 
-/// Note F?: the partial alone updates the edited set's item rows: answering an undecided alpha removes its row.
+/// Note FL: the partial alone updates the edited set's item rows: answering an undecided alpha removes its row.
 #[test]
 fn problems_rows_of_the_edited_set_change_after_partial() {
     let d = tempfile::tempdir().unwrap();
@@ -680,7 +680,7 @@ fn problems_rows_of_the_edited_set_change_after_partial() {
     assert!(!undecided(&m), "the partial removed the leaf's Decide row");
 }
 
-/// Note F?7: on a big project the first frame after a partial (the set views and Problems) costs a small part of the same frame after a full plan: the partial splices the scope sets' views into the cached
+/// Note FL7: on a big project the first frame after a partial (the set views and Problems) costs a small part of the same frame after a full plan: the partial splices the scope sets' views into the cached
 /// ones and carries the export blocks and asks over, so nothing rebuilds all sets. The name is the brief's; the test
 /// measures that reuse (a ratio, as `rename_scale.rs`, not milliseconds).
 #[test]
