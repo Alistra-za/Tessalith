@@ -28,11 +28,13 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP,
     D3D_FEATURE_LEVEL_11_0,
 };
+#[cfg(feature = "test-hooks")]
+use windows::Win32::Graphics::Direct3D11::D3D11_BOX;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext,
     ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11UnorderedAccessView,
     D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX, D3D11_CLEAR_DEPTH, D3D11_CPU_ACCESS_READ,
+    D3D11_BIND_UNORDERED_ACCESS, D3D11_CLEAR_DEPTH, D3D11_CPU_ACCESS_READ,
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_DSV_DIMENSION_TEXTURE2D,
     D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_SHADER_RESOURCE_VIEW_DESC,
     D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
@@ -257,7 +259,7 @@ mod fail_tests {
 
 /// CS's deferred G-buffer, index = RT (Lighting.hlsl:290-301: Diffuse, MotionVectors, NormalGlossiness, Albedo,
 /// Specular, Reflectance, Masks, Masks2). Formats as the golden captures' mrt.json lists them; names as there and
-/// in [`crate::golden::format_tol`].
+/// in `golden::format_tol`.
 pub const MRT_FORMATS: [(DXGI_FORMAT, &str); 8] = [
     (DXGI_FORMAT_R16G16B16A16_FLOAT, "R16G16B16A16_FLOAT"),
     (DXGI_FORMAT_R16G16_FLOAT, "R16G16_FLOAT"),
@@ -345,6 +347,7 @@ static UNORM8: OnceLock<Vec<u8>> = OnceLock::new();
 static SRGB8: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// Bytes per texel of an [`MRT_FORMATS`] format.
+#[cfg(feature = "test-hooks")]
 fn texel_bytes(f: DXGI_FORMAT) -> usize {
     match f {
         DXGI_FORMAT_R16G16B16A16_FLOAT => 8,
@@ -354,6 +357,7 @@ fn texel_bytes(f: DXGI_FORMAT) -> usize {
 }
 
 /// One texel → RGBA f32 the way the golden extractors write `.f32`: missing channels 0, missing alpha 1.
+#[cfg(feature = "test-hooks")]
 fn decode(f: DXGI_FORMAT, t: &[u8]) -> [f32; 4] {
     let h = |i: usize| half::f16::from_le_bytes([t[i], t[i + 1]]).to_f32();
     let word = || u32::from_le_bytes([t[0], t[1], t[2], t[3]]);
@@ -387,6 +391,7 @@ fn decode(f: DXGI_FORMAT, t: &[u8]) -> [f32; 4] {
 }
 
 /// RGBA f32 → one texel of `f`, appended to `out`; exact for any value [`decode`] produced from that format.
+#[cfg(feature = "test-hooks")]
 fn encode(f: DXGI_FORMAT, c: [f32; 4], out: &mut Vec<u8>) {
     let unorm = |x: f32, max: f32| (x.clamp(0.0, 1.0) * max).round() as u32;
     let small = |x: f32, shift: u32| u32::from(half::f16::from_f32(x.max(0.0)).to_bits()) >> shift;
@@ -623,6 +628,7 @@ impl Target {
         Ok(out)
     }
 
+    #[cfg(feature = "test-hooks")]
     fn check_crop(&self, crop: [u32; 4]) -> Result<(), String> {
         let [x, y, w, h] = crop.map(u64::from);
         if x + w > self.width.into() || y + h > self.height.into() {
@@ -635,6 +641,7 @@ impl Target {
     }
 
     /// RT `rt` (0 = `color`; 1-7 only on a deferred target) and its format.
+    #[cfg(feature = "test-hooks")]
     fn rt(&self, rt: usize) -> Result<(&ID3D11Texture2D, DXGI_FORMAT), String> {
         match rt {
             0 => Ok((&self.color, MRT_FORMATS[0].0)),
@@ -649,6 +656,7 @@ impl Target {
     /// RT `rt` over `crop` ([x, y, w, h]) as row-major f32 RGBA, decoded like the golden extractors (half → f32
     /// unclamped; UNORM / small floats per [`MRT_FORMATS`]; missing channels 0, missing alpha 1): the layout of a
     /// golden fixture's `mrt<N>.f32`.
+    #[cfg(feature = "test-hooks")]
     pub fn read_f32(&self, gpu: &Gpu, rt: usize, crop: [u32; 4]) -> Result<Vec<f32>, String> {
         let (src, format) = self.rt(rt)?;
         self.check_crop(crop)?;
@@ -697,6 +705,7 @@ impl Target {
 
     /// Writes `rgba` (row-major f32 RGBA, `crop` = [x, y, w, h]) into RT `rt`, encoded in its format: a golden
     /// fixture's `mrt<N>_before.f32` as the draw's starting contents.
+    #[cfg(feature = "test-hooks")]
     pub fn seed_f32(
         &self,
         gpu: &Gpu,
@@ -764,6 +773,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-hooks")]
     fn mrt_texels_decode_like_the_extractors() {
         use super::{decode, encode, texel_bytes};
         use windows::Win32::Graphics::Dxgi::Common::*;

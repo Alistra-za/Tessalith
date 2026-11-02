@@ -9,6 +9,7 @@ pub mod debug;
 pub mod device;
 pub mod draw;
 pub mod glint_noise;
+#[cfg(feature = "test-hooks")]
 pub mod golden;
 pub mod hdri;
 pub mod includes;
@@ -18,6 +19,7 @@ pub mod mesh;
 pub mod parse;
 pub mod permutation;
 pub mod pool;
+#[cfg(feature = "test-hooks")]
 pub mod replay;
 pub mod scene;
 pub mod source;
@@ -31,6 +33,7 @@ pub use material::{
 };
 pub use parse::{parse, ParsedNif, ParsedShape, ShapeId};
 pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
+#[cfg(feature = "test-hooks")]
 pub use replay::{load_fixture, Replay, ReplayOut};
 
 use background::Backdrop;
@@ -385,6 +388,7 @@ pub struct Renderer {
     /// [`Renderer::set_debug_output`]: the term the next permutations write instead of the lit colour.
     debug: DebugOutput,
     /// Test hook (D6c): render_replay also reads the depth back.
+    #[cfg(feature = "test-hooks")]
     replay_depth: bool,
     /// [`Renderer::set_deferred`]: opaque shapes draw the DEFERRED permutation into the 8 CS render targets.
     deferred: bool,
@@ -511,6 +515,7 @@ impl Renderer {
             missing_fill: None,
             overrides: BTreeMap::new(),
             debug: DebugOutput::Lit,
+            #[cfg(feature = "test-hooks")]
             replay_depth: false,
             deferred: false,
             composite: None,
