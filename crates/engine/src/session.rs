@@ -267,6 +267,21 @@ impl AnalysisCache {
     }
 }
 
+/// [`Session::replan_sets`]'s result: the jobs, skipped and failed files, helpers and events of the `scope` sets
+/// only (set keys).
+pub struct PartialPlan {
+    pub plan: Plan,
+    pub scope: std::collections::BTreeSet<String>,
+}
+
+/// Why [`Session::replan_sets`] gave no partial plan.
+#[derive(Debug)]
+pub enum Partial {
+    /// A `crate::skeleton` reason: the caller plans in full.
+    NeedsFull(&'static str),
+    Err(EngineError),
+}
+
 /// An engine for one GUI window: encoders initialised once (the BC1 model is process-global, spec §4.6).
 pub struct Session {
     engine: Engine,
@@ -327,6 +342,38 @@ impl Session {
     /// The skeleton of the last uncancelled full plan, if any.
     pub fn skeleton(&self) -> Option<Arc<Skeleton>> {
         lock(&self.skeleton).clone()
+    }
+
+    /// Fast re-plan (R2 §4): the plan of only the sets that `changed` reaches, on the last full plan's skeleton.
+    /// `changed` holds the current entry (`None`: removed) of every `[files]` key changed since that plan; `req` is the
+    /// current request, which must differ from the skeleton's in `[files]` only. Neither the skeleton nor the cache's
+    /// contents are replaced. `Err(Partial::NeedsFull)`: plan in full instead.
+    pub fn replan_sets(
+        &self,
+        req: &BatchRequest,
+        changed: &[(String, Option<toml::Table>)],
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<PartialPlan, Partial> {
+        // `plan` signs the request with the session's BC1 model.
+        let sig = if req.bc1_model == self.bc1_model {
+            req.sig_without_files()
+        } else {
+            let mut r = req.clone();
+            r.bc1_model = self.bc1_model;
+            r.sig_without_files()
+        };
+        let (skel, hit) = Skeleton::patch_sig(self.skeleton().as_deref(), sig, changed)
+            .map_err(|e| Partial::NeedsFull(e.0))?;
+        if skel.prepared.req.derive.is_some() {
+            return Err(Partial::NeedsFull(crate::skeleton::DERIVE));
+        }
+        let scope = skel.scope(&hit);
+        let (plan, _) = self
+            .engine
+            .plan_sets(&skel.prepared, Some(&scope), rep, cancel, &self.cache)
+            .map_err(Partial::Err)?;
+        Ok(PartialPlan { plan, scope })
     }
     pub fn run(
         &self,

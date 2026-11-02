@@ -1640,7 +1640,9 @@ impl Engine {
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
     /// derive, RNM, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
-    /// `pbr_sets`). `scope` (set keys) is not read yet: every set is planned.
+    /// `pbr_sets`). `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
+    /// and skips the batch-wide steps: the SET-EDIT-STALE shader warnings, CFG-FILE-UNMATCHED, the BV2 writer dedupe
+    /// and the progress counters (the request is the skeleton's). Its skipped entries are the scope files' only.
     pub(crate) fn plan_sets(
         &self,
         p: &Prepared,
@@ -1649,14 +1651,18 @@ impl Engine {
         cancel: &CancelToken,
         cache: &AnalysisCache,
     ) -> Result<(Plan, BTreeSet<String>), EngineError> {
-        let _ = scope;
         let req = &p.req;
         let registry = &p.registry;
         let (target, target_src, preset_id) = (p.target, &p.target_src, &p.preset_id);
         let (files, file_scopes, nvtt) = (&p.files, &p.file_scopes, &p.nvtt);
         let (hand, typed, dup_idx) = (&p.hand, &p.typed, &p.dup_idx);
         // Mutated below (predicted suffixes, replaced generated members); the prepared sets stay as built.
-        let mut sets = p.sets.clone();
+        let mut sets: Vec<TextureSet> = p
+            .sets
+            .iter()
+            .filter(|s| scope.is_none_or(|sc| sc.contains(&s.key)))
+            .cloned()
+            .collect();
         let key = |out: &Path| output_key(&req.output_root, out);
         let ctx = base_ctx(
             req,
@@ -1669,7 +1675,8 @@ impl Engine {
             nvtt,
         );
 
-        let (explicit, stale_shaders) = explicit_shaders(req, &sets);
+        // On every set, so a choice for a set outside the scope is not taken for stale.
+        let (explicit, stale_shaders) = explicit_shaders(req, &p.sets);
         for set in &mut sets {
             let complex = explicit.get(&set.key) == Some(&Shader::ComplexMaterial);
             predict_suffixes(set, target, complex, files, typed, hand);
@@ -1678,8 +1685,11 @@ impl Engine {
             .iter()
             .flat_map(|s| s.members.iter().map(|&i| (i, s.key.as_str())))
             .collect();
+        let in_scope =
+            |set: Option<&String>| scope.is_none_or(|sc| set.is_some_and(|k| sc.contains(k)));
         let mut skipped: Vec<SkippedFile> = dup_idx
             .iter()
+            .filter(|&i| scope.is_none() || set_of.contains_key(i))
             .map(|&i| SkippedFile {
                 path: files[i].path.clone(),
                 output: files[i].output.clone(),
@@ -1688,7 +1698,12 @@ impl Engine {
                 reason: "two inputs map to one output; exclude one".into(),
             })
             .collect();
-        skipped.extend(p.gen_replaced.iter().cloned());
+        skipped.extend(
+            p.gen_replaced
+                .iter()
+                .filter(|s| in_scope(s.set.as_ref()))
+                .cloned(),
+        );
         let mut self_overwrite: Vec<FailedFile> = vec![];
         let mut work: Vec<(&TextureSet, &InputFile)> = vec![];
         for set in &sets {
@@ -1806,7 +1821,8 @@ impl Engine {
         // One slot per work item, so results keep the input order. A slot left empty is a file that was cancelled
         // before its Load started.
         let slots: Vec<Mutex<Option<_>>> = work.iter().map(|_| Mutex::new(None)).collect();
-        let progress = req.plan_progress.clone();
+        // A partial plans on the skeleton's request, whose counters are the last full plan's.
+        let progress = req.plan_progress.clone().filter(|_| scope.is_none());
         if let Some(p) = &progress {
             p.total.store(work.len(), Ordering::Relaxed);
         }
@@ -1893,7 +1909,7 @@ impl Engine {
             }
         }
         // 6a. Explicit shader choices: the GUI map, then `--set set:<id>.shader` (the command line wins).
-        for id in &stale_shaders {
+        for id in stale_shaders.iter().filter(|_| scope.is_none()) {
             rep.emit(
                 None,
                 None,
@@ -2460,8 +2476,9 @@ impl Engine {
         baking.extend(crate::bake::plan::plan_gloss_bakes(&bake_cx, &mut jobs));
         let peak_admitted_bytes = budget.peak.load(Ordering::Relaxed);
         // DECISIONS N2: a [files] key that names nothing planned is reported once (it stays in the file).
+        // Batch-wide: a partial keeps the full plan's verdict (a value edit never changes which keys match).
         let mut rels: Vec<String> = vec![];
-        if let Some(root) = &file_scopes.root {
+        if let (Some(root), None) = (&file_scopes.root, scope) {
             let rel_of_path = |p: &Path| -> Option<String> {
                 let f = InputFile {
                     path: p.to_path_buf(),
@@ -2526,7 +2543,7 @@ impl Engine {
             Scope::Path(k) => Some(k),
             _ => None,
         }));
-        for key in keys {
+        for key in keys.into_iter().filter(|_| scope.is_none()) {
             if !matched.contains(&key.to_lowercase()) {
                 rep.emit(
                     None,
@@ -2544,9 +2561,12 @@ impl Engine {
         // Audits 08d-1 / 08e-3 (Note BV2): the last word on output paths, whatever made two jobs meet (default
         // packed names, moved raw maps, re-encoded DDS). Both would write the path (the last rename wins) and append
         // two manifest records; the first in plan order keeps it and every later one is IN-DUPLICATE.
+        // Batch-wide too: a partial changes no output path, so the full plan's verdict stands.
+        // shortcut: a scoped job the full plan dedupes is kept here; record the dedupe's sets in the skeleton if a
+        // fast-path edit ever moves an output.
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
         jobs.retain(|j: &ResolvedJob| {
-            if !matches!(j.status, JobStatus::Ready) {
+            if scope.is_some() || !matches!(j.status, JobStatus::Ready) {
                 return true;
             }
             let Some(first) = writers.get(&output_key(&req.output_root, &j.output)) else {
@@ -3393,6 +3413,67 @@ fn panic_while_planning_for_test(path: &Path, stage: Stage) {
     }
 }
 
+/// DECISIONS N2: a `[files]` sub-type must be a known one (`check_up_front`).
+fn check_file_subtype(o: &SetOverride) -> Result<(), EngineError> {
+    match &o.scope {
+        Scope::Path(key) if o.field == "subtype" => {
+            serde_json::from_value::<Subtype>(o.value.clone())
+                .map(|_| ())
+                .map_err(|_| {
+                    EngineError::Config(format!(
+                        "[files.\"{key}\"] subtype: unknown sub-type {}",
+                        o.value
+                    ))
+                })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// DECISIONS N2: any other `[files]` value must build `st`'s profile over `doc` ([`chain_doc`]) (`check_up_front`).
+fn check_file_value(
+    doc: &serde_json::Value,
+    target: Target,
+    st: Subtype,
+    o: &SetOverride,
+) -> Result<(), EngineError> {
+    let Scope::Path(key) = &o.scope else {
+        return Ok(());
+    };
+    if o.field == "subtype" || crate::overrides::is_selector(&o.field) {
+        return Ok(());
+    }
+    let mut d = doc.clone();
+    merge_json(&mut d, &to_patch(&o.field, &o.value));
+    finish_profile(d, target, st)
+        .map(|_| ())
+        .map_err(|e| EngineError::Config(format!("[files.\"{key}\"] {}={}: {e}", o.field, o.value)))
+}
+
+/// `check_up_front`'s `[files]` checks on `ovs` only, against `p`'s preset chain and configs: a skeleton patch holds
+/// the entries it changes to them, so an entry the full plan would refuse never plans as a partial.
+pub(crate) fn check_file_overrides(p: &Prepared, ovs: &[&SetOverride]) -> Result<(), EngineError> {
+    for o in ovs {
+        check_file_subtype(o)?;
+    }
+    if ovs.iter().all(|o| o.field == "subtype") {
+        return Ok(());
+    }
+    let chain = p.registry.chain(&p.preset_id).map_err(preset_err)?;
+    let configs: Vec<&ConfigFile> = p
+        .user_config
+        .iter()
+        .chain(p.project_config.iter())
+        .collect();
+    for st in Subtype::ALL {
+        let doc = chain_doc(&chain, &configs, st);
+        for o in ovs {
+            check_file_value(&doc, p.target, st, o)?;
+        }
+    }
+    Ok(())
+}
+
 /// Spec §8: an invalid preset, config, rule or `--set` value, or a setting unavailable for the whole batch, is an
 /// error (exit 2) before any work. Profiles are built for every sub-type from the batch preset chain and the
 /// configs, then with each rule's and each `--set` override's patch; every suffix alias preset's chain (spec §3.7)
@@ -3414,15 +3495,8 @@ fn check_up_front(
     for c in configs {
         file_overrides.extend(c.file_entries().map_err(config_err)?.0);
     }
-    for o in file_overrides.iter().filter(|o| o.field == "subtype") {
-        if let Scope::Path(key) = &o.scope {
-            serde_json::from_value::<Subtype>(o.value.clone()).map_err(|_| {
-                EngineError::Config(format!(
-                    "[files.\"{key}\"] subtype: unknown sub-type {}",
-                    o.value
-                ))
-            })?;
-        }
+    for o in &file_overrides {
+        check_file_subtype(o)?;
     }
     let alias_presets: BTreeSet<&str> = registry
         .alias_table()
@@ -3460,16 +3534,8 @@ fn check_up_front(
             finish_profile(d, target, st)
                 .map_err(|e| usage(format!("--set {}={}: {e}", o.field, o.value)))?;
         }
-        for o in file_overrides
-            .iter()
-            .filter(|o| o.field != "subtype" && !crate::overrides::is_selector(&o.field))
-        {
-            let Scope::Path(key) = &o.scope else { continue };
-            let mut d = doc.clone();
-            merge_json(&mut d, &to_patch(&o.field, &o.value));
-            finish_profile(d, target, st).map_err(|e| {
-                EngineError::Config(format!("[files.\"{key}\"] {}={}: {e}", o.field, o.value))
-            })?;
+        for o in &file_overrides {
+            check_file_value(&doc, target, st, o)?;
         }
     }
     // Spec §8: an unsupported setting for the whole batch exits 2 before work starts.

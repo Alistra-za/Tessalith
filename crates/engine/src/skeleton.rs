@@ -1,12 +1,13 @@
 //! Fast re-plan (R2 §1, §2): the global half of the last full plan (`Prepared`), kept per session and patched for
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
 use crate::api::{
-    drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members, predict_suffixes,
-    reencodes, set_is_pbr, Plan, Prepared,
+    check_file_overrides, drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members,
+    predict_suffixes, reencodes, set_is_pbr, Plan, Prepared,
 };
 use crate::config::Target;
+use crate::cube::plan::face_tag;
 use crate::discover::{InputFile, InputKind};
-use crate::group::TextureSet;
+use crate::group::{fold, TextureSet};
 use crate::overrides::{project_rel, KeyForms, Scope, SetOverride, SUBTYPE_FIELD};
 use crate::pack::plan::raw_role;
 use std::collections::{BTreeSet, HashMap};
@@ -25,6 +26,8 @@ pub const PBR_SUBTYPE: &str = "subtype on a PBR set member";
 pub const MEMBERSHIP_CHANGE: &str = "membership change";
 pub const PBR_CHANGE: &str = "set PBR status change";
 pub const PATCHED: &str = "patched skeleton";
+/// An Also export's derive step reads its PBR sets as a whole (`plan_derived`, `report_unread`).
+pub const DERIVE: &str = "derive request";
 
 /// The packed-output suffixes a `[files]` key can name (`RecipeKind::suffix`).
 const PACKED_SUFFIXES: [&str; 4] = ["rmaos", "rfaos", "p", "m"];
@@ -204,6 +207,15 @@ impl Skeleton {
             }
         }
 
+        // A value the full plan's up-front checks refuse (a wrong type, say) is that plan's config error, not a partial.
+        let edited: Vec<&SetOverride> = next
+            .prepared
+            .file_scopes
+            .overrides
+            .iter()
+            .filter(|o| matches!(&o.scope, Scope::Path(k) if changed.iter().any(|(c, _)| c == k)))
+            .collect();
+        check_file_overrides(&next.prepared, &edited).map_err(|_| NeedsFull(BAD_ENTRY))?;
         // What the edits change per hit file, under the old and the new layer (`prepare`'s own rules).
         let mut typed = p.typed.clone();
         {
@@ -279,6 +291,69 @@ impl Skeleton {
             .map(|&s| p.sets[s as usize].key.clone())
             .collect();
         Ok((next, keys))
+    }
+
+    /// `hit` closed under the partners of R2 §2, repeated until nothing new is added: the sets of one cube (and a
+    /// set writing the merged cube's output, `plan_cubes`' clash check), a borrowed normal's owner and every borrower,
+    /// and the shared-roughness sets. The `_wet` and helper joins are not partners: `patch` refuses a membership change.
+    pub fn scope(&self, hit: &BTreeSet<String>) -> BTreeSet<String> {
+        let p = &self.prepared;
+        let root = &p.req.output_root;
+        // Each partner group as set keys; a set may sit in several.
+        let mut groups: Vec<BTreeSet<String>> = vec![];
+        // Cube: `plan_cubes` groups face jobs by (folded output folder, base minus the face tag). Any sub-type, since
+        // an edit can make or unmake a face; an untagged output named like the base clashes with the merged cube.
+        let mut cube: HashMap<(String, String), (bool, BTreeSet<String>)> = HashMap::new();
+        for set in &p.sets {
+            for &m in &set.members {
+                let out = &p.files[m].output;
+                let Some(stem) = out.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let (base, tagged) = match face_tag(stem) {
+                    Some((b, _)) => (b, true),
+                    None => (stem, false),
+                };
+                let dir = fold(out.parent().unwrap_or(std::path::Path::new("")));
+                let g = cube.entry((dir, base.to_lowercase())).or_default();
+                g.0 |= tagged;
+                g.1.insert(set.key.clone());
+            }
+        }
+        groups.extend(
+            cube.into_values()
+                .filter(|(tagged, keys)| *tagged && keys.len() > 1)
+                .map(|(_, keys)| keys),
+        );
+        // A borrowed normal: the owner and all its borrowers (`plan_bakes`' `lent` reads every borrower).
+        let mut owners: HashMap<String, BTreeSet<String>> = HashMap::new();
+        for (b, o) in &p.req.borrowed_normal {
+            let o = crate::sets::set_key(root, o);
+            owners
+                .entry(o.clone())
+                .or_insert_with(|| BTreeSet::from([o]))
+                .insert(crate::sets::set_key(root, b));
+        }
+        groups.extend(owners.into_values());
+        let shared: BTreeSet<String> = p
+            .req
+            .shared_roughness
+            .iter()
+            .map(|id| crate::sets::set_key(root, id))
+            .collect();
+        groups.push(shared);
+        let mut scope = hit.clone();
+        loop {
+            let before = scope.len();
+            for g in &groups {
+                if g.iter().any(|k| scope.contains(k)) {
+                    scope.extend(g.iter().cloned());
+                }
+            }
+            if scope.len() == before {
+                return scope;
+            }
+        }
     }
 }
 
