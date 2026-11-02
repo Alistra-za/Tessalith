@@ -27,15 +27,15 @@ const PACKED_SUFFIXES: [&str; 4] = ["rmaos", "rfaos", "p", "m"];
 #[derive(Clone)]
 pub struct Skeleton {
     /// [`crate::api::BatchRequest::sig_without_files`] of the request it was planned with.
-    req_sig: u64,
-    prepared: Prepared,
+    pub(crate) req_sig: u64,
+    pub(crate) prepared: Prepared,
     /// File index → index into `prepared.sets`; `u32::MAX` for a file in no set.
-    set_of: Vec<u32>,
+    pub(crate) set_of: Vec<u32>,
     /// Lower-cased key form (each member's full and stem form, and the packed-output keys of each set that packs)
     /// → the sets it names.
-    key_sets: HashMap<String, Vec<u32>>,
+    pub(crate) key_sets: HashMap<String, Vec<u32>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
-    pbr_sets: BTreeSet<u32>,
+    pub(crate) pbr_sets: BTreeSet<u32>,
 }
 
 impl Skeleton {
@@ -381,7 +381,11 @@ mod tests {
             .unwrap() as u32;
         assert!(!s.pbr_sets.contains(&q), "set q is not PBR");
         for (i, f) in s.prepared.files.iter().enumerate() {
-            let si = s.set_of[i] as usize;
+            // A generated loser is in no set.
+            let Some(si) = Some(s.set_of[i]).filter(|&x| x != u32::MAX) else {
+                continue;
+            };
+            let si = si as usize;
             assert!(
                 s.prepared.sets[si].members.contains(&i),
                 "{}",
