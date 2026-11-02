@@ -2068,6 +2068,7 @@ version = "1.2.0"
 dependencies = [
  "crc32fast",
  "esp",
+ "modscan",
  "nif",
  "rayon",
  "rusqlite",
@@ -2643,6 +2644,7 @@ name = "pgpsim"
 version = "1.2.0"
 dependencies = [
  "nif",
+ "pgpsim",
  "serde_json",
 ]
 
@@ -3061,6 +3063,7 @@ dependencies = [
  "image",
  "modscan",
  "nif",
+ "render3d",
  "serde",
  "serde_json",
  "sha2",
@@ -3279,6 +3282,7 @@ dependencies = [
  "render3d",
  "rfd",
  "rusqlite",
+ "sdc-gui",
  "serde",
  "serde_json",
  "sha2",

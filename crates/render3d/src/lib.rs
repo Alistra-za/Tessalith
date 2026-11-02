@@ -185,6 +185,7 @@ enum Lookup {
 }
 
 /// The floats of `var` as written in the first of `cbs` that has it.
+#[cfg(feature = "test-hooks")]
 fn cb_floats(cbs: &[draw::Cb], var: &str) -> Option<Vec<f32>> {
     let cb = cbs.iter().find(|c| c.writer.has(var))?;
     let f = cb.writer.resolve(var)?;
@@ -375,6 +376,7 @@ pub struct Renderer {
     /// Cbuffer uploads of the last frame.
     uploads: usize,
     /// Test hook: draw with P0's by-name writer (every field, every cbuffer, every frame).
+    #[cfg(feature = "test-hooks")]
     reference_writer: bool,
     /// The HDRI background pass, made on the first `Background::Hdri` frame.
     backdrop: Option<Result<Backdrop, String>>,
@@ -394,11 +396,13 @@ pub struct Renderer {
     /// Why deferred mode is off ("Deferred preview unavailable: …"), if a composite failed.
     deferred_error: Option<String>,
     /// Successful composite builds (test hook).
+    #[cfg(feature = "test-hooks")]
     composite_builds: usize,
     /// The env cube from the HDRI (v2 D5), keyed by `Scene::env_yaw` bits; built in `render` only when the composite
     /// or a drawn program reads one.
     env: Option<(u32, composite::EnvMaps)>,
     /// Env cube builds (test hook).
+    #[cfg(feature = "test-hooks")]
     env_builds: usize,
     /// Side of the env cube ([`hdri::ENV_SIZE`]; a test hook can make it invalid to fake a failed build).
     env_size: u32,
@@ -504,6 +508,7 @@ impl Renderer {
             query,
             last_frame: None,
             uploads: 0,
+            #[cfg(feature = "test-hooks")]
             reference_writer: false,
             backdrop: None,
             missing_fill: None,
@@ -513,8 +518,10 @@ impl Renderer {
             deferred: false,
             composite: None,
             deferred_error: None,
+            #[cfg(feature = "test-hooks")]
             composite_builds: 0,
             env: None,
+            #[cfg(feature = "test-hooks")]
             env_builds: 0,
             env_size: hdri::ENV_SIZE,
             projected: None,
@@ -806,6 +813,7 @@ impl Renderer {
         &self.shaders
     }
 
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn encode_srgb(&self) -> bool {
         self.encode_srgb
@@ -813,6 +821,7 @@ impl Renderer {
 
     /// sRGB-encode the frame on readback (off by default). Turn it on for display when the features include
     /// `ENABLE_LL`: Linear Lighting draws in linear working space; without it the output is already gamma-space.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_encode_srgb(&mut self, on: bool) {
         self.encode_srgb = on;
@@ -838,6 +847,7 @@ impl Renderer {
     }
 
     /// Test hook (D6c): `render_replay` also returns the depth after the draw over the crop (`ReplayOut::depth`).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_replay_depth_readback(&mut self, on: bool) {
         self.replay_depth = on;
@@ -906,7 +916,10 @@ impl Renderer {
             &self.cache_dir,
         )?;
         self.composite = Some(c);
-        self.composite_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.composite_builds += 1;
+        }
         Ok(())
     }
 
@@ -948,24 +961,28 @@ impl Renderer {
     }
 
     /// Test hook: the current composite.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn composite(&self) -> Option<&Composite> {
         self.composite.as_ref()
     }
 
     /// Test hook: env cube builds since this renderer was made (one per yaw while something reads it).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn env_builds(&self) -> usize {
         self.env_builds
     }
 
     /// Test hook: the env cube side for the next builds (a size that is not a power of two makes the build fail).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_env_size(&mut self, size: u32) {
         self.env_size = size;
     }
 
     /// Test hook: successful composite builds since this renderer was made.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn composite_builds(&self) -> usize {
         self.composite_builds
@@ -1000,6 +1017,7 @@ impl Renderer {
 
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
     /// frame), the reference the resolved path must match pixel for pixel.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_reference_writer(&mut self, on: bool) {
         self.reference_writer = on;
@@ -1531,7 +1549,10 @@ impl Renderer {
         n.encode_srgb = self.encode_srgb;
         n.async_compile = self.async_compile;
         n.load_variant = self.load_variant;
-        n.reference_writer = self.reference_writer;
+        #[cfg(feature = "test-hooks")]
+        {
+            n.reference_writer = self.reference_writer;
+        }
         n.compiled = std::mem::take(&mut self.compiled);
         n.missing_fill = self.missing_fill;
         n.debug = self.debug;
@@ -2167,6 +2188,7 @@ impl Renderer {
 
     /// Diagnostic hook: the PS defines the shape's material compiles with, the PS reflection of that program (if it
     /// is at hand), and the shape's draw as (register, DXGI format of the bound view) pairs.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_diag(&mut self, id: ShapeId) -> Option<DrawDiag> {
         let m = self.shapes.get(&id)?.material.clone();
@@ -2191,12 +2213,14 @@ impl Renderer {
 
     /// Test hook: the floats of `var` as written in the shape's pixel-stage cbuffers (`None` without a draw or when
     /// the PS does not reflect `var`).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_cb_floats(&self, id: ShapeId, var: &str) -> Option<Vec<f32>> {
         cb_floats(&self.shapes.get(&id)?.draw.as_ref()?.ps_cbs, var)
     }
 
     /// Test hook: [`Renderer::draw_cb_floats`] over the shape's vertex-stage cbuffers (v2 D6c).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_vs_cb_floats(&self, id: ShapeId, var: &str) -> Option<Vec<f32>> {
         cb_floats(&self.shapes.get(&id)?.draw.as_ref()?.vs_cbs, var)
@@ -2209,6 +2233,7 @@ impl Renderer {
     }
 
     /// Test hook: the COM pointer of the shape's index buffer. A hot-swap must leave it alone (no mesh reload).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_identity(&self, id: ShapeId) -> Option<usize> {
         use windows::core::Interface;
@@ -2221,6 +2246,7 @@ impl Renderer {
 
     /// Test hook: the `(kind, rgba)` of the 1×1 default bound at `reg` of the shape's draw; `None` when a real
     /// texture (or an override) is bound there, or there is no draw.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_default_at(&self, id: ShapeId, reg: u32) -> Option<(SrvKind, [u8; 4])> {
         use windows::core::Interface;
@@ -2233,6 +2259,7 @@ impl Renderer {
     }
 
     /// Test hook: the registers the shape's draw counts as real textures (`Bound`), sorted.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_bound(&self, id: ShapeId) -> Option<Vec<u32>> {
         let d = self.shapes.get(&id)?.draw.as_ref()?;
@@ -2243,17 +2270,17 @@ impl Renderer {
 
     /// Test hook: RT `rt` of the last frame's target, whole, as f32 RGBA ([`Target::read_f32`]). Err without a frame
     /// or for an RT the target does not have (1-7 on a forward target).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn read_mrt(&self, rt: usize) -> Result<Vec<f32>, String> {
         let t = self.target.as_ref().ok_or("no frame rendered")?;
         t.read_f32(&self.gpu, rt, [0, 0, t.width, t.height])
     }
 
-    /// Drops the current target (render's recreation branch; a test seam). The context holds references to bound
+    /// Drops the current target (render's recreation branch). The context holds references to bound
     /// views, so they are unbound first: otherwise the old textures outlive this drop while the new ones are made.
     /// `render` binds only the target's RTVs and DSV (no SRV or UAV of it), and rebinds them every frame.
-    #[doc(hidden)]
-    pub fn drop_target(&mut self) {
+    fn release_target(&mut self) {
         // The composite binds the target's SRVs and UAV to the CS stage (and unbinds them); null them here too.
         let srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
         let uavs: [Option<windows::Win32::Graphics::Direct3D11::ID3D11UnorderedAccessView>; 8] =
@@ -2269,7 +2296,15 @@ impl Renderer {
         self.target = None;
     }
 
+    /// Test hook: [`Renderer::release_target`] on its own.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn drop_target(&mut self) {
+        self.release_target();
+    }
+
     /// Test hook: views bound to the compute stage (SRVs 0..20 + UAVs 0..8).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn bound_cs_views(&self) -> usize {
         let mut srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
@@ -2284,6 +2319,7 @@ impl Renderer {
     }
 
     /// Test hook: how many render target views the immediate context has bound.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn bound_rtvs(&self) -> usize {
         let mut rtvs: [Option<windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView>; 8] =
@@ -2295,6 +2331,7 @@ impl Renderer {
 
     /// Test hook: (width, height) of every texture of the current target: depth, colour, RT1-7, then the main UAV's
     /// resource.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn target_dims(&self) -> Vec<(u32, u32)> {
         use windows::core::Interface;
@@ -2441,7 +2478,7 @@ impl Renderer {
             .as_ref()
             .is_none_or(|t| t.width != w || t.height != h || t.deferred() != deferred_frame)
         {
-            self.drop_target();
+            self.release_target();
             self.target = Some(if deferred_frame {
                 Target::new_deferred(&self.gpu, w, h)?
             } else {
@@ -2473,7 +2510,10 @@ impl Renderer {
             ) {
                 Ok(e) => {
                     self.env = Some((yaw, e));
-                    self.env_builds += 1;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        self.env_builds += 1;
+                    }
                     perf_log::emit(
                         "env_cube",
                         serde_json::json!({ "ms": perf_log::ms_since(t) }),
@@ -2598,21 +2638,24 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&rtvs), &target.dsv);
                         bound_all = want;
                     }
-                    uploads += if self.reference_writer {
-                        {
-                            // Test hook only (P0's reference writer): recomputed every frame.
-                            let fv = values_for(
-                                &self.settings,
-                                self.features_on,
-                                self.head_part,
-                                &s.fields,
-                                &s.built,
-                            );
-                            s.update_by_name(gpu, scene, &view, &fv)
-                        }
+                    // Test hook only (P0's reference writer, recomputed every frame): the default build takes the
+                    // shipped path with no check.
+                    #[cfg(feature = "test-hooks")]
+                    let n = if self.reference_writer {
+                        let fv = values_for(
+                            &self.settings,
+                            self.features_on,
+                            self.head_part,
+                            &s.fields,
+                            &s.built,
+                        );
+                        s.update_by_name(gpu, scene, &view, &fv)
                     } else {
                         s.update(gpu, &inputs)
                     };
+                    #[cfg(not(feature = "test-hooks"))]
+                    let n = s.update(gpu, &inputs);
+                    uploads += n;
                     ctx.IASetInputLayout(&s.mesh.layout);
                     for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
                         ctx.IASetVertexBuffers(

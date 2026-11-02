@@ -11,6 +11,7 @@ mod prep;
 mod slots;
 mod text;
 
+#[cfg(feature = "test-hooks")]
 pub use check::range_warnings;
 pub use index::{MatchIndex, ShapeKeys};
 pub use matching::{matched_path, shape_matches};

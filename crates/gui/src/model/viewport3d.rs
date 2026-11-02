@@ -899,6 +899,7 @@ pub struct Viewport3d {
     popup_settings: Option<CsSettings>,
     thread: Option<Sender<V3Cmd>>,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
+    #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
     tx: Sender<WorkerMsg>,
     rx: Receiver<WorkerMsg>,
@@ -971,6 +972,7 @@ impl Viewport3d {
             failed_hash: None,
             popup_settings: None,
             thread: None,
+            #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
             rx,
@@ -998,6 +1000,7 @@ impl Viewport3d {
     }
 
     /// Test seam: stands in for the render thread; the returned receiver gets the commands.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn attach_test_thread(&mut self) -> Receiver<V3Cmd> {
         let (t, r) = channel();
@@ -1007,6 +1010,7 @@ impl Viewport3d {
 
     /// Test seam: the next `ensure_thread` uses this channel instead of spawning the render loop, so its start-up
     /// commands are seen in order (`attach_test_thread` skips them).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn fake_render_thread(&mut self) -> Receiver<V3Cmd> {
         let (t, r) = channel();
@@ -1015,16 +1019,19 @@ impl Viewport3d {
     }
 
     /// Test seam: the channel the render thread replies on (`poll` drains it).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn reply_sender_for_test(&self) -> Sender<WorkerMsg> {
         self.tx.clone()
     }
 
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn render_sent_for_test(&self) -> u64 {
         self.render_sent
     }
 
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn loaded_for_test(&self) -> Option<u64> {
         self.loaded
@@ -1505,7 +1512,11 @@ impl Viewport3d {
         let (Some(shaders), Some(cache)) = (self.shaders.clone(), self.cache_dir.clone()) else {
             return false;
         };
-        let ctx = match self.fake_thread.take() {
+        #[cfg(feature = "test-hooks")]
+        let fake = self.fake_thread.take();
+        #[cfg(not(feature = "test-hooks"))]
+        let fake: Option<Sender<V3Cmd>> = None;
+        let ctx = match fake {
             Some(t) => t,
             None => {
                 let (ctx, crx) = channel();

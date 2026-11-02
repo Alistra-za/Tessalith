@@ -9,3 +9,11 @@ rust-version.workspace = true
 [dependencies]
 nif = { path = "../nif" }
 serde_json.workspace = true
+
+[features]
+# Test-only seams (DECISIONS Note GJ). Off by default and never enabled by a release build; the dev-dependency below
+# turns it on for `cargo test` (resolver 2 keeps dev-dependency features out of `cargo build`).
+test-hooks = []
+
+[dev-dependencies]
+pgpsim = { path = ".", features = ["test-hooks"] }

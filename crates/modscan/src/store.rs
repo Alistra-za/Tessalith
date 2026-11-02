@@ -1023,6 +1023,7 @@ impl Store {
     }
 
     /// Upserts an origin and enables it at once.
+    #[cfg(feature = "test-hooks")]
     pub fn upsert_origin(&mut self, o: &OriginSpec) -> Result<i64, ScanError> {
         self.upsert_origin_as(o, 1)
     }
@@ -1164,6 +1165,7 @@ impl Store {
     }
 
     /// Writes one copy directly (outside a scan chunk) and returns its id.
+    #[cfg(feature = "test-hooks")]
     pub fn upsert_copy(
         &mut self,
         path: &str,
@@ -1589,6 +1591,7 @@ impl Store {
     }
 
     /// `EXPLAIN QUERY PLAN` detail lines of [`Self::nifs_using_canonical_texture`]'s query (tests check the index).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn canonical_query_plan(&self) -> Result<Vec<String>, ScanError> {
         let mut st = self

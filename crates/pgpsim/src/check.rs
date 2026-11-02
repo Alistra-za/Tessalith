@@ -1,10 +1,13 @@
 //! PGPatcher 2.x reads a patch key only when it has its JSON type and ignores it otherwise [Src 2.2.0 TP:52-57,
 //! 744-1235]; the accessors in `json.rs` do that. The match keys are still read with nlohmann `get<std::string>()`,
 //! which throws [Src 2.2.0 TP:242, 256, 265, 280, 534, 594, 608-609, 618]: those are the only type failures left.
-use crate::json::{flag, GLINT_KEYS};
+use crate::json::flag;
+#[cfg(feature = "test-hooks")]
+use crate::json::GLINT_KEYS;
 use serde_json::{Map, Value};
 
 /// The number keys, for `range_warnings` only.
+#[cfg(feature = "test-hooks")]
 const NUM_KEYS: &[&str] = &[
     "smooth_angle",
     "auto_uv",
@@ -65,6 +68,7 @@ pub(crate) fn coat_error(e: &Map<String, Value>) -> Option<String> {
 
 /// PGPatcher 2.2 `alphaprop_*` whole-number keys and their maxima. Never in `NUM_KEYS`: 2.2 ignores a bad value
 /// (`unsignedFromJSON`) where 1.2.0 threw, so they never make a `Skip`.
+#[cfg(feature = "test-hooks")]
 const INT_KEYS: [(&str, u32); 2] = [("alphaprop_flags", 65535), ("alphaprop_thresh", 255)];
 
 /// PGPatcher 2.2 `unsignedFromJSON`: `Some` only for a JSON number that is a whole value in 0..=max (an integral
@@ -80,11 +84,13 @@ pub(crate) fn uint_in(v: &Value, max: u32) -> Option<u32> {
 
 /// The 0–1 factors among the number keys (sdc M6 F1 spec §2). Mirrors `NumRange::Unit` in sdc-gui's `pgp/schema.rs`;
 /// the GUI test `pgpsim_warns_on_exactly_the_gui_ranges` keeps the two in step.
+#[cfg(feature = "test-hooks")]
 const UNIT_KEYS: [&str; 3] = ["subsurface_opacity", "coat_strength", "fuzz.weight"];
 
 /// sdc's value ranges as warnings (sdc M6 F1 spec §2): every number key below 0, and a 0–1 factor above 1. PGPatcher
 /// itself has no limits, so this is never a `Skip`. Values of the wrong type are `check_types`' business.
 /// `glint.log_microfacet_density` (a log value) and the removed `env_map_*` keys have no range.
+#[cfg(feature = "test-hooks")]
 pub fn range_warnings(entry: &Value) -> Vec<String> {
     let Some(e) = entry.as_object() else {
         return vec![];

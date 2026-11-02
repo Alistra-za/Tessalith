@@ -48,8 +48,14 @@ image.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation"] }
 
+[features]
+# Test-only seams (DECISIONS Note GJ). Off by default and never enabled by a release build; the dev-dependency below
+# turns it on for `cargo test` (resolver 2 keeps dev-dependency features out of `cargo build`).
+test-hooks = ["render3d/test-hooks", "modscan/test-hooks", "pgpsim/test-hooks"]
+
 [dev-dependencies]
 egui_kittest = { version = "=0.36.2", features = ["wgpu"] }
 tempfile.workspace = true
 walkdir.workspace = true
 crc32fast.workspace = true
+sdc-gui = { path = ".", features = ["test-hooks"] }
