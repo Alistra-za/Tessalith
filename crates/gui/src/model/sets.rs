@@ -749,7 +749,7 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         }
     }
     let mut paths = BTreeMap::new();
-    let views = set_views(m);
+    let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
     let named = output_name_paths(m, &views);
     if m.target != Target::Cs {
@@ -882,7 +882,7 @@ pub fn shared_roughness(m: &AppModel) -> BTreeSet<String> {
         return BTreeSet::new();
     }
     let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for v in set_views(m) {
+    for v in views(m).iter() {
         if let Some(SlotFill::Own { item } | SlotFill::Borrowed { item, .. }) =
             v.slots.get(&SlotKind::Rmaos)
         {
@@ -902,7 +902,7 @@ pub fn borrowed_normal(m: &AppModel) -> BTreeMap<String, String> {
     if m.target != Target::Cs {
         return BTreeMap::new();
     }
-    let views = set_views(m);
+    let views = views(m);
     views
         .iter()
         .filter_map(|v| match v.slots.get(&SlotKind::Normal) {

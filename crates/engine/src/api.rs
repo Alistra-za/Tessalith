@@ -1764,7 +1764,9 @@ impl Engine {
         let resolve_one =
             |&(set, f): &(&TextureSet, &InputFile),
              admitted: Admitted<'_>,
-             stage: &Cell<Stage>|
+             stage: &Cell<Stage>,
+             source: Option<SourceStamp>,
+             hints: crate::analyse::AnalyseHints|
              -> Result<(ResolvedJob, crate::analyse::Analysis, SourceInfo), LoadError> {
                 let enter = |st: Stage| {
                     stage.set(st);
@@ -1773,9 +1775,7 @@ impl Engine {
                 };
                 enter(Stage::Load);
                 let split = split_for((set, f));
-                // Taken before the read, so a change made while it is loaded is seen as a change too.
-                let source = SourceStamp::of(&f.path);
-                let hints = hints_of(&ctx, f, &split);
+                // `source` and `hints` come from the spawner: one stat and one hint lookup per file.
                 let (a, info) = match source.and_then(|s| cache.file(&f.path, s, hints)) {
                     Some(hit) => {
                         drop(admitted);
@@ -1840,8 +1840,9 @@ impl Engine {
                 // shortcut: a file changed between this check and its Load loads unadmitted; the next plan admits it.
                 let path = &item.1.path;
                 let hints = hints_of(&ctx, item.1, &split_for(*item));
-                let cached =
-                    SourceStamp::of(path).is_some_and(|s| cache.file(path, s, hints).is_some());
+                // Taken before the read, so a change made while it is loaded is seen as a change too.
+                let source = SourceStamp::of(path);
+                let cached = source.is_some_and(|s| cache.file(path, s, hints).is_some());
                 let est = if cached { 0 } else { estimated_bytes(path) };
                 budget.acquire(est);
                 let admitted = Admitted(&budget, est);
@@ -1853,7 +1854,7 @@ impl Engine {
                         // entered, as in `run_one`. The admitted bytes are released while it unwinds.
                         let stage = Cell::new(Stage::Load);
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            resolve_one(item, admitted, &stage)
+                            resolve_one(item, admitted, &stage, source, hints)
                         }));
                         *lock(slot) = Some(match r {
                             Ok(r) => r.map_err(PlanFailure::Load),

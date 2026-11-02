@@ -4023,6 +4023,16 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(1)));
     }
 
+    /// Task 5: a plan request borrows the cached set views, so building it deep-clones none.
+    #[test]
+    fn building_the_plan_request_clones_no_set_views() {
+        let m = bare_model();
+        sets::SET_VIEWS_CLONES.with(|c| c.set(0));
+        let _ = m.request();
+        let _ = EngineInputs::of(&m);
+        assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
+    }
+
     pub(super) fn panicked(what: &'static str) -> WorkerMsg {
         WorkerMsg::Panicked {
             what,
