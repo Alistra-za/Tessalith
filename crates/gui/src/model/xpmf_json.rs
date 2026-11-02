@@ -274,7 +274,7 @@ fn defaults_in(
     doc.insert("editorIds".into(), json!(edids));
     doc.insert(
         "pbr".into(),
-        json!(is_pbr_landscape(v) && m.target == Target::Cs && !vanilla),
+        json!(is_pbr_landscape(v) && m.target == Target::Cs),
     );
     let root = m.output_root();
     for (key, slot) in TEXTURES {
