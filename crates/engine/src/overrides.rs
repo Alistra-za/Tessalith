@@ -142,7 +142,9 @@ pub struct FileScopes {
     /// Note DW: indices (into the planned files, as `TextureSet::members`) of the GUI's pinned files named as a
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
-    /// `overrides` and `allow` by lower-cased key (`index`); `None` until built.
+    /// `overrides` and `allow` by lower-cased key (`index`); `None` until built. Valid only while `overrides` and
+    /// `allow` change through `index` (or Task 3's `set_entry`): staleness is detected by their lengths only, so an
+    /// in-place key change needs `index` again.
     pub(crate) keys: Option<ScopeIndex>,
 }
 
@@ -653,5 +655,93 @@ mod tests {
             .collect();
         assert_eq!(got, ["subtype", "format"]);
         assert!(fs.allows(&forms, Code::ALL[0]));
+    }
+
+    /// An acknowledgement added after `index`, with `overrides` unchanged, is still seen.
+    #[test]
+    fn allow_only_growth_is_seen() {
+        let mut fs = FileScopes {
+            root: Some(PathBuf::from(ROOT)),
+            overrides: vec![path_override("rock.png", "subtype")],
+            ..FileScopes::default()
+        };
+        let rock = input("rock.png", "rock.png", None);
+        fs.index(std::slice::from_ref(&rock));
+        fs.allow.insert("ROCK.png".into(), [Code::ALL[1]].into());
+        let forms = fs.forms_of(&rock).unwrap();
+        assert!(fs.allows(&forms, Code::ALL[1]));
+        assert!(!fs.allows(&forms, Code::ALL[0]));
+    }
+
+    /// `index` called again after an in-place key change (same lengths) rebuilds the key index.
+    #[test]
+    fn index_again_after_an_in_place_key_change_rebuilds() {
+        let mut fs = FileScopes {
+            root: Some(PathBuf::from(ROOT)),
+            overrides: vec![path_override("rock.png", "subtype")],
+            allow: [("rock.png".to_string(), [Code::ALL[0]].into())].into(),
+            ..FileScopes::default()
+        };
+        let (rock, metal) = (
+            input("rock.png", "rock.png", None),
+            input("metal.png", "metal.png", None),
+        );
+        let files = [rock.clone(), metal.clone()];
+        fs.index(&files);
+        fs.overrides[0].scope = Scope::Path("Metal".into());
+        fs.allow = [("metal.png".to_string(), [Code::ALL[0]].into())].into();
+        fs.index(&files);
+        let (r, m) = (fs.forms_of(&rock).unwrap(), fs.forms_of(&metal).unwrap());
+        assert!(fs.path_overrides(&r).is_empty());
+        assert_eq!(fs.path_overrides(&m).len(), 1);
+        assert!(!fs.allows(&r, Code::ALL[0]));
+        assert!(fs.allows(&m, Code::ALL[0]));
+    }
+
+    /// A file's `[files]` lookup costs about the same however many entries there are: four times the files and
+    /// entries must cost well under 16 times (a scan of every entry per file); a linear total gives about 4.
+    #[test]
+    fn lookups_scale_linearly_with_files_entries() {
+        fn project(n: usize) -> (FileScopes, Vec<InputFile>) {
+            let files: Vec<InputFile> = (0..n)
+                .map(|i| {
+                    let name = format!("d{}/f{i:05}.png", i % 10);
+                    input(&name, &name, None)
+                })
+                .collect();
+            let mut fs = FileScopes {
+                root: Some(PathBuf::from(ROOT)),
+                overrides: (0..n)
+                    .map(|i| path_override(&format!("D{}/F{i:05}.png", i % 10), "subtype"))
+                    .collect(),
+                ..FileScopes::default()
+            };
+            fs.index(&files);
+            (fs, files)
+        }
+        fn best(fs: &FileScopes, files: &[InputFile]) -> std::time::Duration {
+            (0..3)
+                .map(|_| {
+                    let t = std::time::Instant::now();
+                    let hits: usize = files
+                        .iter()
+                        .map(|f| fs.path_overrides(&fs.forms_of(f).unwrap()).len())
+                        .sum();
+                    let took = t.elapsed();
+                    assert_eq!(hits, files.len());
+                    took
+                })
+                .min()
+                .unwrap()
+        }
+        const N: usize = 1000;
+        let (small, large) = (project(N), project(4 * N));
+        let (ts, tl) = (best(&small.0, &small.1), best(&large.0, &large.1));
+        eprintln!("{N} files {ts:?}, {} files {tl:?}", 4 * N);
+        assert!(
+            tl < ts * 10,
+            "looking up {} files took {tl:?}, more than 10 times the {ts:?} of {N} files",
+            4 * N
+        );
     }
 }
