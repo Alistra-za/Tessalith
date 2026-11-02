@@ -95,6 +95,30 @@ fn decisions_re_resolve_before_saving_and_save_writes_them() {
     assert!(text.contains("green_convention"));
 }
 
+/// Note FK (review I4): answers on two textures, the second after the first one's plan landed, both stay in the
+/// document and in the plan; no plan or follow-up drops an earlier answer.
+#[test]
+fn two_quick_answers_on_two_textures_both_stay() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let doc = m.project.as_ref().unwrap();
+    assert_eq!(
+        doc.file_value("landscape/leaf.png", "alpha.policy"),
+        Some(serde_json::json!("cutout"))
+    );
+    assert!(doc.allow("landscape/odd.png").contains(&Code::DimNpot));
+    for k in ["landscape/leaf.png", "landscape/odd.png"] {
+        assert_eq!(status(&m, k), ItemStatus::Ready, "{k}");
+    }
+}
+
 #[test]
 fn filters_search_and_selection_survive_a_replan() {
     let d = tempfile::tempdir().unwrap();

@@ -269,7 +269,8 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
     let cx = Cx {
         key,
         job: &job,
-        ro: model.toml_read_only_reason(),
+        // Note FK: read-only `sdc.toml`, or a plan in flight.
+        ro: model.fix_off(),
         busy: model.busy(),
     };
     let c = &job.profile.cubemap;
