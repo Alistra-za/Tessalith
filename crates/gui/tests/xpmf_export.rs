@@ -281,7 +281,7 @@ fn also_vanilla_gets_a_pbr_false_copy_and_the_two_maps() {
     let mut m = opened_pbr_dir(d.path());
     m.sets_doc.as_mut().unwrap().set_xpmf(
         PBR_ID,
-        json!({"shelterFade": 40, "specularMult": 0.7, "detailNormalTexture": "textures/custom/detail.dds"})
+        json!({"pbr": true, "shelterFade": 40, "specularMult": 0.7, "detailNormalTexture": "textures/custom/detail.dds"})
             .as_object()
             .cloned(),
     );
@@ -321,6 +321,7 @@ fn also_vanilla_gets_a_pbr_false_copy_and_the_two_maps() {
         json!("textures/pbr/landscape/rock01.dds")
     );
     let copy = read_doc(&van.join(FILE));
+    // A typed `pbr = true` is the PBR file's; the Vanilla copy is false whatever the block says.
     assert_eq!(copy["pbr"], json!(false));
     assert_eq!(copy["specularMult"], json!(0.7));
     assert_eq!(copy["shelterFade"], json!(40));
