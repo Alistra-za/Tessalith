@@ -244,12 +244,9 @@ pub fn allowed(ctx: &ResolveCtx, f: &FileFacts, code: Code) -> bool {
     if ctx.files.allow.is_empty() {
         return false;
     }
-    ctx.files.forms_of(f.input).is_some_and(|forms| {
-        ctx.files
-            .allow
-            .iter()
-            .any(|(k, codes)| codes.contains(&code) && forms.matches(k))
-    })
+    ctx.files
+        .forms_of(f.input)
+        .is_some_and(|forms| ctx.files.allows(&forms, code))
 }
 
 /// A file's `[files]` match forms, fetched at most once per pass over the overrides (DECISIONS AV3).
@@ -292,8 +289,13 @@ fn override_provenance(o: &SetOverride) -> Provenance {
 }
 
 /// Overrides, lowest precedence first: the `[files]` layer, then the command line (unscoped, sub-type, file glob,
-/// path), each group in its own order (the sort is stable). DECISIONS N2: the command line always wins.
-fn ranked_overrides<'a>(ctx: &ResolveCtx<'a>) -> Vec<&'a SetOverride> {
+/// path), each group in its own order (the sort is stable). DECISIONS N2: the command line always wins. Only the
+/// `[files]` entries whose key names `input` are listed (the key index); `forms` caches its match forms.
+fn ranked_overrides<'a>(
+    ctx: &ResolveCtx<'a>,
+    input: &InputFile,
+    forms: &LazyForms<'a>,
+) -> Vec<&'a SetOverride> {
     let rank = |o: &SetOverride| match o.scope {
         Scope::All => 0,
         Scope::Subtype(_) => 1,
@@ -303,14 +305,19 @@ fn ranked_overrides<'a>(ctx: &ResolveCtx<'a>) -> Vec<&'a SetOverride> {
     };
     let mut cli: Vec<&SetOverride> = ctx.overrides.iter().collect();
     cli.sort_by_key(|o| rank(o));
-    ctx.files.overrides.iter().chain(cli).collect()
+    let mut files = forms
+        .get_or_init(|| ctx.files.forms_of(input))
+        .as_deref()
+        .map_or_else(Vec::new, |m| ctx.files.path_overrides(m));
+    files.extend(cli);
+    files
 }
 
 /// DECISIONS S6: whether a DDS input is re-encoded. The highest-precedence `reencode` override that reaches the
 /// file decides: `[files]`, then unscoped, file-glob and path `--set` (a sub-type scope is refused at parse time).
 pub fn reencode_requested(ctx: &ResolveCtx, input: &InputFile) -> bool {
     let forms = LazyForms::new();
-    ranked_overrides(ctx)
+    ranked_overrides(ctx, input, &forms)
         .into_iter()
         .rev()
         .filter(|o| o.field == crate::overrides::REENCODE_FIELD)
@@ -331,7 +338,7 @@ pub fn subtype_override(ctx: &ResolveCtx, input: &InputFile) -> Option<crate::co
 /// #4: a raw map given one is an ordinary file (spec §4.4) and names no packing role.
 pub fn subtype_requested(ctx: &ResolveCtx, input: &InputFile) -> bool {
     let forms = LazyForms::new();
-    ranked_overrides(ctx).into_iter().any(|o| {
+    ranked_overrides(ctx, input, &forms).into_iter().any(|o| {
         o.field == "subtype"
             && match &o.scope {
                 Scope::All => true,
@@ -352,7 +359,7 @@ pub fn rnm_target_requested(ctx: &ResolveCtx, input: &InputFile) -> Option<RnmTa
 /// (`[files]`, then unscoped, file-glob and path `--set`; a sub-type scope is refused at parse time).
 fn selector_value<'a>(ctx: &ResolveCtx<'a>, input: &InputFile, field: &str) -> Option<&'a Value> {
     let forms = LazyForms::new();
-    ranked_overrides(ctx)
+    ranked_overrides(ctx, input, &forms)
         .into_iter()
         .rev()
         .filter(|o| o.field == field)
@@ -420,7 +427,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
     };
     // --set subtype (unscoped or file-scoped): the highest-precedence one wins
     let forms = LazyForms::new();
-    let set_subtype = ranked_overrides(ctx)
+    let set_subtype = ranked_overrides(ctx, f.input, &forms)
         .into_iter()
         .rev()
         .find(|o| o.field == "subtype" && override_applies(ctx, o, None, f, &forms));
@@ -681,7 +688,7 @@ fn layered_profile_with(
     let mesh_remove = f.analysis.alpha == AlphaContent::Varying
         && matches!(mesh, Some((AlphaPolicy::Remove, _)))
         && !alpha_policy_explicit(ctx, &prov)
-        && !ranked_overrides(ctx)
+        && !ranked_overrides(ctx, f.input, &forms)
             .into_iter()
             .any(|o| o.field == "alpha.policy" && override_applies(ctx, o, Some(st), f, &forms))
         && !rule_sources(ctx, &chain).into_iter().any(|(_, rules)| {
@@ -799,7 +806,7 @@ fn layered_profile_with(
             );
         }
     }
-    for o in ranked_overrides(ctx)
+    for o in ranked_overrides(ctx, f.input, &forms)
         .into_iter()
         .filter(|o| o.field != "subtype" && !crate::overrides::is_selector(&o.field))
     {

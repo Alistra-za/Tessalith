@@ -142,6 +142,19 @@ pub struct FileScopes {
     /// Note DW: indices (into the planned files, as `TextureSet::members`) of the GUI's pinned files named as a
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
+    /// `overrides` and `allow` by lower-cased key (`index`); `None` until built.
+    pub(crate) keys: Option<ScopeIndex>,
+}
+
+/// The `[files]` layer by lower-cased key, so a file's lookup costs two map hits, not a scan of every entry.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ScopeIndex {
+    /// Lower-cased key → indices into `FileScopes::overrides`, ascending.
+    overrides: BTreeMap<String, Vec<usize>>,
+    /// Lower-cased key → the `FileScopes::allow` keys that fold to it.
+    allow: BTreeMap<String, Vec<String>>,
+    /// `overrides.len()` and `allow.len()` when built: a different length means the index is stale.
+    lens: (usize, usize),
 }
 
 impl FileScopes {
@@ -151,7 +164,48 @@ impl FileScopes {
         allow: BTreeMap::new(),
         forms: BTreeMap::new(),
         skin_pinned: BTreeSet::new(),
+        keys: None,
     };
+
+    /// The key index, when built and not stale.
+    fn fresh_keys(&self) -> Option<&ScopeIndex> {
+        self.keys
+            .as_ref()
+            .filter(|ix| ix.lens == (self.overrides.len(), self.allow.len()))
+    }
+
+    /// The `[files]` overrides whose key names the file with match forms `forms`, in `overrides` order.
+    pub(crate) fn path_overrides<'s>(&'s self, forms: &KeyForms) -> Vec<&'s SetOverride> {
+        let Some(ix) = self.fresh_keys() else {
+            return self
+                .overrides
+                .iter()
+                .filter(|o| matches!(&o.scope, Scope::Path(k) if forms.matches(k)))
+                .collect();
+        };
+        let mut hits: Vec<usize> = forms_iter(forms)
+            .filter_map(|f| ix.overrides.get(f))
+            .flatten()
+            .copied()
+            .collect();
+        hits.sort_unstable();
+        hits.dedup();
+        hits.into_iter().map(|i| &self.overrides[i]).collect()
+    }
+
+    /// Whether the file with match forms `forms` has `code` acknowledged by its own `allow`.
+    pub(crate) fn allows(&self, forms: &KeyForms, code: Code) -> bool {
+        let Some(ix) = self.fresh_keys() else {
+            return self
+                .allow
+                .iter()
+                .any(|(k, codes)| codes.contains(&code) && forms.matches(k));
+        };
+        forms_iter(forms)
+            .filter_map(|f| ix.allow.get(f))
+            .flatten()
+            .any(|k| self.allow.get(k).is_some_and(|c| c.contains(&code)))
+    }
 
     /// Work out each of `files`' match forms once (audit 2026-10-15 item 5), so `forms_of` costs a lookup, not two
     /// absolute-path resolutions per key. Nothing to do when the layer is off or empty.
@@ -162,6 +216,23 @@ impl FileScopes {
         if self.overrides.is_empty() && self.allow.is_empty() {
             return;
         }
+        let mut ix = ScopeIndex {
+            overrides: BTreeMap::new(),
+            allow: BTreeMap::new(),
+            lens: (self.overrides.len(), self.allow.len()),
+        };
+        for (i, o) in self.overrides.iter().enumerate() {
+            if let Scope::Path(k) = &o.scope {
+                ix.overrides.entry(k.to_lowercase()).or_default().push(i);
+            }
+        }
+        for k in self.allow.keys() {
+            ix.allow
+                .entry(k.to_lowercase())
+                .or_default()
+                .push(k.clone());
+        }
+        self.keys = Some(ix);
         self.forms = files
             .iter()
             .map(|f| {
@@ -182,6 +253,11 @@ impl FileScopes {
             _ => project_rel(root, input).map(|r| std::borrow::Cow::Owned(KeyForms::of(&r))),
         }
     }
+}
+
+/// The lower-cased forms a key is compared with (`KeyForms::matches`).
+fn forms_iter(forms: &KeyForms) -> impl Iterator<Item = &str> {
+    std::iter::once(forms.full.as_str()).chain(forms.stem.as_deref())
 }
 
 /// The file name `project_rel` takes for `input`.
@@ -443,4 +519,139 @@ pub fn to_patch(field: &str, value: &Value) -> Value {
         v = Value::Object(m);
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::InputKind;
+
+    const ROOT: &str = "C:/proj/textures";
+
+    fn input(path: &str, rel: &str, real_rel: Option<&str>) -> InputFile {
+        InputFile {
+            path: Path::new(ROOT).join(path),
+            rel: PathBuf::from(rel),
+            game_path: String::new(),
+            output: PathBuf::from("C:/out/x.dds"),
+            kind: InputKind::Image,
+            real_rel: real_rel.map(PathBuf::from),
+        }
+    }
+
+    fn path_override(key: &str, field: &str) -> SetOverride {
+        SetOverride {
+            scope: Scope::Path(key.to_string()),
+            field: field.to_string(),
+            value: Value::Bool(true),
+        }
+    }
+
+    fn linear<'s>(fs: &'s FileScopes, forms: &KeyForms) -> Vec<&'s SetOverride> {
+        fs.overrides
+            .iter()
+            .filter(|o| matches!(&o.scope, Scope::Path(k) if forms.matches(k)))
+            .collect()
+    }
+
+    /// The `[files]` key index returns exactly the overrides (same elements, same order) and acknowledgements a
+    /// linear scan does, for mixed case, stems, nested and non-ASCII keys, and inputs `index` never saw.
+    #[test]
+    fn indexed_matches_linear() {
+        let keys = [
+            "Rock.png",
+            "rock.PNG",
+            "ROCK",
+            "metal",
+            "metal.png",
+            "Metal.DDS",
+            "a/b/c/deep.png",
+            "A/B/C/DEEP",
+            "a/b/deep.png",
+            "Ätna/ß.png",
+            "ätna/ß",
+            "ÄTNA/ß.PNG",
+            "İ.png",
+            "i̇.png",
+            "nothing/here.png",
+            "metal_rmaos",
+            "old.png",
+            "new.png",
+            "OLD",
+            "deep.png",
+        ];
+        let mut fs = FileScopes {
+            root: Some(PathBuf::from(ROOT)),
+            ..FileScopes::default()
+        };
+        for field in ["subtype", "format", "alpha.policy"] {
+            fs.overrides
+                .extend(keys.iter().map(|k| path_override(k, field)));
+        }
+        assert_eq!(fs.overrides.len(), 60);
+        let (c0, c1) = (Code::ALL[0], Code::ALL[1]);
+        for (i, k) in keys.iter().enumerate() {
+            let codes = if i % 2 == 0 { [c0].into() } else { [c1].into() };
+            fs.allow.insert(k.to_string(), codes);
+        }
+        let indexed = [
+            input("rock.png", "rock.png", None),
+            input("metal.png", "metal.png", None),
+            input("metal.dds", "metal.dds", None),
+            input("a/b/c/deep.png", "a/b/c/deep.png", None),
+            input("Ätna/ß.png", "Ätna/ß.png", None),
+            input("İ.png", "İ.png", None),
+        ];
+        fs.index(&indexed);
+        // Not indexed: a packed output's virtual name over an indexed path, and an aliased file.
+        let packed = input("metal.png", "metal_rmaos.png", None);
+        let aliased = input("old.png", "new.png", Some("old.png"));
+        let mut hits = 0;
+        for f in indexed.iter().chain([&packed, &aliased]) {
+            let forms = fs.forms_of(f).expect("under the root");
+            let (got, want) = (fs.path_overrides(&forms), linear(&fs, &forms));
+            assert_eq!(got.len(), want.len(), "{}", f.rel.display());
+            assert!(
+                got.iter().zip(&want).all(|(a, b)| std::ptr::eq(*a, *b)),
+                "{}",
+                f.rel.display()
+            );
+            hits += got.len();
+            for code in [c0, c1, Code::ALL[2]] {
+                let want = fs
+                    .allow
+                    .iter()
+                    .any(|(k, codes)| codes.contains(&code) && forms.matches(k));
+                assert_eq!(
+                    fs.allows(&forms, code),
+                    want,
+                    "{} {code:?}",
+                    f.rel.display()
+                );
+            }
+        }
+        assert!(hits > 20, "the fixture matches too little: {hits}");
+    }
+
+    /// An override or acknowledgement added after `index` is still found (the stale index falls back to a scan).
+    #[test]
+    fn stale_index_falls_back() {
+        let mut fs = FileScopes {
+            root: Some(PathBuf::from(ROOT)),
+            overrides: vec![path_override("rock.png", "subtype")],
+            ..FileScopes::default()
+        };
+        let rock = input("rock.png", "rock.png", None);
+        fs.index(std::slice::from_ref(&rock));
+        fs.overrides.push(path_override("ROCK", "format"));
+        fs.allow.insert("rock".into(), [Code::ALL[0]].into());
+        let forms = fs.forms_of(&rock).unwrap();
+        let got: Vec<&str> = fs
+            .path_overrides(&forms)
+            .iter()
+            .map(|o| o.field.as_str())
+            .collect();
+        assert_eq!(got, ["subtype", "format"]);
+        assert!(fs.allows(&forms, Code::ALL[0]));
+    }
 }
