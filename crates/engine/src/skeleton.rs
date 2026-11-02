@@ -2,15 +2,18 @@
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
 use crate::api::{
     check_file_overrides, drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members,
-    predict_suffixes, reencodes, set_is_pbr, Plan, Prepared,
+    predict_suffixes, reencodes, set_is_pbr, Plan, Prepared, BV2_REASON,
 };
 use crate::config::Target;
 use crate::cube::plan::face_tag;
 use crate::discover::{InputFile, InputKind};
 use crate::group::{fold, TextureSet};
+use crate::manifest::output_key;
 use crate::overrides::{project_rel, KeyForms, Scope, SetOverride, SUBTYPE_FIELD};
 use crate::pack::plan::raw_role;
+use crate::policy::JobStatus;
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 /// Why an edit cannot be patched in: the caller plans in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +31,14 @@ pub const PBR_CHANGE: &str = "set PBR status change";
 pub const PATCHED: &str = "patched skeleton";
 /// An Also export's derive step reads its PBR sets as a whole (`plan_derived`, `report_unread`).
 pub const DERIVE: &str = "derive request";
+/// The scope holds a set in a BV2 writer collision, or the partial writes an output another job writes.
+pub const WRITER_CLASH: &str = "output writer clash";
+/// A `packing.recipe` edit renames a packed output (and the GUI's output paths follow the suffix).
+pub const RECIPE_CHANGE: &str = "packing.recipe change";
+/// The partial plan was cancelled: some scope sets have no jobs.
+pub const CANCELLED: &str = "partial plan cancelled";
+
+const RECIPE_FIELD: &str = "packing.recipe";
 
 /// The packed-output suffixes a `[files]` key can name (`RecipeKind::suffix`).
 const PACKED_SUFFIXES: [&str; 4] = ["rmaos", "rfaos", "p", "m"];
@@ -46,6 +57,12 @@ pub struct Skeleton {
     pub(crate) pbr_sets: BTreeSet<u32>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
+    /// The partner groups [`Skeleton::scope`] closes over (set keys), built once per full plan.
+    pub(crate) partners: Arc<Vec<BTreeSet<String>>>,
+    /// Output key of each `Ready` job of the full plan → its set (index into `prepared.sets`).
+    pub(crate) writers: Arc<HashMap<String, u32>>,
+    /// Keys of the sets in a BV2 writer collision of the full plan, winners and losers alike.
+    pub(crate) clash_sets: Arc<BTreeSet<String>>,
 }
 
 impl Skeleton {
@@ -104,14 +121,58 @@ impl Skeleton {
             .iter()
             .filter_map(|k| by_key.get(k.as_str()).copied())
             .collect();
+        let root = &prepared.req.output_root;
+        let writers: HashMap<String, u32> = plan
+            .jobs
+            .iter()
+            .filter(|j| matches!(j.status, JobStatus::Ready))
+            .filter_map(|j| {
+                Some((
+                    output_key(root, &j.output),
+                    *by_key.get(j.set_key.as_str())?,
+                ))
+            })
+            .collect();
+        let mut clash_sets = BTreeSet::new();
+        for s in plan
+            .skipped
+            .iter()
+            .filter(|s| s.reason.starts_with(BV2_REASON))
+        {
+            clash_sets.extend(s.set.clone());
+            if let Some(&w) = writers.get(&output_key(root, &s.output)) {
+                clash_sets.insert(prepared.sets[w as usize].key.clone());
+            }
+        }
         Skeleton {
             req_sig: prepared.req.sig_without_files(),
+            partners: Arc::new(partner_groups(&prepared)),
             prepared,
             set_of,
             key_sets,
             pbr_sets,
             patched: false,
+            writers: Arc::new(writers),
+            clash_sets: Arc::new(clash_sets),
         }
+    }
+
+    /// Whether `plan` (a partial over `scope`) writes an output another job writes in the next full plan: twice
+    /// itself, or one the last full plan wrote from a set outside the scope (BV2, which a partial does not run).
+    pub(crate) fn writer_clash(&self, scope: &BTreeSet<String>, plan: &Plan) -> bool {
+        let root = &self.prepared.req.output_root;
+        let mut seen = BTreeSet::new();
+        plan.jobs
+            .iter()
+            .filter(|j| matches!(j.status, JobStatus::Ready))
+            .any(|j| {
+                let k = output_key(root, &j.output);
+                let outside = self
+                    .writers
+                    .get(&k)
+                    .is_some_and(|&w| !scope.contains(&self.prepared.sets[w as usize].key));
+                outside || !seen.insert(k)
+            })
     }
 
     /// [`Skeleton::patch`] on the session's skeleton, checked against the current request's signature first.
@@ -147,6 +208,7 @@ impl Skeleton {
         let mut hit_sets: BTreeSet<u32> = BTreeSet::new();
         let mut hit_files: BTreeSet<usize> = BTreeSet::new();
         let mut subtype_sets: BTreeSet<u32> = BTreeSet::new();
+        let mut recipe_changed = false;
         for (key, entry) in changed {
             let sets = self
                 .key_sets
@@ -183,15 +245,17 @@ impl Skeleton {
                     None => doc.files.remove(key),
                 };
             }
-            let subtype = |ovs: &[SetOverride]| -> Vec<serde_json::Value> {
+            let values = |ovs: &[SetOverride], field: &str| -> Vec<serde_json::Value> {
                 ovs.iter()
-                    .filter(|o| {
-                        o.field == SUBTYPE_FIELD && matches!(&o.scope, Scope::Path(k) if k == key)
-                    })
+                    .filter(|o| o.field == field && matches!(&o.scope, Scope::Path(k) if k == key))
                     .map(|o| o.value.clone())
                     .collect()
             };
-            if subtype(&p.file_scopes.overrides) != subtype(&n.file_scopes.overrides) {
+            let differs = |field| {
+                values(&p.file_scopes.overrides, field) != values(&n.file_scopes.overrides, field)
+            };
+            recipe_changed |= differs(RECIPE_FIELD);
+            if differs(SUBTYPE_FIELD) {
                 subtype_sets.extend(sets.iter().copied());
             }
             hit_sets.extend(sets.iter().copied());
@@ -286,6 +350,10 @@ impl Skeleton {
                 return Err(NeedsFull(PBR_CHANGE));
             }
         }
+        // Last, so the more specific reasons above win (a recipe that unmakes skin is a membership change).
+        if recipe_changed {
+            return Err(NeedsFull(RECIPE_CHANGE));
+        }
         let keys = hit_sets
             .iter()
             .map(|&s| p.sets[s as usize].key.clone())
@@ -297,55 +365,10 @@ impl Skeleton {
     /// set writing the merged cube's output, `plan_cubes`' clash check), a borrowed normal's owner and every borrower,
     /// and the shared-roughness sets. The `_wet` and helper joins are not partners: `patch` refuses a membership change.
     pub fn scope(&self, hit: &BTreeSet<String>) -> BTreeSet<String> {
-        let p = &self.prepared;
-        let root = &p.req.output_root;
-        // Each partner group as set keys; a set may sit in several.
-        let mut groups: Vec<BTreeSet<String>> = vec![];
-        // Cube: `plan_cubes` groups face jobs by (folded output folder, base minus the face tag). Any sub-type, since
-        // an edit can make or unmake a face; an untagged output named like the base clashes with the merged cube.
-        let mut cube: HashMap<(String, String), (bool, BTreeSet<String>)> = HashMap::new();
-        for set in &p.sets {
-            for &m in &set.members {
-                let out = &p.files[m].output;
-                let Some(stem) = out.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                let (base, tagged) = match face_tag(stem) {
-                    Some((b, _)) => (b, true),
-                    None => (stem, false),
-                };
-                let dir = fold(out.parent().unwrap_or(std::path::Path::new("")));
-                let g = cube.entry((dir, base.to_lowercase())).or_default();
-                g.0 |= tagged;
-                g.1.insert(set.key.clone());
-            }
-        }
-        groups.extend(
-            cube.into_values()
-                .filter(|(tagged, keys)| *tagged && keys.len() > 1)
-                .map(|(_, keys)| keys),
-        );
-        // A borrowed normal: the owner and all its borrowers (`plan_bakes`' `lent` reads every borrower).
-        let mut owners: HashMap<String, BTreeSet<String>> = HashMap::new();
-        for (b, o) in &p.req.borrowed_normal {
-            let o = crate::sets::set_key(root, o);
-            owners
-                .entry(o.clone())
-                .or_insert_with(|| BTreeSet::from([o]))
-                .insert(crate::sets::set_key(root, b));
-        }
-        groups.extend(owners.into_values());
-        let shared: BTreeSet<String> = p
-            .req
-            .shared_roughness
-            .iter()
-            .map(|id| crate::sets::set_key(root, id))
-            .collect();
-        groups.push(shared);
         let mut scope = hit.clone();
         loop {
             let before = scope.len();
-            for g in &groups {
+            for g in self.partners.iter() {
                 if g.iter().any(|k| scope.contains(k)) {
                     scope.extend(g.iter().cloned());
                 }
@@ -355,6 +378,56 @@ impl Skeleton {
             }
         }
     }
+}
+
+/// [`Skeleton::scope`]'s partner groups (set keys; a set may sit in several).
+fn partner_groups(p: &Prepared) -> Vec<BTreeSet<String>> {
+    let root = &p.req.output_root;
+    let mut groups: Vec<BTreeSet<String>> = vec![];
+    // Cube: `plan_cubes` groups face jobs by (folded output folder, base minus the face tag). Any sub-type, since
+    // an edit can make or unmake a face; an untagged output named like the base clashes with the merged cube.
+    let mut cube: HashMap<(String, String), (bool, BTreeSet<String>)> = HashMap::new();
+    for set in &p.sets {
+        for &m in &set.members {
+            let out = &p.files[m].output;
+            let Some(stem) = out.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let (base, tagged) = match face_tag(stem) {
+                Some((b, _)) => (b, true),
+                None => (stem, false),
+            };
+            let dir = fold(out.parent().unwrap_or(std::path::Path::new("")));
+            let g = cube.entry((dir, base.to_lowercase())).or_default();
+            g.0 |= tagged;
+            g.1.insert(set.key.clone());
+        }
+    }
+    groups.extend(
+        cube.into_values()
+            .filter(|(tagged, keys)| *tagged && keys.len() > 1)
+            .map(|(_, keys)| keys),
+    );
+    // A borrowed normal: the owner and all its borrowers (`plan_bakes`' `lent` reads every borrower).
+    let mut owners: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for (b, o) in &p.req.borrowed_normal {
+        let o = crate::sets::set_key(root, o);
+        owners
+            .entry(o.clone())
+            .or_insert_with(|| BTreeSet::from([o]))
+            .insert(crate::sets::set_key(root, b));
+    }
+    groups.extend(owners.into_values());
+    let shared: BTreeSet<String> = p
+        .req
+        .shared_roughness
+        .iter()
+        .map(|id| crate::sets::set_key(root, id))
+        .collect();
+    if !shared.is_empty() {
+        groups.push(shared);
+    }
+    groups
 }
 
 #[cfg(test)]

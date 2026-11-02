@@ -274,12 +274,42 @@ pub struct PartialPlan {
     pub scope: std::collections::BTreeSet<String>,
 }
 
+impl std::fmt::Debug for PartialPlan {
+    // `Plan` has no `Debug`: its size is enough to tell partials apart.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PartialPlan")
+            .field("scope", &self.scope)
+            .field("jobs", &self.plan.jobs.len())
+            .field("skipped", &self.plan.skipped.len())
+            .field("failed", &self.plan.failed.len())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Why [`Session::replan_sets`] gave no partial plan.
 #[derive(Debug)]
 pub enum Partial {
     /// A `crate::skeleton` reason: the caller plans in full.
     NeedsFull(&'static str),
     Err(EngineError),
+}
+
+impl std::fmt::Display for Partial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Partial::NeedsFull(why) => write!(f, "needs a full plan: {why}"),
+            Partial::Err(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Partial {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Partial::NeedsFull(_) => None,
+            Partial::Err(e) => Some(e),
+        }
+    }
 }
 
 /// An engine for one GUI window: encoders initialised once (the BC1 model is process-global, spec §4.6).
@@ -347,7 +377,8 @@ impl Session {
     /// Fast re-plan (R2 §4): the plan of only the sets that `changed` reaches, on the last full plan's skeleton.
     /// `changed` holds the current entry (`None`: removed) of every `[files]` key changed since that plan; `req` is the
     /// current request, which must differ from the skeleton's in `[files]` only. Neither the skeleton nor the cache's
-    /// contents are replaced. `Err(Partial::NeedsFull)`: plan in full instead.
+    /// contents are replaced. `Err(Partial::NeedsFull)`: plan in full instead (also when `cancel` stopped it, or when
+    /// its outputs meet another writer's).
     pub fn replan_sets(
         &self,
         req: &BatchRequest,
@@ -355,6 +386,10 @@ impl Session {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<PartialPlan, Partial> {
+        use crate::skeleton::{CANCELLED, DERIVE, WRITER_CLASH};
+        if req.derive.is_some() {
+            return Err(Partial::NeedsFull(DERIVE));
+        }
         // `plan` signs the request with the session's BC1 model.
         let sig = if req.bc1_model == self.bc1_model {
             req.sig_without_files()
@@ -365,14 +400,20 @@ impl Session {
         };
         let (skel, hit) = Skeleton::patch_sig(self.skeleton().as_deref(), sig, changed)
             .map_err(|e| Partial::NeedsFull(e.0))?;
-        if skel.prepared.req.derive.is_some() {
-            return Err(Partial::NeedsFull(crate::skeleton::DERIVE));
-        }
         let scope = skel.scope(&hit);
+        if scope.iter().any(|k| skel.clash_sets.contains(k)) {
+            return Err(Partial::NeedsFull(WRITER_CLASH));
+        }
         let (plan, _) = self
             .engine
             .plan_sets(&skel.prepared, Some(&scope), rep, cancel, &self.cache)
             .map_err(Partial::Err)?;
+        if !plan.cancelled.is_empty() {
+            return Err(Partial::NeedsFull(CANCELLED));
+        }
+        if skel.writer_clash(&scope, &plan) {
+            return Err(Partial::NeedsFull(WRITER_CLASH));
+        }
         Ok(PartialPlan { plan, scope })
     }
     pub fn run(

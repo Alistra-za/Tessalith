@@ -1114,6 +1114,9 @@ fn base_ctx<'a>(
     }
 }
 
+/// The head of the BV2 writer dedupe's IN-DUPLICATE reason, which the fast re-plan skeleton reads back.
+pub(crate) const BV2_REASON: &str = "two outputs map to one path ";
+
 /// A DDS input that `ctx` re-encodes (otherwise it is IN-DDS-SKIPPED).
 pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
@@ -2561,9 +2564,9 @@ impl Engine {
         // Audits 08d-1 / 08e-3 (Note BV2): the last word on output paths, whatever made two jobs meet (default
         // packed names, moved raw maps, re-encoded DDS). Both would write the path (the last rename wins) and append
         // two manifest records; the first in plan order keeps it and every later one is IN-DUPLICATE.
-        // Batch-wide too: a partial changes no output path, so the full plan's verdict stands.
-        // shortcut: a scoped job the full plan dedupes is kept here; record the dedupe's sets in the skeleton if a
-        // fast-path edit ever moves an output.
+        // Not run on a partial: it sees only its scope's jobs. `Session::replan_sets` falls back instead when the scope
+        // holds a set of the last full plan's collisions or the partial writes an output another job writes
+        // (`Skeleton::writer_clash`).
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
         jobs.retain(|j: &ResolvedJob| {
             if scope.is_some() || !matches!(j.status, JobStatus::Ready) {
@@ -2579,7 +2582,7 @@ impl Engine {
                 set: Some(j.set_key.clone()),
                 code: Some(Code::InDuplicate),
                 reason: format!(
-                    "two outputs map to one path ({} is also written from {}); change an output path or move a file",
+                    "{BV2_REASON}({} is also written from {}); change an output path or move a file",
                     slash(&j.output),
                     slash(first)
                 ),

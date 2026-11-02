@@ -7,8 +7,8 @@ use engine::api::{BatchRequest, CancelToken, Plan};
 use engine::events::{EngineEvent, EventKind, Reporter, VecSink};
 use engine::session::{Partial, Session};
 use engine::skeleton::{
-    BAD_ENTRY, HELPER_ROLE_CHANGE, HITS_NOTHING, MEMBERSHIP_CHANGE, PBR_CHANGE, PBR_SUBTYPE,
-    REENCODE_CHANGE,
+    BAD_ENTRY, CANCELLED, DERIVE, HELPER_ROLE_CHANGE, HITS_NOTHING, MEMBERSHIP_CHANGE, PBR_CHANGE,
+    PBR_SUBTYPE, RECIPE_CHANGE, REENCODE_CHANGE, WRITER_CLASH,
 };
 use fast_fixture::{fast_fixture, with_entry};
 use serde_json::{json, Value};
@@ -25,13 +25,14 @@ use Expect::*;
 
 struct Row {
     name: &'static str,
-    /// `(key, entry as TOML)`; `None` removes the key. An entry replaces the whole `[files."<key>"]` table.
-    edits: Vec<(&'static str, Option<&'static str>)>,
+    /// `(key, entry)`; `None` removes the key. An entry replaces the whole `[files."<key>"]` table.
+    edits: Vec<(String, Option<toml::Table>)>,
     expect: Expect,
     /// Set ids the scope must hold.
     scope_has: &'static [&'static str],
 }
 
+/// A row; each entry is TOML text, parsed once here.
 fn row(
     name: &'static str,
     edits: &[(&'static str, Option<&'static str>)],
@@ -40,7 +41,10 @@ fn row(
 ) -> Row {
     Row {
         name,
-        edits: edits.to_vec(),
+        edits: edits
+            .iter()
+            .map(|(k, e)| (k.to_string(), e.map(|s| toml::from_str(s).unwrap())))
+            .collect(),
         expect,
         scope_has,
     }
@@ -181,7 +185,52 @@ fn rows() -> Vec<Row> {
             Scoped,
             &["dir/mixedcase"],
         ),
+        row(
+            "one face of cube s, whose merged output clashes with s.png",
+            &[(
+                "dir/s_px",
+                Some("subtype = \"cubemap\"\nmips.filter = \"kaiser\""),
+            )],
+            Scoped,
+            &["dir/s", "dir/s_px", "dir/s_nz"],
+        ),
+        row(
+            "the set the merged cube s clashes with",
+            &[("dir/s.png", Some("alpha.policy = \"cutout\""))],
+            Scoped,
+            &["dir/s", "dir/s_px", "dir/s_nz"],
+        ),
+        row(
+            "shared roughness e pulls q",
+            &[("dir/e_metal.png", Some("mips.filter = \"kaiser\""))],
+            Scoped,
+            &["dir/e", "dir/q"],
+        ),
+        row(
+            "a corrupt source (a load failure in scope)",
+            &[("dir/z.png", Some("alpha.policy = \"cutout\""))],
+            Scoped,
+            &["dir/z"],
+        ),
         // Expected to fall back (R2 §6).
+        row(
+            "a set in the base's BV2 collision",
+            &[("dir/o.png", Some("alpha.policy = \"cutout\""))],
+            NeedsFull(WRITER_CLASH),
+            &[],
+        ),
+        row(
+            "the other set of that collision",
+            &[("dir/n.png", Some("alpha.policy = \"cutout\""))],
+            NeedsFull(WRITER_CLASH),
+            &[],
+        ),
+        row(
+            "packing recipe renamed",
+            &[("dir/e_rfaos", Some("packing.recipe = \"rfaos\""))],
+            NeedsFull(RECIPE_CHANGE),
+            &[],
+        ),
         row(
             "subtype on PBR a_n (P1)",
             &[("dir/a_n.png", Some("subtype = \"normal\""))],
@@ -320,43 +369,39 @@ fn restricted(plan: &Plan, events: &[EngineEvent], scope: &BTreeSet<String>) -> 
     })
 }
 
-fn edited(base: &BatchRequest, edits: &[(&str, Option<&str>)]) -> BatchRequest {
+fn edited(base: &BatchRequest, edits: &[(String, Option<toml::Table>)]) -> BatchRequest {
     let mut r = base.clone();
     for (k, e) in edits {
-        let t: Option<toml::Table> = e.map(|s| toml::from_str(s).unwrap());
-        r = with_entry(&r, k, t.as_ref());
+        r = with_entry(&r, k, e.as_ref());
     }
     r
 }
 
-#[test]
-fn partial_equals_next_full_plan() {
+/// A session that planned the base fixture in full, and the base request it planned.
+fn planned_session() -> (fast_fixture::FastFixture, Session, BatchRequest) {
     let fx = fast_fixture();
     let session = Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
-    let cancel = CancelToken::default();
     let mut base_req = fx.req.clone();
     base_req.bc1_model = session.bc1_model();
+    (fx, session, base_req)
+}
+
+#[test]
+fn partial_equals_next_full_plan() {
+    let (_fx, session, base_req) = planned_session();
+    let cancel = CancelToken::default();
     let (rep, sink) = reporter();
-    let t = Instant::now();
     let base = session.plan(base_req.clone(), &rep, &cancel).unwrap();
-    let full_ms = t.elapsed().as_secs_f64() * 1e3;
     assert!(base.cancelled.is_empty());
     let base_sets = by_set(&base, &sink.take());
     let root = &base_req.output_root;
     let id = |k: &String| engine::sets::set_id(root, k);
-    let mut timed = None;
+    let mut failures_compared = 0;
 
     for r in rows() {
         let req = edited(&base_req, &r.edits);
-        let changed: Vec<(String, Option<toml::Table>)> = r
-            .edits
-            .iter()
-            .map(|(k, e)| (k.to_string(), e.map(|s| toml::from_str(s).unwrap())))
-            .collect();
         let (prep, psink) = reporter();
-        let t = Instant::now();
-        let partial = session.replan_sets(&req, &changed, &prep, &cancel);
-        let ms = t.elapsed().as_secs_f64() * 1e3;
+        let partial = session.replan_sets(&req, &r.edits, &prep, &cancel);
         let partial = match (partial, &r.expect) {
             (Ok(p), Scoped) => p,
             (Err(Partial::NeedsFull(why)), NeedsFull(want)) => {
@@ -410,15 +455,23 @@ fn partial_equals_next_full_plan() {
             );
         }
         let (frep, fsink) = reporter();
-        let t = Instant::now();
         let full = session
             .engine()
             .plan_cached(req.clone(), &frep, &cancel, session.cache())
             .unwrap();
-        timed.get_or_insert((ms, t.elapsed().as_secs_f64() * 1e3));
         let fevents = fsink.take();
         let got = restricted(&partial.plan, &pevents, scope);
         let want = restricted(&full, &fevents, scope);
+        // Every failure of the partial is a scope file's, so the restriction keeps them all.
+        assert_eq!(
+            got["failed"].as_array().map_or(0, Vec::len),
+            plan.failed.len(),
+            "{}: a failure outside the scope",
+            r.name
+        );
+        if !plan.failed.is_empty() {
+            failures_compared += 1;
+        }
         if got != want {
             for part in ["jobs", "skipped", "failed", "helpers", "events"] {
                 if got[part] != want[part] {
@@ -445,8 +498,77 @@ fn partial_equals_next_full_plan() {
             r.name
         );
     }
-    let (partial_ms, warm_ms) = timed.unwrap_or_default();
-    eprintln!(
-        "timing (this build): cold full plan {full_ms:.1} ms; first scoped row: replan_sets {partial_ms:.1} ms, warm full plan {warm_ms:.1} ms"
+    assert!(
+        failures_compared > 0,
+        "no row compared a non-empty failed list"
     );
+}
+
+/// Minor 2: a cancelled partial is never returned as a plan.
+#[test]
+fn a_cancelled_partial_needs_a_full_plan() {
+    let (_fx, session, base_req) = planned_session();
+    let (rep, _) = reporter();
+    session
+        .plan(base_req.clone(), &rep, &CancelToken::default())
+        .unwrap();
+    let edit = vec![(
+        "dir/a.png".to_string(),
+        Some(toml::from_str("alpha.policy = \"cutout\"").unwrap()),
+    )];
+    let cancel = CancelToken::default();
+    cancel.cancel();
+    let got = session.replan_sets(&edited(&base_req, &edit), &edit, &rep, &cancel);
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == CANCELLED),
+        "{got:?}"
+    );
+}
+
+/// Minor 3: a request carrying an Also export's derive step falls back before any patch work.
+#[test]
+fn a_derive_request_needs_a_full_plan() {
+    let (_fx, session, base_req) = planned_session();
+    let mut req = base_req.clone();
+    req.derive = Some(engine::derive::DeriveRequest {
+        mode: engine::derive::DeriveMode::Vanilla,
+        params: Default::default(),
+        sets: vec![],
+        drop: vec![],
+        scanned: false,
+    });
+    let (rep, _) = reporter();
+    // No full plan yet: the derive check comes before the skeleton is even looked at.
+    let got = session.replan_sets(&req, &[], &rep, &CancelToken::default());
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == DERIVE),
+        "{got:?}"
+    );
+}
+
+/// The sanity timing (not a gate): `cargo test -p engine --release --test fast_replan -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn replan_timing() {
+    let (_fx, session, base_req) = planned_session();
+    let cancel = CancelToken::default();
+    let (rep, _) = reporter();
+    let t = Instant::now();
+    session.plan(base_req.clone(), &rep, &cancel).unwrap();
+    let cold = t.elapsed();
+    let edit = vec![(
+        "dir/a.png".to_string(),
+        Some(toml::from_str("alpha.policy = \"cutout\"").unwrap()),
+    )];
+    let req = edited(&base_req, &edit);
+    let t = Instant::now();
+    session.replan_sets(&req, &edit, &rep, &cancel).unwrap();
+    let partial = t.elapsed();
+    let t = Instant::now();
+    session
+        .engine()
+        .plan_cached(req, &rep, &cancel, session.cache())
+        .unwrap();
+    let warm = t.elapsed();
+    eprintln!("cold full plan {cold:?}; replan_sets {partial:?}; warm full plan {warm:?}");
 }

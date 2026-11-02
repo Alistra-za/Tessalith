@@ -25,6 +25,19 @@ subtype = "cubemap"
 [files."dir/c_nz"]
 subtype = "cubemap"
 
+[files."dir/s_px"]
+subtype = "cubemap"
+[files."dir/s_nx"]
+subtype = "cubemap"
+[files."dir/s_py"]
+subtype = "cubemap"
+[files."dir/s_ny"]
+subtype = "cubemap"
+[files."dir/s_pz"]
+subtype = "cubemap"
+[files."dir/s_nz"]
+subtype = "cubemap"
+
 [files."dir/h_rmaos".packing]
 recipe = "rfaos"
 
@@ -75,7 +88,12 @@ fn put_normal(dir: &Path, name: &str) {
 /// - `j` and `k`, with a set edit moving `k.png` into set `dir/j`;
 /// - non-PBR `q` with a raw height `q_height` (packs `_p`) and `q_rough`, typed `diffuse`: untyped, it would make
 ///   `q` pack `_rmaos` and read as PBR;
-/// - `MixedCase.png`, a file name with upper-case letters.
+/// - `MixedCase.png`, a file name with upper-case letters;
+/// - a BV2 writer collision: `n` (`n`, raw `n_ao`) and `o`, with a set edit moving raw `n_rough.png` into `o`, so both
+///   sets pack a default `n_rmaos` (Note BV2);
+/// - a second six-face cube `s_px` .. `s_nz` beside `s.png`, whose output the merged cube's clashes with;
+/// - `z.png`, a corrupt source (a load failure);
+/// - shared roughness on sets `e` and `q`.
 pub fn fast_fixture() -> FastFixture {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("in/dir");
@@ -124,6 +142,15 @@ pub fn fast_fixture() -> FastFixture {
     put_grey(&d, "q_height.png", 91);
     put_grey(&d, "q_rough.png", 92);
     put_rgb(&d, "MixedCase.png", 100);
+    put_rgb(&d, "n.png", 110);
+    put_grey(&d, "n_ao.png", 111);
+    put_grey(&d, "n_rough.png", 112);
+    put_rgb(&d, "o.png", 113);
+    for (n, face) in ["px", "nx", "py", "ny", "pz", "nz"].iter().enumerate() {
+        put_rgb(&d, &format!("s_{face}.png"), 120 + n as u8);
+    }
+    put_rgb(&d, "s.png", 130);
+    std::fs::write(d.join("z.png"), b"not a png").unwrap();
 
     let mut req = BatchRequest::new(
         vec![dir.path().join("in")],
@@ -135,10 +162,17 @@ pub fn fast_fixture() -> FastFixture {
     req.borrowed_normal = [("dir/i".to_string(), "dir/a".to_string())]
         .into_iter()
         .collect();
-    req.set_edits = vec![engine::sets::SetEdit::Move {
-        file: "dir/k.png".into(),
-        to: "dir/j".into(),
-    }];
+    req.set_edits = vec![
+        engine::sets::SetEdit::Move {
+            file: "dir/k.png".into(),
+            to: "dir/j".into(),
+        },
+        engine::sets::SetEdit::Move {
+            file: "dir/n_rough.png".into(),
+            to: "dir/o".into(),
+        },
+    ];
+    req.shared_roughness = ["dir/e", "dir/q"].map(String::from).into();
     FastFixture { dir, req }
 }
 
