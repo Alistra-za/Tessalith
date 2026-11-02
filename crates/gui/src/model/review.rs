@@ -253,8 +253,14 @@ impl AppModel {
         // Note GI: as the CS files; `prepare` is `Some` while a profile is recorded, so the last block's removal
         // lists its file.
         if let Some(p) = xpmf_json::prepare(self) {
-            let made = p.files.into_iter().map(|(r, _)| r).chain(p.refused);
-            kinds.push((d.xpmf_shas(), p.root, made.collect()));
+            for f in p.folders() {
+                let made = f
+                    .files
+                    .iter()
+                    .map(|(r, _)| r.clone())
+                    .chain(f.refused.clone());
+                kinds.push((d.xpmf_shas(), f.root.clone(), made.collect()));
+            }
         }
         for (shas, root, made) in kinds {
             let shas = records_at(&shas, &root);
@@ -405,8 +411,10 @@ impl AppModel {
             files(JsonKind::ComplexMaterial, p.root, rels, d.cm_json_shas());
         }
         if let (Some(p), Some(d)) = (xpmf_json::prepare(self), doc) {
-            let rels = p.files.into_iter().map(|(r, _)| r).collect();
-            files(JsonKind::Xpmf, p.root, rels, d.xpmf_shas());
+            for f in p.folders() {
+                let rels = f.files.iter().map(|(r, _)| r.clone()).collect();
+                files(JsonKind::Xpmf, f.root.clone(), rels, d.xpmf_shas());
+            }
         }
         *self.review_json_cache.borrow_mut() = Some((key, Instant::now(), lines.clone()));
         lines

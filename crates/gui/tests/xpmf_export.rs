@@ -216,44 +216,161 @@ fn zip_counts_profile() {
     assert_eq!(m.zip_estimate().unwrap().entries, before + 1);
 }
 
-/// Final review I1 (Note GI27): with Vanilla ticked, a PBR Landscape set's profile and its two new maps stay out of
-/// the Vanilla folder, and the export says so. No tick, or a skipped set, no note.
-#[test]
-fn also_vanilla_says_the_profile_and_maps_stay_in_the_pbr_folder() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    set_block(&mut m, Some(json!({})));
-    idle(&mut m);
-    let note = |m: &AppModel| {
-        prepare(m)
-            .unwrap()
-            .notes
-            .into_iter()
-            .find(|n| n.contains("Vanilla folder"))
+/// As `opened`, but the set lives under `textures/pbr/landscape/`, so the Vanilla folder's paths differ from the PBR
+/// folder's (TA12): set `pbr/landscape/rock01`, shader PBR Landscape, with a `cs_mato` block.
+const PBR_ID: &str = "pbr/landscape/rock01";
+
+fn opened_pbr_dir(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::Answer;
+    let r = dir.join("textures/pbr/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(r.join("rock01.png"))
+        .unwrap();
+    ImageBuffer::from_pixel(64, 64, Rgb([128u8, 128, 255]))
+        .save(r.join("rock01_normal.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Luma([((x + y) * 2) as u8]))
+        .save(r.join("rock01_noise.png"))
+        .unwrap();
+    ImageBuffer::from_pixel(64, 64, Rgb([128u8, 128, 255]))
+        .save(r.join("rock01_detail.png"))
+        .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..Default::default()
     };
-    assert_eq!(note(&m), None, "no tick, no note");
+    let mut m = AppModel::new(settings, None, support::session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(dir.join("textures"));
+    idle(&mut m);
+    support::choose_export(&mut m, dir.join("export"));
+    m.decide(
+        "pbr/landscape/rock01.png",
+        Answer::Subtype(Subtype::PbrAlbedo),
+    );
+    m.decide(
+        "pbr/landscape/rock01_normal.png",
+        Answer::Subtype(Subtype::PbrNormal),
+    );
+    m.decide(
+        "pbr/landscape/rock01_normal.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    m.set_shader(PBR_ID, Some(engine::shader::Shader::PbrLandscape));
+    idle(&mut m);
+    m.add_cs_block(PBR_ID, Kind::Mato);
+    m.set_cs_edids(PBR_ID, Kind::Mato, &["MatoA".into(), "MatoB".into()]);
+    idle(&mut m);
+    m
+}
+
+fn read_doc(p: &Path) -> Json {
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{p:?}: {e}")))
+        .unwrap()
+}
+
+/// Final review I1b (owner ruling, Note GI27): with Vanilla ticked, the Vanilla folder gets the Projected noise, the
+/// Detail normal and a `pbr = false` copy of a PBR Landscape set's profile. The copy's default textures are the
+/// Vanilla folder's files, typed values stay as typed, and `specularMult` is kept. No tick, no copy; a set left out of
+/// Also gets none.
+#[test]
+fn also_vanilla_gets_a_pbr_false_copy_and_the_two_maps() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_pbr_dir(d.path());
+    m.sets_doc.as_mut().unwrap().set_xpmf(
+        PBR_ID,
+        json!({"shelterFade": 40, "specularMult": 0.7, "detailNormalTexture": "textures/custom/detail.dds"})
+            .as_object()
+            .cloned(),
+    );
+    idle(&mut m);
+    assert!(prepare(&m).unwrap().vanilla.is_none(), "no tick, no copy");
     m.set_also_tick(AlsoTarget::Vanilla, true);
     idle(&mut m);
     assert!(m.also_on(), "{}", m.status_line);
-    let n = note(&m).expect("a note with Vanilla ticked");
-    assert!(
-        n.starts_with(&format!("{ID}: "))
-            && n.contains("neither the Projected noise nor the Detail normal map")
-            && n.contains("no XPMF profile"),
-        "{n}"
+    let p = prepare(&m).unwrap();
+    assert_eq!(
+        p.vanilla.as_ref().map(|v| v.files.len()),
+        Some(1),
+        "{:?}",
+        p.notes
     );
-    m.set_skip_also(ID, true);
+    assert!(
+        !p.notes.iter().any(|n| n.contains("Vanilla")),
+        "the I1 note is gone: {:?}",
+        p.notes
+    );
+    m.set_skip_also(PBR_ID, true);
     idle(&mut m);
-    assert_eq!(note(&m), None, "a set left out of Vanilla needs no note");
-    // The note reaches the export report.
-    m.set_skip_also(ID, false);
+    assert_eq!(
+        prepare(&m).unwrap().vanilla.unwrap().files.len(),
+        0,
+        "a set left out of Also"
+    );
+    m.set_skip_also(PBR_ID, false);
     idle(&mut m);
     export(&mut m);
-    assert!(
-        notes(&m).contains("the Vanilla folder gets neither"),
-        "{}",
-        notes(&m)
+    let [pbr, van, _] = m.also_folders();
+    let main = read_doc(&pbr.join(FILE));
+    assert_eq!(main["pbr"], json!(true), "{}", notes(&m));
+    assert!(main.get("specularMult").is_none());
+    assert_eq!(
+        main["diffuseTexture"],
+        json!("textures/pbr/landscape/rock01.dds")
     );
+    let copy = read_doc(&van.join(FILE));
+    assert_eq!(copy["pbr"], json!(false));
+    assert_eq!(copy["specularMult"], json!(0.7));
+    assert_eq!(copy["shelterFade"], json!(40));
+    assert_eq!(copy["editorIds"], json!(["MatoA", "MatoB"]), "{copy}");
+    assert_eq!(copy["name"], main["name"]);
+    // The defaults are the Vanilla folder's files; a typed texture stays as typed.
+    assert_eq!(
+        copy["diffuseTexture"],
+        json!("textures/landscape/rock01.dds")
+    );
+    assert_eq!(
+        copy["normalTexture"],
+        json!("textures/landscape/rock01_n.dds")
+    );
+    assert_eq!(
+        copy["noiseTexture"],
+        json!("textures/landscape/rock01_noise.dds")
+    );
+    assert_eq!(
+        copy["detailNormalTexture"],
+        json!("textures/custom/detail.dds")
+    );
+    for t in ["rock01", "rock01_n", "rock01_noise", "rock01_detail"] {
+        assert!(
+            van.join(format!("textures/landscape/{t}.dds")).is_file(),
+            "{t}: {}",
+            notes(&m)
+        );
+    }
+    let shas = m.sets_doc.as_ref().unwrap().xpmf_shas();
+    assert_eq!(
+        shas.get(&record_key(&van.join(FILE))),
+        sha256_of(&van.join(FILE)).as_ref(),
+        "{shas:?}"
+    );
+}
+
+/// Without the tick an export writes no Vanilla folder and no copy.
+#[test]
+fn no_vanilla_copy_without_the_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_pbr_dir(d.path());
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_xpmf(PBR_ID, json!({}).as_object().cloned());
+    export(&mut m);
+    assert!(m.output_root().join(FILE).is_file(), "{}", notes(&m));
+    assert!(!m.also_folders()[1].exists());
+    assert!(!notes(&m).contains("Vanilla"), "{}", notes(&m));
 }
 /// The entry names of a zip, from its central directory (copied from `also_export.rs`).
 fn zip_names(path: &Path) -> Vec<String> {

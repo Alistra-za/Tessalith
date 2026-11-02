@@ -194,6 +194,60 @@ fn foreign_file_kept() {
     assert!(notes.iter().any(|n| n.contains("kept")), "{notes:?}");
 }
 
+/// Note GI27: the Vanilla folder's copy has the main file's guard: a foreign file there is kept and noted, the PBR
+/// folder's own profile is still written, and an edited recorded copy is kept too.
+#[test]
+fn vanilla_copy_has_the_same_guard() {
+    let d = tempfile::tempdir().unwrap();
+    let (pbr, van) = (d.path().join("pbr"), d.path().join("van"));
+    let foreign = van.join(FILE);
+    std::fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+    std::fs::write(&foreign, "{\"name\": \"theirs\"}").unwrap();
+    let mut p = pending(&pbr, "{}\n");
+    p.vanilla = Some(Box::new(pending(&van, "{\"pbr\": false}\n")));
+    let mut notes = vec![];
+    let shas = finish(&p, &BTreeMap::new(), &mut notes);
+    assert_eq!(
+        std::fs::read_to_string(&foreign).unwrap(),
+        "{\"name\": \"theirs\"}"
+    );
+    assert!(pbr.join(FILE).is_file(), "{notes:?}");
+    assert!(!shas.contains_key(&record_key(&foreign)), "{shas:?}");
+    assert!(shas.contains_key(&record_key(&pbr.join(FILE))), "{shas:?}");
+    let kept = format!("{}", foreign.display());
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains(&kept) && n.contains("kept")),
+        "{notes:?}"
+    );
+    // Our own recorded copy is replaced; a recorded copy no run writes any more is reported, never deleted.
+    std::fs::write(&foreign, "old\n").unwrap();
+    let rec: BTreeMap<String, String> =
+        [(record_key(&foreign), sha256_of(&foreign).unwrap())].into();
+    let mut notes = vec![];
+    let shas = finish(&p, &rec, &mut notes);
+    assert_eq!(
+        std::fs::read_to_string(&foreign).unwrap(),
+        "{\"pbr\": false}\n"
+    );
+    assert_eq!(shas[&record_key(&foreign)], sha256_of(&foreign).unwrap());
+    let mut gone = pending(&pbr, "{}\n");
+    gone.vanilla = Some(Box::new(PendingXpmf {
+        root: van.clone(),
+        ..Default::default()
+    }));
+    let mut notes = vec![];
+    finish(&gone, &shas, &mut notes);
+    assert!(foreign.is_file());
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("no set writes this XPMF profile any more")),
+        "{notes:?}"
+    );
+}
+
 #[test]
 fn own_file_replaced() {
     let d = tempfile::tempdir().unwrap();

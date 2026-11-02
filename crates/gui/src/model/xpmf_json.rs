@@ -6,6 +6,8 @@ use super::sets::{is_pbr_landscape, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
 use crate::sets_doc::SetEntry;
 use engine::config::Target;
+use engine::derive::vanilla_rel;
+use engine::policy::ResolvedJob;
 use engine::sets::same_id;
 use engine::shader::Shader;
 use serde_json::{json, Map, Value};
@@ -203,12 +205,19 @@ fn empty(v: &Value) -> bool {
 /// The set's profile (X2-X9): the block's values over the defaults from the set, null and empty values dropped,
 /// `specularMult` dropped while `pbr` is on. `Err` is the export note.
 pub fn profile(m: &AppModel, set: &SetEntry) -> Result<Map<String, Value>, String> {
-    profile_in(m, &views(m), set)
+    profile_in(m, &views(m), set, false)
 }
 
-/// `profile` with the set views computed once by the caller (`prepare`).
-fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String, Value>, String> {
-    let mut doc = defaults_in(m, vs, set)?;
+/// `profile` with the set views computed once by the caller (`prepare`). `vanilla`: the copy for the Also export's
+/// Vanilla folder (Note GI27): `pbr` is false whatever the block says, so `specularMult` stays, and the default
+/// textures are the Vanilla folder's files.
+fn profile_in(
+    m: &AppModel,
+    vs: &[SetView],
+    set: &SetEntry,
+    vanilla: bool,
+) -> Result<Map<String, Value>, String> {
+    let mut doc = defaults_in(m, vs, set, vanilla)?;
     if let Some(b) = &set.xpmf {
         // R13: an empty `name` or `editorIds` is unset, so the default above stays. Other empty keys drop the
         // default below (`noiseTexture = ""` is the game's own).
@@ -218,6 +227,9 @@ fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String
                 .filter(|(k, v)| !unset(k, v))
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
+    }
+    if vanilla {
+        doc.insert("pbr".into(), json!(false));
     }
     doc.retain(|_, v| !empty(v));
     if doc.get("pbr") == Some(&json!(true)) {
@@ -234,7 +246,12 @@ fn profile_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String
 
 /// The values Tessalith fills while the block leaves a key unset (X2-X5): `name`, `editorIds` (maybe empty), `pbr`
 /// and the textures of filled slots. `profile` lays the block over these; the card shows them greyed.
-fn defaults_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<String, Value>, String> {
+fn defaults_in(
+    m: &AppModel,
+    vs: &[SetView],
+    set: &SetEntry,
+    vanilla: bool,
+) -> Result<Map<String, Value>, String> {
     let Some(v) = vs
         .iter()
         .find(|v| same_id(&v.id, &set.id) && !v.members.is_empty())
@@ -257,11 +274,13 @@ fn defaults_in(m: &AppModel, vs: &[SetView], set: &SetEntry) -> Result<Map<Strin
     doc.insert("editorIds".into(), json!(edids));
     doc.insert(
         "pbr".into(),
-        json!(is_pbr_landscape(v) && m.target == Target::Cs),
+        json!(is_pbr_landscape(v) && m.target == Target::Cs && !vanilla),
     );
     let root = m.output_root();
     for (key, slot) in TEXTURES {
-        if let Some(rel) = slot_output(m, v.slots.get(&slot)).and_then(|o| data_rel(&root, &o)) {
+        if let Some(rel) =
+            slot_job(m, v.slots.get(&slot)).and_then(|j| texture_rel(&root, j, vanilla))
+        {
             doc.insert(key.into(), json!(rel));
         }
     }
@@ -296,9 +315,9 @@ pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let v = std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
         Some(e) => {
-            let profile = profile_in(m, &vs, e);
+            let profile = profile_in(m, &vs, e, false);
             CardValues {
-                defaults: defaults_in(m, &vs, e),
+                defaults: defaults_in(m, &vs, e, false),
                 refusal: profile
                     .as_ref()
                     .ok()
@@ -364,7 +383,7 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
             continue;
         }
         let (Ok(p), Some(v)) = (
-            profile_in(m, &vs, e),
+            profile_in(m, &vs, e, false),
             vs.iter().find(|v| same_id(&v.id, &e.id)),
         ) else {
             continue;
@@ -387,12 +406,24 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
     out
 }
 
-fn slot_output(m: &AppModel, fill: Option<&SlotFill>) -> Option<PathBuf> {
+fn slot_job<'a>(m: &'a AppModel, fill: Option<&SlotFill>) -> Option<&'a ResolvedJob> {
     let item = match fill? {
         SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => item,
         SlotFill::Empty => return None,
     };
-    Some(m.item(item)?.job.as_ref()?.output.clone())
+    m.item(item)?.job.as_ref()
+}
+
+/// The Data-relative path of a job's output under `root`; with `vanilla`, the file the Vanilla folder gets for it
+/// (TA12's `vanilla_rel`, as the Also export's Vanilla phase paths its derived and kept files).
+fn texture_rel(root: &std::path::Path, job: &ResolvedJob, vanilla: bool) -> Option<String> {
+    let rel = data_rel(root, &job.output)?;
+    Some(match vanilla {
+        true => vanilla_rel(std::path::Path::new(&rel), &job.game_path)
+            .to_string_lossy()
+            .replace('\\', "/"),
+        false => rel,
+    })
 }
 
 /// The file's text: `$schema`, then the keys sorted (serde_json's map is sorted and `$` sorts first), 2-space pretty
@@ -418,6 +449,17 @@ pub struct PendingXpmf {
     /// Controller ruling R2: file (as in `files`) → the Data-relative textures taken from this project's own outputs.
     /// `finish` writes the file only when each is on disk.
     pub own_textures: BTreeMap<String, Vec<String>>,
+    /// Note GI27: with Vanilla ticked in an Also export, the `pbr = false` copies for the Vanilla folder (its `root`,
+    /// the same relative paths), written, guarded and reported as the files above. `None` as `prepare` leaves it
+    /// without the tick.
+    pub vanilla: Option<Box<PendingXpmf>>,
+}
+
+impl PendingXpmf {
+    /// This pending set and the Vanilla folder's.
+    pub fn folders(&self) -> impl Iterator<Item = &PendingXpmf> {
+        std::iter::once(self).chain(self.vanilla.as_deref())
+    }
 }
 
 /// XPMF accepts any slashes and case (schema `texture`), so a typed path is compared to the outputs folded.
@@ -482,20 +524,29 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
         .collect();
     let mut p = PendingXpmf {
         root: m.output_root(),
+        // Note GI27 (owner ruling): a ticked Vanilla folder of an Also export gets a `pbr = false` copy of each PBR
+        // Landscape set's profile, guarded and recorded as the main file is.
+        vanilla: (m.also_ticks().0 && m.also_root().is_some()).then(|| {
+            Box::new(PendingXpmf {
+                root: m.also_folders()[1].clone(),
+                ..Default::default()
+            })
+        }),
         ..Default::default()
     };
     if blocks.is_empty() {
         return (!doc.xpmf_shas().is_empty()).then_some(p);
     }
     let vs = views(m);
-    let outputs: BTreeMap<String, String> = m
-        .items
-        .iter()
-        .filter_map(|i| data_rel(&p.root, &i.job.as_ref()?.output))
-        .map(|r| (fold_path(&r), r))
-        .collect();
-    // I1 (GI27): the Vanilla folder of an Also export gets none of a PBR Landscape set's profile files.
-    let vanilla = m.also_ticks().0 && m.also_root().is_some();
+    // The project's own outputs by folded Data-relative path; with `vanilla`, the Vanilla folder's names for them.
+    let outputs = |vanilla: bool| -> BTreeMap<String, String> {
+        m.items
+            .iter()
+            .filter_map(|i| texture_rel(&p.root, i.job.as_ref()?, vanilla))
+            .map(|r| (fold_path(&r), r))
+            .collect()
+    };
+    let (own_outputs, vanilla_outputs) = (outputs(false), outputs(true));
     for e in &blocks {
         let name = match file_name(&e.id) {
             Ok(n) => n,
@@ -506,42 +557,54 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
             }
         };
         let rel = format!("{FOLDER}/{name}");
-        let refused = profile_in(m, &vs, e)
-            .and_then(|doc| refusal(&vs, &entries, e, &doc).map(|text| (doc, text)));
-        match refused {
-            Ok((doc, text)) => {
-                let own: Vec<String> = TEXTURES
-                    .iter()
-                    .filter_map(|(k, _)| doc.get(*k)?.as_str())
-                    .filter_map(|t| outputs.get(&fold_path(t)).cloned())
-                    .collect();
+        // The profile built for one folder, its text, and the texture paths among the outputs of that folder.
+        let build = |vanilla: bool, outputs: &BTreeMap<String, String>| {
+            let doc = profile_in(m, &vs, e, vanilla)?;
+            let text = refusal(&vs, &entries, e, &doc)?;
+            let own: Vec<String> = TEXTURES
+                .iter()
+                .filter_map(|(k, _)| doc.get(*k)?.as_str())
+                .filter_map(|t| outputs.get(&fold_path(t)).cloned())
+                .collect();
+            Ok::<_, String>((text, own))
+        };
+        match build(false, &own_outputs) {
+            Ok((text, own)) => {
                 if !own.is_empty() {
                     p.own_textures.insert(rel.clone(), own);
                 }
-                p.files.push((rel, text));
-                if vanilla
-                    && !m.also_skipped(&e.id)
-                    && vs
-                        .iter()
-                        .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v))
-                {
-                    p.notes.push(format!(
-                        "{}: the Vanilla folder gets neither the Projected noise nor the Detail normal map, and no XPMF profile",
-                        e.id
-                    ));
-                }
+                p.files.push((rel.clone(), text));
             }
             Err(note) => {
                 if !p.refused.contains(&rel) {
                     p.refused.push(rel);
                 }
                 p.notes.push(note);
+                continue;
+            }
+        }
+        if let Some(van) = p.vanilla.as_mut().filter(|_| {
+            !m.also_skipped(&e.id)
+                && vs
+                    .iter()
+                    .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v))
+        }) {
+            match build(true, &vanilla_outputs) {
+                Ok((text, own)) => {
+                    if !own.is_empty() {
+                        van.own_textures.insert(rel.clone(), own);
+                    }
+                    van.files.push((rel, text));
+                }
+                Err(note) => {
+                    van.refused.push(rel);
+                    p.notes.push(format!("Vanilla folder: {note}"));
+                }
             }
         }
     }
     Some(p)
 }
-
 /// After a clean export: write each profile whose own textures are on disk, unless it was edited outside Tessalith,
 /// then report the recorded profiles this run did not write (never deleted). `shas` is the record (path → hash of
 /// what was last written there); returns the new record.
@@ -601,7 +664,11 @@ pub fn finish(
             path.display()
         ));
     }
-    out
+    // Note GI27: the Vanilla folder's copies, with the same guard and reports (their records are absolute already).
+    match p.vanilla.as_deref() {
+        Some(v) => finish(v, &out, notes),
+        None => out,
+    }
 }
 
 impl AppModel {
@@ -663,7 +730,7 @@ impl AppModel {
                 .as_ref()
                 .is_some_and(|s| s.cancelled.is_empty() && s.failed == 0);
         if !ok {
-            if !p.files.is_empty() {
+            if p.folders().any(|f| !f.files.is_empty()) {
                 self.export
                     .notes
                     .push("XPMF profiles not written: the export did not finish".into());
@@ -675,8 +742,10 @@ impl AppModel {
             None => return,
         };
         let shas = finish(&p, &recorded, &mut self.export.notes);
-        self.also_json
-            .extend(super::also::current_files(&p.root, &p.files));
+        for f in p.folders() {
+            self.also_json
+                .extend(super::also::current_files(&f.root, &f.files));
+        }
         if shas == recorded {
             return;
         }

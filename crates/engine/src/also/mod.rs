@@ -890,7 +890,8 @@ pub fn start_also(
 }
 
 /// The rest of `run_also`: the walk of the folders, the zips and the report. `extra`: files this export wrote into
-/// the PBR folder after its phases (the GUI's JSON), counted as this run's outputs; any other path is ignored.
+/// the PBR or Vanilla folder after its phases (the GUI's JSON), counted as this run's outputs; any other path is
+/// ignored.
 pub fn finish_also(
     run: AlsoRun,
     spec: &AlsoSpec,
@@ -935,9 +936,12 @@ pub fn finish_also(
     // while zipping does not change it.
     let finished = !cancel.is_cancelled() && s.error.is_none();
     let mut keys = keys.map(|k| std::mem::take(&mut *crate::api::lock(&k)));
-    let pbr = format!("{}/", norm(&s.folders[0]));
-    for p in extra.iter().filter(|p| norm(p).starts_with(&pbr)) {
-        keys[0].insert(output_key(&s.folders[0], p));
+    // Note GI27: the GUI also writes the XPMF profile copy into the Vanilla folder.
+    for (folder, keys) in s.folders.iter().zip(&mut keys).take(2) {
+        let under = format!("{}/", norm(folder));
+        for p in extra.iter().filter(|p| norm(p).starts_with(&under)) {
+            keys.insert(output_key(folder, p));
+        }
     }
     let files = match finished {
         true => this_runs_files(&mut s, &keys, spec.cfg.zip),
