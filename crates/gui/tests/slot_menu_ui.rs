@@ -77,8 +77,10 @@ fn a_vanilla_sets_slot_commands_use_vanilla_names() {
 fn slot_names_follow_the_set_editors_cards() {
     use sdc_gui::model::sets::{slot_label, slot_name, SlotKind};
     for k in SlotKind::ALL {
+        // The XPMF maps have no PGPatcher slot, so no Match/Slot name (Note GI).
+        let Some(n) = k.slot_number() else { continue };
         let card = slot_label(k, "");
-        let name = slot_name(true, k.slot_number());
+        let name = slot_name(true, n);
         assert!(card.starts_with(name), "{card} vs {name}");
     }
 }
