@@ -243,14 +243,15 @@ impl BakeJob {
     }
 
     /// Peak bytes of baking a `w`×`h` `_n` whose decoded texels are `decoded` bytes wide. The peak is inside
-    /// `load::load_image`, which holds three buffers at once: the decoded image (`decoded`: 3 for 8-bit RGB, 8 for
-    /// 16-bit RGBA), its `to_rgba32f` copy (16) and the collected `Vec` (16). Everything after is smaller:
+    /// `load::load_image`, which holds two buffers at once: the decoded image (`decoded`: 3 for 8-bit RGB, 8 for
+    /// 16-bit RGBA) and its `into_rgba32f` conversion (16), which becomes the texel `Vec` without a copy (Note FM6).
+    /// Everything after is smaller:
     /// `preprocess` and the renormalise work in place on the 16-byte base, and the pyramid build adds one
     /// quarter-size accumulation level (4), the next one (1) and the lengths (1.33), about 22.4 per texel.
     /// A DDS input (M6) instead holds its file data (every mip) and the decoded RGBA32F mip 0 at once: ~32 per texel
     /// for a float DDS; not modelled here.
     pub fn peak_bytes(w: u32, h: u32, decoded: u64) -> u64 {
-        u64::from(w) * u64::from(h) * (decoded + 16 + 16)
+        u64::from(w) * u64::from(h) * (decoded + 16)
     }
 }
 
@@ -544,16 +545,16 @@ mod tests {
             stamp: None,
             rnm: None,
         };
-        // 8-bit RGB: the decoded image (3) + `to_rgba32f` (16) + the collected `Vec` (16) per texel.
+        // 8-bit RGB: the decoded image (3) + its `into_rgba32f` conversion (16) per texel.
         let rgb8 = d.path().join("rgb8_n.png");
         ::image::RgbImage::new(64, 32).save(&rgb8).unwrap();
-        assert_eq!(job(rgb8).estimated_bytes(), 64 * 32 * (3 + 16 + 16));
-        // 16-bit RGBA: 8 + 16 + 16.
+        assert_eq!(job(rgb8).estimated_bytes(), 64 * 32 * (3 + 16));
+        // 16-bit RGBA: 8 + 16.
         let rgba16 = d.path().join("rgba16_n.png");
         ::image::ImageBuffer::<::image::Rgba<u16>, _>::new(4, 4)
             .save(&rgba16)
             .unwrap();
-        assert_eq!(job(rgba16).estimated_bytes(), 4 * 4 * (8 + 16 + 16));
+        assert_eq!(job(rgba16).estimated_bytes(), 4 * 4 * (8 + 16));
         assert_eq!(job(d.path().join("missing_n.png")).estimated_bytes(), 0);
     }
 
@@ -590,7 +591,7 @@ mod tests {
             layers: vec![small, layer("big.png", 256)],
             ao: None,
         });
-        assert_eq!(job.estimated_bytes(), base + 256 * 128 * 35 + 64 * 32 * 16);
+        assert_eq!(job.estimated_bytes(), base + 256 * 128 * 19 + 64 * 32 * 16);
     }
 
     #[test]

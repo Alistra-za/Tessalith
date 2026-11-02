@@ -452,3 +452,68 @@ fn dimension_limit_follows_the_content_not_the_extension() {
         Err(LoadError::TooLarge { dim: 16385, .. })
     ));
 }
+
+/// FNV-1a over the IEEE bits of every texel of a loaded image, with its size.
+fn bits_hash(img: &engine::image::Rgba32F) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for v in [img.width, img.height]
+        .into_iter()
+        .map(|d| d as f32)
+        .chain(img.px.iter().flatten().copied())
+    {
+        for b in v.to_bits().to_le_bytes() {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// Audit §4.5 (Note FM6): `load_image` returns the same texel bits whatever way it widens the decoded image to
+/// `f32` (8-bit RGBA PNG, 16-bit RGB PNG, OpenEXR with alpha, which is un-premultiplied).
+#[test]
+fn load_image_output_bits_are_pinned() {
+    let d = tempfile::tempdir().unwrap();
+    let p8 = d.path().join("a.png");
+    ImageBuffer::from_fn(7, 5, |x, y| {
+        Rgba([
+            (x * 37) as u8,
+            (y * 51) as u8,
+            (x * y) as u8,
+            (x * 29 + 3) as u8,
+        ])
+    })
+    .save(&p8)
+    .unwrap();
+    let p16 = d.path().join("b.png");
+    ImageBuffer::from_fn(6, 4, |x, y| {
+        Rgb([
+            (x * 10_913) as u16,
+            (y * 16_001) as u16,
+            (x * y * 977) as u16,
+        ])
+    })
+    .save(&p16)
+    .unwrap();
+    let pexr = d.path().join("c.exr");
+    ImageBuffer::from_fn(5, 3, |x, y| {
+        Rgba([
+            x as f32 * 0.37,
+            y as f32 * 0.91 + 0.1,
+            1.5 - x as f32 * 0.2,
+            x as f32 * 0.25,
+        ])
+    })
+    .save(&pexr)
+    .unwrap();
+    let got: Vec<u64> = [&p8, &p16, &pexr]
+        .iter()
+        .map(|p| bits_hash(&load_image(p).unwrap().0))
+        .collect();
+    assert!(load_image(&pexr).unwrap().1.has_alpha);
+    let want = [
+        0x49e9_5be8_d989_6771,
+        0x935b_b4ac_3650_d2a4,
+        0xe3c2_5cad_1ac3_b8d7u64,
+    ];
+    assert_eq!(got, want, "{got:x?}");
+}

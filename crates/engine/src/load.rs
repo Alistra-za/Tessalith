@@ -137,7 +137,12 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
         has_alpha: ct.has_alpha(),
         is_float: matches!(ct, image::ColorType::Rgb32F | image::ColorType::Rgba32F),
     };
-    let mut px: Vec<[f32; 4]> = img.to_rgba32f().pixels().map(|p| p.0).collect();
+    let (width, height) = (img.width(), img.height());
+    // `into_rgba32f` drops the decoded image; the f32 buffer becomes the `[f32; 4]` Vec without a second copy (same
+    // alignment; the copy only runs if the allocation's capacity is not a whole number of texels).
+    let raw = img.into_rgba32f().into_raw();
+    let mut px: Vec<[f32; 4]> = bytemuck::allocation::try_cast_vec(raw)
+        .unwrap_or_else(|(_, raw)| raw.as_chunks::<4>().0.to_vec());
     if exr && info.has_alpha && !exr_straight {
         for p in px.iter_mut().filter(|p| p[3] > 0.0) {
             let a = p[3];
@@ -147,11 +152,7 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
         }
     }
     Ok((
-        Rgba32F {
-            width: img.width(),
-            height: img.height(),
-            px,
-        },
+        Rgba32F { width, height, px },
         info,
         SourceMeta {
             icc_profile,

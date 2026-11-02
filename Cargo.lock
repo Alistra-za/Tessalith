@@ -1114,6 +1114,7 @@ name = "engine"
 version = "1.2.0"
 dependencies = [
  "bcdec_rs",
+ "bytemuck",
  "encoders-sys",
  "engine",
  "flate2",

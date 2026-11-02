@@ -17,6 +17,8 @@ toml_edit = "0.25"
 schemars.workspace = true
 thiserror.workspace = true
 image.workspace = true
+# Reuses the decoded f32 buffer as the texel Vec (load.rs); already in the lock through image.
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 half.workspace = true
 bcdec_rs.workspace = true
 rayon.workspace = true

@@ -3691,13 +3691,13 @@ mod tests {
     }
 
     /// Review Focus 4 (Task 7 review I2): a 16K `_n` (16-bit RGBA, the widest integer source) baking into a 4K
-    /// roughness member is admitted for at least its peak. The `_n` decode (decoded image 8 + `to_rgba32f` 16 + the
-    /// collected `Vec` 16 per texel) and the member's own conversion (with the 1.33 B/texel pyramid) never overlap.
+    /// roughness member is admitted for at least its peak. The `_n` decode (decoded image 8 + its `into_rgba32f`
+    /// conversion 16 per texel) and the member's own conversion (with the 1.33 B/texel pyramid) never overlap.
     #[test]
     fn a_16k_normal_baking_into_a_4k_member_is_admitted_for_its_peak() {
         let (n, m) = (16384u64 * 16384, 4096u64 * 4096);
         let admitted = input_bytes(4096, 4096) + crate::bake::BakeJob::peak_bytes(16384, 16384, 8);
-        let decode_peak = n * (8 + 16 + 16);
+        let decode_peak = n * (8 + 16);
         let member_peak = input_bytes(4096, 4096) + n * 4 / 3 + 1;
         assert!(admitted >= decode_peak, "{admitted} < {decode_peak}");
         assert!(admitted >= member_peak, "{admitted} < {member_peak}");
@@ -3792,13 +3792,13 @@ mod tests {
         (j, base)
     }
 
-    /// Note BB: a layered normal is admitted for its largest layer's decode (8-bit RGB: 3 + 16 + 16 per layer texel)
+    /// Note BB: a layered normal is admitted for its largest layer's decode (8-bit RGB: 3 + 16 per layer texel)
     /// plus that layer resampled to the base (16 per base texel), on top of the base.
     #[test]
     fn a_layer_bigger_than_its_normal_is_admitted_for_its_decode_and_resample() {
         let d = tempfile::tempdir().unwrap();
         let (mut j, base) = layered_normal(d.path());
-        assert_eq!(job_bytes(&j), base + 256 * 256 * 35 + 64 * 64 * 16);
+        assert_eq!(job_bytes(&j), base + 256 * 256 * 19 + 64 * 64 * 16);
         // Off, the layers are not loaded, so they are not admitted.
         j.profile.rnm.enabled = false;
         assert_eq!(job_bytes(&j), base);
