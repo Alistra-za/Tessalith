@@ -246,6 +246,11 @@ impl NvttCell {
     pub fn into_probed(self) -> Option<NvttProbe> {
         self.cell.into_inner()
     }
+
+    /// [`NvttCell::into_probed`] without consuming the cell.
+    pub fn probed(&self) -> Option<NvttProbe> {
+        self.cell.get().cloned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -915,6 +915,28 @@ struct Setup {
     preset_skips: Vec<Warning>,
 }
 
+/// The global half of a plan ([`Engine::prepare`]): everything before the per-set work, owned, so
+/// [`Engine::plan_sets`] can build its `ResolveCtx` from a borrow of it.
+pub(crate) struct Prepared {
+    req: BatchRequest,
+    registry: PresetRegistry,
+    user_config: Option<ConfigFile>,
+    project_config: Option<ConfigFile>,
+    target: Target,
+    target_src: Provenance,
+    preset_id: String,
+    files: Vec<InputFile>,
+    /// Final membership, before the predicted packing suffixes.
+    sets: Vec<TextureSet>,
+    file_scopes: FileScopes,
+    nvtt: crate::nvtt::NvttCell,
+    hand: Vec<Option<crate::helper::HelperRole>>,
+    typed: BTreeSet<usize>,
+    dup_idx: BTreeSet<usize>,
+    gen_replaced: Vec<SkippedFile>,
+    packed_outputs: BTreeMap<(String, String), PathBuf>,
+}
+
 impl Engine {
     pub fn new() -> Result<Self, EngineError> {
         Ok(Engine {
@@ -1040,6 +1062,18 @@ impl Engine {
         cancel: &CancelToken,
         cache: &AnalysisCache,
     ) -> Result<Plan, EngineError> {
+        self.plan_sets(&self.prepare(&req, rep, cancel)?, None, rep, cancel, cache)
+    }
+
+    /// The global half of [`Engine::plan_cached`]: setup, discover, grouping, `[files]` scopes, set edits, output
+    /// paths and duplicates. Emits `batch_started`, the setup warnings, `SET-EDIT-STALE` and `file_discovered`.
+    pub(crate) fn prepare(
+        &self,
+        req: &BatchRequest,
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<Prepared, EngineError> {
+        let _ = cancel; // nothing here checks it yet
         let Setup {
             registry,
             user_config,
@@ -1048,7 +1082,7 @@ impl Engine {
             target_src,
             preset_id,
             preset_skips,
-        } = self.setup(&req)?;
+        } = self.setup(req)?;
 
         for i in &req.inputs {
             if !i.exists() {
@@ -1066,7 +1100,7 @@ impl Engine {
         )
         .map_err(|e| EngineError::Usage(format!("discover: {e}")))?;
         // F3b: `[inputs]` aliases rename files before anything reads their names.
-        let read_as_warnings = match (&project_config, project_root(&req)) {
+        let read_as_warnings = match (&project_config, project_root(req)) {
             (Some(c), Some(root)) if !c.inputs.is_empty() => {
                 crate::discover::apply_read_as(&mut files, &root, &req.output_root, &c.inputs)
             }
@@ -1107,7 +1141,7 @@ impl Engine {
         // 6b. One `ShaderPick` per set (`shader::pick_for_set`) from the pass-1 sub-types; `ctx.shaders` holds them.
         // 6c. Members of a set whose shader has member defaults are resolved again with the picks; then packing.
         let scope_root =
-            project_root(&req).or_else(|| req.inputs.first().filter(|p| p.is_dir()).cloned());
+            project_root(req).or_else(|| req.inputs.first().filter(|p| p.is_dir()).cloned());
         let (mut sets, _) = group_sets_with(&files, registry.alias_table());
         let (file_overrides, mut file_allow) = match &project_config {
             Some(c) => c.file_entries().map_err(config_err)?,
@@ -1316,11 +1350,67 @@ impl Engine {
         let dups = crate::group::duplicate_outputs_with(&files, |f| {
             !losers.contains(&f.path) && (f.kind != InputKind::Dds || reencode(f))
         });
+        let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
+        Ok(Prepared {
+            req: req.clone(),
+            registry,
+            user_config,
+            project_config,
+            target,
+            target_src,
+            preset_id,
+            files,
+            sets,
+            file_scopes,
+            nvtt,
+            hand,
+            typed,
+            dup_idx,
+            gen_replaced,
+            packed_outputs,
+        })
+    }
+
+    /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
+    /// derive, RNM, bakes and the plan's events. `scope` (set keys) is not read yet: every set is planned.
+    pub(crate) fn plan_sets(
+        &self,
+        p: &Prepared,
+        scope: Option<&BTreeSet<String>>,
+        rep: &Reporter,
+        cancel: &CancelToken,
+        cache: &AnalysisCache,
+    ) -> Result<Plan, EngineError> {
+        let _ = scope;
+        let req = &p.req;
+        let registry = &p.registry;
+        let (target, target_src, preset_id) = (p.target, &p.target_src, &p.preset_id);
+        let (files, file_scopes, nvtt) = (&p.files, &p.file_scopes, &p.nvtt);
+        let (hand, typed, dup_idx) = (&p.hand, &p.typed, &p.dup_idx);
+        // Mutated below (predicted suffixes, replaced generated members); the prepared sets stay as built.
+        let mut sets = p.sets.clone();
+        let key = |out: &Path| output_key(&req.output_root, out);
+        let ctx = ResolveCtx {
+            target,
+            registry,
+            preset: preset_id,
+            user_config: p.user_config.as_ref(),
+            project_config: p.project_config.as_ref(),
+            overrides: &req.overrides,
+            accept: req.accept,
+            allow: &req.allow,
+            files: file_scopes,
+            shaders: &NO_SHADERS,
+            mesh_alpha: &req.mesh_alpha,
+            nvtt: Some(nvtt),
+        };
+        let reencode =
+            |f: &InputFile| f.kind == InputKind::Dds && crate::policy::reencode_requested(&ctx, f);
 
         // Spec §6.4 "Set membership", DECISIONS Note M7: a recipe's output joins its set before anything resolves.
         // Note AZ: a set explicitly given complex material predicts the complex `_m` (the auto pick comes later and
         // needs a member already typed complex_material, so it never adds a suffix of its own).
-        let (explicit, stale_shaders) = explicit_shaders(&req, &sets);
+        let (explicit, stale_shaders) = explicit_shaders(req, &sets);
         for set in &mut sets {
             let roles: BTreeSet<RawMap> = set
                 .members
@@ -1341,7 +1431,6 @@ impl Engine {
             .iter()
             .flat_map(|s| s.members.iter().map(|&i| (i, s.key.as_str())))
             .collect();
-        let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         let mut skipped: Vec<SkippedFile> = dup_idx
             .iter()
             .map(|&i| SkippedFile {
@@ -1352,7 +1441,7 @@ impl Engine {
                 reason: "two inputs map to one output; exclude one".into(),
             })
             .collect();
-        skipped.extend(gen_replaced);
+        skipped.extend(p.gen_replaced.iter().cloned());
         let mut self_overwrite: Vec<FailedFile> = vec![];
         let mut work: Vec<(&TextureSet, &InputFile)> = vec![];
         for set in &sets {
@@ -1466,7 +1555,7 @@ impl Engine {
                 Ok((job, a, info))
             };
         let pool = thread_pool(req.jobs)?;
-        let budget = Budget::new(budget_limit(&req), pool.current_num_threads());
+        let budget = Budget::new(budget_limit(req), pool.current_num_threads());
         // One slot per work item, so results keep the input order. A slot left empty is a file that was cancelled
         // before its Load started.
         let slots: Vec<Mutex<Option<_>>> = work.iter().map(|_| Mutex::new(None)).collect();
@@ -1583,7 +1672,7 @@ impl Engine {
                 let pick = crate::shader::pick_for_set(
                     &ctx,
                     s,
-                    &files,
+                    files,
                     &index,
                     explicit.get(&s.key).copied(),
                     &req.mesh_shaders,
@@ -1711,16 +1800,16 @@ impl Engine {
         // DECISIONS DS8: six face files become one cube job, and one-file cubes get their layout.
         crate::cube::plan::plan_cubes(&cube_facts, &mut jobs, &mut skipped);
         // Note DY: helper alpha fills, decided before packing so a helper an alpha fill uses is not reported unused.
-        let fills = crate::helper::plan::plan_fills(&ctx, &sets, &files, &mut jobs, &alpha_facts);
+        let fills = crate::helper::plan::plan_fills(&ctx, &sets, files, &mut jobs, &alpha_facts);
         let mut packed = pack::plan::plan_packing(
             &ctx,
             &sets,
-            &files,
+            files,
             &mut jobs,
             &failed_paths,
             &cancelled,
             &mut skipped,
-            &packed_outputs,
+            &p.packed_outputs,
             &derive_heights,
             &flat_b,
             &fills,
@@ -1977,7 +2066,7 @@ impl Engine {
                 &ctx,
                 d,
                 &req.mesh_shaders,
-                &files,
+                files,
                 &mut jobs,
                 &mut skipped,
                 &failed,
@@ -2074,7 +2163,7 @@ impl Engine {
                 crate::derive::plan::report_unread(
                     d,
                     &dp.member_sets,
-                    &files,
+                    files,
                     &jobs,
                     &mut skipped,
                     &failed[..failed_before],
@@ -2109,12 +2198,12 @@ impl Engine {
         }
         // M6 Track F2: RNM layers attach to their base normals once the shaders are known (eye sets are skipped),
         // before the bakes, so a baking roughness member copies its `_n`'s blend (Note W18).
-        crate::rnm::plan::plan_rnm(&ctx, &sets, &files, registry.alias_table(), &mut jobs);
-        let helpers = crate::helper::report::reports(&ctx, &sets, &files, &jobs, &fills);
+        crate::rnm::plan::plan_rnm(&ctx, &sets, files, registry.alias_table(), &mut jobs);
+        let helpers = crate::helper::report::reports(&ctx, &sets, files, &jobs, &fills);
         let bake_cx = crate::bake::plan::BakeCtx {
             target,
             sets: &sets,
-            files: &files,
+            files,
             aliases: registry.alias_table(),
             shared: &shared,
             borrowed: &borrowed,
@@ -2258,7 +2347,7 @@ impl Engine {
                 let maps = map_members(
                     &ctx,
                     set,
-                    &files,
+                    files,
                     &index,
                     &skipped,
                     registry.alias_table(),
@@ -2332,9 +2421,9 @@ impl Engine {
                 .collect()
         };
         Ok(Plan {
-            request: req,
-            registry,
-            preset_id,
+            request: req.clone(),
+            registry: registry.clone(),
+            preset_id: preset_id.clone(),
             target,
             jobs,
             skipped,
@@ -2342,7 +2431,7 @@ impl Engine {
             peak_admitted_bytes,
             cancelled,
             shaders: picks,
-            nvtt: nvtt.into_probed(),
+            nvtt: nvtt.probed(),
             derive_own,
             fill_ends,
             helpers,
