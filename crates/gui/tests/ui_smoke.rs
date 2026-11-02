@@ -363,9 +363,9 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
     assert!(!item.decisions.is_empty(), "the decision is open again");
 }
 
-/// Note FK: on a large project the re-plan after an answer takes seconds, and the panel shows the last plan until it
-/// lands. Its controls are off meanwhile, with the reason, so a second click does not cancel and restart that plan
-/// and nothing looks like it reverted. (`ui::draw` does not poll, so the plan stays in flight until `settle`.)
+/// Note FK, as Note F? refines it: the panel shows the last plan until the answer's partial plan lands. Its controls
+/// are off meanwhile, with the reason, so a click is not lost to a stale view and nothing looks like it reverted.
+/// (`ui::draw` does not poll, so the partial stays out until `settle`.)
 #[test]
 fn the_texture_panel_waits_for_the_plan_its_answer_started() {
     let d = tempfile::tempdir().unwrap();
@@ -405,6 +405,7 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
     h.get_by_role_and_label(Role::Button, "Cutout").click();
     h.run();
     assert!(h.state().busy(), "the answer's plan is in flight");
+    assert!(h.state().partial_pending, "the answer's partial is out");
     for label in ["Remove", "Blend", "Data"] {
         assert!(button(&h, label), "{label} is enabled");
     }
@@ -422,6 +423,115 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
         .find(|n| n.accesskit_node().value().as_deref() == Some("Cutout"))
         .expect("the Alpha combo shows the answer");
     assert!(!alpha.accesskit_node().is_disabled());
+}
+
+/// Poll until the partial of the newest edit is parked, then handle it alone. The full plans stay parked in `full`,
+/// so none can land in between (`hold_plan_results`).
+fn land_partial(h: &mut Harness<'static, AppModel>, full: &mut Vec<sdc_gui::worker::WorkerMsg>) {
+    use sdc_gui::worker::WorkerMsg;
+    let m = h.state_mut();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut partial = None;
+    while partial.is_none() {
+        assert!(
+            std::time::Instant::now() < end,
+            "the partial did not arrive"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        m.poll();
+        for x in m.take_held() {
+            match x {
+                WorkerMsg::Partial { seq, .. } if seq == m.edit_seq => partial = Some(x),
+                WorkerMsg::Partial { .. } => {}
+                x => full.push(x),
+            }
+        }
+    }
+    m.hold_plan_results = false;
+    m.sender().send(partial.unwrap()).unwrap();
+    m.poll();
+    m.hold_plan_results = true;
+    // A full plan polled in that one window was handled, not parked: the test would then not hold it.
+    assert!(m.busy(), "the full plan landed with the partial");
+}
+
+/// The owner's bug (Note FK1, fixed by Note F?): two alpha answers in a row. The second waits only for the first one's
+/// partial plan, not for the full plan, which stays parked until the end.
+#[test]
+fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
+    use eframe::egui::accesskit::Role;
+    use engine::config::AlphaPolicy;
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_item("landscape/leaf.png");
+    model.hold_plan_results = true;
+    let mut h = harness(model);
+    h.run();
+    let policy = |h: &Harness<'static, AppModel>| {
+        h.state()
+            .item("landscape/leaf.png")
+            .and_then(|i| i.job.as_ref())
+            .map(|j| j.profile.alpha.policy)
+    };
+    let alpha_combo = |h: &Harness<'static, AppModel>, value: &str| {
+        h.query_all_by_role(Role::ComboBox)
+            .find(|n| n.accesskit_node().value().as_deref() == Some(value))
+            .map(|n| (n.rect(), n.accesskit_node().is_disabled()))
+    };
+    let mut full = vec![];
+    h.get_by_role_and_label(Role::Button, "Cutout").hover();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Cutout").click();
+    h.run();
+    assert!(
+        h.state().fix_off().is_some(),
+        "the first answer's partial is out"
+    );
+    land_partial(&mut h, &mut full);
+    h.run();
+    assert_eq!(policy(&h), Some(AlphaPolicy::Cutout));
+    assert!(h.query_by_label("Undecided").is_none());
+    let (_, off) = alpha_combo(&h, "Cutout").expect("the Alpha combo shows the answer");
+    assert!(!off, "the second answer waits for the full plan");
+    assert!(h.state().busy(), "the first full plan is still out");
+    // The second answer, through the Alpha combo.
+    fn combo<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+            .find(|n| n.accesskit_node().value().as_deref() == Some("Cutout"))
+            .expect("the Alpha combo")
+    }
+    combo(&h).hover();
+    h.run();
+    combo(&h).click();
+    h.run();
+    h.get_by_label("Blend").hover();
+    h.run();
+    h.get_by_label("Blend").click();
+    h.run();
+    assert!(h.state().fix_off().is_some(), "the second partial is out");
+    land_partial(&mut h, &mut full);
+    h.run();
+    assert_eq!(policy(&h), Some(AlphaPolicy::Blend));
+    let (_, off) = alpha_combo(&h, "Blend").expect("the Alpha combo shows the second answer");
+    assert!(!off);
+    // Review says the full plan is still out.
+    h.state_mut().open_review();
+    h.run();
+    h.get_by_label("Planning…");
+    // Both full plans land behind; the newer one wins.
+    let m = h.state_mut();
+    m.hold_plan_results = false;
+    for x in full {
+        m.sender().send(x).unwrap();
+    }
+    settle(&mut h);
+    assert_eq!(policy(&h), Some(AlphaPolicy::Blend));
+    assert!(h.query_by_label("Planning…").is_none());
 }
 
 /// Note FK3: only the edit rows wait; with a read-only `sdc.toml` a group header still opens and closes.

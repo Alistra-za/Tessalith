@@ -58,7 +58,7 @@ Each column's heading carries its count: **Blockers (n)**, **Undecided (n)**, **
 
 **Export 20 files (skip 2 undecided)** exports the decided textures and skips the rest; it never decides for you. **Close** closes Review and cancels an Export it had queued.
 
-If a source changed on disk or a plan is still running, a click on Export waits for the plan and then checks again; a new pitfall in the meantime stops the export and says why in Review. Opening another folder or reloading closes Review and exports nothing. If the plan fails, Review stays open with its blockers.
+If a source changed on disk or a plan is still running, a click on Export waits for the plan and then checks again (Review shows "Planning…" beside its Export button until the plan lands); a new pitfall in the meantime stops the export and says why in Review. Opening another folder or reloading closes Review and exports nothing. If the plan fails, Review stays open with its blockers.
 
 ## The Files tab
 

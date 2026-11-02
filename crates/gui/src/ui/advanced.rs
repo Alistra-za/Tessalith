@@ -727,7 +727,7 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
                         key: &key,
                         job: &job,
                         target: model.target,
-                        busy: model.busy(),
+                        busy: model.edit_busy(),
                         compact: false,
                         edit_off: why.clone(),
                         warnings: &[],
@@ -754,7 +754,7 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
             return;
         };
         let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
-        let busy = model.busy();
+        let busy = model.edit_busy();
         let why = toml_read_only_reason(model);
         ui.add_enabled_ui(!read_only, |ui| {
             egui::Grid::new(("advanced-fields", &key))

@@ -271,7 +271,7 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
         job: &job,
         // Note FK: read-only `sdc.toml`, or a plan in flight.
         ro: model.fix_off(),
-        busy: model.busy(),
+        busy: model.edit_busy(),
     };
     let c = &job.profile.cubemap;
     // The planned layout (a six-file set is `faces`) wins over the setting, which may be unset (auto).

@@ -1516,6 +1516,29 @@ impl AppModel {
             || self.nvtt_pending
     }
 
+    /// Note F?: an edit waits for the plan. That is this edit's partial while it is out, or the full plan when this
+    /// edit has no partial shown (a global edit, a `NeedsFull`, a folder open); also the scan-database votes.
+    pub fn plan_wait(&self) -> bool {
+        self.partial_pending
+            || (self.planning.is_some() && self.applied_seq < self.edit_seq)
+            || self.votes_pending.is_some()
+    }
+
+    /// Note F?: a full plan (or the scan-database votes) is still out; Review says "Planning…" and an Export click
+    /// queues behind it.
+    pub fn full_plan_pending(&self) -> bool {
+        self.planning.is_some() || self.votes_pending.is_some()
+    }
+
+    /// `busy()` with `plan_wait` for the plan: what the Advanced fields wait on. `busy()` itself stays true until the
+    /// full plan lands, as the frame loop and `wait_idle` need.
+    pub fn edit_busy(&self) -> bool {
+        self.plan_wait()
+            || self.export.running.is_some()
+            || self.preview.working()
+            || self.nvtt_pending
+    }
+
     /// A v2 worker job is in flight (owner answer 8): the app's one poll line keeps frames coming and `wait_idle`
     /// waits for it. Not part of `busy()`, which greys the Advanced fields. Tracks A and B add their jobs here.
     pub fn v2_jobs_pending(&self) -> bool {
@@ -1581,7 +1604,10 @@ impl AppModel {
                 total,
             } if generation == self.generation => {
                 self.plan_progress = Some((done, total));
-                self.status_line = plan_bar_text(done, total);
+                // Note F?: a partial's "<counts> · planning…" stays until the full plan lands.
+                if self.planning.is_none() || self.applied_seq < self.edit_seq {
+                    self.status_line = plan_bar_text(done, total);
+                }
             }
             WorkerMsg::PlanProgress { .. } => {}
             WorkerMsg::Planned { generation, result } if generation == self.generation => {
@@ -2720,6 +2746,10 @@ impl AppModel {
         self.refresh_game_paths();
         self.request_dds_thumbs();
         self.counts_status();
+        // Note F?: the full plan still runs behind the partial.
+        if self.planning.is_some() {
+            self.status_line.push_str(" · planning…");
+        }
         self.prune_selection();
         if expanded_in_scope {
             self.preview_after_plan();

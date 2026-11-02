@@ -895,6 +895,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                             ui.colored_label(RED, why);
                         }
                     }
+                    // Note F?: the rows may be an edit's partial plan; a click waits for the full plan (rule 7.2).
+                    if m.full_plan_pending() {
+                        ui.weak("Planning…")
+                            .on_hover_text("Export waits for the plan, then checks again");
+                    }
                 });
             });
         });

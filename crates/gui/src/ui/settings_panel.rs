@@ -1217,11 +1217,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             .map(|i| i.key.clone()),
         _ => None,
     };
-    let (target, busy) = (model.target, model.busy());
+    let (target, busy) = (model.target, model.edit_busy());
     let read_only = model.project.as_ref().is_some_and(|p| p.read_only());
-    // Note FK: the panel shows the last plan; while the next one is in flight every edit control is off, as Problems'
-    // fix buttons are (CA12), so a click is not lost to a stale view nor cancels the plan an edit started. A read-only
-    // `sdc.toml` gives its own reason first.
+    // Note FK: the panel shows the last plan; until the edit's partial plan lands (Note F?: or its full plan, when it
+    // has no partial) every edit control is off, as Problems' fix buttons are (CA12), so a click is not lost to a
+    // stale view. A read-only `sdc.toml` gives its own reason first.
     let edit_off = model.fix_off();
     let header = model.dds_header(key);
     let confirming = model.dds_patch.confirming.as_deref() == Some(key);

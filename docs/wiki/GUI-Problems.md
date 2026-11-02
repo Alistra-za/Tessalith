@@ -45,7 +45,7 @@ An undecided texture with a suggested type shows it as one button, **Set type: s
 - **Accept all suggestions (n)** at the top of the list decides every texture that has a suggestion, as one undo step.
 - A row takes the keyboard (Tab, or Shift+Tab back). **Enter** or **Space** on a row with a suggestion accepts it and moves to the next row; on the last row the keyboard stays on the list. A row without a suggestion ignores both.
 - Every accept edits the project in memory, like any other edit: **Save** writes it to `sdc.toml`.
-- These buttons are greyed out, with the reason on hover, while `sdc.toml` is read-only ("Wait for the plan to finish" while a plan runs).
+- These buttons are greyed out, with the reason on hover, while `sdc.toml` is read-only ("Wait for the plan to finish" until an edit's quick plan of the sets it touches lands, or the whole plan after a project-wide change).
 
 ## Every row has its action
 

@@ -76,7 +76,7 @@ fn row(
         thumb(ui, model, &r.path, None);
         ui.label(r.label);
         let sid = egui::Id::new(("rnm-strength", key, id));
-        if let Some(v) = drag_slider(ui, model.busy(), sid, r.strength, 0.0..=2.0, "") {
+        if let Some(v) = drag_slider(ui, model.edit_busy(), sid, r.strength, 0.0..=2.0, "") {
             let v = json!(v);
             edits.push((key.into(), format!("rnm.{id}.strength"), Some(v)));
         }
@@ -137,7 +137,7 @@ fn bent(ui: &mut egui::Ui, model: &AppModel, key: &str, job: &ResolvedJob, edits
         let pid = egui::Id::new(("rnm-ao-power", key));
         if let Some(p) = drag_slider(
             ui,
-            model.busy(),
+            model.edit_busy(),
             pid,
             job.profile.rnm.ao_power(),
             0.1..=8.0,

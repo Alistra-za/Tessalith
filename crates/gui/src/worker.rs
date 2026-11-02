@@ -253,8 +253,9 @@ pub fn spawn_export(
             Arc::new(ChannelSink(tx.clone())),
             engine::events::new_batch_id(),
         );
+        // The export's token is its own: a re-plan never cancels it, so its skeleton must not replace the edit's.
         let result = session
-            .plan(req, &rep, &cancel)
+            .plan_no_skeleton(req, &rep, &cancel)
             .and_then(|plan| session.run(plan, &rep, &cancel))
             .map_err(|e| e.to_string());
         let _ = tx.send(WorkerMsg::ExportDone(result));

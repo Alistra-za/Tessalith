@@ -103,7 +103,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             if let Some(why) = &read_only {
                 ui.colored_label(AMBER, why);
             }
-            let (target, busy) = (model.target, model.busy());
+            let (target, busy) = (model.target, model.edit_busy());
             let rows = &view.rows;
             // The Format row offers the pairs every selected texture allows (`bulk_encodings`).
             let formats: Options = view

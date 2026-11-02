@@ -536,10 +536,11 @@ impl AppModel {
         self.root.is_some() && self.export.running.is_none() && !read_only
     }
 
-    /// K11: why Problems' and Review's fix buttons are off, or `None` when they work.
+    /// K11: why Problems' and Review's fix buttons (and the texture panel's edit controls, Note FK) are off, or `None`
+    /// when they work.
     pub fn fix_off(&self) -> Option<String> {
         self.toml_read_only_reason().or_else(|| {
-            (self.planning.is_some() || self.votes_pending.is_some())
+            self.plan_wait()
                 .then(|| "Wait for the plan to finish".to_string())
         })
     }

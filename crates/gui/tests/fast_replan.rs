@@ -14,6 +14,7 @@ use support::*;
 const LEAF: &str = "landscape/leaf.png";
 const ROCK: &str = "landscape/rock01.png";
 const DDS: &str = "landscape/plate.dds";
+const WAIT: &str = "Wait for the plan to finish";
 
 /// The support fixture plus `extra`, opened with its export folder chosen, then holding plan results.
 fn open(dir: &Path, extra: impl FnOnce(&Path)) -> AppModel {
@@ -141,6 +142,24 @@ fn partial_lands_before_full() {
     assert_eq!(policy(&m, ROCK), rock);
     assert!(m.items_rev() > rev, "the views see the splice");
     assert!(!m.partial_pending);
+    // Note F?: the panel takes the next edit at once; the status line still says the full plan runs.
+    assert_eq!(m.fix_off(), None, "the panel waits only for the partial");
+    assert!(m.status_line.ends_with(" · planning…"), "{}", m.status_line);
+    let generation = m.generation();
+    m.sender()
+        .send(WorkerMsg::PlanProgress {
+            generation,
+            done: 1,
+            total: 6,
+        })
+        .unwrap();
+    m.poll();
+    assert_eq!(m.plan_progress, Some((1, 6)));
+    assert!(
+        m.status_line.ends_with(" · planning…"),
+        "a progress tick keeps the counts: {}",
+        m.status_line
+    );
     // Nothing but the edit's own `replan` moved: no `last_inputs` write, no checks run, no project write.
     assert_eq!(m.plan_marks(), marks_edit);
     assert_eq!(marks_edit.1, marks.1);
@@ -270,11 +289,47 @@ fn needs_full_waits_for_full() {
     assert!(!m.partial_pending);
     assert_eq!(m.items_rev(), rev, "nothing changed");
     assert!(m.item(DDS).is_some_and(|i| i.job.is_none()));
+    // Note F?: no partial for this edit, so the panel waits for the full plan (Note FK).
+    assert_eq!(m.fix_off().as_deref(), Some(WAIT));
     finish(&mut m, full);
+    assert_eq!(m.fix_off(), None);
     assert!(
         m.item(DDS).is_some_and(|i| i.job.is_some()),
         "the full plan re-encodes it"
     );
+}
+
+/// Note F?: a partial frees the texture panel only. Export clicked after it queues, Review says "Planning…",
+/// and the export runs on the full plan once it lands.
+#[test]
+fn export_waits_for_full_after_partial() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    m.hold_plan_results = false;
+    decide_all(&mut m);
+    m.hold_plan_results = true;
+    m.set_field(LEAF, "alpha.policy", json!(AlphaPolicy::Blend));
+    let (partials, full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Blend));
+    assert_eq!(m.fix_off(), None);
+    assert!(m.full_plan_pending(), "Review says Planning…");
+    m.export_clicked();
+    assert!(m.export_queued(), "the click waits for the full plan");
+    assert!(m.export.running.is_none() && m.review.is_none());
+    finish(&mut m, full);
+    if m.review.is_some() {
+        m.acknowledge_all_asks();
+        m.export_from_review();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+    }
+    assert!(!m.export_queued());
+    assert!(
+        m.export.summary.is_some() && m.export.error.is_none(),
+        "the export ran: {:?}",
+        m.export.error
+    );
+    assert_eq!(policy(&m, LEAF), Some(AlphaPolicy::Blend));
 }
 
 #[test]
@@ -286,6 +341,11 @@ fn a_global_edit_sends_no_partial() {
     assert!(!m.partial_pending);
     let (partials, full) = collect(&mut m, 0, 1);
     assert!(partials.is_empty());
+    assert_eq!(
+        m.fix_off().as_deref(),
+        Some(WAIT),
+        "a global edit waits for the full plan"
+    );
     finish(&mut m, full);
     // A `[files]` edit after it landed sends one again.
     m.hold_plan_results = true;
