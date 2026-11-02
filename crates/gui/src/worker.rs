@@ -364,15 +364,23 @@ pub fn spawn_plan(
 
 /// Fast re-plan (R2 §5): `Session::replan_sets` for `changed` (the current entry of every `[files]` key changed
 /// since the last landed full plan), sent as `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it.
+/// When `latest` (the newest `seq` issued) has moved past `seq` before the work starts, it is skipped and an `Err`
+/// is sent.
 pub fn spawn_partial(
     tx: Sender<WorkerMsg>,
     session: Arc<Session>,
     req: BatchRequest,
     changed: Vec<(String, Option<toml::Table>)>,
     seq: u64,
+    latest: Arc<std::sync::atomic::AtomicU64>,
     root: PathBuf,
 ) {
     spawn_guarded(tx, "partial plan", move |tx| {
+        if latest.load(Ordering::SeqCst) > seq {
+            let result = Err("superseded by a newer partial plan".to_string());
+            let _ = tx.send(WorkerMsg::Partial { seq, result });
+            return;
+        }
         let events = Arc::new(VecSink::default());
         let rep = Reporter::new(events.clone(), engine::events::new_batch_id());
         // A panic is this partial's failure: the full plan behind it reports for itself.

@@ -361,12 +361,26 @@ impl Session {
     ) -> Result<Plan, EngineError> {
         req.bc1_model = self.bc1_model;
         let (plan, prepared, pbr) = self.engine.plan_full(&req, rep, cancel, &self.cache)?;
-        // A cancelled plan saw only part of its folder (and may be superseded): it must not evict a live one.
-        if plan.cancelled.is_empty() {
-            self.cache.retain_plan(&plan);
-            *lock(&self.skeleton) = Some(Arc::new(Skeleton::new(prepared, &plan, &pbr)));
-        }
+        self.keep_skeleton(&plan, prepared, &pbr, cancel);
         Ok(plan)
+    }
+
+    /// Store a finished full plan's skeleton (and trim the cache to it) unless the plan was cancelled: it saw only
+    /// part of its folder, or a newer plan superseded it. The token is read under the skeleton lock, so a superseded
+    /// plan that finished late never overwrites the newer plan's skeleton (the caller cancels the old token before it
+    /// starts the new plan, as the GUI's `replan` does).
+    fn keep_skeleton(
+        &self,
+        plan: &Plan,
+        prepared: crate::api::Prepared,
+        pbr: &std::collections::BTreeSet<String>,
+        cancel: &CancelToken,
+    ) {
+        let mut slot = lock(&self.skeleton);
+        if plan.cancelled.is_empty() && !cancel.is_cancelled() {
+            self.cache.retain_plan(plan);
+            *slot = Some(Arc::new(Skeleton::new(prepared, plan, pbr)));
+        }
     }
 
     /// The skeleton of the last uncancelled full plan, if any.
@@ -670,6 +684,52 @@ mod tests {
     fn session_is_send_and_sync() {
         fn check<T: Send + Sync>() {}
         check::<super::Session>();
+    }
+
+    /// Fast re-plan fix round 1: a plan superseded (its token cancelled) after it finished planning but before its
+    /// skeleton is stored keeps the newer skeleton; an uncancelled one replaces it.
+    #[test]
+    fn a_plan_cancelled_before_the_store_keeps_the_skeleton() {
+        use super::*;
+        use crate::config::Target;
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("in/textures");
+        std::fs::create_dir_all(&dir).unwrap();
+        image::ImageBuffer::from_fn(16, 16, |x, y| {
+            image::Rgb([x as u8 * 16, y as u8 * 16, 90u8])
+        })
+        .save(dir.join("a.png"))
+        .unwrap();
+        let req = || {
+            let mut r =
+                BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+            r.recursive = true;
+            r
+        };
+        let s = Session::new(Bc1Model::Ideal).unwrap();
+        let rep = Reporter::new(Arc::new(NullSink), "t");
+        s.plan(req(), &rep, &CancelToken::default()).unwrap();
+        let first = s.skeleton().expect("a skeleton");
+        let late = |cancelled: bool| {
+            let cancel = CancelToken::default();
+            let (plan, prepared, pbr) =
+                s.engine.plan_full(&req(), &rep, &cancel, &s.cache).unwrap();
+            assert!(plan.cancelled.is_empty(), "it finished planning");
+            if cancelled {
+                cancel.cancel();
+            }
+            s.keep_skeleton(&plan, prepared, &pbr, &cancel);
+        };
+        late(true);
+        assert!(
+            Arc::ptr_eq(&first, &s.skeleton().unwrap()),
+            "superseded: kept"
+        );
+        late(false);
+        assert!(
+            !Arc::ptr_eq(&first, &s.skeleton().unwrap()),
+            "current: stored"
+        );
     }
 
     /// Note AQ: the stored source of MSN, flow and complex grass is the encoder input before rounding. Grass builds

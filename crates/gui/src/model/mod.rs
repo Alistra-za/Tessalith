@@ -658,8 +658,8 @@ pub struct AppModel {
     pub dirty_keys: BTreeSet<String>,
     /// A partial of the current `edit_seq` is in flight.
     pub partial_pending: bool,
-    /// One-shot, taken by `replan`: the edit it plans left the sets document as it was, so it may send a partial.
-    files_edit: bool,
+    /// The newest partial `seq` issued, shared with the partial workers: an older one skips its work.
+    partial_latest: Arc<std::sync::atomic::AtomicU64>,
     /// `[files]` of the latest plan's request (`dirty_keys` grows by what differs from the next one).
     plan_files: BTreeMap<String, serde_json::Value>,
     /// `(edit_seq, request signature without [files])` of the full plan in flight.
@@ -668,6 +668,8 @@ pub struct AppModel {
     landed_sig: Option<u64>,
     /// Tests: `Partial` and `Planned` messages are parked (`take_held`) instead of handled, so a test can deliver
     /// them in the order it wants.
+    // Exists for tests only (crates/gui/tests/fast_replan.rs).
+    #[doc(hidden)]
     pub hold_plan_results: bool,
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
@@ -886,7 +888,7 @@ impl AppModel {
             applied_seq: 0,
             dirty_keys: Default::default(),
             partial_pending: false,
-            files_edit: false,
+            partial_latest: Default::default(),
             plan_files: Default::default(),
             plan_sig: (0, 0),
             landed_sig: None,
@@ -1305,12 +1307,17 @@ impl AppModel {
         }
     }
 
-    /// Plan again on a worker; a newer plan supersedes (cancels) an older one.
+    /// Plan again on a worker; a newer plan supersedes (cancels) an older one. Sends no partial plan.
     pub fn replan(&mut self) {
+        self.replan_with(false);
+    }
+
+    /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
+    /// partial plan first (`send_partial`).
+    fn replan_with(&mut self, files_edit: bool) {
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
-        let files_edit = std::mem::take(&mut self.files_edit);
         let (Some(session), Some(req), Some(root)) =
             (self.session.clone(), self.request(), self.root.clone())
         else {
@@ -1389,12 +1396,15 @@ impl AppModel {
             .collect();
         let Some(changed) = changed else { return };
         self.partial_pending = true;
+        self.partial_latest
+            .store(self.edit_seq, std::sync::atomic::Ordering::SeqCst);
         spawn_partial(
             self.tx.clone(),
             session.clone(),
             req.clone(),
             changed,
             self.edit_seq,
+            self.partial_latest.clone(),
             root.to_path_buf(),
         );
     }
@@ -1415,6 +1425,8 @@ impl AppModel {
     }
 
     /// Tests: the `Partial` and `Planned` messages parked while `hold_plan_results` is on, in arrival order.
+    // Exists for tests only (crates/gui/tests/fast_replan.rs).
+    #[doc(hidden)]
     pub fn take_held(&mut self) -> Vec<WorkerMsg> {
         std::mem::take(&mut self.held)
     }
@@ -2023,18 +2035,18 @@ impl AppModel {
     }
 
     /// A user edit recorded a step: re-plan as a change (`replan_changed`).
-    fn replan_after_edit(&mut self) {
+    fn replan_after_edit(&mut self, files_edit: bool) {
         self.type_edit_recorded();
-        self.replan_changed();
+        self.replan_changed(files_edit);
     }
 
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
-    /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11).
-    fn replan_changed(&mut self) {
+    /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
+    fn replan_changed(&mut self, files_edit: bool) {
         let cancel = self.export_after_plan
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
-        self.replan();
+        self.replan_with(files_edit);
         if cancel {
             self.export_after_plan = false;
             self.status_note = Some(
@@ -2077,7 +2089,7 @@ impl AppModel {
             return false;
         }
         self.drop_undo_note();
-        self.files_edit = before.project == after.project;
+        let files_edit = before.project == after.project;
         self.history.push(history::Command {
             label: label.into(),
             before,
@@ -2086,7 +2098,7 @@ impl AppModel {
             created_file: None,
         });
         self.auto_replans = 0;
-        self.replan_after_edit();
+        self.replan_after_edit(files_edit);
         true
     }
 
@@ -2653,6 +2665,22 @@ impl AppModel {
             .as_deref()
             .and_then(|k| self.item(k))
             .is_some_and(in_scope);
+        // The scope sets' RNM layer, mask and AO paths (as `PlanView::build` collects them): the view's replace them.
+        let old_rnm: Vec<PathBuf> = self
+            .items
+            .iter()
+            .filter(|i| in_scope(i))
+            .filter_map(|i| i.job.as_ref()?.rnm.as_ref())
+            .flat_map(|r| {
+                r.layers
+                    .iter()
+                    .flat_map(|l| {
+                        std::iter::once(&l.file.path).chain(l.mask.as_ref().map(|m| &m.path))
+                    })
+                    .chain(r.ao.as_ref().map(|a| &a.file.path))
+                    .cloned()
+            })
+            .collect();
         // A failed file has no set: the partial's own item for its key replaces it.
         let new: BTreeSet<String> = view.items.iter().map(|i| i.key.clone()).collect();
         let mut items = view.items;
@@ -2664,11 +2692,26 @@ impl AppModel {
         // Stable, as `PlanView::build`'s sort.
         items.sort_by_cached_key(|i| i.key.to_lowercase());
         self.items = items;
+        // The engine refuses any edit that changes membership, so the view holds exactly the scope's sets, and
+        // each of them already exists.
+        debug_assert!(
+            scope.iter().all(|k| view.sets.iter().any(|s| &s.key == k)),
+            "every scope set is in the partial"
+        );
+        debug_assert!(
+            view.sets
+                .iter()
+                .all(|s| self.sets.iter().any(|x| x.key == s.key)),
+            "a partial adds no set"
+        );
         for s in view.sets {
             match self.sets.iter_mut().find(|x| x.key == s.key) {
                 Some(x) => *x = s,
                 None => self.sets.push(s),
             }
+        }
+        for p in &old_rnm {
+            self.rnm_keys.remove(p);
         }
         self.rnm_notes.retain(|k, _| !scope.contains(k));
         self.rnm_notes.extend(view.rnm_notes);
@@ -3045,8 +3088,7 @@ impl AppModel {
         });
         self.auto_replans = 0;
         if replan {
-            self.files_edit = files_edit;
-            self.replan_after_edit();
+            self.replan_after_edit(files_edit);
         }
     }
 
@@ -3134,8 +3176,7 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
-        self.files_edit = files_edit;
-        self.replan_changed();
+        self.replan_changed(files_edit);
     }
 
     pub fn can_undo(&self) -> bool {
