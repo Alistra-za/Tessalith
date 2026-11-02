@@ -758,7 +758,8 @@ mod tests {
             (fs, files)
         }
         fn best(fs: &FileScopes, files: &[InputFile]) -> std::time::Duration {
-            (0..3)
+            // Best of 5: one slow run under a loaded test machine must not fail the ratio.
+            (0..5)
                 .map(|_| {
                     let t = std::time::Instant::now();
                     let hits: usize = files

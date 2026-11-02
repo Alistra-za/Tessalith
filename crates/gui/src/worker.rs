@@ -255,7 +255,7 @@ pub fn spawn_export(
         );
         // The export's token is its own: a re-plan never cancels it, so its skeleton must not replace the edit's.
         let result = session
-            .plan_no_skeleton(req, &rep, &cancel)
+            .plan(req, &rep, &cancel)
             .and_then(|plan| session.run(plan, &rep, &cancel))
             .map_err(|e| e.to_string());
         let _ = tx.send(WorkerMsg::ExportDone(result));
@@ -348,8 +348,9 @@ pub fn spawn_plan(
         let ticker = plan_ticker(tx.clone(), progress, generation, stop_rx);
         let rep = Reporter::new(events.clone(), engine::events::new_batch_id());
         let result = plan_result(|| {
+            // Note F?3: the one storing call; `replan` cancels this token before the next edit's plan starts.
             session
-                .plan(req, &rep, &cancel)
+                .plan_and_keep(req, &rep, &cancel)
                 .map(|plan| PlanView::build(&plan, &events.take(), &session, &root))
                 .map_err(|e| PlanFailure {
                     config: matches!(e, EngineError::Config(_)),

@@ -351,9 +351,22 @@ impl Session {
     pub fn cache(&self) -> &AnalysisCache {
         &self.cache
     }
-    /// `Engine::plan` through the cache; the request's BC1 model is the session's. An uncancelled plan also
-    /// replaces the session's skeleton.
+    /// `Engine::plan` through the cache; the request's BC1 model is the session's. Leaves the skeleton (and the
+    /// cache's trim) alone.
     pub fn plan(
+        &self,
+        mut req: BatchRequest,
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<Plan, EngineError> {
+        req.bc1_model = self.bc1_model;
+        Ok(self.engine.plan_full(&req, rep, cancel, &self.cache)?.0)
+    }
+
+    /// `plan` that also replaces the session's skeleton when it is not cancelled (Note F?3). Only the GUI's edit
+    /// plans call it, each on a token the next edit's plan cancels before it starts: an export plans on its own
+    /// token, which no re-plan cancels, so its skeleton could land after a newer edit's plan.
+    pub fn plan_and_keep(
         &self,
         mut req: BatchRequest,
         rep: &Reporter,
@@ -365,22 +378,10 @@ impl Session {
         Ok(plan)
     }
 
-    /// `plan` that leaves the skeleton (and the cache's trim) alone: an export plans on its own token, which no
-    /// re-plan cancels, so its skeleton could land after a newer edit's plan (fast re-plan, Note F?).
-    pub fn plan_no_skeleton(
-        &self,
-        mut req: BatchRequest,
-        rep: &Reporter,
-        cancel: &CancelToken,
-    ) -> Result<Plan, EngineError> {
-        req.bc1_model = self.bc1_model;
-        Ok(self.engine.plan_full(&req, rep, cancel, &self.cache)?.0)
-    }
-
     /// Store a finished full plan's skeleton (and trim the cache to it) unless the plan was cancelled: it saw only
-    /// part of its folder, or a newer plan superseded it. The token is read under the skeleton lock, so a superseded
-    /// plan that finished late never overwrites the newer plan's skeleton (the caller cancels the old token before it
-    /// starts the new plan, as the GUI's `replan` does).
+    /// part of its folder, or a newer plan superseded it. The skeleton is built outside the lock; the token is read
+    /// again under it, so a superseded plan that finished late never overwrites (or trims for) the newer plan (the
+    /// caller cancels the old token before it starts the new plan, as the GUI's `replan` does).
     fn keep_skeleton(
         &self,
         plan: &Plan,
@@ -388,10 +389,14 @@ impl Session {
         pbr: &std::collections::BTreeSet<String>,
         cancel: &CancelToken,
     ) {
+        if !plan.cancelled.is_empty() || cancel.is_cancelled() {
+            return;
+        }
+        let skeleton = Arc::new(Skeleton::new(prepared, plan, pbr));
         let mut slot = lock(&self.skeleton);
-        if plan.cancelled.is_empty() && !cancel.is_cancelled() {
+        if !cancel.is_cancelled() {
             self.cache.retain_plan(plan);
-            *slot = Some(Arc::new(Skeleton::new(prepared, plan, pbr)));
+            *slot = Some(skeleton);
         }
     }
 
@@ -720,7 +725,8 @@ mod tests {
         };
         let s = Session::new(Bc1Model::Ideal).unwrap();
         let rep = Reporter::new(Arc::new(NullSink), "t");
-        s.plan(req(), &rep, &CancelToken::default()).unwrap();
+        s.plan_and_keep(req(), &rep, &CancelToken::default())
+            .unwrap();
         let first = s.skeleton().expect("a skeleton");
         let late = |cancelled: bool| {
             let cancel = CancelToken::default();
@@ -762,15 +768,13 @@ mod tests {
         req.recursive = true;
         let s = Session::new(Bc1Model::Ideal).unwrap();
         let rep = Reporter::new(Arc::new(NullSink), "t");
-        let plan = s
-            .plan_no_skeleton(req.clone(), &rep, &CancelToken::default())
-            .unwrap();
+        let plan = s.plan(req.clone(), &rep, &CancelToken::default()).unwrap();
         assert!(!plan.jobs.is_empty(), "it planned");
         assert!(s.skeleton().is_none(), "none stored");
-        s.plan(req.clone(), &rep, &CancelToken::default()).unwrap();
-        let kept = s.skeleton().expect("a skeleton");
-        s.plan_no_skeleton(req, &rep, &CancelToken::default())
+        s.plan_and_keep(req.clone(), &rep, &CancelToken::default())
             .unwrap();
+        let kept = s.skeleton().expect("a skeleton");
+        s.plan(req, &rep, &CancelToken::default()).unwrap();
         assert!(Arc::ptr_eq(&kept, &s.skeleton().unwrap()), "export: kept");
     }
 

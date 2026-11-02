@@ -774,7 +774,7 @@ mod tests {
         assert!(session.skeleton().is_none());
         let rep = Reporter::new(Arc::new(NullSink), "t");
         session
-            .plan(fx.req.clone(), &rep, &CancelToken::default())
+            .plan_and_keep(fx.req.clone(), &rep, &CancelToken::default())
             .unwrap();
         let s = session.skeleton().expect("a full plan stores its skeleton");
         let mut req = fx.req.clone();

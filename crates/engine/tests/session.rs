@@ -30,7 +30,7 @@ fn req(dir: &Path, target: Target) -> BatchRequest {
 }
 
 fn plan(s: &Session, r: BatchRequest) -> Plan {
-    s.plan(
+    s.plan_and_keep(
         r,
         &Reporter::new(Arc::new(NullSink), "t"),
         &CancelToken::default(),
@@ -196,7 +196,7 @@ fn a_cancelled_plan_keeps_the_cached_entries() {
     let cancel = CancelToken::default();
     cancel.cancel();
     let p = s
-        .plan(
+        .plan_and_keep(
             req(b.path(), Target::Cs),
             &Reporter::new(Arc::new(NullSink), "t"),
             &cancel,

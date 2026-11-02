@@ -391,7 +391,9 @@ fn partial_equals_next_full_plan() {
     let (_fx, session, base_req) = planned_session();
     let cancel = CancelToken::default();
     let (rep, sink) = reporter();
-    let base = session.plan(base_req.clone(), &rep, &cancel).unwrap();
+    let base = session
+        .plan_and_keep(base_req.clone(), &rep, &cancel)
+        .unwrap();
     assert!(base.cancelled.is_empty());
     let base_sets = by_set(&base, &sink.take());
     let root = &base_req.output_root;
@@ -510,7 +512,7 @@ fn a_cancelled_partial_needs_a_full_plan() {
     let (_fx, session, base_req) = planned_session();
     let (rep, _) = reporter();
     session
-        .plan(base_req.clone(), &rep, &CancelToken::default())
+        .plan_and_keep(base_req.clone(), &rep, &CancelToken::default())
         .unwrap();
     let edit = vec![(
         "dir/a.png".to_string(),
@@ -554,7 +556,9 @@ fn replan_timing() {
     let cancel = CancelToken::default();
     let (rep, _) = reporter();
     let t = Instant::now();
-    session.plan(base_req.clone(), &rep, &cancel).unwrap();
+    session
+        .plan_and_keep(base_req.clone(), &rep, &cancel)
+        .unwrap();
     let cold = t.elapsed();
     let edit = vec![(
         "dir/a.png".to_string(),
