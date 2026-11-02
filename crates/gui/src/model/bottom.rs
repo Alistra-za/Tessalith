@@ -880,6 +880,12 @@ mod tests {
         let m = r"skipped: C:\mods\a\locked: Access is denied. (os error 5)";
         assert_eq!(unreadable_folder(m), Some(PathBuf::from(r"C:\mods\a")));
         assert_eq!(unreadable_folder("not the shape"), None);
+        // The shapes the engine writes for a dangling link and for a link loop (Note FM5).
+        let dead =
+            r"skipped: C:\mods\a\link: The system cannot find the file specified. (os error 2)";
+        assert_eq!(unreadable_folder(dead), Some(PathBuf::from(r"C:\mods\a")));
+        let looped = r"skipped: C:\mods\a\loop: file system loop to C:\mods\a";
+        assert_eq!(unreadable_folder(looped), Some(PathBuf::from(r"C:\mods\a")));
     }
 
     /// Pins the engine's alias-clash refusal (`presets::check_aliases`) that `alias_clash` parses.

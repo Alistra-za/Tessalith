@@ -167,14 +167,21 @@ pub fn discover_reporting(
                         if err.depth() == 0 {
                             return Err(std::io::Error::other(err));
                         }
-                        skipped.push(if err.path().is_none() && err.loop_ancestor().is_none() {
-                            {
+                        // `<path>: <reason>`, the shape the Problems row's Open folder fix parses (Note FM5);
+                        // walkdir's own text puts "IO error for operation on" before the path.
+                        skipped.push(match err.path() {
+                            Some(p) => match (err.loop_ancestor(), err.io_error()) {
+                                (Some(a), _) => {
+                                    format!("{}: file system loop to {}", p.display(), a.display())
+                                }
+                                (None, Some(io)) => format!("{}: {io}", p.display()),
+                                (None, None) => format!("{}: {err}", p.display()),
+                            },
+                            None => {
                                 let v = dirs.borrow();
                                 let parent = &v[err.depth().saturating_sub(1).min(v.len() - 1)];
                                 format!("{}: {err}", unreadable_child(parent))
                             }
-                        } else {
-                            err.to_string()
                         });
                         continue;
                     }
