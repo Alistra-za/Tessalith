@@ -373,7 +373,6 @@ fn partial_equals_next_full_plan() {
             }
             (Err(Partial::Err(e)), _) => panic!("{}: {e}", r.name),
         };
-        timed.get_or_insert(ms);
         let scope = &partial.scope;
         let ids: BTreeSet<String> = scope.iter().map(id).collect();
         for want in r.scope_has {
@@ -384,10 +383,12 @@ fn partial_equals_next_full_plan() {
             );
         }
         let (frep, fsink) = reporter();
+        let t = Instant::now();
         let full = session
             .engine()
             .plan_cached(req.clone(), &frep, &cancel, session.cache())
             .unwrap();
+        timed.get_or_insert((ms, t.elapsed().as_secs_f64() * 1e3));
         let fevents = fsink.take();
         let pevents = psink.take();
         let got = restricted(&partial.plan, &pevents, scope);
@@ -418,8 +419,8 @@ fn partial_equals_next_full_plan() {
             r.name
         );
     }
+    let (partial_ms, warm_ms) = timed.unwrap_or_default();
     eprintln!(
-        "timing (this build): full Session::plan {full_ms:.1} ms, first replan_sets {:.1} ms",
-        timed.unwrap_or_default()
+        "timing (this build): cold full plan {full_ms:.1} ms; first scoped row: replan_sets {partial_ms:.1} ms, warm full plan {warm_ms:.1} ms"
     );
 }
