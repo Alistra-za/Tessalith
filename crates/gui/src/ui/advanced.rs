@@ -729,7 +729,7 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
                         target: model.target,
                         busy: model.busy(),
                         compact: false,
-                        toml_read_only: why.clone(),
+                        edit_off: why.clone(),
                         warnings: &[],
                         nvtt_found: model.nvtt_found(),
                     };
@@ -766,7 +766,7 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
                         target: model.target,
                         busy,
                         compact: false,
-                        toml_read_only: why.clone(),
+                        edit_off: why.clone(),
                         warnings: &[],
                         nvtt_found: model.nvtt_found(),
                     };

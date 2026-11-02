@@ -363,6 +363,109 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
     assert!(!item.decisions.is_empty(), "the decision is open again");
 }
 
+/// Note FK: on a large project the re-plan after an answer takes seconds, and the panel shows the last plan until it
+/// lands. Its controls are off meanwhile, with the reason, so a second click does not cancel and restart that plan
+/// and nothing looks like it reverted. (`ui::draw` does not poll, so the plan stays in flight until `settle`.)
+#[test]
+fn the_texture_panel_waits_for_the_plan_its_answer_started() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_item("landscape/leaf.png");
+    use eframe::egui::accesskit::Role;
+    let mut h = harness(model);
+    h.run();
+    let button = |h: &Harness<'static, AppModel>, label: &str| {
+        h.get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(!button(&h, "Blend"));
+    // The Alpha combo: the one whose value is an alpha meaning.
+    let meanings = ["Remove", "Cutout", "Blend", "Cutout + Blend", "Data"];
+    let alpha_combo = |h: &Harness<'static, AppModel>| {
+        let n = h
+            .query_all_by_role(Role::ComboBox)
+            .find(|n| {
+                n.accesskit_node()
+                    .value()
+                    .as_deref()
+                    .is_some_and(|v| meanings.contains(&v))
+            })
+            .expect("the Alpha combo");
+        (n.rect(), n.accesskit_node().is_disabled())
+    };
+    let (before, _) = alpha_combo(&h);
+    h.get_by_role_and_label(Role::Button, "Cutout").hover();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Cutout").click();
+    h.run();
+    assert!(h.state().busy(), "the answer's plan is in flight");
+    for label in ["Remove", "Blend", "Data"] {
+        assert!(button(&h, label), "{label} is enabled");
+    }
+    // The field combos are off too, and nothing moved: the reason is hover text, not a line.
+    let (during, off) = alpha_combo(&h);
+    assert!(off, "the Alpha combo is enabled");
+    assert_eq!(before, during, "the panel moved when the plan started");
+    h.get_by_role_and_label(Role::Button, "Blend").hover();
+    h.run();
+    h.get_by_label("Wait for the plan to finish");
+    settle(&mut h);
+    assert!(h.query_by_label("Undecided").is_none());
+    let alpha = h
+        .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+        .find(|n| n.accesskit_node().value().as_deref() == Some("Cutout"))
+        .expect("the Alpha combo shows the answer");
+    assert!(!alpha.accesskit_node().is_disabled());
+}
+
+/// Note FK3: only the edit rows wait; with a read-only `sdc.toml` a group header still opens and closes.
+#[test]
+fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
+    use eframe::egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_item("landscape/leaf.png");
+    model
+        .project
+        .as_mut()
+        .unwrap()
+        .set_error("broken on purpose");
+    assert!(model.fix_off().is_some_and(|w| w.contains("read-only")));
+    let mut h = harness(model);
+    h.run();
+    // The answers and rows are off …
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Cutout")
+        .accesskit_node()
+        .is_disabled());
+    let format_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("Format").count();
+    assert!(format_rows(&h) >= 1, "the Compression group starts open");
+    // … the group header is not: it collapses the group.
+    let header = h
+        .query_all_by_label("Compression")
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("an enabled Compression header");
+    header.hover();
+    h.run();
+    h.query_all_by_label("Compression")
+        .find(|n| !n.accesskit_node().is_disabled())
+        .unwrap()
+        .click();
+    h.run();
+    assert_eq!(format_rows(&h), 0, "the Compression group did not collapse");
+}
+
 #[test]
 fn the_threshold_commits_when_the_drag_stops_not_while_dragging() {
     use eframe::egui::{Event, Modifiers, PointerButton};

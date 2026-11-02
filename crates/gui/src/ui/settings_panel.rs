@@ -592,8 +592,9 @@ pub struct Ctx<'a> {
     pub target: Target,
     pub busy: bool,
     pub compact: bool,
-    /// Why `sdc.toml` cannot be edited, when it is read-only.
-    pub toml_read_only: Option<String>,
+    /// Why the rows' edits are off, shown on their disabled hover: `sdc.toml` is read-only, or (the texture panel,
+    /// `AppModel::fix_off`, Note FK) a plan is in flight.
+    pub edit_off: Option<String>,
     /// The item's warnings (the Compression group shows the HDR reason).
     pub warnings: &'a [Warning],
     /// The NVTT probe found nvcompress (the Encoder row offers NVTT only then).
@@ -638,7 +639,7 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
     } else {
         r
     };
-    if let Some(reason) = f.lock.map(str::to_string).or(cx.toml_read_only.clone()) {
+    if let Some(reason) = f.lock.map(str::to_string).or(cx.edit_off.clone()) {
         r.on_disabled_hover_text(reason);
     }
     if let Some(v) = set {
@@ -717,10 +718,10 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = levels_view(cx.target, cx.job);
     let mut on = mips_on(&f.value);
     let ticked = ui.add_enabled(
-        cx.toml_read_only.is_none(),
+        cx.edit_off.is_none(),
         egui::Checkbox::new(&mut on, "Mipmaps"),
     );
-    let ticked = match &cx.toml_read_only {
+    let ticked = match &cx.edit_off {
         Some(why) => ticked.on_disabled_hover_text(why),
         None => ticked,
     };
@@ -790,7 +791,7 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
         Some(why) => r.on_hover_text(why),
         None => r,
     };
-    if let Some(why) = &cx.toml_read_only {
+    if let Some(why) = &cx.edit_off {
         r.on_disabled_hover_text(why);
     }
     if let Some(m) = picked {
@@ -816,6 +817,10 @@ fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Acti
             egui::Grid::new((cx.key, name))
                 .num_columns(3)
                 .show(ui, |ui| {
+                    // Note FK3: the rows wait, the header above stays clickable.
+                    if cx.edit_off.is_some() {
+                        ui.disable();
+                    }
                     if name == "Mipmaps" {
                         mipmaps_rows(ui, cx, actions);
                     }
@@ -855,6 +860,15 @@ fn message_of(warnings: &[Warning], code: Code) -> Option<&str> {
         .map(|w| w.message.as_str())
 }
 
+/// A small edit button that is off, with `off`'s reason on hover, while `off` is set (Note FK).
+fn waiting_button(ui: &mut egui::Ui, off: &Option<String>, text: &str) -> egui::Response {
+    let r = ui.add_enabled(off.is_none(), egui::Button::new(text).small());
+    match off {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    }
+}
+
 /// The amber "Undecided" box: one control per decision, each writing an explicit answer.
 fn decision_box(
     ui: &mut egui::Ui,
@@ -863,13 +877,17 @@ fn decision_box(
     warnings: &[Warning],
     actions: &mut Vec<Action>,
 ) {
-    egui::Frame::new()
+    let frame = egui::Frame::new()
         .stroke(egui::Stroke::new(2.0, AMBER))
         .corner_radius(4.0)
         .inner_margin(8.0)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.colored_label(AMBER, egui::RichText::new("Undecided").strong());
+            // Note FK2: the answers wait for the plan; the reason is the box's hover, so nothing moves.
+            if cx.edit_off.is_some() {
+                ui.disable();
+            }
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
@@ -942,6 +960,15 @@ fn decision_box(
                 ui.add_space(4.0);
             }
         });
+    if let Some(why) = &cx.edit_off {
+        // Over every control of the box: a disabled widget shows no hover of its own here.
+        ui.interact(
+            frame.response.rect,
+            ui.id().with(("decision-why", cx.key)),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(why);
+    }
     ui.add_space(6.0);
 }
 
@@ -1192,7 +1219,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     };
     let (target, busy) = (model.target, model.busy());
     let read_only = model.project.as_ref().is_some_and(|p| p.read_only());
-    let toml_read_only = toml_read_only_reason(model);
+    // Note FK: the panel shows the last plan; while the next one is in flight every edit control is off, as Problems'
+    // fix buttons are (CA12), so a click is not lost to a stale view nor cancels the plan an edit started. A read-only
+    // `sdc.toml` gives its own reason first.
+    let edit_off = model.fix_off();
     let header = model.dds_header(key);
     let confirming = model.dds_patch.confirming.as_deref() == Some(key);
     let last = model.dds_patch.last_for(key).map(str::to_string);
@@ -1200,7 +1230,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     // Note FI3: why the re-encode button is off (read-only first), and whether it would write over its source. Only a
     // skipped DDS draws that button, so nothing else pays for the scan or the file-system check each frame.
     let skipped_dds = kind == ItemKind::Dds && job.is_none();
-    let reencode_off = toml_read_only
+    let reencode_off = edit_off
         .clone()
         .or_else(|| skipped_dds.then(|| model.reencode_blocker(key)).flatten());
     let into_source = skipped_dds
@@ -1223,14 +1253,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         // Note FI3: a DDS re-encoded by `sdc.toml` (it has a job, or failed at plan) offers the way back.
         if reencoding {
             let r = ui
-                .add_enabled(
-                    toml_read_only.is_none(),
-                    egui::Button::new("Stop re-encoding"),
-                )
+                .add_enabled(edit_off.is_none(), egui::Button::new("Stop re-encoding"))
                 .on_hover_text(
                     "Leave the DDS file as it is again: it is not written to the export.",
                 );
-            let r = match &toml_read_only {
+            let r = match &edit_off {
                 Some(why) => r.on_disabled_hover_text(why),
                 None => r,
             };
@@ -1248,13 +1275,12 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             let mut reset = false;
             ui.horizontal(|ui| {
                 ui.label("Not a helper (set by you)");
-                let r =
-                    ui.add_enabled(toml_read_only.is_none(), egui::Button::new("Reset").small());
+                let r = ui.add_enabled(edit_off.is_none(), egui::Button::new("Reset").small());
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), "Reset role")
                 });
                 let r = r.on_hover_text("Use the role guessed from the name");
-                let r = match &toml_read_only {
+                let r = match &edit_off {
                     Some(why) => r.on_disabled_hover_text(why),
                     None => r,
                 };
@@ -1267,7 +1293,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         // Note DY17 (docs review): any image can be made a helper here, e.g. one whose name has no helper suffix.
         if kind == ItemKind::Image {
             let picked = ui
-                .add_enabled_ui(toml_read_only.is_none(), |ui| {
+                .add_enabled_ui(edit_off.is_none(), |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Helper role");
                         super::helper_panel::role_combo(
@@ -1275,7 +1301,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                             key,
                             engine::helper::HelperRole::NotHelper,
                             not_helper,
-                            &toml_read_only,
+                            &edit_off,
                         )
                     })
                     .inner
@@ -1287,7 +1313,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         }
         ui.add_space(4.0);
     }
-    ui.add_enabled_ui(!read_only, |ui| match &job {
+    // Note FK3: with a job, each edit control waits on `edit_off` itself, so the headers stay usable read-only.
+    ui.add_enabled_ui(!read_only || job.is_some(), |ui| match &job {
         None => {
             match &status {
                 ItemStatus::Skipped(r) => ui.label(format!("Skipped: {r}")),
@@ -1339,7 +1366,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 target,
                 busy,
                 compact,
-                toml_read_only: toml_read_only.clone(),
+                edit_off: edit_off.clone(),
                 warnings: &warnings,
                 nvtt_found: model.nvtt_found(),
             };
@@ -1364,7 +1391,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(format!("{m}{hint}")).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::InGreenUnstated.as_str()));
-                    if ui.small_button("Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -1373,7 +1400,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(m).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::ChkGreenGuess.as_str()));
-                    if ui.small_button("Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -1383,14 +1410,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                     if matches!(
                         job.provenance.get("channels.green_convention"),
                         Some(Provenance::ProjectFile | Provenance::User)
-                    ) {
-                        let b = ui.add_enabled(
-                            toml_read_only.is_none(),
-                            egui::Button::new("Treat as DirectX").small(),
-                        );
-                        if b.clicked() {
-                            actions.push(Action::Clear("channels.green_convention"));
-                        }
+                    ) && waiting_button(ui, &edit_off, "Treat as DirectX").clicked()
+                    {
+                        actions.push(Action::Clear("channels.green_convention"));
                     }
                 });
             }
@@ -1408,7 +1430,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 group(ui, g, &cx, &mut actions);
             }
             if !compact {
-                super::rnm_section::rnm_section(ui, model, key);
+                super::rnm_section::rnm_section(ui, model, key, &edit_off);
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
                     match v {
                         Some(v) => model.set_field(&k, &f, v),
