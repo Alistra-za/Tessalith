@@ -221,6 +221,11 @@ fn zip_counts_profile() {
 const PBR_ID: &str = "pbr/landscape/rock01";
 
 fn opened_pbr_dir(dir: &Path) -> AppModel {
+    opened_pbr_dir_with(dir, |_| {})
+}
+
+/// `opened_pbr_dir` with `extra(<the set's folder>)` run before the folder is opened.
+fn opened_pbr_dir_with(dir: &Path, extra: impl FnOnce(&Path)) -> AppModel {
     use engine::config::{GreenConvention, Subtype};
     use sdc_gui::model::Answer;
     let r = dir.join("textures/pbr/landscape");
@@ -237,6 +242,7 @@ fn opened_pbr_dir(dir: &Path) -> AppModel {
     ImageBuffer::from_pixel(64, 64, Rgb([128u8, 128, 255]))
         .save(r.join("rock01_detail.png"))
         .unwrap();
+    extra(&r);
     let settings = sdc_gui::settings::GuiSettings {
         export_folder: Some(dir.join("export")),
         ..Default::default()
@@ -406,6 +412,60 @@ fn a_refused_profile_does_not_orphan_the_recorded_vanilla_copy() {
         "{notes:?}"
     );
     assert!(out.contains_key(&record_key(&path)), "{out:?}");
+}
+
+/// I1b fix round 1, Minor 4: the copy is built only for a set the Vanilla derive keeps (`keeps_landscape`): a DDS member
+/// is never re-encoded, so the derive skips the set (M9); a set left out of Also is skipped too. Neither gets a copy
+/// (nor a "not exported" note about a Vanilla file that will never exist), and a recorded one is an orphan.
+#[test]
+fn a_set_the_vanilla_derive_skips_gets_no_copy() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_pbr_dir_with(d.path(), |r| {
+        // A 4x4 A8R8G8B8 DDS beside the set (the `_p`): the derive step skips the set.
+        let mut b: Vec<u8> = b"DDS ".to_vec();
+        let mut u = |v: u32| b.extend_from_slice(&v.to_le_bytes());
+        for v in [124, 0x100F, 4, 4, 16, 0, 0] {
+            u(v);
+        }
+        for _ in 0..11 {
+            u(0);
+        }
+        for v in [
+            32,
+            0x41,
+            0,
+            32,
+            0x00ff_0000,
+            0x0000_ff00,
+            0x0000_00ff,
+            0xff00_0000,
+            0x1000,
+            0,
+            0,
+            0,
+            0,
+        ] {
+            u(v);
+        }
+        b.extend(std::iter::repeat_n(0x80u8, 64));
+        std::fs::write(r.join("rock01_p.dds"), b).unwrap();
+    });
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_xpmf(PBR_ID, json!({}).as_object().cloned());
+    idle(&mut m);
+    assert!(m.also_on(), "{}", m.status_line);
+    let p = prepare(&m).unwrap();
+    assert_eq!(
+        p.files.len(),
+        1,
+        "the PBR file is still written: {:?}",
+        p.notes
+    );
+    let van = p.vanilla.as_ref().unwrap();
+    assert!(van.files.is_empty() && van.refused.is_empty(), "{van:?}");
 }
 
 /// The entry names of a zip, from its central directory (copied from `also_export.rs`).

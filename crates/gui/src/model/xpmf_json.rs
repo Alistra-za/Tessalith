@@ -469,6 +469,20 @@ fn fold_path(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
 }
 
+/// Whether the Also export's Vanilla phase derives this set and keeps its maps (`DeriveRequest::keeps_landscape`): a
+/// PBR Landscape set with a diffuse or a normal and no DDS member (a DDS is never re-encoded, so the derive skips the
+/// set, M9). Only such a set has Vanilla files for a profile copy to name.
+fn vanilla_keeps(m: &AppModel, v: &SetView) -> bool {
+    let filled = |k| !matches!(v.slots.get(&k), None | Some(SlotFill::Empty));
+    is_pbr_landscape(v)
+        && (filled(SlotKind::Diffuse) || filled(SlotKind::Normal))
+        && !v.members.iter().filter_map(|k| m.item(k)).any(|i| {
+            i.input
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+        })
+}
+
 /// What refuses a built profile `doc` of `e` (M1; `prepare` and the card both ask): a file name that folds like another
 /// landscape set's, then the schema. `Ok` is the file's text. Sets that are not landscape write nothing, so they
 /// cannot clash (M2).
@@ -573,7 +587,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
         let copy = !m.also_skipped(&e.id)
             && vs
                 .iter()
-                .any(|v| same_id(&v.id, &e.id) && is_pbr_landscape(v));
+                .any(|v| same_id(&v.id, &e.id) && vanilla_keeps(m, v));
         let van = p.vanilla.as_mut().filter(|_| copy);
         match build(false, &own_outputs) {
             Ok((text, own)) => {
