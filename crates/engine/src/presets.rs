@@ -293,64 +293,79 @@ impl ConfigFile {
         let mut overrides = vec![];
         let mut allow = BTreeMap::new();
         for (key, entry) in &self.files {
-            let bad = |m: String| PresetError::Parse(format!("[files.\"{key}\"]: {m}"));
-            let mut entry = entry.clone();
-            let obj = entry
-                .as_object_mut()
-                .ok_or_else(|| bad("expected a table".into()))?;
-            if let Some(a) = obj.remove("allow") {
-                let list = a
-                    .as_array()
-                    .ok_or_else(|| bad("allow must be a list of codes".into()))?;
-                let mut codes = BTreeSet::new();
-                for c in list {
-                    let s = c.as_str().unwrap_or_default();
-                    codes.insert(Code::parse(s).ok_or_else(|| bad(format!("unknown code '{s}'")))?);
-                }
+            let (ovs, codes) = file_entry(key, entry)?;
+            overrides.extend(ovs);
+            if let Some(codes) = codes {
                 allow.insert(key.clone(), codes);
-            }
-            // `leaf_paths` skips nulls, which only a non-finite number makes (audit #8, Note BC).
-            if crate::overrides::non_finite(&entry) {
-                return Err(bad(
-                    "not a finite number (inf, -inf and nan are refused)".into()
-                ));
-            }
-            let mut paths = vec![];
-            leaf_paths(&entry, "", &mut paths);
-            for field in paths {
-                if !crate::overrides::FIELD_PATHS.contains(&field.as_str()) {
-                    return Err(bad(format!("unknown field '{field}'")));
-                }
-                // No such path means the key itself held a dot (`"alpha.policy" = ...`): refuse, never read null.
-                let value = field
-                    .split('.')
-                    .try_fold(&entry, |v, part| v.get(part))
-                    .cloned()
-                    .ok_or_else(|| {
-                        bad(format!(
-                            "'{field}' is written as one quoted key; use a nested table or an unquoted dotted key"
-                        ))
-                    })?;
-                if field == crate::overrides::REENCODE_FIELD && !value.is_boolean() {
-                    return Err(bad("reencode takes true or false".into()));
-                }
-                if field == crate::overrides::RNM_TARGET_FIELD
-                    && crate::overrides::rnm_target_value(&value).is_none()
-                {
-                    return Err(bad("rnm.target takes n, cnr or both".into()));
-                }
-                if let Some(e) = crate::helper::value_error(&field, &value) {
-                    return Err(bad(e));
-                }
-                overrides.push(SetOverride {
-                    scope: Scope::Path(key.clone()),
-                    field,
-                    value,
-                });
             }
         }
         Ok((overrides, allow))
     }
+}
+
+/// One `[files]` entry as `Scope::Path` overrides (leaf order) and its `allow` codes, if it lists any.
+pub(crate) fn file_entry(
+    key: &str,
+    entry: &Value,
+) -> Result<(Vec<SetOverride>, Option<BTreeSet<Code>>), PresetError> {
+    let bad = |m: String| PresetError::Parse(format!("[files.\"{key}\"]: {m}"));
+    let mut overrides = vec![];
+    let mut allow = None;
+    let mut entry = entry.clone();
+    let obj = entry
+        .as_object_mut()
+        .ok_or_else(|| bad("expected a table".into()))?;
+    if let Some(a) = obj.remove("allow") {
+        let list = a
+            .as_array()
+            .ok_or_else(|| bad("allow must be a list of codes".into()))?;
+        let mut codes = BTreeSet::new();
+        for c in list {
+            let s = c.as_str().unwrap_or_default();
+            codes.insert(Code::parse(s).ok_or_else(|| bad(format!("unknown code '{s}'")))?);
+        }
+        allow = Some(codes);
+    }
+    // `leaf_paths` skips nulls, which only a non-finite number makes (audit #8, Note BC).
+    if crate::overrides::non_finite(&entry) {
+        return Err(bad(
+            "not a finite number (inf, -inf and nan are refused)".into()
+        ));
+    }
+    let mut paths = vec![];
+    leaf_paths(&entry, "", &mut paths);
+    for field in paths {
+        if !crate::overrides::FIELD_PATHS.contains(&field.as_str()) {
+            return Err(bad(format!("unknown field '{field}'")));
+        }
+        // No such path means the key itself held a dot (`"alpha.policy" = ...`): refuse, never read null.
+        let value = field
+            .split('.')
+            .try_fold(&entry, |v, part| v.get(part))
+            .cloned()
+            .ok_or_else(|| {
+                bad(format!(
+                    "'{field}' is written as one quoted key; use a nested table or an unquoted dotted key"
+                ))
+            })?;
+        if field == crate::overrides::REENCODE_FIELD && !value.is_boolean() {
+            return Err(bad("reencode takes true or false".into()));
+        }
+        if field == crate::overrides::RNM_TARGET_FIELD
+            && crate::overrides::rnm_target_value(&value).is_none()
+        {
+            return Err(bad("rnm.target takes n, cnr or both".into()));
+        }
+        if let Some(e) = crate::helper::value_error(&field, &value) {
+            return Err(bad(e));
+        }
+        overrides.push(SetOverride {
+            scope: Scope::Path(key.to_string()),
+            field,
+            value,
+        });
+    }
+    Ok((overrides, allow))
 }
 
 /// Where a resolved field value came from (spec §5.2). Declaration order is precedence order, lowest first.

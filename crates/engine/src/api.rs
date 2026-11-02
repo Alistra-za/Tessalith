@@ -201,6 +201,23 @@ impl BatchRequest {
             skip_root: None,
         }
     }
+
+    /// A hash of every field except the `[files]` table of `project_config_inline` and `plan_progress` (live
+    /// counters, not an input). Fields are hashed through their `Debug` form (most are not `Hash`); maps and sets
+    /// there are ordered, so it is stable within a build.
+    pub fn sig_without_files(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut r = BatchRequest {
+            plan_progress: None,
+            ..self.clone()
+        };
+        if let Some(c) = &mut r.project_config_inline {
+            c.files.clear();
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        format!("{r:?}").hash(&mut h);
+        h.finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -917,24 +934,41 @@ struct Setup {
 
 /// The global half of a plan ([`Engine::prepare`]): everything before the per-set work, owned, so
 /// [`Engine::plan_sets`] can build its `ResolveCtx` from a borrow of it.
+#[derive(Clone)]
 pub(crate) struct Prepared {
-    req: BatchRequest,
-    registry: PresetRegistry,
-    user_config: Option<ConfigFile>,
-    project_config: Option<ConfigFile>,
-    target: Target,
-    target_src: Provenance,
-    preset_id: String,
-    files: Vec<InputFile>,
+    pub(crate) req: BatchRequest,
+    pub(crate) registry: PresetRegistry,
+    pub(crate) user_config: Option<ConfigFile>,
+    pub(crate) project_config: Option<ConfigFile>,
+    pub(crate) target: Target,
+    pub(crate) target_src: Provenance,
+    pub(crate) preset_id: String,
+    pub(crate) files: Vec<InputFile>,
     /// Final membership, before the predicted packing suffixes.
-    sets: Vec<TextureSet>,
-    file_scopes: FileScopes,
-    nvtt: crate::nvtt::NvttCell,
-    hand: Vec<Option<crate::helper::HelperRole>>,
-    typed: BTreeSet<usize>,
-    dup_idx: BTreeSet<usize>,
-    gen_replaced: Vec<SkippedFile>,
-    packed_outputs: BTreeMap<(String, String), PathBuf>,
+    pub(crate) sets: Vec<TextureSet>,
+    pub(crate) file_scopes: FileScopes,
+    pub(crate) nvtt: crate::nvtt::NvttCell,
+    pub(crate) hand: Vec<Option<crate::helper::HelperRole>>,
+    pub(crate) typed: BTreeSet<usize>,
+    pub(crate) dup_idx: BTreeSet<usize>,
+    pub(crate) gen_replaced: Vec<SkippedFile>,
+    pub(crate) packed_outputs: BTreeMap<(String, String), PathBuf>,
+}
+
+impl Prepared {
+    /// The pass-1 `ResolveCtx` over this skeleton ([`base_ctx`]).
+    pub(crate) fn ctx(&self) -> ResolveCtx<'_> {
+        base_ctx(
+            &self.req,
+            self.target,
+            &self.registry,
+            &self.preset_id,
+            self.user_config.as_ref(),
+            self.project_config.as_ref(),
+            &self.file_scopes,
+            &self.nvtt,
+        )
+    }
 }
 
 /// The pass-1 `ResolveCtx` (no shader picks). `prepare` and `plan_sets` both build theirs here, so the two cannot
@@ -967,7 +1001,7 @@ fn base_ctx<'a>(
 }
 
 /// A DDS input that `ctx` re-encodes (otherwise it is IN-DDS-SKIPPED).
-fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
+pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
 }
 
@@ -1411,6 +1445,20 @@ impl Engine {
         cancel: &CancelToken,
         cache: &AnalysisCache,
     ) -> Result<Plan, EngineError> {
+        self.plan_sets_pbr(p, scope, rep, cancel, cache)
+            .map(|(plan, _)| plan)
+    }
+
+    /// [`Engine::plan_sets`], also returning the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
+    /// `pbr_sets`).
+    pub(crate) fn plan_sets_pbr(
+        &self,
+        p: &Prepared,
+        scope: Option<&BTreeSet<String>>,
+        rep: &Reporter,
+        cancel: &CancelToken,
+        cache: &AnalysisCache,
+    ) -> Result<(Plan, BTreeSet<String>), EngineError> {
         let _ = scope;
         let req = &p.req;
         let registry = &p.registry;
@@ -2344,6 +2392,7 @@ impl Engine {
             false
         });
         let index = crate::shader::JobIndex::new(&jobs);
+        let mut pbr_sets = BTreeSet::new();
         for set in &sets {
             let Some(&first) = set
                 .members
@@ -2363,6 +2412,9 @@ impl Engine {
                 is_float: false,
                 advanced_skin: false,
             });
+            if pbr {
+                pbr_sets.insert(set.key.clone());
+            }
             let members = set.members.iter().map(|&m| slash(&files[m].path)).collect();
             let pick = picks.get(&set.key).cloned();
             let mut warnings = vec![];
@@ -2444,7 +2496,7 @@ impl Engine {
                 .filter(|(h, ..)| !ended.contains(h.as_path()) && seen.insert(h.clone()))
                 .collect()
         };
-        Ok(Plan {
+        let plan = Plan {
             request: req.clone(),
             registry: registry.clone(),
             preset_id: preset_id.clone(),
@@ -2459,7 +2511,8 @@ impl Engine {
             derive_own,
             fill_ends,
             helpers,
-        })
+        };
+        Ok((plan, pbr_sets))
     }
 
     /// Report the plan's skipped and failed files, then (unless `dry_run`) convert every ready file and emit

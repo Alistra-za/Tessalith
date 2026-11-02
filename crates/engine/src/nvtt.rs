@@ -216,7 +216,7 @@ pub fn probe_path(path: &Path) -> NvttProbe {
 }
 
 /// The batch's probe, run on first use only, so a batch with no profile on NVTT never starts nvcompress.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct NvttCell {
     explicit: Option<PathBuf>,
     cell: OnceLock<NvttProbe>,

@@ -1,4 +1,7 @@
 //! sdc engine: configuration, policy, pipeline, DDS I/O, validation, events.
+// Lib tests include fixtures shared with the integration tests, which name the crate `engine`.
+#[cfg(test)]
+extern crate self as engine;
 pub mod also;
 pub mod analyse;
 pub mod analysis_store;
@@ -44,6 +47,7 @@ pub mod schemas;
 pub mod session;
 pub mod sets;
 pub mod shader;
+pub mod skeleton;
 pub mod suggest;
 pub(crate) mod sysmem;
 pub mod validate;

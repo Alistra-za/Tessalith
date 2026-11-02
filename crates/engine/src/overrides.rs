@@ -143,7 +143,7 @@ pub struct FileScopes {
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
     /// `overrides` and `allow` by lower-cased key (`index`); `None` until built. Valid only while `overrides` and
-    /// `allow` change through `index` (or Task 3's `set_entry`): staleness is detected by their lengths only, so an
+    /// `allow` change through `index` or `set_entry`: staleness is detected by their lengths only, so any other
     /// in-place key change needs `index` again.
     pub(crate) keys: Option<ScopeIndex>,
 }
@@ -212,12 +212,59 @@ impl FileScopes {
     /// Work out each of `files`' match forms once (audit 2026-10-15 item 5), so `forms_of` costs a lookup, not two
     /// absolute-path resolutions per key. Nothing to do when the layer is off or empty.
     pub fn index(&mut self, files: &[InputFile]) {
-        let Some(root) = self.root.as_deref() else {
+        let Some(root) = self.root.clone() else {
             return;
         };
         if self.overrides.is_empty() && self.allow.is_empty() {
             return;
         }
+        self.rebuild_keys();
+        self.forms = files
+            .iter()
+            .map(|f| {
+                let forms = project_rel(&root, f).map(|r| KeyForms::of(&r));
+                (f.path.clone(), (key_name(f).map(Into::into), forms))
+            })
+            .collect();
+    }
+
+    /// Replace every `[files]` override and the `allow` entry of `key` (this exact spelling, as the document holds
+    /// it) with `entry` parsed as the config loader does; `None` removes them. Overrides stay in key order, and the
+    /// key index is rebuilt. A bad entry is an error and changes nothing.
+    pub(crate) fn set_entry(
+        &mut self,
+        key: &str,
+        entry: Option<&toml::Table>,
+    ) -> Result<(), crate::presets::PresetError> {
+        let parsed = match entry {
+            Some(t) => {
+                let v = serde_json::to_value(t)
+                    .map_err(|e| crate::presets::PresetError::Parse(e.to_string()))?;
+                Some(crate::presets::file_entry(key, &v)?)
+            }
+            None => None,
+        };
+        let is_key = |o: &SetOverride| matches!(&o.scope, Scope::Path(k) if k == key);
+        self.overrides.retain(|o| !is_key(o));
+        self.allow.remove(key);
+        if let Some((ovs, codes)) = parsed {
+            // `[files]` is a sorted map: this key's fields go before the first later key's.
+            let at = self
+                .overrides
+                .iter()
+                .position(|o| matches!(&o.scope, Scope::Path(k) if k.as_str() > key))
+                .unwrap_or(self.overrides.len());
+            self.overrides.splice(at..at, ovs);
+            if let Some(codes) = codes {
+                self.allow.insert(key.to_string(), codes);
+            }
+        }
+        self.rebuild_keys();
+        Ok(())
+    }
+
+    /// The key index of `overrides` and `allow` as they stand now.
+    pub(crate) fn rebuild_keys(&mut self) {
         let mut ix = ScopeIndex {
             overrides: BTreeMap::new(),
             allow: BTreeMap::new(),
@@ -235,13 +282,6 @@ impl FileScopes {
                 .push(k.clone());
         }
         self.keys = Some(ix);
-        self.forms = files
-            .iter()
-            .map(|f| {
-                let forms = project_rel(root, f).map(|r| KeyForms::of(&r));
-                (f.path.clone(), (key_name(f).map(Into::into), forms))
-            })
-            .collect();
     }
 
     /// The match forms of `input`'s project-relative path when the layer is active: from `index` when it saw this

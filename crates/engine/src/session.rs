@@ -16,6 +16,7 @@ use crate::pack::PackJob;
 use crate::pipeline::{encode_levels, prepare, FileError, FileTracker, Keep};
 use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::stored_rgb;
+use crate::skeleton::Skeleton;
 use crate::validate::{validate, ValidationInput, ValidationSummary};
 use encoders_sys::Bc1Model;
 use std::collections::HashMap;
@@ -271,6 +272,8 @@ pub struct Session {
     engine: Engine,
     cache: AnalysisCache,
     bc1_model: Bc1Model,
+    /// The last uncancelled full plan's skeleton (fast re-plan), replaced wholesale by the next one.
+    skeleton: Mutex<Option<Arc<Skeleton>>>,
 }
 
 impl Session {
@@ -284,6 +287,7 @@ impl Session {
                 ..Default::default()
             },
             bc1_model,
+            skeleton: Mutex::new(None),
         })
     }
     /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to about 200 MB.
@@ -302,7 +306,8 @@ impl Session {
     pub fn cache(&self) -> &AnalysisCache {
         &self.cache
     }
-    /// `Engine::plan` through the cache; the request's BC1 model is the session's.
+    /// `Engine::plan` through the cache; the request's BC1 model is the session's. An uncancelled plan also
+    /// replaces the session's skeleton.
     pub fn plan(
         &self,
         mut req: BatchRequest,
@@ -310,12 +315,21 @@ impl Session {
         cancel: &CancelToken,
     ) -> Result<Plan, EngineError> {
         req.bc1_model = self.bc1_model;
-        let plan = self.engine.plan_cached(req, rep, cancel, &self.cache)?;
+        let prepared = self.engine.prepare(&req, rep, cancel)?;
+        let (plan, pbr) = self
+            .engine
+            .plan_sets_pbr(&prepared, None, rep, cancel, &self.cache)?;
         // A cancelled plan saw only part of its folder (and may be superseded): it must not evict a live one.
         if plan.cancelled.is_empty() {
             self.cache.retain_plan(&plan);
+            *lock(&self.skeleton) = Some(Arc::new(Skeleton::new(prepared, &plan, &pbr)));
         }
         Ok(plan)
+    }
+
+    /// The skeleton of the last uncancelled full plan, if any.
+    pub fn skeleton(&self) -> Option<Arc<Skeleton>> {
+        lock(&self.skeleton).clone()
     }
     pub fn run(
         &self,
