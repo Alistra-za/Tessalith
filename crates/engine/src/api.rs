@@ -1596,6 +1596,27 @@ impl Engine {
                 (s.key.clone(), pick)
             })
             .collect();
+        // Note GI27: a set whose `_noise` or `_detail` the Vanilla derive keeps is typed as its PBR phase typed it,
+        // so the 6c pass below re-types them (a detail layer into a detail normal, a medium `_noise`).
+        let kept_maps: BTreeSet<&Path> = (req.derive.iter())
+            .flat_map(|d| d.sets.iter().filter(|s| d.keeps_landscape(s)))
+            .flat_map(|s| s.kept_maps.iter().map(PathBuf::as_path))
+            .collect();
+        for s in &sets {
+            if s.members
+                .iter()
+                .any(|&i| kept_maps.contains(files[i].path.as_path()))
+            {
+                picks.insert(
+                    s.key.clone(),
+                    ShaderPick {
+                        shader: crate::shader::Shader::PbrLandscape,
+                        provenance: crate::shader::ShaderOrigin::Derived,
+                        wanted: None,
+                    },
+                );
+            }
+        }
         // The pass-1 context (no picks) is kept, so the derive step can rebuild it after adding its picks.
         let base_ctx = ctx;
         let ctx = ResolveCtx {

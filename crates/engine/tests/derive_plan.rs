@@ -1255,6 +1255,45 @@ fn landscape_puts_p_in_the_diffuse_alpha_and_uses_ao_0_3() {
     assert!((px[3] - 100.0 / 255.0).abs() < 1e-6, "{px:?}");
 }
 
+/// Final review I1b (owner ruling, Note GI27): the Vanilla folder keeps a derived landscape set's Projected noise and
+/// Detail normal jobs as it keeps the `_p` (O6), re-pathed by TA12; the CM folder never has them.
+#[test]
+fn landscape_noise_and_detail_stay_in_the_vanilla_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    dirt(&inputs, true);
+    let lan = inputs.join("textures/landscape");
+    png(&lan.join("dirt_noise.png"), 16, 16, [90, 90, 90, 255]);
+    png(&lan.join("dirt_detail.png"), 16, 16, [128, 128, 255, 255]);
+    let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
+    for (tail, input, subtype) in [
+        (
+            "textures/landscape/dirt_noise.dds",
+            "dirt_noise.png",
+            Subtype::ProjectedNoise,
+        ),
+        (
+            "textures/landscape/dirt_detail.dds",
+            "dirt_detail.png",
+            Subtype::DetailNormal,
+        ),
+    ] {
+        let j = out_job(&p, tail).unwrap_or_else(|| panic!("{tail} stays in the Vanilla folder"));
+        assert!(j.derive.is_none());
+        assert!(slash(&j.input).ends_with(input));
+        assert_eq!(j.profile.subtype, subtype);
+        assert!(
+            !j.game_path.to_lowercase().contains("/pbr/"),
+            "{}",
+            j.game_path
+        );
+        assert!(matches!(j.status, JobStatus::Ready), "{j:#?}");
+    }
+    let (p, _) = cs_then(DeriveMode::Cm, &inputs, &d.path().join("cm"), no_tweak);
+    assert!(out_job(&p, "textures/landscape/dirt_noise.dds").is_none());
+    assert!(out_job(&p, "textures/landscape/dirt_detail.dds").is_none());
+}
+
 /// TA5: no `_p`, an opaque diffuse with no alpha, and no `_p` job.
 #[test]
 fn landscape_without_p_has_an_opaque_diffuse() {

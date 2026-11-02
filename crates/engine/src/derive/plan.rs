@@ -184,17 +184,18 @@ pub fn plan_derived(
         .map(PathBuf::as_path)
         .collect();
     // O6 (TA5, preflight P7): the Vanilla folder keeps a derived landscape set's `_p` job (the `_p` member's own,
-    // or the `Parallax` recipe of a raw `_height`), folded by TA12. The CM folder never has it.
+    // or the `Parallax` recipe of a raw `_height`), folded by TA12; Note GI27 adds its `_noise` and `_detail`
+    // jobs. The CM folder never has them.
+    fn kept_of(s: &DeriveSet) -> Vec<&Path> {
+        (s.height.as_ref().and_then(source_path).into_iter())
+            .chain(s.kept_maps.iter().map(PathBuf::as_path))
+            .collect()
+    }
     let keep: BTreeSet<&Path> = d
         .sets
         .iter()
-        .filter(|s| {
-            d.mode == DeriveMode::Vanilla
-                && s.shader == Shader::PbrLandscape
-                && s.dds.is_empty()
-                && (s.albedo.is_some() || s.normal.is_some())
-        })
-        .filter_map(|s| s.height.as_ref().and_then(source_path))
+        .filter(|s| d.keeps_landscape(s))
+        .flat_map(kept_of)
         .collect();
     let holds = |keep: &BTreeSet<&Path>, j: &ResolvedJob| match &j.pack {
         None => keep.contains(j.input.as_path()),
@@ -478,7 +479,7 @@ pub fn plan_derived(
         .iter()
         .zip(&set_keys)
         .filter(|(_, k)| k.as_deref().is_none_or(|k| !derived.contains(k)))
-        .filter_map(|(s, _)| s.height.as_ref().and_then(source_path))
+        .flat_map(|(s, _)| kept_of(s))
         .filter(|p| keep.contains(p))
         .collect();
     jobs.retain(|j| !holds(&lost, j));

@@ -387,6 +387,11 @@ pub fn derive_sets(
             height,
             curves: raw(RawMap::Curves),
             cavity: raw(RawMap::Cavity),
+            kept_maps: ["_noise", "_detail"]
+                .into_iter()
+                .filter_map(role)
+                .map(|j| j.input.clone())
+                .collect(),
             gray: GraySource::R,
         });
     }
