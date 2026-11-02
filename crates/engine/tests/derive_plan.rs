@@ -1137,7 +1137,12 @@ fn derive_and_pack_candidates_fail_alone() {
 /// `<dir>/textures/landscape/<base>{,_n,_rmaos}.png` (16², opaque), plus `_p` (R 100) when `p`. `_rmaos`: rough
 /// 0.8, metal 1 (landscape ignores it), AO 128.
 fn landscape(dir: &Path, base: &str, p: bool) {
-    let d = dir.join("textures/landscape");
+    landscape_in(dir, "textures/landscape", base, p)
+}
+
+/// `landscape` under `<dir>/<sub>` (`textures/pbr/landscape` for the TA12 re-path).
+fn landscape_in(dir: &Path, sub: &str, base: &str, p: bool) {
+    let d = dir.join(sub);
     png(&d.join(format!("{base}.png")), 16, 16, [200, 200, 200, 255]);
     png(
         &d.join(format!("{base}_n.png")),
@@ -1256,44 +1261,74 @@ fn landscape_puts_p_in_the_diffuse_alpha_and_uses_ao_0_3() {
 }
 
 /// Final review I1b (owner ruling, Note GI27): the Vanilla folder keeps a derived landscape set's Projected noise and
-/// Detail normal jobs as it keeps the `_p` (O6), re-pathed by TA12; the CM folder never has them.
+/// Detail normal jobs as it keeps the `_p` (O6), re-pathed by TA12; the CM folder never has them. Under `textures/pbr/`
+/// the Vanilla path loses the `pbr` folder (fix round 1, Minor 1); `_detailnorm` is a `_detail` alias (the same slot);
+/// and the kept `_p` is planned as it is in a set without the two maps (the api.rs pick must not change it).
 #[test]
 fn landscape_noise_and_detail_stay_in_the_vanilla_folder() {
-    let d = tempfile::tempdir().unwrap();
-    let inputs = d.path().join("in");
-    dirt(&inputs, true);
-    let lan = inputs.join("textures/landscape");
-    png(&lan.join("dirt_noise.png"), 16, 16, [90, 90, 90, 255]);
-    png(&lan.join("dirt_detail.png"), 16, 16, [128, 128, 255, 255]);
-    let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
-    for (tail, input, subtype) in [
-        (
-            "textures/landscape/dirt_noise.dds",
-            "dirt_noise.png",
-            Subtype::ProjectedNoise,
-        ),
-        (
-            "textures/landscape/dirt_detail.dds",
-            "dirt_detail.png",
-            Subtype::DetailNormal,
-        ),
-    ] {
-        let j = out_job(&p, tail).unwrap_or_else(|| panic!("{tail} stays in the Vanilla folder"));
-        assert!(j.derive.is_none());
-        assert!(slash(&j.input).ends_with(input));
-        assert_eq!(j.profile.subtype, subtype);
-        assert!(
-            !j.game_path.to_lowercase().contains("/pbr/"),
-            "{}",
-            j.game_path
-        );
-        assert!(matches!(j.status, JobStatus::Ready), "{j:#?}");
+    for sub in ["textures/landscape", "textures/pbr/landscape"] {
+        for detail in ["dirt_detail", "dirt_detailnorm"] {
+            let d = tempfile::tempdir().unwrap();
+            let (plain, inputs) = (d.path().join("plain"), d.path().join("in"));
+            landscape_in(&plain, sub, "dirt", true);
+            landscape_in(&inputs, sub, "dirt", true);
+            let lan = inputs.join(sub);
+            png(&lan.join("dirt_noise.png"), 16, 16, [90, 90, 90, 255]);
+            png(
+                &lan.join(format!("{detail}.png")),
+                16,
+                16,
+                [128, 128, 255, 255],
+            );
+            let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
+            let why = format!("{sub} / {detail}");
+            for (stem, subtype) in [
+                ("dirt_noise", Subtype::ProjectedNoise),
+                (detail, Subtype::DetailNormal),
+            ] {
+                let tail = format!("textures/landscape/{stem}.dds");
+                let j = out_job(&p, &tail).unwrap_or_else(|| panic!("{why}: {tail} is kept"));
+                assert!(j.derive.is_none(), "{why}");
+                assert!(slash(&j.input).ends_with(&format!("{stem}.png")), "{why}");
+                assert_eq!(j.profile.subtype, subtype, "{why}");
+                assert!(
+                    !j.game_path.to_lowercase().contains("/pbr/"),
+                    "{why}: {}",
+                    j.game_path
+                );
+                assert!(matches!(j.status, JobStatus::Ready), "{why}: {j:#?}");
+            }
+            // The kept `_p` is the one a set without the two maps keeps.
+            let (q, _) = cs_then(DeriveMode::Vanilla, &plain, &d.path().join("q"), no_tweak);
+            let (with, without) = (
+                out_job(&p, "textures/landscape/dirt_p.dds").expect("the kept _p"),
+                out_job(&q, "textures/landscape/dirt_p.dds").expect("the kept _p, no maps"),
+            );
+            assert_eq!(with.profile, without.profile, "{why}");
+            assert_eq!(
+                format!("{:?}", with.status),
+                format!("{:?}", without.status),
+                "{why}"
+            );
+            assert_eq!(with.game_path, without.game_path, "{why}");
+            assert_eq!(
+                with.shader
+                    .as_ref()
+                    .map(|s| (s.shader, s.provenance.clone())),
+                without
+                    .shader
+                    .as_ref()
+                    .map(|s| (s.shader, s.provenance.clone())),
+                "{why}"
+            );
+            let (c, _) = cs_then(DeriveMode::Cm, &inputs, &d.path().join("cm"), no_tweak);
+            for stem in ["dirt_noise", detail] {
+                let tail = format!("textures/landscape/{stem}.dds");
+                assert!(out_job(&c, &tail).is_none(), "{why}: {tail} in CM");
+            }
+        }
     }
-    let (p, _) = cs_then(DeriveMode::Cm, &inputs, &d.path().join("cm"), no_tweak);
-    assert!(out_job(&p, "textures/landscape/dirt_noise.dds").is_none());
-    assert!(out_job(&p, "textures/landscape/dirt_detail.dds").is_none());
 }
-
 /// TA5: no `_p`, an opaque diffuse with no alpha, and no `_p` job.
 #[test]
 fn landscape_without_p_has_an_opaque_diffuse() {
