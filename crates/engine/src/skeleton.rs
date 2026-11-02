@@ -1,11 +1,14 @@
 //! Fast re-plan (R2 §1, §2): the global half of the last full plan (`Prepared`), kept per session and patched for
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
-use crate::api::{reencodes, Plan, Prepared};
+use crate::api::{
+    drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members, predict_suffixes,
+    reencodes, set_is_pbr, Plan, Prepared,
+};
 use crate::config::Target;
 use crate::discover::{InputFile, InputKind};
-use crate::helper::HelperRole;
-use crate::overrides::{project_rel, KeyForms, Scope, SetOverride};
-use crate::pack::plan::{raw_role, set_is_advanced_skin};
+use crate::group::TextureSet;
+use crate::overrides::{project_rel, KeyForms, Scope, SetOverride, SUBTYPE_FIELD};
+use crate::pack::plan::raw_role;
 use std::collections::{BTreeSet, HashMap};
 
 /// Why an edit cannot be patched in: the caller plans in full.
@@ -20,6 +23,8 @@ pub const REENCODE_CHANGE: &str = "reencode change";
 pub const HELPER_ROLE_CHANGE: &str = "helper.role change";
 pub const PBR_SUBTYPE: &str = "subtype on a PBR set member";
 pub const MEMBERSHIP_CHANGE: &str = "membership change";
+pub const PBR_CHANGE: &str = "set PBR status change";
+pub const PATCHED: &str = "patched skeleton";
 
 /// The packed-output suffixes a `[files]` key can name (`RecipeKind::suffix`).
 const PACKED_SUFFIXES: [&str; 4] = ["rmaos", "rfaos", "p", "m"];
@@ -36,6 +41,8 @@ pub struct Skeleton {
     pub(crate) key_sets: HashMap<String, Vec<u32>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
     pub(crate) pbr_sets: BTreeSet<u32>,
+    /// A clone `patch` returned: never patched again.
+    pub(crate) patched: bool,
 }
 
 impl Skeleton {
@@ -100,6 +107,7 @@ impl Skeleton {
             set_of,
             key_sets,
             pbr_sets,
+            patched: false,
         }
     }
 
@@ -118,22 +126,38 @@ impl Skeleton {
 
     /// A clone with each `(key, entry)` set in its `[files]` layer (`None` removes the key), and the keys of the
     /// sets those keys hit. `NeedsFull` when an edit could change membership, outputs or duplicates (R2 §2).
+    /// Checks, first hit wins: a patched skeleton; per key, a key that hits nothing, then a bad entry; per hit file, a
+    /// `reencode` change, then a `helper.role` change; the membership joins; a sub-type edit on a PBR set's member;
+    /// a hit set whose PBR status flips.
     pub fn patch(
         &self,
         changed: &[(String, Option<toml::Table>)],
     ) -> Result<(Skeleton, BTreeSet<String>), NeedsFull> {
+        // The GUI sends every key changed since the full plan, so a patch always starts from a full plan's skeleton
+        // (`key_sets` and `pbr_sets` are only right for that one).
+        if self.patched {
+            return Err(NeedsFull(PATCHED));
+        }
         let p = &self.prepared;
         let mut next = self.clone();
+        next.patched = true;
         let mut hit_sets: BTreeSet<u32> = BTreeSet::new();
         let mut hit_files: BTreeSet<usize> = BTreeSet::new();
+        let mut subtype_sets: BTreeSet<u32> = BTreeSet::new();
         for (key, entry) in changed {
             let sets = self
                 .key_sets
                 .get(&key.to_lowercase())
                 .ok_or(NeedsFull(HITS_NOTHING))?;
+            // The entry as `ConfigFile::files` holds it: once, for the layer and both documents.
+            let value = entry
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(|_| NeedsFull(BAD_ENTRY))?;
             let n = &mut next.prepared;
             n.file_scopes
-                .set_entry(key, entry.as_ref())
+                .set_entry(key, value.as_ref())
                 .map_err(|_| NeedsFull(BAD_ENTRY))?;
             if let Some(codes) = n.req.file_allow.get(key) {
                 n.file_scopes
@@ -144,9 +168,6 @@ impl Skeleton {
                 n.file_scopes.rebuild_keys();
             }
             // Keep the documents in step with the layer, as a fresh `prepare` would read them.
-            let value = entry
-                .as_ref()
-                .map(|t| serde_json::to_value(t).unwrap_or_default());
             for doc in [
                 n.project_config.as_mut(),
                 n.req.project_config_inline.as_mut(),
@@ -162,17 +183,13 @@ impl Skeleton {
             let subtype = |ovs: &[SetOverride]| -> Vec<serde_json::Value> {
                 ovs.iter()
                     .filter(|o| {
-                        o.field == "subtype" && matches!(&o.scope, Scope::Path(k) if k == key)
+                        o.field == SUBTYPE_FIELD && matches!(&o.scope, Scope::Path(k) if k == key)
                     })
                     .map(|o| o.value.clone())
                     .collect()
             };
-            // DECISIONS P1: a PBR member's sub-type moves the GUI's output paths, which the request carries.
-            if p.target == Target::Cs
-                && sets.iter().any(|s| self.pbr_sets.contains(s))
-                && subtype(&p.file_scopes.overrides) != subtype(&n.file_scopes.overrides)
-            {
-                return Err(NeedsFull(PBR_SUBTYPE));
+            if subtype(&p.file_scopes.overrides) != subtype(&n.file_scopes.overrides) {
+                subtype_sets.extend(sets.iter().copied());
             }
             hit_sets.extend(sets.iter().copied());
             for &s in sets {
@@ -187,8 +204,8 @@ impl Skeleton {
             }
         }
 
-        // What the edits change per hit file, under the old and the new layer.
-        let mut flips: Vec<usize> = vec![];
+        // What the edits change per hit file, under the old and the new layer (`prepare`'s own rules).
+        let mut typed = p.typed.clone();
         {
             let (old_ctx, new_ctx) = (p.ctx(), next.prepared.ctx());
             for &i in &hit_files {
@@ -196,66 +213,65 @@ impl Skeleton {
                 if f.kind == InputKind::Dds && reencodes(&old_ctx, f) != reencodes(&new_ctx, f) {
                     return Err(NeedsFull(REENCODE_CHANGE));
                 }
-                let hand = (f.kind == InputKind::Image)
-                    .then(|| crate::policy::helper_requested(&new_ctx, f).role)
-                    .flatten();
+                let hand = hand_role(&new_ctx, f);
                 if hand != p.hand[i] {
                     return Err(NeedsFull(HELPER_ROLE_CHANGE));
                 }
-                // As `prepare` builds `typed`.
-                let typed = raw_role(f).is_some()
-                    && match hand {
-                        Some(r) => r == HelperRole::NotHelper,
-                        None => crate::policy::subtype_requested(&new_ctx, f),
-                    };
-                if typed != p.typed.contains(&i) {
-                    flips.push(i);
+                if is_typed(&new_ctx, f, hand) {
+                    typed.insert(i);
+                } else {
+                    typed.remove(&i);
                 }
             }
-        }
-        // `drop_typed_roles` for the flipped files: a typed raw map's role leaves its set's suffixes unless another
-        // untyped raw member has it; an untyped one brings it back.
-        let n = &mut next.prepared;
-        for &i in &flips {
-            if !n.typed.remove(&i) {
-                n.typed.insert(i);
+            // Membership check: rerun `prepare`'s joins on its grouping under the new layer; any set whose members
+            // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
+            let mut joined = p.grouped.clone();
+            drop_typed_roles(&mut joined, &p.files, &typed);
+            join_members(
+                &mut joined,
+                &p.files,
+                p.registry.alias_table(),
+                &new_ctx,
+                &p.hand,
+            );
+            let same = |a: &TextureSet, b: &TextureSet| a.key == b.key && a.members == b.members;
+            if joined.len() != p.joined.len()
+                || !joined.iter().zip(&p.joined).all(|(a, b)| same(a, b))
+            {
+                return Err(NeedsFull(MEMBERSHIP_CHANGE));
             }
         }
-        for &i in &flips {
-            let (Some(r), Some(set)) = (
-                raw_role(&n.files[i]),
-                n.sets.get_mut(self.set_of[i] as usize),
-            ) else {
-                continue;
-            };
-            let kept = set
+        // DECISIONS P1: a PBR member's sub-type moves the GUI's output paths, which the request carries.
+        if p.target == Target::Cs && subtype_sets.iter().any(|s| self.pbr_sets.contains(s)) {
+            return Err(NeedsFull(PBR_SUBTYPE));
+        }
+        // The suffixes of the sets whose `typed` members changed: every raw role back, then `prepare`'s drop.
+        let n = &mut next.prepared;
+        let flipped: BTreeSet<u32> = typed
+            .symmetric_difference(&n.typed)
+            .map(|&i| self.set_of[i])
+            .filter(|&s| s != u32::MAX)
+            .collect();
+        n.typed = typed;
+        for s in flipped {
+            let set = &mut n.sets[s as usize];
+            let roles: Vec<String> = set
                 .members
                 .iter()
-                .any(|&j| !n.typed.contains(&j) && raw_role(&n.files[j]).is_some_and(|q| q == r));
-            if kept {
-                set.suffixes.insert(r.id());
-            } else {
-                set.suffixes.remove(&r.id());
-            }
+                .filter_map(|&i| raw_role(&n.files[i]).map(|r| r.id()))
+                .collect();
+            set.suffixes.extend(roles);
+            drop_typed_roles(std::slice::from_mut(set), &n.files, &n.typed);
         }
-        // Membership check: `x_wet` sits in set `x` only while `x` is Advanced skin (`join_skin_wet`, cs only).
-        if p.target == Target::Cs {
-            let (old_ctx, new_ctx) = (p.ctx(), next.prepared.ctx());
-            for &s in &hit_sets {
-                let (old, new) = (&p.sets[s as usize], &next.prepared.sets[s as usize]);
-                let wet_key = format!("{}_{}", old.key, crate::group::SKIN_WET);
-                let joins = old.suffixes.contains(crate::group::SKIN_WET)
-                    || p.sets.iter().any(|t| t.key == wet_key);
-                let Some(&first) = old.members.first() else {
-                    continue;
-                };
-                let f = &p.files[first];
-                if joins
-                    && set_is_advanced_skin(&old_ctx, old, f)
-                        != set_is_advanced_skin(&new_ctx, new, f)
-                {
-                    return Err(NeedsFull(MEMBERSHIP_CHANGE));
-                }
+        // A hit set whose PBR status flips moves output paths too (P1); decided as `set_resolved` decides it.
+        for &s in &hit_sets {
+            let mut set = n.sets[s as usize].clone();
+            let (explicit, _) = explicit_shaders(&n.req, std::slice::from_ref(&set));
+            let complex = explicit.get(&set.key) == Some(&crate::shader::Shader::ComplexMaterial);
+            predict_suffixes(&mut set, n.target, complex, &n.files, &n.typed, &n.hand);
+            if set_is_pbr(n.target, &set, &n.files).is_some_and(|b| b != self.pbr_sets.contains(&s))
+            {
+                return Err(NeedsFull(PBR_CHANGE));
             }
         }
         let keys = hit_sets
@@ -289,12 +305,10 @@ mod tests {
 
     fn skeleton(req: &BatchRequest) -> Skeleton {
         let rep = Reporter::new(Arc::new(NullSink), "t");
-        let e = Engine::new().unwrap();
-        let p = e.prepare(req, &rep, &CancelToken::default()).unwrap();
-        let (plan, pbr) = e
-            .plan_sets_pbr(
-                &p,
-                None,
+        let (plan, p, pbr) = Engine::new()
+            .unwrap()
+            .plan_full(
+                req,
                 &rep,
                 &CancelToken::default(),
                 &AnalysisCache::default(),
@@ -411,7 +425,7 @@ mod tests {
     }
 
     /// Removing a key, and a raw map's sub-type flipping it to an ordinary file and back, patch to what a fresh
-    /// `prepare` builds (`typed`, suffixes).
+    /// `prepare` builds (`typed`, suffixes). Each step patches a skeleton of a full plan, never a patched one.
     #[test]
     fn patch_matches_fresh_prepare() {
         let fx = fast_fixture();
@@ -430,9 +444,61 @@ mod tests {
         let fresh = prepare(&edited);
         assert_ne!(fresh.typed, s.prepared.typed, "the edit types q_height");
         assert_eq!(layer(&typed.prepared), layer(&fresh));
-        // And back: the role returns to the set's suffixes.
-        let (back, _) = typed.patch(&[("dir/q_height.png".into(), None)]).unwrap();
+        // And back, from the edited project's own full plan: the role returns to the set's suffixes.
+        let (back, _) = skeleton(&edited)
+            .patch(&[("dir/q_height.png".into(), None)])
+            .unwrap();
         assert_eq!(layer(&back.prepared), layer(&s.prepared));
+    }
+
+    /// Minor 7: a file name with upper-case letters is hit by its lower-cased and its exact-case key.
+    #[test]
+    fn mixed_case_names_are_hit_by_any_case() {
+        let fx = fast_fixture();
+        let s = skeleton(&fx.req);
+        for key in [
+            "dir/MixedCase.png",
+            "dir/mixedcase.png",
+            "dir/MixedCase",
+            "DIR/MIXEDCASE",
+        ] {
+            assert_eq!(ids(&s, key), vec!["dir/mixedcase".to_string()], "{key}");
+        }
+        let t = table("alpha.policy = \"cutout\"");
+        let (next, hit) = s
+            .patch(&[("dir/MixedCase.png".into(), Some(t.clone()))])
+            .unwrap();
+        assert_eq!(set_ids(&s, &hit), vec!["dir/mixedcase".to_string()]);
+        assert_eq!(
+            layer(&next.prepared),
+            layer(&prepare(&with_entry(
+                &fx.req,
+                "dir/MixedCase.png",
+                Some(&t)
+            )))
+        );
+    }
+
+    /// Minor 8, Note DT31: all six cube faces in one call scope the six face sets.
+    #[test]
+    fn one_patch_of_six_cube_faces_scopes_six_sets() {
+        let fx = fast_fixture();
+        let s = skeleton(&fx.req);
+        let t = table("subtype = \"cubemap\"\nalpha.policy = \"cutout\"");
+        let faces = ["px", "nx", "py", "ny", "pz", "nz"];
+        let changed: Vec<(String, Option<toml::Table>)> = faces
+            .iter()
+            .map(|f| (format!("dir/c_{f}"), Some(t.clone())))
+            .collect();
+        let (next, hit) = s.patch(&changed).unwrap();
+        let mut want: Vec<String> = faces.iter().map(|f| format!("dir/c_{f}")).collect();
+        want.sort();
+        assert_eq!(set_ids(&s, &hit), want);
+        let mut edited = fx.req.clone();
+        for (k, e) in &changed {
+            edited = with_entry(&edited, k, e.as_ref());
+        }
+        assert_eq!(layer(&next.prepared), layer(&prepare(&edited)));
     }
 
     #[test]
@@ -455,6 +521,28 @@ mod tests {
         );
         // Without the recipe `h` is no longer Advanced skin, so `h_wet` would leave its set.
         assert_eq!(one("dir/h_rmaos", None), Some(MEMBERSHIP_CHANGE));
+        // Typing both raw maps leaves `h` nothing to pack `_rfaos` from: no longer skin, `h_wet` leaves.
+        let diffuse = table("subtype = \"diffuse\"");
+        assert_eq!(
+            s.patch(&[
+                ("dir/h_roughness.png".into(), Some(diffuse.clone())),
+                ("dir/h_ao.png".into(), Some(diffuse.clone())),
+            ])
+            .err(),
+            Some(NeedsFull(MEMBERSHIP_CHANGE))
+        );
+        // Untyped, `q_rough` makes `q` pack `_rmaos`: the set turns PBR, which moves output paths (Note P1).
+        assert_eq!(one("dir/q_rough", None), Some(PBR_CHANGE));
+        // A patched skeleton is never patched again.
+        let (patched, _) = s
+            .patch(&[("dir/a.png".into(), Some(table("alpha.policy = \"cutout\"")))])
+            .unwrap();
+        assert_eq!(
+            patched
+                .patch(&[("dir/b.png".into(), Some(table("alpha.policy = \"cutout\"")))])
+                .err(),
+            Some(NeedsFull(PATCHED))
+        );
         assert_eq!(
             one("dir/a.png", Some("subtype = \"diffuse\"")),
             Some(PBR_SUBTYPE)
@@ -497,6 +585,38 @@ mod tests {
         let mut r = fx.req.clone();
         r.project_config_inline.as_mut().unwrap().preset = Some("cs-quality".into());
         assert_ne!(r.sig_without_files(), sig);
+    }
+
+    /// Minor 4: equal requests built in different insertion orders sign equally.
+    #[test]
+    fn sig_ignores_insertion_order() {
+        let fx = fast_fixture();
+        let build = |order: &[usize]| {
+            let mut r = fx.req.clone();
+            let entries = [
+                ("dir/a.png", crate::codes::Code::InDuplicate),
+                ("dir/b.png", crate::codes::Code::InDdsSkipped),
+                ("dir/c_px", crate::codes::Code::InDuplicate),
+            ];
+            for &i in order {
+                let (k, c) = entries[i];
+                r.file_allow.entry(k.into()).or_default().insert(c);
+                r.pinned_files.insert(k.into());
+                r.set_shaders
+                    .insert(format!("set{i}"), crate::shader::Shader::Pbr);
+            }
+            let text = if order[0] == 0 {
+                "[defaults]\nmips.filter = \"kaiser\"\nalpha.policy = \"cutout\"\n"
+            } else {
+                "[defaults]\nalpha.policy = \"cutout\"\nmips.filter = \"kaiser\"\n"
+            };
+            r.project_config_inline = Some(crate::presets::ConfigFile::parse(text, "t").unwrap());
+            r
+        };
+        assert_eq!(
+            build(&[0, 1, 2]).sig_without_files(),
+            build(&[2, 1, 0]).sig_without_files()
+        );
     }
 
     #[test]

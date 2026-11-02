@@ -27,6 +27,9 @@ subtype = "cubemap"
 
 [files."dir/h_rmaos".packing]
 recipe = "rfaos"
+
+[files."dir/q_rough"]
+subtype = "diffuse"
 "#;
 
 /// A temp project and the request that plans it.
@@ -70,7 +73,9 @@ fn put_normal(dir: &Path, name: &str) {
 ///   joins `h_wet`;
 /// - `i` (`i`, `i_rmaos`) borrowing `a`'s normal;
 /// - `j` and `k`, with a set edit moving `k.png` into set `dir/j`;
-/// - non-PBR `q` with a raw height `q_height` (packs `_p`).
+/// - non-PBR `q` with a raw height `q_height` (packs `_p`) and `q_rough`, typed `diffuse`: untyped, it would make
+///   `q` pack `_rmaos` and read as PBR;
+/// - `MixedCase.png`, a file name with upper-case letters.
 pub fn fast_fixture() -> FastFixture {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("in/dir");
@@ -117,6 +122,8 @@ pub fn fast_fixture() -> FastFixture {
     put_rgb(&d, "k.png", 81);
     put_rgb(&d, "q.png", 90);
     put_grey(&d, "q_height.png", 91);
+    put_grey(&d, "q_rough.png", 92);
+    put_rgb(&d, "MixedCase.png", 100);
 
     let mut req = BatchRequest::new(
         vec![dir.path().join("in")],

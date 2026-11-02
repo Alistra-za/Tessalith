@@ -315,10 +315,7 @@ impl Session {
         cancel: &CancelToken,
     ) -> Result<Plan, EngineError> {
         req.bc1_model = self.bc1_model;
-        let prepared = self.engine.prepare(&req, rep, cancel)?;
-        let (plan, pbr) = self
-            .engine
-            .plan_sets_pbr(&prepared, None, rep, cancel, &self.cache)?;
+        let (plan, prepared, pbr) = self.engine.plan_full(&req, rep, cancel, &self.cache)?;
         // A cancelled plan saw only part of its folder (and may be superseded): it must not evict a live one.
         if plan.cancelled.is_empty() {
             self.cache.retain_plan(&plan);

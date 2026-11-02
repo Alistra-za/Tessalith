@@ -229,21 +229,17 @@ impl FileScopes {
     }
 
     /// Replace every `[files]` override and the `allow` entry of `key` (this exact spelling, as the document holds
-    /// it) with `entry` parsed as the config loader does; `None` removes them. Overrides stay in key order, and the
-    /// key index is rebuilt. A bad entry is an error and changes nothing.
+    /// it) with `entry` (the TOML table as JSON, as `ConfigFile::files` holds it) parsed as the config loader does;
+    /// `None` removes them. Overrides stay in key order, and the key index is rebuilt. A bad entry is an error and
+    /// changes nothing.
     pub(crate) fn set_entry(
         &mut self,
         key: &str,
-        entry: Option<&toml::Table>,
+        entry: Option<&Value>,
     ) -> Result<(), crate::presets::PresetError> {
-        let parsed = match entry {
-            Some(t) => {
-                let v = serde_json::to_value(t)
-                    .map_err(|e| crate::presets::PresetError::Parse(e.to_string()))?;
-                Some(crate::presets::file_entry(key, &v)?)
-            }
-            None => None,
-        };
+        let parsed = entry
+            .map(|v| crate::presets::file_entry(key, v))
+            .transpose()?;
         let is_key = |o: &SetOverride| matches!(&o.scope, Scope::Path(k) if k == key);
         self.overrides.retain(|o| !is_key(o));
         self.allow.remove(key);
@@ -417,6 +413,8 @@ pub const FIELD_PATHS: &[&str] = &[
 ];
 
 pub const REENCODE_FIELD: &str = "reencode";
+/// The sub-type field.
+pub const SUBTYPE_FIELD: &str = "subtype";
 
 /// M6 Track F2 (DECISIONS Note W3): which base normal a layer file feeds; a per-file selector, not a profile field.
 pub const RNM_TARGET_FIELD: &str = "rnm.target";

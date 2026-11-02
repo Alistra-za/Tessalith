@@ -203,20 +203,130 @@ impl BatchRequest {
     }
 
     /// A hash of every field except the `[files]` table of `project_config_inline` and `plan_progress` (live
-    /// counters, not an input). Fields are hashed through their `Debug` form (most are not `Hash`); maps and sets
-    /// there are ordered, so it is stable within a build.
+    /// counters, not an input). Fields are hashed through their `Debug` form (most are not `Hash`), streamed into
+    /// the hasher with no copy of the request. Every map and set reachable from a request is a `BTreeMap`/`BTreeSet`
+    /// (`serde_json` without `preserve_order` included), so the form is the same whatever the insertion order; a
+    /// `HashMap` field would need hashing in sorted form. Stable within a build.
     pub fn sig_without_files(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut r = BatchRequest {
-            plan_progress: None,
-            ..self.clone()
-        };
-        if let Some(c) = &mut r.project_config_inline {
-            c.files.clear();
+        use std::fmt::Write;
+        use std::hash::Hasher;
+        struct Sink(std::collections::hash_map::DefaultHasher);
+        impl Write for Sink {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0.write(s.as_bytes());
+                Ok(())
+            }
         }
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        format!("{r:?}").hash(&mut h);
-        h.finish()
+        let mut h = Sink(Default::default());
+        // Destructured, so a new field fails to compile until it is hashed or left out on purpose.
+        let BatchRequest {
+            inputs,
+            output_root,
+            target,
+            preset,
+            preset_files,
+            user_config,
+            user_presets,
+            project_config,
+            project_config_inline,
+            overrides,
+            accept,
+            allow,
+            file_allow,
+            set_edits,
+            output_paths,
+            shared_roughness,
+            borrowed_normal,
+            set_shaders,
+            pinned_files,
+            mesh_shaders,
+            mesh_alpha,
+            gras_diffuses,
+            gras_all_diffuses,
+            cs_txst_sets,
+            recursive,
+            on_existing,
+            jobs,
+            mem_budget,
+            bc1_model,
+            nvtt,
+            sidecar,
+            dry_run,
+            plan_progress: _,
+            low_detail,
+            derive,
+            skip_root,
+        } = self;
+        let fields: [&dyn std::fmt::Debug; 34] = [
+            inputs,
+            output_root,
+            target,
+            preset,
+            preset_files,
+            user_config,
+            user_presets,
+            project_config,
+            overrides,
+            accept,
+            allow,
+            file_allow,
+            set_edits,
+            output_paths,
+            shared_roughness,
+            borrowed_normal,
+            set_shaders,
+            pinned_files,
+            mesh_shaders,
+            mesh_alpha,
+            gras_diffuses,
+            gras_all_diffuses,
+            cs_txst_sets,
+            recursive,
+            on_existing,
+            jobs,
+            mem_budget,
+            bc1_model,
+            nvtt,
+            sidecar,
+            dry_run,
+            low_detail,
+            derive,
+            skip_root,
+        ];
+        for f in fields {
+            let _ = write!(h, "{f:?};");
+        }
+        match project_config_inline {
+            None => {
+                let _ = write!(h, "None;");
+            }
+            Some(ConfigFile {
+                schema_version,
+                preset,
+                target,
+                defaults,
+                subtypes,
+                rules,
+                files: _,
+                inputs,
+                export,
+            }) => {
+                let inline: [&dyn std::fmt::Debug; 8] = [
+                    schema_version,
+                    preset,
+                    target,
+                    defaults,
+                    subtypes,
+                    rules,
+                    inputs,
+                    export,
+                ];
+                for f in inline {
+                    let _ = write!(h, "{f:?};");
+                }
+            }
+        }
+        h.0.finish()
     }
 }
 
@@ -944,6 +1054,10 @@ pub(crate) struct Prepared {
     pub(crate) target_src: Provenance,
     pub(crate) preset_id: String,
     pub(crate) files: Vec<InputFile>,
+    /// `group_sets_with`'s sets, before `drop_typed_roles` and the joins.
+    pub(crate) grouped: Vec<TextureSet>,
+    /// The sets after [`join_members`], before set edits.
+    pub(crate) joined: Vec<TextureSet>,
     /// Final membership, before the predicted packing suffixes.
     pub(crate) sets: Vec<TextureSet>,
     pub(crate) file_scopes: FileScopes,
@@ -1003,6 +1117,119 @@ fn base_ctx<'a>(
 /// A DDS input that `ctx` re-encodes (otherwise it is IN-DDS-SKIPPED).
 pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
+}
+
+/// Note DY: an image's hand-set `helper.role`.
+pub(crate) fn hand_role(ctx: &ResolveCtx, f: &InputFile) -> Option<crate::helper::HelperRole> {
+    (f.kind == InputKind::Image)
+        .then(|| crate::policy::helper_requested(ctx, f).role)
+        .flatten()
+}
+
+/// Trace-debug 2026-10-16 #4: a raw map whose sub-type was requested is an ordinary file (spec §4.4), as
+/// `plan_packing` treats it, so its role leaves the set's suffixes (unless another raw member has it) and Advanced
+/// skin detection and the `auto` prediction follow the recipe actually built. Note DY: a hand role `none` makes a raw
+/// map an ordinary file, like a requested sub-type; any other hand role wins over a requested sub-type (ruling 13).
+/// shortcut: rule-named sub-types are not seen here (rules need the analysis); revisit if a rule names one.
+pub(crate) fn is_typed(
+    ctx: &ResolveCtx,
+    f: &InputFile,
+    hand: Option<crate::helper::HelperRole>,
+) -> bool {
+    pack::plan::raw_role(f).is_some()
+        && match hand {
+            Some(r) => r == crate::helper::HelperRole::NotHelper,
+            None => crate::policy::subtype_requested(ctx, f),
+        }
+}
+
+/// Each typed raw member's role leaves its set's suffixes unless an untyped raw member has it too.
+pub(crate) fn drop_typed_roles(
+    sets: &mut [TextureSet],
+    files: &[InputFile],
+    typed: &BTreeSet<usize>,
+) {
+    for set in sets.iter_mut() {
+        let role = |i: usize| pack::plan::raw_role(&files[i]).map(|r| r.id());
+        let (typed_m, raw_m): (Vec<usize>, Vec<usize>) =
+            set.members.iter().partition(|i| typed.contains(i));
+        for r in typed_m.into_iter().filter_map(role) {
+            if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
+                set.suffixes.remove(&r);
+            }
+        }
+    }
+}
+
+/// The membership joins of grouping, in `prepare`'s order.
+pub(crate) fn join_members(
+    sets: &mut Vec<TextureSet>,
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+    ctx: &ResolveCtx,
+    hand: &[Option<crate::helper::HelperRole>],
+) {
+    // Note DY: a hand-set helper with no recognised suffix (`x_mask`) joins set `x` when it exists.
+    crate::group::join_helpers(sets, files, aliases, |i| {
+        hand[i].is_some_and(|r| r != crate::helper::HelperRole::NotHelper)
+    });
+    // Final review I3 (DECISIONS Note R): `x_wet` joins set `x` as its skin `_wet` member only on cs and only
+    // when `x` is Advanced skin. Before set edits, so they see the joined set like any automatic one.
+    // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here; move the explicit shaders up
+    // if such a project needs its `_wet` joined.
+    if ctx.target == Target::Cs {
+        join_skin_wet(sets, files, aliases, |s| {
+            s.members
+                .first()
+                .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
+        });
+    }
+}
+
+/// Spec §6.4 "Set membership", DECISIONS Note M7: a recipe's output joins its set before anything resolves.
+/// Note AZ: a set explicitly given complex material predicts the complex `_m` (the auto pick comes later and needs
+/// a member already typed complex_material, so it never adds a suffix of its own).
+pub(crate) fn predict_suffixes(
+    set: &mut TextureSet,
+    target: Target,
+    complex: bool,
+    files: &[InputFile],
+    typed: &BTreeSet<usize>,
+    hand: &[Option<crate::helper::HelperRole>],
+) {
+    let roles: BTreeSet<RawMap> = set
+        .members
+        .iter()
+        .filter(|i| !typed.contains(i))
+        .filter_map(|&i| match hand[i] {
+            Some(crate::helper::HelperRole::Raw(r)) => Some(r),
+            Some(_) => None,
+            None => pack::plan::raw_role(&files[i]),
+        })
+        .collect();
+    for s in pack::predicted_suffixes(target, complex, &roles) {
+        set.suffixes.insert(s.to_string());
+    }
+}
+
+/// Whether `set` (its predicted suffixes included) is a PBR set, as its `set_resolved` reports it; `None` for a set
+/// with no members.
+pub(crate) fn set_is_pbr(target: Target, set: &TextureSet, files: &[InputFile]) -> Option<bool> {
+    let &first = set
+        .members
+        .iter()
+        .find(|&&i| files[i].kind == InputKind::Image)
+        // Note FI2: an all-DDS set resolves too; `first` only feeds `is_pbr_set`'s game path.
+        .or_else(|| set.members.first())?;
+    Some(is_pbr_set(&SuggestContext {
+        target,
+        suffix: None,
+        game_path: &files[first].game_path,
+        set_suffixes: &set.suffixes,
+        alpha: AlphaContent::None,
+        is_float: false,
+        advanced_skin: false,
+    }))
 }
 
 impl Engine {
@@ -1130,7 +1357,22 @@ impl Engine {
         cancel: &CancelToken,
         cache: &AnalysisCache,
     ) -> Result<Plan, EngineError> {
-        self.plan_sets(&self.prepare(&req, rep, cancel)?, None, rep, cancel, cache)
+        self.plan_full(&req, rep, cancel, cache)
+            .map(|(plan, ..)| plan)
+    }
+
+    /// The one composition of a full plan: [`Engine::prepare`] then every set through [`Engine::plan_sets`].
+    /// Also returns the `Prepared` and the PBR set keys, which a session keeps as its skeleton.
+    pub(crate) fn plan_full(
+        &self,
+        req: &BatchRequest,
+        rep: &Reporter,
+        cancel: &CancelToken,
+        cache: &AnalysisCache,
+    ) -> Result<(Plan, Prepared, BTreeSet<String>), EngineError> {
+        let p = self.prepare(req, rep, cancel)?;
+        let (plan, pbr) = self.plan_sets(&p, None, rep, cancel, cache)?;
+        Ok((plan, p, pbr))
     }
 
     /// The global half of [`Engine::plan_cached`]: setup, discover, grouping, `[files]` scopes, set edits, output
@@ -1265,57 +1507,16 @@ impl Engine {
             &file_scopes,
             &nvtt,
         );
-        // Trace-debug 2026-10-16 #4: a raw map whose sub-type was requested is an ordinary file (spec §4.4), as
-        // `plan_packing` treats it, so its role leaves the set's suffixes (unless another raw member has it) and
-        // Advanced skin detection and the `auto` prediction below follow the recipe actually built.
-        // shortcut: rule-named sub-types are not seen here (rules need the analysis); revisit if a rule names one.
-        // Note DY: each image's hand-set `helper.role`. `none` makes a raw map an ordinary file, like a requested
-        // sub-type; any other hand role wins over a requested sub-type (ruling 13).
-        let hand: Vec<Option<crate::helper::HelperRole>> = files
-            .iter()
-            .map(|f| {
-                (f.kind == InputKind::Image)
-                    .then(|| crate::policy::helper_requested(&ctx, f).role)
-                    .flatten()
-            })
-            .collect();
+        let hand: Vec<Option<crate::helper::HelperRole>> =
+            files.iter().map(|f| hand_role(&ctx, f)).collect();
         let typed: BTreeSet<usize> = (0..files.len())
-            .filter(|&i| {
-                pack::plan::raw_role(&files[i]).is_some()
-                    && match hand[i] {
-                        Some(r) => r == crate::helper::HelperRole::NotHelper,
-                        None => crate::policy::subtype_requested(&ctx, &files[i]),
-                    }
-            })
+            .filter(|&i| is_typed(&ctx, &files[i], hand[i]))
             .collect();
-        let drop_typed_roles = |sets: &mut Vec<TextureSet>| {
-            for set in sets.iter_mut() {
-                let role = |i: usize| pack::plan::raw_role(&files[i]).map(|r| r.id());
-                let (typed_m, raw_m): (Vec<usize>, Vec<usize>) =
-                    set.members.iter().partition(|i| typed.contains(i));
-                for r in typed_m.into_iter().filter_map(role) {
-                    if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
-                        set.suffixes.remove(&r);
-                    }
-                }
-            }
-        };
-        drop_typed_roles(&mut sets);
-        // Note DY: a hand-set helper with no recognised suffix (`x_mask`) joins set `x` when it exists.
-        crate::group::join_helpers(&mut sets, &files, registry.alias_table(), |i| {
-            hand[i].is_some_and(|r| r != crate::helper::HelperRole::NotHelper)
-        });
-        // Final review I3 (DECISIONS Note R): `x_wet` joins set `x` as its skin `_wet` member only on cs and only
-        // when `x` is Advanced skin. Before set edits, so they see the joined set like any automatic one.
-        // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here; move the explicit shaders up
-        // if such a project needs its `_wet` joined.
-        if target == Target::Cs {
-            join_skin_wet(&mut sets, &files, registry.alias_table(), |s| {
-                s.members
-                    .first()
-                    .is_some_and(|&i| pack::plan::set_is_advanced_skin(&ctx, s, &files[i]))
-            });
-        }
+        // The skeleton keeps the grouping before the joins, so a patch can rerun them (fast re-plan).
+        let grouped = sets.clone();
+        drop_typed_roles(&mut sets, &files, &typed);
+        join_members(&mut sets, &files, registry.alias_table(), &ctx, &hand);
+        let joined = sets.clone();
         let stale = crate::sets::apply_set_edits(
             &mut sets,
             &files,
@@ -1325,7 +1526,7 @@ impl Engine {
             &req.set_edits,
         );
         // A touched set's suffixes were rebuilt from its members' names.
-        drop_typed_roles(&mut sets);
+        drop_typed_roles(&mut sets, &files, &typed);
         for s in &stale {
             rep.emit(
                 None,
@@ -1424,6 +1625,8 @@ impl Engine {
             target_src,
             preset_id,
             files,
+            grouped,
+            joined,
             sets,
             file_scopes,
             nvtt,
@@ -1436,22 +1639,9 @@ impl Engine {
     }
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
-    /// derive, RNM, bakes and the plan's events. `scope` (set keys) is not read yet: every set is planned.
+    /// derive, RNM, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
+    /// `pbr_sets`). `scope` (set keys) is not read yet: every set is planned.
     pub(crate) fn plan_sets(
-        &self,
-        p: &Prepared,
-        scope: Option<&BTreeSet<String>>,
-        rep: &Reporter,
-        cancel: &CancelToken,
-        cache: &AnalysisCache,
-    ) -> Result<Plan, EngineError> {
-        self.plan_sets_pbr(p, scope, rep, cancel, cache)
-            .map(|(plan, _)| plan)
-    }
-
-    /// [`Engine::plan_sets`], also returning the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
-    /// `pbr_sets`).
-    pub(crate) fn plan_sets_pbr(
         &self,
         p: &Prepared,
         scope: Option<&BTreeSet<String>>,
@@ -1479,25 +1669,10 @@ impl Engine {
             nvtt,
         );
 
-        // Spec §6.4 "Set membership", DECISIONS Note M7: a recipe's output joins its set before anything resolves.
-        // Note AZ: a set explicitly given complex material predicts the complex `_m` (the auto pick comes later and
-        // needs a member already typed complex_material, so it never adds a suffix of its own).
         let (explicit, stale_shaders) = explicit_shaders(req, &sets);
         for set in &mut sets {
-            let roles: BTreeSet<RawMap> = set
-                .members
-                .iter()
-                .filter(|i| !typed.contains(i))
-                .filter_map(|&i| match hand[i] {
-                    Some(crate::helper::HelperRole::Raw(r)) => Some(r),
-                    Some(_) => None,
-                    None => pack::plan::raw_role(&files[i]),
-                })
-                .collect();
             let complex = explicit.get(&set.key) == Some(&Shader::ComplexMaterial);
-            for s in pack::predicted_suffixes(target, complex, &roles) {
-                set.suffixes.insert(s.to_string());
-            }
+            predict_suffixes(set, target, complex, files, typed, hand);
         }
         let set_of: BTreeMap<usize, &str> = sets
             .iter()
@@ -2394,24 +2569,9 @@ impl Engine {
         let index = crate::shader::JobIndex::new(&jobs);
         let mut pbr_sets = BTreeSet::new();
         for set in &sets {
-            let Some(&first) = set
-                .members
-                .iter()
-                .find(|&&i| files[i].kind == InputKind::Image)
-                // Note FI2: an all-DDS set resolves too; `first` only feeds `is_pbr_set`'s game path.
-                .or_else(|| set.members.first())
-            else {
+            let Some(pbr) = set_is_pbr(target, set, files) else {
                 continue;
             };
-            let pbr = is_pbr_set(&SuggestContext {
-                target,
-                suffix: None,
-                game_path: &files[first].game_path,
-                set_suffixes: &set.suffixes,
-                alpha: AlphaContent::None,
-                is_float: false,
-                advanced_skin: false,
-            });
             if pbr {
                 pbr_sets.insert(set.key.clone());
             }
@@ -3067,7 +3227,7 @@ fn run_one(
 /// without `/` also names every set whose key ends in `/<id>`. GUI ids are canonical and match exactly (final
 /// review I2). Also returns each id that names no set, once, for one SET-EDIT-STALE each at step 6a. Computed
 /// before the packing prediction (step 6), which reads it (Note AZ).
-fn explicit_shaders(
+pub(crate) fn explicit_shaders(
     req: &BatchRequest,
     sets: &[TextureSet],
 ) -> (BTreeMap<String, Shader>, Vec<String>) {
@@ -4063,7 +4223,7 @@ mod tests {
         let run = || {
             let sink = Arc::new(VecSink::default());
             let rep = Reporter::new(sink.clone(), "t");
-            let plan = engine.plan_sets(&p, None, &rep, &cancel, &cache).unwrap();
+            let plan = engine.plan_sets(&p, None, &rep, &cancel, &cache).unwrap().0;
             let events: Vec<Value> = sink
                 .take()
                 .into_iter()
