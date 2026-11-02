@@ -375,6 +375,33 @@ fn partial_equals_next_full_plan() {
         };
         let scope = &partial.scope;
         let ids: BTreeSet<String> = scope.iter().map(id).collect();
+        // The partial holds its scope only: nothing outside it, and every scope set resolved.
+        let plan = &partial.plan;
+        assert!(
+            plan.jobs.iter().all(|j| scope.contains(&j.set_key))
+                && plan
+                    .skipped
+                    .iter()
+                    .all(|s| s.set.as_ref().is_some_and(|k| scope.contains(k)))
+                && plan.helpers.iter().all(|h| scope.contains(&h.set_key)),
+            "{}: the partial plans outside its scope",
+            r.name
+        );
+        let pevents = psink.take();
+        let resolved: BTreeSet<String> = pevents
+            .iter()
+            .filter(|e| matches!(e.kind, EventKind::SetResolved { .. }))
+            .filter_map(|e| e.set.clone())
+            .collect();
+        assert_eq!(&resolved, scope, "{}: resolved sets", r.name);
+        assert!(
+            pevents
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::FilePlanned { .. }))
+                .all(|e| e.set.as_ref().is_some_and(|k| scope.contains(k))),
+            "{}: a planned file outside the scope",
+            r.name
+        );
         for want in r.scope_has {
             assert!(
                 ids.contains(*want),
@@ -390,7 +417,6 @@ fn partial_equals_next_full_plan() {
             .unwrap();
         timed.get_or_insert((ms, t.elapsed().as_secs_f64() * 1e3));
         let fevents = fsink.take();
-        let pevents = psink.take();
         let got = restricted(&partial.plan, &pevents, scope);
         let want = restricted(&full, &fevents, scope);
         if got != want {
