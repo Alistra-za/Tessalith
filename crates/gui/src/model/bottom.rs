@@ -164,6 +164,8 @@ pub struct Problem {
     pub suggested: Option<engine::config::Subtype>,
     /// Note FC1: more for the row's hover (the combined row lists what it covers), one line each.
     pub detail: Option<String>,
+    /// Note F?: a block or ask row, checked on the last full plan (`AppModel::fix_off_for`).
+    pub carried: bool,
 }
 
 impl Problem {
@@ -343,6 +345,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         fix: None,
         suggested: None,
         detail: None,
+        carried: false,
     };
     let mut out = vec![];
     // Note FC1 (AM14): the plan runs on the fallback so the window is not empty, but the export waits for a preset.
@@ -388,6 +391,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         };
         out.push(Problem {
             fix: b.fix,
+            carried: true,
             ..row(Level::Blocks, at, b.text, None)
         });
     }
@@ -458,7 +462,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         } else {
             set_at(&a.set_key, &a.set_id)
         };
-        out.push(row(Level::Warning, at, a.text, None));
+        out.push(Problem {
+            carried: true,
+            ..row(Level::Warning, at, a.text, None)
+        });
     }
     for i in m
         .items

@@ -460,6 +460,34 @@ fn problems_after_partial_then_full_equal_fresh() {
     assert_eq!(*after, *problems(&again));
 }
 
+/// Note F?7 (final fixes I3): a block row carried from the last full plan keeps its fix off ("being rechecked")
+/// while the full plan of an edit that resolved it is out; other rows' fixes work after the partial.
+#[test]
+fn a_carried_block_row_waits_for_the_full_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    decided(&mut m, WALL_N, Subtype::SkinSk);
+    decided(&mut m, WALL, Subtype::Glow);
+    let clash = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.level == Level::Blocks && p.text.contains("_g and _sk both use slot 3"))
+            .cloned()
+    };
+    let row = clash(&m).expect("the clash blocks");
+    assert!(row.carried);
+    assert_eq!(m.fix_off_for(&row), None, "no plan out: the fix works");
+    m.decide(WALL, Answer::Subtype(Subtype::Diffuse));
+    let (partials, full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    assert_eq!(m.fix_off(), None, "the partial landed: plain fixes work");
+    let row = clash(&m).expect("the block is carried until the full plan");
+    let off = m.fix_off_for(&row).expect("a carried row's fix is off");
+    assert!(off.contains("rechecked"), "{off}");
+    finish(&mut m, full);
+    assert!(clash(&m).is_none(), "the full plan dropped the block");
+}
+
 /// Note F?7: the views a partial splices equal a fresh build on the same model, for an edited set and for a set that
 /// borrows from it, and Problems' set rows read them at once.
 #[test]

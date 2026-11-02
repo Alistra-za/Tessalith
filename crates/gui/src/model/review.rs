@@ -545,6 +545,15 @@ impl AppModel {
         })
     }
 
+    /// Note F?: `fix_off` for one Problems row. A block or ask row comes from the last full plan, so a partial plan
+    /// may have made it stale: its fix stays off until the full plan lands.
+    pub fn fix_off_for(&self, p: &super::bottom::Problem) -> Option<String> {
+        self.fix_off().or_else(|| {
+            (p.carried && self.full_plan_pending())
+                .then(|| "Being rechecked: wait for the plan to finish".to_string())
+        })
+    }
+
     /// Ok((files, skipped_undecided)) or Err(the reason the button shows), in A9's order.
     pub fn review_gate(&self) -> Result<(usize, usize), String> {
         if self.root.is_none() {
