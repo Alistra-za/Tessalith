@@ -365,6 +365,18 @@ impl Session {
         Ok(plan)
     }
 
+    /// `plan` that leaves the skeleton (and the cache's trim) alone: an export plans on its own token, which no
+    /// re-plan cancels, so its skeleton could land after a newer edit's plan (fast re-plan, Note F?).
+    pub fn plan_no_skeleton(
+        &self,
+        mut req: BatchRequest,
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<Plan, EngineError> {
+        req.bc1_model = self.bc1_model;
+        Ok(self.engine.plan_full(&req, rep, cancel, &self.cache)?.0)
+    }
+
     /// Store a finished full plan's skeleton (and trim the cache to it) unless the plan was cancelled: it saw only
     /// part of its folder, or a newer plan superseded it. The token is read under the skeleton lock, so a superseded
     /// plan that finished late never overwrites the newer plan's skeleton (the caller cancels the old token before it
@@ -730,6 +742,13 @@ mod tests {
             !Arc::ptr_eq(&first, &s.skeleton().unwrap()),
             "current: stored"
         );
+        // An export's plan never stores its skeleton.
+        let kept = s.skeleton().unwrap();
+        let plan = s
+            .plan_no_skeleton(req(), &rep, &CancelToken::default())
+            .unwrap();
+        assert!(!plan.jobs.is_empty(), "it planned");
+        assert!(Arc::ptr_eq(&kept, &s.skeleton().unwrap()), "export: kept");
     }
 
     /// Note AQ: the stored source of MSN, flow and complex grass is the encoder input before rounding. Grass builds
