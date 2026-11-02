@@ -782,4 +782,43 @@ mod tests {
         assert_eq!(s.req_sig, req.sig_without_files());
         assert!(!s.key_sets.is_empty());
     }
+
+    /// Note F?3: a partial whose plan writes one output twice, or writes one a set outside its scope wrote in the
+    /// last full plan, needs the full plan. No `[files]` edit the patch lets through moves an output (a cube face's
+    /// edit pulls in the set its merged output meets), so the plan is edited by hand here.
+    #[test]
+    fn writer_clash_catches_a_new_collision() {
+        let fx = fast_fixture();
+        let session = crate::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+        let rep = Reporter::new(Arc::new(NullSink), "t");
+        let full = session
+            .plan_and_keep(fx.req.clone(), &rep, &CancelToken::default())
+            .unwrap();
+        let s = session.skeleton().unwrap();
+        let ready = |p: &Plan| {
+            p.jobs
+                .iter()
+                .filter(|j| matches!(j.status, JobStatus::Ready) && !j.set_key.is_empty())
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let jobs = ready(&full);
+        let (a, b) = (
+            &jobs[0],
+            jobs.iter().find(|j| j.set_key != jobs[0].set_key).unwrap(),
+        );
+        let scope = |j: &crate::policy::ResolvedJob| BTreeSet::from([j.set_key.clone()]);
+        let mut plan = full;
+        plan.jobs = vec![a.clone()];
+        assert!(!s.writer_clash(&scope(a), &plan), "its own output");
+        plan.jobs = vec![a.clone(), a.clone()];
+        assert!(s.writer_clash(&scope(a), &plan), "twice itself");
+        let mut moved = a.clone();
+        moved.output = b.output.clone();
+        plan.jobs = vec![moved];
+        assert!(
+            s.writer_clash(&scope(a), &plan),
+            "b's output, b out of scope"
+        );
+    }
 }
