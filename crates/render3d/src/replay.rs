@@ -2,12 +2,11 @@
 //! samplers, so the CS shader math is compared in isolation from render3d's own extraction and cbuffer writers.
 //! Ruling D-P2: the captured IA + mesh.vb/ib are drawn as they are; the VS defines are derived from the PS list and
 //! the IA ([`vs_defines`]) and checked against the compiled VS input signature.
-use crate::compile::compile;
+use crate::compile::{compile, to_defines};
 use crate::composite::{Composite, EnvMaps, Inputs};
 use crate::device::{Gpu, Target, MRT_FORMATS};
 use crate::draw::create_program;
 use crate::golden;
-use crate::permutation::Defines;
 use crate::textures::{cube_bpp, cube_srv, load_dds, read_cube_dds};
 use crate::Renderer;
 use serde_json::Value;
@@ -891,18 +890,6 @@ pub fn vs_defines(ps: &[String], mesh: &ReplayMesh) -> Vec<String> {
         out.push("SKINNED".into());
     }
     out
-}
-
-/// "K=V" → (K, V); bare K → (K, "1") as in permutation.rs.
-pub(crate) fn to_defines<'a>(list: impl IntoIterator<Item = &'a String>) -> Defines {
-    Defines(
-        list.into_iter()
-            .map(|d| match d.split_once('=') {
-                Some((k, v)) => (k.to_string(), v.to_string()),
-                None => (d.clone(), "1".to_string()),
-            })
-            .collect(),
-    )
 }
 
 fn buffer(gpu: &Gpu, bytes: &[u8], bind: D3D11_BIND_FLAG) -> Result<ID3D11Buffer, String> {

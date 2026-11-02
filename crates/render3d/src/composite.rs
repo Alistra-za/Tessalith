@@ -7,7 +7,7 @@
 //! D5: DepthTexture, the Dynamic Cubemaps cubes (EnvTexture, EnvReflectionsTexture) and the sampler come from
 //! [`Inputs`]: the GUI passes the deferred depth and the HDRI cube ([`EnvMaps`]), the replay the captured ones. A
 //! reflected input that is not given is an error (fail closed).
-use crate::compile::{compile, Reflection, SrvKind};
+use crate::compile::{compile, to_defines, Reflection, SrvKind};
 use crate::cs_settings;
 use crate::device::{Gpu, Target};
 use crate::draw::{cbuffers, upload, Cb};
@@ -144,7 +144,7 @@ impl Composite {
             );
         }
         let s = src.get(Path::new(SOURCE))?;
-        let c = compile(&s, &crate::replay::to_defines(defines), "cs_5_0", cache_dir)?;
+        let c = compile(&s, &to_defines(defines), "cs_5_0", cache_dir)?;
         let r = c.reflection;
         if r.threads == [0; 3] {
             return Err(format!("{SOURCE}: no thread-group size"));
