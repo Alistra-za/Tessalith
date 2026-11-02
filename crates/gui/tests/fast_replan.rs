@@ -320,13 +320,12 @@ fn export_waits_for_full_after_partial() {
     assert!(m.export_queued(), "the click waits for the full plan");
     assert!(m.export.running.is_none() && m.review.is_none());
     finish(&mut m, full);
-    // The queued click ran its checks on the full plan: this fixture's pitfalls open Review, and nothing was written.
+    // The queued click ran its checks on the full plan and, with everything decided, exported without Review.
     assert!(!m.export_queued());
-    assert!(m.review.is_some(), "the queued click opened Review");
-    assert!(m.export.summary.is_none(), "nothing exported before Review");
-    m.acknowledge_all_asks();
-    m.export_from_review();
-    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        m.review.is_none(),
+        "this fixture exports straight from the queue"
+    );
     assert!(
         m.export.summary.is_some() && m.export.error.is_none(),
         "the export ran: {:?}",
