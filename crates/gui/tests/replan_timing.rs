@@ -98,13 +98,34 @@ fn one_edit_settles() {
         .unwrap()
         .with_disk_cache(tmp.path().join("analysis-cache"));
     let export = tmp.path().join("export");
+    // `SDC_REPLAN_GUI_TOML`: a copy of the owner's `gui.toml` (read only, never saved: no settings path). Its export
+    // folder and Meshes source are replaced, so nothing outside the tempdir is written or scanned; the accept mode
+    // is the app's own default, as the owner runs it. Unset: defaults, and one edit is one plan (accept None).
+    let owner = std::env::var_os("SDC_REPLAN_GUI_TOML").map(PathBuf::from);
+    let base = match &owner {
+        Some(p) => {
+            let (s, err) = GuiSettings::load(p);
+            assert!(err.is_none(), "{err:?}");
+            s
+        }
+        None => GuiSettings::default(),
+    };
     let settings = GuiSettings {
         export_folder: Some(export.clone()),
-        ..GuiSettings::default()
+        meshes: Default::default(),
+        ..base
     };
     let mut m = AppModel::new(settings, None, Arc::new(session));
-    // One edit is one plan: no suggestion is recorded after it (`finish_plan`).
-    m.accept = engine::policy::AcceptSuggestions::None;
+    if owner.is_none() {
+        m.accept = engine::policy::AcceptSuggestions::None;
+    }
+    println!(
+        "settings: {}, accept {:?}",
+        owner
+            .as_ref()
+            .map_or("defaults".into(), |p| p.display().to_string()),
+        m.accept
+    );
     m.scan_db = std::env::var_os("SDC_REPLAN_SCAN_DB").map(PathBuf::from);
     let t = Instant::now();
     m.open_folder(scratch.clone());
@@ -152,8 +173,13 @@ fn one_edit_settles() {
         frame(&m)
     );
 
-    // 3. Time (i), (ii), (iii), alternating the value; best of 3.
-    let (mut t1, mut t2, mut t3) = (vec![], vec![], vec![]);
+    // 3. Time (i), (ii), (iii), alternating the value; best of 3. Every poll that changed something is followed by a
+    // frame (views + Problems), as the app draws; the panel's grey time (`plan_wait`) is logged with its cause.
+    assert!(
+        !m.scan_running && !m.scan_store_unsettled,
+        "the votes read must run"
+    );
+    let (mut t1, mut t2, mut t3, mut tf, mut tg) = (vec![], vec![], vec![], vec![], vec![]);
     for (n, policy) in [AlphaPolicy::Cutout, AlphaPolicy::Blend, AlphaPolicy::Cutout]
         .into_iter()
         .enumerate()
@@ -163,57 +189,117 @@ fn one_edit_settles() {
         m.set_field(&key, "alpha.policy", json!(policy));
         let edit = s.elapsed();
         assert!(m.partial_pending, "the edit sent a partial plan");
-        let (mut slowest, mut landing) = (Duration::ZERO, Duration::ZERO);
-        while m.applied_seq < m.edit_seq {
-            let p = Instant::now();
-            m.poll();
-            let d = p.elapsed();
-            slowest = slowest.max(d);
-            if m.applied_seq == m.edit_seq {
-                landing = d;
+        let (mut i, mut ii, mut rows) = (None, None, 0);
+        let mut landings = vec![];
+        let (mut slowest_poll, mut slowest_frame) = (Duration::ZERO, Duration::ZERO);
+        // Grey intervals: (cause, from, to) in ms since the edit; the cause is the first of partial, votes, plan.
+        let mut grey: Vec<(&str, f64, f64)> = vec![];
+        let cause = |m: &AppModel| {
+            if !m.plan_wait() {
+                None
+            } else if m.partial_pending {
+                Some("partial")
+            } else if m.votes_pending() {
+                Some("votes")
+            } else {
+                Some("plan")
             }
-            assert!(s.elapsed() < Duration::from_secs(120), "no partial landed");
+        };
+        let mut open: Option<(&str, f64)> = cause(&m).map(|c| (c, 0.0));
+        loop {
+            let p = Instant::now();
+            let changed = m.poll();
+            let pd = p.elapsed();
+            let poll_end = ms(s.elapsed());
+            slowest_poll = slowest_poll.max(pd);
+            let landed = m.plan_marks().1 > plans + landings.len() as u64;
+            let mut fd = Duration::ZERO;
+            if changed {
+                let f = Instant::now();
+                let _ = views(&m);
+                let r = problems(&m).len();
+                fd = f.elapsed();
+                slowest_frame = slowest_frame.max(fd);
+                if i.is_none() && m.applied_seq == m.edit_seq && m.plan_marks().1 == plans {
+                    i = Some(poll_end);
+                    ii = Some(ms(s.elapsed()));
+                    rows = r;
+                }
+            }
+            if landed {
+                landings.push((ms(pd), ms(fd)));
+            }
+            let now = ms(s.elapsed());
+            let c = cause(&m);
+            if open.map(|o| o.0) != c {
+                if let Some((oc, from)) = open.take() {
+                    grey.push((oc, from, now));
+                }
+                open = c.map(|c| (c, now));
+            }
+            if !m.busy() && !m.v2_jobs_pending() {
+                break;
+            }
+            assert!(s.elapsed() < Duration::from_secs(300), "did not settle");
             std::thread::sleep(Duration::from_millis(1));
         }
-        let i = s.elapsed();
-        assert_eq!(
-            m.plan_marks().1,
-            plans,
-            "the partial landed first, not the full plan"
-        );
-        let f = Instant::now();
-        let _ = views(&m);
-        let rows = problems(&m).len();
-        let first = f.elapsed();
-        let ii = s.elapsed();
-        assert!(m.wait_idle(Duration::from_secs(300)));
         let iii = s.elapsed();
-        assert_eq!(m.plan_marks().1, plans + 1, "one edit is one full plan");
+        let (i, ii) = (i.expect("the partial landed first"), ii.unwrap());
         println!(
-            "edit {n} ({policy:?}): set_field {:.1} ms; (i) partial applied {:.0} ms (the poll that applied it \
-             {:.1} ms, slowest poll {:.1} ms); (ii) +views+problems {:.1} ms ({rows} rows) = {:.0} ms; (iii) settled \
-             {:.2} s",
+            "edit {n} ({policy:?}): set_field {:.1} ms; (i) partial applied {i:.0} ms; (ii) +views+problems = \
+             {ii:.0} ms ({rows} rows); (iii) settled {:.2} s; {} full plan(s); slowest poll {:.1} ms, slowest frame \
+             {:.1} ms",
             ms(edit),
-            ms(i),
-            ms(landing),
-            ms(slowest),
-            ms(first),
-            ms(ii),
-            iii.as_secs_f64()
+            iii.as_secs_f64(),
+            m.plan_marks().1 - plans,
+            ms(slowest_poll),
+            ms(slowest_frame),
         );
-        t1.push(ms(i));
-        t2.push(ms(ii));
+        for (k, (pd, fd)) in landings.iter().enumerate() {
+            println!("  full plan {k} landed: its poll {pd:.1} ms, the frame after it {fd:.1} ms");
+        }
+        let after_partial: f64 = grey
+            .iter()
+            .filter(|g| g.0 != "partial")
+            .map(|g| g.2 - g.1)
+            .sum();
+        for (c, from, to) in &grey {
+            println!("  grey ({c}): {from:.0}..{to:.0} ms ({:.0} ms)", to - from);
+        }
+        println!("  grey after the partial: {after_partial:.0} ms");
+        t1.push(i);
+        t2.push(ii);
         t3.push(iii.as_secs_f64());
-        // The app draws after the full plan lands; the next partial splices that frame's views.
-        println!("  frame after its full plan: {:.1} ms", frame(&m));
+        tf.extend(landings.iter().map(|l| l.0 + l.1));
+        tg.push(after_partial);
     }
     let best = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+    let worst = |v: &[f64]| v.iter().copied().fold(0.0, f64::max);
     println!(
-        "BEST: (i) {:.0} ms, (ii) {:.0} ms, (iii) {:.2} s",
+        "BEST: (i) {:.0} ms, (ii) {:.0} ms, (iii) {:.2} s; full-plan landing poll + frame best {:.0} ms, worst {:.0} \
+         ms; grey after the partial worst {:.0} ms",
         best(&t1),
         best(&t2),
-        best(&t3)
+        best(&t3),
+        best(&tf),
+        worst(&tf),
+        worst(&tg)
     );
+    // The cold parts of a frame after a full plan.
+    m.invalidate_views();
+    let s = Instant::now();
+    let _ = views(&m);
+    let v = ms(s.elapsed());
+    let s = Instant::now();
+    let _ = export_blocks(&m);
+    let b = ms(s.elapsed());
+    let s = Instant::now();
+    let _ = export_asks(&m);
+    let a = ms(s.elapsed());
+    let s = Instant::now();
+    let _ = problems(&m);
+    let p = ms(s.elapsed());
+    println!("cold: views {v:.1} ms, export_blocks {b:.1} ms, export_asks {a:.1} ms, Problems' own loops {p:.1} ms");
 
     // The GUI thread's part of one edit, on the settled model.
     let (b, md) = time(5, || {
