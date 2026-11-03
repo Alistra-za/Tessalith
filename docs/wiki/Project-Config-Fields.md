@@ -126,7 +126,7 @@ These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` f
 
 The order the cube is built in is in [Cubemaps](Cubemaps.md#order-of-work).
 
-A cube is written as BC1, BC3, BC7 or RGBA8 with the UNORM tag; any other `format` or an sRGB tag is `CFG-INVALID`. `mips.levels = "none"` raises `CUBE-NO-MIPS`.
+A cube is written as BC1, BC3, BC7, RGBA8 or RGB8 with the UNORM tag; any other `format` or an sRGB tag is `CFG-INVALID`. `mips.levels = "none"` raises `CUBE-NO-MIPS`.
 
 ## Re-encoding DDS inputs
 

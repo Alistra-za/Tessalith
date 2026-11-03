@@ -557,3 +557,77 @@ fn a_kra_source_is_reported_not_skipped() {
         }
     }
 }
+
+/// Note FM38: the legacy layouts load as 8-bit sources. An A8L8 file is grey with alpha, so it reports four channels
+/// and an alpha: `analyse` takes `channels == 2` for a two-channel (Z-less) normal source, which a grey map is not.
+#[test]
+fn legacy_uncompressed_layouts_load_with_the_source_info_of_what_they_hold() {
+    let d = tempfile::tempdir().unwrap();
+    // (bits, [R, G, B, A masks], pixel bytes, pixel, (bit depth, channels, alpha, float))
+    type Case<'a> = (u32, [u32; 4], &'a [u8], [u8; 4], (u8, u8, bool, bool));
+    let cases: [Case; 4] = [
+        (
+            24,
+            [0xff_0000, 0xff00, 0xff, 0],
+            &[30, 20, 10],
+            [10, 20, 30, 255],
+            (8, 3, false, false),
+        ),
+        (
+            16,
+            [0xff, 0, 0, 0xff00],
+            &[77, 200],
+            [77, 77, 77, 200],
+            (8, 4, true, false),
+        ),
+        (
+            8,
+            [0xff, 0, 0, 0xff00],
+            &[77, 200],
+            [77, 77, 77, 200],
+            (8, 4, true, false),
+        ),
+        (
+            16,
+            [0xffff, 0, 0, 0],
+            &[0x34, 0x12],
+            [0x12, 0x12, 0x12, 255],
+            (8, 1, false, false),
+        ),
+    ];
+    for (i, (bits, masks, px, want, (depth, ch, alpha, float))) in cases.into_iter().enumerate() {
+        let mut hd = [0u32; 31];
+        hd[0] = 124;
+        hd[1] = 0x1 | 0x2 | 0x4 | 0x8 | 0x1000;
+        hd[2] = 1;
+        hd[3] = 1;
+        hd[4] = px.len() as u32;
+        hd[5] = 1;
+        hd[6] = 1;
+        hd[18] = 32;
+        hd[19] = 0x40 | if masks[3] != 0 { 1 } else { 0 };
+        hd[21] = bits;
+        hd[22..26].copy_from_slice(&masks);
+        hd[26] = 0x1000;
+        let mut b = b"DDS ".to_vec();
+        for v in hd {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        b.extend_from_slice(px);
+        let p = d.path().join(format!("legacy{i}.dds"));
+        std::fs::write(&p, b).unwrap();
+        let (img, info, meta) = load_image_meta(&p).unwrap_or_else(|e| panic!("{i}: {e}"));
+        assert_eq!(
+            (info.bit_depth, info.channels, info.has_alpha, info.is_float),
+            (depth, ch, alpha, float),
+            "case {i}"
+        );
+        assert_eq!(
+            img.at(0, 0).map(|v| (v * 255.0).round() as u8),
+            want,
+            "case {i}"
+        );
+        // No DXGI equivalent: `policy` must not take A8L8 for the R8G8 two-channel path.
+        assert_eq!(meta.dds_dxgi, Some(0), "case {i}");
+    }
+}

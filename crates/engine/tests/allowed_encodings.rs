@@ -150,8 +150,8 @@ fn grey_skin_wet_allows_what_check_profile_accepts() {
     }
 }
 
-/// Note FM38: rgb8 is offered where rgba8 is offered with a linear tag, under both targets, and never with `_SRGB`. A
-/// cubemap is the one exception: it stays BC1, BC3, BC7 or RGBA8.
+/// Note FM38: rgb8 is offered where rgba8 is offered with a linear tag, under both targets, and never with `_SRGB`, a
+/// cubemap included (owner ruling T27B-c).
 #[test]
 fn rgb8_is_allowed_where_rgba8_unorm_is() {
     for t in [Target::Cs, Target::Vanilla] {
@@ -159,12 +159,7 @@ fn rgb8_is_allowed_where_rgba8_unorm_is() {
             let a = allowed_encodings(st, t);
             let rgba8 = a.contains(&(Format::Rgba8, ColorTag::Unorm));
             let rgb8 = a.contains(&(Format::Rgb8, ColorTag::Unorm));
-            assert_eq!(
-                rgb8,
-                rgba8 && st != Subtype::Cubemap,
-                "{st:?} {t:?}: {}",
-                pairs(&a)
-            );
+            assert_eq!(rgb8, rgba8, "{st:?} {t:?}: {}", pairs(&a));
             assert!(
                 !a.iter()
                     .any(|&(f, tag)| f == Format::Rgb8 && tag != ColorTag::Unorm),

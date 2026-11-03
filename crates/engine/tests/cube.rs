@@ -53,7 +53,7 @@ fn cubemap_profile_defaults() {
 }
 
 #[test]
-fn cubemap_encodings_are_unorm_bc1_bc3_bc7_rgba8() {
+fn cubemap_encodings_are_unorm_bc1_bc3_bc7_rgba8_rgb8() {
     for t in [Target::Cs, Target::Vanilla] {
         assert_eq!(
             allowed_encodings(Subtype::Cubemap, t),
@@ -62,6 +62,7 @@ fn cubemap_encodings_are_unorm_bc1_bc3_bc7_rgba8() {
                 (Format::Bc3, ColorTag::Unorm),
                 (Format::Bc7, ColorTag::Unorm),
                 (Format::Rgba8, ColorTag::Unorm),
+                (Format::Rgb8, ColorTag::Unorm),
             ],
             "{t:?}"
         );

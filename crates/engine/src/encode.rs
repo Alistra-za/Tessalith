@@ -181,8 +181,9 @@ fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], zero: bool) {
     }
 }
 
-/// Uncompressed level bytes (DECISIONS S4): `rgba8` as B8G8R8A8, `rgb8` as B8G8R8 (Note FM38), `r8` as R, `rg8` as R then G, `rgba16f` as four
-/// little-endian halves per texel. Rows are tightly packed (pitch `w * bytes_per_pixel`).
+/// Uncompressed level bytes (DECISIONS S4): `rgba8` as B8G8R8A8, `rgb8` as B8G8R8 (Note FM38), `r8` as R,
+/// `rg8` as R then G, `rgba16f` as four little-endian halves per texel. Rows are tightly packed (pitch
+/// `w * bytes_per_pixel`).
 pub(crate) fn pack_uncompressed(input: &EncoderInput, format: Format) -> Vec<u8> {
     match (input, format) {
         (EncoderInput::Ldr(px), Format::Rgba8) => {

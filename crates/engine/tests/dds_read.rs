@@ -1529,3 +1529,74 @@ fn rgb8_output_round_trips_through_the_reader() {
         );
     }
 }
+
+/// Ruling T27B-c: a 24-bit cubemap (the owner's load order has one under textures\cubemaps) writes with the legacy
+/// header and the cube caps, and reads back as six faces with their mips.
+#[test]
+fn an_rgb8_cube_round_trips_with_a_legacy_header() {
+    let size = 4u32;
+    let desc = DdsDesc {
+        width: size,
+        height: size,
+        format: Format::Rgb8,
+        srgb: false,
+        header: resolve_header(Format::Rgb8, false, HeaderForm::Auto),
+    };
+    let dims = chain_dims(size, size);
+    let mut levels = vec![];
+    for face in 0..6u8 {
+        for &(w, h) in &dims {
+            // B, G, R of the face: a different colour per face.
+            levels.push([face + 1, face * 3, face * 5 + 2].repeat((w * h) as usize));
+        }
+    }
+    let bytes = dds_bytes_cube(&desc, &levels).unwrap();
+    let u = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+    let per_face: usize = dims.iter().map(|&(w, h)| 3 * (w * h) as usize).sum();
+    assert_eq!(bytes.len(), 128 + 6 * per_face, "no DX10 block");
+    assert_eq!((u(80), u(88)), (DDPF_RGB, 24));
+    assert_eq!(u(112), DDSCAPS2_CUBE_ALLFACES);
+    let f = read_dds(&bytes).unwrap();
+    assert_eq!(f.header_kind, HeaderKind::Legacy);
+    assert_eq!(f.format, DdsPixelFormat::Rgb8);
+    assert!(f.is_cubemap);
+    assert_eq!(f.levels.len(), 3);
+    assert!(check_header(&f).is_empty(), "{:?}", check_header(&f));
+    let surfaces = f.surfaces();
+    assert_eq!(surfaces.len(), 18);
+    for (i, (w, h, r)) in surfaces.iter().enumerate() {
+        let face = (i / 3) as u8;
+        let want = Decoded::Ldr(vec![
+            [face * 5 + 2, face * 3, face + 1, 255];
+            (w * h) as usize
+        ]);
+        assert_eq!(
+            decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap(),
+            want,
+            "surface {i}"
+        );
+    }
+    assert!(
+        engine::cube::checks::inspect_issues("textures/cubemaps/x.dds", &f).is_empty(),
+        "a full 24-bit cube has no cube issue"
+    );
+}
+
+/// `resolve_header` never picks DX10 for rgb8, but a hand-built description that asks for it is refused, not
+/// written as a file with no valid DXGI format.
+#[test]
+fn an_rgb8_dx10_header_is_refused() {
+    let desc = DdsDesc {
+        width: 4,
+        height: 4,
+        format: Format::Rgb8,
+        srgb: false,
+        header: ResolvedHeader::Dx10,
+    };
+    assert_eq!(
+        dds_bytes(&desc, &[vec![0; 48]]),
+        Err(DdsError::NoDx10Form {
+            format: Format::Rgb8
+        })
+    );
+}

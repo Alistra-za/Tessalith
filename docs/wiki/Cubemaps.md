@@ -55,7 +55,7 @@ They work on every layout, six separate files included. Faces exported by a cube
 Tessalith always writes:
 - all six faces;
 - every mip level down to 1×1, built across faces so no seams appear;
-- a UNORM format (BC1, BC3, BC7 or RGBA8). An sRGB tag on a cube is refused.
+- a UNORM format (BC1, BC3, BC7, RGBA8 or RGB8). An sRGB tag on a cube is refused.
 
 ### Colour
 

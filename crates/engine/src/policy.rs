@@ -1520,12 +1520,12 @@ fn encoding_warnings(
     if st == Subtype::Cubemap
         && !(matches!(
             format,
-            Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8
+            Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8 | Format::Rgb8
         ) && tag == ColorTag::Unorm)
     {
         add(
             CfgInvalid,
-            "cubemaps are written as BC1, BC3, BC7 or RGBA8, UNORM".into(),
+            "cubemaps are written as BC1, BC3, BC7, RGBA8 or RGB8, UNORM".into(),
         );
     }
     w
@@ -1890,11 +1890,12 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     // Note FM38: rgb8 stores no alpha at all, so any policy but `remove` is a loss the user must choose.
     if p.format == Format::Rgb8 {
         if p.alpha.policy != AlphaPolicy::Remove {
+            let id = serde_json::to_value(p.alpha.policy).unwrap_or_default();
             add(
                 FmtRgb8Alpha,
                 format!(
-                    "RGB8 keeps no alpha.policy {:?} alpha; choose a format with alpha or remove the alpha",
-                    p.alpha.policy
+                    "RGB8 stores no alpha, but alpha.policy is {}; choose a format with alpha or set alpha.policy to remove",
+                    id.as_str().unwrap_or("?")
                 ),
             );
         }

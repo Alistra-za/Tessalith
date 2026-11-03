@@ -71,7 +71,7 @@ pub fn legacy_masks(format: Format) -> Option<(u32, u32, [u32; 4])> {
     }
 }
 
-/// Header form for a request. `Auto` picks legacy only for BC1/BC3/RGBA8 UNORM.
+/// Header form for a request. `Auto` picks legacy for BC1/BC3/RGBA8 UNORM, and RGB8 is always legacy.
 ///
 /// An explicit `legacy` on a format with no legacy form (BC6H, BC7, any `_SRGB`) maps to DX10 here as a defensive
 /// fallback only; Resolve rejects such requests as a user error (`CFG-INVALID`) before this is reached. `rgb8` is

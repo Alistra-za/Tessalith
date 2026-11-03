@@ -49,6 +49,9 @@ fn bc1_bc5_and_rgba8_at_a_few_sizes_with_and_without_mips() {
     assert_eq!((e.mips, e.chain_bytes, e.header_bytes), (7, 10_924, 128));
     let e = estimate((64, 32), &profile(Format::Rgba8, ColorTag::Unorm, NONE));
     assert_eq!((e.mips, e.chain_bytes), (1, 64 * 32 * 4));
+    // Note FM38: RGB8 is three bytes a texel (the chain is 2,731 texels) and always has the legacy header.
+    let e = estimate((64, 32), &profile(Format::Rgb8, ColorTag::Unorm, FULL));
+    assert_eq!((e.mips, e.chain_bytes, e.header_bytes), (7, 3 * 2731, 128));
 }
 
 #[test]

@@ -581,13 +581,37 @@ pub fn dxgi_format(f: DdsPixelFormat, dx10: Option<u32>) -> DXGI_FORMAT {
         P::Rgba8 { srgb } => 28 + srgb as i32,
         P::Bgra8 { srgb } => 87 + 4 * srgb as i32,
         P::Bgrx8 => 88,
-        // Note FM38: legacy 24-bit RGB, A8L8 and L16 have no DXGI format; `load_dds_as` refuses them (0 = unknown).
-        P::Rgb8 | P::La8 | P::R16 => 0,
+        // Note FM38: L16 is R16_UNORM as stored. Legacy 24-bit RGB and A8L8 have no DXGI format of their own;
+        // `load_dds_as` expands them to R8G8B8A8_UNORM (`expand_legacy`).
+        P::Rgb8 | P::La8 => 28,
+        P::R16 => 56,
         P::R8 => 61,
         P::Rg8 => 49,
         P::Rgba16f => 10,
         P::Rgba32f => 2,
     })
+}
+
+/// The RGBA8 bytes (R, G, B, A) of a legacy level that DXGI has no format for, or `None` for any other layout
+/// (Note FM38): 24-bit B, G, R gets alpha 255; A8L8 gets L in R, G and B and its own alpha, as the engine decodes it.
+pub fn expand_legacy(f: DdsPixelFormat, data: &[u8]) -> Option<Vec<u8>> {
+    match f {
+        DdsPixelFormat::Rgb8 => Some(
+            data.as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|c| [c[2], c[1], c[0], 255])
+                .collect(),
+        ),
+        DdsPixelFormat::La8 => Some(
+            data.as_chunks::<2>()
+                .0
+                .iter()
+                .flat_map(|c| [c[0], c[0], c[0], c[1]])
+                .collect(),
+        ),
+        _ => None,
+    }
 }
 
 /// The UNORM twin of an `_SRGB` format (R8G8B8A8, BC1-3, B8G8R8A8, B8G8R8X8, BC7); any other format as is.
@@ -645,11 +669,15 @@ pub fn load_dds_as(gpu: &Gpu, bytes: &[u8], linear: bool) -> Result<Texture, Str
     let mips = f.levels.len().max(1);
     let slice_bytes = f.levels.last().map_or(0, |l| l.2.end);
     let faces = if f.is_cubemap { 6 } else { 1 };
+    // Note FM38: 24-bit RGB and A8L8 upload as RGBA8, so each of their levels is expanded first; `levels` keeps the
+    // buffers alive until the texture is created.
+    let expanded = matches!(f.format, DdsPixelFormat::Rgb8 | DdsPixelFormat::La8);
     let row = |w: u32| match f.format.block_bytes() {
+        _ if expanded => w as usize * 4,
         Some(b) => w.div_ceil(4) as usize * b,
         None => f.format.level_size(w, 1),
     };
-    let mut init = Vec::with_capacity(mips * faces);
+    let mut levels: Vec<(std::borrow::Cow<[u8]>, u32, u32)> = Vec::with_capacity(mips * faces);
     for face in 0..faces {
         for (w, h, r) in &f.levels {
             let start = face * slice_bytes + r.start;
@@ -657,13 +685,28 @@ pub fn load_dds_as(gpu: &Gpu, bytes: &[u8], linear: bool) -> Result<Texture, Str
                 .data
                 .get(start..start + r.len())
                 .ok_or("DDS data shorter than its levels")?;
-            init.push(D3D11_SUBRESOURCE_DATA {
-                pSysMem: data.as_ptr() as _,
-                SysMemPitch: row(*w) as u32,
-                SysMemSlicePitch: f.format.level_size(*w, *h) as u32,
-            });
+            levels.push((
+                match expand_legacy(f.format, data) {
+                    Some(v) => std::borrow::Cow::Owned(v),
+                    None => std::borrow::Cow::Borrowed(data),
+                },
+                *w,
+                *h,
+            ));
         }
     }
+    let init: Vec<D3D11_SUBRESOURCE_DATA> = levels
+        .iter()
+        .map(|(data, w, h)| D3D11_SUBRESOURCE_DATA {
+            pSysMem: data.as_ptr() as _,
+            SysMemPitch: row(*w) as u32,
+            SysMemSlicePitch: if expanded {
+                *w * *h * 4
+            } else {
+                f.format.level_size(*w, *h) as u32
+            },
+        })
+        .collect();
     let desc = tex_desc(f.width, f.height, mips as u32, faces as u32, format);
     let t = create_texture(gpu, &desc, &init)?;
     let (view, kind) = if f.is_cubemap {
@@ -696,13 +739,37 @@ mod tests {
             dxgi_format(DdsPixelFormat::Bgra8 { srgb: false }, None).0,
             87
         );
-        // Note FM38: the legacy layouts with no DXGI equivalent map to UNKNOWN, which `load_dds_as` refuses.
+        // Note FM38: L16 is R16_UNORM as stored; 24-bit RGB and A8L8 are expanded and uploaded as R8G8B8A8_UNORM.
+        assert_eq!(dxgi_format(DdsPixelFormat::R16, None).0, 56);
+        for f in [DdsPixelFormat::Rgb8, DdsPixelFormat::La8] {
+            assert_eq!(dxgi_format(f, None).0, 28, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn legacy_layouts_expand_to_rgba8_as_the_engine_decodes_them() {
+        // Two texels of B, G, R.
+        assert_eq!(
+            expand_legacy(DdsPixelFormat::Rgb8, &[1, 2, 3, 10, 20, 30]),
+            Some(vec![3, 2, 1, 255, 30, 20, 10, 255])
+        );
+        // Two texels of L, A, and the same bytes through the engine's decode.
+        let la = [7, 200, 9, 0];
+        assert_eq!(
+            expand_legacy(DdsPixelFormat::La8, &la),
+            Some(vec![7, 7, 7, 200, 9, 9, 9, 0])
+        );
+        let want = vec![[7, 7, 7, 200], [9, 9, 9, 0]];
+        assert_eq!(
+            engine::decode::decode_level(DdsPixelFormat::La8, 2, 1, &la).unwrap(),
+            engine::decode::Decoded::Ldr(want)
+        );
         for f in [
-            DdsPixelFormat::Rgb8,
-            DdsPixelFormat::La8,
             DdsPixelFormat::R16,
+            DdsPixelFormat::Bgra8 { srgb: false },
+            DdsPixelFormat::Bc7 { srgb: false },
         ] {
-            assert_eq!(dxgi_format(f, None).0, 0, "{f:?}");
+            assert_eq!(expand_legacy(f, &[0; 16]), None, "{f:?}");
         }
     }
 
