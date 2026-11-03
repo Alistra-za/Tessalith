@@ -126,6 +126,7 @@ impl AppModel {
         // Another mip is not this picture; only the scale may lag.
         (key.mip == want.mip).then(|| image.clone()).flatten()
     }
+
     /// The heatmap is on but the one for the current key has not landed (the legend says "updating…").
     pub fn heatmap_updating(&self) -> bool {
         self.heat_wanted().is_some_and(|w| {

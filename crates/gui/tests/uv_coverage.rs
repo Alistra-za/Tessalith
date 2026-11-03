@@ -1093,6 +1093,83 @@ fn the_uv_overlay_dims_unused_texels_and_veils_used_ones() {
     assert!(uv_overlay_image(&UvMask::new(0)).pixels.is_empty());
 }
 
+type GpuHarness = Harness<'static, (AppModel, sdc_gui::ui::State)>;
+
+/// A harness whose GpuStatus says the source is on the GPU, so the source pane (and the overlay over it) is drawn.
+fn gpu_harness(model: AppModel) -> GpuHarness {
+    let mut s = sdc_gui::ui::State::default();
+    s.gpu.renderer = true;
+    s.gpu.source = true;
+    let h = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .build_ui_state(
+            |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
+            (model, s),
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+/// The allocated "overlay" texture: its id and options.
+fn overlay_texture(h: &GpuHarness) -> Option<(egui::TextureId, egui::TextureOptions)> {
+    let manager = h.ctx.tex_manager();
+    let tm = manager.read();
+    let found = tm
+        .allocated()
+        .find(|(_, m)| m.name == "overlay")
+        .map(|(id, m)| (*id, m.options));
+    found
+}
+
+/// Review I1, M4, M7: the worker hands the UI a ready `ColorImage` (the model holds `Arc<ColorImage>`, which the
+/// frame uploads as is); the texture is the image's size with Nearest both ways and Repeat; turning the toggle off
+/// frees the image and the texture. (kittest's renderer consumes `textures_delta` inside `step`, so the uploaded
+/// `Arc` itself cannot be compared here.)
+#[test]
+fn the_ui_uploads_the_workers_image_and_frees_it_when_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = uv_model(d.path(), Some(real_db(d.path())));
+    m.expand(WALL);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.view.overlay = Some(sdc_gui::model::overlay::OverlayKind::Uv);
+    let mut h = gpu_harness(m);
+    let mut id = None;
+    for _ in 0..50 {
+        h.step();
+        assert!(h.state_mut().0.wait_idle(Duration::from_secs(10)));
+        if h.state().0.overlay.image.is_none() {
+            continue;
+        }
+        h.step();
+        if let Some((found, _)) = overlay_texture(&h) {
+            id = Some(found);
+            break;
+        }
+    }
+    let id = id.expect("the overlay was never uploaded");
+    let img = h.state().0.overlay.image.clone().unwrap();
+    assert_eq!(img.size, [512, 512]);
+    let (_, options) = overlay_texture(&h).unwrap();
+    assert_eq!(options.minification, egui::TextureFilter::Nearest);
+    assert_eq!(options.magnification, egui::TextureFilter::Nearest);
+    assert_eq!(options.wrap_mode, egui::TextureWrapMode::Repeat);
+    assert_eq!(
+        h.ctx.tex_manager().read().meta(id).unwrap().size,
+        [512, 512]
+    );
+    h.state_mut().0.view.overlay = None;
+    h.step();
+    h.step();
+    assert!(
+        h.state().0.overlay.image.is_none(),
+        "the image is kept while off"
+    );
+    assert!(
+        overlay_texture(&h).is_none(),
+        "the texture is kept while off"
+    );
+}
+
 // ---- Task 8 fix round 1 ----
 
 /// Review I1: no read before the written size is known, and a new written size reads again.

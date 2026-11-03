@@ -33,6 +33,9 @@ pub fn uv_overlay_image(mask: &UvMask) -> Arc<ColorImage> {
     ))
 }
 
+/// Builds the overlay image from a mask on the overlay worker.
+pub type UvBuild = fn(&UvMask) -> Arc<ColorImage>;
+
 /// The overlay job and the overlay on show.
 #[derive(Default)]
 pub struct OverlayState {
@@ -75,6 +78,17 @@ impl AppModel {
         item: &str,
         mask: Arc<UvMask>,
     ) -> Option<Arc<ColorImage>> {
+        self.uv_overlay_job_with(item, mask, uv_overlay_image)
+    }
+
+    /// `uv_overlay_job` with the image builder swapped (a test makes it slow or panicking).
+    #[doc(hidden)]
+    pub fn uv_overlay_job_with(
+        &mut self,
+        item: &str,
+        mask: Arc<UvMask>,
+        build: UvBuild,
+    ) -> Option<Arc<ColorImage>> {
         if self.preview.item.as_deref() != Some(item) {
             return None;
         }
@@ -89,7 +103,7 @@ impl AppModel {
             // A panic lands as this job's "no overlay", so v2_jobs_pending clears (K9) and the key is not retried.
             let image = or_send(
                 tx,
-                || uv_overlay_image(&mask),
+                || build(&mask),
                 |_| WorkerMsg::Overlay {
                     generation,
                     image: None,

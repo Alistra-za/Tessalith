@@ -325,7 +325,7 @@ fn encode_now_during_an_export_runs_when_the_export_ends() {
 }
 
 /// The labels of the expanded preview's toolbar controls, sorted.
-fn toolbar_controls(m: AppModel) -> Vec<String> {
+fn toolbar_controls(m: AppModel) -> (Vec<String>, Vec<(String, eframe::egui::Pos2)>) {
     use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
     use egui_kittest::kittest::{NodeT, Queryable};
     let mut h = egui_kittest::Harness::builder()
@@ -353,7 +353,52 @@ fn toolbar_controls(m: AppModel) -> Vec<String> {
         }
     }
     out.sort();
-    out
+    // The pane captions: where the source and the encoded pane start.
+    let mut panes = vec![];
+    for c in &h.output().shapes {
+        if let egui::Shape::Text(t) = &c.shape {
+            if matches!(t.galley.text(), "Source" | "Encoded") {
+                panes.push((t.galley.text().to_string(), t.pos));
+            }
+        }
+    }
+    (out, panes)
+}
+
+/// egui-ui-rules: at the doc-shot and narrower widths no toolbar control is cut off by the panel's edge (the flow
+/// wraps whole widgets).
+#[test]
+fn no_toolbar_control_is_clipped_at_narrow_widths() {
+    use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
+    use egui_kittest::kittest::{NodeT, Queryable};
+    for width in [960.0, 1100.0, 1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        m.expand("landscape/rock01_rmaos");
+        settle(&mut m);
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(width, 810.0))
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        let bar = PanelState::load(&h.ctx, egui::Id::new("preview-toolbar"))
+            .expect("the toolbar is drawn")
+            .outer_rect;
+        for role in [Role::Button, Role::CheckBox, Role::Slider] {
+            for n in h.query_all_by_role(role) {
+                let r = n.rect();
+                let inside_row =
+                    bar.x_range().contains(r.min.x) && r.min.y >= bar.min.y && r.max.y <= bar.max.y;
+                if inside_row {
+                    assert!(
+                        r.max.x <= bar.max.x + 0.5,
+                        "{width}: {:?} {r:?} runs past the toolbar {bar:?}",
+                        n.accesskit_node().label()
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Note FM26: the preview offers the side-by-side pair with Heatmap, Lens, Tile 3×3 and UV coverage, and the HDR
@@ -385,9 +430,18 @@ fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
     settle(&mut m);
     m.encode_now();
     settle(&mut m);
-    assert_eq!(toolbar_controls(m), base);
+    let (got, panes) = toolbar_controls(m);
+    assert_eq!(got, base);
+    // Side by side is the only layout: the Source pane starts left of the Encoded one, on the same row.
+    let at = |name: &str| panes.iter().find(|(n, _)| n == name).map(|(_, p)| *p);
+    let (src, enc) = (
+        at("Source").expect("Source pane"),
+        at("Encoded").expect("Encoded pane"),
+    );
+    assert!(enc.x > src.x + 100.0, "{src:?} {enc:?}");
+    assert_eq!(src.y, enc.y);
 
-    // An HDR texture adds the exposure slider and drops sRGB / UNORM.
+    // An HDR texture adds the exposure slider and nothing else (the exact set, so a dropped or new control shows).
     let d = tempfile::tempdir().unwrap();
     let root = support::mod_folder(d.path());
     raw_dds(
@@ -399,15 +453,9 @@ fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
     let mut m = opened(d.path());
     m.expand("landscape/sky.dds");
     settle(&mut m);
-    let got = toolbar_controls(m);
-    assert!(got.contains(&"Exposure".to_string()), "{got:?}");
-    for gone in [
-        "Side by side",
-        "Split",
-        "Pin this result",
-        "Unpin",
-        "Range overlay",
-    ] {
-        assert!(!got.iter().any(|l| l == gone), "{gone} is back: {got:?}");
-    }
+    let (got, _) = toolbar_controls(m);
+    let mut want: Vec<&str> = base.to_vec();
+    want.push("Exposure");
+    want.sort();
+    assert_eq!(got, want);
 }

@@ -388,6 +388,11 @@ fn mip_control(ui: &mut egui::Ui, view: &mut ViewState, info: &Info) {
     ui.label(format!("mip {} ({w}×{h}{per_face})", view.mip));
     if info.end - info.first > 1 {
         let mut mip = view.mip;
+        // The flow does not wrap a slider, so it takes what is left of the row (at least 40 pt) instead of running
+        // past the panel's edge at the doc-shot width.
+        let room =
+            ui.clip_rect().right() - ui.next_widget_position().x - ui.spacing().item_spacing.x;
+        ui.spacing_mut().slider_width = room.clamp(40.0, 100.0);
         let r = ui.add(
             egui::Slider::new(&mut mip, info.first..=info.end - 1)
                 .step_by(1.0)
@@ -635,7 +640,11 @@ fn lens(
     let clip = visible.intersect(ui.clip_rect());
     let painter = ui.painter().with_clip_rect(clip);
     painter.circle_filled(centre, view::LENS_PX / 2.0, PANE_BG);
-    paint_clipped(ui, r, visible, slot, params);
+    // The lens's own rect, clipped to the pane.
+    ui.scope(|ui| {
+        ui.set_clip_rect(clip);
+        render::paint(ui, r, slot, params);
+    });
     let stroke = egui::Stroke::new(1.0, Color32::from_gray(220));
     painter.circle_stroke(
         centre,
@@ -700,10 +709,10 @@ fn params_for(
     }
 }
 
-/// Draws a slot into `viewport`, showing only `visible` of it.
-fn paint_clipped(ui: &mut egui::Ui, viewport: Rect, visible: Rect, slot: Slot, params: Params) {
+/// Draws a slot into `viewport`, clipped to it.
+fn paint_clipped(ui: &mut egui::Ui, viewport: Rect, slot: Slot, params: Params) {
     ui.scope(|ui| {
-        ui.set_clip_rect(visible.intersect(ui.clip_rect()));
+        ui.set_clip_rect(viewport.intersect(ui.clip_rect()));
         render::paint(ui, viewport, slot, params);
     });
 }
@@ -859,7 +868,7 @@ fn draw_source_pane(
             _ => (info.face_of(mip), mip.saturating_sub(s.first_level)),
         };
         let params = params_for(&masked(&model.view, info), size, own, in_texture, tonemap);
-        paint_clipped(ui, viewport, viewport, Slot::Source, params);
+        paint_clipped(ui, viewport, Slot::Source, params);
         drawn = Some((Slot::Source, params));
         if let Some(id) = overlay {
             let (pic, uv) = picture_rects(&masked(&model.view, info), viewport, size, own);
@@ -997,7 +1006,7 @@ fn draw_encoded_pane(
             );
             params.channel = 0;
             params.view_linear = 0;
-            paint_clipped(ui, viewport, viewport, Slot::Heatmap, params);
+            paint_clipped(ui, viewport, Slot::Heatmap, params);
             drawn = Some((Slot::Heatmap, params));
         } else if let (true, Some(out)) = (uploaded, &info.shown) {
             let tonemap = out.result.format.is_hdr();
@@ -1009,7 +1018,7 @@ fn draw_encoded_pane(
                 mip.saturating_sub(first),
                 tonemap,
             );
-            paint_clipped(ui, viewport, viewport, Slot::Encoded, params);
+            paint_clipped(ui, viewport, Slot::Encoded, params);
             drawn = Some((Slot::Encoded, params));
             if info.cross && model.view.face_labels {
                 let (pic, _) = picture_rects(
