@@ -11384,6 +11384,22 @@ fn the_preview_keeps_160_px_with_review_open() {
     let t = tempfile::tempdir().unwrap();
     let model = support::opened(&t.path().join("mod"));
     let (_d, mut h) = in_the_meshes_view_sized(model, 1, egui::vec2(w, hgt));
+    // A tall head: the open Plugin overrides list gives the lines above the frame something to give up (Note GJ5; the
+    // Meshes bar's button row used to).
+    h.state_mut().meshes.plugin_uses = (0..8)
+        .map(|i| modscan::plugin_store::MeshUse {
+            formid: i,
+            edid: Some(format!("Rock{i}")),
+            sig: "STAT".into(),
+            plugin: "Skyrim.esm".into(),
+            model_slot: 0,
+            n_overrides: 0,
+            swaps: vec![],
+        })
+        .collect();
+    h.run_steps(2);
+    h.get_by_label("Plugin overrides (8)").click();
+    h.run_steps(2);
     h.state_mut().model.open_review();
     h.run_steps(8);
     let mut tops = vec![];
@@ -11408,9 +11424,11 @@ fn the_preview_keeps_160_px_with_review_open() {
         }
         tops.push(frame.min.y);
     }
-    // The lines above give way first: the frame's top stops at the head's least once the room runs short. Note GJ5:
-    // the Meshes bar's Plugin file references row is gone, so the head has about 2 px to give where it had 24.
-    assert!(tops[0] > tops[4], "the head did not give way: {tops:?}");
+    // The lines above give way first: the frame's top stops at the head's least once the room runs short.
+    assert!(
+        tops[0] > tops[4] + 20.0,
+        "the head did not give way: {tops:?}"
+    );
     assert_eq!(tops[3], tops[4], "the head is at its least: {tops:?}");
 }
 

@@ -223,31 +223,10 @@ fn a_folder_scan_hides_plugin_rows_and_the_next_mo2_scan_restores_them() {
     assert_eq!(s.txsts_matching(&dirt_key(), 50).unwrap().len(), 1);
 }
 
-/// Skyrim.esm (master Missing.esm, not loaded) with: TXSTs naming a BSA-only, an inactive-origin, a FaceGen and a
-/// seven-times-referenced texture; an unresolved STAT whose raw FormID collides with a resolved one.
+/// Skyrim.esm (master Missing.esm, not loaded) with an unresolved STAT whose raw FormID collides with a resolved one.
 fn fixture2() -> tempfile::TempDir {
     let d = instance_fixture("+A\\n");
     let r = d.path();
-    let t = |id: u32, name: &str, path: &str| {
-        rec(
-            b"TXST",
-            0x0100_0000 | id,
-            &[edid(name), sub(b"TX00", &zstr(path))],
-        )
-    };
-    let mut txsts = vec![
-        t(0x101, "BsaTXST", "Bsa\\OnlyBsa.dds"),
-        t(0x102, "OffTXST", "Off\\Inactive.dds"),
-        t(
-            0x103,
-            "FaceTXST",
-            "Actors\\Character\\FaceGenData\\FaceTint\\Skyrim.esm\\00000001.dds",
-        ),
-        t(0x104, "NifTXST", "Nifonly\\Used.dds"),
-    ];
-    for i in 0..7u32 {
-        txsts.push(t(0x200 + i, &format!("Lot{i}"), "Many\\Lots.dds"));
-    }
     let stat =
         |id: u32, name: &str, m: &str| rec(b"STAT", id, &[edid(name), sub(b"MODL", &zstr(m))]);
     put(
@@ -256,36 +235,18 @@ fn fixture2() -> tempfile::TempDir {
         &plugin(
             esp::FLAG_ESM,
             &["Missing.esm"],
-            &[
-                top(b"TXST", &txsts),
-                top(
-                    b"STAT",
-                    &[
-                        stat(0x0000_0ABC, "Orphan", "Missing\\Orphan.nif"),
-                        stat(0x0100_0ABC, "Real", "Real.nif"),
-                    ],
-                ),
-                placing(&[
-                    0x0100_0101,
-                    0x0100_0102,
-                    0x0100_0103,
-                    0x0100_0104,
-                    0x0100_0200,
-                    0x0100_0201,
-                    0x0100_0202,
-                    0x0100_0203,
-                    0x0100_0204,
-                    0x0100_0205,
-                    0x0100_0206,
-                    0x0100_0ABC,
-                ]),
-            ],
+            &[top(
+                b"STAT",
+                &[
+                    stat(0x0000_0ABC, "Orphan", "Missing\\Orphan.nif"),
+                    stat(0x0100_0ABC, "Real", "Real.nif"),
+                ],
+            )],
         ),
     );
     put(r, "profiles/Default/plugins.txt", b"# none\\n");
     d
 }
-
 /// An unresolved record (owner_ok = 0) keeps a raw FormID that can equal a resolved winner's.
 #[test]
 fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
@@ -318,6 +279,41 @@ fn zero_limit_matches_nothing() {
     assert!(s.txsts_matching(&dirt_key(), 0).unwrap().is_empty());
 }
 
+/// Final review I1: a scan cancelled mid-parse leaves every origin disabled (the store reads as incomplete). The
+/// record winners of the earlier scan are not touched by it (only a taint or a cancel at the plugin pass empties
+/// them, below), so this pins the disabled origins and the `Cancelled` result.
+#[test]
+fn a_cancelled_scan_leaves_every_origin_disabled() {
+    let d = fixture();
+    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
+    mo2(&d, &mut s);
+    let enabled = |s: &Store| -> i64 {
+        s.conn()
+            .query_row("SELECT count(*) FROM origin WHERE enabled = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    };
+    assert!(enabled(&s) > 0, "fixture: a finished scan enables origins");
+    for i in 0..600 {
+        put(d.path(), &format!("mods/A/meshes/c{i}.nif"), b"x");
+    }
+    let cancel = AtomicBool::new(false);
+    let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
+    let r = run(
+        &src,
+        &mut s,
+        &cancel,
+        &|p| {
+            if p.phase == "parse" {
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        },
+        &|| vec![],
+    );
+    assert!(matches!(r, Err(modscan::ScanError::Cancelled)), "{r:?}");
+    assert_eq!(enabled(&s), 0);
+}
 /// Trace-debug wave 2 #7: a tainted scan (PGPatcher started mid-scan) empties the winners; the plugin rows are
 /// then empty, not stale.
 #[test]

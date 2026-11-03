@@ -544,32 +544,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-/// TXSTs read for a set's suggestions.
-pub const LIMIT: usize = 200;
-pub const NO_SCAN: &str = "No scan yet: scan the MO2 instance in the Meshes view.";
-
-/// The set's match key as PGPatcher reads it: the set's settings, `match_diffuse` defaulting to the derived match.
-pub fn set_key(v: &SetView) -> Option<TexKey> {
-    let mut entry: Map<String, Json> = v
-        .settings
-        .iter()
-        .map(|(k, x)| (k.clone(), x.clone()))
-        .collect();
-    if let Some(d) = &v.derived_match {
-        entry
-            .entry("match_diffuse")
-            .or_insert_with(|| Json::String(d.clone()));
-        // AN1: a renamed entry is written with its `match_diffuse` only.
-        if let Some((md, _)) = crate::pgp::prefix::json_rename(&v.settings, d) {
-            entry.retain(|k, _| {
-                k == "match_diffuse" || !(k.starts_with("match") || k == "path_contains")
-            });
-            entry.insert("match_diffuse".into(), Json::String(md));
-        }
-    }
-    crate::model::set_preview::tex_key(&Json::Object(entry), &Json::Null).map(|(k, _)| k)
-}
-
 /// Shape rows read for the statics count; more only lowers a count that is already far above 0.
 pub const STATICS_ROWS: usize = 20_000;
 
@@ -636,6 +610,33 @@ fn open(db: Option<&Path>) -> Result<Store, String> {
         .filter(|p| p.is_file())
         .ok_or_else(|| NO_SCAN.to_string())?;
     Store::open_read_only(p).map_err(|e| e.to_string())
+}
+
+/// TXSTs read for a set's suggestions.
+pub const LIMIT: usize = 200;
+/// Shown when no scan database exists yet.
+pub const NO_SCAN: &str = "No scan yet: scan the MO2 instance in the Meshes view.";
+
+/// The set's match key as PGPatcher reads it: the set's settings, `match_diffuse` defaulting to the derived match.
+pub fn set_key(v: &SetView) -> Option<TexKey> {
+    let mut entry: Map<String, Json> = v
+        .settings
+        .iter()
+        .map(|(k, x)| (k.clone(), x.clone()))
+        .collect();
+    if let Some(d) = &v.derived_match {
+        entry
+            .entry("match_diffuse")
+            .or_insert_with(|| Json::String(d.clone()));
+        // AN1: a renamed entry is written with its `match_diffuse` only.
+        if let Some((md, _)) = crate::pgp::prefix::json_rename(&v.settings, d) {
+            entry.retain(|k, _| {
+                k == "match_diffuse" || !(k.starts_with("match") || k == "path_contains")
+            });
+            entry.insert("match_diffuse".into(), Json::String(md));
+        }
+    }
+    crate::model::set_preview::tex_key(&Json::Object(entry), &Json::Null).map(|(k, _)| k)
 }
 
 /// Distinct mesh paths of `rows`, LOD meshes left out (`is_lod_path`, PGPatcher's own blocklist).
