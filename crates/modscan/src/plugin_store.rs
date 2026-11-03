@@ -436,6 +436,37 @@ impl Store {
         Ok(out)
     }
 
+    /// The winning copy of TXST `formid`'s textures in NIF `BSShaderTextureSet` slot order: 9 canonical paths, ""
+    /// for an empty slot (Note GO). None when no winning TXST has that FormID.
+    pub fn txst_textures(&self, formid: u32) -> Result<Option<Vec<String>>, ScanError> {
+        let mut st = self.conn.prepare(
+            "SELECT r.plugin_id, r.local FROM rec_winner w
+             JOIN rec r ON r.plugin_id = w.plugin_id AND r.formid = w.formid AND r.owner_ok = 1
+             WHERE w.formid = ?1 AND r.sig = 'TXST'",
+        )?;
+        let Some((plugin_id, local)) = st
+            .query_row([i64::from(formid)], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut st = self.conn.prepare(
+            "SELECT ts.slot, p.p FROM txst_slot ts JOIN path p ON p.id = ts.path_id
+             WHERE ts.plugin_id = ?1 AND ts.local = ?2",
+        )?;
+        let mut out = vec![String::new(); 9];
+        let mut rows = st.query(params![plugin_id, local])?;
+        while let Some(r) = rows.next()? {
+            let tx = r.get::<_, i64>(0)? as usize;
+            if let Some(&nif) = TX_TO_NIF.get(tx) {
+                out[nif as usize] = r.get(1)?;
+            }
+        }
+        Ok(Some(out))
+    }
+
     /// Winning records whose model (any slot) is `norm`, with the swaps of that model slot (spec §4.2).
     pub fn plugin_uses_of_mesh(&self, norm: &str) -> Result<Vec<MeshUse>, ScanError> {
         let mut st = self.conn.prepare(

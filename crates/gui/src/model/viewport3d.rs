@@ -174,6 +174,9 @@ pub struct MeshSpec {
     pub le_mesh: bool,
     /// A head part (Note BA: facegendata or an HDPT model): every shape is CS "head" ([`ParsedNif::head_part`]).
     pub head_part: bool,
+    /// Note GO: the shape card's texture set pick, preview only: the TXST's 9 slot paths ("" = empty) in place of
+    /// the shape's own. `textures` holds where each one is read.
+    pub txst: BTreeMap<ShapeId, Vec<String>>,
 }
 
 /// One shape's Advanced Skin card picks (Note GN): the renderer's preview and where each picked key is read (added
@@ -1995,6 +1998,14 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
             Ok(nif) => {
                 let mut p = render3d::parse(&nif);
                 p.head_part = spec.head_part;
+                for s in &mut p.shapes {
+                    if let Some(t) = spec.txst.get(&s.id) {
+                        s.material.slots = t
+                            .iter()
+                            .map(|t| nif::path::canon_texture(t.as_bytes()))
+                            .collect();
+                    }
+                }
                 r.load_parsed_sync(&p, &textures)
             }
             Err(e) => {

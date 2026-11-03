@@ -48,6 +48,7 @@ mod edit_extra;
 mod edit_fields;
 mod edit_panel;
 mod skin_preview;
+mod txst_preview;
 use crate::model::meshes::skin_preview::has_skin_card;
 use skin_preview::SkinAct;
 /// Problems listed under "Scan details"; the count is always shown.
@@ -961,6 +962,7 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let scan_ctrls = m.shown_copy().and_then(|c| m.scan_ctrls.get(&c).cloned());
     let (mut clicked, mut open, mut pick, mut pick_root) = (None, None, None, None);
     let mut skin_act = None;
+    let mut txst_act = None;
     egui::ScrollArea::vertical()
         .id_salt("meshes-shapes-scroll")
         .auto_shrink([false, false])
@@ -1052,6 +1054,9 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
                             if p.is_some() {
                                 clicked = p;
                             }
+                            if let Some(f) = txst_preview::row(ui, m, s) {
+                                txst_act = Some((s.block, f));
+                            }
                             title
                         }
                         None => {
@@ -1086,6 +1091,11 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
         }
         Some((block, SkinAct::Wet(w))) => m.set_skin_wet(block, w),
         None => {}
+    }
+    if let Some((block, f)) = txst_act {
+        if let Err(e) = m.set_txst(block, f) {
+            m.error = Some(e);
+        }
     }
     if let Some(p) = clicked {
         m.show_users(&p);
@@ -1211,7 +1221,17 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &MeshesModel) {
                                         s.txst_formid
                                     )
                                 };
-                                ui.label(format!("{} → {target}", s.shape_name));
+                                ui.label(format!("#{} {} → {target}", s.index, s.shape_name));
+                                // Note GO: the game goes by the 3D index, so this swap re-textures nothing.
+                                let hit = u32::try_from(s.index)
+                                    .is_ok_and(|i| m.shapes.iter().any(|v| v.index3d == Some(i)));
+                                // No shapes read (a NIF that failed to read): no index to judge against.
+                                if !hit && !m.shapes.is_empty() {
+                                    ui.colored_label(
+                                        AMBER,
+                                        format!("No shape #{} in this NIF", s.index),
+                                    );
+                                }
                             }
                         });
                     }

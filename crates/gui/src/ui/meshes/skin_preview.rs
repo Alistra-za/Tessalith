@@ -113,7 +113,11 @@ fn hover(m: &MeshesModel, s: &ShapeView, map: SkinMap, picked: Option<&str>) -> 
             None => format!("Picked from the mod list: {k}"),
         };
     }
-    let slot = |i: usize| s.textures.get(i).cloned().flatten().unwrap_or_default();
+    // Note GO: a texture set pick's slots are what the 3D view guesses from.
+    let slot = |i: usize| match m.txst_pick(s.block) {
+        Some((_, t)) => t.get(i).cloned().unwrap_or_default(),
+        None => s.textures.get(i).cloned().flatten().unwrap_or_default(),
+    };
     let ty = s.shader_type.unwrap_or(0);
     let suffix = match map {
         SkinMap::Rfaos => "_rfaos",

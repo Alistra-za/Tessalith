@@ -1391,7 +1391,7 @@ fn plugin_overrides_list_records_and_shape_swaps() {
     h.get_by_label("Plugin overrides (1)").click();
     h.run();
     h.get_by_label("RockStat [00012345] STAT — Skyrim.esm · overridden 2×");
-    h.get_by_label("Shape0 → DirtTXST [00000ABC]");
+    h.get_by_label("#0 Shape0 → DirtTXST [00000ABC]");
 }
 
 /// A swap whose TXST master is missing says so instead of showing FormID 00000000.
@@ -1418,7 +1418,7 @@ fn an_unresolved_swap_target_is_labelled() {
     h.run();
     h.get_by_label("Plugin overrides (1)").click();
     h.run();
-    h.get_by_label("Shape0 → unresolved TXST");
+    h.get_by_label("#0 Shape0 → unresolved TXST");
 }
 
 #[test]

@@ -173,6 +173,20 @@ fn txst_users_and_mesh_overrides() {
         .is_empty());
 }
 
+/// Note GO: the winning copy's textures (A.esp's DirtTXST has no TX02), in NIF slot order.
+#[test]
+fn txst_textures_are_the_winning_copys_in_nif_slot_order() {
+    let d = fixture();
+    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
+    mo2(&d, &mut s);
+    let mut want = vec![String::new(); 9];
+    want[0] = "textures/landscape/dirt02.dds".into();
+    want[1] = "textures/landscape/dirt02_n.dds".into();
+    assert_eq!(s.txst_textures(DIRT).unwrap(), Some(want));
+    assert_eq!(s.txst_textures(0xDEF).unwrap(), None, "a STAT is no TXST");
+    assert_eq!(s.txst_textures(0x1234).unwrap(), None);
+}
+
 /// Review Focus 4.
 #[test]
 fn a_folder_scan_hides_plugin_rows_and_the_next_mo2_scan_restores_them() {

@@ -226,6 +226,7 @@ fn the_wet_amount_is_kept_per_shape_and_another_mesh_resets_every_pick() {
         textures: HashMap::new(),
         le_mesh: false,
         head_part: false,
+        txst: Default::default(),
     }));
     assert!(m.skin_entry(5).is_none(), "picks reset with another mesh");
 }

@@ -304,6 +304,7 @@ fn femalebody_viewport(cache: &Path) -> Option<Viewport3d> {
         textures,
         le_mesh: false,
         head_part: false,
+        txst: Default::default(),
     }));
     Some(v)
 }
@@ -608,6 +609,7 @@ fn spec(key: i64, le_mesh: bool) -> v3::MeshSpec {
         textures: Default::default(),
         le_mesh,
         head_part: false,
+        txst: Default::default(),
     }
 }
 

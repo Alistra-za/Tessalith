@@ -29,6 +29,7 @@ pub mod export;
 pub mod nif_edit;
 pub mod pg_entries;
 pub mod skin_preview;
+pub mod txst_preview;
 pub mod worklist;
 pub use nif_edit::NifReviewRow;
 pub use worklist::{NifLevel, NifProblem, NifTab};
@@ -509,6 +510,8 @@ pub struct MeshesModel {
     pub tex_users: Option<(String, Vec<TexUser>)>,
     /// Winning plugin records that use the shown mesh (esp spec §4.2).
     pub plugin_uses: Vec<MeshUse>,
+    /// Note GO: each shape card's texture set pick (NIF block → TXST FormID); the slots are in the 3D view's spec.
+    txst_picks: BTreeMap<u32, u32>,
     /// Database or scan errors; shown, never swallowed.
     pub error: Option<String>,
     pub dialog: Option<MeshesDialog>,
@@ -646,6 +649,7 @@ impl MeshesModel {
             banner: None,
             tex_users: None,
             plugin_uses: vec![],
+            txst_picks: BTreeMap::new(),
             error: None,
             dialog: None,
             report: None,
@@ -1714,6 +1718,8 @@ impl MeshesModel {
     }
 
     fn load_shapes(&mut self) {
+        // Note GO: the spec below has no texture set picks.
+        self.txst_picks.clear();
         let (Some(store), Some(copy)) = (&self.store, self.shown_copy()) else {
             return;
         };
@@ -1823,6 +1829,7 @@ fn mesh_spec(
         textures,
         le_mesh,
         head_part: store.is_head_part_mesh(&path).unwrap_or(false), // shading only: a failed lookup is body
+        txst: BTreeMap::new(),
     }))
 }
 
