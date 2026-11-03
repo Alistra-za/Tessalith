@@ -56,6 +56,8 @@ pub struct Payload {
     pub models: Vec<ModelRef>,
     /// MATO DATA flags (u32 at DATA offset 44; bit 0 = Single Pass); `None` when DATA is absent or shorter than 48 bytes.
     pub mato_flags: Option<u32>,
+    /// ARMA skin textures (Note GO4): NAM0 (male) and NAM1 (female) TXST local FormIDs, 0 = none.
+    pub skin_txst: [u32; 2],
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -81,6 +83,6 @@ pub struct AltTex {
     /// The NIF shape name ("3D Name").
     pub shape_name: String,
     pub txst_local_formid: u32,
-    /// "3D Index" (informational; shapes are matched by name).
+    /// "3D Index": the shape the game re-textures (Note GO2); the name is only what the record stores.
     pub index: i32,
 }

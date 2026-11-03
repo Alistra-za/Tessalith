@@ -1,32 +1,41 @@
 //! The shape card's Texture set dropdown (Note GO): the TXSTs that plugin records using this mesh assign to the
-//! shape's 3D index, previewed on that shape in the 3D view. The game matches alternate textures by 3D index, so
-//! the record's stored shape name is shown, never used. Preview only: nothing is written, and the picks reset when
+//! shape's 3D index, and on a Skin Tint shape the ARMA skin textures (Note GO4), previewed on that shape in the 3D
+//! view. The game matches alternate textures by 3D index, so the record's stored shape name is shown, never used. Preview only: nothing is written, and the picks reset when
 //! the shapes reload (another mesh, the In game / Source toggle, Edit opening or closing).
 use super::{db_err, texture_sources, MeshesModel};
 use crate::model::viewport3d::Content;
+use modscan::store::ShapeView;
 use render3d::ShapeId;
 use std::sync::Arc;
 
-/// One TXST a plugin record assigns to a 3D index.
+/// One TXST plugin records assign to a shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TxstChoice {
     pub formid: u32,
     pub edid: Option<String>,
-    /// Who assigns it: (index into `plugin_uses`, the shape name that record stores).
-    pub users: Vec<(usize, String)>,
+    /// Who assigns it: (index into `plugin_uses`, the shape name that record stores; None: the ARMA's skin texture).
+    pub users: Vec<(usize, Option<String>)>,
 }
 
 impl MeshesModel {
-    /// The TXSTs the scanned plugin records using this mesh assign to 3D index `index3d`, each once, in
-    /// `plugin_uses` order. An unresolved TXST (its master not loaded) is left out: Plugin overrides lists it.
-    pub fn txst_choices(&self, index3d: u32) -> Vec<TxstChoice> {
+    /// The TXSTs the scanned plugin records using this mesh assign to shape `shape`, each once, in `plugin_uses`
+    /// order: alternate textures for its 3D index, and ARMA skin textures when it is a Skin Tint (5) shape. An
+    /// unresolved TXST (its master not loaded) is left out: Plugin overrides lists it.
+    pub fn txst_choices(&self, shape: &ShapeView) -> Vec<TxstChoice> {
+        let skin_shape = shape.shader_kind == 1 && shape.shader_type == Some(5);
         let mut out: Vec<TxstChoice> = vec![];
         for (i, u) in self.plugin_uses.iter().enumerate() {
             for s in &u.swaps {
-                if s.txst_formid == 0 || u32::try_from(s.index) != Ok(index3d) {
+                let hit = match s.is_skin() {
+                    true => skin_shape,
+                    false => {
+                        shape.index3d.is_some() && u32::try_from(s.index).ok() == shape.index3d
+                    }
+                };
+                if s.txst_formid == 0 || !hit {
                     continue;
                 }
-                let user = (i, s.shape_name.clone());
+                let user = (i, (!s.is_skin()).then(|| s.shape_name.clone()));
                 match out.iter_mut().find(|c| c.formid == s.txst_formid) {
                     Some(c) => c.users.push(user),
                     None => out.push(TxstChoice {

@@ -132,6 +132,25 @@ impl Store {
                         i64::from(a.index)
                     ])?;
                 }
+                // Note GO4: the ARMA's skin texture for this model's sex, stored as a swap marked SKIN_TEXTURE.
+                let skin = match m.slot {
+                    2 | 4 => r.payload.skin_txst[0],
+                    3 | 5 => r.payload.skin_txst[1],
+                    _ => 0,
+                };
+                if &r.sig == b"ARMA" && skin != 0 {
+                    tx.prepare_cached(
+                        "INSERT INTO alt_tex(local, plugin_id, model_slot, shape_name, txst_local, idx)
+                         VALUES (?1,?2,?3,'',?4,?5)",
+                    )?
+                    .execute(params![
+                        local,
+                        id,
+                        i64::from(m.slot),
+                        i64::from(clamp_local(skin, nm)),
+                        i64::from(SKIN_TEXTURE)
+                    ])?;
+                }
             }
         }
         tx.commit()?;
@@ -340,6 +359,10 @@ pub struct TxstUse {
     pub n_overrides: u32,
 }
 
+/// `ShapeSwap::index` of an ARMA's skin texture (NAM0 / NAM1, Note GO4): it re-textures the model's skin shapes,
+/// not one 3D index, and has no shape name.
+pub const SKIN_TEXTURE: i32 = -1;
+
 /// One alternate-texture entry: a NIF shape re-textured with a TXST.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeSwap {
@@ -347,7 +370,14 @@ pub struct ShapeSwap {
     pub txst_formid: u32,
     /// The EDID of the TXST's winning copy.
     pub txst_edid: Option<String>,
+    /// The 3D index, or [`SKIN_TEXTURE`].
     pub index: i32,
+}
+
+impl ShapeSwap {
+    pub fn is_skin(&self) -> bool {
+        self.index == SKIN_TEXTURE
+    }
 }
 
 /// A winning record that uses a mesh, with its swaps for that model slot.

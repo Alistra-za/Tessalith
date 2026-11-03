@@ -1221,16 +1221,31 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &MeshesModel) {
                                         s.txst_formid
                                     )
                                 };
-                                ui.label(format!("#{} {} → {target}", s.index, s.shape_name));
-                                // Note GO: the game goes by the 3D index, so this swap re-textures nothing.
-                                let hit = u32::try_from(s.index)
-                                    .is_ok_and(|i| m.shapes.iter().any(|v| v.index3d == Some(i)));
-                                // No shapes read (a NIF that failed to read): no index to judge against.
+                                // Note GO: the game goes by the 3D index (GO4: a skin texture by the skin shapes),
+                                // so a swap that matches no shape re-textures nothing.
+                                let (line, hit, miss) = if s.is_skin() {
+                                    let field = txst_preview::skin_field(u.model_slot);
+                                    let hit = m
+                                        .shapes
+                                        .iter()
+                                        .any(|v| v.shader_kind == 1 && v.shader_type == Some(5));
+                                    let miss = "No Skin Tint shape in this NIF".to_string();
+                                    (format!("{field} → {target}"), hit, miss)
+                                } else {
+                                    let hit = u32::try_from(s.index).is_ok_and(|i| {
+                                        m.shapes.iter().any(|v| v.index3d == Some(i))
+                                    });
+                                    let miss = format!("No shape #{} in this NIF", s.index);
+                                    (
+                                        format!("#{} {} → {target}", s.index, s.shape_name),
+                                        hit,
+                                        miss,
+                                    )
+                                };
+                                ui.label(line);
+                                // No shapes read (a NIF that failed to read): nothing to judge against.
                                 if !hit && !m.shapes.is_empty() {
-                                    ui.colored_label(
-                                        AMBER,
-                                        format!("No shape #{} in this NIF", s.index),
-                                    );
+                                    ui.colored_label(AMBER, miss);
                                 }
                             }
                         });

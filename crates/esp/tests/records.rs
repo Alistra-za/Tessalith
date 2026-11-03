@@ -55,6 +55,40 @@ fn a_txst_without_dodt_is_not_a_decal() {
     assert_eq!(t.flags, 0);
 }
 
+/// Note GO4: an ARMA's NAM0 / NAM1 skin textures (UBE's NakedTorso layout: MOD3, then NAM1); another type's NAM0 is
+/// not one.
+#[test]
+fn arma_skin_textures_are_read() {
+    let r = one(
+        b"ARMA",
+        rec(
+            b"ARMA",
+            0x0100_0D00,
+            &[
+                edid("NakedTorso"),
+                sub(b"MOD3", &zstr("!UBE\\Body\\FemaleBody_Tangent_1.nif")),
+                sub(b"NAM0", &0x0100_0ABDu32.to_le_bytes()),
+                sub(b"NAM1", &0x0100_0ABCu32.to_le_bytes()),
+                sub(b"NAM3", &0x0100_0F00u32.to_le_bytes()),
+                // ARMA MODL = an additional race (FormID), not a path.
+                sub(b"MODL", &0x0001_3746u32.to_le_bytes()),
+            ],
+        ),
+    );
+    assert_eq!(r.payload.skin_txst, [0x0100_0ABD, 0x0100_0ABC]);
+    assert_eq!(
+        r.payload.models.len(),
+        1,
+        "MOD3 only: {:?}",
+        r.payload.models
+    );
+    let s = one(
+        b"STAT",
+        rec(b"STAT", 1, &[sub(b"NAM0", &7u32.to_le_bytes())]),
+    );
+    assert_eq!(s.payload.skin_txst, [0, 0]);
+}
+
 /// Each alternate-texture list belongs to the model with its slot (MO2S → MOD2, MO4S → MOD4).
 #[test]
 fn models_carry_their_own_alternate_textures() {
@@ -121,13 +155,14 @@ fn models_carry_their_own_alternate_textures() {
     );
 }
 
+/// Not ARMA: its MODL is an additional race FormID (Note GO5; `arma_skin_textures_are_read`).
 #[test]
 fn every_model_record_type_reads_modl_and_mods() {
     for sig in [
         b"STAT", b"MSTT", b"ACTI", b"FURN", b"DOOR", b"CONT", b"LIGH", b"MISC", b"TREE", b"FLOR",
-        b"GRAS", b"ARMA", b"WEAP", b"AMMO", b"BOOK", b"INGR", b"ALCH", b"KEYM", b"SLGM", b"SCRL",
-        b"HDPT", b"TACT", b"ANIO", b"CLMT", b"IDLM", b"PROJ", b"HAZD", b"EXPL", b"ADDN", b"CAMS",
-        b"ARTO", b"MATO", b"LVLN", b"APPA", b"SCOL", b"BPTD",
+        b"GRAS", b"WEAP", b"AMMO", b"BOOK", b"INGR", b"ALCH", b"KEYM", b"SLGM", b"SCRL", b"HDPT",
+        b"TACT", b"ANIO", b"CLMT", b"IDLM", b"PROJ", b"HAZD", b"EXPL", b"ADDN", b"CAMS", b"ARTO",
+        b"MATO", b"LVLN", b"APPA", b"SCOL", b"BPTD",
     ] {
         let r = one(
             sig,

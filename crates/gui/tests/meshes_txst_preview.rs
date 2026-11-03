@@ -113,7 +113,7 @@ fn model() -> MeshesModel {
 #[test]
 fn choices_follow_the_3d_index_not_the_shape_name() {
     let m = model();
-    let c0 = m.txst_choices(0);
+    let c0 = m.txst_choices(&m.shapes[0]);
     assert_eq!(c0.len(), 1, "DirtTXST once, the unresolved one left out");
     assert_eq!(
         (c0[0].formid, c0[0].edid.as_deref()),
@@ -121,14 +121,17 @@ fn choices_follow_the_3d_index_not_the_shape_name() {
     );
     assert_eq!(
         c0[0].users,
-        [(0, "Body".to_string()), (1, "Hands".to_string())],
+        [
+            (0, Some("Body".to_string())),
+            (1, Some("Hands".to_string()))
+        ],
         "SkinB names Hands but assigns index 0"
     );
-    let c1 = m.txst_choices(1);
+    let c1 = m.txst_choices(&m.shapes[1]);
     assert_eq!(c1.len(), 1);
     assert_eq!(c1[0].formid, MOSS);
-    assert_eq!(c1[0].users, [(0, "Hands".to_string())]);
-    assert!(m.txst_choices(2).is_empty());
+    assert_eq!(c1[0].users, [(0, Some("Hands".to_string()))]);
+    assert!(m.txst_choices(&shape(9, "Other", 2)).is_empty());
 }
 
 #[test]
@@ -146,6 +149,63 @@ fn each_card_has_its_dropdown_and_plugin_overrides_flag_a_missing_index() {
         1,
         "only the swap whose index no shape has"
     );
+}
+
+/// Note GO4: UBE's body ARMAs (NakedTorso, MOD3 + NAM1, no MO3S): the skin texture is offered on every Skin Tint
+/// shape whatever its index, on no other shape, and Plugin overrides names the field.
+#[test]
+fn arma_skin_textures_go_to_the_skin_tint_shapes() {
+    use modscan::plugin_store::SKIN_TEXTURE;
+    let mut m = model();
+    let mut body = shape(3, "BaseShape", 0);
+    body.shader_type = Some(5);
+    let mut hands = shape(5, "Hands", 4);
+    hands.shader_type = Some(5);
+    m.shapes = vec![body, hands, shape(6, "Nails", 1)];
+    let mut skin = arma(
+        0x200,
+        "00UBE_NakedTorso",
+        vec![swap("", DIRT, "SkinBodyFemale", SKIN_TEXTURE)],
+    );
+    skin.model_slot = 3;
+    m.plugin_uses = vec![skin];
+    for i in [0, 1] {
+        let c = m.txst_choices(&m.shapes[i]);
+        assert_eq!(c.len(), 1, "Skin Tint shape {i}");
+        assert_eq!((c[0].formid, c[0].users.clone()), (DIRT, vec![(0, None)]));
+    }
+    assert!(
+        m.txst_choices(&m.shapes[2]).is_empty(),
+        "not a Skin Tint shape"
+    );
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Texture set of block 3: From the NIF");
+    h.get_by_label("Texture set of block 5: From the NIF");
+    assert!(h
+        .query_by_label("Texture set of block 6: From the NIF")
+        .is_none());
+    h.get_by_label("Plugin overrides (1)").click();
+    h.run();
+    h.get_by_label("female skin texture (NAM1) → SkinBodyFemale [00000ABC]");
+    assert!(h.query_by_label("No Skin Tint shape in this NIF").is_none());
+}
+
+#[test]
+fn a_skin_texture_on_a_mesh_without_skin_shapes_is_flagged() {
+    use modscan::plugin_store::SKIN_TEXTURE;
+    let mut m = model();
+    m.plugin_uses = vec![arma(
+        0x200,
+        "Torso",
+        vec![swap("", DIRT, "SkinBodyMale", SKIN_TEXTURE)],
+    )];
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Plugin overrides (1)").click();
+    h.run();
+    h.get_by_label("male skin texture (NAM0) → SkinBodyMale [00000ABC]");
+    h.get_by_label("No Skin Tint shape in this NIF");
 }
 
 #[test]
@@ -244,7 +304,8 @@ fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
         .find(|s| s.index3d == Some(0))
         .expect("a shape with 3D index 0")
         .block;
-    assert_eq!(m.txst_choices(0).len(), 1);
+    let s0 = m.shapes.iter().find(|s| s.block == block).unwrap().clone();
+    assert_eq!(m.txst_choices(&s0).len(), 1);
     let spec = |m: &MeshesModel| match m.v3.content() {
         Some(Content::Mesh(s)) => s.clone(),
         other => panic!("not a scanned mesh: {other:?}"),

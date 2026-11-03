@@ -187,6 +187,60 @@ fn txst_textures_are_the_winning_copys_in_nif_slot_order() {
     assert_eq!(s.txst_textures(0x1234).unwrap(), None);
 }
 
+/// Note GO4: an ARMA's skin textures are swaps marked SKIN_TEXTURE, NAM1 on the female models (MOD3), NAM0 on the
+/// male ones (MOD2), next to its alternate textures.
+#[test]
+fn arma_skin_textures_are_skin_swaps_of_their_sexs_models() {
+    use modscan::plugin_store::SKIN_TEXTURE;
+    let d = instance_fixture("+A\n");
+    let r = d.path();
+    let txst = |id: u32, e: &str| rec(b"TXST", id, &[edid(e), sub(b"TX00", &zstr("a.dds"))]);
+    let arma = rec(
+        b"ARMA",
+        0xD00,
+        &[
+            edid("NakedTorso"),
+            sub(b"MOD2", &zstr("m.nif")),
+            sub(b"MOD3", &zstr("f.nif")),
+            sub(b"MO3S", &alt(&[("Body", GHOST, 0)])),
+            sub(b"NAM0", &GHOST.to_le_bytes()),
+            sub(b"NAM1", &DIRT.to_le_bytes()),
+        ],
+    );
+    put(
+        r,
+        "Game/Data/Skyrim.esm",
+        &plugin(
+            esp::FLAG_ESM,
+            &[],
+            &[
+                top(b"TXST", &[txst(DIRT, "DirtTXST"), txst(GHOST, "GhostTXST")]),
+                top(b"ARMA", &[arma]),
+            ],
+        ),
+    );
+    put(r, "profiles/Default/plugins.txt", b"");
+    let mut s = Store::open(&r.join("scan.db")).unwrap();
+    mo2(&d, &mut s);
+    let f = s.plugin_uses_of_mesh("meshes/f.nif").unwrap();
+    assert_eq!(f.len(), 1);
+    let skin = ShapeSwap {
+        shape_name: String::new(),
+        txst_formid: DIRT,
+        txst_edid: Some("DirtTXST".into()),
+        index: SKIN_TEXTURE,
+    };
+    assert_eq!(f[0].swaps[0], skin, "the skin texture sorts first");
+    assert!(f[0].swaps[0].is_skin());
+    assert_eq!(f[0].swaps[1].index, 0, "MO3S kept");
+    let m = s.plugin_uses_of_mesh("meshes/m.nif").unwrap();
+    assert_eq!(m[0].swaps.len(), 1);
+    assert_eq!(
+        (m[0].swaps[0].txst_formid, m[0].swaps[0].index),
+        (GHOST, SKIN_TEXTURE)
+    );
+}
+
 /// Review Focus 4.
 #[test]
 fn a_folder_scan_hides_plugin_rows_and_the_next_mo2_scan_restores_them() {

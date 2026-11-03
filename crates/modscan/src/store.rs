@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 /// `PRAGMA user_version` of the current schema. Older databases are dropped and rebuilt (the store is a cache).
 /// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6). 9: 2.0 debloat (Note GJ7), the dead tables and
-/// columns dropped.
-pub const SCHEMA_VERSION: i64 = 9;
+/// columns dropped. 10: ARMA skin textures as `alt_tex` rows (Note GO4), so every plugin is read again.
+pub const SCHEMA_VERSION: i64 = 10;
 
 const SCHEMA: &str = r#"
 CREATE TABLE path   (id INTEGER PRIMARY KEY, p TEXT NOT NULL UNIQUE);

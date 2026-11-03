@@ -12,7 +12,7 @@ const FROM_NIF: &str = "From the NIF";
 /// The row for shape `s`, drawn only when a plugin assigns a TXST to its 3D index. Returns the new pick:
 /// `Some(None)` = the NIF's own textures, `Some(Some(formid))` = that TXST.
 pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u32>> {
-    let choices = m.txst_choices(s.index3d?);
+    let choices = m.txst_choices(s);
     if choices.is_empty() {
         return None;
     }
@@ -74,6 +74,14 @@ pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u
     out
 }
 
+/// Which ARMA field a skin texture comes from, by the model slot it re-textures (Note GO4).
+pub(super) fn skin_field(model_slot: u32) -> &'static str {
+    match model_slot {
+        2 | 4 => "male skin texture (NAM0)",
+        _ => "female skin texture (NAM1)",
+    }
+}
+
 fn choice_text(c: &TxstChoice) -> String {
     format!(
         "{} [{:08X}]",
@@ -91,6 +99,10 @@ fn users(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView, c: &TxstChoice) {
             continue;
         };
         let rec = record_label(u.edid.as_deref(), u.formid, &u.sig, &u.plugin);
+        let Some(name) = name else {
+            ui.label(format!("{rec}, {}", skin_field(u.model_slot)));
+            continue;
+        };
         ui.label(format!("{rec}, as \"{name}\""));
         if name != here {
             ui.colored_label(

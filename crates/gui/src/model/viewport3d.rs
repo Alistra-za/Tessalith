@@ -2000,6 +2000,8 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
                 p.head_part = spec.head_part;
                 for s in &mut p.shapes {
                     if let Some(t) = spec.txst.get(&s.id) {
+                        // shortcut: only the slots change, not the TXST's DNAM flags or decal data; apply those if a
+                        // preview mismatch is traced to them.
                         s.material.slots = t
                             .iter()
                             .map(|t| nif::path::canon_texture(t.as_bytes()))

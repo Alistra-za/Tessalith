@@ -56,10 +56,16 @@ pub(crate) fn read(rec: &mut Rec, data: &[u8]) -> Result<(), usize> {
             b"TXST" => txst(p, &sig, d),
             b"RACE" => race(p, &sig, d),
             b"MATO" if &sig == b"DATA" => p.mato_flags = (d.len() >= 48).then(|| u32_at(d, 44)),
+            // xEdit `wbRecord(ARMA…)`: NAM0 / NAM1 male / female skin texture (TXST FormID).
+            // shortcut: NAM2 / NAM3 skin-texture swap lists (FLST) are not read, read them if a preview needs them.
+            b"ARMA" if d.len() >= 4 && (&sig == b"NAM0" || &sig == b"NAM1") => {
+                p.skin_txst[usize::from(sig[3] - b'0')] = u32_at(d, 0);
+            }
             _ => {}
         }
         // Skyrim ARMO MODL is an ARMA FormID (one per armature), not a path; world models are MOD2/MOD4 (ruling F-2).
-        if &kind != b"RACE" && !(&kind == b"ARMO" && &sig == b"MODL") {
+        // ARMA MODL is an additional race FormID (Note GO5).
+        if &kind != b"RACE" && !(matches!(&kind, b"ARMO" | b"ARMA") && &sig == b"MODL") {
             model(p, &sig, d);
         }
     })
