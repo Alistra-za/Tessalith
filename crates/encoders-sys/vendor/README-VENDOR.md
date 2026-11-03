@@ -126,3 +126,5 @@ transparent (opaque black is reached through an endpoint). The shim adds `sdc_bc
 `encoders_sys::bc1_encode_block_alpha` calls it at level 18. Before this patch `rgbcx.cpp` had SHA-256
 `d5d785fd7a8ad61cee47a8a7bc6c4ffc235bd98ff0dc59d80480ff8ca5c6933a` and `rgbcx.h`
 `c5defdaa3daf151116517a386cfb38145010b2490000976f524baf6a6dc97592`.
+The principal-axis and extreme-texel setup is a copy of the one in `try_3color_block_useblack`; on an upstream update,
+keep the two in sync.

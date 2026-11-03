@@ -125,7 +125,7 @@ pub const REMOVED: &[Removed] = &[
     Removed {
         key: "encoder.bc1_transparent_black",
         value: None,
-        hint: "use encoder.bc1_alpha",
+        hint: "delete the line; use encoder.bc1_alpha for 1-bit alpha",
     },
 ];
 
@@ -364,7 +364,7 @@ mod tests {
         .unwrap();
         assert!(
             m.starts_with("defaults.encoder.bc1_transparent_black: removed in 2.0;")
-                && m.ends_with("use encoder.bc1_alpha"),
+                && m.ends_with("delete the line; use encoder.bc1_alpha for 1-bit alpha"),
             "{m}"
         );
         assert!(removed_in(&t("[defaults]\nencoder = { bc1_alpha = true }")).is_none());

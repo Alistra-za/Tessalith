@@ -122,6 +122,11 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                     // Note FM: with `bc1_alpha` quantise cut the alpha to 0/255; texels below 128 go transparent.
                     // Without it rgbcx ignores alpha.
                     Format::Bc1 if e.bc1_alpha => {
+                        // Precondition: `quantize::to_encoder_input` already cut the alpha, so 128 only splits 0 from 255.
+                        debug_assert!(
+                            src.iter().all(|t| matches!(t[3], 0 | 255)),
+                            "BC1 1-bit alpha input not cut to 0/255"
+                        );
                         let mask = src
                             .iter()
                             .enumerate()

@@ -94,6 +94,42 @@ fn the_reset_arrow_drops_an_override() {
     assert!(h.query_by_label("↺").is_none());
 }
 
+/// Note FM20: the preset editor offers the 1-bit alpha box for a BC1 sub-type only, and ticking it sets the field.
+#[test]
+fn the_one_bit_alpha_box_shows_for_a_bc1_row_only() {
+    use eframe::egui::accesskit::Role;
+    use engine::config::Subtype;
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.open_presets();
+    m.presets_model().select("cs-quality");
+    m.presets_model().duplicate();
+    let mut h = harness(m);
+    h.run();
+    collapse_pbr(&mut h);
+    h.get_by_label("diffuse — BC7 · linear").click();
+    h.run();
+    h.get_by_label("Alpha");
+    assert!(
+        h.query_by_label("1-bit alpha").is_none(),
+        "no box under BC7"
+    );
+    h.state_mut().presets_model().set_field(
+        Subtype::Diffuse,
+        "format",
+        serde_json::json!(["bc1", "unorm"]),
+    );
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "1-bit alpha")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state_mut()
+            .presets_model()
+            .field(Subtype::Diffuse, "encoder.bc1_alpha"),
+        Some(serde_json::json!(true))
+    );
+}
+
 fn with_folder(dir: &std::path::Path) -> AppModel {
     let mut m = AppModel::placeholder(GuiSettings::default());
     m.user_presets = Some(dir.to_path_buf());

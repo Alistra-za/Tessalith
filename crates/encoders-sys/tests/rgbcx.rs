@@ -119,6 +119,58 @@ fn bc1_alpha_fits_only_opaque_texels() {
     }
 }
 
+/// `encode_bc1_alpha` takes its low endpoint from the low end of the principal axis. For red against blue the axis
+/// runs red -> blue (negative R-B covariance), so low = red = 0xF800 > high = blue = 0x001F, and `bc1_encode3` must
+/// swap the endpoints (selectors 0 <-> 1, 3 stays 3). Masked texels must still decode transparent and opaque ones
+/// opaque. The other pairs cover the unswapped case and both texel orders.
+#[test]
+fn bc1_alpha_swapped_endpoints_keep_the_mask() {
+    let pairs = [
+        ([255u8, 255, 255], [0u8, 0, 0]),
+        ([255, 0, 0], [0, 0, 255]),
+        ([20, 230, 40], [200, 10, 220]),
+        ([250, 250, 0], [5, 5, 250]),
+    ];
+    for (a, b) in pairs {
+        for (hi, lo) in [(a, b), (b, a)] {
+            let mut px = [[0u8; 4]; 16];
+            let mask = 0b0110_0110_0110_0110u16;
+            for (i, p) in px.iter_mut().enumerate() {
+                *p = if mask & (1 << i) != 0 {
+                    [128, 128, 128, 0]
+                } else if i < 8 {
+                    [hi[0], hi[1], hi[2], 255]
+                } else {
+                    [lo[0], lo[1], lo[2], 255]
+                };
+            }
+            let enc = bc1_encode_block_alpha(&px, mask);
+            let (c0, c1) = (
+                u16::from_le_bytes([enc[0], enc[1]]),
+                u16::from_le_bytes([enc[2], enc[3]]),
+            );
+            assert!(
+                c0 <= c1,
+                "{hi:?}/{lo:?}: not 3-colour mode ({c0:#06x} > {c1:#06x})"
+            );
+            for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
+                for (i, d) in bc1_decode_block(&enc, model).iter().enumerate() {
+                    if mask & (1 << i) != 0 {
+                        assert_eq!(*d, [0, 0, 0, 0], "{hi:?}/{lo:?} {model:?} texel {i}");
+                    } else {
+                        let s = px[i];
+                        assert_eq!(d[3], 255, "{hi:?}/{lo:?} {model:?} texel {i}");
+                        assert!(
+                            (0..3).all(|c| (d[c] as i32 - s[c] as i32).abs() <= 8),
+                            "{hi:?}/{lo:?} {model:?} texel {i}: {d:?} vs {s:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn bc4_ramp_is_close() {
     let b = ramp_block();

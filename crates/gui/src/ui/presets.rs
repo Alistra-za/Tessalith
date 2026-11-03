@@ -3,7 +3,8 @@
 use super::columns::RED;
 use super::settings_panel::{combo_for, options_of, subtype_label, Options};
 use crate::model::fields::{
-    encoding_options, field_lock, filter_option_lock, format_label, is_cutout,
+    encoding_options, field_hidden, field_lock, filter_option_lock, format_label, is_cutout,
+    BC1_ALPHA_HOVER,
 };
 use crate::model::presets::{
     is_data, layout, PresetsModel, Row, FAMILIES, FILL_ROLES, ORM_EXAMPLE, SWIZZLE_SOURCES,
@@ -549,6 +550,10 @@ fn tree(
                 if is_cutout(p) {
                     threshold_row(ui, pm, row, p, scope, acts);
                 }
+                // Note FM20: the same BC1-only rule as the texture panel's box.
+                if !field_hidden(p, "encoder.bc1_alpha") {
+                    bc1_alpha_row(ui, pm, row, p, scope, acts);
+                }
             });
         });
     }
@@ -737,6 +742,34 @@ fn threshold_row(
     hint(ui, name, h.map(|b| b.alpha.threshold.to_string()));
     reset(ui, own_value(pm, st, scope, "alpha.threshold"), || {
         acts.push(clear(st, scope, "alpha.threshold"))
+    });
+    ui.end_row();
+}
+
+fn bc1_alpha_row(
+    ui: &mut egui::Ui,
+    pm: &PresetsModel,
+    row: &Row,
+    p: &Profile,
+    scope: Scope,
+    acts: &mut Vec<Act>,
+) {
+    let st = row.subtype;
+    ui.label("1-bit alpha");
+    let mut v = p.encoder.bc1_alpha;
+    let r = ui.checkbox(&mut v, "").on_hover_text(BC1_ALPHA_HOVER);
+    // The box has no text of its own, so name it for AccessKit.
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, "1-bit alpha")
+    });
+    if r.changed() {
+        acts.push(set(st, scope, "encoder.bc1_alpha", json!(v)));
+    }
+    let on_off = |b: &Profile| if b.encoder.bc1_alpha { "on" } else { "off" }.to_string();
+    let (h, name) = hint_profile(row, scope);
+    hint(ui, name, h.map(on_off));
+    reset(ui, own_value(pm, st, scope, "encoder.bc1_alpha"), || {
+        acts.push(clear(st, scope, "encoder.bc1_alpha"))
     });
     ui.end_row();
 }
