@@ -157,7 +157,7 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
     let raw_params = encoders_sys::Bc7Params {
         level: bc7_level(p.encoder.effort),
         perceptual: false,
-        exact_opaque: encoders_sys::BC7E_EXACT_OPAQUE_NATIVE,
+        exact_opaque: true,
     };
     let mut fixed_blocks = 0;
     for seed in 1..=6 {
@@ -171,8 +171,11 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
             encoders_sys::bc7e_compress_blocks(b, o, raw_params);
         }
         for (f, r) in out.chunks(16).zip(raw.chunks(16)) {
-            // Mode-6 blocks are the native flag's (never post-fixed).
-            if f == r || r[0] & 0x7f == 0x40 {
+            // Mode 6 is bc7e's native flag (`raw_params.exact_opaque`); it is never post-fixed.
+            if r[0] & 0x7f == 0x40 {
+                assert_eq!(f, r, "a mode-6 block must be left as bc7e wrote it");
+            }
+            if f == r {
                 continue;
             }
             assert!(rotated_mode45(r), "only rotated mode 4/5 blocks may change");

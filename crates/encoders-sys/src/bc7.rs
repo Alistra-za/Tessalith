@@ -22,11 +22,6 @@ pub struct Bc7Params {
     pub exact_opaque: bool,
 }
 
-/// True once the vendored bc7e objects carry patch 0001 (exact opaque alpha).
-pub const BC7E_EXACT_OPAQUE_NATIVE: bool = cfg!(sdc_bc7e_patched);
-/// True once the vendored bc7e objects carry patch 0002 (the `Max` level).
-pub const BC7E_MAX_NATIVE: bool = cfg!(sdc_bc7e_patch2);
-
 /// ISPC code path of the bc7e objects. The dispatcher picks the best one the CPU runs, and the paths do not
 /// encode bit-identically, so a pinned output hash is only meaningful per target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,14 +87,6 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     assert_eq!(pixels.len() % 16, 0, "pixels must hold whole 4x4 blocks");
     let n = pixels.len() / 16;
     assert_eq!(out.len(), n * 16, "out must hold 16 bytes per block");
-    assert!(
-        !p.exact_opaque || BC7E_EXACT_OPAQUE_NATIVE,
-        "exact_opaque needs the patched bc7e objects"
-    );
-    assert!(
-        p.level != Bc7Level::Max || BC7E_MAX_NATIVE,
-        "Bc7Level::Max needs the patch-0002 bc7e objects"
-    );
     if n == 0 {
         return;
     }
@@ -155,18 +142,6 @@ pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Para
     assert_eq!(pixels.len() % 16, 0, "pixels must hold whole 4x4 blocks");
     let n = pixels.len() / 16;
     assert_eq!(out.len(), n * 16, "out must hold 16 bytes per block");
-    assert!(
-        !p.exact_opaque || BC7E_EXACT_OPAQUE_NATIVE,
-        "exact_opaque needs the patched bc7e objects"
-    );
-    assert!(
-        p.level != Bc7Level::Max || BC7E_MAX_NATIVE,
-        "Bc7Level::Max needs the patch-0002 bc7e objects"
-    );
-    assert!(
-        (tune.endpoint_search.is_none() && tune.refine_partitions.is_none()) || BC7E_MAX_NATIVE,
-        "the patch-0002 overrides need the patch-0002 bc7e objects"
-    );
     if n == 0 {
         return;
     }

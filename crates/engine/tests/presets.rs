@@ -1050,6 +1050,20 @@ fn removed_encoder_keys_and_codes_are_named() {
         let e = engine::overrides::parse_set(&format!("{key}=1")).unwrap_err();
         assert!(e.contains(key) && e.contains("removed in 2.0"), "{e}");
     }
+    // A user preset file (the `migrate_preset` path) and a `[[rules]]` table in a config or preset.
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    let mut r = PresetRegistry::builtin().unwrap();
+    let e = r
+        .add_toml(&format!(
+            "{head}[defaults]\nencoder = {{ backend = \"rgbcx\" }}\n"
+        ))
+        .unwrap_err();
+    assert!(e.to_string().contains("encoder.backend"), "{e}");
+    let rule = "[[rules]]\nmatch = { glob = \"*.png\" }\noverrides = { encoder = { backend = \"bc7e\" } }\n";
+    let e = ConfigFile::parse(rule, "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("encoder.backend"), "{e}");
+    let e = r.add_toml(&format!("{head}{rule}")).unwrap_err();
+    assert!(e.to_string().contains("encoder.backend"), "{e}");
     // The `nvtt` row comes first, so that value still names NVTT.
     let e = ConfigFile::parse("[defaults]\nencoder = { backend = \"nvtt\" }\n", "sdc.toml")
         .unwrap_err();

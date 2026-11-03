@@ -7,13 +7,6 @@
 #include "bc7e_ispc.h"
 #include "ispc_texcomp.h"
 
-#ifndef SDC_BC7E_PATCHED
-#define SDC_BC7E_PATCHED 0
-#endif
-#ifndef SDC_BC7E_PATCH2
-#define SDC_BC7E_PATCH2 0
-#endif
-
 namespace {
 ispc::bc7e_compress_block_params g_bc7[8][2][2];  // [level u0..u6, 7 = sdc_max][perceptual][exact_opaque]
 bc6h_enc_settings g_bc6[6];                       // veryfast, fast, basic, slow, veryslow, veryslow_peak
@@ -27,12 +20,7 @@ void init_bc7_level(ispc::bc7e_compress_block_params* p, int level, bool percept
     case 4: ispc::bc7e_compress_block_params_init_slow(p, perceptual); break;
     case 5: ispc::bc7e_compress_block_params_init_veryslow(p, perceptual); break;
     case 6: ispc::bc7e_compress_block_params_init_slowest(p, perceptual); break;
-#if SDC_BC7E_PATCH2
     default: ispc::bc7e_compress_block_params_init_sdc_max(p, perceptual); break;
-#else
-    // Without patch 0002 level 7 does not exist; Rust refuses it before it gets here.
-    default: ispc::bc7e_compress_block_params_init_slowest(p, perceptual); break;
-#endif
     }
 }
 }  // namespace
@@ -59,9 +47,7 @@ void sdc_init(int bc1_mode) {
                 ispc::bc7e_compress_block_params* p = &g_bc7[l][s][e];
                 std::memset(p, 0, sizeof(*p));  // rdo_bc_encoder.cpp does the same before init
                 init_bc7_level(p, l, s != 0);
-#if SDC_BC7E_PATCHED
                 p->m_exact_opaque_alpha = (e != 0);
-#endif
             }
     GetProfile_bc6h_veryfast(&g_bc6[0]);
     GetProfile_bc6h_fast(&g_bc6[1]);
@@ -92,7 +78,7 @@ void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int lev
 // Measurement only (the BC7 tuning study, docs/research/bc7e-tuning.md): the level's parameters with some fields overridden. A negative
 // override keeps the level's value. `t` is 14 ints: partitions_to_try (modes 0/1/3, 2 and 7 together),
 // uber_level, refinement_passes, pbit_search, weights r g b a, max_partitions for modes 1/3/7, mode 0, mode 2,
-// then the patch-0002 flags endpoint_search and refine_partitions (ignored without the patch), and one spare.
+// then the patch-0002 flags endpoint_search and refine_partitions, and one spare.
 void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, int level, int perceptual, int exact,
                              const int32_t* t) {
     ispc::bc7e_compress_block_params p = g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0];
@@ -114,10 +100,8 @@ void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, i
     }
     if (t[9] >= 0) p.m_max_partitions_mode[0] = t[9];
     if (t[10] >= 0) p.m_max_partitions_mode[2] = t[10];
-#if SDC_BC7E_PATCH2
     if (t[11] >= 0) p.m_endpoint_search = t[11] != 0;
     if (t[12] >= 0) p.m_refine_partitions = t[12] != 0;
-#endif
     ispc::bc7e_compress_blocks(n, blocks, px, &p);
 }
 
@@ -159,7 +143,5 @@ void sdc_bc6h_compress(const uint16_t* rgba16f, int32_t width, int32_t rows, int
     s.stride = stride_bytes;
     CompressBlocksBC6H(&s, dst, &g_bc6[level]);
 }
-
-int sdc_bc7e_patched(void) { return SDC_BC7E_PATCHED; }
 
 }  // extern "C"

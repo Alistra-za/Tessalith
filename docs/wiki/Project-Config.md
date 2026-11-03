@@ -90,7 +90,7 @@ Every texture's final settings (its profile) are built from layers. Later layers
 
 ### Format and encoder
 
-The format alone picks the encoder, so a layer that changes only `format` needs no other setting: BC1, BC3, BC4 and BC5 use rgbcx (BC1 and BC3 colour at its top level, 18), BC6H uses ISPC and BC7 uses bc7e. Uncompressed formats run no encoder. There is no key to choose the encoder or the rgbcx level. <!-- D:FM15 -->
+The format picks the encoder: rgbcx for BC1, BC3, BC4 and BC5 (level 18 for BC1 and BC3 colour), ISPC for BC6H, bc7e for BC7. Uncompressed formats run no encoder. <!-- D:FM15 -->
 
 ## [defaults] and [subtypes]
 

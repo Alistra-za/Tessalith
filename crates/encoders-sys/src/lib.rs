@@ -8,7 +8,7 @@ mod rgbcx;
 pub use bc6h::*;
 pub use bc7::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned, Bc7Level, Bc7Params,
-    Bc7Target, Bc7Tune, BC7E_EXACT_OPAQUE_NATIVE, BC7E_MAX_NATIVE,
+    Bc7Target, Bc7Tune,
 };
 pub use rgbcx::*;
 
@@ -69,19 +69,12 @@ pub struct Versions {
 }
 
 pub fn versions() -> Versions {
-    // The compiled shim reports whether the vendored bc7e header carries the exact-opaque patch.
-    let patched = unsafe { ffi::sdc_bc7e_patched() } != 0;
-    debug_assert_eq!(patched, cfg!(sdc_bc7e_patched));
     Versions {
         bc7enc_rdo: "b943862",
         rgbcx_patch: Some("bc4-round-to-nearest+bc4-search"),
         ispctc: "79ddbc9",
         ispc: "1.31.0",
-        bc7e_patch: if patched {
-            Some("0001-exact-opaque-alpha")
-        } else {
-            None
-        },
+        bc7e_patch: Some("0001-exact-opaque-alpha"),
     }
 }
 

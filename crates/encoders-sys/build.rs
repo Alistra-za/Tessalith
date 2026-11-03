@@ -19,10 +19,6 @@ fn main() {
             "vendor/ispc-objs/bc7e/bc7e_ispc.h lacks `{marker}`: the bc7e objects are missing patch {patch} (tools/regen-ispc.ps1)"
         );
     }
-    println!("cargo::rustc-check-cfg=cfg(sdc_bc7e_patched)");
-    println!("cargo::rustc-cfg=sdc_bc7e_patched");
-    println!("cargo::rustc-check-cfg=cfg(sdc_bc7e_patch2)");
-    println!("cargo::rustc-cfg=sdc_bc7e_patch2");
 
     let mut b = cc::Build::new();
     b.cpp(true)
@@ -32,8 +28,6 @@ fn main() {
         .flag("/fp:precise")
         .define("NOMINMAX", None)
         .define("NDEBUG", None)
-        .define("SDC_BC7E_PATCHED", "1")
-        .define("SDC_BC7E_PATCH2", "1")
         .include(v.join("bc7enc_rdo"))
         .include(v.join("ispctc"))
         .include(&bc7e)

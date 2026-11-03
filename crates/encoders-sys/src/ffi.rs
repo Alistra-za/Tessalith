@@ -34,5 +34,4 @@ extern "C" {
         dst: *mut u8,
         level: i32,
     );
-    pub fn sdc_bc7e_patched() -> i32;
 }

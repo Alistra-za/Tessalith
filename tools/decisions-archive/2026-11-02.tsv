@@ -38,3 +38,4 @@ BZ5	BZ		back	FM		partial	2026-11-02		goes: build.rs detecting the patch and the 
 CB1	CB		back	FM		partial	2026-11-02		goes: BC7E_MAX_NATIVE is now true and the renamed test; stays: the rebuilt objects
 CP11	CP		back	FM		partial	2026-11-02		goes: non-bc7e backends; stays: the other items
 FF1	FF		back	FM		partial	2026-11-02		goes: the max refusal sentence; stays: the mapping
+FM15	FM		back	FM		partial	2026-11-02		goes: the constants and the shim #if branches stay; stays: the rest of the item

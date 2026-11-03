@@ -12,10 +12,6 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-// The vendored bc7e objects always carry patch 0001 (build.rs refuses a tree without it), so `alpha.exact_opaque`
-// is bc7e's native flag and there is no mode-6 byte patch (DECISIONS Note FM).
-const _: () = assert!(BC7E_EXACT_OPAQUE_NATIVE);
-
 /// Blocks per bc7e call (what the bench used).
 const BC7_BLOCKS_PER_CALL: usize = 64;
 /// Texels per 4x4 block.
