@@ -244,7 +244,8 @@ fn rnm_fixture(dir: &Path) {
 }
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
-/// opaque BC1, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, plus BC4 and BC5. Returns the
+/// opaque BC1, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a BC3 cutout at alpha.threshold
+/// 200, plus BC4 and BC5. Returns the
 /// `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
@@ -281,6 +282,18 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
             &["subtype=diffuse", &fmt, "alpha.policy=blend"],
         );
     }
+    // A smooth alpha cutout at threshold 200: the BC3 alpha guard keeps texels across 201, not 128 (Note FM).
+    add(
+        "cutout_bc3_t200",
+        rgba64(),
+        &[
+            "subtype=diffuse",
+            "format=bc3",
+            "alpha.policy=cutout",
+            "alpha.threshold=200",
+            "mips.filter=box",
+        ],
+    );
     // `_SRGB`-tagged BC1 and BC3 (pbr_albedo is the cs sub-type that carries the tag), an opaque and a blend source.
     add("srgb_bc1", rgb(64), &["subtype=pbr_albedo", "format=bc1"]);
     add(

@@ -642,7 +642,7 @@ fn engine_bc4_bytes_equal_reference() {
             let v: [u8; 16] = std::array::from_fn(|t| src[t][ch]);
             assert_eq!(
                 out[b * bs..b * bs + 8],
-                bc4ref::search(&v, rad, fmt == Format::Bc3),
+                bc4ref::search(&v, rad, (fmt == Format::Bc3).then_some(128)),
                 "{fmt:?} block {b}"
             );
         }

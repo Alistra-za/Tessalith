@@ -19,7 +19,7 @@ Provenance of the first objects: the bc7e objects are byte-identical to the ones
 because the bench's copies embed the bench's absolute source path; same source and flags,
 but the files differ from the bench's.
 
-Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search and BC1 dual patches at
+Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search, BC1 dual and BC4 guard cut patches at
 the end of this file).
 
 Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) changes bc7e. `bc7e/bc7e.ispc` is the pristine `bc7enc_rdo/bc7e.ispc` with that patch applied:
@@ -101,3 +101,14 @@ total orderings, endpoint search) are unchanged. `unpack_bc1_block_colors` asser
 uses mode 1 or 2). BC4 and BC5 take no new code path. Before this patch `rgbcx.cpp` had SHA-256
 `cf4d034b3277c9f942814896d7ce70eeaeb5d33c2011a897f784389b1858da95` and `rgbcx.h`
 `e49b480432cb4de1985295999a9c9397b969ee701bb5638cda3a1db259202845`. Measurements: the bc1-dual research report (`reports/bc1-dual/REPORT-dual-mode.md`, outside the repo).
+
+Patch "rgbcx BC4 guard cut" (2026-11-02) applies on top of BC1 dual, marked `sdc patch (bc4 guard cut)`. `BC4_SDC_GUARD128`
+keeps the mode-loop block when the search would flip more texels across the alpha-test cutoff; the cutoff was the
+constant 128 and is now bits 8..15 of `mode_flag` (a texel passes when alpha >= cutoff; 0 means 128, so every caller
+that sets no bits there is unchanged). `rgbcx.h` documents the bits; in `rgbcx.cpp` `sdc_bc4::flips` takes the cutoff and
+`encode_bc4_hq` reads it from `mode_flag` before the guard compare. The shim's `sdc_bc3_encode` takes the cutoff and
+ORs `cut << 8` into the flags; `encoders_sys::bc3_encode_block` passes it on (the engine's `alpha_cut`, Note FM). The
+reference is `search(v, radius, Some(cut))` in `crates/encoders-sys/tests/support/bc4ref.rs`; with cutoff 128 the output
+is byte-identical to the BC1 dual patch. Before this patch `rgbcx.cpp` had SHA-256
+`9e5245dcbbfbde3fbbc0472545a5dbe64ef76df9759c08feadc7a660749bd99f` and `rgbcx.h`
+`204c7d75e361fc22e700467b97f0f09c17fd6efebc527dbff1f1519036219ffd`.

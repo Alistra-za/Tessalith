@@ -62,7 +62,7 @@ fn bc5_encodes_red_and_green() {
 #[test]
 fn bc3_keeps_alpha() {
     let b = ramp_block();
-    let enc = bc3_encode_block(&b, BC45_RADIUS_MAX);
+    let enc = bc3_encode_block(&b, BC45_RADIUS_MAX, 128);
     let mut dec = [0u8; 64];
     bcdec_rs::bc3(&enc, &mut dec, 16);
     for i in 0..16 {

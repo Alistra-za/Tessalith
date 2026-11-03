@@ -20,7 +20,7 @@ extern "C" {
         t: *const i32,
     );
     pub fn sdc_bc1_encode(dst: *mut u8, px: *const u8, level: u32, allow3: i32, black: i32);
-    pub fn sdc_bc3_encode(dst: *mut u8, px: *const u8, level: u32, rad: u32);
+    pub fn sdc_bc3_encode(dst: *mut u8, px: *const u8, level: u32, rad: u32, cut: u32);
     pub fn sdc_bc4_encode(dst: *mut u8, px: *const u8, stride: u32, rad: u32);
     pub fn sdc_bc4_encode_flags(dst: *mut u8, px: *const u8, stride: u32, rad: u32, flags: u32);
     pub fn sdc_bc5_encode(dst: *mut u8, px: *const u8, rad: u32);

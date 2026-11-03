@@ -1217,6 +1217,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **FJ8 `max` near-exhaustive search: not done.** Owner declined after the timing (2026-11-01, "no exhaustive"); numbers in `docs/research/bc4-family.md` ("max: near-exhaustive": about +0.03 dB over the search at radius 10 for about 2.4× its time). `bc45_search_radius = "max"` is the FJ1 search at radius 10; `sdc_bench::bc4ref::search_max` stays a Rust-only measurement. End to end at `max` (median s per texture old → new): BC3 cutouts 0.151 → 0.165 (1.09×), BC4 0.359 → 0.598 (1.67×), BC5 0.776 → 1.348 (1.74×); worst 0.406, 0.746 and 1.497 s.
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **FJ9 Not done: per-mesh alpha thresholds.** The guard protects the alpha-test value 128 only, the vanilla and Community Shaders default. A mesh with another alpha-test threshold is not protected, because the threshold lives in the NIF (`NiAlphaProperty`), not in the texture the encoder sees.
+
 ## Note DM — Per-type encode versions for if-changed (owner, 2026-10-26)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)

@@ -273,11 +273,11 @@ pub fn local(v: &[u8; 16], b: &mut Best) {
     }
 }
 
-/// Texels whose alpha-test result at 128 differs from the source.
-pub fn flips(v: &[u8; 16], b: &Best) -> u32 {
+/// Texels whose alpha-test result (pass when alpha >= `cut`) differs from the source.
+pub fn flips(v: &[u8; 16], b: &Best, cut: u8) -> u32 {
     let p = pal(b.e0, b.e1);
     (0..16)
-        .filter(|&i| (v[i] >= 128) != (p[b.sels[i] as usize] >= 128))
+        .filter(|&i| (v[i] >= cut) != (p[b.sels[i] as usize] >= cut))
         .count() as u32
 }
 
@@ -286,9 +286,9 @@ pub fn upstream(v: &[u8; 16], radius: u32) -> [u8; 8] {
     v0(v, radius as i32).bytes()
 }
 
-/// The measured search (probe variant v4; v5 with `guard128`, which falls back to the upstream block when it would
-/// flip more texels across the alpha-test value 128). Never worse than [`upstream`] in SSE.
-pub fn search(v: &[u8; 16], radius: u32, guard128: bool) -> [u8; 8] {
+/// The measured search (probe variant v4; v5 with `guard = Some(cut)`, which falls back to the upstream block when it
+/// would flip more texels across the alpha-test cutoff `cut`, 128 by default). Never worse than [`upstream`] in SSE.
+pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let rad = radius as i32;
     let base = v0(v, rad);
     let mut b = base;
@@ -296,8 +296,10 @@ pub fn search(v: &[u8; 16], radius: u32, guard128: bool) -> [u8; 8] {
     refit_both(v, &mut b, rad);
     trimmed6(v, &mut b);
     local(v, &mut b);
-    if guard128 && flips(v, &b) > flips(v, &base) {
-        b = base;
+    if let Some(cut) = guard {
+        if flips(v, &b, cut) > flips(v, &base, cut) {
+            b = base;
+        }
     }
     b.bytes()
 }

@@ -3083,13 +3083,13 @@ namespace rgbcx
 				}
 		}
 
-		static uint32_t flips(const uint8_t* v, const best& b)
+		static uint32_t flips(const uint8_t* v, const best& b, uint32_t cut)
 		{
 			uint8_t p[8];
 			bc4_block::get_block_values(p, b.e0, b.e1);
 			uint32_t n = 0;
 			for (uint32_t i = 0; i < 16; i++)
-				n += (v[i] >= 128) != (p[b.sels[i]] >= 128);
+				n += (v[i] >= cut) != (p[b.sels[i]] >= cut);
 			return n;
 		}
 	} // namespace sdc_bc4
@@ -3267,7 +3267,8 @@ namespace rgbcx
 			sdc_bc4::refit_both(v, b, rad);
 			sdc_bc4::trimmed6(v, b);
 			sdc_bc4::local(v, b);
-			if ((mode_flag & BC4_SDC_GUARD128) && sdc_bc4::flips(v, b) > sdc_bc4::flips(v, base))
+			const uint32_t cut = ((mode_flag >> 8) & 255) ? ((mode_flag >> 8) & 255) : 128; // sdc patch (bc4 guard cut): bits 8..15 of mode_flag, 0 = 128
+			if ((mode_flag & BC4_SDC_GUARD128) && sdc_bc4::flips(v, b, cut) > sdc_bc4::flips(v, base, cut))
 				b = base;
 			uint64_t bits = 0;
 			for (uint32_t i = 0; i < 16; i++)

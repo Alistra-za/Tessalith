@@ -41,8 +41,9 @@ pub fn bc1_encode_block(
     out
 }
 
-/// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha).
-pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
+/// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha). The alpha search keeps texels on their side of
+/// the alpha test: a texel passes when its alpha is at least `cut` (2..=255; 128 is the default test, Note FM).
+pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32, cut: u8) -> [u8; 16] {
     init();
     let src = bytes(px);
     let mut out = [0u8; 16];
@@ -53,6 +54,7 @@ pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
             src.as_ptr(),
             RGBCX_MAX_LEVEL,
             search_radius,
+            cut as u32,
         )
     };
     out
@@ -84,7 +86,7 @@ pub const BC4_USE_ALL_MODES: u32 = 3;
 /// C++ does not check ([`bc4_encode_block_flags`] debug-asserts it).
 pub const BC4_SDC_SEARCH: u32 = 4;
 /// `rgbcx::BC4_SDC_GUARD128` (sdc patch): with [`BC4_SDC_SEARCH`], keep the mode-loop block when the search would flip
-/// more texels across 128. `bc3_encode_block` sets it for alpha.
+/// more texels across the alpha-test cutoff (bits 8..15 of the flags, 0 = 128). `bc3_encode_block` sets it for alpha.
 pub const BC4_SDC_GUARD128: u32 = 8;
 
 /// Like [`bc4_encode_block`] but `flags` reaches `encode_bc4_hq` verbatim (the shim adds no bit of its own).

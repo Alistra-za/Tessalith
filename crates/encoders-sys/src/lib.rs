@@ -47,7 +47,7 @@ pub struct Versions {
 pub fn versions() -> Versions {
     Versions {
         bc7enc_rdo: "b943862",
-        rgbcx_patch: Some("bc4-round-to-nearest+bc4-search+bc1-dual"),
+        rgbcx_patch: Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut"),
         ispctc: "79ddbc9",
         ispc: "1.31.0",
         bc7e_patch: Some("0001-exact-opaque-alpha"),

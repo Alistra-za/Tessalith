@@ -253,7 +253,8 @@ namespace rgbcx
 	const uint32_t BC4_USE_MODE6_FLAG = 2;
 	const uint32_t BC4_USE_ALL_MODES = 3;
 	// sdc patch (bc4 search, see README-VENDOR.md): after the mode loop, search more endpoint pairs (never worse in SSE);
-	// GUARD128 falls back to the mode-loop block when the search would flip more texels across 128 (BC3 alpha test).
+	// GUARD128 falls back to the mode-loop block when the search would flip more texels across the alpha-test cutoff (BC3
+	// alpha test). The cutoff is bits 8..15 of mode_flag (a texel passes when alpha >= cutoff); 0 means 128 (sdc patch: bc4 guard cut).
 	const uint32_t BC4_SDC_SEARCH = 4;
 	const uint32_t BC4_SDC_GUARD128 = 8;
 

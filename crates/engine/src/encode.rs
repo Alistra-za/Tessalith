@@ -52,6 +52,16 @@ pub fn bc6h_level(e: Effort) -> Bc6hLevel {
     }
 }
 
+/// The least alpha that passes the texture's alpha test, the cutoff the BC3 alpha guard keeps texels on the right side
+/// of (Note FM): `gt` t passes alpha >= t + 1, `ge` t passes alpha >= t. `threshold` is 1..=254 (checked in policy), so
+/// the result is 2..=255 and never 0, which the encoder reads as "128". The default (127, `gt`) gives 128.
+pub fn alpha_cut(a: &AlphaSpec) -> u8 {
+    match a.compare {
+        AlphaCompare::Gt => a.threshold.saturating_add(1),
+        AlphaCompare::Ge => a.threshold,
+    }
+}
+
 pub fn radius(r: SearchRadius) -> u32 {
     match r {
         SearchRadius::Default => BC45_RADIUS_DEFAULT,
@@ -110,9 +120,11 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                     Format::Bc1 => {
                         blk.copy_from_slice(&bc1_encode_block(src, true, e.bc1_transparent_black))
                     }
-                    Format::Bc3 => {
-                        blk.copy_from_slice(&bc3_encode_block(src, radius(e.bc45_search_radius)))
-                    }
+                    Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
+                        src,
+                        radius(e.bc45_search_radius),
+                        alpha_cut(&p.alpha),
+                    )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
                     Format::Bc4 => {
                         blk.copy_from_slice(&bc4_encode_block(src, 0, radius(e.bc45_search_radius)))

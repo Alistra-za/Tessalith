@@ -3,13 +3,20 @@
 use engine::api::*;
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, Format, Target};
+use engine::encode::{alpha_cut, encode_level, EncodeCtx};
 use engine::events::*;
 use engine::overrides::parse_set;
 use engine::policy::{AcceptSuggestions, JobStatus, Need, Provenance, ResolvedJob};
+use engine::quantize::EncoderInput;
 use engine::shader::MeshAlpha;
 use image::{ImageBuffer, Rgb, Rgba};
 use std::path::Path;
 use std::sync::Arc;
+
+// Shared with the encoders-sys BC4 reference test; this file uses only `Rng` and `search`.
+#[allow(dead_code)]
+#[path = "../../encoders-sys/tests/support/bc4ref.rs"]
+mod bc4ref;
 
 const WALL: &str = "textures/a/wall";
 const BLEND: MeshAlpha = MeshAlpha {
@@ -268,4 +275,43 @@ fn the_mesh_beats_the_shader_default_and_its_threshold_is_clamped() {
         (AlphaPolicy::Cutout, 1)
     );
     assert!(!codes(j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+}
+
+/// Note FM: the threshold a mesh gives a BC3 cutout reaches the encoder's alpha guard as its cutoff (`gt` 200 passes
+/// from 201), so the written alpha block equals the reference guarded at 201, which differs from the default guard.
+#[test]
+fn a_mesh_threshold_reaches_the_bc3_guard() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    let p = plan(d.path(), None, &[], &[(WALL, vec![tested(200)])]);
+    let mut prof = job(&p, "wall.dds").profile.clone();
+    assert_eq!(prof.alpha.threshold, 200);
+    assert_eq!(alpha_cut(&prof.alpha), 201);
+    prof.format = Format::Bc3;
+    let mut r = bc4ref::Rng(0x0DDB_1A5E_5BAD_5EED);
+    let img: Vec<[u8; 4]> = (0..64 * 64)
+        .map(|_| [r.byte(), r.byte(), r.byte(), r.byte()])
+        .collect();
+    let out = encode_level(
+        &EncoderInput::Ldr(img.clone()),
+        64,
+        64,
+        &prof,
+        &EncodeCtx::default(),
+    )
+    .unwrap();
+    let rad = engine::encode::radius(prof.encoder.bc45_search_radius);
+    let gathered = encoders_sys::gather_blocks(&img, 64, 64);
+    let mut not_default = 0;
+    for (b, src) in gathered.chunks(16).enumerate() {
+        let v: [u8; 16] = std::array::from_fn(|t| src[t][3]);
+        assert_eq!(
+            out[b * 16..b * 16 + 8],
+            bc4ref::search(&v, rad, Some(201)),
+            "block {b}"
+        );
+        not_default +=
+            (bc4ref::search(&v, rad, Some(201)) != bc4ref::search(&v, rad, Some(128))) as u32;
+    }
+    assert!(not_default > 0, "no block tells 201 from 128");
 }

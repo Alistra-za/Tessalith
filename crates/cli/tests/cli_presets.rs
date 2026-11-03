@@ -117,7 +117,7 @@ fn encoders_reports_versions_isa_and_bc1_target() {
         "79ddbc9",
         "1.31.0",
         "0001-exact-opaque-alpha@sha256:",
-        "patch bc4-round-to-nearest+bc4-search+bc1-dual@sha256:",
+        "patch bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut@sha256:",
         "dispatched ISA",
         "BC1 encode target: dual",
     ] {
@@ -138,7 +138,7 @@ fn encoders_json_is_one_object() {
     assert!(v["rgbcx_patch"]
         .as_str()
         .unwrap()
-        .starts_with("bc4-round-to-nearest+bc4-search+bc1-dual@sha256:"));
+        .starts_with("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut@sha256:"));
     assert!(["sse2", "sse4", "avx", "avx2"].contains(&v["isa"].as_str().unwrap()));
 }
 

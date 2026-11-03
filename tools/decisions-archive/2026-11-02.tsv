@@ -43,3 +43,4 @@ R-fills-2	R		back	FM		partial	2026-11-02		goes: old project-wide defaults.packin
 F¶- BC1 decoder model:	F		back	FM		archive-item	2026-11-02		BC1 always encodes for NVIDIA + AMD (FM17); no decoder setting
 CN32	CN		back	FM		partial	2026-11-02		goes: run_also never sets bc1_model and the process-global BC1 model sentence; stays: the phases and rules
 CN64	CN		back	FM		partial	2026-11-02		goes: req.bc1_model = session.bc1_model(); stays: the worker and the end of an Also export
+FJ9	FJ		back	FM		archive-item	2026-11-02		per-mesh alpha thresholds now reach the BC3 guard (FM19)

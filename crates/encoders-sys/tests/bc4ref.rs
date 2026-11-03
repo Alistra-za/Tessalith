@@ -15,6 +15,11 @@ fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
     p
 }
 
+/// The alpha half of `bc3_encode_block` for texels `v` (the colour half is not under test).
+fn bc3_alpha(v: &[u8; 16], r: u32, cut: u8) -> [u8; 8] {
+    bc3_encode_block(&px(v, 3), r, cut)[..8].try_into().unwrap()
+}
+
 fn sse(b: &[u8; 8], v: &[u8; 16]) -> u64 {
     let mut d = [0u8; 16];
     bcdec_rs::bc4(b, &mut d, 4, false);
@@ -59,9 +64,9 @@ fn search_never_worse() {
     for v in blocks(20_000) {
         for r in [4, 5, 10] {
             let s = upstream(&v, r);
-            let a = search(&v, r, false);
+            let a = search(&v, r, None);
             assert!(sse(&a, &v) <= sse(&s, &v), "{v:?} r {r}");
-            let g = search(&v, r, true);
+            let g = search(&v, r, Some(128));
             assert!(sse(&g, &v) <= sse(&s, &v), "{v:?} r {r} guard");
             assert!(flips(&g, &v) <= flips(&s, &v), "{v:?} r {r} guard");
         }
@@ -75,8 +80,8 @@ fn const_and_binary_blocks_unchanged() {
         *x = if (i + i / 4) % 2 == 0 { 0 } else { 255 };
     }
     for v in [[0u8; 16], [255; 16], [77; 16], checker] {
-        assert_eq!(search(&v, 5, false), upstream(&v, 5), "{v:?}");
-        assert_eq!(search(&v, 5, true), upstream(&v, 5), "{v:?}");
+        assert_eq!(search(&v, 5, None), upstream(&v, 5), "{v:?}");
+        assert_eq!(search(&v, 5, Some(128)), upstream(&v, 5), "{v:?}");
     }
 }
 
@@ -85,7 +90,7 @@ fn trimmed_range_beats_upstream_on_near_extremes() {
     let v = [
         0, 0, 1, 2, 40, 80, 120, 160, 200, 253, 254, 255, 255, 255, 128, 64,
     ];
-    assert!(sse(&search(&v, 5, false), &v) < sse(&upstream(&v, 5), &v));
+    assert!(sse(&search(&v, 5, None), &v) < sse(&upstream(&v, 5), &v));
 }
 
 // The vendored C++ (shim flags BC4_SDC_SEARCH, plus BC4_SDC_GUARD128 for BC3 alpha) equals the reference byte for
@@ -100,13 +105,13 @@ fn ffi_equals_reference() {
                 let p = px(v, ch);
                 assert_eq!(
                     bc4_encode_block(&p, ch, r),
-                    search(v, r, false),
+                    search(v, r, None),
                     "{v:?} ch {ch} r {r}"
                 );
             }
             assert_eq!(
-                bc3_encode_block(&px(v, 3), r)[..8],
-                search(v, r, true),
+                bc3_alpha(v, r, 128),
+                search(v, r, Some(128)),
                 "{v:?} bc3 r {r}"
             );
             let mut p = px(v, 0);
@@ -114,8 +119,8 @@ fn ffi_equals_reference() {
                 p[t][1] = w[t];
             }
             let e = bc5_encode_block(&p, r);
-            assert_eq!(e[..8], search(v, r, false), "{v:?} bc5 r half r {r}");
-            assert_eq!(e[8..], search(w, r, false), "{w:?} bc5 g half r {r}");
+            assert_eq!(e[..8], search(v, r, None), "{v:?} bc5 r half r {r}");
+            assert_eq!(e[8..], search(w, r, None), "{w:?} bc5 g half r {r}");
         }
     }
 }
@@ -132,13 +137,13 @@ fn flag_constants_select_the_reference_arms() {
             let f = BC4_USE_ALL_MODES | BC4_SDC_SEARCH;
             assert_eq!(
                 bc4_encode_block_flags(&p, 0, r, f),
-                search(&v, r, false),
+                search(&v, r, None),
                 "{v:?} r {r}"
             );
             let g = f | BC4_SDC_GUARD128;
             assert_eq!(
                 bc4_encode_block_flags(&p, 0, r, g),
-                search(&v, r, true),
+                search(&v, r, Some(128)),
                 "{v:?} r {r} guard"
             );
         }
@@ -166,9 +171,37 @@ fn guard_only_on_bc3() {
     let v = [
         101, 185, 152, 193, 87, 248, 130, 84, 241, 174, 246, 200, 103, 217, 60, 5,
     ];
-    let (v4, v5) = (search(&v, 5, false), search(&v, 5, true));
+    let (v4, v5) = (search(&v, 5, None), search(&v, 5, Some(128)));
     assert_ne!(v4, v5);
     assert_eq!(bc4_encode_block(&px(&v, 0), 0, 5), v4);
     assert_eq!(bc5_encode_block(&px(&v, 0), 5)[..8], v4);
-    assert_eq!(bc3_encode_block(&px(&v, 3), 5)[..8], v5);
+    assert_eq!(bc3_alpha(&v, 5, 128), v5);
+}
+
+/// The BC3 guard counts flips across the cutoff it is given (Note FM): the C++ equals the reference for other cutoffs,
+/// through `bc3_encode_block` and through the `mode_flag` bits 8..15 directly, and the cutoff does change blocks.
+#[test]
+fn guard_follows_the_cutoff() {
+    use encoders_sys::{
+        bc4_encode_block_flags, BC4_SDC_GUARD128, BC4_SDC_SEARCH, BC4_USE_ALL_MODES,
+    };
+    const RADIUS: u32 = 5;
+    let mut differs = 0;
+    for v in blocks(4096) {
+        for cut in [64u8, 128, 200] {
+            assert_eq!(
+                bc3_alpha(&v, RADIUS, cut),
+                search(&v, RADIUS, Some(cut)),
+                "{v:?} cut {cut}"
+            );
+            let f = BC4_USE_ALL_MODES | BC4_SDC_SEARCH | BC4_SDC_GUARD128 | (cut as u32) << 8;
+            assert_eq!(
+                bc4_encode_block_flags(&px(&v, 0), 0, RADIUS, f),
+                search(&v, RADIUS, Some(cut)),
+                "{v:?} flags cut {cut}"
+            );
+        }
+        differs += (search(&v, RADIUS, Some(200)) != search(&v, RADIUS, Some(128))) as u32;
+    }
+    assert!(differs > 0, "the cutoff never changed a block");
 }
