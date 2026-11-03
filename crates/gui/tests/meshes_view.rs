@@ -1129,6 +1129,71 @@ fn the_mod_picker_lists_mods_with_nifs_and_picking_one_lists_its_copies() {
     );
 }
 
+/// Owner 2026-11-02 (Note GK): with thousands of mods the picker takes typed text. Its filter box has the focus when it
+/// opens, a click in it keeps the list open, every word narrows the list (any case), "Any mod" stays, Enter picks the
+/// first match, and the box is empty again at the next open.
+#[test]
+fn the_mod_picker_filters_by_typed_words_and_enter_picks_the_first_match() {
+    let (_d, mut m) = scanned();
+    for (i, name) in ["Starsight Eyes", "Arch_Solitude", "CommunityShaders_AIO"]
+        .into_iter()
+        .enumerate()
+    {
+        m.mods.push(mod_row(100 + i as i64, name, 0, false));
+    }
+    let mut h = harness(m);
+    h.run();
+    picker(&h, "Any mod").click();
+    h.run();
+    let filter = |h: &Harness<'static, MeshesModel>| {
+        h.query_all_by_role(Role::TextInput)
+            .find(|n| n.is_focused())
+            .map(|n| n.value().unwrap_or_default())
+    };
+    assert_eq!(
+        filter(&h).as_deref(),
+        Some(""),
+        "the filter box has the focus"
+    );
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| n.is_focused())
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "B"); // still open
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| n.is_focused())
+        .unwrap()
+        .type_text("SOL arch");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Arch_Solitude");
+    h.get_by_role_and_label(Role::Button, "Any mod");
+    for gone in ["A", "B", "Starsight Eyes", "CommunityShaders_AIO"] {
+        assert!(
+            h.query_by_role_and_label(Role::Button, gone).is_none(),
+            "{gone} is still listed"
+        );
+    }
+    h.key_press(eframe::egui::Key::Enter);
+    h.run();
+    assert_eq!(h.state().selected_mod, Some(101));
+    assert!(
+        h.query_by_role_and_label(Role::Button, "Starsight Eyes")
+            .is_none(),
+        "the pick closes the list"
+    );
+    picker(&h, "Arch_Solitude").click();
+    h.run();
+    assert_eq!(
+        filter(&h).as_deref(),
+        Some(""),
+        "a fresh filter at the next open"
+    );
+    for name in ["A", "B", "Starsight Eyes", "CommunityShaders_AIO"] {
+        h.get_by_role_and_label(Role::Button, name);
+    }
+}
+
 /// Note GC test 4: in "Any mod", Overridden lists the losing copies, each with its own mod; Wins is hidden there
 /// (every row wins) and comes back with a picked mod.
 #[test]

@@ -572,13 +572,16 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
 }
 
 /// The mod picker (Note GC): "Any mod" lists every path's winner; a mod lists its own copies. Greyed while a scan
-/// runs, as the list's selection is.
+/// runs, as the list's selection is. Note GK: a filter box on top, focused when the list opens, narrows the mods to
+/// those holding every typed word (any case); Enter picks the first match.
 fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let text = match m.selected_mod {
         Some(id) => m.mod_name(id).to_string(),
         None => "Any mod".to_string(),
     };
     let mut pick = None;
+    let query_id = egui::Id::new("meshes-mod-picker-filter");
+    let pass = ui.ctx().cumulative_pass_nr();
     // Rule 3.5: the combo's width is a minimum, so it gets an exact slot.
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
     ui.allocate_ui(size, |ui| {
@@ -587,20 +590,54 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 .selected_text(text)
                 .width(size.x)
                 .truncate()
+                // A click in the filter box keeps the list open; a pick closes it below.
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
+                    // (text, last pass drawn): a list not drawn at the last pass has just opened.
+                    let (mut q, fresh) = match ui.data(|d| d.get_temp::<(String, u64)>(query_id)) {
+                        Some((q, p)) if p + 1 == pass => (q, false),
+                        _ => (String::new(), true),
+                    };
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut q)
+                            .hint_text("Filter: words of the mod name")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if fresh {
+                        r.request_focus();
+                    }
+                    ui.data_mut(|d| d.insert_temp(query_id, (q.clone(), pass)));
+                    let q = q.to_lowercase();
+                    let words: Vec<&str> = q.split_whitespace().collect();
+                    let hits: Vec<_> = m
+                        .picker_mods()
+                        .filter(|r| {
+                            let n = r.name.to_lowercase();
+                            words.iter().all(|w| n.contains(w))
+                        })
+                        .collect();
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        pick = hits.first().map(|r| Some(r.id));
+                    }
                     if ui
                         .selectable_label(m.selected_mod.is_none(), "Any mod")
                         .clicked()
                     {
                         pick = Some(None);
                     }
-                    for r in m.picker_mods() {
+                    for r in &hits {
                         if ui
                             .selectable_label(m.selected_mod == Some(r.id), &r.name)
                             .clicked()
                         {
                             pick = Some(Some(r.id));
                         }
+                    }
+                    if hits.is_empty() && !words.is_empty() {
+                        ui.weak("No mod name has every word");
+                    }
+                    if pick.is_some() {
+                        ui.close();
                     }
                 })
                 .response
