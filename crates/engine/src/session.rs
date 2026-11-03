@@ -9,6 +9,7 @@ use crate::config::{Category, Format};
 use crate::dds::{dds_bytes, read_dds, resolve_header, DdsDesc};
 use crate::decode::{decode_level, Decoded};
 use crate::events::{NullSink, Reporter, Stage};
+use crate::helper::FillJob;
 use crate::image::{Rgba32F, SourceInfo};
 use crate::manifest::sha256_json;
 use crate::ops::{linear_to_srgb, Domain};
@@ -124,6 +125,20 @@ pub fn pack_cache_key(pk: &PackJob) -> Option<String> {
         .flatten()
 }
 
+/// The key of a filled target's analysis (Note FM31): the target and the helper with their stamps, the fill's own
+/// settings and the EXR straight-alpha setting the target was loaded under. `None` when either file has no stamp.
+pub fn fill_cache_key(
+    target: &Path,
+    target_stamp: Option<SourceStamp>,
+    fill: &FillJob,
+    straight: bool,
+) -> Option<String> {
+    let stamps = (target_stamp?, fill.source.stamp?);
+    sha256_json(&(target, stamps, fill, straight))
+        .ok()
+        .map(|k| format!("fill:{k}"))
+}
+
 impl AnalysisCache {
     /// Images decoded so far (a packed image counts each of its sources).
     pub fn loads(&self) -> u64 {
@@ -214,6 +229,30 @@ impl AnalysisCache {
         lock(&self.packs).insert(key.to_string(), e.clone());
         Some(e)
     }
+    /// A filled target's analysis (see [`fill_cache_key`]), kept in the pack map; memory only, because the disk
+    /// store's version pin does not run the fill.
+    pub(crate) fn fill(&self, key: &str, hints: AnalyseHints) -> Option<(Analysis, SourceInfo)> {
+        lock(&self.packs)
+            .get(key)
+            .filter(|e| e.hints == hints)
+            .map(|e| (e.analysis.clone(), e.info))
+    }
+    pub(crate) fn put_fill(
+        &self,
+        key: String,
+        hints: AnalyseHints,
+        analysis: Analysis,
+        info: SourceInfo,
+    ) {
+        let e = PackEntry {
+            analysis,
+            info,
+            non_gray: vec![],
+            thumb: None,
+            hints,
+        };
+        lock(&self.packs).insert(key, e);
+    }
     pub(crate) fn put_pack(&self, key: String, e: PackEntry) {
         if let Some(d) = &self.disk {
             d.put_pack(&key, e.hints, &e);
@@ -230,6 +269,10 @@ impl AnalysisCache {
             .iter()
             .filter_map(|j| j.pack.as_ref())
             .filter_map(pack_cache_key)
+            .chain(plan.jobs.iter().filter_map(|j| {
+                let fill = j.fill.as_ref()?;
+                fill_cache_key(&j.input, j.source, fill, j.profile.alpha.exr_straight)
+            }))
             .collect();
         lock(&self.packs).retain(|k, _| keep.contains(k));
     }

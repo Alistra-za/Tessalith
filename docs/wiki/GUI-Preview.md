@@ -26,7 +26,7 @@ Three labelled clusters in one wrapping flow, with only **✕ Close** pinned to 
 | **View** | A *Heatmap* of the difference to the source, *Lens*, *Tile 3×3*, the *UV coverage* overlay ([Artist checks](GUI-Artist-Checks.md#preview-overlay)), *Fit*, *1:1*, and the exposure slider for HDR formats. |
 | **Encode** | *Live encode* and **Encode now**. |
 
-After them come the sRGB / UNORM display and the mip slider. Both panes show the values the file stores, so a source and its encode look alike under either display. HDR formats are tone-mapped for display.
+After them come the sRGB / UNORM display and the mip slider. Both panes show the values the file stores, so a source and its encode look alike under either display. HDR formats are tone-mapped for display (`x / (1 + x)` per colour channel, then sRGB), and so are the tiles of stored HDR files.
 
 A narrow toolbar wraps onto more rows in that order instead of clipping; a row that appears is drawn on the next frame. **Encode now** is filled in the accent colour while it can encode and plain while it cannot.
 

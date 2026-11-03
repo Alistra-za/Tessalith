@@ -230,6 +230,43 @@ impl AppModel {
         self.nav.cols as isize
     }
 
+    /// The helper rows the column shows, in display order (none while the Helpers group is collapsed).
+    fn shown_helper_keys(&self) -> Vec<String> {
+        if self.filter.hide_helpers {
+            return vec![];
+        }
+        let rows = self.visible_helpers_shared();
+        rows.iter().map(|&i| self.items[i].key.clone()).collect()
+    }
+
+    /// Up or Down (Note FM31). From a helper row they walk the helper rows, and Up from the first returns to the last
+    /// tile; from a tile, Down past the last grid row enters the first helper row. Anything else is a grid row move.
+    pub fn row_move(&mut self, down: bool) {
+        let helpers = self.shown_helper_keys();
+        let to = match self.grid_from(&helpers) {
+            Some(i) if down => helpers.get(i + 1).cloned(),
+            Some(0) => self.visible_keys().pop(),
+            Some(i) => Some(helpers[i - 1].clone()),
+            None => {
+                let (order, step) = (self.visible_keys(), self.nav.cols);
+                let past_grid = self
+                    .grid_from(&order)
+                    .is_some_and(|i| i + step >= order.len());
+                if down && past_grid {
+                    helpers.first().cloned()
+                } else {
+                    let step = self.grid_row_step();
+                    return self.grid_move(if down { step } else { -step }, false);
+                }
+            }
+        };
+        if let Some(key) = to {
+            self.click_item(&key, false, false);
+            self.nav.cursor = Some(key.clone());
+            self.nav.reveal_item = Some(key);
+        }
+    }
+
     /// The Up and Down keys work once the Textures column has drawn its grid (it sets `nav.cols`; a hidden or
     /// collapsed column leaves it 0, see `ui::draw_with_scan`).
     pub fn can_step_rows(&self) -> bool {

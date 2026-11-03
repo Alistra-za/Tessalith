@@ -343,11 +343,23 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
     Ok(PreviewOut { decoded, result })
 }
 
+/// Whether a DDS stores float values that can pass 1: BC6H and the two float layouts.
+pub fn is_hdr_dds(f: DdsPixelFormat) -> bool {
+    matches!(
+        f,
+        DdsPixelFormat::Bc6hUf16
+            | DdsPixelFormat::Bc6hSf16
+            | DdsPixelFormat::Rgba16f
+            | DdsPixelFormat::Rgba32f
+    )
+}
+
 /// A skipped DDS input's tile image (Note FI1): its largest mip of at most `THUMB_MAX`, else its smallest mip
 /// box-downsampled, as stored (RGBA8).
 /// shortcut: a mipless 4K DDS decodes its full level once on the worker; read a cached thumb from the DZ disk cache
 /// if open time shows it.
-/// shortcut: an HDR (BC6H, float) DDS is clamped, not tone-mapped; upgrade if HDR tiles look blown out.
+/// An HDR (BC6H, float) DDS is tone-mapped like the preview pane at 0 EV: `x / (1 + x)` per colour channel, then
+/// sRGB (Note FM31).
 pub fn dds_thumbnail(path: &std::path::Path) -> Result<engine::session::Thumbnail, String> {
     use engine::session::THUMB_MAX;
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -369,12 +381,13 @@ pub fn dds_thumbnail(path: &std::path::Path) -> Result<engine::session::Thumbnai
         height: h,
         px,
     };
-    // `make_thumbnail` box-downsamples a mip still over the limit and clamps as stored (`is_float: false`).
+    // `make_thumbnail` box-downsamples a mip still over the limit, then tone-maps a float image (negatives to 0) or
+    // clamps an LDR one as stored.
     let info = engine::image::SourceInfo {
         bit_depth: 8,
         channels: 4,
         has_alpha: true,
-        is_float: false,
+        is_float: is_hdr_dds(f.format),
     };
     Ok(engine::session::make_thumbnail(&img, &info))
 }

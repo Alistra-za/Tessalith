@@ -363,8 +363,8 @@ fn shift_click_between_helpers_selects_the_range() {
     assert_eq!(m.selected_items(), rows, "A..C in display order");
 }
 
-/// Re-review fix (DY16): keyboard ranges stay on the tiles (shortcut: helper rows are mouse-only), even from a
-/// helper anchor.
+/// Re-review fix (DY16): Shift+arrow ranges stay on the tiles, even from a helper anchor (Up and Down walk the helper
+/// rows: `helper_rows_move_with_arrow_keys`).
 #[test]
 fn shift_arrow_from_a_helper_selects_tiles_only() {
     let d = tempfile::tempdir().unwrap();
@@ -390,6 +390,92 @@ fn shift_arrow_from_a_helper_selects_tiles_only() {
     m.click_item(&tiles[0], false, false);
     m.grid_move(1, true);
     assert_eq!(m.selected_items(), tiles[..2].to_vec());
+}
+
+fn active(h: &Harness<'static, AppModel>) -> Option<String> {
+    match &h.state().selection {
+        sdc_gui::model::Selection::Item(k) => Some(k.clone()),
+        _ => None,
+    }
+}
+
+fn press(h: &mut Harness<'static, AppModel>, key: egui::Key) {
+    h.key_press(key);
+    h.run();
+    h.run();
+}
+
+/// Note FM31 (supersedes DY16's mouse-only helper rows): Down from the last tile enters the helper rows, Up and Down
+/// walk them and stop at the ends, Up from the first returns to the last tile, and Enter opens the active row.
+#[test]
+fn helper_rows_move_with_arrow_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET3, ""));
+    let rows = helper_keys(h.state());
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let last_tile = {
+        let m = h.state();
+        let tiles = m.visible_items();
+        m.items[*tiles.last().expect("a tile")].key.clone()
+    };
+    h.state_mut().click_item(&last_tile, false, false);
+    h.run();
+    use egui::Key::{ArrowDown as Down, ArrowUp as Up};
+    for (key, want) in [
+        (Down, &rows[0]),
+        (Down, &rows[1]),
+        (Down, &rows[2]),
+        (Down, &rows[2]),
+        (Up, &rows[1]),
+        (Up, &rows[0]),
+        (Up, &last_tile),
+        (Down, &rows[0]),
+    ] {
+        press(&mut h, key);
+        assert_eq!(active(&h).as_ref(), Some(want), "after {key:?}");
+    }
+    press(&mut h, egui::Key::Enter);
+    assert_eq!(
+        h.state().expanded.as_ref(),
+        Some(&rows[0]),
+        "Enter opens it"
+    );
+}
+
+/// Note FM31: the row the keys move to is scrolled into view.
+#[test]
+fn the_helper_row_the_keys_reach_stays_in_view() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path(), &XSET, "");
+    let base = m
+        .items
+        .iter()
+        .find(|i| i.kind == ItemKind::Helper)
+        .unwrap()
+        .clone();
+    m.items.retain(|i| i.kind != ItemKind::Helper);
+    m.items.extend((0..60).map(|n| {
+        let mut i = base.clone();
+        i.key = format!("h/h{n:02}_roughness.png");
+        i.name = format!("h{n:02}_roughness.png");
+        i
+    }));
+    m.invalidate_views();
+    let mut h = app(m);
+    let first = helper_keys(h.state())[0].clone();
+    h.state_mut().click_item(&first, false, false);
+    h.run();
+    for _ in 0..40 {
+        press(&mut h, egui::Key::ArrowDown);
+    }
+    let key = active(&h).expect("a selection");
+    assert_eq!(key, "h/h40_roughness.png");
+    let panel = textures_rect(&h);
+    let (_, r) = row(&h, "h40_roughness.png");
+    assert!(
+        r.min.y >= panel.min.y && r.max.y <= panel.max.y + 1.0,
+        "{r:?} in {panel:?}"
+    );
 }
 
 #[test]

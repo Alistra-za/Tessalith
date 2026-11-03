@@ -279,3 +279,7 @@ AF¶- AF7: a recipe that writes nothing	AF		back	FM		partial	2026-11-03		goes: s
 CN¶Sources of different sizes (TA22) are checked	CN		back	FM		partial	2026-11-03		goes: sources of different sizes fail the set; stays: the plan-time check, the error job, the shared builder (aspect ratios, FM30)
 DY8	DY		back	FM		partial	2026-11-03		goes: an assigned fill of another size is an error; stays: the suggested skip, the error job for another aspect ratio (FM30)
 FM¶- **Names and old files.**	FM		back	FM		partial	2026-11-03		goes: Code::ALL has 92; stays: the removed-code names and the old-file handling (93 after FM30)
+CE21	CE		back	FM		partial	2026-11-03		goes: "Not fixed here: a saved W×H opens as (W+3)×(H+3) and that is saved back" (FM31 fixes the creep); stays: the clamp rule and its drag-to-the-full-height shortcut
+FC¶- **FC8 egui-limit rulings become fixes	FC		back	FM		partial	2026-11-03		goes: CE21 as a kept shortcut (the 3-point creep per start; FM31); stays: every other FC8 ruling and shortcut
+DY¶- shortcut: the filled analysis is not cached	DY		back	FM		archive-item	2026-11-03
+DY¶- shortcut: helper rows are mouse-only	DY		back	FM		archive-item	2026-11-03

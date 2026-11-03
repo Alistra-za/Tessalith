@@ -214,6 +214,55 @@ fn fill_runs_before_alpha_policy() {
     assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
 }
 
+/// Note FM31 (supersedes DY's uncached filled analysis): a re-plan of unchanged files loads nothing at the fill step,
+/// and a changed target or helper loads again.
+#[test]
+fn filled_analysis_loads_once_across_replans() {
+    use engine::session::Session;
+    let d = tempfile::tempdir().unwrap();
+    rgb(d.path(), "x.png");
+    checker(d.path(), "x_opacity.png", 3, 252);
+    let s = Session::new().unwrap();
+    let replan = || {
+        s.plan_and_keep(
+            req(d.path(), Target::Cs, &[DIFFUSE]),
+            &Reporter::new(Arc::new(NullSink), "fill-cache"),
+            &CancelToken::default(),
+        )
+        .unwrap()
+    };
+    let first = replan();
+    assert!(job(&first, "x.png").fill.is_some());
+    // Pass 1 loads the target and the helper; the fill step loads and fills the target once (two decodes).
+    let loads = s.cache().loads();
+    assert_eq!(loads, 4);
+    for _ in 0..2 {
+        let again = replan();
+        assert_eq!(s.cache().loads(), loads, "no file changed: nothing loads");
+        let (a, b) = (job(&first, "x.png"), job(&again, "x.png"));
+        assert_eq!(
+            serde_json::to_string(&(&a.profile, &a.status, &a.fill)).unwrap(),
+            serde_json::to_string(&(&b.profile, &b.status, &b.fill)).unwrap(),
+            "the cached analysis resolves as the loaded one did"
+        );
+    }
+    // A changed helper (a different size is a different stamp): pass 1 reloads it, the fill step loads both again.
+    ImageBuffer::from_fn(N, N, |_, _| Luma([128u8]))
+        .save(at(d.path(), "x_opacity.png"))
+        .unwrap();
+    replan();
+    assert_eq!(s.cache().loads(), loads + 3, "a changed helper reloads");
+    let loads = s.cache().loads();
+    replan();
+    assert_eq!(s.cache().loads(), loads, "and is cached again");
+    // A changed target, the same.
+    ImageBuffer::from_fn(N, N, |_, _| Rgb([9u8, 9, 9]))
+        .save(at(d.path(), "x.png"))
+        .unwrap();
+    replan();
+    assert_eq!(s.cache().loads(), loads + 3, "a changed target reloads");
+}
+
 /// Final review I1: a raw map the user typed to convert alone (`[files] subtype`, no `helper.*`) fills nothing.
 #[test]
 fn raw_map_typed_to_convert_alone_fills_nothing() {

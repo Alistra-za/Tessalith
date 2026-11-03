@@ -212,9 +212,10 @@ pub struct Probe {
     details: [bool; DETAILS_NAMES.len()],
 }
 
-/// The 3D settings window's rectangle this frame, if it has been shown (AG132).
-fn settings_window_now(ctx: &egui::Context) -> Option<Rect> {
-    ctx.memory(|m| m.area_rect(crate::ui::set_preview::settings_window_id()))
+/// The 3D settings window's rectangle this frame, if it has been shown and its size has settled (AG132), as
+/// `default_rect` takes it back (Note FM31).
+pub fn settings_window_now(ctx: &egui::Context) -> Option<Rect> {
+    crate::ui::set_preview::settings_window_saved_rect(ctx)
 }
 
 pub fn probe(
@@ -324,8 +325,6 @@ pub fn capture(
 /// always taken; a change under half a point is noise.
 /// shortcut: a user who drags a window to the full width or height of `area` keeps their previous size on that axis;
 /// read the resize drag (`ctx.read_response`) if that ever matters.
-/// shortcut: a saved W×H opens as (W+3)×(H+3) and is saved back, so a window's size creeps 3 points per start
-/// (CE21); fix it when this clamp code is next touched (Note FC8).
 fn window_rect(r: Rect, prev: Option<[f32; 4]>, area: Rect) -> Option<[f32; 4]> {
     let (wide, tall) = (
         r.width() >= area.width() - 1.0,

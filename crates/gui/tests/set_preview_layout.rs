@@ -304,6 +304,33 @@ fn the_settings_window_toggles_and_its_edits_reach_the_preview() {
     assert!(h.query_by_label("Specular level").is_none());
 }
 
+/// Note FM31 (supersedes CE21's creep shortcut): egui draws the window a few points bigger than it was asked for, and
+/// the layout takes that off, so a saved W×H comes back as W×H and is saved again unchanged (it grew 3 points per start).
+#[test]
+fn a_saved_window_size_reopens_at_the_same_size() {
+    for saved in [[200.0, 100.0, 700.0, 500.0], [120.0, 120.0, 460.0, 620.0]] {
+        let d = tempfile::tempdir().unwrap();
+        let h = harness_at(d.path(), egui::vec2(1400.0, 900.0), |m| {
+            m.settings.set_settings_open = true;
+            m.settings.layout.settings_window = Some(saved);
+        });
+        let drawn = h
+            .ctx
+            .memory(|m| m.area_rect(sdc_gui::ui::set_preview::settings_window_id()))
+            .expect("the settings window is drawn");
+        assert!(
+            drawn.width() > saved[2],
+            "egui does draw it bigger: {drawn:?}"
+        );
+        let r = sdc_gui::layout::settings_window_now(&h.ctx).expect("the size has settled");
+        assert_eq!(
+            [r.min.x, r.min.y, r.width(), r.height()],
+            saved,
+            "saved W×H, saved again W×H"
+        );
+    }
+}
+
 #[test]
 fn details_is_collapsed_by_default_and_holds_the_tech_lines() {
     use sdc_gui::model::set_preview::{cap_text, JSON_WINS};

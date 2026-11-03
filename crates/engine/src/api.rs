@@ -22,7 +22,7 @@ use crate::pack;
 use crate::pipeline::{process_file, FileError, FileTracker};
 use crate::policy::*;
 use crate::presets::*;
-use crate::session::{pack_cache_key, AnalysisCache, PackEntry};
+use crate::session::{fill_cache_key, pack_cache_key, AnalysisCache, PackEntry};
 use crate::shader::{MeshAlpha, Shader, ShaderPick};
 use crate::suggest::{is_pbr_set, SuggestContext};
 use serde::{Deserialize, Serialize};
@@ -2226,8 +2226,8 @@ impl Engine {
         }
         // Note DY: each filled target is loaded, filled and analysed again, then re-resolved as 6c does, so alpha
         // policy, format, coverage and cutout all see the filled image. It runs before the derive step, so a target
-        // a derive replaces loses its fill with it (Ruling 15).
-        // shortcut: the filled analysis is not cached (as derive P25); key it on both stamps if re-plans get slow.
+        // a derive replaces loses its fill with it (Ruling 15). The filled analysis is cached in memory by both files'
+        // stamps and the fill (Note FM31), so a re-plan of unchanged files loads nothing here.
         let fill_items: Vec<_> = fills
             .candidates
             .iter()
@@ -2278,19 +2278,30 @@ impl Engine {
                 let mut straight = old.profile.alpha.exr_straight;
                 let mut tries = 0;
                 let (mut job, a) = loop {
-                    stage.set(Stage::Load);
-                    let (mut img, mut info) = crate::load::load_image_as(&c.target, straight)
-                        .map_err(PlanFailure::Load)?;
-                    crate::helper::apply_fill(&mut img, &mut info, &c.fill)
-                        .map_err(PlanFailure::Pack)?;
-                    cache.count_loads(2);
-                    stage.set(Stage::Analyse);
                     let hints = crate::checks::hints_for(split.suffix.as_deref(), cache.checks);
-                    let mut a = analyse_with(&img, &info, hints);
-                    if let Some(&dxgi) = load_meta.get(&c.target) {
-                        a.dds_dxgi = dxgi;
-                    }
-                    drop(img);
+                    let key = fill_cache_key(&c.target, old.source, &c.fill, straight);
+                    let (a, info) = match key.as_deref().and_then(|k| cache.fill(k, hints)) {
+                        Some(hit) => hit,
+                        None => {
+                            stage.set(Stage::Load);
+                            let (mut img, mut info) =
+                                crate::load::load_image_as(&c.target, straight)
+                                    .map_err(PlanFailure::Load)?;
+                            crate::helper::apply_fill(&mut img, &mut info, &c.fill)
+                                .map_err(PlanFailure::Pack)?;
+                            cache.count_loads(2);
+                            stage.set(Stage::Analyse);
+                            let mut a = analyse_with(&img, &info, hints);
+                            if let Some(&dxgi) = load_meta.get(&c.target) {
+                                a.dds_dxgi = dxgi;
+                            }
+                            drop(img);
+                            if let Some(k) = key {
+                                cache.put_fill(k, hints, a.clone(), info);
+                            }
+                            (a, info)
+                        }
+                    };
                     stage.set(Stage::Resolve);
                     let facts = FileFacts {
                         input: f,

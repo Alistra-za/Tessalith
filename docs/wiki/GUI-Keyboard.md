@@ -25,6 +25,7 @@ While a text field has the keyboard (the search box, a name, a number), the shor
 - A key does nothing while its action is off: Ctrl+S with nothing to save outside a text field, Ctrl+Z with nothing to undo.
 - No shortcut acts while a dialog, a menu or a box is open. A dialog has its own Enter and Esc.
 - In the Textures grid the arrow keys follow the order on show (search and filters applied): Left and Right step one texture, Up and Down one row. Shift with an arrow selects the range from the active texture, as a Shift-click does.
+- Below the tiles, Up and Down walk the Helpers rows: Down from the last row of tiles enters them, Up from the first helper row returns to the last tile. Enter opens the active row.
 
 ### All shortcuts
 

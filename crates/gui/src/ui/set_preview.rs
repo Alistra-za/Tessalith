@@ -368,6 +368,70 @@ pub fn settings_window_id() -> egui::Id {
     egui::Id::new("set-3d-settings-window")
 }
 
+/// What the settings window's size has been doing since it was first drawn this session (Note FM31).
+#[derive(Clone, Copy)]
+struct SizeFit {
+    /// The size asked for (`default_rect`), which egui only reads when it makes the window.
+    asked: egui::Vec2,
+    last: egui::Vec2,
+    frames: u32,
+    still: u32,
+    /// What egui drew over `asked` once the size held, or None while it is still moving.
+    extra: Option<egui::Vec2>,
+}
+
+/// Frames the drawn size must hold before the extra is taken, and the most it may take.
+const FIT_STILL: u32 = 3;
+const FIT_MAX_FRAMES: u32 = 60;
+/// An excess past this is a clamp to the window (or the user's resize), not egui's margin: nothing is taken off.
+const FIT_MAX_EXTRA: f32 = 16.0;
+
+/// egui draws a `Window` a few points bigger than `default_rect` asks (its title bar and frame margins: 3 points
+/// with the default style, more with some content), so a saved size would grow at every start. This is the drawn
+/// rect less that excess, which is what `default_rect` takes back: save and restore are the identity. None until the
+/// size has settled.
+pub fn settings_window_saved_rect(ctx: &egui::Context) -> Option<egui::Rect> {
+    let id = settings_window_id();
+    let r = ctx.memory(|m| m.area_rect(id))?;
+    let extra = ctx.data(|d| d.get_temp::<SizeFit>(id))?.extra?;
+    Some(egui::Rect::from_min_size(r.min, r.size() - extra))
+}
+
+/// Watches the drawn size after `settings_window` has shown the window, until it holds still.
+fn measure_window_extra(ctx: &egui::Context, asked: egui::Vec2) {
+    let id = settings_window_id();
+    let Some(drawn) = ctx.memory(|m| m.area_rect(id)).map(|r| r.size()) else {
+        return;
+    };
+    let settled = ctx.data_mut(|d| {
+        let fit = d.get_temp_mut_or_insert_with(id, || SizeFit {
+            asked,
+            last: egui::Vec2::ZERO,
+            frames: 0,
+            still: 0,
+            extra: None,
+        });
+        if fit.extra.is_some() {
+            return true;
+        }
+        fit.frames += 1;
+        fit.still = if drawn == fit.last { fit.still + 1 } else { 0 };
+        fit.last = drawn;
+        if fit.still >= FIT_STILL || fit.frames >= FIT_MAX_FRAMES {
+            let extra = drawn - fit.asked;
+            fit.extra = Some(if extra.abs().max_elem() <= FIT_MAX_EXTRA {
+                extra
+            } else {
+                egui::Vec2::ZERO
+            });
+        }
+        fit.extra.is_some()
+    });
+    if !settled {
+        ctx.request_repaint();
+    }
+}
+
 /// The settings toggle, beside the input name box (or the texture's name) in the 3D header row.
 pub fn settings_toggle(ui: &mut egui::Ui, m: &mut AppModel) {
     let mut on = m.settings.set_settings_open;
@@ -452,6 +516,7 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
                 crate::ui::cm_card::section(ui, m, v);
             }
         });
+    measure_window_extra(ctx, rect.size());
     if !open {
         m.settings.set_settings_open = false;
         m.save_settings();

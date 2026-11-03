@@ -73,7 +73,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         c = vec4<f32>(c.rg, z * 0.5 + 0.5, 1.0);
     }
     if (params.tonemap == 1u) {
-        let e = c.rgb * params.exposure;
+        // A negative value (signed or float data) is 0: x / (1 + x) would turn -2 into +2.
+        let e = max(c.rgb * params.exposure, vec3<f32>(0.0));
         c = vec4<f32>(linear_to_srgb(e / (vec3<f32>(1.0) + e)), 1.0);
     }
     var rgb = c.rgb;

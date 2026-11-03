@@ -300,6 +300,54 @@ fn uncompressed_dds_inputs_preview_from_the_cpu_decode() {
     }
 }
 
+/// The red code of a tile of a 16x16 float DDS whose texels are `[v, -3, 0, 1]`; also checks the pane's format.
+fn float_tile_red(f32s: bool, v: f32) -> u8 {
+    let texel: Vec<u8> = if f32s {
+        [v, -3.0, 0.0, 1.0]
+            .iter()
+            .flat_map(|c| c.to_le_bytes())
+            .collect()
+    } else {
+        [v, -3.0, 0.0, 1.0]
+            .iter()
+            .flat_map(|c| half::f16::from_f32(*c).to_le_bytes())
+            .collect()
+    };
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("hdr.dds");
+    raw_dds(
+        &p,
+        if f32s { 2 } else { 10 },
+        if f32s { 16 } else { 8 },
+        &texel,
+    );
+    // The main preview reads it as an HDR format, so the shader tone-maps it.
+    assert!(dds_preview(&p, 64).unwrap().result.format.is_hdr());
+    let t = dds_thumbnail(&p).unwrap();
+    // Negative green is 0 before the map; alpha is untouched.
+    assert_eq!((t.rgba[1], t.rgba[3]), (0, 255), "f32 {f32s}");
+    t.rgba[0]
+}
+
+/// Note FM31: an HDR DDS tile maps `x / (1 + x)` then sRGB, so values above 1
+/// stay apart; an LDR tile keeps its stored codes.
+#[test]
+fn hdr_preview_tone_maps_values_above_one() {
+    for f32s in [true, false] {
+        let codes: Vec<u8> = [1.0, 4.0, 16.0]
+            .iter()
+            .map(|v| float_tile_red(f32s, *v))
+            .collect();
+        // x / (1 + x) gives 0.5, 0.8, 0.941; sRGB-encoded: 188, 231, 248.
+        assert_eq!(codes, [188, 231, 248], "f32 {f32s}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("ldr.dds");
+    raw_dds(&p, 87, 4, &[30u8, 20, 200, 40]);
+    let t = dds_thumbnail(&p).unwrap();
+    assert_eq!(t.rgba[..4], [200, 20, 30, 40], "a BGRA8 tile is as stored");
+}
+
 /// Trace #32: Encode now during an export says it waits, so it encodes once the export is done (Live encode off).
 #[test]
 fn encode_now_during_an_export_runs_when_the_export_ends() {
