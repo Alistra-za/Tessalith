@@ -19,6 +19,21 @@ fn sdc_app_new_takes_the_scan_db_from_the_model_not_the_environment() {
 }
 
 #[test]
+fn sdc_app_new_takes_the_shader_cache_from_the_model_not_the_environment() {
+    let d = tempfile::tempdir().unwrap();
+    std::env::set_var("LOCALAPPDATA", d.path());
+    let app = SdcApp::new(support::opened(d.path()));
+    assert_eq!(app.meshes.v3.cache_dir, None);
+    assert_eq!(app.state.set3d.v3.cache_dir, None);
+
+    let mut m = support::opened(d.path());
+    m.shader_cache = Some(d.path().join("sc"));
+    let app = SdcApp::new(m);
+    assert_eq!(app.meshes.v3.cache_dir, Some(d.path().join("sc")));
+    assert_eq!(app.state.set3d.v3.cache_dir, Some(d.path().join("sc")));
+}
+
+#[test]
 fn sdc_app_new_creates_no_analysis_cache() {
     let d = tempfile::tempdir().unwrap();
     std::env::set_var("LOCALAPPDATA", d.path());

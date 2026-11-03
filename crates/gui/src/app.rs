@@ -68,6 +68,8 @@ impl SdcApp {
             &model.settings,
             model.scan_db.clone(),
         );
+        meshes.v3.cache_dir = model.shader_cache.clone();
+        set3d.v3.cache_dir = model.shader_cache.clone();
         // The saved arrangement: filters, preview channel and layout, and both 3D looks (AG17).
         let layout = model.settings.layout.clone();
         crate::layout::restore_model(

@@ -870,7 +870,7 @@ impl Viewport3d {
             adapter: None,
             panel: "meshes",
             render_error: None,
-            cache_dir: default_cache_dir(),
+            cache_dir: None, // set by `SdcApp::new` from `AppModel::shader_cache`, so tests never use the real cache
             bounds: None,
             content: None,
             shapes: vec![],

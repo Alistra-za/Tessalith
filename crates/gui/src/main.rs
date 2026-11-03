@@ -36,6 +36,7 @@ fn build_model() -> AppModel {
             m.user_config = user_config_path();
             m.user_presets = user_presets_path();
             m.scan_db = sdc_gui::model::meshes::default_store_path();
+            m.shader_cache = sdc_gui::model::viewport3d::default_cache_dir();
             m
         }
         Err(e) => {

@@ -354,6 +354,9 @@ pub struct AppModel {
     /// The scan database the mesh votes read (`meshes::default_store_path()`), set by `main`; `None` in tests so a
     /// developer's scan cannot leak in.
     pub scan_db: Option<PathBuf>,
+    /// The 3D previews' shader cache (`viewport3d::default_cache_dir()`), set by `main`; `None` in tests so no test
+    /// compiles into or prunes the real cache.
+    pub shader_cache: Option<PathBuf>,
     /// Trace-debug wave 2 #6: a Meshes scan is running, or the last one was cancelled or failed, so the store has every
     /// origin disabled and reads empty; the mesh evidence and "Used by meshes" keep what they have. Set by the app.
     pub scan_store_unsettled: bool,
@@ -741,6 +744,7 @@ impl AppModel {
             read_only_flags: vec![],
             nif_problems: Default::default(),
             scan_db: None,
+            shader_cache: None,
             scan_store_unsettled: false,
             unsettled_before_scan: false,
             scan_running: false,
