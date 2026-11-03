@@ -10,14 +10,14 @@
 - BC6H (HDR) at encoder effort `slowest` and `max` now uses a peak-preserving mode: small, very bright highlights such as a sun keep their brightness (venice_sunset's peak goes from 0.22 to 0.92 of the source). Other blocks encode as `veryslow`. Effort `veryslow` (the default) and below are unchanged. `--on-existing if-changed` re-encodes `pbr_emissive` and `hdr_sky`, the two types that are BC6H by default, once after upgrading. A texture of another type set to BC6H by hand is not re-encoded; to get the new mode for it, re-export it with `--on-existing overwrite`.
 - Meshes view: one flat list of NIF files titled **Meshes**, with a search over path or mod, an **Any mod** picker and chips (Wins, All, Overridden, Conflicted, Problems). Mod chips sit on the rows. **Show in Meshes** from a texture's Used by meshes adds a "Uses <texture>" chip.
   - Upgrading from 1.1: the scan database is emptied once; scan again in the Meshes view.
-- Removed from the Meshes view and the 3D preview (the scan no longer stores what they needed):
-  - **Plugin file references…** (the Missing and Unused window) and the set editor's **Used by plugins**.
+- Removed from the Meshes view and the 3D preview:
+  - **Plugin file references…** (the Missing and Unused window) and the set editor's **Used by plugins**. The scan no longer stores what they needed.
   - **Show inert**: **Plugin overrides** lists every winning record that uses the mesh.
   - The **Stale patch** chip, the "PGPatcher output is out of date" banner with **Show list**, and the "PGPatcher check" line. Tessalith no longer compares PGPatcher's patched meshes with their sources.
   - **Scan without PGPatcher output**. With PGPatcher running, the banner says to close it and press **Retry**.
   - The mod-level **Generated** chip, and the shape card's Details lines other than which mod each texture comes from (NIF block, SLSF flags, geometry, raw slot strings).
   - The **UV checker** debug view.
-  - The preview timing log (`SDC_PREVIEW_LOG`), the Details **Timings** section, the 3D frame-time footer line and the "CS settings: N fields unset" line. "Scanned in N s" stays.
+  - The preview timing log (`SDC_PREVIEW_LOG`), the Details **Timings** section, the 3D frame-time footer line and the "CS settings: N fields unset" line. The scan's per-step timings in **Scan details** and the plugin line's "N ms" go too. "Scanned in N s" stays.
   - `set_preview_max` in `gui.toml` (ignored if present).
 - The 3D preview's studio HDRI is Poly Haven's 1k file (1024 × 512), 4.7 MB smaller than the 2k file.
 - NIF edits in the worklist: NIF warnings are worklist rows, **Export NIF** is a Review row with **Diff…** (a block diff), and NIF edits need an export folder you chose. An empty RMAOS slot is an amber row. Clip timing is editable. Cancelling Review writes no NIF edits.

@@ -229,7 +229,7 @@ pub fn le_mesh(v: &Viewport3d) -> bool {
     v.report.as_ref().is_some_and(|r| r.le_mesh)
 }
 
-/// The Details footer's 3D part: the Community Shaders toggle, what is off in the preview, the frame stats and the
+/// The Details footer's 3D part: the Community Shaders toggle, what is off in the preview, the adapter and the
 /// renderer's notes.
 pub fn details(ui: &mut egui::Ui, v: &mut Viewport3d) {
     let mut on = v.features_on;

@@ -1286,8 +1286,8 @@ fn winning_mods(m: &MeshesModel, s: &ShapeView) -> Vec<(usize, String)> {
     out
 }
 
-/// The closed part of a shape card: which mod wins each texture (the flag lists and geometry are in the NIF edit panel,
-/// Note GJ8).
+/// The closed part of a shape card: which mod wins each texture (the SLSF flag lists are in the NIF edit panel;
+/// the geometry and raw slot lines were removed, Note GJ8).
 fn shape_details(ui: &mut egui::Ui, winners: &[(usize, String)]) {
     for (i, origin) in winners {
         ui.horizontal_wrapped(|ui| {

@@ -62,7 +62,7 @@ Banners about PGPatcher:
 
 | Banner | Meaning and action |
 |---|---|
-| PGPatcher is running — scan paused. | Close PGPatcher and press **Retry**. |
+| PGPatcher is running, so the scan is paused. Close PGPatcher and press Retry to scan. | **Retry** rescans. |
 | PGPatcher output '<name>' looks incomplete (no ParallaxGen_Diff.json). Re-run PGPatcher. | The marker set is incomplete. |
 
 ## The Meshes view
