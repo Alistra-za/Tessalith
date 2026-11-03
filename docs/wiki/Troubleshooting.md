@@ -14,7 +14,7 @@ skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidenc
 
 ### A colour map asks what its alpha means
 
-A diffuse (or albedo, UI or skin colour) whose alpha varies cannot be decided from the image alone: the mesh decides whether it is a cutout, a blend or unused. Set `alpha.policy` on the file, answer the question in the GUI, or scan your mods so the GUI can read the meshes ([Mod scanning](Mod-Scanning.md)). Alpha whose minimum is 251 or more is treated as opaque and does not ask.
+A diffuse (or albedo, UI or skin colour) whose alpha varies cannot be decided from the image alone: the mesh decides whether it is a cutout, a blend or unused. Set `alpha.policy` on the file, answer the question in the GUI, or scan your mods so the GUI can read the meshes ([Mod scanning](Mod-Scanning.md)). Alpha that counts as opaque (stray noise near 255, see [Texture types](Texture-Types.md)) does not ask.
 
 ### A normal map reports IN-GREEN-UNSTATED
 

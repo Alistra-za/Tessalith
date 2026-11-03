@@ -289,3 +289,6 @@ AJ1	AJ		back	FM		partial	2026-11-03		goes: 'always listed, reading "off" while M
 AJ4	AJ		back	FM		partial	2026-11-03		goes: 'The group is hidden' and the note text "N coat values kept, unused while Multilayer is off"; stays: the values are kept and the writer skips them (Note FM33)
 CC9	CC		back	FM		partial	2026-11-03		goes: Coat, Emissive, Parallax, Glint and Fuzz always listed, closed and "off", and Coat as the only off group with a body; stays: the id keyed by state, Subsurface's selector body, the blocked header (Note FM33)
 CC15	CC		back	FM		partial	2026-11-03		goes: Parallax in the group order and the five feature groups always listed; stays: the rest (Note FM33)
+L¶- **Rule:**	L		back	FM		partial	2026-11-03		goes: a minimum of 251 or more as the whole rule; stays: such alpha is opaque, resolves like constant-255, no LOSS-ALPHA-DATA, no code (Note FM34 adds the stray-texel rule)
+L¶- **Below the cutoff:**	L		back	FM		partial	2026-11-03		goes: one texel below 251 keeps the normal varying-alpha rules; stays: other alpha below 251 keeps them (Note FM34)
+AT1	AT		back	FM		partial	2026-11-03		goes: a Note L alpha (minimum below 251) as the test for complex_material; stays: the vanilla CS rule and the formats (Note FM34)

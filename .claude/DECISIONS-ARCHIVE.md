@@ -534,6 +534,13 @@ ARCHIVED (wording before the edit; superseded in part by Note FC11 and Note BV3,
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - Untick or orphan: the file is a stale row in Review, with Delete while it still has its recorded hash (Note FC11).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **AT1 Vanilla keeps a complex `_m` (D16).** The `(Vanilla, complex_material) → envmask` fallback and the "_m under vanilla" suggestion are gone.
+  - Vanilla uses the CS rule: a Note L alpha (minimum below 251) gives `complex_material` (High, BC7 UNORM with alpha, BC3 option, Note AH unchanged), and anything else gives `envmask` (BC4, no alpha).
+  - Side effects: a Vanilla set with a complex `_m` auto-picks the Complex Material shader. A varying-alpha `_m` that used to be skipped (`LOSS-ALPHA-DATA`) or written as BC4 is now BC7, twice the size, and its `profile_sha256` changes once, so `if-changed` re-encodes it. The engine version stays 0.7.0.
+  - The vanilla shader ignores the alpha without ENB. The owner accepted this.
+  - Two golden tests changed (both owner-approved). `vanilla_fallbacks_are_written_with_allow_cfg_unavailable` drops `iron_m`: three fallbacks. `vanilla_g_is_glow_and_m_with_alpha_is_envmask_with_loss` now expects BC7 `complex_material` plus `VAL-M-GRAYSCALE` (its RGB is grey); the test name predates AT. It also dropped its `skip_code(None)` assert, because that helper panics when there is no skip event.
+
 ## Note AU — GUI suggestions, NIF side (plan rulings, 2026-10-15) (Note AN on nif/main; renumbered at the merge into main)
 
 ARCHIVED (wording before the edit; superseded in part by Note GE8, 2026-10-29)
@@ -2307,6 +2314,12 @@ The verbs whose report *is* the result print their human report on **stdout**: `
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **Rule:** source alpha whose minimum is **≥ 251** (no texel below 251) is treated as opaque. It resolves like constant-255 alpha, so `remove` applies and no LOSS-ALPHA-DATA is raised. An info code `ALPHA-NEAR-OPAQUE` reports the minimum.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **Rule:** source alpha whose minimum is **≥ 251** (no texel below 251) is treated as opaque. It resolves like constant-255 alpha, so `remove` applies and no LOSS-ALPHA-DATA is raised. No code reports it (Note FM21).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **Below the cutoff:** one texel below 251 keeps the normal varying-alpha rules.
 
 ## Note AC — Authoring-format inputs: PSD/PSB, Krita, OpenRaster, WebP (plan rulings, 2026-10-14)
 

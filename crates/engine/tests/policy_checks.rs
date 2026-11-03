@@ -165,7 +165,7 @@ fn pbr_albedo_unavailable_under_vanilla_and_srgb_is_an_error_there() {
 #[test]
 fn diffuse_with_varying_alpha_is_unresolved_until_policy_is_set() {
     let mut img = opaque();
-    img.px[0][3] = 0.0;
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.0); // over the 0.1 % noise share (Note FM34)
     let j = run(
         Target::Cs,
         "textures/a/x.png",
@@ -610,7 +610,7 @@ fn bc1_blocks_every_alpha_policy_but_remove() {
     }
     // varying alpha on BC1 is also lost data
     let mut img = opaque();
-    img.px[0][3] = 0.0;
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.0); // over the 0.1 % noise share (Note FM34)
     let j = run(
         Target::Cs,
         "textures/a/x.png",
@@ -742,7 +742,7 @@ fn preset_alpha_policy_counts_as_explicit() {
     let mut reg = PresetRegistry::builtin().unwrap();
     reg.add_toml("schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n[subtypes.diffuse]\nalpha = { policy = \"blend\" }\n").unwrap();
     let mut img = opaque();
-    img.px[0][3] = 0.5;
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.5); // over the 0.1 % noise share (Note FM34)
     let overrides = [parse_set("subtype=diffuse").unwrap()];
     let allow = BTreeSet::new();
     let f = InputFile {
@@ -892,7 +892,7 @@ fn slashless_globs_match_the_file_name() {
 #[test]
 fn resolved_job_json_shape() {
     let mut img = opaque();
-    img.px[0][3] = 0.0;
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.0); // over the 0.1 % noise share (Note FM34)
     let j = run(Target::Cs, "textures/a/x.png", None, &[], img, &[], &[]);
     let v = serde_json::to_value(&j).unwrap();
     assert_eq!(v["input"], "x.png");
@@ -1106,7 +1106,7 @@ fn allow_cfg_unavailable_accepts_fallbacks_only() {
 fn builtin_presets_never_confirm_mesh_alpha() {
     let reg = PresetRegistry::builtin().unwrap();
     let mut img = opaque();
-    img.px[0][3] = 0.5;
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.5); // over the 0.1 % noise share (Note FM34)
     let allow = BTreeSet::new();
     assert!(reg.is_builtin(BASE_ID));
     for target in [Target::Cs, Target::Vanilla] {
@@ -1535,13 +1535,86 @@ fn bc1_transparent_black_is_named() {
     }
 }
 
-/// A 64 px image whose alpha runs through `codes` (8-bit values) across its first texels, 255 elsewhere.
+/// A 64 x 64 image whose alpha runs through `codes` (8-bit values) across its first texels, 8 texels per code, 255
+/// elsewhere. Eight texels per code keeps a code at or below 250 above Note FM34's 0.1 % noise share (4 texels).
 fn alpha_codes(codes: &[u8]) -> Rgba32F {
     let mut img = opaque();
-    for (p, &c) in img.px.iter_mut().zip(codes) {
+    for (p, &c) in img.px.iter_mut().zip(codes.iter().flat_map(|c| [c; 8])) {
         p[3] = f32::from(c) / 255.0;
     }
     img
+}
+
+/// An opaque 64 x 64 image with `n` texels, spread out, at alpha code `code`.
+fn alpha_specks(n: usize, code: u8) -> Rgba32F {
+    let mut img = opaque();
+    for i in 0..n {
+        img.px[i * 130][3] = f32::from(code) / 255.0;
+    }
+    img
+}
+
+/// Note FM34 (the survey's false positive): an opaque albedo with one low texel asks nothing and removes alpha; a
+/// real cutout, a soft gradient and a small cluster that is more than noise still ask.
+#[test]
+fn alpha_noise_near_255_asks_nothing_but_real_alpha_still_asks() {
+    let diffuse = |img| {
+        run(
+            Target::Cs,
+            "textures/a/x.png",
+            None,
+            &[],
+            img,
+            &["subtype=diffuse"],
+            &[],
+        )
+    };
+    let j = diffuse(alpha_specks(1, 200));
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
+    assert!(
+        !codes(&j).contains(&Code::LossAlphaData),
+        "{:?}",
+        j.warnings
+    );
+    // 10 % at 0: a real cutout.
+    let mut cut = opaque();
+    let n = cut.px.len();
+    cut.px[..n / 10].iter_mut().for_each(|p| p[3] = 0.0);
+    assert!(matches!(diffuse(cut).status, JobStatus::Unresolved { .. }));
+    // A gradient.
+    let mut ramp = opaque();
+    ramp.px
+        .iter_mut()
+        .enumerate()
+        .for_each(|(i, p)| p[3] = (i % 64) as f32 / 63.0);
+    assert!(matches!(diffuse(ramp).status, JobStatus::Unresolved { .. }));
+    // Five texels is over 0.1 % of 4096.
+    assert!(matches!(
+        diffuse(alpha_specks(5, 0)).status,
+        JobStatus::Unresolved { .. }
+    ));
+}
+
+/// Note FM34: a glow map with a few texels at 250 (birthsignthief01_g, skeletonkey_g in the survey) took a blocking
+/// LOSS-ALPHA-DATA under the default `remove`; it is now opaque, so nothing is lost and nothing asks.
+#[test]
+fn a_glow_map_with_a_few_texels_at_250_has_no_loss_alpha_data() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x_g.png",
+        None,
+        &[],
+        alpha_specks(3, 250),
+        &["subtype=glow", "color.tag=unorm"],
+        &[],
+    );
+    assert!(
+        !codes(&j).contains(&Code::LossAlphaData),
+        "{:?}",
+        j.warnings
+    );
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 }
 
 /// DECISIONS Note L: a PBR normal re-exported from BC7 with alpha 251..=255 removes the alpha silently, with no

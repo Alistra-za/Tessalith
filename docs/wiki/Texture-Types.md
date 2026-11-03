@@ -129,7 +129,7 @@ There are 32 sub-types in five categories.
 Notes on the defaults:
 
 - A single photo as a cubemap (`cubemap.layout = "photo"`) is an approximation: the photo becomes the front half of a mirrored fake panorama, and the cube is blurred by default (0.6). It gives soft reflections, not an exact sky.
-- The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha whose minimum is 251 or more is treated as opaque. A colour map whose alpha really varies is undecided unless scanned meshes supply one.
+- The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha counts as opaque when its minimum is 251 or more, or when the texels below 251 are fewer than 0.1 % of the image and no connected group of them is larger than 16 texels (stray noise left by a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes supply one.
 - Exact opaque means opaque alpha decodes as exactly 255 in BC7 rather than 254. It is on for `_m` maps because PGPatcher and ENB read their alpha; turning it off for a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
 - Normal maps are never BC4 or BC5: the game would decode Z as -1 and lose alpha (`FMT-BC5-NORMAL`, blocking).
 

@@ -34,7 +34,8 @@ pub struct Analysis {
     pub is_pot: bool,
     /// R, G, B, A.
     pub channels: [ChannelStats; 4],
-    /// Alpha class. `Constant255` includes near-opaque alpha (see [`NEAR_OPAQUE_ALPHA`]).
+    /// Alpha class. `Constant255` includes near-opaque alpha and a few stray low texels (see [`NEAR_OPAQUE_ALPHA`],
+    /// [`ALPHA_SPECK_SHARE`]).
     pub alpha: AlphaContent,
     pub alpha_hist: AlphaHistogram,
     /// R, G and B agree within 4/255 for every pixel.
@@ -83,6 +84,45 @@ pub struct AnalyseHints {
 pub const NEAR_OPAQUE_ALPHA: f32 = CS_COMPLEX_GATE_CODE as f32 / 255.0;
 const NEAR_OPAQUE_EPS: f32 = 1e-6;
 
+/// DECISIONS Note FM34: texels below [`NEAR_OPAQUE_ALPHA`] that are fewer than this share of the image, with no
+/// 4-connected group over [`ALPHA_SPECK_MAX_GROUP`] texels, are noise and the alpha counts as opaque. The smallest
+/// real cutout in the survey is 0.31 %; the group cap keeps a small cutout on a large texture asking.
+pub const ALPHA_SPECK_SHARE: f64 = 0.001;
+pub const ALPHA_SPECK_MAX_GROUP: usize = 16;
+
+/// No 4-connected group of texels with alpha below [`NEAR_OPAQUE_ALPHA`] is larger than [`ALPHA_SPECK_MAX_GROUP`].
+/// Each group stops growing once it is over the cap, so the work is bounded by the (already small) low-texel count.
+fn low_alpha_groups_are_small(img: &Rgba32F) -> bool {
+    let (w, h) = (img.width as usize, img.height as usize);
+    let low = |i: usize| img.px[i][3] < NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS;
+    let mut seen = std::collections::HashSet::new();
+    for start in (0..img.px.len()).filter(|&i| low(i)) {
+        if !seen.insert(start) {
+            continue;
+        }
+        let (mut stack, mut size) = (vec![start], 0);
+        while let Some(i) = stack.pop() {
+            size += 1;
+            if size > ALPHA_SPECK_MAX_GROUP {
+                return false;
+            }
+            let (x, y) = (i % w, i / w);
+            let near = [
+                (x > 0).then(|| i - 1),
+                (x + 1 < w).then(|| i + 1),
+                (y > 0).then(|| i - w),
+                (y + 1 < h).then(|| i + w),
+            ];
+            for j in near.into_iter().flatten() {
+                if low(j) && seen.insert(j) {
+                    stack.push(j);
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Community Shaders' complex-material alpha gate, as an 8-bit code (spike S8, DECISIONS Note L): an `_m` whose
 /// smallest-mip alpha is at or above it is a plain env mask, and source alpha whose minimum reaches it is opaque.
 pub const CS_COMPLEX_GATE_CODE: u8 = 251;
@@ -109,6 +149,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         mean: 0.0,
     }; 4];
     let mut hist = AlphaHistogram::default();
+    let mut low_alpha = 0u64;
     let mut nonfinite = [0u64; 4];
     let mut finite = [0u64; 4];
     let mut len_n = 0u64;
@@ -133,6 +174,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         }
         hist.le5 += u64::from(a <= 5);
         hist.ge250 += u64::from(a >= 250);
+        low_alpha += u64::from(p[3] < NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS);
         let (r, g, b) = (
             i32::from(code8(p[0])),
             i32::from(code8(p[1])),
@@ -166,9 +208,13 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
     // A NaN texel has code 0 but no value: it must not turn all-255 into near-opaque (trace #6).
     let all_255 = hist.eq255 > 0 && (hist.eq255 + nonfinite[3]) as usize == count;
     let near_opaque = info.has_alpha && ch[3].min >= NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS;
+    let speckled = info.has_alpha
+        && !(all_255 || near_opaque)
+        && (low_alpha as f64) < ALPHA_SPECK_SHARE * count as f64
+        && low_alpha_groups_are_small(img);
     let alpha = if !info.has_alpha {
         AlphaContent::None
-    } else if all_255 || near_opaque {
+    } else if all_255 || near_opaque || speckled {
         AlphaContent::Constant255
     } else {
         AlphaContent::Varying
@@ -483,5 +529,59 @@ mod tests {
         let mut img = Rgba32F::new(2, 1, [0.5, 0.5, 0.5, 1.0]);
         img.px[0][3] = f32::NAN;
         assert_eq!(analyse(&img, &src).alpha, AlphaContent::Constant255);
+    }
+
+    /// An opaque `w` x `h` image with the texels `low` (x, y) at 8-bit alpha code `code`.
+    fn specked(
+        w: u32,
+        h: u32,
+        code: u8,
+        low: impl IntoIterator<Item = (u32, u32)>,
+    ) -> AlphaContent {
+        let mut img = Rgba32F::new(w, h, [0.5, 0.5, 0.5, 1.0]);
+        for (x, y) in low {
+            img.at_mut(x, y)[3] = f32::from(code) / 255.0;
+        }
+        analyse(&img, &RGBA8).alpha
+    }
+    use AlphaContent as Alpha;
+
+    /// Note FM34: texels at 250 or below that are fewer than 0.1 % of the image and form no group over 16 are noise.
+    #[test]
+    fn a_few_low_texels_are_opaque_but_a_real_cutout_or_gradient_is_not() {
+        // One texel at 200 on 64 x 64: opaque.
+        assert_eq!(specked(64, 64, 200, [(7, 9)]), Alpha::Constant255);
+        // The share limit on 64 x 64 (4096 texels, 0.1 % is 4.096): four spread texels are noise, five are not.
+        let spread = |n: u32| (0..n).map(|i| (i * 9, i * 9));
+        assert_eq!(specked(64, 64, 0, spread(4)), Alpha::Constant255);
+        assert_eq!(specked(64, 64, 0, spread(5)), Alpha::Varying);
+        // A real cutout (10 % at 0) and a soft gradient.
+        let tenth = (0..64u32 * 64 / 10).map(|i| (i % 64, i / 64));
+        assert_eq!(specked(64, 64, 0, tenth), Alpha::Varying);
+        let mut ramp = Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 1.0]);
+        for (i, p) in ramp.px.iter_mut().enumerate() {
+            p[3] = (i % 64) as f32 / 63.0;
+        }
+        assert_eq!(analyse(&ramp, &RGBA8).alpha, Alpha::Varying);
+    }
+
+    /// Note FM34: the group cap. 0.1 % of a large image is many texels, so a small real cutout must still ask: a 4 x 4
+    /// block (16 texels) is noise, 17 connected texels are not, and a diagonal chain is not connected.
+    #[test]
+    fn a_connected_group_over_16_texels_is_not_noise() {
+        let block =
+            |w: u32, h: u32| (0..h).flat_map(move |y| (0..w).map(move |x| (100 + x, 100 + y)));
+        assert_eq!(specked(512, 512, 0, block(4, 4)), Alpha::Constant255);
+        assert_eq!(specked(512, 512, 0, block(5, 4)), Alpha::Varying);
+        let row = |n: u32| (0..n).map(|x| (x, 40));
+        assert_eq!(specked(512, 512, 0, row(16)), Alpha::Constant255);
+        assert_eq!(specked(512, 512, 0, row(17)), Alpha::Varying);
+        // Diagonal neighbours are separate groups.
+        assert_eq!(
+            specked(512, 512, 0, (0..40).map(|i| (i, i))),
+            Alpha::Constant255
+        );
+        // A 5 x 5 block (25 texels) on a 2048 x 2048 image is under 0.1 % (4194 texels) and still asks.
+        assert_eq!(specked(2048, 2048, 0, block(5, 5)), Alpha::Varying);
     }
 }
