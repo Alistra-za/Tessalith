@@ -35,10 +35,10 @@ pub fn resize_work(work: &mut Work, p: &Profile) {
             px[0] *= px[0];
         }
     }
-    // Alpha (and RGB for box) is the area-exact box; `filt` is never non-box while `weighted`.
+    // Alpha (and RGB for box) is the area-exact box; `filt` is tent or box while `weighted`.
     let mut out = mips::area_resample(&work.img, to, weighted);
     if filt != MipFilter::Box {
-        let direct = crate::filter::resample_rgb(&work.img, to, filt, p.mips.edge);
+        let direct = mips::resample_direct(&work.img, to, filt, weighted, p.mips.edge);
         for (px, d) in out.px.iter_mut().zip(&direct.px) {
             px[..3].copy_from_slice(&d[..3]);
         }
@@ -263,6 +263,29 @@ mod tests {
             "{o1:?}"
         );
         assert!(close(o0[3], 1.0 / 1.5) && close(o1[3], 1.0 / 1.5));
+    }
+
+    /// Note FM28: a weighted tent resize keeps the area-exact box alpha and ignores transparent colour.
+    #[test]
+    fn weighted_tent_resize_keeps_box_alpha_and_ignores_invisible_colour() {
+        let mut img = Rgba32F::new(6, 1, [0.0, 1.0, 0.0, 1.0]);
+        img.px[1] = [1.0, 0.0, 0.0, 0.0];
+        img.px[4] = [1.0, 0.0, 0.0, 0.0];
+        let mut p = profile(Subtype::Diffuse);
+        p.alpha.policy = AlphaPolicy::Cutout;
+        p.mips.filter = MipFilter::Tent;
+        let mut w = work(img.clone(), Domain::LinearLight, true);
+        assert_eq!(mips::effective_filter(&w, &p), MipFilter::Tent);
+        resize_work(&mut w, &p);
+        let boxed = area_resample(&img, (4, 1), true);
+        assert_eq!(w.img.px.len(), 4);
+        for (a, b) in w.img.px.iter().zip(&boxed.px) {
+            assert_eq!(a[3], b[3]);
+            assert!(
+                close(a[0], 0.0) && close(a[1], 1.0) && close(a[2], 0.0),
+                "{a:?}"
+            );
+        }
     }
 
     #[test]

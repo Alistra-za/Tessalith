@@ -238,9 +238,9 @@ fn filter_options_lock_per_s_mips_2() {
     let mut c = p.clone();
     c.alpha.policy = AlphaPolicy::Cutout;
     assert_eq!(filter_option_lock(&c, Box), None);
-    for f in [Tent, Mitchell, Kaiser] {
+    for f in [Mitchell, Kaiser] {
         assert!(
-            filter_option_lock(&c, f).is_some_and(|r| r.contains("alpha-weighted")),
+            filter_option_lock(&c, f).is_some_and(|r| r.contains("box or tent")),
             "cutout {f:?}"
         );
     }
@@ -256,7 +256,28 @@ fn filter_options_lock_per_s_mips_2() {
     assert_eq!(filter_option_lock(&r, Tent), None);
     assert!(filter_option_lock(&r, Kaiser).is_some());
     r.alpha.policy = AlphaPolicy::Cutout;
-    assert!(filter_option_lock(&r, Tent).is_some_and(|m| m.contains("alpha-weighted")));
+    assert!(filter_option_lock(&r, Tent).is_some_and(|m| m.contains("alpha weighting")));
+}
+
+/// Note FM28: alpha-weighted colour (cutout, blend, cutout_blend) can pick tent; Mitchell and Kaiser stay barred
+/// with the reason as the option's hover text.
+#[test]
+fn the_filter_menu_offers_tent_for_a_cutout_texture() {
+    use MipFilter::*;
+    let reg = PresetRegistry::builtin().unwrap();
+    for policy in [
+        AlphaPolicy::Cutout,
+        AlphaPolicy::Blend,
+        AlphaPolicy::CutoutBlend,
+    ] {
+        let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+        p.alpha.policy = policy;
+        assert_eq!(filter_option_lock(&p, Box), None, "{policy:?}");
+        assert_eq!(filter_option_lock(&p, Tent), None, "{policy:?}");
+        for f in [Mitchell, Kaiser] {
+            assert!(filter_option_lock(&p, f).is_some(), "{policy:?} {f:?}");
+        }
+    }
 }
 
 #[test]

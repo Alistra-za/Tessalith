@@ -8,11 +8,11 @@ const NOT_SRGB_COLOUR: &str =
 const HDR_NOT_COLOUR: &str =
     "HDR mips use box or tent, and tent only on colour or HDR maps without alpha weighting (spec §5.5)";
 const ALPHA_WEIGHTED: &str =
-    "alpha-tested and blended colour uses the alpha-weighted box (spec §5.5)";
+    "alpha-tested and blended colour takes box or tent; Mitchell and Kaiser ring at cutout edges";
 
 /// Why `p.mips.filter` cannot be used for this profile (S-mips-2), or Ok. Box is always allowed. Tent, Mitchell
-/// and Kaiser need sRGB colour without alpha weighting; an HDR format (`is_hdr()`) on a colour or HDR sub-type
-/// without alpha weighting takes tent only.
+/// and Kaiser need sRGB colour; alpha-weighted colour takes box or tent (Note FM28). An HDR format (`is_hdr()`) on
+/// a colour or HDR sub-type without alpha weighting takes tent only.
 pub fn filter_allowed(p: &Profile) -> Result<(), &'static str> {
     use crate::ops::{domain_for, Domain};
     let f = p.mips.filter;
@@ -31,7 +31,12 @@ pub fn filter_allowed(p: &Profile) -> Result<(), &'static str> {
         return Err(NOT_SRGB_COLOUR);
     }
     if p.alpha_weighted_mips() {
-        return Err(ALPHA_WEIGHTED);
+        if domain == Domain::Hdr {
+            return Err(HDR_NOT_COLOUR);
+        }
+        if f != MipFilter::Tent {
+            return Err(ALPHA_WEIGHTED);
+        }
     }
     Ok(())
 }
@@ -154,24 +159,56 @@ pub fn axis_taps(n: u32, m: u32, f: MipFilter, edge: MipEdge) -> Vec<Vec<(u32, f
 
 /// Separable polyphase resample of RGB to `(w, h)` (RESULTS-2 B8, S-mips-4): horizontal then vertical, each tap
 /// row accumulated in f64. Alpha of the result is 0.0; there is no clamping here (the caller clamps overshoot).
-pub fn resample_rgb(src: &Rgba32F, (w, h): (u32, u32), f: MipFilter, edge: MipEdge) -> Rgba32F {
+pub fn resample_rgb(src: &Rgba32F, to: (u32, u32), f: MipFilter, edge: MipEdge) -> Rgba32F {
+    resample_core(src, to, f, edge, false)
+}
+
+/// Alpha-weighted tent (Note FM28): the taps of [`resample_rgb`] with `MipFilter::Tent`, each multiplied by the
+/// source alpha, RGB divided by the weighted sum. Where that sum is 0 (every tap transparent) the plain tent RGB is
+/// used. Alpha of the result is 0.0; the caller keeps the area-exact box alpha (S-mips-2).
+pub fn resample_rgb_weighted(src: &Rgba32F, to: (u32, u32), edge: MipEdge) -> Rgba32F {
+    let mut out = resample_core(src, to, MipFilter::Tent, edge, true);
+    if out.px.iter().any(|p| p[3] < 0.0) {
+        let plain = resample_core(src, to, MipFilter::Tent, edge, false);
+        for (o, d) in out.px.iter_mut().zip(&plain.px) {
+            if o[3] < 0.0 {
+                *o = *d;
+            }
+        }
+    }
+    out
+}
+
+/// The polyphase pass. `weighted` multiplies each tap by the source alpha and divides by the weight sum; a texel
+/// with no weight comes back with alpha -1.0 for [`resample_rgb_weighted`] to fill in. Unweighted taps are scaled by
+/// exactly 1.0, so that path's bytes are unchanged.
+fn resample_core(
+    src: &Rgba32F,
+    (w, h): (u32, u32),
+    f: MipFilter,
+    edge: MipEdge,
+    weighted: bool,
+) -> Rgba32F {
     debug_assert!(src.width >= 1 && src.height >= 1 && w >= 1 && h >= 1);
     let tx = axis_taps(src.width, w, f, edge);
     let ty = axis_taps(src.height, h, f, edge);
     let (sw, dw) = (src.width as usize, w as usize);
-    let mut mid = vec![[0f32; 3]; src.height as usize * dw];
+    // Per texel: the three channel sums and the weight sum.
+    let mut mid = vec![[0f32; 4]; src.height as usize * dw];
     mid.par_chunks_mut(dw).enumerate().for_each(|(y, row)| {
         let line = &src.px[y * sw..(y + 1) * sw];
         for (o, taps) in row.iter_mut().zip(&tx) {
-            let mut acc = [0f64; 3];
+            let mut acc = [0f64; 4];
             for &(k, wt) in taps {
-                for (a, v) in acc.iter_mut().zip(line[k as usize]) {
-                    *a += wt * f64::from(v);
-                    // Saturate: a huge finite source must not become Inf (then NaN in the vertical pass).
+                let px = line[k as usize];
+                let wt = if weighted { wt * f64::from(px[3]) } else { wt };
+                for (a, v) in acc.iter_mut().zip(&px[..3]) {
+                    *a += wt * f64::from(*v);
                 }
+                acc[3] += wt;
             }
+            // Saturate: a huge finite source must not become Inf, then NaN in the vertical pass.
             *o = acc.map(|v| v.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32);
-            // saturate: a huge finite source must not become Inf, then NaN
         }
     });
     let mut out = Rgba32F::new(w, h, [0.0; 4]);
@@ -180,13 +217,20 @@ pub fn resample_rgb(src: &Rgba32F, (w, h): (u32, u32), f: MipFilter, edge: MipEd
         .zip(ty.par_iter())
         .for_each(|(row, taps)| {
             for (x, o) in row.iter_mut().enumerate() {
-                let mut acc = [0f64; 3];
+                let mut acc = [0f64; 4];
                 for &(k, wt) in taps {
                     for (a, v) in acc.iter_mut().zip(mid[k as usize * dw + x]) {
                         *a += wt * f64::from(v);
                     }
                 }
-                *o = [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0];
+                *o = if !weighted {
+                    [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0]
+                } else if acc[3] > 0.0 {
+                    let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / acc[3]) as f32);
+                    [r, g, b, 0.0]
+                } else {
+                    [0.0, 0.0, 0.0, -1.0]
+                };
             }
         });
     out
@@ -372,6 +416,31 @@ mod tests {
                     .fold(0.0f64, f64::max);
             assert!(max < 1e-5, "{f:?}: max |sdc - reference| = {max}");
         }
+    }
+
+    #[test]
+    fn weighted_tent_is_the_plain_tent_for_opaque_input_and_falls_back_where_nothing_has_weight() {
+        let mut img = Rgba32F::new(8, 8, [0.0; 4]);
+        for (i, p) in img.px.iter_mut().enumerate() {
+            *p = [i as f32 / 64.0, (i * 7 % 64) as f32 / 64.0, 0.5, 1.0];
+        }
+        let close = |a: &Rgba32F, b: &Rgba32F| {
+            a.px.iter()
+                .zip(&b.px)
+                .all(|(x, y)| (0..3).all(|c| (x[c] - y[c]).abs() < 1e-5) && x[3] == 0.0)
+        };
+        let plain = resample_rgb(&img, (4, 4), MipFilter::Tent, MipEdge::Wrap);
+        assert!(close(
+            &resample_rgb_weighted(&img, (4, 4), MipEdge::Wrap),
+            &plain
+        ));
+        // Fully transparent: no weight anywhere, so the plain tent RGB is used.
+        for p in &mut img.px {
+            p[3] = 0.0;
+        }
+        let w = resample_rgb_weighted(&img, (4, 4), MipEdge::Wrap);
+        let plain = resample_rgb(&img, (4, 4), MipFilter::Tent, MipEdge::Wrap);
+        assert!(close(&w, &plain));
     }
 
     #[test]

@@ -24,7 +24,7 @@ Options a texture cannot use are greyed out, with the reason on hover.
 
 **Compression.** For an emissive it shows the `FMT-HDR-SOURCE` reason (why it is BC6H or BC7 sRGB). Effort is locked for the uncompressed formats.
 
-**Mipmaps: Filter and Edge.** The default filter is *Box*. Tent, Mitchell and Kaiser are only for sRGB colour without alpha weighting (not cutout or blend); an HDR texture (BC6H or RGBA16F) may use Box or Tent only. *Edge* (*Wrap* by default) is locked while the filter is Box, because only Tent, Mitchell and Kaiser read past the edge.
+**Mipmaps: Filter and Edge.** The default filter is *Box*. The options a texture cannot use are greyed out, with the reason on hover; the rules are under `mips.filter` in [Project config fields](Project-Config-Fields.md#mipmaps). *Edge* (*Wrap* by default) is locked while the filter is Box, because only Tent, Mitchell and Kaiser read past the edge.
 
 **Normal base level** (normal maps only) stores mip 0 at unit length by default; choose *Keep as authored* for a normal map whose short normals are deliberate. A PBR set's normal map also bakes its detail into the set's `_rmaos`/`_rfaos` roughness (including a normal map shared into another set, which bakes into that set's own roughness); its Normal handling row then reads *decided by the texture set*. A `_cnr` bakes its detail into its own coat roughness by default, so its row reads *built-in default*.
 

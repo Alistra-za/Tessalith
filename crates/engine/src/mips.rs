@@ -5,11 +5,13 @@
 //! - **Non-box:** the box loop still runs, so the accumulation, alpha and the roughness and coat bakes are exactly
 //!   as for box. After `finalize` and before the bakes, RGB is overwritten by the direct resample and clamped to
 //!   the domain again (linear light [0, 1], HDR ≥ 0). Alpha always stays the recursive box.
-//! - **Coverage:** `preserve_coverage` reads only (box) alpha; a non-box filter is never allowed with `cutout` or
-//!   `cutout_blend` (S-mips-2).
+//! - **Coverage:** `preserve_coverage` reads only (box) alpha; with `cutout` or `cutout_blend` only tent is allowed
+//!   (S-mips-2, Note FM28).
+//! - **Alpha-weighted RGB** takes box or tent. Tent weights each tap by the source alpha
+//!   ([`crate::filter::resample_rgb_weighted`]); Mitchell and Kaiser would ring at cutout edges.
 //! - **Box-only contents:** normal renormalisation, the `_cnr` self-bake, `LengthPyramid` and roughness r² are box
-//!   only (S-mips-2); `effective_filter` returns box for them, and for alpha-weighted RGB, even if a blocked profile
-//!   reached the chain.
+//!   only (S-mips-2); `effective_filter` returns box for them, and for Mitchell or Kaiser on alpha-weighted RGB,
+//!   even if a blocked profile reached the chain.
 //! - **Odd sizes** (an acknowledged `DIM-NPOT` without resize): the level size is the box chain's, and the resample
 //!   takes any n -> m.
 //!
@@ -197,13 +199,31 @@ pub(crate) fn weighted_rgb(work: &Work, p: &Profile) -> bool {
         && !matches!(work.domain, Domain::Normal | Domain::Msn | Domain::SignedRg)
 }
 
-/// The filter the RGB levels use (S-mips-3): `p.mips.filter` when policy allows it ([`crate::filter::filter_allowed`])
-/// and the RGB is not alpha-weighted, else box. The policy check is the gate; this is a backstop for a blocked job.
+/// The filter the RGB levels use (S-mips-3): `p.mips.filter` when policy allows it ([`crate::filter::filter_allowed`]),
+/// else box. Alpha-weighted RGB takes box or tent only (Note FM28). The policy check is the gate; this is a backstop
+/// for a blocked job.
 pub(crate) fn effective_filter(work: &Work, p: &Profile) -> MipFilter {
-    if crate::filter::filter_allowed(p).is_ok() && !weighted_rgb(work, p) {
+    let weighted_ok = !weighted_rgb(work, p) || p.mips.filter == MipFilter::Tent;
+    if crate::filter::filter_allowed(p).is_ok() && weighted_ok {
         p.mips.filter
     } else {
         MipFilter::Box
+    }
+}
+
+/// The non-box RGB of a level or resize from `src` (mip 0): the weighted tent for alpha-weighted colour, else the
+/// plain polyphase resample. Alpha of the result is 0.
+pub(crate) fn resample_direct(
+    src: &Rgba32F,
+    to: (u32, u32),
+    filt: MipFilter,
+    weighted: bool,
+    edge: MipEdge,
+) -> Rgba32F {
+    if weighted {
+        crate::filter::resample_rgb_weighted(src, to, edge)
+    } else {
+        crate::filter::resample_rgb(src, to, filt, edge)
     }
 }
 
@@ -293,7 +313,7 @@ pub fn build_chain_with(work: &Work, p: &Profile, bake: Option<&NormalVariance>)
         if filt != MipFilter::Box {
             // S-mips-3: RGB straight from mip 0 at this level's size; alpha keeps the box value above.
             let size = (next.width, next.height);
-            let direct = crate::filter::resample_rgb(&out[0], size, filt, p.mips.edge);
+            let direct = resample_direct(&out[0], size, filt, weighted, p.mips.edge);
             for (px, d) in fin.px.iter_mut().zip(&direct.px) {
                 px[..3].copy_from_slice(&d[..3]);
                 clamp_rgb(px, work.domain);
@@ -1119,6 +1139,83 @@ mod tests {
             assert!(la.px.iter().zip(&lb.px).all(|(x, y)| x[3] == y[3]));
         }
         assert_ne!(a[1].px, b[1].px); // RGB did change
+    }
+
+    /// Opaque green texels with a transparent red column every 4th: nothing but green may reach any level.
+    fn green_with_red_transparent_columns() -> Rgba32F {
+        let mut img = Rgba32F::new(16, 16, [0.0, 1.0, 0.0, 1.0]);
+        for y in 0..16 {
+            for x in (0..16).step_by(4) {
+                *img.at_mut(x, y) = [1.0, 0.0, 0.0, 0.0];
+            }
+        }
+        img
+    }
+
+    fn cutout_tent() -> Profile {
+        let mut p = profile(Subtype::Diffuse);
+        p.alpha.policy = AlphaPolicy::Cutout;
+        p.mips.filter = MipFilter::Tent;
+        p
+    }
+
+    #[test]
+    fn tent_is_the_effective_filter_for_alpha_weighted_colour_but_kaiser_is_not() {
+        let w = work(
+            green_with_red_transparent_columns(),
+            Domain::LinearLight,
+            true,
+        );
+        let mut p = cutout_tent();
+        assert_eq!(effective_filter(&w, &p), MipFilter::Tent);
+        p.mips.filter = MipFilter::Kaiser;
+        assert_eq!(effective_filter(&w, &p), MipFilter::Box);
+    }
+
+    #[test]
+    fn weighted_tent_ignores_transparent_colour() {
+        let w = work(
+            green_with_red_transparent_columns(),
+            Domain::LinearLight,
+            true,
+        );
+        let c = build_chain(&w, &cutout_tent());
+        assert!(c.len() > 2);
+        for (k, level) in c.iter().enumerate().skip(1) {
+            for q in &level.px {
+                assert!(
+                    q[0].abs() < 1e-6 && (q[1] - 1.0).abs() < 1e-6 && q[2].abs() < 1e-6,
+                    "level {k}: {q:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn weighted_tent_alpha_is_the_box_alpha() {
+        let w = work(rnd_image(16, 16, 11), Domain::LinearLight, true);
+        let tent = cutout_tent();
+        let mut bx = tent.clone();
+        bx.mips.filter = MipFilter::Box;
+        let (a, b) = (build_chain(&w, &bx), build_chain(&w, &tent));
+        for (la, lb) in a.iter().zip(&b) {
+            assert!(la.px.iter().zip(&lb.px).all(|(x, y)| x[3] == y[3]));
+        }
+        assert_ne!(a[1].px, b[1].px); // RGB did change
+    }
+
+    #[test]
+    fn weighted_tent_is_not_the_plain_tent() {
+        // A random alpha makes the weights uneven: the weighted level differs from the unweighted one.
+        let img = rnd_image(16, 16, 5);
+        let w = work(img.clone(), Domain::LinearLight, true);
+        let c = build_chain(&w, &cutout_tent());
+        let plain = crate::filter::resample_rgb(&img, (8, 8), MipFilter::Tent, MipEdge::Wrap);
+        assert!(c[1]
+            .px
+            .iter()
+            .zip(&plain.px)
+            .any(|(a, b)| (a[0] - b[0]).abs() > 1e-3));
     }
 
     #[test]

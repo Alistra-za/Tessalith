@@ -252,3 +252,5 @@ FC¶- **Tests.** `sets_filter.rs`	FC		back	FM		partial	2026-11-03		goes: the ran
 CL19	CL		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of the end_export_with hook; stays: the cancel rule and its test
 GC11	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of row_builds; stays: the cache key and the build count
 GC2	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of hold_rows_read; stays: the two full reads and the worker thread
+S-mips-2	S		back	FM		partial	2026-11-03		goes: tent barred for colour with cutout, blend or cutout_blend; the owner-question-2 line "no alpha-weighted tent (revisit later)"; stays: Mitchell and Kaiser barred there, the rest of the rule
+S¶- **Deferred:**	S		back	FM		partial	2026-11-03		goes: "alpha-weighted tent for foliage" as deferred; stays: the other deferred items

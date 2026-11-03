@@ -116,6 +116,12 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
   - **`--out-dir` onto the input is a usage error** (controller ruling, Task 10 review, overriding the plan's Step 3 code): an `--out-dir` that resolves to an input itself (the S6 guard), or two inputs with one file name, exits 2 before anything is written. `PATCHED` is printed only after the write succeeds; a write failure exits 1 for that file and the batch goes on (Note AV-S1).
   - **The GUI Patch writes under `export_root()`** (controller ruling, Task 11 review, overriding the brief's code): the copy goes to the export root (the chosen export folder, else the default `sdc-out`), so the button never silently does nothing; every error reaches the status line and the confirmation always ends.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-2 Where non-box filters are allowed** (spec §3.2, §5.5 read literally). `tent`, `mitchell` and `kaiser` require category Color, sRGB content (domain `LinearLight`) and an alpha policy that does not weight (`remove` or `data`). `tent` is also allowed for HDR, `format.is_hdr()` (`bc6h_uf16` or `rgba16f`), but only for category Color or Hdr with an alpha policy that does not weight; HDR with `mitchell`/`kaiser` is refused ("HDR mips use box or tent"). Anything else with a non-box filter set at sub-type or file scope is **`CFG-INVALID`** (Error; an unscoped value falls back to box instead, S-mips-13), with the reason: normals, `_msn`, `_flow`, data, grayscale, packed, roughness members, linear-content colour, and colour with `cutout`/`blend`/`cutout_blend`. The GUI shows these as locked options. The engine also falls back to box in `mips.rs` (`effective_filter`), but only as a guard; a blocked job never reaches it. **Owner question 2 closed** (2026-10-11): alpha-tested and blended colour (foliage) stays on alpha-weighted box; no alpha-weighted tent (revisit later).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **Deferred:** the Kaiser width/alpha/stretch syntax; alpha-weighted tent for foliage; `resize` upscaling (`pot-up`, `pot-nearest`) and a size cap; matching the resized mip 0's coverage to the source (S-mips-8); resizing pack sources of different sizes to a common size (`PACK-SIZE-MISMATCH` still errors); the 16K box peak and the single-threaded `powf` (S-mips-11).
+
 ## Note T — M6 Track D: presets (plan rulings, 2026-10-12)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)

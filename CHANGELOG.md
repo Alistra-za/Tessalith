@@ -52,6 +52,7 @@
 - The command palette's Enter acts only after you type or move the highlight. Automatic types alone no longer ask on close. In the Meshes view with a NIF selected the bottom panel leaves room for the 3D preview.
 - Preview: **Pin this result**, the Compare controls, the `P` key and the **Split** layout are removed, with the **Side by side** button and the `preview_layout` setting. The preview shows the source beside the encode. An old `gui.toml` with `preview_layout` loads, and the key drops on the next save.
 - The **Value range** and **Plastic look** artist checks are removed (`CHK-RANGE`, `CHK-PLASTIC`), with the preview's **Range** overlay and their two switches in Advanced → Checks. Four checks remain. An allow list naming either code is an error that says so, and an old `[checks]` line for either in `gui.toml` is ignored.
+- Mip filter: Tent is now allowed on alpha-tested and blended colour (cutout, lend, cutout_blend). It weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge; alpha stays the area-exact box. Mitchell and Kaiser stay off there because they ring at cutout edges. Box is the default and its output does not change. A texture that set mips.filter = tent on such colour used box in 1.x and now writes the tent.
 - Fixes:
   - NIF validate reads non-ASCII texture paths and BSX names as Windows-1252, the same as apply.
   - The 2D and set previews update when a helper's Invert or Read changes, or when a bake, cube face or derive source changes.

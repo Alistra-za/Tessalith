@@ -34,6 +34,13 @@
     "subtype": "diffuse",
     "width": 64
   },
+  "cov/textures/c/cutout_bc3_tent.dds": {
+    "format": "Bc3 { srgb: false }",
+    "height": 64,
+    "payload_sha256": "e532e34cfcd871b68bd50277e7e243705f54a96852d11e9d3cf907d276fffc9d",
+    "subtype": "diffuse",
+    "width": 64
+  },
   "cov/textures/c/cutout_bc7.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,

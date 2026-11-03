@@ -37,7 +37,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 | Field | Values | Default | Notes |
 |---|---|---|---|
 | `mips.levels` | `full`, `none`, or a count | `full`; `none` for `ui_sky` and under `interface` and `sky` folders | Number of mip levels. |
-| `mips.filter` | `box`, `tent`, `mitchell`, `kaiser` | `box` | Downsampling filter. Non-box filters are allowed only on sRGB colour content without alpha weighting (not `cutout`, `blend` or `cutout_blend`). HDR textures may use `box` or `tent`. An unscoped filter a texture cannot use falls back to box with `CFG-FILTER-IGNORED` (info); a scoped one is `CFG-INVALID`. |
+| `mips.filter` | `box`, `tent`, `mitchell`, `kaiser` | `box` | Downsampling filter. Tent, Mitchell and Kaiser are for sRGB colour content. With `cutout`, `blend` or `cutout_blend` only `tent` is allowed: it weights each tap by alpha, and Mitchell and Kaiser ring at cutout edges. HDR textures without alpha weighting may use `box` or `tent`. An unscoped filter a texture cannot use falls back to box with `CFG-FILTER-IGNORED` (info); a scoped one is `CFG-INVALID`. |
 | `mips.edge` | `wrap`, `clamp` | `wrap` | How tent, Mitchell and Kaiser read past the texture edge. Ignored by box. |
 | `mips.normal` | `renormalize`, `renormalize_bake` | `renormalize`; `renormalize_bake` for `coat_normal` | How normal-map mips are built. `renormalize_bake` also bakes the normal detail lost in each mip into the roughness stored in the same texture (the coat roughness of a `_cnr`). |
 | `mips.normal_base` | `renormalize`, `keep` | `renormalize` | Mip 0 of a normal map: stored at unit length, or as authored. |

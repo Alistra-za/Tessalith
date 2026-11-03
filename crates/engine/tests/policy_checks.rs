@@ -1995,17 +1995,29 @@ fn non_box_filters_are_cfg_invalid_outside_srgb_colour() {
 }
 
 #[test]
-fn alpha_weighted_colour_keeps_box() {
+fn alpha_weighted_colour_keeps_box_or_tent() {
     for alpha in ["cutout", "blend", "cutout_blend"] {
         let a = format!("alpha.policy={alpha}");
-        let j = m6_job(&["subtype=diffuse", &a, "file:**/x.png.mips.filter=kaiser"]);
-        assert!(
-            cfg_invalid(&j)
-                .iter()
-                .any(|m| m.contains("alpha-weighted box")),
-            "{alpha}: {:?}",
-            j.warnings
-        );
+        for f in ["mitchell", "kaiser"] {
+            let m = format!("file:**/x.png.mips.filter={f}");
+            let j = m6_job(&["subtype=diffuse", &a, &m]);
+            assert!(
+                cfg_invalid(&j).iter().any(|m| m.contains("box or tent")),
+                "{alpha} {f}: {:?}",
+                j.warnings
+            );
+        }
+    }
+}
+
+/// Note FM28: tent is allowed on alpha-weighted sRGB colour.
+#[test]
+fn tent_is_allowed_for_cutout_colour() {
+    for alpha in ["cutout", "blend", "cutout_blend"] {
+        let a = format!("alpha.policy={alpha}");
+        let j = m6_job(&["subtype=diffuse", &a, "file:**/x.png.mips.filter=tent"]);
+        assert!(cfg_invalid(&j).is_empty(), "{alpha}: {:?}", j.warnings);
+        assert_eq!(j.profile.mips.filter, MipFilter::Tent, "{alpha}");
     }
 }
 
@@ -2035,7 +2047,7 @@ fn hdr_allows_tent_only() {
             }
         }
     }
-    // F2: alpha-weighted HDR colour keeps the alpha-weighted box.
+    // F2: alpha-weighted HDR colour keeps box (the weighted tent is for LDR colour, Note FM28).
     for alpha in ["cutout", "blend", "cutout_blend"] {
         let a = format!("alpha.policy={alpha}");
         let j = m6_job(&[
@@ -2048,7 +2060,7 @@ fn hdr_allows_tent_only() {
         assert!(
             cfg_invalid(&j)
                 .iter()
-                .any(|m| m.contains("alpha-weighted box")),
+                .any(|m| m.contains("without alpha weighting")),
             "{alpha}: {:?}",
             j.warnings
         );
@@ -2110,7 +2122,7 @@ fn unscoped_filter_falls_back_to_box() {
     assert_eq!(j.profile.mips.filter, MipFilter::Box);
     assert!(
         warning(&j, Code::CfgFilterIgnored).message.ends_with(
-            "uses box: alpha-tested and blended colour uses the alpha-weighted box (spec §5.5)"
+            "uses box: alpha-tested and blended colour takes box or tent; Mitchell and Kaiser ring at cutout edges"
         ),
         "{:?}",
         j.warnings
@@ -2141,6 +2153,29 @@ fn unscoped_filter_falls_back_to_box() {
         assert!(!cfg_invalid(&j).is_empty(), "{sets:?}: {:?}", j.warnings);
         assert!(!codes(&j).contains(&Code::CfgFilterIgnored), "{sets:?}");
     }
+}
+
+/// Note FM28: an unscoped Kaiser on a cutout falls back to box with the notice; an unscoped tent is kept silently.
+#[test]
+fn kaiser_on_cutout_falls_back_to_box_with_cfg_filter_ignored() {
+    let k = m6_job(&[
+        "subtype=diffuse",
+        "alpha.policy=cutout",
+        "mips.filter=kaiser",
+    ]);
+    assert_eq!(k.profile.mips.filter, MipFilter::Box);
+    assert!(
+        codes(&k).contains(&Code::CfgFilterIgnored),
+        "{:?}",
+        k.warnings
+    );
+    let t = m6_job(&["subtype=diffuse", "alpha.policy=cutout", "mips.filter=tent"]);
+    assert_eq!(t.profile.mips.filter, MipFilter::Tent);
+    assert!(
+        !codes(&t).contains(&Code::CfgFilterIgnored),
+        "{:?}",
+        t.warnings
+    );
 }
 
 /// Scope is per field: an unrelated sub-type-scoped `--set` does not scope the unscoped filter, and an unrelated
