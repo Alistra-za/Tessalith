@@ -12,3 +12,4 @@ Format and rules: [README.md](README.md).
 - 2026-11-01 `cargo clean` missed the real build folder → pass `--target x86_64-pc-windows-msvc` too (`cargo clean`)
 - 2026-11-01 `tools/decisions-archive.py` crashed with UnicodeEncodeError (cp1252) printing a failure, and `PYTHONIOENCODING` is ignored under `-I` → run it as `py -3.13 -I -B -X utf8 tools/decisions-archive.py ...` (decisions-archive.py --check)
 - 2026-11-01 A `///` doc-comment change on a `JsonSchema` field left `schema/*.json` stale and failed `committed_schemas_match_the_types` in the full gate → after editing such a comment run `sdc presets schema all --out schema` and commit the diff (`crates/engine/tests/schemas.rs`)
+- 2026-11-03 Splicing a line into CHANGELOG.md with List.AddRange in PowerShell wiped the file to one line (it was caught by git diff --stat) -> insert with the Edit tool anchored on a nearby line, and read git diff --stat after any scripted doc edit (CHANGELOG.md)

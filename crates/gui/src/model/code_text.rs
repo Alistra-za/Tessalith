@@ -56,7 +56,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         InAliasInvalid => "A name alias was refused — fix it in the preset",
         OutUnknownExisting => "An existing output file isn't ours — move or remove it",
         PackDefaulted => "A packed channel had no input and got a default — add the missing map",
-        PackSizeMismatch => "The packed maps differ in size — use matching sizes",
+        PackSizeMismatch => "The packed maps have different aspect ratios — use maps of the same proportions",
         PackConflict => "A packed file collides with another output — remove one of them",
         PackUnusedInput => "A packing input isn't used by this set — remove it or change the recipe",
         PackRecipeConflict => "The packing recipe doesn't fit this set — change the recipe",

@@ -485,6 +485,7 @@ fn pack_codes_are_in_the_catalogue() {
     for (s, sev) in [
         ("PACK-DEFAULTED", Severity::Warning),
         ("PACK-SIZE-MISMATCH", Severity::Error),
+        ("PACK-SOURCE-RESIZED", Severity::Info),
         ("PACK-CONFLICT", Severity::Warning),
         ("PACK-UNUSED-INPUT", Severity::Warning),
         ("PACK-RECIPE-CONFLICT", Severity::Warning),

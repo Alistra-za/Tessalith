@@ -19,6 +19,10 @@ ARCHIVED (wording before the edit; superseded in part by Note BV1, 2026-10-17)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **M5 (#22) Fill values:** field `packing.fill.<role>` (one per §4.4 raw-map role: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`), an 8-bit code 0–255. CLI `--fill <role>=<0..255>` is an unscoped `--set packing.fill.<role>=<v>` added after every `--set`, so it beats an unscoped `--set` of the same field and loses to sub-type- and file-scoped ones. A roughness fill is used for a glossiness channel as `255 − v` and back. A filled channel has provenance `fill:<code written>` and raises **no** `PACK-DEFAULTED` (the user chose it). The GUI slider lands with M3's settings panel.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **M9 Pre-packed conflict** is keyed on an image member whose canonical suffix equals the recipe's suffix (`rmaos`, `rfaos`, `p` under `cs`; `m` under `cpm`/`vanilla`). A re-encoded DDS member is written, so it conflicts like an image; a skipped DDS member never conflicts (Note BV1). With `packing.prefer = raw` the replaced file is skipped with `PACK-CONFLICT` and counts as an intentional skip (Note I). Exception (never write neither): when the recipe's sources differ in size, the sizes are checked first, the pre-packed file stays a job (no skip, no `PACK-CONFLICT`) and the recipe fails with `PACK-SIZE-MISMATCH`. When `packing.prefer = raw` but the raw sources differ in size, the recipe fails (`PACK-SIZE-MISMATCH`) and the pre-packed file is kept; it converts under the normal never-auto-decide rule (its sub-type is a suggestion, so it needs `--accept-suggestions` or a rule).
+  - (pointer, Note CO7: a generated member that a real map replaces is skipped `GEN-REPLACED` before M9, so it never reaches M9 and `packing.prefer` never sees it.)
+
 ## Note N — M3a converter GUI decisions (owner and M3a plan, 2026-10-10)
 
 ARCHIVED (wording before the edit; superseded in part by Note CA1, 2026-10-18)
@@ -139,6 +143,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 - **S-mips-11 Memory and speed:** the new kernels are separable and row-parallel on the shared rayon pool. Admission (`api::job_bytes`) adds `8·w·h` bytes for a non-box filter and `32·w·h` for a resize, with `(w, h)` from one shared `input_dims` helper (also used by `estimated_bytes`: a DDS by its header, else `load::image_size`), so a re-encoded DDS is admitted on its real size. The 13 GiB box peak at 16K and the single-threaded per-channel `powf` in Preprocess stay deferred to the scheduler revisit.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-7 Resize in planning:** `DIM-SMALL` and `DIM-FLOW-SMALL` test the **post-resize** size (`resize::target_dims`). A resized job gets the **`DIM-RESIZED`** (Info) code, data `{"from":[w,h],"to":[w',h']}` (its message is FM29); a job whose size does not change gets none. The bake plans its shift on the post-resize sizes and `BakeJob::load_lengths` builds the pyramid from the resized, renormalised `_n`; the bake's `NormalVariance` is built on `target_dims`, so the shift check holds on an NPOT pair. `BakeJob::identity_sha256` adds the `_n`'s `resize` only when it is not `none`, so existing identities are unchanged. `PACK-SIZE-MISMATCH` still compares source sizes before assembly; the packed image is resized after assembly.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **Deferred:** the Kaiser width/alpha/stretch syntax; a size cap; matching the resized mip 0's coverage to the source (S-mips-8); resizing pack sources of different sizes to a common size (`PACK-SIZE-MISMATCH` still errors); the 16K box peak and the single-threaded `powf` (S-mips-11).
 
 ## Note T — M6 Track D: presets (plan rulings, 2026-10-12)
 
@@ -1354,6 +1364,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Track C (Note CL):** `_flow` → Hair never reaches a PBR set. Check stats skip a derived job (CN22), and `drop_top_mip`/low detail act on the derived chain (CN11).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  Sources of different sizes (TA22) are checked at plan time with `check_sizes`, as packing does. Each derived job of the set becomes an error job with `PACK-SIZE-MISMATCH` naming every source (preflight P6). It is built by the builder packing uses, now `pack::plan::recipe_error_job` + `size_mismatch_warning`. The other sets plan.
+
 ## Note CM — NIF v2 Phase B: animation clock, key editor, controllers, clips, In game preview (NIF team, 2026-10-21)
 
 ARCHIVED (wording before the edit; superseded in part by Note CM33, 2026-10-21)
@@ -1729,6 +1742,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FB12, 2026-10-29)
   - DY16g. **Ctrl+A selects tiles only**, like the arrow keys (builder call, accepted by the reviewer). Mouse Shift-click ranges and the selection summary run over the tiles then the shown helper rows (`shown_keys()`). **Keyboard ranges stay on tiles** (controller ruling, re-review): `grid_move` uses its own tile-only order, so Shift+arrow from a helper anchor never pulls helper rows in.
   - DY16h. **Helper member chips on set cards stay as built** (controller ruling, Tasks 7 and 9; owner confirmed 2026-10-28): helper items are set members, so cards show layer and alpha-fill helpers as small member chips. Cost if wrong: one follow-up to hide them.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- DY8. **Sizes (Ruling 7).** A suggested alpha fill of another size is skipped and the helper is not used ("512x512, target 1024x1024: sizes differ"), so an existing project never starts failing. An assigned one turns the target into an Error job with PACK-SIZE-MISMATCH (`size_mismatch_warning`, both sizes). That helper counts as used (it went into the error) and the error job keeps `fill`, so the run, which never runs it, ends the helper with "filled into <output>" (builder calls, accepted). A size that changes between plan and run fails the target at load: "`<helper>`: size changed since planning; re-run". Packed channels keep today's rule (recipe Error).
+
 ## Note GC — Meshes view: flat NIF list (NIF team, 2026-10-29)
 
 ARCHIVED (wording before the edit; superseded in part by Note GC19, 2026-10-29)
@@ -2067,6 +2083,9 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
 ARCHIVED (superseded by Note FM, 2026-11-02)
   - AF2: loading a `.kra`/`.ora` first reads the PNG IHDR (`image_size`), so an archive over MAX_DIM is `DIM-TOO-LARGE` before anything is inflated. The inflation cap then comes from that IHDR: `h·(1 + 8w)` (16-bit RGBA stored raw with a filter byte per row) + 1/64 for zlib and chunk framing + 4 MiB for ancillary chunks, never above `MERGED_CAP`. The buffer grows from the central directory's claim, doubling but never past the cap. A 2×2 IHDR with megabytes behind it is refused after at most about 4 MiB, whether the entry's claim is true or a lie. The refusal is `IN-DECODE` ("larger than its size in the PNG header allows").
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - AF7: a recipe that writes nothing holds no path in the duplicate check. That covers a failed or cancelled source, `packing.enabled = false`, and sources that differ in size. Its packing switch and source sizes are read once more for this, before planning.
+
 ## Note AH — Complex `_m` alpha and Enable parallax (2026-10-14)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
@@ -2198,6 +2217,9 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Half size.** There is no Review question, no `Review.half_size`, no `Measure whether full size adds anything` switch (an old `[checks] drop_top_mip` key in `gui.toml` is ignored on load) and no `LowDetailMode::Hold`, `Keep::Measure` or `Processed::UpToDate`: the engine writes a flagged texture at full size and `Warn` only adds the warning. `drop_top_mip` stays a texture field (the Advanced tick, Copy settings, the size estimate); its pins live in `gui/tests/drop_top_mip_field.rs`. Encoded bytes and `identity.json` are unchanged.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Names and old files.** `Code::parse` returns `None` for the two codes and `Code::ALL` has 92. `migrate::REMOVED` has an `allow` row for each, so a list naming one is an error that says "removed in 2.0" (`removed_check_codes_in_allow_lists_are_named`). An old `gui.toml` with `[checks] range`, `plastic` or `preview_layout` loads, ignores the keys and drops them on the next save (`removed_check_keys_in_gui_toml_are_ignored`, `window_layout`).
 
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 

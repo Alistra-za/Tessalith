@@ -36,7 +36,7 @@ pub enum RecipeStatus {
     Run,
     /// The set already holds this output as a file (`PACK-CONFLICT`); `reason` says which side is used.
     Conflict,
-    /// A source could not be read or the sources differ in size.
+    /// A source could not be read or the sources have different aspect ratios.
     Failed,
     /// `packing.enabled = false`: the raw maps stay packing inputs.
     Disabled,

@@ -297,12 +297,23 @@ pub fn apply_fill(
     info: &mut crate::image::SourceInfo,
     f: &FillJob,
 ) -> Result<(), String> {
-    let (src, _) = crate::load::load_image(&f.source.path).map_err(|e| e.to_string())?;
-    if (src.width, src.height) != (img.width, img.height) {
+    let (mut src, _) = crate::load::load_image(&f.source.path).map_err(|e| e.to_string())?;
+    let (have, sized) = ((img.width, img.height), (src.width, src.height));
+    // Only an assigned fill plans with sizes that differ (Note FM30): the smaller of the two is enlarged to the
+    // other's size. A suggested one needs equal sizes, so a change since planning stays an error.
+    let to = crate::pack::common_size(&[have, sized]).filter(|_| f.assigned || have == sized);
+    let Some(to) = to else {
         return Err(format!(
             "{}: size changed since planning; re-run",
             f.source.path.display()
         ));
+    };
+    if sized != to {
+        src = crate::resize::enlarge(&src, to, false);
+    }
+    if have != to {
+        // The target's alpha is replaced just below, so its colour is interpolated plain.
+        *img = crate::resize::enlarge(img, to, false);
     }
     let k = f.read.unwrap_or(HelperRead::R).channel();
     for (o, q) in img.px.iter_mut().zip(&src.px) {

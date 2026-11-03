@@ -429,6 +429,7 @@
         "IN-ALIAS-STALE",
         "OUT-UNKNOWN-EXISTING",
         "PACK-DEFAULTED",
+        "PACK-SOURCE-RESIZED",
         "PACK-SIZE-MISMATCH",
         "PACK-CONFLICT",
         "PACK-UNUSED-INPUT",
@@ -1738,7 +1739,7 @@
         },
         {
           "const": "failed",
-          "description": "A source could not be read or the sources differ in size.",
+          "description": "A source could not be read or the sources have different aspect ratios.",
           "type": "string"
         },
         {

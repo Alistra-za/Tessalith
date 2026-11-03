@@ -97,6 +97,13 @@
     "subtype": "pbr_albedo",
     "width": 64
   },
+  "cov/textures/c/twosize_rmaos.dds": {
+    "format": "Bc7 { srgb: false }",
+    "height": 64,
+    "payload_sha256@avx2": "63367287436e8596a2dc01b60e56df70cb70cb636f26976d9d822f1d3ad92cce",
+    "subtype": "rmaos",
+    "width": 64
+  },
   "cov/textures/c/wide_bc1.dds": {
     "format": "Bc1 { srgb: false }",
     "height": 16,

@@ -364,14 +364,43 @@ fn a_set_without_rmaos_uses_the_slot_defaults() {
     assert!((a.image.px[0][3] - 0.66 * (1.0 - r)).abs() < 1e-5);
 }
 
+/// Note FM30: a smaller scalar map is enlarged to the colour map's size; each derived job of the set says so, and
+/// the assembled image has the larger size.
 #[test]
-fn sources_of_different_sizes_fail_only_that_set() {
+fn sources_of_different_sizes_are_resized() {
     let d = tempfile::tempdir().unwrap();
     let inputs = d.path().join("in");
     let dir = inputs.join("textures/pbr/arm");
     png(&dir.join("big.png"), 64, 64, [200, 200, 200, 255]);
     png(&dir.join("big_n.png"), 64, 64, [128, 128, 255, 255]);
     png(&dir.join("big_rmaos.png"), 32, 32, [128, 0, 255, 255]);
+    let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
+    for out in ["textures/arm/big.dds", "textures/arm/big_n.dds"] {
+        let j = out_job(&p, out).expect(out);
+        assert_eq!(j.status, JobStatus::Ready, "{out}: {:?}", j.warnings);
+        let w = j
+            .warnings
+            .iter()
+            .find(|w| w.code == Code::PackSourceResized)
+            .unwrap_or_else(|| panic!("{out}: {:?}", j.warnings));
+        assert!(
+            w.message.contains("big_rmaos.png 32x32") && w.message.ends_with("resized to 64x64"),
+            "{}",
+            w.message
+        );
+        let a = engine::derive::assemble::assemble_derived(j.derive.as_ref().unwrap()).unwrap();
+        assert_eq!((a.image.width, a.image.height), (64, 64));
+    }
+}
+
+#[test]
+fn sources_of_different_aspect_ratios_fail_only_that_set() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    let dir = inputs.join("textures/pbr/arm");
+    png(&dir.join("big.png"), 64, 64, [200, 200, 200, 255]);
+    png(&dir.join("big_n.png"), 64, 64, [128, 128, 255, 255]);
+    png(&dir.join("big_rmaos.png"), 32, 16, [128, 0, 255, 255]);
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
     let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
     let big = out_job(&p, "textures/arm/big.dds").expect("an error job");
@@ -699,6 +728,7 @@ fn a_grass_stack_on_an_opaque_albedo_keeps_its_spec_alpha() {
         input,
         job: job.clone(),
         notes: vec![],
+        resized: None,
         nif: None,
     };
     let set = TextureSet {
@@ -1527,8 +1557,8 @@ fn a_kept_p_of_a_no_albedo_set_is_not_called_not_converted() {
     assert_eq!(s.failed, 0);
 }
 
-/// Final review M4b: a landscape set whose every derived job fails at plan time (sources of different sizes) does
-/// not keep its `_p`: the `_p` follows its set.
+/// Final review M4b: a landscape set whose every derived job fails at plan time (sources of different aspect
+/// ratios) does not keep its `_p`: the `_p` follows its set.
 #[test]
 fn a_p_follows_its_set_when_the_set_does_not_derive() {
     let d = tempfile::tempdir().unwrap();
@@ -1536,7 +1566,7 @@ fn a_p_follows_its_set_when_the_set_does_not_derive() {
     let dir = inputs.join("textures/landscape");
     png(&dir.join("rock.png"), 32, 32, [200, 200, 200, 255]);
     png(&dir.join("rock_n.png"), 32, 32, [128, 128, 255, 255]);
-    png(&dir.join("rock_rmaos.png"), 16, 16, [204, 255, 128, 255]);
+    png(&dir.join("rock_rmaos.png"), 32, 16, [204, 255, 128, 255]);
     png(&dir.join("rock_p.png"), 16, 16, [100, 100, 100, 255]);
     let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), no_tweak);
     assert!(p.jobs.iter().all(|j| j.derive.is_none()), "{:#?}", p.jobs);

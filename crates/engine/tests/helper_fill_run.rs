@@ -507,12 +507,46 @@ fn filled_into(k: &EventKind, out: &str) -> bool {
         if reason.starts_with("filled into ") && reason.ends_with(out))
 }
 
-/// Review 4 I1: an assigned helper of another size fails its target; the helper still ends with that output.
+/// Note FM30: an assigned helper of another size and the same aspect ratio is resized by the larger of the two: a
+/// 32 px helper is enlarged to the 64 px target, and a 128 px helper makes its 64 px target write at 128 px.
+#[test]
+fn assigned_helper_of_another_size_is_resized() {
+    for (n, want) in [(32u32, 64u32), (128, 128)] {
+        let d = tempfile::tempdir().unwrap();
+        rgb(d.path(), "x.png");
+        let k = 255 / (n - 1);
+        ImageBuffer::from_fn(n, n, |x, _| Luma([(x * k) as u8]))
+            .save(at(d.path(), "x_opacity.png"))
+            .unwrap();
+        toml(d.path(), OPACITY_ASSIGNED);
+        let p = plan(d.path(), Target::Cs, &RGBA8);
+        let j = job(&p, "x.png");
+        assert_eq!(j.status, JobStatus::Ready, "{n}: {:?}", j.warnings);
+        assert!(
+            j.warnings
+                .iter()
+                .any(|w| w.code == engine::codes::Code::PackSourceResized),
+            "{n}: {:?}",
+            j.warnings
+        );
+        let (s, ev) = run(p);
+        assert_eq!(s.converted, 1, "{n}: {ev:#?}");
+        let f = read_dds(&std::fs::read(out(d.path(), "x.dds")).unwrap()).unwrap();
+        assert_eq!((f.width, f.height), (want, want), "{n}");
+        // The alpha ramp spans the whole width, whichever image was enlarged.
+        let a = alpha(d.path(), "x.dds").1;
+        let row = &a[(want as usize / 2) * want as usize..][..want as usize];
+        assert!(row[0] <= 8 && row[want as usize - 1] >= 240, "{n}: {row:?}");
+        assert!(row.windows(2).all(|w| w[0] <= w[1]), "{n}: {row:?}");
+    }
+}
+
+/// Review 4 I1: an assigned helper of another aspect ratio fails its target; the helper still ends with that output.
 #[test]
 fn size_mismatch_helper_ends_with_its_target() {
     let d = tempfile::tempdir().unwrap();
     rgb(d.path(), "x.png");
-    ImageBuffer::from_fn(32, 32, |_, _| Luma([9u8]))
+    ImageBuffer::from_fn(64, 32, |_, _| Luma([9u8]))
         .save(at(d.path(), "x_opacity.png"))
         .unwrap();
     toml(d.path(), OPACITY_ASSIGNED);

@@ -12,6 +12,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+/// Whether `a` and `b` have the same aspect ratio, by exact cross-multiplication.
+pub(crate) fn same_aspect(a: (u32, u32), b: (u32, u32)) -> bool {
+    u64::from(a.0) * u64::from(b.1) == u64::from(b.0) * u64::from(a.1)
+}
+
+/// The size every source is brought to (Note FM30): the largest by area when all share one aspect ratio, else
+/// `None`. With one aspect and a larger area a source is larger on both sides, so the rest only grow.
+pub(crate) fn common_size(sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
+    let first = *sizes.first()?;
+    if !sizes.iter().all(|&s| same_aspect(first, s)) {
+        return None;
+    }
+    sizes
+        .iter()
+        .copied()
+        .max_by_key(|&(w, h)| u64::from(w) * u64::from(h))
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]

@@ -5,7 +5,8 @@ use super::{AlphaTarget, FillJob, FillTarget, HelperRole, HelperSel};
 use crate::config::{RawMap, Subtype, Target};
 use crate::discover::{InputFile, InputKind};
 use crate::group::TextureSet;
-use crate::pack::plan::{raw_role, size_mismatch_warning};
+use crate::pack::common_size;
+use crate::pack::plan::{raw_role, resized_warning, size_mismatch_warning};
 use crate::pack::PackSource;
 use crate::policy::{helper_requested, JobStatus, ResolveCtx, ResolvedJob};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -25,6 +26,8 @@ pub struct FillCandidate {
     pub set_key: String,
     pub target: PathBuf,
     pub fill: FillJob,
+    /// `PACK-SOURCE-RESIZED` when the helper and the target differ in size (an assigned fill; Note FM30).
+    pub resized: Option<crate::codes::Warning>,
 }
 
 /// The alpha fills of a batch. `used` and `not_used` cover only helpers that had an alpha target: a helper may miss
@@ -101,8 +104,8 @@ struct Helper<'a> {
     targets: Vec<AlphaTarget>,
 }
 
-/// Plans every set's alpha fills (Rulings 4-8). An assigned fill whose size differs from its target's turns the
-/// target job into a `PACK-SIZE-MISMATCH` error; nothing else changes `jobs`.
+/// Plans every set's alpha fills (Rulings 4-8). An assigned fill whose aspect ratio differs from its target's turns
+/// the target job into a `PACK-SIZE-MISMATCH` error; nothing else changes `jobs`.
 pub fn plan_fills(
     ctx: &ResolveCtx,
     sets: &[TextureSet],
@@ -236,6 +239,7 @@ pub fn plan_fills(
                     invert: h.sel.invert,
                     assigned,
                 };
+                let mut resized = None;
                 if hf.size != tf.size {
                     let ((hw, hh), (tw, th)) = (hf.size, tf.size);
                     if !assigned {
@@ -243,21 +247,26 @@ pub fn plan_fills(
                         why.push(format!("{hw}x{hh}, target {tw}x{th}: sizes differ"));
                         continue;
                     }
-                    // Ruling 7: the user asked; never silently drop it.
+                    let found = [(h.f.path.clone(), hw, hh), (target.clone(), tw, th)];
                     let j = &mut jobs[ji];
-                    j.status = JobStatus::Error {
-                        codes: vec![crate::codes::Code::PackSizeMismatch],
-                    };
-                    let w = size_mismatch_warning(
-                        &j.output,
-                        &[(h.f.path.clone(), hw, hh), (target.clone(), tw, th)],
-                    );
-                    j.warnings.push(w);
-                    // The error job keeps the helper, so the run ends the helper with this output (never run).
-                    j.fill = Some(fill);
-                    winner.insert(id, h.f.path.clone());
-                    landed = true;
-                    continue;
+                    match common_size(&[hf.size, tf.size]) {
+                        // Note FM30: the smaller of the two is enlarged to the other's size when the load applies
+                        // the fill.
+                        Some(to) => resized = resized_warning(&j.output, &found, to),
+                        None => {
+                            // Ruling 7: the user asked; never silently drop it.
+                            j.status = JobStatus::Error {
+                                codes: vec![crate::codes::Code::PackSizeMismatch],
+                            };
+                            j.warnings.push(size_mismatch_warning(&j.output, &found));
+                            // The error job keeps the helper, so the run ends the helper with this output (never
+                            // run).
+                            j.fill = Some(fill);
+                            winner.insert(id, h.f.path.clone());
+                            landed = true;
+                            continue;
+                        }
+                    }
                 }
                 if !assigned && !tf.empty {
                     why.push(format!("{} already has alpha", name(&target)));
@@ -267,6 +276,7 @@ pub fn plan_fills(
                     set_key: set.key.clone(),
                     target,
                     fill,
+                    resized,
                 });
                 winner.insert(id, h.f.path.clone());
                 landed = true;

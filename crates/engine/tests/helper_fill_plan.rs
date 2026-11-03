@@ -285,10 +285,44 @@ fn suggested_fill_of_other_size_is_skipped() {
     assert!(r.contains("32x32") && r.contains("64x64"), "{r}");
 }
 
+/// Note FM30: an assigned fill of another size and the same aspect ratio lands; the smaller of the two is enlarged
+/// when the fill is applied, and the candidate carries the notice.
 #[test]
-fn assigned_fill_of_other_size_fails_target() {
+fn assigned_fill_of_other_size_lands_with_a_resize_notice() {
+    for size in [32, 128] {
+        let mut f = opacity_pair();
+        set_facts(&mut f, "x_opacity.png", true, size);
+        let p = run(
+            Target::Cs,
+            &["file:**/x_opacity.png.helper.fills=[\"diffuse.a\"]"],
+            &mut f,
+        );
+        assert_eq!(landed(&p), own("x_opacity.png", "x.png", true), "{size}");
+        let w = p.candidates[0].resized.as_ref().expect("a resize notice");
+        assert_eq!(w.code, Code::PackSourceResized);
+        let (small, big) = if size == 32 {
+            ("x_opacity.png 32x32", "64x64")
+        } else {
+            ("x.png 64x64", "128x128")
+        };
+        assert!(
+            w.message.contains(small) && w.message.ends_with(&format!("resized to {big}")),
+            "{}",
+            w.message
+        );
+    }
+}
+
+#[test]
+fn assigned_fill_of_other_aspect_fails_target() {
     let mut f = opacity_pair();
-    set_facts(&mut f, "x_opacity.png", true, 32);
+    f.facts.insert(
+        path("x_opacity.png"),
+        AlphaFacts {
+            empty: true,
+            size: (64, 32),
+        },
+    );
     let p = run(
         Target::Cs,
         &["file:**/x_opacity.png.helper.fills=[\"diffuse.a\"]"],
@@ -305,7 +339,7 @@ fn assigned_fill_of_other_size_fails_target() {
     let w = &x.warnings[0];
     assert_eq!(w.code, Code::PackSizeMismatch);
     assert!(
-        w.message.contains("32x32") && w.message.contains("64x64"),
+        w.message.contains("64x32") && w.message.contains("64x64"),
         "{}",
         w.message
     );

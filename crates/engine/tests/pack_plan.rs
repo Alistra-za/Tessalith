@@ -12,9 +12,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn put(dir: &Path, name: &str, w: u32, f: impl Fn(u32, u32) -> u8) {
+    put_wh(dir, name, w, w, f);
+}
+
+fn put_wh(dir: &Path, name: &str, w: u32, h: u32, f: impl Fn(u32, u32) -> u8) {
     let p = dir.join("in/textures/a").join(name);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(w, w, |x, y| Luma([f(x, y)]))
+    ImageBuffer::from_fn(w, h, |x, y| Luma([f(x, y)]))
         .save(p)
         .unwrap();
 }
@@ -309,14 +313,14 @@ fn prefer_raw_replaces_the_prepacked_file() {
 }
 
 /// DECISIONS Note M9: a recipe that cannot be packed never costs the user the file they had. With
-/// `packing.prefer = raw` and sources of different sizes the pre-packed file stays a job (no `PACK-CONFLICT`
+/// `packing.prefer = raw` and sources of different aspect ratios the pre-packed file stays a job (no `PACK-CONFLICT`
 /// skip) and the recipe fails with `PACK-SIZE-MISMATCH`.
 #[test]
 fn prefer_raw_with_mismatched_sources_keeps_the_prepacked_file() {
     let d = tempfile::tempdir().unwrap();
     prepacked(d.path());
     put(d.path(), "iron_roughness.png", 64, |_, _| 100);
-    put(d.path(), "iron_ao.png", 32, |_, _| 200);
+    put_wh(d.path(), "iron_ao.png", 64, 32, |_, _| 200);
     // The kept pre-packed file must convert, not wait on its `_rmaos` suggestion (never auto-decide).
     let mut req = request(d.path(), Target::Cs, &["packing.prefer=raw"]);
     req.accept = AcceptSuggestions::High;
@@ -361,11 +365,83 @@ fn a_source_that_fails_to_load_fails_its_recipe() {
     assert_eq!(dry_run(p).0.exit_code(), 1);
 }
 
+/// Note FM30: sources of one aspect ratio and two sizes pack at the larger size; the smaller one is named by an Info
+/// notice. The packed job's input is still the first source, and nothing fails.
 #[test]
-fn sources_of_different_sizes_fail_the_recipe() {
+fn pack_sources_of_two_sizes_are_resized() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_ao.png", 1024, |_, _| 200);
+    put(d.path(), "iron_roughness.png", 512, |_, _| 100);
+    let (p, ev) = plan(d.path(), Target::Cs, &[]);
+    assert_eq!(p.jobs.len(), 1, "{:?}", p.jobs);
+    let j = job(&p, "iron_roughness.png");
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    assert_eq!(j.profile.subtype, Subtype::Rmaos);
+    assert!(j.pack.is_some());
+    assert!(!codes(j).contains(&Code::PackSizeMismatch));
+    let w = j
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::PackSourceResized)
+        .unwrap_or_else(|| panic!("{:?}", j.warnings));
+    assert_eq!(w.severity, engine::codes::Severity::Info);
+    assert_eq!(
+        w.message,
+        "iron_rmaos.dds: iron_roughness.png 512x512 resized to 1024x1024"
+    );
+    assert_eq!(w.data["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(w.data["width"], 1024);
+    assert_eq!(recipes(&ev)[0].status, RecipeStatus::Run);
+}
+
+/// A pack whose sources already share a size has no notice.
+#[test]
+fn pack_sources_of_one_size_have_no_resize_notice() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_ao.png", 32, |_, _| 200);
+    put(d.path(), "iron_roughness.png", 32, |_, _| 100);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    assert!(!codes(job(&p, "iron_roughness.png")).contains(&Code::PackSourceResized));
+}
+
+/// Note FM30: only a different aspect ratio still refuses, by exact cross-multiplication.
+#[test]
+fn pack_sources_of_different_aspect_still_refuse() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_ao.png", 1024, |_, _| 200);
+    put_wh(d.path(), "iron_roughness.png", 1024, 512, |_, _| 100);
+    let (p, ev) = plan(d.path(), Target::Cs, &[]);
+    let j = job(&p, "iron_roughness.png");
+    assert_eq!(
+        j.status,
+        JobStatus::Error {
+            codes: vec![Code::PackSizeMismatch]
+        }
+    );
+    assert!(
+        j.warnings[0].message.contains("different aspect ratios"),
+        "{}",
+        j.warnings[0].message
+    );
+    assert_eq!(recipes(&ev)[0].status, RecipeStatus::Failed);
+    // One texel off is a different ratio too: 1000x500 against 513x256.
+    let d = tempfile::tempdir().unwrap();
+    put_wh(d.path(), "iron_ao.png", 1000, 500, |_, _| 200);
+    put_wh(d.path(), "iron_roughness.png", 513, 256, |_, _| 100);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    assert_eq!(
+        job(&p, "iron_roughness.png").status,
+        JobStatus::Error {
+            codes: vec![Code::PackSizeMismatch]
+        }
+    );
+}
+
+#[test]
+fn sources_of_different_aspect_ratios_fail_the_recipe() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "iron_roughness.png", 64, |_, _| 100);
-    put(d.path(), "iron_ao.png", 32, |_, _| 200);
+    put_wh(d.path(), "iron_ao.png", 64, 32, |_, _| 200);
     let (p, ev) = plan(d.path(), Target::Cs, &[]);
     let j = job(&p, "iron_roughness.png");
     assert_eq!(
@@ -379,7 +455,7 @@ fn sources_of_different_sizes_fail_the_recipe() {
     assert_eq!(j.provenance["subtype"], Provenance::Recipe("rmaos".into()));
     let m = &j.warnings[0].message;
     assert!(
-        m.contains("iron_roughness.png 64x64") && m.contains("iron_ao.png 32x32"),
+        m.contains("iron_roughness.png 64x64") && m.contains("iron_ao.png 64x32"),
         "{m}"
     );
     assert_eq!(recipes(&ev)[0].status, RecipeStatus::Failed);

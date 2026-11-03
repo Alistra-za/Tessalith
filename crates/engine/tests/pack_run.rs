@@ -14,9 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn gray(dir: &Path, name: &str, w: u32, f: impl Fn(u32, u32) -> u8) -> PathBuf {
+    gray_wh(dir, name, w, w, f)
+}
+
+fn gray_wh(dir: &Path, name: &str, w: u32, h: u32, f: impl Fn(u32, u32) -> u8) -> PathBuf {
     let p = dir.join("in").join(name);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(w, w, |x, y| Luma([f(x, y)]))
+    ImageBuffer::from_fn(w, h, |x, y| Luma([f(x, y)]))
         .save(&p)
         .unwrap();
     p
@@ -131,6 +135,27 @@ fn converts_from_every_source_and_records_them() {
     );
     assert_eq!(e.sources[1].sha256, sha256_file(&ao).unwrap());
     assert_eq!(e.source_sha256, sha256_file(&rough).unwrap());
+}
+
+/// Note FM30, then Note FM29: the 512x256 map is enlarged to the pack's 1000x500, and the packed image then goes
+/// through `target_dims` like any output, so the file is 1024x512 and holds the enlarged map's linear ramp.
+#[test]
+fn a_1000x500_and_512x256_pack_resizes_then_goes_power_of_two() {
+    let d = tempfile::tempdir().unwrap();
+    let rough = gray_wh(d.path(), "iron_rough.png", 1000, 500, |_, _| 100);
+    let ao = gray_wh(d.path(), "iron_ao.png", 512, 256, |x, _| (x / 2) as u8);
+    let (s, ev) = run(plan(d.path(), &rough, &ao));
+    assert_eq!(s.converted, 1, "{ev:#?}");
+    let f = read_dds(&std::fs::read(d.path().join("out/iron_rmaos.dds")).unwrap()).unwrap();
+    let (w, h, r) = f.levels[0].clone();
+    assert_eq!((w, h), (1024, 512));
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
+        panic!("LDR expected")
+    };
+    // B follows the ramp across the full width (0 at the left, near 255 at the right), not a quarter of it.
+    let row = |x: usize| px[(h as usize / 2) * w as usize + x][2];
+    assert!(row(8) < 12 && row(1015) > 243, "{} {}", row(8), row(1015));
+    assert!((i32::from(row(512)) - 127).abs() < 8, "centre {}", row(512));
 }
 
 /// Spec §6.4 "Provenance": `if-changed` re-encodes when any source changes.

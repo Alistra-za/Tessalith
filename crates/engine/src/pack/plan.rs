@@ -1,7 +1,7 @@
 //! Plan-time wiring of channel packing (spec §6.4, plan M2.5, DECISIONS Note M). `Engine::plan` calls
 //! [`plan_packing`] once every file is resolved (pass 1: recipes, packing settings, conflicts, consumed and unused
 //! raw jobs), then assembles, analyses and resolves each [`Candidate`] with [`finish_recipe`] (pass 2).
-use super::assemble::{check_sizes, sizes, PackError};
+use super::assemble::{check_file_sizes, check_sizes, sizes, PackError};
 use super::{
     file_name as name, recipes_for_sel, recipes_for_with, resolve_channels, ChannelSource, PackJob,
     PackSource, RawInput, RecipeKind, Slot,
@@ -187,6 +187,8 @@ pub struct Candidate {
     /// A `packing.recipe` notice: `PACK-RECIPE-CONFLICT` (the `_rfaos` and `_rmaos` keys disagree) or
     /// `PACK-RECIPE-UNBUILDABLE` (`rfaos` was asked for on a set that cannot build it).
     pub notes: Vec<(Code, String)>,
+    /// `PACK-SOURCE-RESIZED` when a source is smaller than the largest (Note FM30), read from the headers.
+    pub resized: Option<Warning>,
 }
 
 pub struct PackPlan {
@@ -356,7 +358,8 @@ fn prepacked_b<'a>(
     }
 }
 
-/// PACK-SIZE-MISMATCH for `output`, whose sources differ in size (spec §6.4 "Dimensions"; derive TA22).
+/// PACK-SIZE-MISMATCH for `output`, whose sources have different aspect ratios (spec §6.4 "Dimensions"; derive TA22;
+/// Note FM30).
 pub(crate) fn size_mismatch_warning(output: &Path, found: &[(PathBuf, u32, u32)]) -> Warning {
     let data: Vec<_> = found
         .iter()
@@ -365,12 +368,47 @@ pub(crate) fn size_mismatch_warning(output: &Path, found: &[(PathBuf, u32, u32)]
     Warning::new(
         Code::PackSizeMismatch,
         format!(
-            "sources of {} differ in size: {}; no resizing in v1",
+            "sources of {} have different aspect ratios: {}",
             name(output),
             sizes(found)
         ),
     )
     .with_data(json!({ "sources": data }))
+}
+
+/// PACK-SOURCE-RESIZED for `output`: each source of `found` smaller than `to` is enlarged to it (Note FM30). `None`
+/// when every source already has that size.
+pub(crate) fn resized_warning(
+    output: &Path,
+    found: &[(PathBuf, u32, u32)],
+    to: (u32, u32),
+) -> Option<Warning> {
+    let small: Vec<_> = found.iter().filter(|f| (f.1, f.2) != to).cloned().collect();
+    if small.is_empty() {
+        return None;
+    }
+    let data: Vec<_> = small
+        .iter()
+        .map(|(p, w, h)| json!({ "path": slash(p), "width": w, "height": h }))
+        .collect();
+    Some(
+        Warning::new(
+            Code::PackSourceResized,
+            format!(
+                "{}: {} resized to {}x{}",
+                name(output),
+                sizes(&small),
+                to.0,
+                to.1
+            ),
+        )
+        .with_data(json!({
+            "output": slash(output),
+            "width": to.0,
+            "height": to.1,
+            "sources": data,
+        })),
+    )
 }
 
 /// A recipe (packed or derived) that cannot be built: an error job carrying `w`, so `run` fails it. Its sub-type
@@ -629,7 +667,7 @@ pub fn skin_f_candidate(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bo
 /// Pass 1 over every set. `jobs` holds every resolved job of the batch and is changed in place: consumed raw jobs
 /// are removed, unused ones re-tagged `PACK-UNUSED-INPUT` (`IN-PACKING-INPUT` when their recipe is disabled), a
 /// pre-packed job gets `PACK-CONFLICT` or (with `packing.prefer = raw`) moves to `skipped`, and a recipe whose
-/// sources differ in size becomes an error job. `failed` holds the paths that failed planning and `cancelled` those
+/// sources of different aspect ratios becomes an error job. `failed` holds the paths that failed planning and `cancelled` those
 /// whose Load never started because the batch was cancelled: a recipe with a member in either is `Failed` (Note M11).
 /// `packed_outputs` holds explicit GUI output paths of packed outputs by (set key, suffix), M3b. `derive_heights`
 /// holds the raw heights of the landscape sets a Vanilla derive converts (Note CN26, O6): each gets the cs
@@ -771,7 +809,7 @@ pub fn plan_packing(
     }
     // Every recipe's output (explicit or default) before any is planned: an explicit packed path is compared with
     // recipes planned after it too (DECISIONS AF7). A recipe that writes nothing (a failed or cancelled source,
-    // packing off, sources that differ in size) holds no path. The planning loop below walks `heads` in this same
+    // packing off, sources of different aspect ratios) holds no path. The planning loop below walks `heads` in this same
     // order, so a recipe's index here is its `me` there.
     let mut outputs: Vec<(PathBuf, PathBuf, bool)> = vec![];
     for (set, members, _, recipes, _) in &heads {
@@ -894,9 +932,10 @@ pub fn plan_packing(
             }
             // Headers only. Checked before the conflict below so that a recipe which cannot be packed never
             // replaces the pre-packed file the user had (DECISIONS Note M9: never write neither).
-            let mismatch = match check_sizes(&sources) {
-                Err(PackError::SizeMismatch(found)) => Some(found),
-                _ => None,
+            let (mismatch, resized) = match check_file_sizes(&sources) {
+                Err(PackError::SizeMismatch(found)) => (Some(found), None),
+                Ok((to, found)) => (None, resized_warning(&vin.output, &found, to)),
+                Err(_) => (None, None),
             };
             let mut kept = None;
             let pre = prepacked_member(ctx, set, files, jobs, recipe.kind);
@@ -965,9 +1004,11 @@ pub fn plan_packing(
                 report.status = RecipeStatus::Failed;
                 report.reason = Some(match kept {
                     Some(pre) => {
-                        format!("sources differ in size; {pre} is kept (packing.prefer = raw)")
+                        format!(
+                            "sources have different aspect ratios; {pre} is kept (packing.prefer = raw)"
+                        )
                     }
-                    None => "sources differ in size".into(),
+                    None => "sources have different aspect ratios".into(),
                 });
                 reports.push(report);
                 jobs.push(recipe_error_job(
@@ -1007,6 +1048,7 @@ pub fn plan_packing(
                 virtual_input: vin,
                 job,
                 defaulted,
+                resized,
                 notes: recipe_note
                     .iter()
                     .filter(|_| matches!(recipe.kind, RecipeKind::Rfaos | RecipeKind::Rmaos))
@@ -1120,6 +1162,7 @@ pub fn finish_recipe(
         job.warnings
             .push(Warning::new(*code, format!("{out}: {note}")));
     }
+    job.warnings.extend(c.resized.clone());
     for p in non_gray {
         job.warnings.push(Warning::new(
             Code::ChanNotGray,

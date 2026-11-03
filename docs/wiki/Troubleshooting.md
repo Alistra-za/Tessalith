@@ -70,7 +70,7 @@ An `_opacity` file (or a mask you gave the role Opacity) fills the alpha of its 
 | Reason | Why | Fix |
 |---|---|---|
 | `x.png already has alpha` | A suggested helper only fills an empty alpha (none, fully opaque, or flat). Your colour PNG has a real alpha. | Assign the helper: in its panel pick the Opacity role again (it then reads *set by you*) or add the target, or set `helper.role = "opacity"` on the file. An assigned helper replaces the alpha. |
-| `512x512, target 1024x1024: sizes differ` | The helper and the colour texture are not the same size. | Resize one of them. An assigned helper of another size fails the texture with `PACK-SIZE-MISMATCH` instead. |
+| `512x512, target 1024x1024: sizes differ` | The helper and the colour texture are not the same size. | Resize one of them, or assign the helper: an assigned helper of the same aspect ratio is resized to fit. |
 | `no colour texture planned` | The set has no plain colour texture to fill (only a PBR or skin output that is not a target, or none at all), or the file did not join the set. | Check the set in the Sets column; give the file the same base name as the colour texture. |
 | `diffuse.a is filled by <other file>` | Another helper fills that alpha. An assigned one beats a suggested one; otherwise the first by path wins. | Remove the target from the other helper, or assign this one. |
 | `no targets chosen` | Its `helper.fills` is `[]`. | Reset Fills in the panel, or remove the key. |

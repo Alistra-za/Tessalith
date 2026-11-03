@@ -499,7 +499,7 @@ fn an_explicit_packed_path_on_a_raw_inputs_path_is_not_a_duplicate() {
     );
 }
 
-/// Review round 1 M3 (DECISIONS AF7): a recipe that writes nothing (packing off, or failed: sources differ in size)
+/// Review round 1 M3 (DECISIONS AF7): a recipe that writes nothing (packing off, or failed: sources differ in aspect ratio)
 /// does not hold its default path against an explicit packed path.
 #[test]
 fn a_recipe_that_writes_nothing_is_not_a_duplicate_of_an_explicit_path() {
@@ -515,7 +515,7 @@ fn a_recipe_that_writes_nothing_is_not_a_duplicate_of_an_explicit_path() {
                         .unwrap(),
                 ];
         } else {
-            image::ImageBuffer::from_fn(32, 32, |_, _| Luma([200u8]))
+            image::ImageBuffer::from_fn(64, 32, |_, _| Luma([200u8]))
                 .save(r_in.join("stone/stone_ao.png"))
                 .unwrap();
         }

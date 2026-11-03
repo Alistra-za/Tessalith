@@ -375,17 +375,20 @@ fn vanilla_packs_an_env_mask_only_from_metallic_or_specular() {
     assert_eq!(o.summary.exit_code(), 0);
 }
 
-/// Exit: size mismatch → PACK-SIZE-MISMATCH naming both files.
+/// Exit: aspect mismatch → PACK-SIZE-MISMATCH naming both files (Note FM30: a size alone is resized).
 #[test]
-fn sources_of_different_sizes_fail_with_both_named() {
+fn sources_of_different_aspect_fail_with_both_named() {
     let d = tempfile::tempdir().unwrap();
     put_sized(d.path(), "iron_roughness.png", 64, |_, _| 100);
-    put_sized(d.path(), "iron_ao.png", 32, |_, _| 200);
+    let p = d.path().join("in/textures/a/iron_ao.png");
+    ImageBuffer::from_fn(64, 32, |_, _| image::Luma([200u8]))
+        .save(&p)
+        .unwrap();
     let o = convert(d.path(), Target::Cs, &[]);
     let w = warnings_of(&o, "iron_roughness.png");
     let mm = w.iter().find(|w| w.code == Code::PackSizeMismatch).unwrap();
     assert!(
-        mm.message.contains("iron_roughness.png 64x64") && mm.message.contains("iron_ao.png 32x32")
+        mm.message.contains("iron_roughness.png 64x64") && mm.message.contains("iron_ao.png 64x32")
     );
     assert!(!out_path(d.path(), "iron_rmaos.dds").exists());
     assert_eq!((o.summary.failed, o.summary.exit_code()), (1, 1));

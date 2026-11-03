@@ -618,6 +618,21 @@ fn estimated_bytes(path: &Path) -> u64 {
     input_bytes(w, h) + file
 }
 
+/// [`estimated_bytes`] of each of `paths` when all are brought to their common size (Note FM30): a smaller source is
+/// held enlarged, so it counts at the common size. Equal sizes give [`estimated_bytes`] unchanged.
+fn grown_bytes<'a>(paths: impl Iterator<Item = &'a Path>) -> Vec<u64> {
+    let paths: Vec<&Path> = paths.collect();
+    let dims: Vec<_> = paths.iter().filter_map(|p| input_dims(p)).collect();
+    let grown = match crate::pack::common_size(&dims) {
+        Some((w, h)) if dims.len() == paths.len() => input_bytes(w, h),
+        _ => 0,
+    };
+    paths
+        .iter()
+        .map(|p| estimated_bytes(p).max(grown))
+        .collect()
+}
+
 fn is_dds(path: &Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
@@ -642,6 +657,32 @@ fn input_bytes(w: u32, h: u32) -> u64 {
     u64::from(w) * u64::from(h) * 16 * 134 / 100 * 3
 }
 
+/// The size `job` holds its input at: its own, or for a pack, a derive or an alpha fill the common size its sources
+/// are enlarged to (Note FM30).
+fn job_dims(job: &ResolvedJob) -> Option<(u32, u32)> {
+    let own = input_dims(&job.input);
+    let mut paths: Vec<&Path> = vec![];
+    paths.extend(
+        job.pack
+            .iter()
+            .flat_map(|p| &p.sources)
+            .map(|s| s.path.as_path()),
+    );
+    paths.extend(
+        job.derive
+            .iter()
+            .flat_map(|d| &d.sources)
+            .map(|s| s.path.as_path()),
+    );
+    if let Some(f) = &job.fill {
+        paths.extend([job.input.as_path(), f.source.path.as_path()]);
+    }
+    let dims: Vec<_> = paths.iter().filter_map(|p| input_dims(p)).collect();
+    crate::pack::common_size(&dims)
+        .filter(|_| dims.len() == paths.len())
+        .or(own)
+}
+
 /// [`estimated_bytes`] of the job's input, plus what its variance bake holds (DECISIONS R4; the M4 carry "the
 /// summed-area table counts against `--mem-budget`", a length pyramid since R5), plus (S-mips-11) 8 B/texel for a
 /// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus (Note BB) the active
@@ -649,7 +690,8 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 /// chain (both half chains and the stacked chain are live together in `grass::build`).
 fn job_bytes(job: &ResolvedJob) -> u64 {
     let p = &job.profile;
-    let extra = input_dims(&job.input).map_or(0, |(w, h)| {
+    let dims = job_dims(job);
+    let extra = dims.map_or(0, |(w, h)| {
         let texels = u64::from(w) * u64::from(h);
         let filter = if p.mips.filter != MipFilter::Box {
             8
@@ -707,7 +749,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         };
         others + 6 * face * face * 16 * 3 + panorama
     });
-    estimated_bytes(&job.input)
+    estimated_bytes(&job.input).max(dims.map_or(0, |(w, h)| input_bytes(w, h)))
         + extra
         + cube
         // Note DY: `apply_fill` holds the helper's decoded image beside the target's.
@@ -2078,7 +2120,13 @@ impl Engine {
             &budget,
             cancel,
             &packed.candidates,
-            |c| estimated_bytes(&c.job.sources[0].path),
+            |c| {
+                // One decoded source beside the output; a smaller one is held enlarged to the common size.
+                grown_bytes(c.job.sources.iter().map(|s| s.path.as_path()))
+                    .first()
+                    .copied()
+                    .unwrap_or(0)
+            },
             |c| &c.virtual_input.output,
             |c, admitted, stage| {
                 // The key includes every source's stamp, so an edited source misses the cache. A recipe
@@ -2257,6 +2305,7 @@ impl Engine {
                 };
                 drop(admitted);
                 job.source = old.source;
+                job.warnings.extend(c.resized.clone());
                 job.warnings.extend(picks.get(&job.set_key).and_then(|p| {
                     crate::shader::pbr_grass_albedo_note(p, job.profile.subtype, a.corner_err)
                 }));
@@ -2337,7 +2386,11 @@ impl Engine {
                 &budget,
                 cancel,
                 &dp.candidates,
-                |c| c.job.sources.iter().map(|s| estimated_bytes(&s.path)).sum(),
+                |c| {
+                    grown_bytes(c.job.sources.iter().map(|s| s.path.as_path()))
+                        .iter()
+                        .sum()
+                },
                 |c| &c.input.output,
                 |c, admitted, stage| {
                     let (asm, mean_rough) = crate::derive::assemble::assemble_derived_rough(&c.job)
@@ -3762,6 +3815,42 @@ mod tests {
         });
         assert!(estimated_bytes(&helper) > 0);
         assert_eq!(job_bytes(&j), base + estimated_bytes(&helper));
+    }
+
+    /// Note FM30: a smaller target is enlarged to its helper's size, so the job is charged as that larger image; a
+    /// pack's pass-2 estimate counts every source at the common size.
+    #[test]
+    fn an_enlarged_source_is_admitted_at_the_common_size() {
+        let d = tempfile::tempdir().unwrap();
+        let mut small = png_job(d.path(), "x.png", (32, 32), Subtype::Diffuse);
+        let big = png_job(d.path(), "y.png", (64, 64), Subtype::Diffuse);
+        let helper = d.path().join("x_opacity.png");
+        image::GrayImage::new(64, 64).save(&helper).unwrap();
+        small.fill = Some(crate::helper::FillJob {
+            source: crate::pack::PackSource {
+                read: None,
+                path: helper.clone(),
+                role: crate::config::RawMap::Opacity,
+                stamp: None,
+            },
+            read: None,
+            invert: false,
+            assigned: true,
+        });
+        assert_eq!(
+            job_bytes(&small),
+            job_bytes(&big) + estimated_bytes(&helper)
+        );
+        let paths = [small.input.as_path(), big.input.as_path()];
+        assert_eq!(
+            grown_bytes(paths.into_iter()),
+            vec![input_bytes(64, 64); 2],
+            "both sources at the larger size"
+        );
+        assert_eq!(
+            grown_bytes([big.input.as_path()].into_iter()),
+            vec![estimated_bytes(&big.input)]
+        );
     }
 
     /// Note CN13: a derived job adds 16 B/texel per colour map, the scalars and the output (twice for the grass

@@ -171,21 +171,54 @@ fn non_grey_sources_are_named_and_luma_is_honoured() {
     assert!((a.image.at(0, 0)[2] - luma).abs() < 1e-6);
 }
 
+/// Note FM30: sources of one aspect ratio are sized to the largest, whatever their order, and the smaller ones are
+/// enlarged by linear interpolation when assembled.
 #[test]
-fn sources_of_different_sizes_are_refused_with_every_size() {
+fn sources_of_one_aspect_are_enlarged_to_the_largest() {
+    let d = tempfile::tempdir().unwrap();
+    let small = gray8(d.path(), "iron_rough.png", 2, |x, _| x as u8 * 255);
+    let big = gray8(d.path(), "iron_ao.png", 4, |_, _| 51);
+    assert_eq!(check_sizes(&[small.clone(), big.clone()]).unwrap(), (4, 4));
+    assert_eq!(check_sizes(&[big.clone(), small.clone()]).unwrap(), (4, 4));
+    let j = job(
+        RecipeKind::Rmaos,
+        [
+            src(&small, RawMap::Roughness, false),
+            ChannelSource::Default { value: 0.0 },
+            src(&big, RawMap::Ao, false),
+            ChannelSource::Default { value: 1.0 },
+        ],
+        &[(&small, RawMap::Roughness), (&big, RawMap::Ao)],
+    );
+    let a = assemble(&j, GraySource::R).unwrap();
+    assert_eq!((a.image.width, a.image.height), (4, 4));
+    // 0, 1 across two texels becomes 0, 0.25, 0.75, 1 across four; the large source is untouched.
+    for (x, want) in [0.0, 0.25, 0.75, 1.0].into_iter().enumerate() {
+        close(a.image.at(x as u32, 2)[0], want);
+        close(a.image.at(x as u32, 2)[2], 51.0 / 255.0);
+    }
+}
+
+#[test]
+fn sources_of_different_aspect_are_refused_with_every_size() {
     let d = tempfile::tempdir().unwrap();
     let a = gray8(d.path(), "iron_rough.png", 64, |_, _| 10);
-    let b = gray8(d.path(), "iron_ao.png", 32, |_, _| 10);
+    let b = d.path().join("iron_ao.png");
+    ImageBuffer::from_fn(64, 32, |_, _| Luma([10u8]))
+        .save(&b)
+        .unwrap();
     let err = check_sizes(&[a.clone(), b.clone()]).unwrap_err();
     match &err {
         PackError::SizeMismatch(s) => {
-            assert_eq!(s, &vec![(a.clone(), 64, 64), (b.clone(), 32, 32)])
+            assert_eq!(s, &vec![(a.clone(), 64, 64), (b.clone(), 64, 32)])
         }
         e => panic!("{e}"),
     }
     let text = err.to_string();
     assert!(
-        text.contains("iron_rough.png 64x64") && text.contains("iron_ao.png 32x32"),
+        text.contains("different aspect ratios")
+            && text.contains("iron_rough.png 64x64")
+            && text.contains("iron_ao.png 64x32"),
         "{text}"
     );
     assert_eq!(check_sizes(std::slice::from_ref(&a)).unwrap(), (64, 64));

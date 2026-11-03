@@ -130,7 +130,8 @@ Every warning has a code and a severity:
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `PACK-DEFAULTED` | warning | A packed channel has no source and uses the neutral default. | Supply the map, set a fill, or accept. |
-| `PACK-SIZE-MISMATCH` | error | Sources of one recipe differ in size. | Resize the sources. |
+| `PACK-SIZE-MISMATCH` | error | Sources of one recipe, or an assigned helper and its target, have different aspect ratios. | Crop or resize the sources to one aspect ratio. |
+| `PACK-SOURCE-RESIZED` | info | Sources of one aspect ratio and different sizes: each smaller one was enlarged to the largest. | Nothing; supply maps of one size for exact control. |
 | `PACK-CONFLICT` | warning | A pre-packed file and raw maps target one output; the pre-packed file wins by default. | Remove one side, or set `packing.prefer`. |
 | `PACK-UNUSED-INPUT` | warning | A raw map is used by no recipe under the target. | Change the target, set a sub-type, or remove it. |
 | `PACK-RECIPE-CONFLICT` | warning | The `_rfaos` and `_rmaos` keys of one set disagree on `packing.recipe`; the `_rfaos` entry wins. | Keep the recipe on one key. |

@@ -4,18 +4,19 @@
 //! floats, so 16-bit sources keep their precision until Quantise. Sources are decoded **one at a time**: the peak
 //! is the output plus one decoded source, inside the 3x per-file estimate of `api::estimated_bytes`, which reads
 //! the first source (every source has its size).
-use super::{ChannelSource, PackJob, PackSource};
+use super::{common_size, same_aspect, ChannelSource, PackJob, PackSource};
 use crate::analyse::code8;
 use crate::config::GraySource;
 use crate::image::{Rgba32F, SourceInfo};
 use crate::load::{image_size, load_image, LoadError};
+use crate::resize::enlarge;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
     #[error("{0}")]
     Load(#[from] LoadError),
-    #[error("sources differ in size: {}", sizes(.0))]
+    #[error("sources have different aspect ratios: {}", sizes(.0))]
     SizeMismatch(Vec<(PathBuf, u32, u32)>),
 }
 
@@ -45,8 +46,9 @@ pub struct Assembled {
     pub non_gray: Vec<PathBuf>,
 }
 
-/// The width and height every source shares, from the file headers alone (read by content, MAX_DIM-checked, so
-/// the packed canvas is never sized by a file `load_image` would refuse).
+/// The size the packed canvas has, from the file headers alone (read by content, MAX_DIM-checked, so the canvas is
+/// never sized by a file `load_image` would refuse): the largest source, when every source has one aspect ratio
+/// (Note FM30; the smaller ones are enlarged to it), else `SizeMismatch`.
 pub fn check_sizes(sources: &[PathBuf]) -> Result<(u32, u32), PackError> {
     check_sizes_with(sources, |p| Ok(image_size(p)?))
 }
@@ -54,18 +56,60 @@ pub fn check_sizes(sources: &[PathBuf]) -> Result<(u32, u32), PackError> {
 /// [`check_sizes`] with each source's size supplied by `size` (headers for files, the image for memory).
 pub fn check_sizes_with(
     sources: &[PathBuf],
-    mut size: impl FnMut(&Path) -> Result<(u32, u32), PackError>,
+    size: impl FnMut(&Path) -> Result<(u32, u32), PackError>,
 ) -> Result<(u32, u32), PackError> {
+    Ok(check_sizes_found(sources, size)?.0)
+}
+
+/// The common size and every source's own `(path, width, height)`.
+pub(crate) type SizesFound = ((u32, u32), Vec<(PathBuf, u32, u32)>);
+
+/// [`check_sizes_with`] and every source's own size, for the `PACK-SOURCE-RESIZED` notice.
+pub(crate) fn check_sizes_found(
+    sources: &[PathBuf],
+    mut size: impl FnMut(&Path) -> Result<(u32, u32), PackError>,
+) -> Result<SizesFound, PackError> {
     let mut found = vec![];
     for p in sources {
         let (w, h) = size(p)?;
         found.push((p.clone(), w, h));
     }
-    let (w, h) = found.first().map_or((0, 0), |f| (f.1, f.2));
-    if found.iter().any(|f| (f.1, f.2) != (w, h)) {
-        return Err(PackError::SizeMismatch(found));
+    if found.is_empty() {
+        return Ok(((0, 0), found));
     }
-    Ok((w, h))
+    let dims: Vec<_> = found.iter().map(|f| (f.1, f.2)).collect();
+    match common_size(&dims) {
+        Some(c) => Ok((c, found)),
+        None => Err(PackError::SizeMismatch(found)),
+    }
+}
+
+/// [`check_sizes_found`] with sizes read from the file headers.
+pub(crate) fn check_file_sizes(sources: &[PathBuf]) -> Result<SizesFound, PackError> {
+    check_sizes_found(sources, |p| Ok(image_size(p)?))
+}
+
+/// `src` brought to `to` (Note FM30): a smaller source of the same aspect ratio is enlarged by linear interpolation
+/// (`weighted`: colour premultiplied by its alpha). Anything else, such as a file replaced since the headers were
+/// read, is a mismatch against `first`, the source the canvas was sized from.
+pub(crate) fn fit_source(
+    src: Rgba32F,
+    to: (u32, u32),
+    weighted: bool,
+    first: &Path,
+    path: &Path,
+) -> Result<Rgba32F, PackError> {
+    let d = (src.width, src.height);
+    if d == to {
+        return Ok(src);
+    }
+    if d.0 > to.0 || d.1 > to.1 || !same_aspect(d, to) {
+        return Err(PackError::SizeMismatch(vec![
+            (first.to_path_buf(), to.0, to.1),
+            (path.to_path_buf(), d.0, d.1),
+        ]));
+    }
+    Ok(enlarge(&src, to, weighted))
 }
 
 /// The analysis' grey test (`analyse.rs`): the whole R/G/B spread within 4 codes (same `code8` rounding).
@@ -113,10 +157,24 @@ pub fn assemble_channels_with(
     sources: &[PackSource],
     gray: GraySource,
     size: impl FnMut(&Path) -> Result<(u32, u32), PackError>,
-    mut load: impl FnMut(&Path) -> Result<(Rgba32F, SourceInfo), PackError>,
+    load: impl FnMut(&Path) -> Result<(Rgba32F, SourceInfo), PackError>,
 ) -> Result<Assembled, PackError> {
     let paths: Vec<PathBuf> = sources.iter().map(|s| s.path.clone()).collect();
-    let (w, h) = check_sizes_with(&paths, size)?;
+    let dims = check_sizes_with(&paths, size)?;
+    assemble_into(channels, sources, gray, dims, load)
+}
+
+/// [`assemble_channels_with`] on a canvas of `(w, h)`, which no source may exceed: each smaller one is enlarged to
+/// it (Note FM30; derive sizes its scalars to its colour map). Packed channels are data, so the sources are
+/// interpolated without an alpha weight.
+pub(crate) fn assemble_into(
+    channels: &[ChannelSource; 4],
+    sources: &[PackSource],
+    gray: GraySource,
+    (w, h): (u32, u32),
+    mut load: impl FnMut(&Path) -> Result<(Rgba32F, SourceInfo), PackError>,
+) -> Result<Assembled, PackError> {
+    let first = sources.first().map_or(Path::new(""), |s| s.path.as_path());
     let mut image = Rgba32F::new(w, h, [0.0, 0.0, 0.0, 1.0]);
     let mut info = SourceInfo {
         bit_depth: 8,
@@ -151,12 +209,7 @@ pub fn assemble_channels_with(
         let multi = targets.iter().any(|t| t.2.is_some());
         let (src, si) = load(&s.path)?;
         // `check_sizes` read the headers; a file replaced since then is caught here.
-        if (src.width, src.height) != (w, h) {
-            return Err(PackError::SizeMismatch(vec![
-                (paths[0].clone(), w, h),
-                (s.path.clone(), src.width, src.height),
-            ]));
-        }
+        let src = fit_source(src, (w, h), false, first, &s.path)?;
         info.bit_depth = info.bit_depth.max(si.bit_depth);
         info.is_float |= si.is_float;
         let mut all_grey = true;

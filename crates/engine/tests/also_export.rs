@@ -1032,7 +1032,7 @@ fn a_set_the_vanilla_plan_skips_whole_is_noted() {
 
 // ---- Task 9 fix round 1 (I1, M4, N1) ----
 
-/// I1: a size mismatch only the CM `_m` meets (a `_p` of another size) reaches the CM run: one `FileFailed`, a failed
+/// I1: a size mismatch only the CM `_m` meets (a `_p` of another aspect ratio) reaches the CM run: one `FileFailed`, a failed
 /// count and a partial exit.
 #[test]
 fn a_cm_only_size_mismatch_fails_in_the_cm_phase() {
@@ -1041,7 +1041,7 @@ fn a_cm_only_size_mismatch_fails_in_the_cm_phase() {
         png(
             &m.join("textures/pbr/arm/steel_p.png"),
             32,
-            32,
+            16,
             [100, 100, 100, 255],
         );
     });

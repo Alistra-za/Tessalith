@@ -272,3 +272,10 @@ FC¶- **Half size has one meaning.**	FC		back	FM		partial	2026-11-03		goes: the 
 FC¶- **The glossary.**	FC		back	FM		partial	2026-11-03		goes: half size and the Resize wording; stays: the other words
 FM¶- **Half size.** There is no Review question	FM		back	FM		partial	2026-11-03		goes: drop_top_mip stays a texture field; stays: the rest
 S-mips-11	S		back	FM		partial	2026-11-03		goes: 32 B/texel for every resize; stays: the rest (FM29: 64 when an axis grows)
+M9	M		back	FM		partial	2026-11-03		goes: a size difference fails the recipe; stays: the conflict rule, an aspect-ratio mismatch keeps the pre-packed file a job (FM30)
+S-mips-7	S		back	FM		partial	2026-11-03		goes: PACK-SIZE-MISMATCH compares source sizes; stays: the post-resize DIM checks (FM30)
+S¶- **Deferred:**	S		back	FM		partial	2026-11-03		goes: resizing pack sources as deferred; stays: the other deferred items (FM30)
+AF¶- AF7: a recipe that writes nothing	AF		back	FM		partial	2026-11-03		goes: sources that differ in size; stays: the duplicate-check rule (aspect ratios, FM30)
+CN¶Sources of different sizes (TA22) are checked	CN		back	FM		partial	2026-11-03		goes: sources of different sizes fail the set; stays: the plan-time check, the error job, the shared builder (aspect ratios, FM30)
+DY8	DY		back	FM		partial	2026-11-03		goes: an assigned fill of another size is an error; stays: the suggested skip, the error job for another aspect ratio (FM30)
+FM¶- **Names and old files.**	FM		back	FM		partial	2026-11-03		goes: Code::ALL has 92; stays: the removed-code names and the old-file handling (93 after FM30)

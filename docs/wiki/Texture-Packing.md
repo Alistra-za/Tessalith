@@ -61,7 +61,7 @@ packing.fill.specular = 128
 
 or for a whole run with `--set packing.fill.metallic=255`. In the GUI, set it on the packed output's card in the set editor.
 
-If a set has both a ready-made packed file (`iron_rmaos.png`) and raw maps for it, the packed file wins and the raw maps are reported (`PACK-CONFLICT`). Set `packing.prefer = "raw"` to build from the raw maps instead. All sources of one recipe must be the same size (`PACK-SIZE-MISMATCH` otherwise). Set `packing.enabled = false` to leave the raw maps alone (`IN-PACKING-INPUT`).
+If a set has both a ready-made packed file (`iron_rmaos.png`) and raw maps for it, the packed file wins and the raw maps are reported (`PACK-CONFLICT`). Set `packing.prefer = "raw"` to build from the raw maps instead. The sources of one recipe may differ in size if they share an aspect ratio: each smaller one is enlarged to the largest (`PACK-SOURCE-RESIZED` names it), and the packed image is then sized like any output. Sources with different aspect ratios fail the recipe (`PACK-SIZE-MISMATCH`). Set `packing.enabled = false` to leave the raw maps alone (`IN-PACKING-INPUT`).
 
 ## Helper textures
 
@@ -86,7 +86,7 @@ Fuzz weight and subsurface weight have no file-name term: a file is one only whe
 - Two helpers on one channel: an assigned one beats a suggested one; otherwise the first by path wins, and the other reads "`<target>` is filled by `<winner>`".
 - A value fill (`packing.fill.*`) applies only when no helper fills the channel.
 
-**Sizes.** A suggested alpha fill whose helper is not the target's size is skipped ("512x512, target 1024x1024: sizes differ"). An assigned one fails the target with `PACK-SIZE-MISMATCH`, naming both sizes. Packed channels keep their rule: every source of a recipe must be the same size.
+**Sizes.** A suggested alpha fill whose helper is not the target's size is skipped ("512x512, target 1024x1024: sizes differ"). An assigned one of the same aspect ratio is resized like a packed source, so a helper larger than its colour texture makes that texture larger; one with another aspect ratio fails the target with `PACK-SIZE-MISMATCH`, naming both sizes.
 
 **The fill comes first.** The helper's channel is written into the target before the target is analysed, so alpha policy, format choice, alpha-coverage mips and cutout handling all see the filled alpha, exactly as if the source had carried it. A diffuse that would be BC1 can therefore move to an alpha format. Only the alpha comes from the helper; the target keeps its own bit depth.
 

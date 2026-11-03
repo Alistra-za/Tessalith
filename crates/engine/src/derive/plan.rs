@@ -13,8 +13,10 @@ use crate::config::AlphaPolicy;
 use crate::discover::InputFile;
 use crate::group::TextureSet;
 use crate::image::SourceInfo;
-use crate::pack::assemble::{check_sizes, PackError};
-use crate::pack::plan::{recipe_error_job, size_mismatch_warning, virtual_input_as};
+use crate::pack::assemble::{check_file_sizes, PackError};
+use crate::pack::plan::{
+    recipe_error_job, resized_warning, size_mismatch_warning, virtual_input_as,
+};
 use crate::pack::ChannelSource;
 use crate::policy::{
     resolve_decided, FileFacts, JobStatus, ResolveCtx, ResolvedJob, SourceStamp, SubtypeDecision,
@@ -35,6 +37,8 @@ pub struct DeriveCandidate {
     pub job: DeriveJob,
     /// Set-level notes this job carries (it is the set's diffuse, else its first derived job).
     pub notes: Vec<Warning>,
+    /// `PACK-SOURCE-RESIZED` when a source is smaller than the largest (Note FM30).
+    pub resized: Option<Warning>,
     /// `Some(env_map)`: this job carries `DERIVE-NIF-SUGGEST`, its glossiness from the mean roughness.
     pub nif: Option<bool>,
 }
@@ -393,11 +397,17 @@ pub fn plan_derived(
             input.path = job.sources[0].path.clone();
             let st = kind.subtype(job.landscape);
             let paths: Vec<PathBuf> = job.sources.iter().map(|s| s.path.clone()).collect();
-            // P6 (TA22): sources of different sizes fail at plan time, as a packing recipe does.
-            if let Err(PackError::SizeMismatch(found)) = check_sizes(&paths) {
-                let w = size_mismatch_warning(&input.output, &found);
-                jobs.push(recipe_error_job(ctx, &input, &key, st, kind.id(), w));
-                continue;
+            // P6 (TA22): sources of different aspect ratios fail at plan time, as a packing recipe does; smaller
+            // ones of the same ratio are enlarged to the largest (Note FM30).
+            let mut resized = None;
+            match check_file_sizes(&paths) {
+                Err(PackError::SizeMismatch(found)) => {
+                    let w = size_mismatch_warning(&input.output, &found);
+                    jobs.push(recipe_error_job(ctx, &input, &key, st, kind.id(), w));
+                    continue;
+                }
+                Ok((to, found)) => resized = resized_warning(&input.output, &found, to),
+                Err(_) => {}
             }
             if let Some(other) = taken.get(&fold(&input.output)) {
                 let w = Warning::new(
@@ -426,6 +436,7 @@ pub fn plan_derived(
                 input,
                 job,
                 notes: vec![],
+                resized,
                 nif: None,
             });
         }
@@ -579,6 +590,7 @@ pub fn finish_derived(
             .insert("alpha.policy".into(), Provenance::Recipe(kind.id().into()));
     }
     job.warnings.extend(c.notes.iter().cloned());
+    job.warnings.extend(c.resized.clone());
     if let Some(env_map) = c.nif {
         let glossiness = nif_glossiness(mean_rough);
         job.warnings.push(

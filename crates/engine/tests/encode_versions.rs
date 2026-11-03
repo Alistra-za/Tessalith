@@ -277,7 +277,7 @@ fn rnm_fixture(dir: &Path) {
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
 /// opaque BC1, a BC1 1-bit alpha cutout, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a
-/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, plus BC4 and BC5. Returns the
+/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, a two-size `_rmaos` pack, plus BC4 and BC5. Returns the
 /// `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
@@ -384,6 +384,15 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         &["subtype=diffuse", "format=bc1", "mips.filter=box"],
     );
     add("height_half", rgb(512), &["subtype=height", "resize=half"]);
+    // Note FM30: a pack of two sizes. The 32x32 AO is enlarged to the roughness map's 64x64 (the `_rmaos` is BC7).
+    let ramp = |w: u32| {
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(w, w, |x, y| {
+            let v = ((x + y) * 255 / (2 * (w - 1))) as u8;
+            Rgb([v, v, v])
+        }))
+    };
+    add("twosize_roughness", ramp(64), &[]);
+    add("twosize_ao", ramp(32), &[]);
     sets
 }
 
@@ -575,6 +584,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     };
     assert_eq!(dims("npot_1000_bc1"), (Some(1024), Some(1024)));
     assert_eq!(dims("height_half"), (Some(256), Some(256)));
+    assert_eq!(dims("twosize_rmaos"), (Some(64), Some(64)));
     t200_pins_the_cutoff(c.path());
     // The tent pin only means something if the weighted tent changes bytes against the box cutout.
     let sha =
@@ -604,6 +614,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "wide_bc3",
         "npot_1000_bc1",
         "height_half",
+        "twosize_rmaos",
     ] {
         assert!(covered(name), "identity pins miss the {name} fixture");
     }

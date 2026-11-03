@@ -18,7 +18,8 @@
 //! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
 //! and the three `GEN-*` codes of generated maps: GEN-REPLACED, GEN-STALE (GUI only) and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
-//! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM).
+//! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM)
+//! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +117,9 @@ codes! {
     InAliasStale = "IN-ALIAS-STALE" => Info,
     OutUnknownExisting = "OUT-UNKNOWN-EXISTING" => Warning,
     PackDefaulted = "PACK-DEFAULTED" => Warning,
+    // Note FM30: sources of one aspect ratio but different sizes; the smaller ones are enlarged to the largest.
+    PackSourceResized = "PACK-SOURCE-RESIZED" => Info,
+    // Sources of different aspect ratios (Note FM30).
     PackSizeMismatch = "PACK-SIZE-MISMATCH" => Error,
     PackConflict = "PACK-CONFLICT" => Warning,
     PackUnusedInput = "PACK-UNUSED-INPUT" => Warning,
@@ -248,7 +252,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 92);
+        assert_eq!(Code::ALL.len(), 93);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

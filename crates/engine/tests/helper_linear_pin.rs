@@ -124,14 +124,13 @@ fn fx() -> Fx {
     let facts = files
         .iter()
         .map(|f| {
-            let s = if f.path == path("x_n.png") { 128 } else { 64 };
-            (
-                f.path.clone(),
-                AlphaFacts {
-                    empty: true,
-                    size: (s, s),
-                },
-            )
+            // Another aspect ratio (Note FM30: another size alone is resized).
+            let size = if f.path == path("x_n.png") {
+                (128, 64)
+            } else {
+                (64, 64)
+            };
+            (f.path.clone(), AlphaFacts { empty: true, size })
         })
         .collect();
     Fx {
@@ -198,6 +197,7 @@ fn fills_and_reports_pin_first_match_order() {
                     invert: false,
                     assigned: false,
                 },
+                resized: None,
             }],
             used: [sp(1), sp(2)].into_iter().collect(),
             not_used: BTreeMap::new(),

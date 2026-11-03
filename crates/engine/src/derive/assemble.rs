@@ -5,12 +5,14 @@ use super::recipe::{self, DiffuseFlavour};
 use super::{DeriveJob, DeriveKind};
 use crate::image::{Rgba32F, SourceInfo};
 use crate::load::{load_image, LoadError};
-use crate::pack::assemble::{assemble_channels, check_sizes, constant, Assembled, PackError};
+use crate::pack::assemble::{
+    assemble_into, check_sizes, constant, fit_source, Assembled, PackError,
+};
 use crate::pack::{ChannelSource, PackSource};
 use std::path::PathBuf;
 
 /// The image whose R, G, B, A are `channels`, read from the files they name; a `w`×`h` image of constants when they
-/// name none (`assemble_channels` sizes its canvas from its sources).
+/// name none; the files they name are enlarged to `w`×`h` (Note FM30).
 fn channels_image(
     channels: [ChannelSource; 4],
     gray: crate::config::GraySource,
@@ -45,10 +47,11 @@ fn channels_image(
             non_gray: vec![],
         });
     }
-    assemble_channels(&channels, &sources, gray)
+    assemble_into(&channels, &sources, gray, (w, h), |p| Ok(load_image(p)?))
 }
 
-/// Builds the image of `job`. Every source shares one size (`PackError::SizeMismatch`, as packing; TA22).
+/// Builds the image of `job`. Every source has one aspect ratio (`PackError::SizeMismatch`, as packing; TA22) and
+/// the smaller ones are enlarged to the largest (Note FM30).
 pub fn assemble_derived(job: &DeriveJob) -> Result<Assembled, PackError> {
     assemble_derived_rough(job).map(|(a, _)| a)
 }
@@ -70,14 +73,9 @@ pub fn assemble_derived_rough(job: &DeriveJob) -> Result<(Assembled, f64), PackE
             msg: format!("a {} job has no {what}", job.kind.id()),
         })?;
         let (img, info) = load_image(p)?;
-        // `check_sizes` read the headers; a file replaced since then is caught here.
-        if (img.width, img.height) != (w, h) {
-            return Err(PackError::SizeMismatch(vec![
-                (first.clone(), w, h),
-                (p.clone(), img.width, img.height),
-            ]));
-        }
-        Ok((img, info))
+        // `check_sizes` read the headers; a file replaced since then is caught here. The albedo's alpha is the
+        // output's, so its colour is interpolated weighted by it.
+        Ok::<_, PackError>((fit_source(img, (w, h), true, &first, p)?, info))
     };
     let k = job.kind;
     let albedo = matches!(k, VanillaDiffuse | CmDiffuse | GrassStack)
