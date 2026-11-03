@@ -390,6 +390,9 @@ const FIT_MAX_EXTRA: f32 = 16.0;
 /// with the default style, more with some content), so a saved size would grow at every start. This is the drawn
 /// rect less that excess, which is what `default_rect` takes back: save and restore are the identity. None until the
 /// size has settled.
+// shortcut: the excess is measured once per session from the content on show then, and it depends on that content
+// (a selected item adds a few points); a window whose content later changes saves off by the difference. An excess
+// over `FIT_MAX_EXTRA` is taken as a clamp and ignored. Upgrade when egui's Window sizing stops adding to `default_rect`.
 pub fn settings_window_saved_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     let id = settings_window_id();
     let r = ctx.memory(|m| m.area_rect(id))?;

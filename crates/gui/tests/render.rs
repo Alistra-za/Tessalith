@@ -425,6 +425,19 @@ fn exposure_scales_hdr_values_before_the_tone_map() {
     near(draw(rs, &r, Slot::Source, hdr(1.0, 2.0))[MIDDLE], one);
     // And it is brighter than 0.5 at EV 0.
     assert!(draw(rs, &r, Slot::Source, hdr(1.0, 1.0))[MIDDLE][0] < one[0] - 10);
+    // Fix round 1: a negative value stays black (unclamped, -2 / (1 - 2) would draw as +2).
+    let neg = SourcePreview {
+        first_level: 0,
+        dims: vec![(1, 1)],
+        levels: vec![level(1, 1, -2.0)],
+    };
+    assert!(r.set_source(rs, &neg));
+    for exposure in [1.0, 0.25] {
+        near(
+            draw(rs, &r, Slot::Source, hdr(0.0, exposure))[MIDDLE],
+            [0, 0, 0, 255],
+        );
+    }
 }
 
 /// Item 1: the lens draws only the circle inscribed in its rect.

@@ -248,15 +248,19 @@ impl AppModel {
             Some(0) => self.visible_keys().pop(),
             Some(i) => Some(helpers[i - 1].clone()),
             None => {
-                let (order, step) = (self.visible_keys(), self.nav.cols);
-                let past_grid = self
-                    .grid_from(&order)
-                    .is_some_and(|i| i + step >= order.len());
-                if down && past_grid {
-                    helpers.first().cloned()
-                } else {
-                    let step = self.grid_row_step();
-                    return self.grid_move(if down { step } else { -step }, false);
+                // Only a tile in the last grid row (a partial one included) goes on to the helper rows; one above a
+                // gap in a partial last row stays put, as `grid_move` leaves it.
+                let (order, cols) = (self.visible_keys(), self.nav.cols);
+                let in_last_row = cols > 0
+                    && self
+                        .grid_from(&order)
+                        .is_some_and(|i| i / cols == (order.len() - 1) / cols);
+                match helpers.first() {
+                    Some(first) if down && in_last_row => Some(first.clone()),
+                    _ => {
+                        let step = self.grid_row_step();
+                        return self.grid_move(if down { step } else { -step }, false);
+                    }
                 }
             }
         };

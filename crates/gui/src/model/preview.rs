@@ -343,15 +343,10 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
     Ok(PreviewOut { decoded, result })
 }
 
-/// Whether a DDS stores float values that can pass 1: BC6H and the two float layouts.
+/// Whether a DDS stores float values that can pass 1: `Format::is_hdr` (BC6H UF16, RGBA16F) and RGBA32F, which has no
+/// `Format`. Signed BC6H is refused before this is asked.
 pub fn is_hdr_dds(f: DdsPixelFormat) -> bool {
-    matches!(
-        f,
-        DdsPixelFormat::Bc6hUf16
-            | DdsPixelFormat::Bc6hSf16
-            | DdsPixelFormat::Rgba16f
-            | DdsPixelFormat::Rgba32f
-    )
+    f == DdsPixelFormat::Rgba32f || f.as_format().is_some_and(|(fmt, _)| fmt.is_hdr())
 }
 
 /// A skipped DDS input's tile image (Note FI1): its largest mip of at most `THUMB_MAX`, else its smallest mip

@@ -442,6 +442,81 @@ fn helper_rows_move_with_arrow_keys() {
     );
 }
 
+fn active_of(m: &AppModel) -> Option<String> {
+    match &m.selection {
+        sdc_gui::model::Selection::Item(k) => Some(k.clone()),
+        _ => None,
+    }
+}
+
+fn tile_keys(m: &AppModel) -> Vec<String> {
+    m.visible_items()
+        .iter()
+        .map(|&i| m.items[i].key.clone())
+        .collect()
+}
+
+/// Review fix (Note FM31): a tile above a gap in a partial last grid row does not jump to the helper rows; only the
+/// last grid row (the partial one included) goes on to them.
+#[test]
+fn down_enters_the_helper_rows_only_from_the_last_grid_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = XSET.to_vec();
+    files.extend(["a.png", "b.png", "c.png", "d.png", "e.png"]);
+    let mut m = fixture(d.path(), &files, "");
+    let (tiles, rows) = (tile_keys(&m), helper_keys(&m));
+    assert_eq!(tiles.len(), 7, "{tiles:?}");
+    assert!(!rows.is_empty(), "{rows:?}");
+    m.nav.cols = 4; // rows: 0..=3 and 4..=6, the last one partial
+    let down_from = |m: &mut AppModel, from: &str| {
+        m.click_item(from, false, false);
+        m.row_move(true);
+        active_of(m).unwrap()
+    };
+    assert_eq!(
+        down_from(&mut m, &tiles[1]),
+        tiles[5],
+        "an ordinary row down"
+    );
+    assert_eq!(
+        down_from(&mut m, &tiles[3]),
+        tiles[3],
+        "above the gap: stays"
+    );
+    assert_eq!(down_from(&mut m, &tiles[5]), rows[0], "last row, middle");
+    assert_eq!(down_from(&mut m, &tiles[6]), rows[0], "last row, end");
+}
+
+/// Review fix (Note FM31): with no helper rows Down and Up are the grid row moves, as before.
+#[test]
+fn down_without_helper_rows_is_the_plain_grid_row_move() {
+    let d = tempfile::tempdir().unwrap();
+    let files = [
+        "a.png", "b.png", "c.png", "d.png", "e.png", "f.png", "g.png",
+    ];
+    let mut m = fixture(d.path(), &files, "");
+    let tiles = tile_keys(&m);
+    assert_eq!(tiles.len(), 7, "{tiles:?}");
+    assert!(helper_keys(&m).is_empty());
+    m.nav.cols = 3; // rows: 0..=2, 3..=5 and 6
+    for (from, down, want) in [
+        (0, true, 3),
+        (3, true, 6),
+        (4, true, 4), // 4 + 3 is past the end: stays
+        (6, true, 6),
+        (6, false, 3),
+        (1, false, 1),
+    ] {
+        m.click_item(&tiles[from], false, false);
+        m.row_move(down);
+        assert_eq!(
+            active_of(&m).as_ref(),
+            Some(&tiles[want]),
+            "from {from} down={down}"
+        );
+    }
+}
+
 /// Note FM31: the row the keys move to is scrolled into view.
 #[test]
 fn the_helper_row_the_keys_reach_stays_in_view() {

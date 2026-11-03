@@ -348,6 +348,54 @@ fn hdr_preview_tone_maps_values_above_one() {
     assert_eq!(t.rgba[..4], [200, 20, 30, 40], "a BGRA8 tile is as stored");
 }
 
+/// Fix round 1: a 4x4 BC6H UF16 DDS (one mip, one mode-3 block: 10-bit endpoints, every texel `v10` in all three
+/// channels). Whatever float that decodes to is above 1, which the test checks.
+fn bc6h_dds(path: &std::path::Path, v10: u128) {
+    let block: u128 = 3 | (v10 << 5) | (v10 << 15) | (v10 << 25);
+    let mut hd = [0u32; 31];
+    hd[0] = 124;
+    hd[1] = 0x1 | 0x2 | 0x4 | 0x1000 | 0x8_0000;
+    hd[2] = 4;
+    hd[3] = 4;
+    hd[4] = 16;
+    hd[5] = 1;
+    hd[6] = 1;
+    hd[18] = 32;
+    hd[19] = 0x4;
+    hd[20] = u32::from_le_bytes(*b"DX10");
+    hd[26] = 0x1000;
+    let mut b = b"DDS ".to_vec();
+    for v in hd {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    for v in [95u32, 3, 0, 1, 0] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&block.to_le_bytes());
+    std::fs::write(path, b).unwrap();
+}
+
+/// Fix round 1: a BC6H tile is tone-mapped too (the decode's float is above 1, so a clamp would give 255).
+#[test]
+fn a_bc6h_tile_is_tone_mapped() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("bc6h.dds");
+    bc6h_dds(&p, 548);
+    let out = dds_preview(&p, 64).unwrap();
+    assert!(out.result.format.is_hdr());
+    let x = out.decoded[0][0][0];
+    assert!(x > 1.5 && x.is_finite(), "decoded {x}");
+    let m = x / (1.0 + x);
+    let want = 255.0 * (1.055 * m.powf(1.0 / 2.4) - 0.055);
+    let tile = dds_thumbnail(&p).unwrap();
+    assert!(tile.rgba[0] < 255, "not clamped: {:?}", &tile.rgba[..4]);
+    assert!(
+        (f32::from(tile.rgba[0]) - want).abs() <= 1.0,
+        "{:?} vs {want}",
+        &tile.rgba[..4]
+    );
+}
+
 /// Trace #32: Encode now during an export says it waits, so it encodes once the export is done (Live encode off).
 #[test]
 fn encode_now_during_an_export_runs_when_the_export_ends() {
