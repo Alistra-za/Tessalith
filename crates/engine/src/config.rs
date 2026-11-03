@@ -72,7 +72,7 @@ impl GraySource {
             GraySource::G => q[1],
             GraySource::B => q[2],
             GraySource::A => q[3],
-            GraySource::Luma => crate::pack::assemble::luma(q),
+            GraySource::Luma => crate::image::luma(q),
         }
     }
     /// The channel as provenance and warnings name it: `R`, `G`, `B`, `A` or `luma`.

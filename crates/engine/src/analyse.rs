@@ -153,6 +153,15 @@ pub fn code8(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+/// The widest spread, in 8-bit codes, that still counts as one value: R, G and B within it are grey
+/// ([`Analysis::grayscale`]), and a channel whose range is within it is flat ([`is_flat`], Note FM36).
+pub const FLAT_CODES: i32 = 4;
+
+/// Whether a channel that stores `min..=max` holds one value, to [`FLAT_CODES`].
+pub fn is_flat(min: f32, max: f32) -> bool {
+    i32::from(code8(max)) - i32::from(code8(min)) <= FLAT_CODES
+}
+
 /// Compute the §5.1 statistics for `img`. `info` says whether the source file
 /// actually carried an alpha channel (the float image always has four).
 pub fn analyse(img: &Rgba32F, info: &SourceInfo) -> Analysis {
@@ -200,7 +209,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
             i32::from(code8(p[1])),
             i32::from(code8(p[2])),
         );
-        gray &= r.max(g).max(b) - r.min(g).min(b) <= 4;
+        gray &= r.max(g).max(b) - r.min(g).min(b) <= FLAT_CODES;
         if let Some(h) = &mut codes {
             CheckStats::hist_add(h, [r as u8, g as u8, b as u8, a]);
         }

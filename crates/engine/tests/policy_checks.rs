@@ -2800,14 +2800,28 @@ fn chan_not_gray_names_the_pick_and_suggests_a_channel() {
     // B is flat too, and the first varying channel is still G.
     let m = text(Some("b"));
     assert!(
-        m.contains("keeping B") && m.contains("B is flat and G varies"),
+        m.contains("B is flat; keeping it") && m.contains("G varies"),
         "{m}"
     );
-    // G varies: the pick is named and nothing is suggested.
-    let m = text(Some("g"));
-    assert!(m.contains("keeping G") && !m.contains("flat"), "{m}");
+    assert!(m.contains(r#"channels.grayscale_source = "g""#), "{m}");
     let m = text(Some("luma"));
     assert!(m.contains("keeping luma") && !m.contains("flat"), "{m}");
+}
+
+/// An explicit G, B or A pick whose channel varies is the user's data, so no `CHAN-NOT-GRAY` (Note FM36).
+#[test]
+fn an_explicit_pick_on_a_varying_channel_is_not_warned() {
+    for pick in ["g", "a"] {
+        let j = height_with(Some(pick), green_data(), &RGBA8);
+        assert!(
+            !codes(&j).contains(&Code::ChanNotGray),
+            "{pick}: {:?}",
+            j.warnings
+        );
+    }
+    // The default R on a colour image still warns.
+    let j = height_with(None, green_data(), &RGBA8);
+    assert!(codes(&j).contains(&Code::ChanNotGray), "{:?}", j.warnings);
 }
 
 #[test]

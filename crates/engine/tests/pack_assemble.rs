@@ -213,12 +213,17 @@ fn a_pick_reads_g_b_or_alpha_and_the_check_measures_that_channel() {
             close(a.image.at(x as u32, 0)[0], w);
         }
     }
-    // The check follows the pick: R, G and B ask for grey, so this colour source is named; A asks for alpha, which
-    // it has.
-    assert_eq!(read(GraySource::G, &p).non_gray, std::slice::from_ref(&p));
+    // The check follows the pick: R assumes grey, so this colour source is named; G and A vary here, so they are
+    // the user's data; B is one value, so it is named.
+    assert_eq!(read(GraySource::R, &p).non_gray, std::slice::from_ref(&p));
+    assert!(read(GraySource::G, &p).non_gray.is_empty());
     assert!(read(GraySource::A, &p).non_gray.is_empty());
-    // A grey source with no alpha channel: fine for G, named for A (it reads 255).
-    assert!(read(GraySource::G, &rgb).non_gray.is_empty());
+    assert_eq!(read(GraySource::B, &p).non_gray, std::slice::from_ref(&p));
+    // A grey source with no alpha channel: flat for G and A alike, so both are named (A reads 255).
+    assert_eq!(
+        read(GraySource::G, &rgb).non_gray,
+        std::slice::from_ref(&rgb)
+    );
     let a = read(GraySource::A, &rgb);
     assert_eq!(a.non_gray, std::slice::from_ref(&rgb));
     close(a.image.at(1, 1)[0], 1.0);

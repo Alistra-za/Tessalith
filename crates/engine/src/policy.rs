@@ -1599,30 +1599,41 @@ fn cube_checks(p: &Profile, add: &mut impl FnMut(Code, String)) {
 }
 
 /// `CHAN-NOT-GRAY`'s text for a grayscale map that reads `pick` (Note FM36), or `None` when the pick fits the
-/// source: an A pick needs an alpha channel (else it reads 255); any other pick assumes R = G = B. When a single
-/// channel is picked and is flat while another varies, the first varying one in R, G, B, A order is suggested.
+/// source. R and luma assume R = G = B, as before. A G, B or A pick is never the default, so it is the user's: it is
+/// named only when that channel is flat (an A pick on a source with no alpha channel reads 255). When the picked
+/// R, G, B or A is flat and another channel varies, the first varying one in R, G, B, A order is suggested.
 fn gray_pick_problem(pick: GraySource, a: &Analysis, has_alpha: bool) -> Option<String> {
-    if pick == GraySource::A {
-        return (!has_alpha).then(|| "no alpha channel; keeping A, which reads as 255".into());
-    }
-    if a.grayscale {
-        return None;
-    }
-    let mut why = format!("R/G/B differ by more than 4/255; keeping {}", pick.label());
-    let flat = |c: usize| a.channels[c].max - a.channels[c].min <= 4.0 / 255.0;
+    let flat = |c: usize| crate::analyse::is_flat(a.channels[c].min, a.channels[c].max);
     let picked = match pick {
         GraySource::R => Some(0),
         GraySource::G => Some(1),
         GraySource::B => Some(2),
-        GraySource::A | GraySource::Luma => None,
+        GraySource::A => Some(3),
+        GraySource::Luma => None,
+    };
+    let mut why = match pick {
+        GraySource::A if !has_alpha => {
+            return Some("no alpha channel; keeping A, which reads as 255".into())
+        }
+        GraySource::R | GraySource::Luma if !a.grayscale => {
+            format!("R/G/B differ by more than 4/255; keeping {}", pick.label())
+        }
+        GraySource::G | GraySource::B | GraySource::A if picked.is_some_and(flat) => {
+            format!("{} is flat; keeping it", pick.label())
+        }
+        _ => return None,
     };
     if let Some(p) = picked.filter(|&p| flat(p)) {
         let by_channel = [GraySource::R, GraySource::G, GraySource::B, GraySource::A];
         if let Some(s) = (0..4).find(|&c| c != p && !flat(c)).map(|c| by_channel[c]) {
+            // The R form already says R/G/B differ; the others already say the pick is flat.
+            let lead = if pick == GraySource::R {
+                format!("; R is flat and {} varies", s.label())
+            } else {
+                format!("; {} varies", s.label())
+            };
             why += &format!(
-                "; {} is flat and {} varies (channels.grayscale_source = \"{}\")",
-                pick.label(),
-                s.label(),
+                "{lead} (channels.grayscale_source = \"{}\")",
                 s.label().to_lowercase()
             );
         }

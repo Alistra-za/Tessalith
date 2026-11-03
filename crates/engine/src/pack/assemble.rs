@@ -5,9 +5,9 @@
 //! is the output plus one decoded source, inside the 3x per-file estimate of `api::estimated_bytes`, which reads
 //! the first source (every source has its size).
 use super::{common_size, same_aspect, ChannelSource, PackJob, PackSource};
-use crate::analyse::code8;
+use crate::analyse::{code8, is_flat, FLAT_CODES};
 use crate::config::GraySource;
-use crate::image::{Rgba32F, SourceInfo};
+use crate::image::{luma, Rgba32F, SourceInfo};
 use crate::load::{image_size, load_image, LoadError};
 use crate::resize::enlarge;
 use std::path::{Path, PathBuf};
@@ -31,11 +31,6 @@ pub(crate) fn sizes(s: &[(PathBuf, u32, u32)]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// Rec. 709 luma of a texel ([`super::LUMA_CHANNEL`]); shared with `helper::apply_fill`.
-pub(crate) fn luma(q: &[f32; 4]) -> f32 {
-    0.2126 * q[0] + 0.7152 * q[1] + 0.0722 * q[2]
 }
 
 pub struct Assembled {
@@ -125,7 +120,7 @@ pub(crate) fn fit_source(
 fn grey(q: &[f32; 4]) -> bool {
     let c = |v: f32| i32::from(code8(v));
     let (r, g, b) = (c(q[0]), c(q[1]), c(q[2]));
-    r.max(g).max(b) - r.min(g).min(b) <= 4
+    r.max(g).max(b) - r.min(g).min(b) <= FLAT_CODES
 }
 
 /// The value a channel holds on every texel; `None` for a channel read from a source or mirrored.
@@ -227,10 +222,13 @@ pub(crate) fn assemble_into(
         info.bit_depth = info.bit_depth.max(si.bit_depth);
         info.is_float |= si.is_float;
         let mut all_grey = true;
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
         for (o, q) in image.px.iter_mut().zip(&src.px) {
             all_grey &= grey(q);
             let luma = luma(q);
             let v = gray.read(q);
+            lo = lo.min(v);
+            hi = hi.max(v);
             for &(c, invert, channel) in &targets {
                 let v = match channel {
                     None => v,
@@ -240,12 +238,12 @@ pub(crate) fn assemble_into(
                 o[c] = if invert { 1.0 - v } else { v };
             }
         }
-        // What the check measures is the channel packed: an alpha pick needs an alpha channel (a source without one
-        // reads 255), any other pick needs the grey R = G = B it assumes (Note FM36).
-        let fine = if gray == GraySource::A {
-            si.has_alpha
-        } else {
-            all_grey
+        // What the check measures is the channel packed (Note FM36). R and luma assume a grey source. A G, B or A
+        // pick is never the default, so it is the user's: it is named only when that channel holds one value (an A
+        // pick on a source with no alpha reads 255 everywhere, so it is flat too).
+        let fine = match gray {
+            GraySource::R | GraySource::Luma => all_grey,
+            GraySource::G | GraySource::B | GraySource::A => !is_flat(lo, hi),
         };
         if !fine && !multi {
             non_gray.push(s.path.clone());

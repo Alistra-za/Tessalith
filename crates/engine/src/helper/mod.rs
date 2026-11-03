@@ -318,7 +318,7 @@ pub fn apply_fill(
     let k = f.read.unwrap_or(HelperRead::R).channel();
     for (o, q) in img.px.iter_mut().zip(&src.px) {
         let v = match k {
-            crate::pack::LUMA_CHANNEL => crate::pack::assemble::luma(q),
+            crate::pack::LUMA_CHANNEL => crate::image::luma(q),
             k => q[usize::from(k)],
         };
         o[3] = (if f.invert { 1.0 - v } else { v }).clamp(0.0, 1.0);

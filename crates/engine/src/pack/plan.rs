@@ -1165,13 +1165,21 @@ pub fn finish_recipe(
     job.warnings.extend(c.resized.clone());
     for p in non_gray {
         let pick = c.job.gray;
-        let why = if pick == GraySource::A {
-            "no alpha channel; packing its A as 255".to_string()
-        } else {
-            format!(
+        let why = match pick {
+            GraySource::R | GraySource::Luma => format!(
                 "R/G/B differ by more than 4/255; packing its {}",
                 pick.label()
-            )
+            ),
+            // An A pick on a file with no alpha channel lands here too: it reads 255 everywhere.
+            _ => format!(
+                "its {} holds one value everywhere{}; packing it as it is",
+                pick.label(),
+                if pick == GraySource::A {
+                    " (or the file has no alpha channel)"
+                } else {
+                    ""
+                }
+            ),
         };
         job.warnings.push(Warning::new(
             Code::ChanNotGray,

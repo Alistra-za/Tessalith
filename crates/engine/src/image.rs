@@ -33,6 +33,11 @@ pub struct SourceInfo {
     pub is_float: bool,
 }
 
+/// Rec. 709 luma of a texel (a packed channel's `LUMA_CHANNEL`, `helper.read = luma`, `channels.grayscale_source`).
+pub fn luma(q: &[f32; 4]) -> f32 {
+    0.2126 * q[0] + 0.7152 * q[1] + 0.0722 * q[2]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

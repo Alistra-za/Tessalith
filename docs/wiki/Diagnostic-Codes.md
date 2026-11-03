@@ -39,7 +39,7 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CHAN-NOT-GRAY` | warning | A grayscale sub-type's or raw map's R, G and B differ by more than 4/255; only the channel `channels.grayscale_source` picks is kept. The message names the pick, and when that R, G or B is flat while another channel varies, suggests the first varying one. With `a` picked, it fires for a source that has no alpha channel (read as 255). | Pick the channel or the sub-type. |
+| `CHAN-NOT-GRAY` | warning | A grayscale sub-type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it is reported only when that channel holds one value (an `a` pick on a source with no alpha channel reads 255). The message names the pick, and when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the sub-type. |
 | `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | Use **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. |
 
 ### Format and tag

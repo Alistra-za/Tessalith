@@ -28,6 +28,17 @@ fn gray_wh(dir: &Path, name: &str, w: u32, h: u32, f: impl Fn(u32, u32) -> u8) -
 
 /// One `_rmaos` job packed from `rough` (R) and `ao` (B), as `Engine::plan` builds it (stamps taken now).
 fn plan(dir: &Path, rough: &Path, ao: &Path) -> Plan {
+    plan_with(dir, rough, ao, GraySource::R, None)
+}
+
+/// [`plan`] with the output's grayscale pick and `rough`'s own channel pick (`helper.read`, Note DY).
+fn plan_with(
+    dir: &Path,
+    rough: &Path,
+    ao: &Path,
+    pick: GraySource,
+    rough_channel: Option<u8>,
+) -> Plan {
     let registry = PresetRegistry::builtin().unwrap();
     let source = |path: &Path, role| PackSource {
         read: None,
@@ -58,7 +69,7 @@ fn plan(dir: &Path, rough: &Path, ao: &Path) -> Plan {
                     path: rough.to_path_buf(),
                     role: RawMap::Roughness,
                     invert: false,
-                    channel: None,
+                    channel: rough_channel,
                 },
                 ChannelSource::Default { value: 0.0 },
                 ChannelSource::Source {
@@ -69,7 +80,7 @@ fn plan(dir: &Path, rough: &Path, ao: &Path) -> Plan {
                 },
                 ChannelSource::Default { value: 1.0 },
             ],
-            gray: GraySource::R,
+            gray: pick,
             sources: vec![source(rough, RawMap::Roughness), source(ao, RawMap::Ao)],
         }),
         bake: None,
@@ -135,6 +146,86 @@ fn converts_from_every_source_and_records_them() {
     );
     assert_eq!(e.sources[1].sha256, sha256_file(&ao).unwrap());
     assert_eq!(e.source_sha256, sha256_file(&rough).unwrap());
+}
+
+fn rgba(dir: &Path, name: &str, f: impl Fn(u32, u32) -> [u8; 4]) -> PathBuf {
+    let p = dir.join("in").join(name);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(32, 32, |x, y| image::Rgba(f(x, y)))
+        .save(&p)
+        .unwrap();
+    p
+}
+
+/// Packs the plan and returns the written `_rmaos` as 8-bit RGBA, row-major, 32 wide.
+fn packed(d: &Path, p: Plan) -> Vec<[u8; 4]> {
+    let (s, ev) = run(p);
+    assert_eq!(s.converted, 1, "{ev:#?}");
+    let f = read_dds(&std::fs::read(d.join("out/iron_rmaos.dds")).unwrap()).unwrap();
+    let (w, h, r) = f.levels[0].clone();
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
+        panic!("LDR expected")
+    };
+    px
+}
+
+/// Note FM36: a roughness map that stores its value in green (R and B are 0) packs from green once the pick says so.
+#[test]
+fn a_value_stored_in_green_packs_from_green() {
+    let d = tempfile::tempdir().unwrap();
+    let rough = rgba(d.path(), "iron_rough.png", |x, _| [0, x as u8 * 8, 0, 255]);
+    let ao = gray(d.path(), "iron_ao.png", 32, |_, _| 200);
+    let px = packed(
+        d.path(),
+        plan_with(d.path(), &rough, &ao, GraySource::G, None),
+    );
+    for (i, p) in px.iter().enumerate() {
+        let x = i as i32 % 32;
+        assert!((i32::from(p[0]) - x * 8).abs() <= 6, "R at {x}: {p:?}");
+    }
+}
+
+/// Note FM36: an `A` pick packs the alpha channel of every grayscale source.
+#[test]
+fn an_alpha_pick_reads_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    let rough = rgba(d.path(), "iron_rough.png", |_, y| {
+        [200, 100, 50, y as u8 * 8]
+    });
+    let ao = rgba(d.path(), "iron_ao.png", |x, _| [9, 9, 9, 255 - x as u8 * 8]);
+    let px = packed(
+        d.path(),
+        plan_with(d.path(), &rough, &ao, GraySource::A, None),
+    );
+    for (i, p) in px.iter().enumerate() {
+        let (x, y) = (i as i32 % 32, i as i32 / 32);
+        assert!((i32::from(p[0]) - y * 8).abs() <= 6, "R at {x},{y}: {p:?}");
+        assert!(
+            (i32::from(p[2]) - (255 - x * 8)).abs() <= 6,
+            "B at {x},{y}: {p:?}"
+        );
+    }
+}
+
+/// Note FM36: a source's own pick (`helper.read`, Note DY) beats the output's pick, so one pack can mix: roughness
+/// read from green, AO from the output's default R.
+#[test]
+fn a_per_source_read_beats_the_output_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let rough = rgba(d.path(), "iron_rough.png", |x, _| [0, x as u8 * 8, 0, 255]);
+    let ao = gray(d.path(), "iron_ao.png", 32, |_, y| 255 - y as u8 * 8);
+    let px = packed(
+        d.path(),
+        plan_with(d.path(), &rough, &ao, GraySource::R, Some(1)),
+    );
+    for (i, p) in px.iter().enumerate() {
+        let (x, y) = (i as i32 % 32, i as i32 / 32);
+        assert!((i32::from(p[0]) - x * 8).abs() <= 6, "R at {x},{y}: {p:?}");
+        assert!(
+            (i32::from(p[2]) - (255 - y * 8)).abs() <= 6,
+            "B at {x},{y}: {p:?}"
+        );
+    }
 }
 
 /// Note FM30, then Note FM29: the 512x256 map is enlarged to the pack's 1000x500, and the packed image then goes

@@ -30,7 +30,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 | `channels.flip_green` | `true`, `false` | `false` | Invert the green channel of a normal map. |
 | `channels.green_convention` | `directx`, `opengl` | unset | Which way the source normal map's green points. `opengl` turns on `flip_green`. A plain `_normal` file with this unset is converted as DirectX and notes `IN-GREEN-UNSTATED` (info). An explicit `flip_green` that contradicts the convention gives `CFG-GREEN-CONFLICT`, and the explicit `flip_green` wins. |
 | `channels.reconstruct_z` | `true`, `false` | `false` | Rebuild the normal's blue channel from red and green. |
-| `channels.grayscale_source` | `r`, `g`, `b`, `a`, `luma` | `r` | The channel a grayscale value is read from in a colour source: red, green, blue, alpha or Rec. 709 luminance. It applies to grayscale sub-types and to the raw maps that [pack](Texture-Packing.md#packing-raw-maps) into a recipe. With `a` the alpha is the data, so it is not reported as discarded; a source with no alpha channel reads 255 (`CHAN-NOT-GRAY`). |
+| `channels.grayscale_source` | `r`, `g`, `b`, `a`, `luma` | `r` | The channel a grayscale value is read from in a colour source: red, green, blue, alpha or Rec. 709 luminance. It applies to grayscale sub-types and to the raw maps that [pack](Texture-Packing.md#packing-raw-maps) into a recipe. With `a` the alpha is the data, so it is not reported as discarded; a source with no alpha channel reads 255 (`CHAN-NOT-GRAY`). To pick for one raw map only, set [`helper.read`](Project-Config.md) on that file; it beats this value. |
 
 ## Mipmaps
 
