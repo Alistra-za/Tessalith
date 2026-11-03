@@ -127,6 +127,61 @@ fn a_missing_cbuffer_field_stays_in_the_load_report_when_compiles_settle_at_load
     assert_eq!(rep.warnings.len(), baseline_warnings(false).len() + 1);
     assert!(r.take_late_warnings().is_empty());
 }
+
+/// A partly cached async load: the cached shape lands at load, the other waits for a new permutation. The load
+/// reports nothing (the check needs both draws); the warning arrives once, with the last landing.
+#[test]
+fn a_partly_cached_async_load_reports_the_missing_field_late_exactly_once() {
+    let shaders = standin_without_ambient();
+    let cache = tempfile::tempdir().unwrap();
+    let nif = parse(&fixture("TestNifFile_Furniture_Col_SE.nif"));
+    // Warm the disk cache with the vanilla permutation of both shapes.
+    let mut warm = renderer_at(shaders.path(), cache.path(), LIT);
+    warm.set_async_compile(true);
+    warm.load_parsed(&nif, &none);
+    assert!(drain(&mut warm) >= 1);
+    // CYL2 now needs a permutation that is not cached; CYL1 is.
+    let mut edited = nif.clone();
+    let s = edited.shapes.iter_mut().find(|s| s.id == CYL2).unwrap();
+    s.material = pbr_subsurface(s.material.clone());
+    let mut r = renderer_at(shaders.path(), cache.path(), LIT);
+    r.set_async_compile(true);
+    let rep = r.load_parsed(&edited, &none);
+    assert_eq!((rep.shapes, rep.pending), (2, 1), "{rep:?}");
+    assert_eq!(status(&r, CYL1), ShapeStatus::Drawing, "CYL1 was cached");
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    assert!(
+        r.take_late_warnings().is_empty(),
+        "nothing before the last landing"
+    );
+    assert_eq!(drain(&mut r), 1);
+    let w = r.take_late_warnings();
+    assert_eq!(w.iter().filter(|s| *s == NO_AMBIENT).count(), 1, "{w:?}");
+    assert_eq!(w.len(), baseline_warnings(true).len() + 1, "{w:?}");
+}
+
+/// Each load checks again: `fields_checked` is reset by the load, not carried over.
+#[test]
+fn a_second_async_load_reports_the_missing_field_again() {
+    let shaders = standin_without_ambient();
+    let cache = tempfile::tempdir().unwrap();
+    let nif = parse(&fixture("TestNifFile_Furniture_Col_SE.nif"));
+    let mut r = renderer_at(shaders.path(), cache.path(), LIT);
+    r.set_async_compile(true);
+    r.load_parsed(&nif, &none);
+    assert!(drain(&mut r) >= 1);
+    assert!(r.take_late_warnings().contains(&NO_AMBIENT.to_string()));
+    // A new permutation keeps the second load pending, so its report cannot carry the warning.
+    let mut edited = nif.clone();
+    let s = edited.shapes.iter_mut().find(|s| s.id == CYL1).unwrap();
+    s.material = pbr_subsurface(s.material.clone());
+    let rep = r.load_parsed(&edited, &none);
+    assert!(rep.pending >= 1, "{rep:?}");
+    assert!(drain(&mut r) >= 1);
+    let w = r.take_late_warnings();
+    assert_eq!(w.iter().filter(|s| *s == NO_AMBIENT).count(), 1, "{w:?}");
+}
+
 /// Vanilla → TruePBR with Rim (Subsurface): a permutation edit whose pixels differ (the stand-in writes 0.5
 /// green when PBRFlags ≠ 0).
 fn pbr_subsurface(mut m: MaterialState) -> MaterialState {

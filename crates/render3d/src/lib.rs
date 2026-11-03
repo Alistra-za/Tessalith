@@ -356,9 +356,9 @@ pub struct Renderer {
     load_epoch: Arc<AtomicU64>,
     /// Hosts that drive a pool turn this on; the default settles every load and edit before returning.
     async_compile: bool,
-    /// The missing-cbuffer-field check ran for this load (it waits until no shape is Pending).
+    /// The missing-cbuffer-field check is done for this load (it waits until no shape is `Pending`). True while a load builds, so `apply_compiled` calls inside it stay quiet.
     fields_checked: bool,
-    /// Warnings found after the load returned (async compiles landed); drained by [Renderer::take_late_warnings].
+    /// Warnings found after the load returned (async compiles landed); drained by [`Renderer::take_late_warnings`].
     late_warnings: Vec<String>,
     /// The loaded NIF is a head part (Note BA; [`ParsedNif::head_part`]), set by every load.
     head_part: bool,
@@ -1582,7 +1582,7 @@ impl Renderer {
         self.tex_cache.clear();
         self.evicted_missing.clear();
         self.bounds = None;
-        self.fields_checked = false;
+        self.fields_checked = true;
         self.late_warnings.clear();
         self.fixed_pipeline = fixed;
         self.head_part = parsed.head_part;
@@ -1634,11 +1634,11 @@ impl Renderer {
             }
         }
         self.bounds = self.compute_bounds();
-        if !self.any_pending() {
-            // settle may have run the check through pply_compiled: the report carries it, not the late list.
-            self.late_warnings.clear();
+        // The check needs every shape's program: with some still pending, the last landing runs it (`apply_compiled`).
+        if self.any_pending() {
+            self.fields_checked = false;
+        } else {
             self.warn_missing_fields(&mut rep);
-            self.fields_checked = true;
         }
         self.sort_draw_order();
         rep.pending = self

@@ -678,8 +678,8 @@ pub enum V3Reply {
         report: LoadReport,
         bounds: Option<([f32; 3], f32)>,
     },
-    /// Warnings found after the load's report went out (the last async compile landed); appended to its notes.
-    LateWarnings(Vec<String>),
+    /// Warnings found after load `id`'s report went out (its last async compile landed); appended to that load's notes.
+    LateWarnings(u64, Vec<String>),
     Frame {
         frame: Arc<Frame>,
         #[cfg(feature = "test-hooks")]
@@ -1687,9 +1687,11 @@ impl Viewport3d {
                     self.bounds = bounds;
                 }
             }
-            V3Reply::LateWarnings(w) => {
-                if let Some(rep) = &mut self.report {
-                    rep.warnings.extend(w);
+            V3Reply::LateWarnings(id, w) => {
+                if self.loaded == Some(id) {
+                    if let Some(rep) = &mut self.report {
+                        rep.warnings.extend(w);
+                    }
                 }
             }
             V3Reply::Frame {
@@ -2437,10 +2439,6 @@ fn render_loop(
                 }
             }
         }
-        let late = r.take_late_warnings();
-        if !late.is_empty() {
-            send(V3Reply::LateWarnings(late));
-        }
         let pending_was_empty = pending.is_empty();
         if !pending.is_empty() {
             if let Some((lid, c)) = &last {
@@ -2486,6 +2484,11 @@ fn render_loop(
             }
         }
         pump(&mut r);
+        // After the batch's loads and edits: what the renderer found belongs to the load it now holds.
+        let late = r.take_late_warnings();
+        if let (false, Some((lid, _))) = (late.is_empty(), &last) {
+            send(V3Reply::LateWarnings(*lid, late));
+        }
         if reshaded {
             send(V3Reply::DebugSupport(r.debug_supported()));
         }
