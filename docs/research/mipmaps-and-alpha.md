@@ -103,6 +103,10 @@ Further points:
 
 Tessalith's coverage step rebuilds the idea of AlphaBloom's Auto Coverage (by tkRiverGamer) and Castaño's method. No code is copied; see [CREDITS](../CREDITS.md).
 
+## Result 6: a few low alpha texels are noise, a cutout is not
+
+A survey of 708 colour textures that asked about their alpha, checked against the meshes that use them, looked for a rule that clears stray low texels from re-encoded sources without silencing a real cutout. The smallest real cutout covers 0.31 % of its image (`weapons/elven/bow/bow`), so a limit of 0.1 % of the texels clears none of the 457 mesh-confirmed real alpha textures. Limits of 0.5 % and 1 % silence 4 and 20 real cutouts. On the other side, 3 glow maps lose a false blocking warning and 135 normals whose minimum alpha is 249 or 250 become opaque. 0.1 % of a 4K texture is 16 777 texels, so a second condition caps any connected group of low texels at 16; a small real cutout on a large texture still asks (`sprigganburnt2`, 12 alpha-test shapes).
+
 ## What Tessalith does because of this
 
 The mip chain is in [`crates/engine/src/mips.rs`](../../crates/engine/src/mips.rs), the kernels in [`filter.rs`](../../crates/engine/src/filter.rs), coverage in [`coverage.rs`](../../crates/engine/src/coverage.rs), dilation in [`dilate.rs`](../../crates/engine/src/dilate.rs) and the normal bake in [`bake/mod.rs`](../../crates/engine/src/bake/mod.rs).

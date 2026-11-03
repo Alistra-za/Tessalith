@@ -726,14 +726,21 @@ fn inspect_rejects_invalid_options_and_configs_without_images() {
 /// A 4x4 BC7 (DX10 `BC7_UNORM`) file of one mode-6 block whose every texel decodes to RGB 128 (or 129) and alpha
 /// `(a7 << 1) | p`.
 fn bc7_flat_alpha_file(dir: &Path, name: &str, a7: u128, p: u128) -> PathBuf {
-    let mut b = vec![0u8; 128 + 20 + 16];
+    bc7_blocks_file(dir, name, 4, &[(a7, p)])
+}
+
+/// A `side` x `side` BC7 file (a multiple of 4) of mode-6 blocks in row order, each `(a7, p)` as in
+/// [`bc7_flat_alpha_file`]; blocks past the list repeat its last entry.
+fn bc7_blocks_file(dir: &Path, name: &str, side: usize, blocks: &[(u128, u128)]) -> PathBuf {
+    let n = (side / 4) * (side / 4);
+    let mut b = vec![0u8; 128 + 20 + 16 * n];
     let put = |b: &mut Vec<u8>, at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
     b[0..4].copy_from_slice(b"DDS ");
     put(&mut b, 4, 124);
     put(&mut b, 8, 0x8_1007); // CAPS | HEIGHT | WIDTH | PIXELFORMAT | LINEARSIZE
-    put(&mut b, 12, 4);
-    put(&mut b, 16, 4);
-    put(&mut b, 20, 16);
+    put(&mut b, 12, side as u32);
+    put(&mut b, 16, side as u32);
+    put(&mut b, 20, 16 * n as u32);
     put(&mut b, 76, 32);
     put(&mut b, 80, 4); // DDPF_FOURCC
     b[84..88].copy_from_slice(b"DX10");
@@ -741,13 +748,16 @@ fn bc7_flat_alpha_file(dir: &Path, name: &str, a7: u128, p: u128) -> PathBuf {
     put(&mut b, 128, 98); // DXGI_FORMAT_BC7_UNORM
     put(&mut b, 132, 3); // TEXTURE2D
     put(&mut b, 140, 1); // array size
-                         // Mode 6: endpoints R0 R1 G0 G1 B0 B1 A0 A1 (7 bits each) from bit 7, p-bits at 63 and 64, indices 0.
-    let mut block: u128 = 1 << 6;
-    for (i, v) in [64u128, 64, 64, 64, 64, 64, a7, a7].into_iter().enumerate() {
-        block |= v << (7 + 7 * i);
+    for i in 0..n {
+        let (a7, p) = blocks[i.min(blocks.len() - 1)];
+        // Mode 6: endpoints R0 R1 G0 G1 B0 B1 A0 A1 (7 bits each) from bit 7, p-bits at 63 and 64, indices 0.
+        let mut block: u128 = 1 << 6;
+        for (k, v) in [64u128, 64, 64, 64, 64, 64, a7, a7].into_iter().enumerate() {
+            block |= v << (7 + 7 * k);
+        }
+        block |= (p << 63) | (p << 64);
+        b[148 + 16 * i..164 + 16 * i].copy_from_slice(&block.to_le_bytes());
     }
-    block |= (p << 63) | (p << 64);
-    b[148..164].copy_from_slice(&block.to_le_bytes());
     let path = dir.join(name);
     std::fs::write(&path, b).unwrap();
     path
@@ -804,6 +814,27 @@ fn validate_infers_varying_alpha_below_the_note_l_cutoff() {
     }
 }
 
+/// Note FM34: the CLI reads a stored alpha the way the engine's analysis does. A 128 x 128 `_m` whose only low
+/// alpha is one 4 x 4 block (16 texels, under 0.1 % and not over 16 connected) is an `envmask`; two adjacent low
+/// blocks (32 connected texels) are `complex_material`.
+#[test]
+fn validate_treats_stray_low_alpha_texels_as_opaque() {
+    let d = tempfile::tempdir().unwrap();
+    let blocks = |low: usize| {
+        let mut v = vec![(125u128, 0u128); low];
+        v.push((127, 1));
+        v
+    };
+    for (name, low, want) in [
+        ("one_m.dds", 1, "envmask"),
+        ("two_m.dds", 2, "complex_material"),
+    ] {
+        let dds = bc7_blocks_file(d.path(), name, 128, &blocks(low));
+        let o = validate(&["--json"], &dds);
+        let v: serde_json::Value = serde_json::from_str(text(&o.stdout).trim()).unwrap();
+        assert_eq!(v["subtype"], want, "{name}: {v}");
+    }
+}
 #[test]
 fn inspect_prints_the_packing_recipes_of_a_set() {
     let d = tempfile::tempdir().unwrap();

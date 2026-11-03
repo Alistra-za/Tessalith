@@ -502,21 +502,39 @@ const VARYING_ALPHA_BELOW: u8 = engine::analyse::CS_COMPLEX_GATE_CODE;
 /// even a single lower texel is treated as storing alpha.
 const FLAT_ALPHA_MIN: u8 = 254;
 
-/// The smallest decoded alpha of mip 0, for formats that carry alpha (`None` for others and on decode errors).
-fn mip0_alpha_min(file: &DdsFile) -> Option<u8> {
+/// Mip-0 decoded alpha: its minimum, and whether the texels below the opaque cutoff are only stray noise (the
+/// engine's rule, DECISIONS Note FM34), so such a file is opaque for sub-type inference as its analysis would be.
+#[derive(Clone, Copy)]
+struct Mip0Alpha {
+    min: u8,
+    speck: bool,
+}
+
+/// Mip-0 alpha, for formats that carry alpha (`None` for others and on decode errors).
+fn mip0_alpha(file: &DdsFile) -> Option<Mip0Alpha> {
     if !carries_alpha(file.format) {
         return None;
     }
     let (w, h, r) = file.levels.first()?;
     match decode_level(file.format, *w, *h, &file.data[r.clone()]) {
-        Ok(Decoded::Ldr(px)) => Some(alpha_stats(&px).min),
+        Ok(Decoded::Ldr(px)) => {
+            let low = |i: usize| engine::analyse::is_low_alpha(f32::from(px[i][3]) / 255.0);
+            let n_low = (0..px.len()).filter(|&i| low(i)).count() as u64;
+            let (w, h) = (*w as usize, *h as usize);
+            Some(Mip0Alpha {
+                min: alpha_stats(&px).min,
+                speck: n_low > 0
+                    && px.len() == w * h
+                    && engine::analyse::low_alpha_is_speck_noise(w, h, n_low, low),
+            })
+        }
         _ => None,
     }
 }
 
 /// The sub-type a DDS is meant to be when `--subtype` is not given: the top suggestion for its name, path and
 /// (for `_m`) stored alpha, else `generic_data`.
-fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha_min: Option<u8>) -> Subtype {
+fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha: Option<Mip0Alpha>) -> Subtype {
     let stem = path
         .file_stem()
         .unwrap_or_default()
@@ -529,9 +547,9 @@ fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha_min: Option<
     if file.is_cubemap {
         return Subtype::Cubemap;
     }
-    let alpha = if !carries_alpha(file.format) {
+    let alpha_class = if !carries_alpha(file.format) {
         AlphaContent::None
-    } else if alpha_min.is_some_and(|m| m < VARYING_ALPHA_BELOW) {
+    } else if alpha.is_some_and(|a| a.min < VARYING_ALPHA_BELOW && !a.speck) {
         AlphaContent::Varying
     } else {
         AlphaContent::Constant255
@@ -542,7 +560,7 @@ fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha_min: Option<
         suffix: suffix.as_deref(),
         game_path: &game_path(&abs, &rel),
         set_suffixes: &set,
-        alpha,
+        alpha: alpha_class,
         is_float: matches!(
             file.format,
             DdsPixelFormat::Rgba16f | DdsPixelFormat::Rgba32f | DdsPixelFormat::Bc6hUf16
@@ -679,10 +697,11 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
                 continue;
             }
         };
-        let alpha_min = mip0_alpha_min(&file);
+        let alpha = mip0_alpha(&file);
+        let alpha_min = alpha.map(|a| a.min);
         let (st, mut note) = match explicit {
             Some(st) => (st, None),
-            None => available_or_fallback(infer_subtype(path, &file, target, alpha_min), target),
+            None => available_or_fallback(infer_subtype(path, &file, target, alpha), target),
         };
         let mut policy = None;
         let mut judged = true;

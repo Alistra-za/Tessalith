@@ -90,14 +90,35 @@ const NEAR_OPAQUE_EPS: f32 = 1e-6;
 pub const ALPHA_SPECK_SHARE: f64 = 0.001;
 pub const ALPHA_SPECK_MAX_GROUP: usize = 16;
 
-/// No 4-connected group of texels with alpha below [`NEAR_OPAQUE_ALPHA`] is larger than [`ALPHA_SPECK_MAX_GROUP`].
-/// Each group stops growing once it is over the cap, so the work is bounded by the (already small) low-texel count.
-fn low_alpha_groups_are_small(img: &Rgba32F) -> bool {
-    let (w, h) = (img.width as usize, img.height as usize);
-    let low = |i: usize| img.px[i][3] < NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS;
-    let mut seen = std::collections::HashSet::new();
-    for start in (0..img.px.len()).filter(|&i| low(i)) {
-        if !seen.insert(start) {
+/// A stored alpha value that counts as "low": below [`NEAR_OPAQUE_ALPHA`]. Every low-alpha test uses this one.
+pub fn is_low_alpha(v: f32) -> bool {
+    v < NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS
+}
+
+/// Note FM34's stray-texel rule over a width x height alpha plane: `low_count` texels satisfy `is_low` (index
+/// `y * width + x`), they are fewer than [`ALPHA_SPECK_SHARE`] of the plane, and no 4-connected group of them is
+/// larger than [`ALPHA_SPECK_MAX_GROUP`]. The group walk runs only under the share limit and stops at the first
+/// group over the cap, so its work is bounded by the low count.
+pub fn low_alpha_is_speck_noise(
+    width: usize,
+    height: usize,
+    low_count: u64,
+    is_low: impl Fn(usize) -> bool,
+) -> bool {
+    let n = width * height;
+    if (low_count as f64) >= ALPHA_SPECK_SHARE * n as f64 {
+        return false;
+    }
+    let mut seen = vec![0u64; n.div_ceil(64)];
+    // True when `i` was not marked before.
+    let mut mark = |i: usize| {
+        let (word, bit) = (i / 64, 1u64 << (i % 64));
+        let fresh = seen[word] & bit == 0;
+        seen[word] |= bit;
+        fresh
+    };
+    for start in (0..n).filter(|&i| is_low(i)) {
+        if !mark(start) {
             continue;
         }
         let (mut stack, mut size) = (vec![start], 0);
@@ -106,15 +127,15 @@ fn low_alpha_groups_are_small(img: &Rgba32F) -> bool {
             if size > ALPHA_SPECK_MAX_GROUP {
                 return false;
             }
-            let (x, y) = (i % w, i / w);
+            let (x, y) = (i % width, i / width);
             let near = [
                 (x > 0).then(|| i - 1),
-                (x + 1 < w).then(|| i + 1),
-                (y > 0).then(|| i - w),
-                (y + 1 < h).then(|| i + w),
+                (x + 1 < width).then(|| i + 1),
+                (y > 0).then(|| i - width),
+                (y + 1 < height).then(|| i + width),
             ];
             for j in near.into_iter().flatten() {
-                if low(j) && seen.insert(j) {
+                if is_low(j) && mark(j) {
                     stack.push(j);
                 }
             }
@@ -122,7 +143,6 @@ fn low_alpha_groups_are_small(img: &Rgba32F) -> bool {
     }
     true
 }
-
 /// Community Shaders' complex-material alpha gate, as an 8-bit code (spike S8, DECISIONS Note L): an `_m` whose
 /// smallest-mip alpha is at or above it is a plain env mask, and source alpha whose minimum reaches it is opaque.
 pub const CS_COMPLEX_GATE_CODE: u8 = 251;
@@ -174,7 +194,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         }
         hist.le5 += u64::from(a <= 5);
         hist.ge250 += u64::from(a >= 250);
-        low_alpha += u64::from(p[3] < NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS);
+        low_alpha += u64::from(is_low_alpha(p[3]));
         let (r, g, b) = (
             i32::from(code8(p[0])),
             i32::from(code8(p[1])),
@@ -207,11 +227,12 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
     let ln = len_n.max(1) as f64;
     // A NaN texel has code 0 but no value: it must not turn all-255 into near-opaque (trace #6).
     let all_255 = hist.eq255 > 0 && (hist.eq255 + nonfinite[3]) as usize == count;
-    let near_opaque = info.has_alpha && ch[3].min >= NEAR_OPAQUE_ALPHA - NEAR_OPAQUE_EPS;
+    let near_opaque = info.has_alpha && !is_low_alpha(ch[3].min);
     let speckled = info.has_alpha
         && !(all_255 || near_opaque)
-        && (low_alpha as f64) < ALPHA_SPECK_SHARE * count as f64
-        && low_alpha_groups_are_small(img);
+        && low_alpha_is_speck_noise(img.width as usize, img.height as usize, low_alpha, |i| {
+            is_low_alpha(img.px[i][3])
+        });
     let alpha = if !info.has_alpha {
         AlphaContent::None
     } else if all_255 || near_opaque || speckled {
@@ -249,6 +270,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
 mod tests {
     use super::*;
     use crate::image::{Rgba32F, SourceInfo};
+    use AlphaContent as Alpha;
 
     const RGBA8: SourceInfo = SourceInfo {
         bit_depth: 8,
@@ -544,7 +566,18 @@ mod tests {
         }
         analyse(&img, &RGBA8).alpha
     }
-    use AlphaContent as Alpha;
+
+    /// Note FM34 boundaries: one texel at 250 or at 251 on a large image is opaque; a region at 250 that is 0.5 % of
+    /// the image (well over the share, and over the group cap) stays varying.
+    #[test]
+    fn code_250_is_low_and_251_is_not_at_the_speck_boundaries() {
+        assert_eq!(specked(512, 512, 250, [(9, 9)]), Alpha::Constant255);
+        assert_eq!(specked(512, 512, 251, [(9, 9)]), Alpha::Constant255);
+        // 18 x 18 = 324 texels, 0.5 % of 512 x 512.
+        let block = (0..18u32).flat_map(|y| (0..18u32).map(move |x| (100 + x, 100 + y)));
+        assert_eq!(specked(512, 512, 250, block.clone()), Alpha::Varying);
+        assert_eq!(specked(512, 512, 251, block), Alpha::Constant255);
+    }
 
     /// Note FM34: texels at 250 or below that are fewer than 0.1 % of the image and form no group over 16 are noise.
     #[test]

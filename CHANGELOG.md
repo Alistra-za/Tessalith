@@ -66,7 +66,7 @@
   - The 3D settings window keeps its saved size: it opened 3 points larger at every start and saved that back.
   - The tile of a stored HDR DDS (BC6H, RGBA16F, RGBA32F) is tone-mapped like the preview instead of clamped, and the preview no longer turns a negative value bright.
   - Up and Down move through the helper rows under the tiles (Enter opens the active one), and a re-plan of unchanged files no longer reloads each target that an alpha helper fills.
-- Alpha counts as opaque when only stray texels are below 251: fewer than 0.1 % of the image, with no connected group larger than 16. Such a texture no longer asks about its alpha, and a glow map or normal with a few low texels no longer raises `LOSS-ALPHA-DATA`. Output bytes do not change; cached image analysis is recomputed once.
+- Alpha counts as opaque when only stray texels are below 251: fewer than 0.1 % of the image, with no connected group larger than 16. Such a texture no longer asks about its alpha, and a glow map or normal with a few low texels no longer raises `LOSS-ALPHA-DATA`. A texture that was blocked or asked only because of such texels now converts, with its alpha removed by default (a complex `_m` becomes an env mask with parallax off); an explicit `alpha.policy` is honoured as before. Bytes for files that were not affected do not change, and cached image analysis is recomputed once. `sdc validate` reads a stored DDS the same way when it infers the type.
 
 ## 1.1.0
 
