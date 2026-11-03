@@ -8,16 +8,16 @@ It needs the `cs` mode: the PBR folder is the cs export.
 
 - **Where to switch it on.** **Export to ▾** (**More ▾** with no project open) has two checkable items, **Also export as Vanilla** and **Also export as Complex material**; the menu stays open on a tick, and there is no dialog. Without a folder open they are greyed out with "Open a folder first". Review has an **Also export as** column with the same two ticks. The column shows in the `cs` mode or while a tick is on; its red reason line (why Export cannot run yet) shows only while a tick is on. The ticks are saved as `[export] also` in `sdc.toml`.
 - **The three folders.** While a tick is on, Export always opens Review, and Review's Export writes, in the folder its **Also folders go in** row names, `<project> PBR` (the plain cs export, byte for byte, with the PGPatcher, CS PBR and complex-material JSON), `<project> Vanilla` and `<project> CM` side by side, where `<project>` is the opened folder's name. Ticking only CM writes the Vanilla folder too: CM installs on top of it. Files rows of the Vanilla and CM folders start with the folder name.
-- **Review's column** holds **Also folders go in** (**Choose where the Also folders go…**; per project, `[project] also_location` in `sdc-project.toml`, by default the export folder, which reads "the export folder (not chosen yet)" until one is chosen; the JSON lines under What will be written then start with `‹export folder›`), the three folder names (empty means the default name, shown as the hint), **Keep metal brightness** and its **Strength** (CM only), **Also write a zip of each folder** and **Skip these sets**.
+- **Review's column** holds **Also folders go in** (**Choose where the Also folders go…**; per project, `[project] also_location` in `sdc-project.toml`, by default the export folder, which reads "the export folder (not chosen yet)" until one is chosen; the JSON lines under What will be written then start with `‹export folder›`), the three folder names (empty means the default name, shown as the hint), **Keep metal brightness** and its **Strength** (CM only) and **Skip these sets**.
 - **Copy CLI command** then passes the location as `-o`. **Open export folder**, the header's export path and the JSON editor stay on the export folder; by default the location is that folder, so it shows the three folders.
-- **The env `_m` needs a scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the Meshes scan. Without a scan no env `_m` is written and the report says "no: no scan". The command line reads no scan, so it never writes one.
+- **The env `_m` needs a scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the Meshes scan. Without a scan no env `_m` is written. The command line reads no scan, so it never writes one.
 - **NIF edits follow the PBR folder** while a tick is on, so one mod folder holds the textures and the meshes, as a plain export does.
 
 ## Skipping a set
 
 A PBR set can be left out of Vanilla and CM: tick it in Review's **Skip these sets**, or, in 2D, use **Skip vanilla/CM for this set** in the set editor's Material tab (its **Also export** group, shown while a tick is on, reads "converted" or "skipped"). Skipped sets are `[export] skip` in `sdc.toml`.
 
-A PBR set with a map still undecided (or blocked by a code you have not acknowledged) is not exported to the PBR folder, so Vanilla and CM leave it out too; the report and the export notes say "not derived: N maps undecided in the PBR export".
+A PBR set with a map still undecided (or blocked by a code you have not acknowledged) is not exported to the PBR folder, so Vanilla and CM leave it out too; the export notes say "not derived: N maps undecided in the PBR export".
 
 ## The recipe
 
@@ -25,14 +25,10 @@ A PBR set with a map still undecided (or blocked by a code you have not acknowle
 
 `_curves`, `_curvature` and `_cavity` maps join their PBR set and are read only by Also export ([Set-Shaders](Set-Shaders.md#also-export-as-vanilla-and-cm)). [Generate from normal map](GUI-Generate-From-Normal.md#curvature) can make a curvature map.
 
-## Report and zips
+## Files this export did not write
 
-Every Also export (not a dry run) writes `<project> conversion-report.md` next to the three folders: the counts per folder, the recipe settings, a row per PBR set (suggested NIF Glossiness, Specular Strength, whether the Environment Map shader is needed and the env `_m` was written), the sets not converted and why, and the install lines.
+Files Tessalith did not write are never overwritten, and Tessalith never deletes either. A file in one of the folders that this export did not write (an earlier export's CM diffuse after Keep metal brightness was turned off, the outputs of a set now skipped) stays, and the export notes list it as "not written by this export". Delete such files yourself: a stale CM file overrides the Vanilla file of the same name.
 
-- With the zip on, each folder that ran is zipped ([`zip`](Project-Config.md#export)).
-- A zip the ZIP format cannot hold (65,535 files or more, or 4 GiB, counted from the planned outputs' sizes) is a Review blocker before anything is written: "Zip too large for the ZIP format (n files, size); untick "Also write a zip" or split the export".
-- The zips and the report are written after the PGPatcher, CS PBR and complex-material JSON, so the PBR zip holds the JSON this export wrote. The export stays running (and can be cancelled) until they are done.
+The notes are written after the PGPatcher, CS PBR and complex-material JSON, so those files are not listed. The export stays running (and can be cancelled) until the notes are done.
 
-Files Tessalith did not write are never overwritten, and Tessalith never deletes either. A file in one of the folders that this export did not write (an earlier export's CM diffuse after Keep metal brightness was turned off, the outputs of a set now skipped) stays, and the report and the export notes list it as "not written by this export" (with the zip on, "not zipped"). Delete such files yourself: a stale CM file overrides the Vanilla file of the same name.
-
-To start from scratch, delete the three folders, the report, the zips and the sums file together. Their record is in the PBR folder (`_sdc/also.json`), so deleting only the PBR folder leaves the report, zips and sums kept as files Tessalith did not write.
+To start from scratch, delete the three folders together.

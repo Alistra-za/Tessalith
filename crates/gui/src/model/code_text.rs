@@ -87,13 +87,11 @@ pub fn code_sentence(code: Code) -> &'static str {
         AlsoPhaseFailed => "An extra export step stopped with an error — see Messages and export again",
         // Note FC10: the row's `Reset also.json` is the remedy.
         AlsoOwnedUnreadable => "also.json cannot be read — Reset also.json starts a new record",
-        AlsoZipFailed => "The zip or its checksum file was not written — check the folder and export again",
-        AlsoReportFailed => "The extra export's report was not written — check the folder and export again",
         CubeFaces => "A cubemap's faces are missing or differ in size — fix the six faces",
         CubeNoMips => "A cubemap without mips sparkles on curved surfaces — turn mips on",
         // Note FC3: the Info results that are rows, since the user acts on them.
         GenStale => "This generated map no longer matches its normal map or set — regenerate it",
-        DeriveNifSuggest => "This converted set needs NIF values set by hand — the report lists them",
+        DeriveNifSuggest => "This converted set needs NIF values set by hand — hover the row for them",
         ChkGreenGuess => "This normal map's green channel looks flipped — treat it as OpenGL if its lighting looks inverted",
         // The other Info results: no row, no sentence.
         _ => "",

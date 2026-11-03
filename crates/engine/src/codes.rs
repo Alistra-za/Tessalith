@@ -158,12 +158,9 @@ codes! {
     DeriveNifSuggest = "DERIVE-NIF-SUGGEST" => Info,
     // Track A Also export (Note CN): the Vanilla or CM phase stopped with an engine error; its exit code is kept.
     AlsoPhaseFailed = "ALSO-PHASE-FAILED" => Error,
-    // `<PBR folder>/_sdc/also.json` cannot be read: left as it is, and no owned file is written until it is fixed.
+    // `<PBR folder>/_sdc/also.json` (the record of an earlier export's report, zips and sums file) cannot be read: left
+    // as it is.
     AlsoOwnedUnreadable = "ALSO-OWNED-UNREADABLE" => Warning,
-    // An Also export zip or its SHA256SUMS file was not written (kept, too large, I/O): the export is partial (1).
-    AlsoZipFailed = "ALSO-ZIP-FAILED" => Warning,
-    // The Also export report was not written (kept as edited outside Tessalith, I/O): the export is partial (1).
-    AlsoReportFailed = "ALSO-REPORT-FAILED" => Warning,
     // v2 Generate from normal map (Note CO): a generated member skipped because a real map fills its slot.
     GenReplaced = "GEN-REPLACED" => Info,
     // v2 Generate from normal map (Note CO): a generated file whose normal, height neutral or shader changed since it
@@ -255,7 +252,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 97);
+        assert_eq!(Code::ALL.len(), 95);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

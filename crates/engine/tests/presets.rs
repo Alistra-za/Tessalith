@@ -1161,3 +1161,45 @@ fn removed_output_codes_in_allow_lists_are_named() {
         assert!(e.contains(code) && e.contains("removed in 2.0"), "{e}");
     }
 }
+
+/// Note FM: the `[export] zip` key and the two codes of the zip and the conversion report are gone. A 1.x config names
+/// them (never a bare "unknown field"), and `ALSO-ZIP-FAILED` / `ALSO-REPORT-FAILED` in an `allow` list, in `--set
+/// allow=` and in `--allow` get the removal message.
+#[test]
+fn the_export_zip_key_is_named() {
+    for text in [
+        "[export]\nzip = true\n",
+        "[export]\nalso = [\"cm\"]\nzip = false\n",
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err().to_string();
+        assert!(
+            e.contains("sdc.toml: export.zip: removed in 2.0;") && e.contains("zips"),
+            "{e}"
+        );
+    }
+    let ok = ConfigFile::parse("[export]\nalso = [\"cm\"]\n", "sdc.toml").unwrap();
+    assert_eq!(ok.export.unwrap().also, vec![AlsoTarget::Cm]);
+    // A preset names it the same way; `--set` too (the key is not settable, so the removal is what it says).
+    let head = "schema_version = 1\nid = \"twin\"\nversion = \"1\"\nbase = \"cs-quality\"\n";
+    let mut r = PresetRegistry::builtin().unwrap();
+    let e = r
+        .add_toml(&format!("{head}[export]\nzip = true\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("export.zip: removed in 2.0"), "{e}");
+    let e = engine::overrides::parse_set("export.zip=true").unwrap_err();
+    assert!(
+        e.contains("export.zip") && e.contains("removed in 2.0"),
+        "{e}"
+    );
+
+    for code in ["ALSO-ZIP-FAILED", "ALSO-REPORT-FAILED"] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains(code), "{e}");
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 2.0"), "{e}");
+        let e = engine::overrides::parse_set(&format!("allow=[\"{code}\"]")).unwrap_err();
+        assert!(e.contains(code), "{e}");
+    }
+}

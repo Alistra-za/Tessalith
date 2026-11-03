@@ -78,7 +78,7 @@ The GUI does, for PBR sets under `cs`, to `<export folder>\PBRNIFPatcher\<name>.
 
 ### Which source formats work?
 
-PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB (merged image, saved with Maximize Compatibility), and Krita/OpenRaster (merged image). GIMP `.xcf` and Paint.NET `.pdn` are not read; export to PNG or TGA first.
+PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, and PSD/PSB (merged image, saved with Maximize Compatibility). GIMP `.xcf`, Paint.NET `.pdn`, Krita and OpenRaster files are not read; export to PNG or TGA first.
 
 ### Can I run conversions from a script or another tool?
 
@@ -90,7 +90,7 @@ Do nothing special: `--on-existing if-changed` is the default. It compares each 
 
 ### How do I start an Also export (Vanilla / CM) from scratch?
 
-Delete everything it wrote together: the `<project> PBR`, `<project> Vanilla` and `<project> CM` folders, `<project> conversion-report.md`, the zips and `<project> SHA256SUMS.txt`. The record of the report, zips and sums lives in the PBR folder (`_sdc/also.json`), so deleting only the PBR folder makes the next export keep the old report, zips and sums as files it did not write (exit 1, with a note to delete them). If `also.json` cannot be read, no report, zip or sums file is written; the GUI's Problems row *also.json cannot be read* has **Reset also.json**, which deletes that record, and the next export then treats an old report, zips and sums the same way.
+Delete the `<project> PBR`, `<project> Vanilla` and `<project> CM` folders together. If `_sdc/also.json` in the PBR folder cannot be read, the GUI's Problems row *also.json cannot be read* has **Reset also.json**, which deletes that record.
 
 ### Where are my settings stored?
 

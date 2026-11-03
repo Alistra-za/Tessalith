@@ -484,7 +484,7 @@ fn column(ui: &mut egui::Ui, key: &str, heading: &str, body: impl FnOnce(&mut eg
 /// P2 / TA30: the CM lines Review shows: the engine's install text (the report prints the same; `grass`: a PBR grass
 /// set is not skipped), plus "the Vanilla folder is written too" when only CM is ticked.
 pub fn also_cm_lines(cfg: &ExportConfig, grass: bool) -> Vec<&'static str> {
-    let mut v = engine::also::cm_lines(cfg, grass, false);
+    let mut v = engine::also::cm_lines(cfg, grass);
     if !cfg.also.contains(&AlsoTarget::Vanilla) {
         v.push(engine::also::CM_NEEDS_VANILLA);
     }
@@ -534,7 +534,7 @@ fn name_field(
 }
 
 /// Review's "Also export as" column (Note CN, owner answers 5 and 6): the ticks, the location, the folder names, Keep
-/// metal brightness and the CM lines, the zip, the sets to skip, and the gate's Also reason (`gate`). It names what
+/// metal brightness and the CM lines, the sets to skip, and the gate's Also reason (`gate`). It names what
 /// is written and why it cannot be yet, never that it will succeed (Task 11 M5). The recipe is in Advanced.
 fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut Option<Act>) {
     let cfg = m.also_config();
@@ -658,17 +658,9 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
                 });
             });
             for l in also_cm_lines(&cfg, m.also_grass()) {
-                // The engine's text is Markdown (the report prints it); no backticks on screen.
+                // The engine's text is Markdown; no backticks on screen.
                 ui.add(egui::Label::new(egui::RichText::new(l.replace('`', "")).weak()).wrap());
             }
-        }
-        let mut zip = cfg.zip;
-        if ui
-            .checkbox(&mut zip, "Also write a zip of each folder")
-            .on_hover_text("With a SHA-256 sums file")
-            .changed()
-        {
-            *act = Some(Act::AlsoSet(Box::new(move |c| c.zip = zip)));
         }
         skip_list(ui, m, &cfg, act);
     })

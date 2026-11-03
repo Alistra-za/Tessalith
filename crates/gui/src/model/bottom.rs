@@ -103,10 +103,6 @@ pub enum Fix {
     Regenerate(String),
     /// CHAN-NORMAL-LENGTH (Note DP): set `channels.reconstruct_z` on this item.
     RebuildZ(String),
-    /// DERIVE-* (CN67): open the Also export's conversion report.
-    OpenReport(PathBuf),
-    /// DERIVE-* with no report written: open the Messages tab, which says why.
-    ShowMessages,
     /// IN-UNREADABLE (Y4): open the folder that holds the skipped entry.
     OpenFolder(PathBuf),
     /// CHK-GREEN-GUESS (CL5): answer this item's green convention as OpenGL.
@@ -563,7 +559,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             )
         });
     }
-    // Note FC10 (CN43): the Also export's record cannot be read, so no report, zip or sums file is written.
+    // Note FC10 (CN43): the Also export's record cannot be read; it is left as it is.
     if let Some(p) = &m.also_unreadable {
         out.push(Problem {
             fix: Some(Fix::ResetAlsoJson(p.clone())),
@@ -661,19 +657,16 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     None => Level::Warning,
                 };
                 let fix = match w.code {
-                    // No report written: Messages says why (fix round 1: a row always carries its action).
-                    Code::DeriveNifSuggest => Some(
-                        m.also_report
-                            .clone()
-                            .map_or(Fix::ShowMessages, Fix::OpenReport),
-                    ),
                     // Note FC3 (DP7d): after Rebuild Z the file on disk is still short; the row keeps the button.
                     Code::ChanNormalLength => live.map(|i| Fix::RebuildZ(i.key.clone())),
                     _ => None,
                 };
                 let at = At::File(r.job_key.clone());
+                // The suggested NIF values are the engine message; the row shows the sentence, the hover the values.
+                let detail = (w.code == Code::DeriveNifSuggest).then(|| w.message.clone());
                 out.push(Problem {
                     fix,
+                    detail,
                     ..row(level, at, w.message.clone(), Some(w.code))
                 });
             }
@@ -772,10 +765,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
 }
 
 /// The hover of `Reset also.json` (Note FC10, CN43, CN39).
-pub const RESET_ALSO_HOVER: &str = "Reset also.json deletes this record of the files an Also export wrote outside the \
-     manifests (report, zips, sums file). The manifests do not list those files, so nothing rebuilds it: the next Also \
-     export writes a new record, and each report, zip or sums file already there counts as one Tessalith did not \
-     write. The export keeps each one and says so; delete them to have them written again.";
+pub const RESET_ALSO_HOVER: &str = "Reset also.json deletes this record of the report, zips and sums file that an earlier \
+     Tessalith wrote beside an Also export. 2.0 writes none of them and reads nothing from the record; the next Also \
+     export starts a new one. The files themselves are never deleted.";
 /// The hover of a `Tag as grass` row (Note FC10).
 pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal map, as complex grass is. No grass record \
      (GRAS) of a scan names it, so it is converted as a diffuse until it is tagged. Tag as grass writes subtype = \

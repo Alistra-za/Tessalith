@@ -64,17 +64,15 @@ fn an_unreadable_entry_is_a_row_with_open_folder() {
     assert_eq!(h.state().shell, vec![ShellRequest::Open(folder)]);
 }
 
-/// CN67: DERIVE-NIF-SUGGEST is an engine Info; in the GUI it is a Warning row with `Open report`.
-/// Other Info results of the last export stay off the list.
+/// CN67 (Note FM: no report any more): DERIVE-NIF-SUGGEST is an engine Info; in the GUI it is a Warning row with no
+/// fix, whose hover holds the suggested values. Other Info results of the last export stay off the list.
 #[test]
-fn derive_results_are_rows_that_open_the_report() {
+fn derive_results_are_rows_with_the_values_on_hover() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
     m.export_clicked();
     assert!(m.wait_idle(Duration::from_secs(120)));
-    let report = d.path().join("export").join("x conversion-report.md");
-    m.also_report = Some(report.clone());
     m.export.rows[0]
         .warnings
         .push(Warning::new(Code::DeriveNotConverted, "not converted"));
@@ -86,7 +84,11 @@ fn derive_results_are_rows_that_open_the_report() {
     let row = row_of(&m, Code::DeriveNifSuggest);
     assert_eq!(row.level, Level::Warning);
     assert!(matches!(row.at, At::File(_)));
-    assert_eq!(row.fix, Some(Fix::OpenReport(report.clone())));
+    assert_eq!(row.fix, None);
+    assert_eq!(
+        row.detail.as_deref(),
+        Some("suggested NIF values: glossiness 30.0, specular strength 1.0")
+    );
     assert!(!code_sentence(Code::DeriveNifSuggest).is_empty());
     assert!(!problems(&m)
         .iter()
@@ -94,23 +96,6 @@ fn derive_results_are_rows_that_open_the_report() {
     let mut h = harness(m);
     h.run();
     h.get_by_label(code_sentence(Code::DeriveNifSuggest));
-    h.query_all_by_label("Open report").next().unwrap().click();
-    h.run();
-    assert_eq!(h.state().shell, vec![ShellRequest::Open(report)]);
-    // Fix round 1: with no report written the row still carries an action, Show in Messages.
-    h.state_mut().also_report = None;
-    h.state_mut().invalidate_views();
-    assert_eq!(
-        row_of(h.state(), Code::DeriveNifSuggest).fix,
-        Some(Fix::ShowMessages)
-    );
-    h.run();
-    h.query_all_by_label("Show in Messages")
-        .next()
-        .unwrap()
-        .click();
-    h.run();
-    assert_eq!(h.state().bottom.tab, bottom::BottomTab::Messages);
 }
 
 /// The fixture with only the plastic check on and one plain warning row: a Warning row and a Check row.

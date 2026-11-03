@@ -1359,8 +1359,6 @@ fn also_in_sdc_toml_writes_three_folders_under_o() {
     assert!(fx.dds("in CM/textures/arm/steel_m.dds").exists());
     // Not today's layout.
     assert!(!fx.dds("textures").exists());
-    let r = std::fs::read_to_string(fx.dds("in conversion-report.md")).unwrap();
-    assert!(r.contains("no: no scan"), "{r}");
     // The JSON stream carries all three phases.
     let done = events(&o)
         .iter()
@@ -1394,7 +1392,6 @@ fn the_cli_and_the_engine_write_the_same_bytes() {
         },
         location: loc2.clone(),
         scanned: false,
-        inner_layer_sets: Default::default(),
     };
     let s = run_also(
         &Engine::new().unwrap(),
@@ -1446,20 +1443,11 @@ fn without_also_the_output_is_the_plain_one() {
         assert!(fx.dds("textures/clutter/cup.dds").exists());
         assert!(fx.dds("_sdc/manifest.jsonl").exists());
         assert!(!fx.dds("in PBR").exists());
-        assert!(!fx.dds("in conversion-report.md").exists());
     }
 }
 
 #[test]
 fn also_exit_codes_follow_the_summary_not_err() {
-    // Partial 1: a zip Tessalith did not write is kept.
-    let fx = Fx::new();
-    fx.pbr_and_plain();
-    fx.project_config("[export]\nalso = [\"vanilla\"]\nzip = true\n");
-    fx.write("out/in PBR.zip", "mine");
-    let o = fx.convert(&HI);
-    assert_eq!(code(&o), 1, "{}", text(&o.stderr));
-    assert_eq!(std::fs::read(fx.p("out/in PBR.zip")).unwrap(), b"mine");
     // Fatal 3: the PBR phase fails (its folder name is taken by a file); `run_also` still returns Ok.
     let fx = Fx::new();
     fx.pbr_and_plain();
@@ -1485,7 +1473,7 @@ fn also_exit_codes_follow_the_summary_not_err() {
 
 /// Task 10 M1: a Ctrl-C on the Also path (simulated by the engine's `SDC_TEST_CANCEL_ON` hook, which cancels the
 /// token `run_also` was given just before the named file loads, as `cli_edges` does for the plain path) is partial:
-/// exit 1, no later phase, and the report says where it stopped.
+/// exit 1 and no later phase.
 #[test]
 fn a_cancel_on_the_also_path_exits_1_and_stops_the_later_phases() {
     let fx = Fx::new();
@@ -1504,26 +1492,18 @@ fn a_cancel_on_the_also_path_exits_1_and_stops_the_later_phases() {
     assert_eq!(code(&o), 1, "{}", text(&o.stderr));
     assert!(!fx.dds("in Vanilla").exists());
     assert!(!fx.dds("in CM").exists());
-    let r = std::fs::read_to_string(fx.dds("in conversion-report.md")).unwrap();
-    assert!(r.to_lowercase().contains("cancel"), "{r}");
 }
 
 /// Task 10 M2, CN99 (owner ruling): the Also path with the default acceptance (no `--accept-suggestions`). Every
 /// file stays undecided, so the PBR folder gets no texture, and Also derives nothing from the PBR set: no Vanilla or
-/// CM file, and the report says why. The undecided files make it partial (exit 1).
+/// CM file. The undecided files make it partial (exit 1).
 #[test]
 fn the_default_flow_with_undecided_sets() {
     let fx = Fx::new();
     fx.pbr_and_plain();
     fx.project_config(ALSO_ALL);
     let o = fx.convert(&[]);
-    let r = std::fs::read_to_string(fx.dds("in conversion-report.md")).unwrap();
-    assert_eq!(code(&o), 1, "{}\n{r}", text(&o.stderr));
-    assert!(r.contains("| in PBR | 0 | - | 0 | 5 | 0 |"), "{r}");
-    assert!(
-        r.contains("- textures/pbr/arm/steel: not derived: 3 maps undecided in the PBR export"),
-        "{r}"
-    );
+    assert_eq!(code(&o), 1, "{}", text(&o.stderr));
     assert!(!fx.dds("in PBR/textures/pbr/arm/steel.dds").exists());
     assert!(!fx.dds("in Vanilla/textures/arm/steel.dds").exists());
     assert!(!fx.dds("in Vanilla/textures/arm/steel_n.dds").exists());
@@ -1532,21 +1512,32 @@ fn the_default_flow_with_undecided_sets() {
 }
 
 /// Task 10 M3: `[export]` is read on every convert, but without `also` a valid table changes nothing, and a
-/// malformed one is a config error (exit 2) as any bad `sdc.toml` is.
+/// malformed one is a config error (exit 2) as any bad `sdc.toml` is. Note FM: so is the removed `zip` key, which
+/// the error names.
 #[test]
 fn an_export_table_without_also_stays_plain_or_fails_as_config() {
     let fx = Fx::new();
     fx.pbr_and_plain();
-    fx.project_config("[export]\nzip = true\n");
+    fx.project_config("[export]\nskip = [\"textures/pbr/arm/steel\"]\n");
     let o = fx.convert(&HI);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert!(fx.dds("textures/clutter/cup.dds").exists());
     assert!(!fx.dds("in PBR").exists());
-    assert!(!fx.p("out/in PBR.zip").exists());
-    let fx = Fx::new();
-    fx.pbr_and_plain();
-    fx.project_config("[export]\nzip = \"yes\"\n");
-    let o = fx.convert(&HI);
-    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
-    assert!(!fx.p("out").exists());
+    for (cfg, named) in [
+        ("[export]\nzip = true\n", "export.zip: removed in 2.0"),
+        ("[export]\nzip = \"yes\"\n", "export.zip: removed in 2.0"),
+        ("[export]\nbogus = 1\n", "bogus"),
+    ] {
+        let fx = Fx::new();
+        fx.pbr_and_plain();
+        fx.project_config(cfg);
+        let o = fx.convert(&HI);
+        assert_eq!(code(&o), 2, "{cfg}: {}", text(&o.stderr));
+        assert!(
+            text(&o.stderr).contains(named),
+            "{cfg}: {}",
+            text(&o.stderr)
+        );
+        assert!(!fx.p("out").exists());
+    }
 }

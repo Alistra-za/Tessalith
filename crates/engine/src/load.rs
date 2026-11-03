@@ -1,5 +1,4 @@
-//! Load PNG/TGA/TIFF/BMP/JPEG/WebP/OpenEXR/Radiance HDR, Photoshop PSD and PSB, and Krita/OpenRaster (their
-//! `mergedimage.png`) into float RGBA.
+//! Load PNG/TGA/TIFF/BMP/JPEG/WebP/OpenEXR/Radiance HDR and Photoshop PSD and PSB into float RGBA.
 //!
 //! Values are stored exactly as decoded (`k / 255.0` for 8-bit, `k / 65535.0` for 16-bit);
 //! no colour-space conversion happens here, the sRGB decode is done later in preprocess.
@@ -59,19 +58,11 @@ fn load_meta(
     if crate::psd::sniff(path) {
         return load_psd(path);
     }
-    // A Krita or OpenRaster archive reads as its `mergedimage.png` (`archive`).
-    if crate::archive::sniff(path) {
-        let bad = |msg: String| LoadError::Decode {
+    if let Some(msg) = unread_format(path) {
+        return Err(LoadError::Decode {
             path: path.to_path_buf(),
             msg,
-        };
-        // DECISIONS AF2: the IHDR first (MAX_DIM, `DIM-TOO-LARGE`), then an inflation capped by that size.
-        let (w, h) = image_size(path)?;
-        let png = crate::archive::merged_png_capped(path, crate::archive::merged_cap(w, h))
-            .map_err(bad)?;
-        let reader =
-            image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
-        return decode(reader, path, exr_straight);
+        });
     }
     let reader = image::ImageReader::open(path)
         .and_then(image::ImageReader::with_guessed_format)
@@ -80,6 +71,14 @@ fn load_meta(
             msg: e.to_string(),
         })?;
     decode(reader, path, exr_straight)
+}
+
+/// Note FM: Krita (`.kra`) and OpenRaster (`.ora`) files are discovered but not read. The name decides, so the
+/// source is reported (`IN-DECODE`) with the way out instead of being skipped silently.
+fn unread_format(path: &Path) -> Option<String> {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("kra") || e.eq_ignore_ascii_case("ora"))
+        .then(|| "Krita and OpenRaster files are not read; export the image as PNG".into())
 }
 
 /// What the png crate may allocate besides the image (DECISIONS AV1): its line buffer and ancillary chunks, the
@@ -160,8 +159,8 @@ pub fn image_size(path: &Path) -> Result<(u32, u32), LoadError> {
         dds_header_size(path).ok_or_else(|| bad("not a readable DDS header".into()))?
     } else if crate::psd::sniff(path) {
         crate::psd::size(path).map_err(|e| psd_error(path, e))?
-    } else if crate::archive::sniff(path) {
-        crate::archive::size(path).map_err(bad)?
+    } else if let Some(msg) = unread_format(path) {
+        return Err(bad(msg));
     } else {
         let mut reader = image::ImageReader::open(path)
             .and_then(image::ImageReader::with_guessed_format)

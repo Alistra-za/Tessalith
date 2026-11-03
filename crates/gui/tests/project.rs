@@ -272,7 +272,7 @@ fn an_explicit_default_valued_export_pin_survives_an_also_edit() {
     assert!(t.contains(&format!("brightness = {k:?}")), "{t}");
     assert!(t.contains("skip"), "{t}");
     assert!(
-        !t.contains("zip"),
+        !t.contains("ao_strength"),
         "a default the GUI would add is pruned: {t}"
     );
 }

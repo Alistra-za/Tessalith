@@ -1,7 +1,7 @@
 //! Track A (DECISIONS Note CN): "Also export as" Vanilla and Complex Material in the GUI model (Task 11, C1 under
 //! layout v2). The ticks and settings are `[export]` in `sdc.toml` (TA9), the location is `[project] also_location`
 //! in `sdc-project.toml` (TA10). Review opens whenever a tick is on, and its Export is the only way out (CA2).
-use super::{auto_flags, checks, messages, sets, AppModel};
+use super::{messages, sets, AppModel};
 use crate::project::ProjectDoc;
 use engine::also::{AlsoSpec, AlsoSummary, Phase};
 use engine::config::Target;
@@ -87,7 +87,7 @@ impl AppModel {
         });
     }
 
-    /// The names, Keep metal brightness and its strength, the zip tick and the `[export.legacy]` recipe values.
+    /// The names, Keep metal brightness and its strength and the `[export.legacy]` recipe values.
     pub fn set_also_settings(&mut self, f: impl FnOnce(&mut ExportConfig)) {
         self.edit_config("Also export settings", f);
     }
@@ -199,24 +199,12 @@ impl AppModel {
         })
     }
 
-    /// What `run_also` needs besides the request: the config, the location, TA13's `scanned` and TA27's sets.
+    /// What `run_also` needs besides the request: the config, the location and TA13's `scanned`.
     pub fn also_spec(&self) -> AlsoSpec {
-        // P21: Track C's test for a 1.0-neutral `_p` (PBR multilayer with coat parallax).
-        let inner_layer_sets = sets::views(self)
-            .iter()
-            .filter(|v| !v.key.is_empty())
-            .filter(|v| {
-                let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
-                let resolved = auto_flags::resolved(v.pbr, &v.slots, &v.settings);
-                checks::height_neutral(shader, &resolved) == checks::HeightNeutral::White
-            })
-            .map(|v| v.id.clone())
-            .collect();
         AlsoSpec {
             cfg: self.also_config(),
             location: self.also_location(),
             scanned: !self.mesh_votes.is_empty(),
-            inner_layer_sets,
         }
     }
 
@@ -263,7 +251,7 @@ impl AppModel {
     /// PBR-run failure is `Ok` from `run_also`), not a success.
     pub(super) fn also_finished(&mut self, s: AlsoSummary) {
         self.export.notes.extend(s.notes.iter().cloned());
-        // CN99: why a PBR set got no Vanilla or CM files (left out, undecided, DDS, ...), as the report says.
+        // CN99: why a PBR set got no Vanilla or CM files (left out, undecided, DDS, ...).
         self.export
             .notes
             .extend(s.sets.iter().map(|n| format!("{}: {}", n.id, n.why)));
@@ -330,9 +318,9 @@ impl AppModel {
         Ok(())
     }
 
-    /// Final review I2: the worker's `AlsoZipped`, after the JSON: the walk's, zips' and report's notes (only theirs),
-    /// then the export ends. A late one, after a panic or a new export, is dropped.
-    pub(super) fn also_zipped(&mut self, s: AlsoSummary) {
+    /// Final review I2: the worker's `AlsoWalked`, after the JSON: the walk's notes (only theirs), then the export
+    /// ends. A late one, after a panic or a new export, is dropped.
+    pub(super) fn also_walked(&mut self, s: AlsoSummary) {
         let Some(failure) = self.also_tail.take() else {
             return;
         };
@@ -341,24 +329,6 @@ impl AppModel {
             self.abandon_nif_export();
         }
         self.export.notes.extend(s.notes.iter().cloned());
-        for z in &s.zips {
-            self.export
-                .notes
-                .push(format!("Zip written: {}", z.display()));
-        }
-        // The "Export finished" line was decided before the zips: a zip or report not written is said here.
-        if s.zip_failed || s.report_failed {
-            self.messages.notify(
-                messages::Severity::Warning,
-                "Also export: a zip, the sums file or the report was not written (see the notes)",
-            );
-        }
-        self.also_report = s.report.clone();
-        if let Some(r) = &s.report {
-            let t = format!("Conversion report: {}", r.display());
-            self.messages.notify(messages::Severity::Info, t.clone());
-            self.export.notes.push(t);
-        }
         self.after_export(failure);
     }
 }
@@ -369,7 +339,7 @@ fn record_path(pbr_folder: &Path) -> PathBuf {
 }
 
 /// Final review I2: the files of `files` (`/`-separated paths under `root`, with their text) that now hold exactly
-/// that text: written by this export or found current. Their paths go to the Also export's zip step.
+/// that text: written by this export or found current. Their paths go to the Also export's walk.
 pub(super) fn current_files(root: &Path, files: &[(String, String)]) -> Vec<PathBuf> {
     files
         .iter()
@@ -444,13 +414,9 @@ mod tests {
             copied: 3,
             sets: vec![],
             folders: Default::default(),
-            report: None,
-            zips: vec![],
             notes: vec![],
             cancelled_after: None,
             error: phase.map(|p| (p, "plan broke".to_string(), 3)),
-            zip_failed: false,
-            report_failed: false,
         }
     }
 
@@ -514,7 +480,7 @@ mod tests {
         assert!(matches!(&m.export.rows[0].state, RowState::Failed(e) if e.contains("plan broke")));
     }
 
-    /// Re-review N2: only a file whose bytes equal this export's text goes to the zip step; a different or missing
+    /// Re-review N2: only a file whose bytes equal this export's text goes to the walk; a different or missing
     /// one does not.
     #[test]
     fn current_files_takes_only_files_that_hold_this_exports_text() {
@@ -533,9 +499,9 @@ mod tests {
         );
     }
 
-    /// Final review I2: a panic while the zips run ends the export once; a late `AlsoZipped` is then dropped.
+    /// Final review I2: a panic while the walk runs ends the export once; a late `AlsoWalked` is then dropped.
     #[test]
-    fn a_panic_while_zipping_ends_the_export_and_a_late_zip_result_is_dropped() {
+    fn a_panic_while_walking_ends_the_export_and_a_late_walk_result_is_dropped() {
         let mut m = bare_model();
         m.also_pass = true;
         m.export.running = Some(Default::default());
@@ -551,22 +517,22 @@ mod tests {
         m.export.running = Some(Default::default());
         let mut s = summary(None);
         s.notes = vec!["late".into()];
-        m.also_zipped(s);
+        m.also_walked(s);
         assert!(m.export.running.is_some(), "another export's token stays");
         assert!(!m.export.notes.contains(&"late".to_string()));
     }
 
-    /// Note GF8: a cancel while the zips and report run (the re-armed token) abandons the queued NIF export, as a
-    /// cancel during the conversion does; app.rs writes NIF edits only on `take_nif_export_due`.
+    /// Note GF8: a cancel while the walk runs (the re-armed token) abandons the queued NIF export, as a cancel during
+    /// the conversion does; app.rs writes NIF edits only on `take_nif_export_due`.
     #[test]
-    fn a_cancel_while_zipping_makes_no_nif_export_due() {
+    fn a_cancel_while_walking_makes_no_nif_export_due() {
         let mut m = bare_model();
         m.also_pass = true;
         m.export.running = Some(Default::default());
         m.export.running.as_ref().unwrap().cancel();
         m.also_tail = Some(None);
         m.nif_export_queued = true;
-        m.also_zipped(summary(None));
+        m.also_walked(summary(None));
         assert!(m.export.running.is_none());
         assert!(
             !m.take_nif_export_due(),
@@ -576,11 +542,11 @@ mod tests {
             m.nif_clear_answers_request,
             "and drops its Review answers (GF9)"
         );
-        // An uncancelled zip phase still hands the NIF export over.
+        // An uncancelled walk still hands the NIF export over.
         m.export.running = Some(Default::default());
         m.also_tail = Some(None);
         m.nif_export_queued = true;
-        m.also_zipped(summary(None));
+        m.also_walked(summary(None));
         assert!(m.take_nif_export_due());
     }
 

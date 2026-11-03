@@ -22,7 +22,7 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 - [Artist checks](docs/wiki/GUI-Artist-Checks.md#artist-checks): warnings for problems such as a weak or clipped height map, and missing uv coverage. They never block an export.
 
 **Maps and packing**
-- Inputs: PNG, TGA, TIFF, EXR, PSD/PSB, Krita, OpenRaster.
+- Inputs: PNG, TGA, TIFF, EXR, PSD/PSB.
 - SRGB / UNORM (Linear) tag chosen per map type and target shader.
 - Cutout alpha: coverage-preserving mips, on by default. Normal mips are renormalised, and their variance is baked into TruePBR roughness.
 - Loose maps are picked up and packed into `_rmaos` / `_rfaos` / complex `_m`. Suffix-based channel remapping; ORM to RMAOS is instant. The complex-material `_m` gate is checked.

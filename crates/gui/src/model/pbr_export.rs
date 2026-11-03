@@ -410,10 +410,6 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             }
         }
     }
-    // Note FC12 (supersedes CN45's skip-with-note): a zip the ZIP format cannot hold blocks before anything is written.
-    if let Some(text) = m.zip_row() {
-        out.push(general(text));
-    }
     out
 }
 

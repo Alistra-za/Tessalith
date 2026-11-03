@@ -141,8 +141,6 @@
         "DERIVE-NIF-SUGGEST",
         "ALSO-PHASE-FAILED",
         "ALSO-OWNED-UNREADABLE",
-        "ALSO-ZIP-FAILED",
-        "ALSO-REPORT-FAILED",
         "GEN-REPLACED",
         "GEN-STALE",
         "GEN-AO",

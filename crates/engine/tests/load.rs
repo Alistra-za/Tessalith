@@ -515,3 +515,45 @@ fn load_image_output_bits_are_pinned() {
     ];
     assert_eq!(got, want, "{got:x?}");
 }
+
+#[test]
+fn webp_lossless_reads_exactly() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("w.webp");
+    let img = ImageBuffer::from_fn(4, 2, |x, y| Rgba([x as u8 * 60, y as u8 * 90, 7, 200]));
+    let f = std::fs::File::create(&p).unwrap();
+    image::codecs::webp::WebPEncoder::new_lossless(f)
+        .encode(img.as_raw(), 4, 2, image::ExtendedColorType::Rgba8)
+        .unwrap();
+    let (out, info) = load_image(&p).unwrap();
+    assert_eq!(
+        (info.bit_depth, info.channels, info.has_alpha),
+        (8, 4, true)
+    );
+    assert_eq!(
+        out.at(3, 1),
+        [180.0 / 255.0, 90.0 / 255.0, 7.0 / 255.0, 200.0 / 255.0]
+    );
+    assert_eq!(image_size(&p).unwrap(), (4, 2));
+}
+
+/// Note FM: Krita and OpenRaster input is gone, but the file is reported (IN-DECODE) and never read or skipped
+/// silently. The name decides, so a real archive and a stub give the same message.
+#[test]
+fn a_kra_source_is_reported_not_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    for name in ["a.kra", "B.ORA"] {
+        let p = d.path().join(name);
+        std::fs::write(&p, b"PK\x03\x04 not read").unwrap();
+        for e in [
+            load_image(&p).map(|_| ()).unwrap_err(),
+            image_size(&p).map(|_| ()).unwrap_err(),
+        ] {
+            assert!(
+                matches!(&e, LoadError::Decode { msg, .. }
+                    if msg == "Krita and OpenRaster files are not read; export the image as PNG"),
+                "{name}: {e}"
+            );
+        }
+    }
+}

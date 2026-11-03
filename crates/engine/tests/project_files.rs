@@ -388,7 +388,7 @@ fn export_table_parses_with_defaults_and_round_trips() {
     .unwrap();
     let e = c.export.clone().unwrap();
     assert_eq!(e.also, vec![AlsoTarget::Vanilla, AlsoTarget::Cm]);
-    assert!(!e.zip && e.skip.is_empty());
+    assert!(e.skip.is_empty());
     assert_eq!(e.legacy.brightness, 0.65);
     assert_eq!(e.legacy.ao_strength, 0.5);
     let text = toml::to_string(&e).unwrap();
@@ -454,7 +454,7 @@ fn a_bad_legacy_value_does_not_break_a_plain_export() {
 fn export_in_the_user_config_is_refused() {
     let d = fixture("");
     let user = d.path().join("user.toml");
-    std::fs::write(&user, "[export]\nzip = true\n").unwrap();
+    std::fs::write(&user, "[export]\nalso = [\"cm\"]\n").unwrap();
     let mut r = req(&d);
     r.user_config = Some(user);
     match plan_events(r).0 {

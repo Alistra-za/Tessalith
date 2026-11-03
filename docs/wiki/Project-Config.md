@@ -216,7 +216,6 @@ An alias must stay under the project folder (no absolute path, no `..`), keep th
 ```toml
 [export]
 also = ["vanilla", "cm"]
-zip = true
 skip = ["textures/pbr/armor/iron/iron"]
 
 [export.names]
@@ -231,7 +230,6 @@ brightness = 0.9
 | Key | Default | Meaning |
 |---|---|---|
 | `also` | `[]` | `"vanilla"`, `"cm"` or both. Empty is a plain export. `"cm"` alone writes Vanilla too: CM installs on top of it. |
-| `zip` | `false` | Also zip each folder that ran into `<folder>.zip`, with a line per zip in `<project> SHA256SUMS.txt`. |
 | `skip` | `[]` | Set ids (as `--set set:<id>` names them) left out of Vanilla and CM. |
 | `names.pbr`, `names.vanilla`, `names.cm` | `<project> PBR`, `<project> Vanilla`, `<project> CM` | The folder names. `<project>` is the opened folder's name (the CLI: the input folder's). Must be usable folder names, not a Windows device name, and all three different. |
 

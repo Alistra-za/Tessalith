@@ -91,7 +91,6 @@ pub fn spec(loc: &Path, also: &[AlsoTarget]) -> AlsoSpec {
         },
         location: loc.to_path_buf(),
         scanned: false,
-        inner_layer_sets: BTreeSet::new(),
     }
 }
 

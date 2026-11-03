@@ -118,7 +118,7 @@ Plans the batch, then encodes every file whose status is ready.
 
 ### Also export as Vanilla / CM
 
-When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Config.md#export)), `sdc convert` runs three passes and writes `<project> PBR`, `<project> Vanilla` and `<project> CM` under `-o`. `<project>` is the first input folder's name (or the folder of the first input file). The PBR folder is the plain cs export; the other two are converted from its PBR sets. Then it writes `<project> conversion-report.md` under `-o` and, with `zip = true`, the zips and `<project> SHA256SUMS.txt`.
+When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Config.md#export)), `sdc convert` runs three passes and writes `<project> PBR`, `<project> Vanilla` and `<project> CM` under `-o`. `<project>` is the first input folder's name (or the folder of the first input file). The PBR folder is the plain cs export; the other two are converted from its PBR sets.
 
 - It needs the `cs` target: "Also export needs the cs mode: the PBR folder is the cs export" (exit 2).
 - A bad `[export.legacy]` value or folder name is an error (exit 2) on this path only; a plain run does not check them.

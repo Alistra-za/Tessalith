@@ -290,8 +290,6 @@ pub(crate) struct ViewKey {
     scan_db: Option<PathBuf>,
     /// Its stamp as of the last `poll` (an external CLI scan shows on the next frame).
     scan: cs_pbr::Stamp,
-    /// Note FC12: "Also write a zip" is in effect, so the zip-size row follows the tick on the next frame.
-    zip: bool,
 }
 
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
@@ -337,8 +335,6 @@ pub struct AppModel {
     pub stale: Vec<engine::manifest::StaleOutput>,
     /// FC11 (fix round 1): the JSON rows of `stale`, each with the SHA-256 its hash record holds (their baseline).
     pub stale_json: std::collections::BTreeMap<PathBuf, String>,
-    /// Note FC3: the last Also export's conversion report, the DERIVE rows' Open report.
-    pub also_report: Option<PathBuf>,
     /// Note FC10 (CN43): the PBR folder's `_sdc/also.json` that the last Also export could not read.
     pub also_unreadable: Option<PathBuf>,
     /// Note FC10 (item 27): the project files with the read-only flag, as of the last open, reload or save.
@@ -608,11 +604,9 @@ pub struct AppModel {
     also_reply: Option<Sender<Vec<PathBuf>>>,
     /// Final review I2: the files the JSON finishers wrote (or found current) in this export.
     also_json: Vec<PathBuf>,
-    /// Note FC12: the zip-size row's limits (entries, bytes): the ZIP format's, lowered only by tests.
-    zip_limits: (usize, u64),
-    /// Final review I2: the token `export_ended` took, re-armed while the walk, zips and report run.
+    /// Final review I2: the token `export_ended` took, re-armed while the walk runs.
     also_cancel: Option<CancelToken>,
-    /// Final review I2: `Some` while the walk, zips and report run: the export's failure, shown when they end.
+    /// Final review I2: `Some` while the walk runs: the export's failure, shown when they end.
     also_tail: Option<Option<String>>,
     /// `sdc.toml` was made read-only because the engine rejected it (not because it failed to parse).
     ignored_by_plan: bool,
@@ -719,7 +713,6 @@ impl AppModel {
             unreadable: vec![],
             stale: vec![],
             stale_json: Default::default(),
-            also_report: None,
             also_unreadable: None,
             read_only_flags: vec![],
             nif_problems: Default::default(),
@@ -836,7 +829,6 @@ impl AppModel {
             also_written: None,
             also_reply: None,
             also_json: Vec::new(),
-            zip_limits: (engine::zip::MAX_ENTRIES, engine::zip::MAX_BYTES),
             also_cancel: None,
             also_tail: None,
             ignored_by_plan: false,
@@ -974,7 +966,6 @@ impl AppModel {
         self.sets.clear();
         self.sets_root = None;
         self.also_written = None;
-        self.also_report = None;
         self.also_unreadable = None;
         // FC11: the previous folder's stale files never get a Delete here.
         self.stale.clear();
@@ -1614,7 +1605,7 @@ impl AppModel {
                     // Audit 08f-9: one error dialog. `export_ended` shows it unless the user was leaving (then the
                     // panic arm shows its own, Note BI6) or a dialog is open, which stays (review m1, 08f-6).
                     "export" => {
-                        // Final review I2: the worker is gone; nothing waits for the JSON and no `AlsoZipped` comes.
+                        // Final review I2: the worker is gone; nothing waits for the JSON and no `AlsoWalked` comes.
                         self.also_reply = None;
                         self.also_tail = None;
                         self.export_ended(Err(format!("internal error: {message}")));
@@ -1701,7 +1692,7 @@ impl AppModel {
                 self.also_reply = Some(reply);
                 self.also_finished(*s)
             }
-            WorkerMsg::AlsoZipped(s) => self.also_zipped(*s),
+            WorkerMsg::AlsoWalked(s) => self.also_walked(*s),
             WorkerMsg::ExportDone(result) => self.export_ended(result),
             WorkerMsg::Source { token, result } => self.on_source(token, result),
             WorkerMsg::Encoded { token, result } => self.on_encoded(token, result),
@@ -1800,8 +1791,8 @@ impl AppModel {
         self.finish_xpmf(xpmf);
         // FC11: the records just written decide which JSON files are stale.
         self.refresh_stale_json();
-        // Final review I2: an Also export's walk, zips and report run now, on its worker, so the PBR zip holds the
-        // JSON above. The export stays running (Cancel reaches the zips); `also_zipped` does the rest.
+        // Final review I2: an Also export's walk of the folders runs now, on its worker, so it counts the JSON above as
+        // this export's. The export stays running (Cancel reaches the walk); `also_walked` does the rest.
         let json = std::mem::take(&mut self.also_json);
         if let Some(tx) = self.also_reply.take() {
             if tx.send(json).is_ok() {
@@ -1823,7 +1814,7 @@ impl AppModel {
 
     /// The end of an export: what was asked while it ran (close, or open another folder), else its error as a dialog.
     fn after_export(&mut self, failure: Option<String>) {
-        // Note FC5: the run has fully ended (with Also on, after its zips). Opening another folder below clears it.
+        // Note FC5: the run has fully ended (with Also on, after its walk). Opening another folder below clears it.
         self.nif_export_due |= std::mem::take(&mut self.nif_export_queued);
         // A user who cancelled the export to leave does not need its error as a dialog.
         if !self.run_after_export() {
@@ -2268,7 +2259,6 @@ impl AppModel {
         self.also_pass = also;
         self.also_error = None;
         self.also_written = None;
-        self.also_report = None;
         // Final review I2: dropping an earlier export's sender releases its worker (no extra file).
         self.also_reply = None;
         self.also_json.clear();
@@ -3046,7 +3036,6 @@ impl AppModel {
             target: self.target,
             scan_db: self.scan_db.clone(),
             scan: self.scan_stamp,
-            zip: self.zip_on(),
         }
     }
 

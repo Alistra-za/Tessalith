@@ -216,14 +216,7 @@ fn fix_button(
                 off.or(done),
             )
         }
-        Fix::OpenReport(path) => button(ui, "Open report", &path.display().to_string(), None),
         Fix::OpenFolder(path) => button(ui, "Open folder", &path.display().to_string(), None),
-        Fix::ShowMessages => button(
-            ui,
-            "Show in Messages",
-            "No conversion report was written; Messages says why",
-            None,
-        ),
         Fix::TreatAsOpenGl(_) => button(
             ui,
             "Treat as OpenGL",
@@ -601,8 +594,7 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
             }
         }
         Fix::RebuildZ(k) => model.set_field(&k, "channels.reconstruct_z", json!(true)),
-        Fix::OpenReport(p) | Fix::OpenFolder(p) => model.shell.push(ShellRequest::Open(p)),
-        Fix::ShowMessages => model.show_tab(crate::model::bottom::BottomTab::Messages),
+        Fix::OpenFolder(p) => model.shell.push(ShellRequest::Open(p)),
         Fix::TreatAsOpenGl(k) => {
             model.decide(&k, Answer::Green(engine::config::GreenConvention::Opengl))
         }

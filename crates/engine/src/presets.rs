@@ -188,8 +188,6 @@ pub struct FolderNames {
 pub struct ExportConfig {
     /// Folders to write besides the PBR export. Empty = a plain export.
     pub also: Vec<AlsoTarget>,
-    /// Zip each folder, with a SHA-256 sums file.
-    pub zip: bool,
     /// Set ids (as `--set set:<id>` uses) left out of Vanilla and CM (C2).
     pub skip: Vec<String>,
     pub names: FolderNames,

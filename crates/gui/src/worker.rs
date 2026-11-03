@@ -71,8 +71,8 @@ pub enum WorkerMsg {
     /// Note CN: an Also export's phases' summary; sent just before its `ExportDone`. The worker then waits on the
     /// sender for the files the JSON finishers wrote into the PBR folder (final review I2; dropped = none).
     AlsoFinished(Box<engine::also::AlsoSummary>, Sender<Vec<PathBuf>>),
-    /// Final review I2: the walk, zips and report ran after the JSON; only their notes, zips and report.
-    AlsoZipped(Box<engine::also::AlsoSummary>),
+    /// Final review I2: the walk of the folders ran after the JSON; only its notes.
+    AlsoWalked(Box<engine::also::AlsoSummary>),
     Source {
         token: u64,
         result: Result<Arc<SourcePreview>, String>,
@@ -260,7 +260,7 @@ pub fn spawn_export(
 /// the `Panicked` router ends it. Sends `AlsoFinished`, then `ExportDone`: an `Err` when the run failed or its PBR
 /// phase did (CN56: `start_also` returns `Ok` then, and nothing must be written after it); otherwise every phase's
 /// counts, with the copies (left out of `batch_done`) counted as written. Then (final review I2) it waits for the
-/// JSON the model wrote into the PBR folder, runs `finish_also` (walk, zips, report) and sends `AlsoZipped`.
+/// JSON the model wrote into the PBR folder, runs `finish_also` (the walk of the folders) and sends `AlsoWalked`.
 pub fn spawn_export_also(
     tx: Sender<WorkerMsg>,
     session: Arc<Session>,
@@ -293,9 +293,9 @@ pub fn spawn_export_also(
         let _ = tx.send(WorkerMsg::ExportDone(also_done(&run.summary)));
         // A model that dropped the sender (a panic, a new export) sends nothing: no extra file, never a hang.
         let extra = json_rx.recv().unwrap_or_default();
-        let mut s = engine::also::finish_also(run, &spec, &extra, &cancel);
+        let mut s = engine::also::finish_also(run, &extra, &cancel);
         s.notes.drain(..before);
-        let _ = tx.send(WorkerMsg::AlsoZipped(Box::new(s)));
+        let _ = tx.send(WorkerMsg::AlsoWalked(Box::new(s)));
     });
 }
 

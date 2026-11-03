@@ -182,7 +182,7 @@ fn a_tick_is_one_undo_step_and_exports_three_folders() {
         .export
         .notes
         .iter()
-        .any(|n| n.contains("Mod conversion-report.md")));
+        .all(|n| !n.contains("conversion-report")));
     all_rows_ended(&m);
     let (done, total) = m.export.progress();
     assert_eq!(done, total);
@@ -555,32 +555,14 @@ fn a_tick_is_refused_in_the_vanilla_mode() {
     assert_eq!(m.status_line, sdc_gui::model::also::NEEDS_CS);
 }
 
-/// The entry names of a zip, from its central directory (as the engine's also_export test reads them).
-fn zip_names(path: &Path) -> Vec<String> {
-    let z = std::fs::read(path).unwrap();
-    let u16le = |at: usize| u16::from_le_bytes([z[at], z[at + 1]]) as usize;
-    let u32le = |at: usize| u32::from_le_bytes(z[at..at + 4].try_into().unwrap()) as usize;
-    let eocd = z.len() - 22;
-    let mut at = u32le(eocd + 16);
-    (0..u16le(eocd + 10))
-        .map(|_| {
-            let (n, x, c) = (u16le(at + 28), u16le(at + 30), u16le(at + 32));
-            let name = String::from_utf8(z[at + 46..at + 46 + n].to_vec()).unwrap();
-            at += 46 + n + x + c;
-            name
-        })
-        .collect()
-}
-
-/// Final review I2: the PBR zip holds the PGPatcher JSON the export wrote into the PBR folder, from the first run,
-/// with no "not zipped" note for it.
+/// Final review I2 (Note FM: no zip any more): the PGPatcher JSON the export wrote into the PBR folder is this export's,
+/// from the first run, so the walk of the folders does not note it as a file it did not write. No zip, sums file or
+/// report is written beside the folders.
 #[test]
-fn the_pbr_zip_holds_the_pgpatcher_json_from_the_first_run() {
+fn the_pgpatcher_json_is_not_noted_and_nothing_else_is_written_beside_the_folders() {
     let d = tempfile::tempdir().unwrap();
     let mut m = project(d.path());
     tick(&mut m, AlsoTarget::Vanilla);
-    m.set_also_settings(|c| c.zip = true);
-    idle(&mut m);
     export(&mut m);
     all_rows_ended(&m);
     let json = sdc_gui::model::pbr_export::prepare(&m).unwrap().path;
@@ -594,66 +576,19 @@ fn the_pbr_zip_holds_the_pgpatcher_json_from_the_first_run() {
             .to_string_lossy()
             .replace('\\', "/")
     );
-    let zip = m.also_location().join(format!("{name}.zip"));
-    let names = zip_names(&zip);
-    assert!(names.contains(&entry), "{entry}: {names:?}");
     assert!(
         !m.export.notes.iter().any(|n| n.starts_with(&entry)),
         "{:?}",
         m.export.notes
     );
-    assert!(m.export.notes.iter().any(|n| n.starts_with("Zip written:")));
+    let beside: Vec<String> = std::fs::read_dir(m.also_location())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| [".zip", ".txt", ".md"].iter().any(|x| n.ends_with(x)))
+        .collect();
+    assert!(beside.is_empty(), "{beside:?}");
     assert!(m.export.running.is_none());
 }
-
-/// Note FC12 (fix round 1): the zip estimate counts every file the PBR zip gets (outputs and JSON), and over the
-/// limits it is a Blockers row that holds Review's gate; unticking the zip, or Also, clears it on the next frame.
-#[test]
-fn a_zip_over_the_limit_blocks_and_its_estimate_counts_every_entry() {
-    const ROW: &str = "Zip too large for the ZIP format";
-    let rows = |m: &AppModel| {
-        sdc_gui::model::pbr_export::export_blocks(m)
-            .into_iter()
-            .filter(|b| b.text.starts_with(ROW))
-            .count()
-    };
-    let d = tempfile::tempdir().unwrap();
-    let mut m = project(d.path());
-    m.set_also_settings(|c| c.zip = true);
-    idle(&mut m);
-    assert_eq!(m.zip_estimate(), None, "no Also tick: no zip");
-    tick(&mut m, AlsoTarget::Vanilla);
-    let e = m.zip_estimate().expect("zip on");
-    assert_eq!(rows(&m), 0);
-    export(&mut m);
-    let pbr = m.also_folders()[0].clone();
-    let name = pbr.file_name().unwrap().to_string_lossy().into_owned();
-    let zipped = zip_names(&m.also_location().join(format!("{name}.zip"))).len();
-    assert_eq!(
-        e.entries, zipped,
-        "the estimate counts the PBR zip's entries"
-    );
-    // At the limit (the real one is 65,535 files): a row, and the gate waits.
-    m.set_zip_limits(e.entries, u64::MAX);
-    // The tick reaches the cached row at once, before the new plan lands (`ViewKey::zip`).
-    m.set_also_settings(|c| c.zip = false);
-    assert_eq!(rows(&m), 0, "zip off: the row goes on the next frame");
-    idle(&mut m);
-    assert_eq!(rows(&m), 0, "zip off: no row");
-    m.open_review();
-    m.acknowledge_all_asks();
-    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
-    m.set_also_settings(|c| c.zip = true);
-    assert_eq!(rows(&m), 1, "zip on: the row comes on the next frame");
-    idle(&mut m);
-    m.open_review();
-    m.acknowledge_all_asks();
-    assert!(m.review_gate().is_err(), "the zip row holds the gate");
-    m.set_also_tick(AlsoTarget::Vanilla, false);
-    idle(&mut m);
-    assert_eq!(rows(&m), 0, "Also off: no zip, no row");
-}
-
 /// Every `[export]` field set at once survives the write and the parse (prune, tables after values), as an unsaved
 /// edit; only the non-default fields are written.
 #[test]
@@ -664,7 +599,6 @@ fn every_export_field_round_trips_through_sdc_toml() {
     let steel = steel_id(&m);
     m.set_also_settings(|c| {
         c.also.push(AlsoTarget::Cm);
-        c.zip = true;
         c.skip = vec![steel.clone()];
         c.names.vanilla = Some("Plain".into());
         c.legacy.brightness = 0.8;
@@ -680,7 +614,7 @@ fn every_export_field_round_trips_through_sdc_toml() {
         .unwrap();
     assert_eq!(parsed, m.also_config(), "{text}");
     assert_eq!(parsed.also, [AlsoTarget::Vanilla, AlsoTarget::Cm]);
-    assert!(parsed.zip && parsed.legacy.brightness == 0.8 && parsed.legacy.keep_metal_brightness);
+    assert!(parsed.legacy.brightness == 0.8 && parsed.legacy.keep_metal_brightness);
     assert_eq!(parsed.names.vanilla.as_deref(), Some("Plain"));
     assert_eq!(parsed.skip, [steel.as_str()]);
     assert!(

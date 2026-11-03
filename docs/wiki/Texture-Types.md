@@ -9,7 +9,7 @@ Tessalith decides how to encode each file from its sub-type: what the texture is
 | `.png`, `.tga`, `.tif`, `.tiff`, `.bmp`, `.jpg`, `.jpeg`, `.webp` | Read as stored. |
 | `.exr`, `.hdr` | Float sources. A TruePBR emissive needs one (peaking above 1.0) to become BC6H. `hdr_sky` is BC6H whatever the source. An `.exr` with alpha is read as premultiplied; set `alpha.exr_straight = true` for one saved with straight alpha (in the GUI: the Problems row's **Straight alpha**, or the tick box in the texture's Alpha group). |
 | `.psd`, `.psb` | The merged composite image only; layers are never read. RGB and Grayscale documents, 8, 16 and 32 bits per channel. The file must be saved with Maximize Compatibility on; without it the file is refused. Colour that Photoshop matted against white is un-matted. |
-| `.kra`, `.ora` | Krita and OpenRaster: the `mergedimage.png` stored in the archive. Layers are never read. |
+| `.kra`, `.ora` | Not read: `IN-DECODE` ("Krita and OpenRaster files are not read; export the image as PNG"). |
 | `.dds` | Skipped by default (`IN-DDS-SKIPPED`). Set `reencode = true` on the file to convert it anyway, at a quality cost (`LOSS-REENCODE`). |
 
 Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Embedded ICC profiles are ignored and the pixels are read as stored. NaN or infinite samples are replaced (`IN-NONFINITE`).

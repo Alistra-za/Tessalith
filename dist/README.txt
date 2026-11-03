@@ -1,9 +1,8 @@
 Tessalith 1.0.0
 ===============
 
-Tessalith converts a folder of source images (PNG, TGA, TIFF, EXR, PSD,
-Krita, OpenRaster) to DDS for Skyrim SE/AE. It works out what each file is
-from its name, groups files into material sets, packs loose maps into
+Tessalith converts a folder of source images (PNG, TGA, TIFF, EXR, PSD) to DDS for Skyrim
+SE/AE. It works out what each file is from its name, groups files into material sets, packs loose maps into
 Skyrim's layouts, builds the mips and picks the format and colour tag.
 
 Back up your mod folders before you convert in place.

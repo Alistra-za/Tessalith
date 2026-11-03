@@ -7,23 +7,21 @@ use crate::api::{
 use crate::codes::{Code, Warning};
 use crate::config::{GraySource, Profile, RawMap, Target};
 use crate::dds::{may_replace, write_atomic, Kept};
-use crate::derive::{vanilla_rel, DeriveMode, DeriveRequest, DeriveSet};
+use crate::derive::{vanilla_rel, DeriveKind, DeriveMode, DeriveRequest, DeriveSet};
 use crate::events::{
     new_batch_id, EngineEvent, EventKind, EventSink, PrefixSink, Reporter, SkipKind, Stage,
 };
 use crate::manifest::{output_key, EncoderVersions, Manifest, ManifestEntry, ManifestRecord};
 use crate::pack::{rmaos_channel, ChannelSource, RecipeKind, Slot};
-use crate::policy::{JobStatus, ResolvedJob, SourceStamp};
+use crate::policy::{JobStatus, Provenance, ResolvedJob, SourceStamp};
 use crate::presets::{AlsoTarget, ExportConfig};
 use crate::session::AnalysisCache;
-use crate::shader::{assign, MemberMap, Shader};
+use crate::shader::{assign, MemberMap};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
-pub mod report;
 
 /// One of the three runs of an Also export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +39,6 @@ pub struct AlsoSpec {
     pub location: PathBuf,
     /// The mesh votes were read (TA13).
     pub scanned: bool,
-    /// Set ids whose `_p` is 1.0-neutral (TA27), for the report. The GUI fills it; the CLI leaves it empty.
-    // shortcut: the CLI has no resolved PGP flags, so it never marks an inner-layer `_p`; upgrade if the engine learns
-    // them.
-    pub inner_layer_sets: BTreeSet<String>,
 }
 
 /// A PBR set's fate in Vanilla and CM that the report lists (a skipped set, ...).
@@ -62,20 +56,12 @@ pub struct AlsoSummary {
     pub copied: u32,
     pub sets: Vec<SetNote>,
     pub folders: [PathBuf; 3],
-    /// Task 9.
-    pub report: Option<PathBuf>,
-    /// Task 8.
-    pub zips: Vec<PathBuf>,
     pub notes: Vec<String>,
     /// A cancel stopped the export after this phase.
     pub cancelled_after: Option<Phase>,
     /// The phase an engine error stopped (the PBR run, CN56; the Vanilla or CM plan or run), its message and its exit
     /// code (`EngineError::exit_code`).
     pub error: Option<(Phase, String, i32)>,
-    /// `zip` was on and a zip or the sums file was not written (`ALSO-ZIP-FAILED` or `ALSO-OWNED-UNREADABLE`).
-    pub zip_failed: bool,
-    /// The report was not written: kept as edited outside Tessalith, or an I/O error (`ALSO-REPORT-FAILED`, CN51).
-    pub report_failed: bool,
 }
 
 /// `b`'s counts added to `a`, `cancelled` concatenated.
@@ -101,13 +87,13 @@ impl AlsoSummary {
 
     /// A later phase's engine error code (2 or 3) when there is one, as a plain export that errors exits with it;
     /// else `combined().exit_code()`, where an export a cancel stopped before its last phase is partial (1, which
-    /// beats 4 as in spec §8) even when the phases that ran were clean. A zip not written is partial too.
+    /// beats 4 as in spec §8) even when the phases that ran were clean.
     pub fn exit_code(&self) -> i32 {
         if let Some((_, _, code)) = &self.error {
             return *code;
         }
         match self.combined().exit_code() {
-            0 | 4 if self.cancelled_after.is_some() || self.zip_failed || self.report_failed => 1,
+            0 | 4 if self.cancelled_after.is_some() => 1,
             c => c,
         }
     }
@@ -121,11 +107,10 @@ pub const NO_PBR_SETS: &str = "no PBR sets: Vanilla holds copies only; no CM fol
 /// C2: a set the user left out.
 pub const SKIPPED_SET: &str = "skipped (Skip vanilla/CM for this set)";
 
-/// P2: the CM install text, the one copy the report and the GUI's Review print. CM never holds `_n` or plain sets
-/// (TA7, O4); with Keep metal brightness off it holds only the `_m` files, plus the complex-grass stacks when a PBR
-/// grass set is exported (`grass`). `stale`: the folder also holds files this export did not write (final review I3;
-/// known after a run only, so Review passes `false`).
-pub fn cm_lines(cfg: &ExportConfig, grass: bool, stale: bool) -> Vec<&'static str> {
+/// P2: the CM install text, the one copy the GUI's Review prints. CM never holds `_n` or plain sets (TA7, O4); with
+/// Keep metal brightness off it holds only the `_m` files, plus the complex-grass stacks when a PBR grass set is
+/// exported (`grass`).
+pub fn cm_lines(cfg: &ExportConfig, grass: bool) -> Vec<&'static str> {
     let mut v = vec!["Install the CM folder on top of the Vanilla folder."];
     if !cfg.legacy.keep_metal_brightness {
         v.push(match grass {
@@ -134,12 +119,6 @@ pub fn cm_lines(cfg: &ExportConfig, grass: bool, stale: bool) -> Vec<&'static st
             }
             false => "It holds only the `_m` files.",
         });
-    }
-    if stale {
-        v.push(
-            "It also holds files this export did not write, listed under Notes: one with the name of a Vanilla file \
-             overrides it until you delete it.",
-        );
     }
     v
 }
@@ -239,6 +218,38 @@ pub fn check_names(cfg: &ExportConfig, project: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// I1: a plan-time error job of a derived output: a derive recipe's (`recipe:<kind>`) on a member of a PBR set.
+fn derive_error(j: &ResolvedJob, members: &BTreeSet<&Path>) -> bool {
+    const KINDS: [DeriveKind; 6] = [
+        DeriveKind::VanillaDiffuse,
+        DeriveKind::CmDiffuse,
+        DeriveKind::LegacyN,
+        DeriveKind::CmM,
+        DeriveKind::EnvM,
+        DeriveKind::GrassStack,
+    ];
+    matches!(j.status, JobStatus::Error { .. })
+        && members.contains(j.input.as_path())
+        && matches!(j.provenance.get("subtype"), Some(Provenance::Recipe(id)) if KINDS.iter().any(|k| k.id() == id))
+}
+
+/// A set the Vanilla plan skipped whole (`DERIVE-DDS-SOURCE`, `DERIVE-NO-ALBEDO`), read before the plan runs: one
+/// `SetNote` with the skip's reason (the last one when several members were skipped).
+fn skipped_sets(plan: &Plan, sets: &[DeriveSet]) -> Vec<SetNote> {
+    sets.iter()
+        .filter_map(|s| {
+            let why = plan.skipped.iter().rfind(|k| {
+                matches!(k.code, Some(Code::DeriveDdsSource | Code::DeriveNoAlbedo))
+                    && s.members.contains(&k.path)
+            })?;
+            Some(SetNote {
+                id: s.id.clone(),
+                why: why.reason.clone(),
+            })
+        })
+        .collect()
 }
 
 /// The PBR sets of the PBR phase's plan (TA11: picked `pbr`, `pbr_landscape` or `pbr_grass`) by the slot rule (Task 4
@@ -429,8 +440,8 @@ struct Owned {
     pending: Option<String>,
 }
 
-/// TA21: the files an Also export writes outside the manifests (the report, the zips, the sums file), as hash
-/// records in `<PBR folder>/_sdc/also.json`, keyed by absolute, lower-cased, `/`-separated paths.
+/// TA21: the record of the files an Also export wrote outside the manifests before 2.0 (the report, the zips, the sums
+/// file), as hash records in `<PBR folder>/_sdc/also.json`, keyed by absolute, lower-cased, `/`-separated paths.
 pub struct OwnedFiles {
     path: PathBuf,
     records: BTreeMap<String, Owned>,
@@ -516,8 +527,8 @@ impl EventSink for NoBatchWarnings {
     }
 }
 
-/// P4: the job keys (relative to the phase's folder, lower-cased) a phase wrote or found up to date, copies included:
-/// TA23's zip list. It is the first sink under the phase's `Reporter`, so the keys are not yet prefixed.
+/// P4: the job keys (relative to the phase's folder, lower-cased) a phase wrote or found up to date, copies included.
+/// It is the first sink under the phase's `Reporter`, so the keys are not yet prefixed.
 struct Recorder {
     inner: Arc<dyn EventSink>,
     keys: Arc<Mutex<BTreeSet<String>>>,
@@ -540,11 +551,8 @@ impl EventSink for Recorder {
     }
 }
 
-/// C8: why no zip was written.
-pub const ZIP_SKIPPED: &str = "zip skipped: the export did not finish";
-/// TA23: a file in a zipped folder that this run did not write or find up to date.
-pub const NOT_ZIPPED: &str = "not zipped: not written by this export";
-/// Final review I3: the same, with zip off. Such a file is kept (Tessalith never deletes) and reported.
+/// Final review I3: a file in an output folder that this run did not write or find up to date. It is kept (Tessalith
+/// never deletes) and reported.
 pub const NOT_WRITTEN: &str = "not written by this export; kept as it is";
 
 /// Every file under `folder` but `_sdc` and leftover `.sdc-*.tmp` files (08d-3).
@@ -574,87 +582,27 @@ fn folder_name(folder: &Path) -> String {
         .into_owned()
 }
 
-/// Final review I3: each folder that ran, as this run's files (TA23's zip list: `keys`) or the walk's error. Every
-/// other file is kept and gets a note: `NOT_ZIPPED` with `zip` on, else `NOT_WRITTEN`.
-fn this_runs_files(
-    s: &mut AlsoSummary,
-    keys: &[BTreeSet<String>; 3],
-    zip: bool,
-) -> Vec<(usize, std::io::Result<Vec<PathBuf>>)> {
+/// Final review I3: in each folder that ran, every file this run did not write or find up to date (`keys`) is kept
+/// and gets a `NOT_WRITTEN` note. A folder that cannot be walked gets none.
+fn note_unwritten_files(s: &mut AlsoSummary, keys: &[BTreeSet<String>; 3]) {
     let ran: Vec<usize> = s.phases.iter().map(|(p, _)| *p as usize).collect();
-    let mut out = vec![];
     for i in ran {
         let folder = s.folders[i].clone();
         let name = folder_name(&folder);
-        let files = folder_files(&folder).map(|files| {
-            let (take, mut left): (Vec<_>, Vec<_>) = files
-                .into_iter()
-                .partition(|f| keys[i].contains(&output_key(&folder, f)));
-            left.sort();
-            for f in left {
-                let rel = slash(f.strip_prefix(&folder).unwrap_or(&f));
-                let why = if zip { NOT_ZIPPED } else { NOT_WRITTEN };
-                s.notes.push(format!("{name}/{rel}: {why}"));
-            }
-            take
-        });
-        out.push((i, files));
-    }
-    out
-}
-
-/// C8 (Note CN): each folder that ran becomes `<location>/<folder name>.zip` of this run's outputs (TA23, `files`
-/// from `this_runs_files`), and `<location>/<project> SHA256SUMS.txt` gets a line per zip written, all through
-/// `OwnedFiles` (TA21). Returns what was not written, one message each (review M1).
-fn write_zips(
-    s: &mut AlsoSummary,
-    owned: &mut OwnedFiles,
-    files: Vec<(usize, std::io::Result<Vec<PathBuf>>)>,
-    location: &Path,
-    project: &str,
-    cancel: &CancelToken,
-) -> Vec<String> {
-    let (mut lines, mut failed) = (String::new(), vec![]);
-    for (i, take) in files {
-        let name = folder_name(&s.folders[i]);
-        let folder = &s.folders[i];
-        let zip = location.join(format!("{name}.zip"));
-        let take = match take {
-            Ok(f) => f,
-            Err(e) => {
-                failed.push(format!("{} not written ({e})", zip.display()));
-                continue;
-            }
+        let Ok(files) = folder_files(&folder) else {
+            continue;
         };
-        let bytes = match crate::zip::write_zip(folder, &take, cancel) {
-            Ok(b) => b,
-            Err(e) => {
-                failed.push(format!("{} not written: {e}", zip.display()));
-                continue;
-            }
-        };
-        match owned.write(&zip, &bytes) {
-            Ok(()) => {
-                lines.push_str(&format!("{}  {name}.zip\n", sha256_hex(&bytes)));
-                s.zips.push(zip);
-            }
-            Err(e) => failed.push(e.note(&zip)),
+        let mut left: Vec<_> = files
+            .into_iter()
+            .filter(|f| !keys[i].contains(&output_key(&folder, f)))
+            .collect();
+        left.sort();
+        for f in left {
+            let rel = slash(f.strip_prefix(&folder).unwrap_or(&f));
+            s.notes.push(format!("{name}/{rel}: {NOT_WRITTEN}"));
         }
     }
-    let sums = location.join(format!("{project} SHA256SUMS.txt"));
-    if !lines.is_empty() {
-        if let Err(e) = owned.write(&sums, lines.as_bytes()) {
-            failed.push(e.note(&sums));
-        }
-    } else if sums.exists() {
-        failed.push(format!(
-            "{} not written: no zip was written, so it still lists an earlier export's zips",
-            sums.display()
-        ));
-    }
-    failed
 }
-
 /// Buffers a phase's planning events until the plan is filtered, then forwards the kept ones and everything after.
 struct Gate {
     inner: Arc<dyn EventSink>,
@@ -835,21 +783,16 @@ pub fn run_also(
     cancel: &CancelToken,
 ) -> Result<AlsoSummary, EngineError> {
     let run = start_also(engine, cache, base, spec, sink, cancel)?;
-    Ok(finish_also(run, spec, &[], cancel))
+    Ok(finish_also(run, &[], cancel))
 }
 
-/// An Also export between its phases and its walk, zips and report (final review I2): the GUI writes the PBR
-/// folder's PGPatcher, CS and CM JSON in between, so the PBR zip holds them.
+/// An Also export between its phases and its walk of the folders (final review I2): the GUI writes the PBR folder's
+/// PGPatcher, CS and CM JSON in between, so the walk counts them as this run's files.
 pub struct AlsoRun {
-    /// The phases' summary: no zip, report or walk note yet.
+    /// The phases' summary: no walk note yet.
     pub summary: AlsoSummary,
     keys: [Arc<Mutex<BTreeSet<String>>>; 3],
-    rows: Vec<report::SetRow>,
-    project: String,
-    grass: bool,
     dry_run: bool,
-    /// The PBR phase's reporter: the later steps' batch-level warnings go out under its batch.
-    rep: Reporter,
 }
 
 /// The phases of `run_also`.
@@ -862,7 +805,6 @@ pub fn start_also(
     cancel: &CancelToken,
 ) -> Result<AlsoRun, EngineError> {
     let keys: [Arc<Mutex<BTreeSet<String>>>; 3] = Default::default();
-    let project = project_name(&base.inputs)?;
     let dry_run = base.dry_run;
     let recorder = |i: usize, inner: Arc<dyn EventSink>| -> Arc<dyn EventSink> {
         Arc::new(Recorder {
@@ -870,68 +812,29 @@ pub fn start_also(
             keys: keys[i].clone(),
         })
     };
-    // The PBR phase's reporter; the later phases' batch-level warnings and the zip step's go out under its batch.
+    // The PBR phase's reporter; the later phases' batch-level warnings go out under its batch.
     let rep = Reporter::new(recorder(0, sink.clone()), new_batch_id());
-    let (mut rows, mut grass) = (vec![], false);
-    let summary = run_phases(
-        engine, cache, base, spec, sink, cancel, &rep, &recorder, &mut rows, &mut grass,
-    )?;
+    let summary = run_phases(engine, cache, base, spec, sink, cancel, &rep, &recorder)?;
     Ok(AlsoRun {
         summary,
         keys,
-        rows,
-        project,
-        grass,
         dry_run,
-        rep,
     })
 }
 
-/// The rest of `run_also`: the walk of the folders, the zips and the report. `extra`: files this export wrote into
-/// the PBR or Vanilla folder after its phases (the GUI's JSON), counted as this run's outputs; any other path is
-/// ignored.
-pub fn finish_also(
-    run: AlsoRun,
-    spec: &AlsoSpec,
-    extra: &[PathBuf],
-    cancel: &CancelToken,
-) -> AlsoSummary {
+/// The rest of `run_also`: the walk of the folders. `extra`: files this export wrote into the PBR or Vanilla folder
+/// after its phases (the GUI's JSON), counted as this run's outputs; any other path is ignored.
+pub fn finish_also(run: AlsoRun, extra: &[PathBuf], cancel: &CancelToken) -> AlsoSummary {
     let AlsoRun {
         summary: mut s,
         keys,
-        rows,
-        project,
-        grass,
         dry_run,
-        rep,
     } = run;
     if dry_run {
         return s;
     }
-    let warn = |code: Code, message: &str| {
-        rep.emit(
-            None,
-            None,
-            EventKind::Warning(Warning::new(code, message.to_string())),
-        )
-    };
-    // CN43: a record found unreadable at the start was reported then; one that broke since is reported here, once.
-    let mut owned = match OwnedFiles::load(&s.folders[0]) {
-        Ok(o) => Some(o),
-        Err(_) if s.notes.iter().any(|n| n.contains(OWNED_UNREADABLE)) => None,
-        Err(e) => {
-            let m = format!(
-                "{} cannot be read ({e}): {OWNED_UNREADABLE}",
-                s.folders[0].join("_sdc").join("also.json").display()
-            );
-            warn(Code::AlsoOwnedUnreadable, &m);
-            s.notes.push(m);
-            None
-        }
-    };
-    // Final review I3: an export that finished lists the files it did not write, zip on or off (they are kept). After
-    // a cancel or a phase error most files were not reached, so none is listed. Decided before the zips, so a cancel
-    // while zipping does not change it.
+    // Final review I3: an export that finished lists the files it did not write (they are kept). After a cancel or a
+    // phase error most files were not reached, so none is listed.
     let finished = !cancel.is_cancelled() && s.error.is_none();
     let mut keys = keys.map(|k| std::mem::take(&mut *crate::api::lock(&k)));
     // Note GI27: the GUI also writes the XPMF profile copy into the Vanilla folder.
@@ -941,53 +844,16 @@ pub fn finish_also(
             keys.insert(output_key(folder, p));
         }
     }
-    let files = match finished {
-        true => this_runs_files(&mut s, &keys, spec.cfg.zip),
-        false => vec![],
-    };
-    if spec.cfg.zip {
-        if !finished {
-            s.notes.push(ZIP_SKIPPED.into());
-            // A cancel after the last phase (the GUI's JSON step) leaves no cancelled file: still partial (CN49).
-            s.zip_failed = true;
-        } else {
-            let failed = match &mut owned {
-                Some(owned) => write_zips(&mut s, owned, files, &spec.location, &project, cancel),
-                None => vec![],
-            };
-            for m in &failed {
-                warn(Code::AlsoZipFailed, m);
-            }
-            // Review M1: a zip or the sums file not written (or no zip at all) is a partial export.
-            s.zip_failed = !failed.is_empty() || s.zips.len() < s.phases.len();
-            s.notes.extend(failed);
-        }
-    }
-    // C5 (Task 9): the report comes last, so it carries every note above; after a cancel or a phase error too.
-    if let Some(owned) = &mut owned {
-        let path = spec
-            .location
-            .join(format!("{project} conversion-report.md"));
-        let text = report::render(&s, &rows, spec, grass);
-        match owned.write(&path, text.as_bytes()) {
-            Ok(()) => s.report = Some(path),
-            // CN51 (fix round 1): as a zip not written, a warning and a partial export.
-            Err(e) => {
-                let m = e.note(&path);
-                warn(Code::AlsoReportFailed, &m);
-                s.notes.push(m);
-                s.report_failed = true;
-            }
-        }
+    if finished {
+        note_unwritten_files(&mut s, &keys);
     }
     s
 }
 
 /// CN43: the tail of the note for an unreadable `also.json`, pointing at the GUI row's button (Note FC10).
-const OWNED_UNREADABLE: &str = "it is left as it is, and no report, zip or sums file is written until it is reset: use Reset also.json on its row in Problems (or delete the file)";
-
-/// `run_also` without the zips and the report; `rep` is the PBR phase's reporter, `recorder` wraps each later
-/// phase's sink (P4). The report's set rows go into `rows`, read from the plans before they run.
+const OWNED_UNREADABLE: &str =
+    "it is left as it is: use Reset also.json on its row in Problems (or delete the file)";
+/// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
 #[allow(clippy::too_many_arguments)]
 fn run_phases(
     engine: &Engine,
@@ -998,8 +864,6 @@ fn run_phases(
     cancel: &CancelToken,
     rep: &Reporter,
     recorder: &dyn Fn(usize, Arc<dyn EventSink>) -> Arc<dyn EventSink>,
-    rows: &mut Vec<report::SetRow>,
-    grass: &mut bool,
 ) -> Result<AlsoSummary, EngineError> {
     let cfg = &spec.cfg;
     let project = project_name(&base.inputs)?;
@@ -1043,13 +907,9 @@ fn run_phases(
         copied: 0,
         sets: vec![],
         folders: folders.clone(),
-        report: None,
-        zips: vec![],
         notes: vec![],
         cancelled_after: None,
         error: None,
-        zip_failed: false,
-        report_failed: false,
     };
 
     // PBR phase: today's export into folder 0, unprefixed, so the GUI's PGPatcher-JSON rows match.
@@ -1062,14 +922,13 @@ fn run_phases(
     let skip: BTreeSet<String> = cfg.skip.iter().cloned().collect();
     let (sets, drop, set_notes) = derive_sets(&pbr_plan, &skip);
     s.sets = set_notes;
-    *grass = sets.iter().any(|d| d.shader == Shader::PbrGrass);
     let pbr_jobs = pbr_plan.jobs.clone();
     // Batch-level events of the later phases go out unprefixed, under the PBR phase's batch.
     let warn = |code: Code, message: String| {
         rep.emit(None, None, EventKind::Warning(Warning::new(code, message)))
     };
-    // Review M1: a phase's error keeps its phase and exit code, and is reported as an event. N1 (CN51): the PBR
-    // phase's too, so the report is still written after it.
+    // Review M1: a phase's error keeps its phase and exit code, and is reported as an event. N1 (CN56): the PBR
+    // phase's too, so the export still returns its summary.
     let failed = |s: &mut AlsoSummary, phase: Phase, e: EngineError| {
         warn(
             Code::AlsoPhaseFailed,
@@ -1085,8 +944,8 @@ fn run_phases(
         }
     }
     if !pbr_req.dry_run {
-        // TA21: the owned-file record lives in the PBR folder (Tasks 8 and 9 write through it). It is created when
-        // missing and never rewritten here; one that cannot be read is left as it is (review M4).
+        // TA21: the owned-file record lives in the PBR folder (2.0 writes no file through it any more). It is created
+        // when missing and never rewritten here; one that cannot be read is left as it is (review M4).
         let rec = folders[0].join("_sdc").join("also.json");
         let made = OwnedFiles::load(&folders[0]).and_then(|o| match o.path().exists() {
             true => Ok(()),
@@ -1131,9 +990,7 @@ fn run_phases(
             return Ok(s);
         }
     };
-    let (r, whole) = report::vanilla_rows(&vplan, &sets, want_cm, &spec.inner_layer_sets);
-    *rows = r;
-    s.sets.extend(whole);
+    s.sets.extend(skipped_sets(&vplan, &sets));
     let pbr_root = &folders[0];
     let pbr_records = Manifest::at(pbr_root).read().unwrap_or_default();
     let encoders = EncoderVersions::current();
@@ -1225,8 +1082,7 @@ fn run_phases(
     // counted; a plain error job, which the Vanilla phase reports already, does not.
     cplan
         .jobs
-        .retain(|j| j.derive.is_some() || report::derive_error(j, &members));
-    report::add_cm_errors(rows, &cplan, &sets);
+        .retain(|j| j.derive.is_some() || derive_error(j, &members));
     cplan.skipped.retain(|f| members.contains(f.path.as_path()));
     cplan.failed.retain(|f| members.contains(f.path.as_path()));
     cplan.cancelled.retain(|p| members.contains(p.as_path()));

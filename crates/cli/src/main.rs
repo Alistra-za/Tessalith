@@ -20,7 +20,6 @@ use engine::also::{run_also, AlsoSpec};
 use engine::api::{CancelToken, Engine, EngineError};
 use engine::events::{new_batch_id, EventSink, JsonLinesSink, Reporter};
 use engine::session::AnalysisCache;
-use std::collections::BTreeSet;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -69,10 +68,8 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         let spec = AlsoSpec {
             cfg,
             location: req.output_root.clone(),
-            // The CLI reads no scan (TA13, TA18), so the env `_m` says "no scan".
+            // The CLI reads no scan (TA13, TA18), so no env `_m` is written.
             scanned: false,
-            // shortcut: the CLI has no resolved PGP flags (TA27), so no set is marked inner-layer.
-            inner_layer_sets: BTreeSet::new(),
         };
         // `run_also` returns Ok even when the PBR phase failed (CN56), so the exit code is the summary's.
         let sum = run_also(

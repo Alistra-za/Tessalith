@@ -110,3 +110,42 @@ FI3	FI		back	FM		partial	2026-11-02		goes: the header issue line and Patch heade
 FM13	FM		back	FM		partial	2026-11-02		goes: Not deleted here: the preset export and validate methods; stays: the rest of the item
 FM14	FM		back	FM		partial	2026-11-02		goes: --nvtt on encoders (the verb is gone); stays: the rest of the item
 FM¶- **Patch header.**	FM		back	FM		archive-item	2026-11-02		patch-header removed
+CN45	CN		back	FM		archive-item	2026-11-02		whole: the zip writer is gone
+CN46	CN		back	FM		archive-item	2026-11-02		whole: no zip, so no list of what goes in it; the not-written note stays (FM23)
+CN47	CN		back	FM		archive-item	2026-11-02		whole: no zip step
+CN48	CN		back	FM		archive-item	2026-11-02		whole: no sums file
+CN49	CN		back	FM		archive-item	2026-11-02		whole: no zip or sums failure; ALSO-ZIP-FAILED is removed
+CN50	CN		back	FM		archive-item	2026-11-02		whole: no conversion report
+CN51	CN		back	FM		archive-item	2026-11-02		whole: no report is written; ALSO-REPORT-FAILED is removed
+CN52	CN		back	FM		archive-item	2026-11-02		whole: the rows fed the report only; derive_error moved to also/mod.rs and the skipped-set SetNotes stay (FM23)
+CN53	CN		back	FM		archive-item	2026-11-02		whole: the per-set report lines are gone
+CN93	CN		back	FM		archive-item	2026-11-02		whole: no zip writer to cancel
+AC6	AC		back	FM		archive-item	2026-11-02		whole: .kra and .ora are not read; they are IN-DECODE (FM23)
+AF2	AF		back	FM		archive-item	2026-11-02		whole: no mergedimage.png inflation
+AF¶- AF2: loading a	AF		back	FM		archive-item	2026-11-02		AF9 sub-bullet about the .kra/.ora IHDR read
+FC¶- **Zip limits are a Blockers row	FC		back	FM		archive-item	2026-11-02		whole: no zip, so no Zip limits row
+CN28	CN		back	FM		partial	2026-11-02		goes: the `zip` (bool) key; stays: the other [export] keys (FM23)
+CN39	CN		back	FM		partial	2026-11-02		goes: report, zips, sums as the owned files, and inner_layer_sets; stays: the OwnedFiles record
+CN43	CN		back	FM		partial	2026-11-02		goes: the report, zips and sums that were not written; stays: a corrupt also.json is left alone
+CN54	CN		back	FM		partial	2026-11-02		goes: the report printing the install line; stays: cm_lines and the GUI Review
+CN55	CN		back	FM		partial	2026-11-02		goes: report::derive_error; stays: the CM-only derived error runs (also::derive_error)
+CN56	CN		back	FM		partial	2026-11-02		goes: the report written after a failed PBR run; stays: the failed PBR run is recorded and run_also returns Ok
+CN57	CN		back	FM		partial	2026-11-02		goes: the report, the sums and inner_layer_sets; stays: the CLI Also export
+CN58	CN		back	FM		partial	2026-11-02		goes: a kept or failed zip or report is partial; stays: the exit code follows the summary
+CN59	CN		back	FM		partial	2026-11-02		goes: the report line and inner_layer_sets; stays: the CLI reads no scan
+CN64	CN		back	FM		partial	2026-11-02		goes: the zips and the report path in the export notes; stays: the worker and the end of an Also export
+CN68	CN		back	FM		partial	2026-11-02		goes: inner_layer_sets; stays: mesh votes and scanned
+CN72	CN		back	FM		partial	2026-11-02		goes: NIF edits are never in the zips; stays: NIF edits follow the PBR folder
+CN80	CN		back	FM		partial	2026-11-02		goes: the "Also write a zip of each folder" checkbox; stays: the rest of the column
+CN94	CN		back	FM		partial	2026-11-02		goes: the zip variant of the note and the report; stays: the NOT_WRITTEN walk
+CN95	CN		back	FM		partial	2026-11-02		goes: the zips, the sums, the report and AlsoZipped; stays: start_also and finish_also, the extra files
+CN99	CN		back	FM		partial	2026-11-02		goes: the report and the zip-failure test; stays: Also derives only from converted sets
+CN101	CN		back	FM		partial	2026-11-02		goes: the zip step; stays: the overwrite question is answered keep before the dialog changes
+AC¶Owner ask (2026-10-14)	AC		back	FM		partial	2026-11-02		goes: Krita and OpenRaster as formats sdc reads; stays: PSD and WebP
+DZ4	DZ		back	FM		partial	2026-11-02		goes: Krita/ORA decoding; stays: the rest of what the pin covers
+FA14	FA		back	FM		partial	2026-11-02		goes: the zip module in the list; stays: the other pub(crate) modules
+FC¶- **CN43.** `also_finished`	FC		back	FM		partial	2026-11-02		goes: the report, zip or sums files in the also.json record; stays: the Reset also.json row
+FC¶- **Tests.** `gui/tests/open_cancel.rs`	FC		back	FM		partial	2026-11-02		goes: the zip limit tests; stays: the others
+GF8	GF		back	FM		partial	2026-11-02		goes: the zip and report phase; stays: a cancel during the walk writes no NIF edits
+GF9	GF		back	FM		partial	2026-11-02		goes: the zip phase name; stays: a cancelled run drops its Review answers
+GI27	GI		back	FM		partial	2026-11-02		goes: the Vanilla zip holds the copy; stays: the Vanilla folder keeps the noise, detail and profile

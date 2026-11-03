@@ -459,11 +459,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "zip": {
-          "default": false,
-          "description": "Zip each folder, with a SHA-256 sums file.",
-          "type": "boolean"
         }
       },
       "type": "object"

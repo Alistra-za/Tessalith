@@ -217,6 +217,21 @@ pub const REMOVED: &[Removed] = &[
         value: None,
         hint: "delete the line; use encoder.bc1_alpha for 1-bit alpha",
     },
+    Removed {
+        key: "^export.zip",
+        value: None,
+        hint: "an Also export no longer writes zips or a SHA256SUMS file; delete the key",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ALSO-ZIP-FAILED"),
+        hint: "ALSO-ZIP-FAILED was removed in 2.0 (an Also export writes no zip); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ALSO-REPORT-FAILED"),
+        hint: "ALSO-REPORT-FAILED was removed in 2.0 (an Also export writes no conversion report); delete it from the list",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

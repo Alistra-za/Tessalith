@@ -1,5 +1,5 @@
 //! Note GI (XPMF Task 6, design X2, X5): XPMF profiles in a full export, in Review's What will be written, as stale
-//! rows (FC11) and in the zip estimate (FC12).
+//! rows (FC11).
 mod support;
 use engine::presets::AlsoTarget;
 use image::{ImageBuffer, Luma, Rgb};
@@ -199,21 +199,6 @@ fn stale_profile_row() {
         .find(|s| s.path == f)
         .expect("stale after the export");
     assert!(!s.ours, "{:?}", m.stale);
-}
-
-/// FC12: the zip estimate counts the profile.
-#[test]
-fn zip_counts_profile() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_also_settings(|c| c.zip = true);
-    m.set_also_tick(AlsoTarget::Vanilla, true);
-    idle(&mut m);
-    assert!(m.also_on(), "{}", m.status_line);
-    let before = m.zip_estimate().expect("zip on").entries;
-    set_block(&mut m, Some(json!({})));
-    idle(&mut m);
-    assert_eq!(m.zip_estimate().unwrap().entries, before + 1);
 }
 
 /// As `opened`, but the set lives under `textures/pbr/landscape/`, so the Vanilla folder's paths differ from the PBR
@@ -468,29 +453,12 @@ fn a_set_the_vanilla_derive_skips_gets_no_copy() {
     assert!(van.files.is_empty() && van.refused.is_empty(), "{van:?}");
 }
 
-/// The entry names of a zip, from its central directory (copied from `also_export.rs`).
-fn zip_names(path: &Path) -> Vec<String> {
-    let z = std::fs::read(path).unwrap();
-    let u16le = |at: usize| u16::from_le_bytes([z[at], z[at + 1]]) as usize;
-    let u32le = |at: usize| u32::from_le_bytes(z[at..at + 4].try_into().unwrap()) as usize;
-    let eocd = z.len() - 22;
-    let mut at = u32le(eocd + 16);
-    (0..u16le(eocd + 10))
-        .map(|_| {
-            let (n, x, c) = (u16le(at + 28), u16le(at + 30), u16le(at + 32));
-            let name = String::from_utf8(z[at + 46..at + 46 + n].to_vec()).unwrap();
-            at += 46 + n + x + c;
-            name
-        })
-        .collect()
-}
-
-/// Final review I2 for profiles: with Also and its zip on, the profile written into the PBR folder is in the PBR zip.
+/// Final review I2 for profiles (Note FM): with Also on, the profile written into the PBR folder is this export's, so the
+/// walk of the folders does not note it as a file it did not write.
 #[test]
-fn the_pbr_zip_holds_the_profile() {
+fn the_profile_is_not_noted_as_unwritten() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_also_settings(|c| c.zip = true);
     m.set_also_tick(AlsoTarget::Vanilla, true);
     idle(&mut m);
     assert!(m.also_on(), "{}", m.status_line);
@@ -499,11 +467,13 @@ fn the_pbr_zip_holds_the_profile() {
     let pbr = m.also_folders()[0].clone();
     assert!(pbr.join(FILE).is_file(), "{}", notes(&m));
     let name = pbr.file_name().unwrap().to_string_lossy().into_owned();
-    let names = zip_names(&m.also_location().join(format!("{name}.zip")));
     let entry = format!("{name}/{FILE}");
-    assert!(names.contains(&entry), "{entry}: {names:?}");
+    assert!(
+        !m.export.notes.iter().any(|n| n.starts_with(&entry)),
+        "{entry}: {:?}",
+        m.export.notes
+    );
 }
-
 /// End to end: a cancelled export, and one with a failed job, write no profile and record no hash.
 #[test]
 fn a_cancelled_or_failed_export_writes_no_profile() {
