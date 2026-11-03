@@ -224,7 +224,7 @@ pub fn spawn_guarded(
 }
 
 /// Run `f`; a panic first sends `failed(message)`, the job's own failure tagged with its id, so a stale job's
-/// panic never ends a newer job then unwinds on to `spawn_guarded`'s dialog.
+/// panic never ends a newer job, then unwinds on to `spawn_guarded`'s dialog.
 pub(crate) fn or_send<T>(
     tx: &Sender<WorkerMsg>,
     f: impl FnOnce() -> T,

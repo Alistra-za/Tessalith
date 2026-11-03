@@ -383,7 +383,7 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
     r.allow = b
         .allow
         .iter()
-        .map(|a| Code::parse(a).ok_or_else(|| format!("--allow {a}: unknown code")))
+        .map(|a| Code::parse_allow(a))
         .collect::<Result<_, _>>()?;
     r.accept = match b.accept_suggestions {
         AcceptArg::None => AcceptSuggestions::None,

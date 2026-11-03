@@ -1023,6 +1023,19 @@ fn an_nvtt_backend_names_the_removed_value() {
     );
 }
 
+/// `--set encoder.backend=nvtt` (also file- and sub-type-scoped) goes through `removed_set`.
+#[test]
+fn a_set_override_naming_nvtt_is_refused_with_the_hint() {
+    for field in ["encoder.backend", "file:a.png.encoder.backend"] {
+        let e = engine::overrides::parse_set(&format!("{field}=nvtt")).unwrap_err();
+        assert!(
+            e.contains("encoder.backend: removed in 2.0") && e.contains("NVTT was removed"),
+            "{e}"
+        );
+    }
+    assert!(engine::overrides::parse_set("encoder.backend=rgbcx").is_ok());
+}
+
 #[test]
 fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {

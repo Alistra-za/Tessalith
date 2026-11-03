@@ -462,7 +462,8 @@ fn a_record_without_an_output_stamp_is_stale_once() {
 }
 
 /// Note FM: a 1.x record (no `encode_version`, older engine and schema) is a known, stale baseline. The
-/// output is re-encoded and replaced, not kept as an unknown file (`OUT-UNKNOWN-EXISTING`).
+/// output is re-encoded and replaced, not kept as an unknown file (`OUT-UNKNOWN-EXISTING`). The record may still
+/// carry `encoders.nvtt` (and an `nvtt` backend) from a 1.x NVTT run (FM14).
 #[test]
 fn a_1x_manifest_record_is_known_and_stale() {
     for (schema, engine) in [(1, "1.0.0"), (2, "1.1.0")] {
@@ -482,7 +483,10 @@ fn a_1x_manifest_record_is_known_and_stale() {
                 o.insert("schema".into(), schema.into());
                 o.insert("engine_version".into(), engine.into());
                 o["bc1_model"] = "ideal".into();
-                o["profile"]["encoder"]["backend"] = "bc7e".into();
+                // What a 1.x NVTT run wrote: the version in `encoders` and, in schema 2, the backend in the profile.
+                o["encoders"]["nvtt"] = "3.2.5".into();
+                o["profile"]["encoder"]["backend"] =
+                    if schema == 2 { "nvtt" } else { "bc7e" }.into();
                 format!("{v}\n")
             })
             .collect();

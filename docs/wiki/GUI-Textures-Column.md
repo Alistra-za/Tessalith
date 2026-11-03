@@ -14,7 +14,7 @@ The **◀** on the column heading collapses the column to a thin strip; **▶** 
 
 Above the search box is a row of pills: *Undecided*, *Warnings*, *Failed* and *Not in a set*, each with the number of textures it would show. Hover a pill for what it does. The pill row holds only filters; the Helpers group is not one.
 
-After the pills comes **Filter ▾**. It opens a popup with five combos, and stays open while you use it:
+After the pills comes **Filter ▾**. It opens a popup with four combos, and stays open while you use it:
 
 | Combo | Values |
 |---|---|

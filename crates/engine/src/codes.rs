@@ -47,6 +47,17 @@ macro_rules! codes {
     };
 }
 
+impl Code {
+    /// A `--allow` value: the code, or an error that names the fix for a code 2.0 removed (same text as a config's
+    /// `allow` list, `migrate::REMOVED`).
+    pub fn parse_allow(s: &str) -> Result<Code, String> {
+        if let Some(removed) = crate::migrate::removed_set("allow", s) {
+            return Err(format!("--{removed}"));
+        }
+        Code::parse(s).ok_or_else(|| format!("--allow {s}: unknown code"))
+    }
+}
+
 codes! {
     LossAlphaData = "LOSS-ALPHA-DATA" => Blocking,
     LossClampHdr = "LOSS-CLAMP-HDR" => Warning,

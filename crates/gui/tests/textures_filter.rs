@@ -55,7 +55,7 @@ fn mixed(dir: &std::path::Path) -> AppModel {
         let (sub, fmt, be) = match n % 4 {
             0 => (Subtype::Diffuse, Format::Bc7, Backend::Bc7e),
             1 => (Subtype::Normal, Format::Bc5, Backend::Rgbcx),
-            2 => (Subtype::Diffuse, Format::Bc7, Backend::Bc7e),
+            2 => (Subtype::Diffuse, Format::Bc7, Backend::Rgbcx),
             _ => (Subtype::Height, Format::R8, Backend::Uncompressed),
         };
         let p = &mut job(&mut m, n).profile;

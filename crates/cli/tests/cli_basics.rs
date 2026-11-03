@@ -69,6 +69,26 @@ fn the_nvtt_flag_is_refused() {
     assert_eq!(code(&o), 2);
     assert!(text(&o.stderr).contains("--nvtt"), "{}", text(&o.stderr));
 }
+
+/// FM14: `--allow` with a code 2.0 removed says so, like the config's `allow` list; an unknown code still doesn't.
+#[test]
+fn allowing_a_removed_nvtt_code_names_the_removal() {
+    for c in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {
+        let o = sdc()
+            .args(["convert", "--allow", c, "in", "out"])
+            .output()
+            .unwrap();
+        assert_eq!(code(&o), 2, "{c}");
+        let e = text(&o.stderr);
+        assert!(e.contains("removed in 2.0") && e.contains(c), "{e}");
+    }
+    let o = sdc()
+        .args(["convert", "--allow", "NOT-A-CODE", "in", "out"])
+        .output()
+        .unwrap();
+    assert!(text(&o.stderr).contains("unknown code"));
+}
+
 #[test]
 fn bad_mem_budget_is_a_usage_error() {
     for bad in ["8Q", "G", "-1", "99999999999999999999G"] {

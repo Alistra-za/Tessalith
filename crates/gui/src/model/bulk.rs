@@ -1,9 +1,8 @@
 //! M6 Track F3a (design `2026-10-13-sdc-m6-f3a-design.md`): the multi-selection, the bulk edit plan and its
 //! commands. No egui types.
-use super::fields::encoding_options;
 use super::fields::{
-    all_fields, field_view, filter_option_lock, hidden_reason, views_of, weighting_option_lock,
-    FieldView, EDGE_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD, WEIGHTING,
+    all_fields, encoding_options, field_view, filter_option_lock, hidden_reason, views_of,
+    weighting_option_lock, FieldView, EDGE_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD, WEIGHTING,
 };
 use super::from_normal::{GenMap, GenOp};
 use super::sets::{
