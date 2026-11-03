@@ -165,7 +165,7 @@ These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert me
 | `CHK-Z-SIGN` | warning | A normal map's blue channel points the wrong way ([checks](Set-Shaders.md#height-maps-and-the-artist-checks)). | Check the source. |
 | `CHK-PARALLAX` | warning | A height map, judged against the set's neutral height (0.5, or 1.0 with a multilayer coat), uses little range, clips, is mostly white or is too steep. | Check the height map. |
 | `CHK-PARALLAX-SCALE` | warning | A landscape set's displacement scale is more than 2x from the others. | Make the scales match. |
-| `CHK-LOW-DETAIL` | warning | Full size adds little detail ([half size](GUI-Artist-Checks.md#half-size)). | Answer **Half size** in Review, or ignore. |
+| `CHK-LOW-DETAIL` | warning | Full size adds little detail ([half size](GUI-Artist-Checks.md#half-size)). | Tick **Half size** in the texture's Advanced settings, or ignore. |
 | `CHK-UV-GUTTER` | warning | UV islands closer than 8 texels for more than 2 % of used texels. | Space the islands out. |
 
 ### Generated maps

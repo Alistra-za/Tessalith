@@ -113,19 +113,6 @@ fn button(ui: &mut egui::Ui, text: &str, tip: &str, off: Option<&str>) -> bool {
     .clicked()
 }
 
-/// `button` for a fix that deletes a file (Note FC10): outlined red, and Enter or Space on it does nothing (FC5).
-/// `name`: the accessible name when several buttons share `text` (rule 8.4; Note FC11's `Delete` rows).
-pub(super) fn destructive_button(
-    ui: &mut egui::Ui,
-    text: &str,
-    name: Option<&str>,
-    tip: &str,
-    off: Option<&str>,
-) -> bool {
-    let b = egui::Button::new(text).stroke(egui::Stroke::new(1.5, super::status::RED));
-    click_only_button(ui, b, name, tip, off)
-}
-
 /// A button that writes to disk: a pointer click only, never Enter or Space on focus (FC5, Note FC10).
 fn click_only_button(
     ui: &mut egui::Ui,
@@ -294,12 +281,7 @@ fn fix_button(
                 .is_some()
                 .then_some(crate::model::also::EXPORT_RUNNING),
         ),
-        Fix::ReviewStale => button(
-            ui,
-            "Review…",
-            "Open Review, which lists these files with a Delete button each",
-            None,
-        ),
+
     };
     clicked.then(|| fix.clone())
 }
@@ -622,7 +604,5 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
                 model.status_line = why;
             }
         }
-        // Note FC11: opens Review only; its Delete buttons write, each on its own click.
-        Fix::ReviewStale => model.open_review(),
     }
 }

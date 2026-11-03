@@ -270,8 +270,6 @@ pub(crate) struct ViewCache {
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
     pub export_files: Option<(ProblemsKey, usize)>,
-    /// `AppModel::half_size_rows`, under the same key and `inner` tuple (Note FC2).
-    pub half_size: Option<(ProblemsKey, Arc<Vec<review::HalfSizeRow>>)>,
     /// The keys `bottom::set_ready` looks up; reset with every `problems` build.
     pub flagged: Option<Arc<bottom::Flagged>>,
     /// Note GI: the XPMF card's values of one set (by id), `xpmf_json::card_values`.
@@ -331,10 +329,6 @@ pub struct AppModel {
     pub skipped_user_presets: Vec<(String, String)>,
     /// Note FC3 (Y4): the last plan's IN-UNREADABLE warnings, one Problems row each.
     pub unreadable: Vec<engine::codes::Warning>,
-    /// FC11: the recorded files the last plan no longer writes, Review's `Stale outputs (n)`. Not a gate.
-    pub stale: Vec<engine::manifest::StaleOutput>,
-    /// FC11 (fix round 1): the JSON rows of `stale`, each with the SHA-256 its hash record holds (their baseline).
-    pub stale_json: std::collections::BTreeMap<PathBuf, String>,
     /// Note FC10 (item 27): the project files with the read-only flag, as of the last open, reload or save.
     pub read_only_flags: Vec<PathBuf>,
     /// Note FC3: the NIF edit's problems, handed over by `app.rs` each frame (`set_nif_problems`).
@@ -709,8 +703,6 @@ impl AppModel {
             loaded_user_presets: vec![],
             skipped_user_presets: vec![],
             unreadable: vec![],
-            stale: vec![],
-            stale_json: Default::default(),
             read_only_flags: vec![],
             nif_problems: Default::default(),
             scan_db: None,
@@ -963,9 +955,6 @@ impl AppModel {
         self.sets.clear();
         self.sets_root = None;
         self.also_written = None;
-        // FC11: the previous folder's stale files never get a Delete here.
-        self.stale.clear();
-        self.stale_json.clear();
         self.unmatched_keys.clear();
         self.selection = Selection::None;
         self.reset_multi();
@@ -1785,8 +1774,6 @@ impl AppModel {
         self.finish_cm_json(cm);
         let xpmf = self.pending_xpmf.take();
         self.finish_xpmf(xpmf);
-        // FC11: the records just written decide which JSON files are stale.
-        self.refresh_stale_json();
         // Final review I2: an Also export's walk of the folders runs now, on its worker, so it counts the JSON above as
         // this export's. The export stays running (Cancel reaches the walk); `also_walked` does the rest.
         let json = std::mem::take(&mut self.also_json);
@@ -1822,8 +1809,7 @@ impl AppModel {
     }
 
     /// Whether `sdc.toml` can be saved: `Err(reason)` with no project, a load error, or the read-only flag. A missing
-    /// file is fine: the save creates it. Stats the file: call it once. The reason is the hover of Review's disabled
-    /// Half (Note FC2); the Also rows show their own text.
+    /// file is fine: the save creates it. Stats the file: call it once. The Also rows show their own text.
     pub fn sdc_toml_writable(&self) -> Result<(), String> {
         let Some(p) = self.project.as_ref() else {
             return Err("No project is open.".into());
@@ -1833,7 +1819,7 @@ impl AppModel {
         }
         match std::fs::metadata(p.path()) {
             Ok(m) if m.permissions().readonly() => Err(format!(
-                "{} is marked read-only, so the half-size choice cannot be saved.",
+                "{} is marked read-only, so changes cannot be saved.",
                 p.path().display()
             )),
             _ => Ok(()),
@@ -1916,15 +1902,11 @@ impl AppModel {
         if self.export_stopped() {
             return;
         }
-        let asks = !pbr_export::export_asks(self).is_empty();
         // R6: an edited PGPatcher JSON is asked about in Review, before the export (C4).
         // Note CN (C1, owner answer 5): a tick opens Review; its Export is the only way to an Also export.
         // Note FB1: no chosen folder is a Review blocker, so the click lists it there instead of writing to `sdc-out`.
-        // Note FC2: the half-size question is asked in Review, before the export.
         // Note FC5: NIF edits are Review rows; its Export is the only way they are written.
-        if asks
-            || self.nif_rows_written()
-            || !self.half_size_rows().is_empty()
+        if self.nif_rows_written()
             || self.undecided() > 0
             || self.pgp_json_edited()
             || self.also_on()
@@ -2121,29 +2103,20 @@ impl AppModel {
                 // checks on), and an edit after the click can add a pitfall, so the guards and the gate run again
                 // on the settled plan (audit 08f-2, Review Focus 1).
                 if self.export_stopped() {
-                    self.undo_half_step();
                     return;
                 }
                 // P9: `sdc.toml`'s writability again, once per Export click.
                 let unwritable = self.also_toml_unwritable();
-                self.refresh_half_unwritable();
                 if let Some(r) = self.review.as_mut() {
                     r.toml_unwritable = unwritable;
                 }
                 match self.review_gate() {
                     Ok(_) => {
-                        // Note FC2: the half-size answers are written here, on the settled plan with the sources
-                        // checked; the export then waits for the plan that edit starts and comes back here.
-                        if self.write_half_answers() {
-                            self.continue_review();
-                            return;
-                        }
                         self.start_export_pass();
                         // Note FC5: Review's Export also writes the NIF edits, once the run has ended.
                         self.nif_export_queued = self.export.running.is_some();
                     }
                     Err(why) => {
-                        self.undo_half_step();
                         self.status_line = format!("Export not started: {why}");
                         self.messages
                             .log(messages::Severity::Info, self.status_line.clone());
@@ -2228,15 +2201,12 @@ impl AppModel {
         self.replan();
     }
 
-    /// Save first (the CLI command and the next session read `sdc.toml`), then run the export on a worker. One pass:
-    /// the half-size answers were written before it, on the settled plan (Note FC2).
+    /// Save first (the CLI command and the next session read `sdc.toml`), then run the export on a worker.
     fn start_export_pass(&mut self) {
         if self.export.running.is_some() {
             return;
         }
-        // Note FC14: a failed save starts no export, so Review's *Half size* step for it is taken back.
         if self.save().is_err() {
-            self.undo_half_step();
             return;
         }
         let (Some(session), Some(mut req)) = (self.session.clone(), self.request()) else {
@@ -2244,12 +2214,10 @@ impl AppModel {
         };
         self.nif_export_queued = false;
         req.on_existing = engine::api::OnExisting::IfChanged;
-        let c = self.settings.checks;
-        // Note FC2: Hold measures (an up-to-date output too) and writes the full chain, like Warn; nothing is held.
-        req.low_detail = match (c.low_detail, c.drop_top_mip) {
-            (false, _) => engine::api::LowDetailMode::Off,
-            (true, true) => engine::api::LowDetailMode::Hold,
-            (true, false) => engine::api::LowDetailMode::Warn,
+        req.low_detail = if self.settings.checks.low_detail {
+            engine::api::LowDetailMode::Warn
+        } else {
+            engine::api::LowDetailMode::Off
         };
         let also = self.also_on();
         self.also_pass = also;
@@ -2267,15 +2235,8 @@ impl AppModel {
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
         self.review_json_cache.take();
-        // Note FC2: the stamps this export runs on, so a half-size row drops out once its source changes.
-        let sources = self
-            .items
-            .iter()
-            .filter_map(|i| Some((i.job_key.clone(), i.job.as_ref()?.source)))
-            .collect();
         self.export = export::ExportModel {
             pace: Some(export::Pace::new(Instant::now())),
-            sources,
             ..Default::default()
         };
         self.show_tab(bottom::BottomTab::Files);
@@ -2585,14 +2546,11 @@ impl AppModel {
         self.loaded_user_presets = view.user_presets;
         self.skipped_user_presets = view.skipped_user_presets;
         self.unreadable = view.unreadable;
-        self.stale = view.stale;
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
         // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (FL7).
         if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
             self.carry_views(carried, &old_key, &scope, false);
         }
-        // The JSON rows are added once the plan settles (`finish_plan`): they read the settled sets.
-        self.stale_json.clear();
         // Fast re-plan: this plan ran on every edit so far.
         self.dirty_keys.clear();
         // The undo note stays through the plan the undo started, and goes with the next one.
@@ -2787,7 +2745,6 @@ impl AppModel {
             return;
         }
         self.auto_replans = 0;
-        self.refresh_stale_json();
         // Task 9 (Z11): the final pass; a cleanup re-plans once.
         if self.settle_types() {
             return;
@@ -2823,8 +2780,6 @@ impl AppModel {
         let note = "Export not started: answer the open dialog, then click Export again";
         self.status_line = note.into();
         self.messages.notify(messages::Severity::Warning, note);
-        // Note FC2: a half size written for this export goes with it.
-        self.undo_half_step();
     }
 
     pub fn wait_idle(&mut self, timeout: Duration) -> bool {
@@ -4482,7 +4437,6 @@ mod tests {
         let export = |m: &mut AppModel| {
             m.export_clicked();
             if m.review.is_some() {
-                m.acknowledge_all_asks();
                 m.export_from_review();
             }
         };
@@ -4499,7 +4453,6 @@ mod tests {
         // Note FC5: Review waits for the answer; it is given for the file as it is now.
         m.export_clicked();
         m.answer_review_json(true);
-        m.acknowledge_all_asks();
         m.export_from_review();
         assert!(m.export.running.is_some(), "{:?}", m.status_line);
         (m, p)

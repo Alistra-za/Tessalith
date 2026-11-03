@@ -178,14 +178,12 @@ pub(crate) fn prepare(
         faces: 6,
     };
     match keep {
-        Keep::Encode | Keep::Measure => {
+        Keep::Encode => {
             prep.dims = (0..6).flat_map(|_| one.iter().copied()).collect();
-            if keep == Keep::Encode {
-                prep.inputs = (0..6)
-                    .flat_map(|f| chain.iter().map(move |c| (f, c)))
-                    .map(|(f, c)| to_encoder_input(&c.faces[f], &meta, &q))
-                    .collect();
-            }
+            prep.inputs = (0..6)
+                .flat_map(|f| chain.iter().map(move |c| (f, c)))
+                .map(|(f, c)| to_encoder_input(&c.faces[f], &meta, &q))
+                .collect();
         }
         Keep::Preview { max_size } | Keep::SourceOnly { max_size, .. } => {
             // DECISIONS DT2: a preview encodes all six faces (face-major, each chain from first_level); the source side shows face 0 (+X), or the face a `SourceOnly` read names (GUI Note DT20).

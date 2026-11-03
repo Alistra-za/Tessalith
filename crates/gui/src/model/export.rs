@@ -77,8 +77,6 @@ pub struct ExportModel {
     pub(crate) index: HashMap<String, usize>,
     /// Rows were removed since `index` was built: rebuild it at the next lookup (audit item 6).
     pub(crate) index_stale: bool,
-    /// Note FC2: job key to the source stamp the export ran on; a half-size row whose source changed since drops out.
-    pub(crate) sources: HashMap<String, Option<engine::policy::SourceStamp>>,
 }
 
 /// The source of `ExportModel::revision`: unique across models, so a cache never mistakes one for another.
@@ -218,10 +216,8 @@ impl ExportModel {
                     k => RowState::Skipped(*k, reason.clone()),
                 };
                 // A skip is not work: it counts in done/total but not in the files/s rate or the ETA.
-                // Hold mode (Note CL20): a measured-only up-to-date file was started, so its skip ends the run.
-                let ends_run = *kind == SkipKind::UpToDate;
                 if let Some(r) = self.row(&ev) {
-                    if r.state.accepts_skip() || (ends_run && r.state == RowState::Running) {
+                    if r.state.accepts_skip() {
                         r.state = state;
                     }
                 }

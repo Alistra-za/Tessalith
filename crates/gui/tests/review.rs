@@ -1,8 +1,12 @@
-//! Layout v2 Task 1.3 (B2, C2, C5; rulings R1–R4): Review replaces the undecided, blocked and pitfall modals.
+//! Layout v2 Task 1.3 (B2, C2, C5; rulings R1–R4): Review replaces the undecided, blocked and pitfall modals. Since
+//! Note FM it gates on blockers, undecided textures and the overwrite questions only.
 mod support;
+use eframe::egui;
+use egui_kittest::kittest::NodeT as _;
+use egui_kittest::Harness;
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
-use sdc_gui::model::bottom::BottomTab;
+use sdc_gui::model::bottom::{problems, BottomTab, Level};
 use sdc_gui::model::review::{DiskState, JsonKind};
 use sdc_gui::model::*;
 use serde_json::json;
@@ -77,63 +81,13 @@ fn a_blocker_wins_over_a_pitfall() {
     assert!(!pbr_export::export_asks(&m).is_empty());
     m.export_clicked();
     assert!(m.review.is_some());
-    m.acknowledge_all_asks();
     assert_eq!(m.review_gate(), Err("Fix 1 blocker first".to_string()));
 }
 
+/// Was pbr_export.rs::pitfalls_ask_and_proceeding_continues_to_the_undecided_check: a pitfall gates nothing, so Export
+/// skips the undecided textures.
 #[test]
-fn pitfalls_gate_until_acknowledged_and_only_for_this_export() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_ready(d.path());
-    m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
-    idle(&mut m);
-    m.export_clicked();
-    // match8 here raises two pitfalls: its `_s` list, and match slots that point at different textures.
-    assert_eq!(
-        m.review_gate(),
-        Err("Acknowledge 2 warnings first".to_string())
-    );
-    m.acknowledge_all_asks();
-    assert!(m.review_gate().is_ok());
-    m.export_from_review();
-    idle(&mut m);
-    assert!(m.export.summary.is_some());
-    // The next export asks again.
-    m.export_clicked();
-    assert!(m.review.is_some());
-    assert!(m.review_gate().is_err());
-}
-
-#[test]
-fn one_tick_acknowledges_one_pitfall_and_can_be_taken_back() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_ready(d.path());
-    m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
-    idle(&mut m);
-    m.export_clicked();
-    let texts: Vec<String> = pbr_export::export_asks(&m)
-        .into_iter()
-        .map(|a| a.text)
-        .collect();
-    assert_eq!(texts.len(), 2, "{texts:?}");
-    m.acknowledge_ask(&texts[0], true);
-    assert_eq!(
-        m.review_gate(),
-        Err("Acknowledge 1 warning first".to_string())
-    );
-    m.acknowledge_ask(&texts[1], true);
-    assert!(m.review_gate().is_ok());
-    m.acknowledge_ask(&texts[1], false);
-    assert_eq!(
-        m.review_gate(),
-        Err("Acknowledge 1 warning first".to_string())
-    );
-}
-
-/// Was pbr_export.rs::pitfalls_ask_and_proceeding_continues_to_the_undecided_check: the pitfall and the undecided
-/// textures are one Review; acknowledging lets Export skip the undecided ones.
-#[test]
-fn pitfalls_and_undecided_textures_share_one_review() {
+fn a_pitfall_does_not_stop_export_skipping_the_undecided_textures() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_ready(d.path());
     m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
@@ -141,49 +95,23 @@ fn pitfalls_and_undecided_textures_share_one_review() {
     assert!(m.undecided() > 0);
     m.export_clicked();
     assert!(m.review.is_some() && m.dialog.is_none(), "{:?}", m.dialog);
-    m.acknowledge_all_asks();
     let (_, skipped) = m.review_gate().unwrap();
     assert_eq!(skipped, m.undecided());
 }
 
 /// Was pbr_export.rs::proceeding_with_warnings_waits_for_a_plan_in_flight (audit 08f-2).
 #[test]
-fn acknowledged_pitfalls_export_waits_for_a_plan_in_flight() {
+fn an_export_with_a_pitfall_waits_for_a_plan_in_flight() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_ready(d.path());
     m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
     idle(&mut m);
     m.export_clicked();
-    m.acknowledge_all_asks();
     m.replan();
     m.export_from_review();
     assert!(m.export_queued() && m.export.running.is_none());
     idle(&mut m);
     assert!(m.export.summary.is_some());
-}
-
-#[test]
-fn a_new_pitfall_after_the_click_stops_the_queued_export() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_ready(d.path());
-    m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
-    idle(&mut m);
-    m.export_clicked();
-    m.acknowledge_all_asks();
-    m.replan();
-    m.export_from_review();
-    assert!(m.export_queued());
-    // A second, different pitfall (alpha flags without Create NiAlphaProperty) lands before the plan does.
-    m.set_json_value("landscape/rock01", "alphaprop_thresh", Some(json!(128)));
-    idle(&mut m);
-    assert!(m.export.summary.is_none() && m.export.running.is_none());
-    assert!(m.review.is_some());
-    assert!(
-        m.status_line
-            .starts_with("Export not started: Acknowledge 1 warning first"),
-        "{}",
-        m.status_line
-    );
 }
 
 #[test]
@@ -629,4 +557,185 @@ fn our_own_pgpatcher_json_does_not_open_review() {
     assert!(m.review.is_none() && m.export.running.is_some());
     idle(&mut m);
     assert_eq!(m.dialog, None);
+}
+
+/// `pbr_ready` with leaf and odd decided (not `decide_all`, which would make rock01 a plain diffuse): nothing is
+/// undecided, so only a pitfall could open Review.
+fn decided_pbr(dir: &std::path::Path) -> AppModel {
+    let mut m = pbr_ready(dir);
+    m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+    m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
+    m.decide(ODD, Answer::Subtype(Subtype::Diffuse));
+    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    idle(&mut m);
+    m
+}
+
+/// Note FM (supersedes FC2, FC7, FC12 as to the ticks): a PGPatcher pitfall is an ordinary Warning row in Problems.
+/// It opens no Review and gates nothing.
+#[test]
+fn a_pgpatcher_pitfall_is_a_problems_row_not_a_gate() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = decided_pbr(d.path());
+    m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
+    idle(&mut m);
+    // match8 here raises two pitfalls: its `_s` list, and match slots that point at different textures.
+    let asks = pbr_export::export_asks(&m);
+    assert_eq!(asks.len(), 2, "{asks:?}");
+    let rows = problems(&m);
+    for a in &asks {
+        let r = rows.iter().find(|p| p.text == a.text);
+        assert_eq!(r.map(|p| p.level), Some(Level::Warning), "{}", a.text);
+    }
+    assert_eq!(m.review_gate().map(|_| ()), Ok(()));
+    // With nothing else to ask, the click exports at once.
+    m.export_clicked();
+    assert!(m.review.is_none(), "a pitfall alone opens no Review");
+    assert!(m.export.running.is_some(), "{:?}", m.status_line);
+    idle(&mut m);
+    assert!(m.export.summary.is_some());
+    // Review open for another reason: its Export is enabled with the pitfalls listed in Problems.
+    m.open_review();
+    assert_eq!(m.review_gate().map(|_| ()), Ok(()));
+}
+
+/// Note FM: Review still gates on a blocker, on an undecided texture (it opens, and Export skips it) and on an
+/// edited PGPatcher JSON nobody answered.
+#[test]
+fn review_still_gates_on_blockers_and_overwrites() {
+    // A blocker disables Export.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    m.set_json_value("landscape/rock01", "emissive", Some(json!(true)));
+    m.export_clicked();
+    assert!(m.review.is_some());
+    assert_eq!(m.review_gate(), Err("Fix 1 blocker first".to_string()));
+    // An undecided texture opens Review instead of exporting; Export then skips it.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    assert!(m.undecided() > 0);
+    m.export_clicked();
+    assert!(m.review.is_some() && m.export.running.is_none());
+    assert_eq!(m.review_gate().map(|g| g.1), Ok(m.undecided()));
+    // An edited PGPatcher JSON waits for Keep or Overwrite.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, p) = clean_pbr_with_edited_json(d.path());
+    m.export_clicked();
+    assert!(m.review.is_some() && m.export.running.is_none());
+    let name = p.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(
+        m.review_gate(),
+        Err(format!("Answer Keep or Overwrite for {name}"))
+    );
+    m.answer_review_json(false);
+    assert_eq!(m.review_gate().map(|_| ()), Ok(()));
+}
+
+/// The labels of the widgets Review draws, sorted: the tab's panel rect, every role that carries text. Paths under
+/// `skip` (the test's temp folder) show it as `<tmp>`.
+fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom-review"))
+        .expect("the Review panel")
+        .outer_rect;
+    let mut out: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter(|n| {
+            n.accesskit_node().bounding_box().is_some_and(|b| {
+                b.x0 >= f64::from(panel.min.x)
+                    && b.y0 >= f64::from(panel.min.y)
+                    && b.x1 <= f64::from(panel.max.x)
+                    && b.y1 <= f64::from(panel.max.y)
+            })
+        })
+        .filter(|n| n.accesskit_node().role() != egui::accesskit::Role::TextRun)
+        .filter_map(|n| {
+            let a = n.accesskit_node();
+            a.label().or_else(|| a.value())
+        })
+        .filter(|l| !l.is_empty())
+        .map(|l| l.replace(skip, "<tmp>"))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// P17: the EXACT groups and rows Review shows. An absence-only test passes after any rename, so this lists everything
+/// drawn in the tab for one fixture: an undecided project with its export folder chosen, one NIF edit written and
+/// one blocked. There is no Warnings group, no half-size question and no Stale outputs group.
+#[test]
+fn review_has_no_half_size_or_stale_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    choose_export(&mut m, d.path().join("export"));
+    m.set_nif_review_rows(vec![
+        sdc_gui::model::meshes::NifReviewRow {
+            path: r"meshes\a.nif".into(),
+            mod_name: "My Mod".into(),
+            blocked: None,
+            foreign: None,
+            answer: None,
+            compaction: None,
+        },
+        sdc_gui::model::meshes::NifReviewRow {
+            path: r"meshes\b.nif".into(),
+            mod_name: "My Mod".into(),
+            blocked: Some("conflicts are open".into()),
+            foreign: None,
+            answer: None,
+            compaction: None,
+        },
+    ]);
+    m.open_review();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1500.0, 900.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let skip = d.path().to_string_lossy().into_owned();
+    let got = review_labels(&h, &skip);
+    let expected: Vec<&str> = vec![
+        "1 DDS file",
+        "Accept all suggestions",
+        "Acknowledge for this texture",
+        "Also export as",
+        "Also folders go in",
+        "Also folders go in: <tmp>\\export",
+        "Blockers (0)",
+        "CM",
+        "CM folder name",
+        "Choose where the Also folders go…",
+        "Close",
+        "Complex material",
+        "Export 1 file + 1 NIF edit (skip 4 undecided, 1 NIF edit)",
+        "Files",
+        "Messages",
+        "NIF edits (1)",
+        "NIF edits skipped (1)",
+        "None",
+        "PBR",
+        "PBR folder name",
+        "Problems (8)",
+        "Recipe settings are in Advanced",
+        "Review",
+        "Skip these sets",
+        "This texture's size isn't a power of two — resize it or acknowledge",
+        "Undecided (4)",
+        "Vanilla",
+        "Vanilla folder name",
+        "What will be written",
+        "landscape diffuse",
+        "landscape normal",
+        "landscape/rock01",
+        "leaf.png",
+        "meshes\\a.nif · My Mod · written to <tmp>\\export",
+        "meshes\\b.nif: conflicts are open",
+        "odd.png",
+        "rock01.png",
+        "rock01_normal.png",
+        "▼",
+        "✓",
+    ];
+    assert_eq!(got, expected, "{got:#?}");
 }

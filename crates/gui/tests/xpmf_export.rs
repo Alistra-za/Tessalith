@@ -154,25 +154,18 @@ fn review_lists_profile() {
     assert!(m.sets_doc.as_ref().unwrap().xpmf_shas().is_empty());
 }
 
-/// FC11 and the Task 5 ruling: removing the last block lists the old profile as stale, with Delete while the file
-/// still has Tessalith's hash.
+/// The Task 5 ruling: removing the last block leaves the old profile in place, and the export says so.
 #[test]
-fn stale_profile_row() {
+fn an_orphaned_profile_is_left_in_place_with_a_note() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     set_block(&mut m, Some(json!({})));
     export(&mut m);
     let f = profile_path(&m);
     assert!(f.is_file(), "{}", notes(&m));
-    assert!(!m.stale.iter().any(|s| s.path == f));
     set_block(&mut m, None);
     m.replan();
     idle(&mut m);
-    assert!(
-        m.stale.iter().any(|s| s.path == f && s.ours),
-        "{:?}",
-        m.stale
-    );
     assert!(
         prepare(&m).is_some(),
         "a record with no block still reports"
@@ -180,10 +173,6 @@ fn stale_profile_row() {
     std::fs::write(&f, "{}\n").unwrap();
     m.replan();
     idle(&mut m);
-    let s = m.stale.iter().find(|s| s.path == f).expect("still stale");
-    assert!(!s.ours, "edited by hand: no Delete");
-    assert!(m.delete_stale_output(&f).is_err());
-    assert!(f.is_file());
     // The export leaves it in place and says so.
     export(&mut m);
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "{}\n");
@@ -192,13 +181,6 @@ fn stale_profile_row() {
         "{}",
         notes(&m)
     );
-    // `finish` keeps the orphan's record, so the row stays, still without Delete.
-    let s = m
-        .stale
-        .iter()
-        .find(|s| s.path == f)
-        .expect("stale after the export");
-    assert!(!s.ours, "{:?}", m.stale);
 }
 
 /// As `opened`, but the set lives under `textures/pbr/landscape/`, so the Vanilla folder's paths differ from the PBR

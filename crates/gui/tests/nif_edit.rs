@@ -10757,7 +10757,6 @@ fn nif_out(h: &AppH) -> (String, std::path::PathBuf, Vec<u8>) {
 fn export_from_review(h: &mut AppH) {
     h.state_mut().model.export_clicked();
     assert!(h.state().model.review.is_some(), "NIF edits open Review");
-    h.state_mut().model.acknowledge_all_asks();
     h.state_mut().model.export_from_review();
     let start = Instant::now();
     while !(h.state().model.export.summary.is_some() && h.state().model.review.is_none()) {
@@ -10811,7 +10810,6 @@ fn a_foreign_nifs_overwrite_answer_reaches_the_export() {
     h.run_steps(4);
     // Unanswered, Review's gate waits and nothing is written.
     h.state_mut().model.export_clicked();
-    h.state_mut().model.acknowledge_all_asks();
     h.run_steps(4);
     assert!(h.state().model.review_gate().is_err());
     h.state_mut().model.export_from_review();
@@ -10884,7 +10882,6 @@ fn a_cancelled_export_drops_the_overwrite_answer() {
     std::fs::write(&out_path, &theirs).unwrap();
     h.run_steps(4);
     h.state_mut().model.export_clicked();
-    h.state_mut().model.acknowledge_all_asks();
     h.run_steps(4);
     h.get_by_label("Overwrite it").click();
     h.run_steps(4);
@@ -10907,7 +10904,6 @@ fn a_cancelled_export_drops_the_overwrite_answer() {
     );
     // Reopened, the row asks again.
     h.state_mut().model.export_clicked();
-    h.state_mut().model.acknowledge_all_asks();
     h.run_steps(4);
     let rows = h.state().model.nif_review_rows().to_vec();
     assert_eq!(rows[0].answer, None, "{rows:?}");

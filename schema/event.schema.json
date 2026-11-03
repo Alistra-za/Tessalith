@@ -2171,7 +2171,7 @@
         },
         {
           "const": "low_detail",
-          "description": "`CHK-LOW-DETAIL`: no longer emitted (Note FC2: Hold writes the full chain); kept so older event logs parse.",
+          "description": "`CHK-LOW-DETAIL`: no longer emitted as a skip; kept so older event logs parse.",
           "type": "string"
         },
         {

@@ -16,7 +16,7 @@ Click the strip at the right edge to open it. With a set selected in 2D, the sam
 | Mipmaps | Levels for the selected texture. |
 | Advanced texture fields | BC7 weighting ([BC7 weighting](GUI-Texture-Panel.md#bc7-weighting-against-bc3)), BC4/BC5 search radius (*Default*, *Maximum*, *Fast (preview)*), DDS header (Auto, DX10 extended header, Legacy FourCC), Resize, Half size. |
 | Interface | **Reduce motion** ([below](#reduce-motion)). |
-| Checks | The switches for the artist checks, **Measure whether full size adds anything** and **Check all UV coverage**. See [Artist checks](GUI-Artist-Checks.md#artist-checks). |
+| Checks | The switches for the artist checks and **Check all UV coverage**. See [Artist checks](GUI-Artist-Checks.md#artist-checks). |
 | Also export recipe | One box per `[export.legacy]` value of [Also export as Vanilla and CM](GUI-Also-Export.md#the-recipe). Starts closed; Review's link opens it. |
 | Unmatched [files] entries | `[files]` entries that name no file under the current target, with **Remove**. |
 

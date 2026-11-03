@@ -101,7 +101,6 @@ fn a_tick_opens_review_and_reviews_export_is_the_only_way_out() {
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_some() && m.export.summary.is_none());
-    m.acknowledge_all_asks();
     m.export_from_review();
     idle(&mut m);
     assert_eq!(m.dialog, None, "{:?}", m.export.notes);
@@ -126,7 +125,6 @@ fn nothing_ticked_exports_exactly_as_today() {
     assert_eq!(m.request().unwrap().skip_root, None);
     m.export_clicked();
     if m.review.is_some() {
-        m.acknowledge_all_asks();
         m.export_from_review();
     }
     idle(&mut m);
@@ -276,7 +274,6 @@ fn the_pbr_json_in_the_pbr_folder_is_ours_on_the_next_export() {
     m.export_clicked();
     assert!(m.review_json().iter().all(|l| l.state != DiskState::Edited));
     assert!(!m.pgp_json_edited());
-    m.acknowledge_all_asks();
     m.export_from_review();
     idle(&mut m);
     // Note FC5: nothing waits for a Keep/Overwrite answer, so the export ran.
@@ -421,52 +418,6 @@ fn renaming_a_skipped_set_keeps_its_opt_out() {
     m.undo();
     idle(&mut m);
     assert_eq!(m.also_config().skip, [steel], "one undo step");
-}
-
-/// P10 (TA24): Hold is Warn during an Also export, so no texture is held out of the folders and no half-size box
-/// opens. The fixture has no PBR set, so there is no CM folder (TA30); the PBR and Vanilla folders hold everything.
-#[test]
-fn drop_top_mip_on_still_writes_every_texture_in_all_three_folders() {
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path().join("Up/textures");
-    std::fs::create_dir_all(&r).unwrap();
-    let small = ImageBuffer::from_fn(512, 512, |x, y| {
-        let v = ((x * 7919 + y * 104729) % 251) as u8;
-        Rgb([v, v.wrapping_mul(3), v.wrapping_mul(7)])
-    });
-    ImageBuffer::from_fn(1024, 1024, |x, y| *small.get_pixel(x / 2, y / 2))
-        .save(r.join("up.png"))
-        .unwrap();
-    std::fs::write(
-        r.join("sdc.toml"),
-        "[defaults.encoder]\neffort = \"ultrafast\"\n\n[files.\"up.png\"]\nsubtype = \"diffuse\"\n",
-    )
-    .unwrap();
-    let settings = sdc_gui::settings::GuiSettings {
-        export_folder: Some(d.path().join("out")),
-        checks: sdc_gui::settings::ChecksSettings {
-            drop_top_mip: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut m = AppModel::new(settings, None, support::session());
-    m.open_folder(r);
-    idle(&mut m);
-    m.set_export_folder(d.path().join("out"));
-    idle(&mut m);
-    assert!(m.settings.checks.low_detail && m.settings.checks.drop_top_mip);
-    tick(&mut m, AlsoTarget::Cm);
-    export(&mut m);
-    // Note FC2: nothing is held, and there is no box after the export.
-    assert!(m.dialog.is_none(), "{:?}", m.dialog);
-    assert!(m.export.rows.iter().all(|r| !matches!(
-        r.state,
-        RowState::Skipped(engine::events::SkipKind::LowDetail, _)
-    )));
-    let [p, v, _] = m.also_folders();
-    assert!(p.join("up.dds").is_file());
-    assert!(v.join("up.dds").is_file());
 }
 
 #[test]

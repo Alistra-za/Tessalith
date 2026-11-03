@@ -371,19 +371,7 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             let v = *on;
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, name));
         }
-        // K22: without Low detail (Note FC9: was "Fake resolution") there is nothing to measure. Note FC2: the switch measures; it never holds.
-        ui.add_enabled(
-            c.low_detail,
-            egui::Checkbox::new(
-                &mut c.drop_top_mip,
-                "Measure whether full size adds anything",
-            ),
-        )
-        .on_hover_text(
-            "Measure the full-size level against the next one on every export, up-to-date files too; Review then \
-             asks half or full size for each texture whose full size adds almost nothing (CHK-LOW-DETAIL)",
-        )
-        .on_disabled_hover_text("Turn on Low detail first");
+
         if c != now {
             actions.push(Action::Checks(c));
         }

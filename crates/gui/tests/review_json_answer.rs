@@ -29,7 +29,6 @@ fn reviewing(dir: &std::path::Path, rows: Vec<NifReviewRow>) -> AppModel {
     m.set_nif_review_rows(rows);
     m.export_clicked();
     assert!(m.review.is_some(), "NIF edits open Review");
-    m.acknowledge_all_asks();
     m
 }
 
@@ -71,7 +70,7 @@ fn export_waits_for_a_foreign_nif_answer() {
     }]);
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     // Closing Review drops the NIF answers (GD29).
-    m.dismiss_review();
+    m.close_review();
     assert!(m.nif_clear_answers_request);
     assert_eq!(m.nif_answer_request, None);
 }
@@ -131,15 +130,14 @@ fn review_lists_nif_edits_and_a_blocked_one_is_a_warning() {
         },
     ];
     let m = reviewing(d.path(), rows);
-    let asks = sdc_gui::model::pbr_export::export_asks(&m).len();
     let mut h = harness(m);
     h.run();
-    // The blocked one is a warning: listed and counted under Warnings, not in the NIF edits group.
+    // The blocked one is listed apart, under "NIF edits skipped", not in the NIF edits group.
     h.get_by_label("NIF edits (2)");
     h.get_by_label_contains(r"meshes\a.nif · My Mod · 3 unused blocks removed · written to ");
-    h.get_by_label("NIF edit skipped: conflicts are open");
-    h.get_by_label(&format!("Warnings ({})", asks + 1));
-    // A warning never blocks: answering the foreign one is all the gate waits for.
+    h.get_by_label("NIF edits skipped (1)");
+    h.get_by_label(r"meshes\b.nif: conflicts are open");
+    // A skipped edit never blocks: answering the foreign one is all the gate waits for.
     // The foreign one is a Blockers question with Review's two radios, neither picked.
     h.get_by_label(r"meshes\c.nif was not written by Tessalith");
     h.get_by_label_contains("Blockers (1)");

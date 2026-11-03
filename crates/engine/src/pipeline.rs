@@ -38,17 +38,6 @@ pub enum FileError {
     Failed(Stage, String),
 }
 
-/// What `process_file` did with a file that did not fail.
-// One value per file, moved once: boxing the outcome would buy nothing.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub enum Processed {
-    Written(FileOutcome),
-    /// A measure-only run of an up-to-date output (`LowDetailMode::Hold`): nothing written; the `CHK-LOW-DETAIL`
-    /// warning when it was flagged again (Note FC2).
-    UpToDate(Option<crate::codes::Warning>),
-}
-
 #[derive(Debug)]
 pub struct FileOutcome {
     pub output: PathBuf,
@@ -147,7 +136,7 @@ fn encode_input_sha256(
 
 /// What `prepare` keeps of the chain (M3a spec §6.5). `Encode` is the export: every mip is quantised, none of the
 /// float chain is kept. `Preview` and `SourceOnly` start at the first mip within `max_size`; `SourceOnly` stops
-/// before quantising. `Measure` (check 3's measure-only run, preflight K15) keeps nothing and always measures.
+/// before quantising.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Keep {
     Encode,
@@ -159,7 +148,6 @@ pub(crate) enum Keep {
         max_size: u32,
         face: usize,
     },
-    Measure,
 }
 
 /// The stages up to quantise. `chain` and `inputs` start at mip `first_level`; `dims` covers every mip. `chain` is
@@ -254,8 +242,8 @@ pub(crate) fn prepare(
 }
 
 /// `prepare`, running `after_stamps` once the stamp check has passed and before anything is decoded (the export
-/// hashes its sources there, so a source that cannot be hashed still fails before it is loaded). `detail` (or
-/// `Keep::Measure`) measures check 3's ratio on an eligible chain.
+/// hashes its sources there, so a source that cannot be hashed still fails before it is loaded). `detail`
+/// measures check 3's ratio on an eligible chain.
 fn prepare_then<T>(
     job: &ResolvedJob,
     cancel: &CancelToken,
@@ -274,11 +262,7 @@ fn prepare_then<T>(
         }
     };
     enter(Stage::Load);
-    // Note CL20 (review M10): a measure-only job writes nothing and its content was matched by hash in `run`, so a
-    // touched-but-identical source is not failed for its stamp.
-    if keep != Keep::Measure {
-        check_stamps(job)?;
-    }
+    check_stamps(job)?;
     let extra = after_stamps()?;
     // DECISIONS DS10: a cube job builds its faces and mips in direction space.
     if let Some(cj) = &job.cube {
@@ -377,7 +361,7 @@ fn prepare_then<T>(
         preserve_coverage(&mut chain, p.alpha.threshold, p.alpha.compare);
     }
     // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the source size.
-    let detail_ratio = ((detail || keep == Keep::Measure)
+    let detail_ratio = (detail
         && crate::checks::low_detail_eligible(p, (chain[0].width, chain[0].height)))
     .then(|| crate::checks::detail_ratio(&chain))
     .flatten();
@@ -388,7 +372,7 @@ fn prepare_then<T>(
     }
     let dims: Vec<(u32, u32)> = chain.iter().map(|l| (l.width, l.height)).collect();
     let first_level = match keep {
-        Keep::Encode | Keep::Measure => 0,
+        Keep::Encode => 0,
         Keep::Preview { max_size } | Keep::SourceOnly { max_size, .. } => {
             first_level_within(&dims, max_size)
         }
@@ -398,14 +382,14 @@ fn prepare_then<T>(
     let source_peak = source_peak(&chain[first_level], p);
     // Quantise clamps mip 0 (Task 31). These exact levels are encoded and handed to Validate (Task 35).
     let inputs: Vec<EncoderInput> = match keep {
-        Keep::SourceOnly { .. } | Keep::Measure => vec![],
+        Keep::SourceOnly { .. } => vec![],
         _ => chain[first_level..]
             .iter()
             .map(|l| to_encoder_input(l, &work, p))
             .collect(),
     };
     let chain = match keep {
-        Keep::Encode | Keep::Measure => {
+        Keep::Encode => {
             drop(chain);
             vec![]
         }
@@ -477,20 +461,18 @@ pub(crate) fn encode_levels(
 /// record, except after a second Ctrl-C: that aborts the process (exit 3) and can leave `.sdc-*.tmp` files, or an
 /// output without a record (`OUT-UNKNOWN-EXISTING` on the next run). A failed validation (`passed = false`) is not a failure here: the output is written and recorded.
 ///
-/// Check 3 (`req.low_detail`, Note CL20, amended by FC2): a flagged texture is written in full and carries the
-/// warning in its report under `Warn` and `Hold` alike. A `measure_only` job (an up-to-date output under `Hold`) is
-/// loaded and measured, never encoded, and is `UpToDate` with the warning when flagged.
+/// Check 3 (`req.low_detail`): a flagged texture is written in full and carries the warning in its report under
+/// `Warn`.
 #[allow(clippy::too_many_arguments)]
 pub fn process_file(
     job: &ResolvedJob,
     req: &BatchRequest,
     preset: &PresetRef,
-    measure_only: bool,
     cancel: &CancelToken,
     rep: &Reporter,
     manifest: &Manifest,
     tracker: &FileTracker,
-) -> Result<Processed, FileError> {
+) -> Result<FileOutcome, FileError> {
     let enter = |st: Stage| tracker.stage.set(st);
     enter(Stage::Load);
     // Test hook (Task 44, `test-hooks` feature only): panic on the named input file to prove per-file panic isolation.
@@ -530,10 +512,6 @@ pub fn process_file(
                 .with_data(serde_json::json!({ "width": w, "height": h, "ratio": r }))
             })
     };
-    if measure_only {
-        let (prep, ()) = prepare_then(job, cancel, tracker, Keep::Measure, true, || Ok(()))?;
-        return Ok(Processed::UpToDate(flagged(&prep)));
-    }
     let detail = req.low_detail != LowDetailMode::Off;
     // The hashes sit between the stamp check and the load, as they always have: a source that cannot be hashed
     // fails here, before it is decoded.
@@ -702,8 +680,8 @@ pub fn process_file(
         .map_err(|e| fail(Stage::Write)(format!("manifest {}: {e}", manifest.path().display())))?;
     // `Warn`: listed with the file's warnings only; the record and its validation summary do not carry it.
     report.warnings.extend(low_detail);
-    Ok(Processed::Written(FileOutcome {
+    Ok(FileOutcome {
         output: job.output.clone(),
         report,
-    }))
+    })
 }

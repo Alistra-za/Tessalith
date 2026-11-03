@@ -1058,7 +1058,6 @@ fn checks_settings_default_on_and_load_from_an_old_gui_toml() {
     assert!(err.is_none(), "{err:?}");
     let c = s.checks;
     assert!(c.range && c.plastic && c.low_detail && c.green && c.parallax && c.uv);
-    assert!(!c.drop_top_mip);
     let mut s = s;
     s.checks.plastic = false;
     s.save(&p).unwrap();

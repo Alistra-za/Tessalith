@@ -186,13 +186,9 @@ fn advanced_checks_use_low_detail_and_no_mip_zero() {
     h.run();
     assert_eq!(h.query_all_by_label("Low detail check").count(), 1);
     assert_no_strays(&h, "Advanced");
-    // The hover is not in the tree until it shows; hover the switch and sweep again.
-    h.get_by_label_contains("Measure whether full size adds anything")
-        .hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("full-size level");
-    assert_no_strays(&h, "Advanced hover");
+    assert!(h
+        .query_by_label_contains("Measure whether full size adds anything")
+        .is_none());
 }
 
 /// Fix round 1: the sub-type dropdowns offer `Skin RFAOS`, never `skin rfaos`.

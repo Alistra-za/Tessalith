@@ -49,13 +49,8 @@ Landscape diffuses are left out, because terrain does not use NIF shapes. Result
 
 ## Half size
 
-With **Low detail** on, **Measure whether full size adds anything** (in Advanced → Checks, greyed until Low detail is on) measures every texture on each export, up-to-date ones too. Export always writes the full texture; nothing is held back. Review then asks about the textures the last export flagged (hover: mip 0 adds little detail over mip 1, `CHK-LOW-DETAIL`).
+With **Low detail** on, Export measures each texture it writes and always writes it at full size. A texture whose top mip adds little detail gets the `CHK-LOW-DETAIL` warning in [Problems](GUI-Problems.md) (hover: mip 0 adds little detail over mip 1). Nothing is asked and nothing is held back.
 
-- Review's Undecided column lists them under **N textures added nothing at full size last export**, one row per texture with a menu: **Half size** or **Full size** (an unanswered row reads *Half or full size? ▾*). The rows count in *Undecided (n)*, and Export waits with "Answer half or full size for N textures" until each has an answer. When `sdc.toml` is read-only, **Half size** is greyed (hover: the half-size choice cannot be saved) and **Full size** still works.
-- Review's Export saves `drop_top_mip = true` on each texture answered **Half size** (one undo step, *Half size*), waits for the new plan, and exports once: those textures are written from mip 1. **Full size** writes nothing to `sdc.toml`. **Close** and **Esc** write nothing; if the export is refused after the half size was saved (or Review is closed before it starts), that step is undone. There is no dialog after the export.
-- An answer is for that export only: a texture answered Full size is measured and asked about again next time. A texture the plan no longer flags (resized, already at half size), or whose source file changed since that export, leaves the list and gets nothing written.
-- The first export of a texture always writes it at full size, because nothing has been measured yet.
-- Without the switch, Low detail only warns in Problems, and Review asks nothing.
 - **Advanced → Half size** sets or clears the same per-file field by hand (a tick box with ↺; greyed with "No mips to drop" when the texture has no mip chain). The CLI honours the saved field ([`drop_top_mip`](Set-Shaders.md#height-maps-and-the-artist-checks)), so both write the same bytes. A half size saved on the source texture is a tick in the *Copy settings* list (*Half size: true*), like any other field.
 
 ## Gloss bake for a complex `_m`

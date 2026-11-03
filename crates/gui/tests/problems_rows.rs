@@ -122,7 +122,6 @@ fn with_a_check(d: &std::path::Path) -> AppModel {
         green: false,
         parallax: false,
         uv: false,
-        drop_top_mip: false,
     });
     m.poll();
     m.invalidate_views();

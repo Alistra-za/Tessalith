@@ -153,3 +153,24 @@ CN44	CN		back	FM		partial	2026-11-02		goes: ALSO-OWNED-UNREADABLE as a code adde
 CN67	CN		back	FM		partial	2026-11-02		goes: Open report and Show in Messages; stays: Files rows and the DERIVE-NIF-SUGGEST Warning row (values on hover)
 CN73	CN		back	FM		partial	2026-11-02		goes: the unreadable _sdc/also.json refusal; stays: the Task 11 review fixes
 FC¶- **T8.** In the GUI	FC		back	FM		partial	2026-11-02		goes: the Reset also.json comparison; stays: the Remove aliases row
+V4	V		back	FM		partial	2026-11-03		goes: the ask before export (now a Warning row in Problems); stays: matches nothing, left out of the JSON
+AT¶- Untick or orphan:	AT		back	FM		partial	2026-11-03		goes: the stale Review row with Delete; stays: the file is left in place
+CA4	CA		back	FM		archive-item	2026-11-03		whole: the pitfall ticks and Acknowledge all are gone (FM24)
+CA5	CA		back	FM		partial	2026-11-03		goes: the Warnings column count in Review; stays: warnings never open Review
+CL15	CL		back	FM		partial	2026-11-03		goes: the Measure whether full size adds anything switch; stays: the six check boxes
+CL20	CL		back	FM		partial	2026-11-03		goes: LowDetailMode::Hold, the Hold bullet and the flagged-again bullet; stays: Off and Warn, the metric, the threshold
+CL26	CL		back	FM		partial	2026-11-03		goes: "never measured first"; stays: the Advanced Half size row and Copy settings
+FC2	FC		back	FM		partial	2026-11-03		goes: the Review half-size question, the engine Hold/UpToDate pieces, the Measure switch; stays: Copy settings tick, the Half size name
+FC¶- **Overwrite answers.**	FC		back	FM		partial	2026-11-03		goes: "after the half-size question"; stays: the overwrite questions
+FC¶- **NIF edits.**	FC		back	FM		partial	2026-11-03		goes: the Warnings column row for a blocked NIF edit; stays: the NIF edits footer group (a blocked one is listed under NIF edits skipped)
+FC¶- **Half size has one meaning.**	FC		back	FM		partial	2026-11-03		goes: Review's answer and the Review hover; stays: the Resize option wording and the Low detail name
+FC11	FC		back	FM		partial	2026-11-03		goes: stale outputs in Review, the Problems row, stale_outputs; stays: the sidecar, reconcile on open, P21
+FC¶- **Unreadable inputs.**	FC		back	FM		archive-item	2026-11-03		whole: stale_outputs is gone (FM24)
+FC¶- **Undecided sets keep their recorded outputs.**	FC		back	FM		archive-item	2026-11-03		whole: stale_outputs is gone (FM24)
+FC12	FC		back	FM		partial	2026-11-03		goes: the portrait photo as a Warnings row in Review; stays: a Warning row in Problems
+DS26	DS		back	FM		partial	2026-11-03		goes: Review lists the portrait photo as a Warnings row to acknowledge; stays: the crop
+AA2	AA		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
+AD5	AD		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
+AG90	AG		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
+DR9	DR		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
+DV7	DV		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place

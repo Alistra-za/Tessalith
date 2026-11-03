@@ -1,17 +1,14 @@
-//! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers, undecided textures and pitfalls side by side, what
-//! the export writes, and one Export button. Not a dialog: Enter does nothing here (N3).
+//! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
+//! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
 use super::settings_panel::{
     alpha_hint, alpha_options, offered_groups, subtype_label, unclear_layouts,
 };
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::bottom::{problems, Level};
 use crate::model::code_text::{ack_label, ack_label_for_texture, code_line};
 use crate::model::items::Decision;
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
-use crate::model::review::{
-    DiskState, HalfAnswer, HalfSizeRow, JsonKind, JsonLine, NO_EXPORT_FOLDER,
-};
+use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
 use engine::config::{AlphaPolicy, CubeLayout, Subtype, Target};
@@ -273,15 +270,10 @@ enum Act {
     Recipe,
     GoTo(String),
     Row(RowPick),
-    Half(String, HalfAnswer),
     AcceptAll,
-    Tick(String, bool),
-    AckAll,
-    Others,
     Json(bool),
     Nif(String, bool, [u8; 32]),
     NifDiff(String),
-    DeleteStale(std::path::PathBuf),
     Export,
     Close,
 }
@@ -351,119 +343,14 @@ fn nif_row_text(
     t
 }
 
-/// Note FC14: one row of the footer's shared list (NIF edits, stale outputs, what will be written).
+/// Note FC14: one row of the footer's shared list (NIF edits, skipped NIF edits, what will be written).
 enum Footer<'a> {
     Heading(String),
     Nif(&'a crate::model::meshes::NifReviewRow),
     NifWaiting(&'a crate::model::meshes::NifReviewRow),
-    Stale(&'a engine::manifest::StaleOutput),
+    NifSkipped(&'a crate::model::meshes::NifReviewRow),
     Written(usize),
     Json(&'a JsonLine),
-}
-
-/// FC11: a `Stale outputs` row: its text, and `Delete` (on a click only) while Tessalith still owns the file.
-fn stale_row(
-    ui: &mut egui::Ui,
-    m: &AppModel,
-    s: &engine::manifest::StaleOutput,
-    off: Option<&str>,
-) -> Option<Act> {
-    let t = m.stale_text(s);
-    let mut act = None;
-    egui::Sides::new().shrink_left().truncate().show(
-        ui,
-        |ui| {
-            ui.add(egui::Label::new(&t).truncate())
-                .on_hover_text(s.path.display().to_string());
-        },
-        |ui| {
-            let tip = format!(
-                "Delete {}: Tessalith wrote it and no longer writes it",
-                s.path.display()
-            );
-            // Rule 8.4: every row's button is named for its file.
-            let name = format!("Delete {}", s.path.display());
-            if s.ours && super::problems::destructive_button(ui, "Delete", Some(&name), &tip, off) {
-                act = Some(Act::DeleteStale(s.path.clone()));
-            }
-        },
-    );
-    act
-}
-
-/// Note FC2: the half-size question, one row per texture the last export flagged: `rock_d.png · Half size ▾`, the
-/// menu `Half size` / `Full size`. "Half size" is the one name; the code and "mip 0" are hover text (CL15). Nothing
-/// is written until Review's Export. An answer writes nothing, so the menu is always on; only Half is off while
-/// `sdc.toml` cannot be saved (`half_off`, its reason on hover).
-fn half_size_group(
-    ui: &mut egui::Ui,
-    answers: &std::collections::BTreeMap<String, Option<HalfAnswer>>,
-    rows: &[HalfSizeRow],
-    half_off: Option<&str>,
-    act: &mut Option<Act>,
-) {
-    if rows.is_empty() {
-        return;
-    }
-    let n = rows.len();
-    ui.colored_label(
-        AMBER,
-        format!(
-            "{n} texture{} added nothing at full size last export",
-            plural(n)
-        ),
-    )
-    .on_hover_text(
-        "Mip 0 adds little detail over mip 1 (CHK-LOW-DETAIL). Half size drops mip 0 and is saved in sdc.toml \
-         when you export; Full size writes the texture as it is.",
-    );
-    for r in rows {
-        let answer = match answers.get(&r.key).copied().flatten() {
-            None => "Half or full size?",
-            Some(HalfAnswer::Half) => "Half size",
-            Some(HalfAnswer::Full) => "Full size",
-        };
-        // ui-rules 3.3: the menu lays out first, the name takes what is left.
-        let (select, pick) = egui::Sides::new().shrink_left().truncate().show(
-            ui,
-            |ui| ui.link(&r.name).on_hover_text(&r.detail).clicked(),
-            |ui| {
-                let mut pick = None;
-                let menu = ui.menu_button(format!("{answer} \u{25BE}"), |ui| {
-                    for (a, label, hover, on) in [
-                        (
-                            HalfAnswer::Half,
-                            "Half size",
-                            "Drop mip 0: half the width and height",
-                            half_off.is_none(),
-                        ),
-                        (HalfAnswer::Full, "Full size", "Write it as it is", true),
-                    ] {
-                        let b = ui
-                            .add_enabled(on, egui::Button::new(label))
-                            .on_hover_text(hover)
-                            .on_disabled_hover_text(half_off.unwrap_or_default());
-                        if b.clicked() {
-                            pick = Some(a);
-                            ui.close();
-                        }
-                    }
-                });
-                // ui-rules 8.4: one name per row, the texture and its answer.
-                let name = format!("{}: {answer}", r.key);
-                menu.response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
-                });
-                pick
-            },
-        );
-        if select {
-            *act = Some(Act::Row(RowPick::Select(r.key.clone())));
-        }
-        if let Some(a) = pick {
-            *act = Some(Act::Half(r.key.clone(), a));
-        }
-    }
 }
 
 /// Note FB10: under this window width the Review sections stack in one scroll area.
@@ -724,18 +611,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         return;
     };
     let m = &*model;
-    // R-b: the asks and the blocks are cached per change, so the gate below reads them again for free.
+    // R-b: the blocks are cached per change, so the gate below reads them again for free.
     let blocks = pbr_export::export_blocks(m);
-    let asks = pbr_export::export_asks(m);
-    // A4: the warnings Problems lists that Review does not ask about.
-    let others = problems(m)
-        .iter()
-        .filter(|p| p.level == Level::Warning)
-        .count()
-        .saturating_sub(asks.len());
     let undecided = m.undecided_keys();
-    let half_rows = m.half_size_rows();
-    let half_open = m.unanswered_half_size();
     let off = m.fix_off();
     let any_suggestion = undecided
         .iter()
@@ -760,6 +638,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     } else {
         None
     };
+    let nif_skipped: Vec<_> = nif_rows
+        .iter()
+        .filter(|r| r.blocked.as_deref().is_some_and(|b| b != NO_EXPORT_FOLDER))
+        .collect();
     let mut act = None;
     // Note FC14: the footer's lists share one scroll area of at most a third of the tab, so the columns keep room.
     let footer_cap = ui.available_height() / 3.0;
@@ -767,8 +649,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     egui::Panel::bottom("review-footer")
         .resizable(false)
         .show(ui, |ui| {
-            // Note FC5: the NIF edits sit between Warnings (above, in the columns) and the files rows; a blocked
-            // one is listed under Warnings instead.
+            // Note FC5: the NIF edits sit above the files rows; a blocked one is listed under its own heading.
             let nif_written: Vec<_> = nif_rows.iter().filter(|r| r.blocked.is_none()).collect();
             let mut list = vec![];
             if !nif_written.is_empty() {
@@ -778,7 +659,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 )));
                 list.extend(nif_written.iter().map(|r| Footer::Nif(r)));
             }
-            // Note FI7 (O5): the Blockers column already names the missing folder, so these are not Warnings.
+            // Note FI7 (O5): the Blockers column already names the missing folder, so these are listed apart.
             let nif_waiting: Vec<_> = nif_rows
                 .iter()
                 .filter(|r| r.blocked.as_deref() == Some(NO_EXPORT_FOLDER))
@@ -790,18 +671,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 )));
                 list.extend(nif_waiting.iter().map(|r| Footer::NifWaiting(r)));
             }
-            // FC11: not a gate. A row Tessalith still owns (its stamp matches) has Delete, on a click only.
-            if !m.stale.is_empty() {
+            // A blocked NIF edit is skipped, never a gate: its reason is listed here.
+            if !nif_skipped.is_empty() {
                 list.push(Footer::Heading(format!(
-                    "Stale outputs ({})",
-                    m.stale.len()
+                    "NIF edits skipped ({})",
+                    nif_skipped.len()
                 )));
-                list.extend(m.stale.iter().map(Footer::Stale));
+                list.extend(nif_skipped.iter().map(|r| Footer::NifSkipped(r)));
             }
             list.push(Footer::Written(m.export_files()));
             // Note FC5: the Keep/Overwrite question moved to Blockers.
             list.extend(json.iter().map(Footer::Json));
-            let off = m.export.running.is_some().then_some(also::EXPORT_RUNNING);
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
             ui.scope(|ui| {
@@ -831,10 +711,14 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                     )
                                     .on_hover_text(&r.path);
                                 }
-                                Footer::Stale(s) => {
-                                    if let Some(a) = stale_row(ui, m, s, off) {
-                                        act = Some(a);
-                                    }
+                                Footer::NifSkipped(r) => {
+                                    let why = r.blocked.as_deref().unwrap_or_default();
+                                    let t = format!("{}: {why}", r.path);
+                                    ui.add(
+                                        egui::Label::new(egui::RichText::new(&t).color(AMBER))
+                                            .truncate(),
+                                    )
+                                    .on_hover_text(&t);
                                 }
                                 Footer::Written(files) => {
                                     ui.strong("What will be written");
@@ -904,23 +788,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         || nif_rows
             .iter()
             .any(|r| r.blocked.is_none() && r.foreign.is_some());
-    let nif_skipped: Vec<_> = nif_rows
-        .iter()
-        .filter(|r| r.blocked.as_deref().is_some_and(|b| b != NO_EXPORT_FOLDER))
-        .collect();
-    let n_cols = if also_on { 4 } else { 3 };
+    let n_cols = if also_on { 3 } else { 2 };
     let heading = |i: usize| match i {
         0 => ("Blockers", format!("Blockers ({blockers})")),
-        // Note FC2: an unanswered half-size row counts, because the gate waits for it.
-        1 => (
-            "Undecided",
-            format!("Undecided ({})", undecided.len() + half_open),
-        ),
-        // Note FC5: a blocked NIF edit is a warning; it is skipped and does not block the export.
-        2 => (
-            "Warnings",
-            format!("Warnings ({})", asks.len() + nif_skipped.len()),
-        ),
+        1 => ("Undecided", format!("Undecided ({})", undecided.len())),
         _ => ("Also export as", "Also export as".to_string()),
     };
     // One body per column, drawn side by side or stacked (Note FB10).
@@ -994,7 +865,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         }
         1 => {
-            if undecided.is_empty() && half_rows.is_empty() {
+            if undecided.is_empty() {
                 ui.weak("None");
             }
             for k in &undecided {
@@ -1015,52 +886,6 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 }));
             if accept.clicked() {
                 act = Some(Act::AcceptAll);
-            }
-            half_size_group(
-                ui,
-                &review.half_size,
-                &half_rows,
-                review.half_unwritable.as_deref(),
-                &mut act,
-            );
-        }
-        2 => {
-            if asks.is_empty() && nif_skipped.is_empty() {
-                ui.weak("None that block the export");
-            }
-            for r in &nif_skipped {
-                let why = r.blocked.as_deref().unwrap_or_default();
-                let t = format!("NIF edit skipped: {why}");
-                ui.add(egui::Label::new(egui::RichText::new(&t).color(AMBER)).truncate())
-                    .on_hover_text(format!("{}: {t}", r.path));
-            }
-            let mut set = None;
-            for a in &asks {
-                // Grouped by set: `export_asks` lists each set's pitfalls together.
-                if set != Some(&a.set_id) {
-                    set = Some(&a.set_id);
-                    // The photo crops come first and belong to no set.
-                    if !a.set_id.is_empty() {
-                        ui.colored_label(AMBER, &a.set_id);
-                    }
-                }
-                let mut on = review.acknowledged.contains(&a.text);
-                if ui.checkbox(&mut on, &a.text).changed() {
-                    act = Some(Act::Tick(a.text.clone(), on));
-                }
-            }
-            if !asks.is_empty() && ui.button("Acknowledge all").clicked() {
-                act = Some(Act::AckAll);
-            }
-            if others > 0
-                && ui
-                    .link(format!(
-                        "{others} warning{} in Problems (do not block)",
-                        plural(others)
-                    ))
-                    .clicked()
-            {
-                act = Some(Act::Others);
             }
         }
         _ => also_section(ui, m, also_err.as_deref(), &mut act),
@@ -1109,25 +934,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             super::header::set_meshes_view(ui.ctx(), false);
         }
         Some(Act::Row(p)) => apply(model, p),
-        Some(Act::Half(k, a)) => model.answer_half_size(&k, a),
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
-        Some(Act::Tick(t, on)) => model.acknowledge_ask(&t, on),
-        Some(Act::AckAll) => model.acknowledge_all_asks(),
-        Some(Act::Others) => model.open_problems(None),
         Some(Act::Json(overwrite)) => model.answer_review_json(overwrite),
         Some(Act::Nif(path, overwrite, sha)) => model.answer_review_nif(&path, overwrite, sha),
         Some(Act::NifDiff(path)) => {
             model.nif_diff_request = Some(path);
             super::header::set_meshes_view(ui.ctx(), true);
         }
-        Some(Act::DeleteStale(path)) => {
-            if let Err(e) = model.delete_stale_output(&path) {
-                model.status_line = e;
-            }
-        }
+
         // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal).
         Some(Act::Export) => super::after_commit(ui.ctx(), model, AppModel::export_from_review),
-        Some(Act::Close) => model.dismiss_review(),
+        Some(Act::Close) => model.close_review(),
         None => {}
     }
 }

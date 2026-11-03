@@ -50,9 +50,7 @@ pub struct GuiSettings {
     pub match_slots: std::collections::BTreeMap<String, u8>,
 }
 
-/// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on but
-/// `drop_top_mip` ("Measure whether full size adds anything", Note FC2: measure up-to-date outputs too and ask the
-/// half-size question in Review; it never changes what an export writes by itself).
+/// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChecksSettings {
@@ -62,7 +60,6 @@ pub struct ChecksSettings {
     pub green: bool,
     pub parallax: bool,
     pub uv: bool,
-    pub drop_top_mip: bool,
 }
 
 impl Default for ChecksSettings {
@@ -74,7 +71,6 @@ impl Default for ChecksSettings {
             green: true,
             parallax: true,
             uv: true,
-            drop_top_mip: false,
         }
     }
 }

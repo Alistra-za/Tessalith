@@ -17,7 +17,7 @@ A row is one line and does not wrap. The fix buttons sit at the panel's right ed
 | A blocker the export would stop on, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …*, a texture that failed to plan | — |
 | *Undecided: sub-type; what its alpha means; <the warning's sentence>* | The [type buttons](#deciding-in-problems), **Decide…** (the alpha choices) and **Acknowledge**. A question that is an acknowledgement shows its warning's sentence, for example "This texture's size isn't a power of two — resize it or acknowledge". |
-| Export pitfalls, texture and set warnings | **Go to set** on a set's row. |
+| Export pitfalls, texture and set warnings | **Go to set** on a set's row. They are ordinary warnings: they never hold back Export or open Review. |
 | A file's export warnings, once the export has ended | Click the file to select it. |
 | Artist-check warnings ([Artist checks](GUI-Artist-Checks.md)) | A grey **check** dot that does not change "ready". A **Checks** pill narrows the list to them. |
 | Info rows, last, with a grey **info** dot | **Undo this change** while that step is still the last one. <!-- D:FC3 --> |

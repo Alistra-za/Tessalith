@@ -105,8 +105,6 @@ pub struct PlanView {
     pub rnm_keys: BTreeMap<PathBuf, String>,
     /// The export folder the plan ran with: set keys are under it (audit 08c-3).
     pub output_root: PathBuf,
-    /// FC11: the recorded files this plan no longer writes (Review's `Stale outputs`).
-    pub stale: Vec<engine::manifest::StaleOutput>,
 }
 
 /// The `[files]` key of a path under `root` (DECISIONS N2).
@@ -437,7 +435,6 @@ impl PlanView {
                 _ => {}
             }
         }
-        let inputs_unreadable = !unreadable.is_empty();
         PlanView {
             target: plan.target,
             preset_id: plan.preset_id.clone(),
@@ -455,15 +452,6 @@ impl PlanView {
             rnm_notes,
             rnm_keys,
             output_root: out_root.clone(),
-            // FC11: one manifest read per plan, on the planning thread.
-            // shortcut: a large manifest is parsed again on every re-plan; cache it by its size and mtime if a
-            // profile of a big project shows it.
-            stale: engine::manifest::stale_outputs(
-                &engine::manifest::Manifest::at(out_root),
-                plan,
-                out_root,
-                inputs_unreadable,
-            ),
         }
     }
 }

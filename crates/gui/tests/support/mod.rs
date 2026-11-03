@@ -205,7 +205,6 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
 pub fn export_through(m: &mut AppModel) {
     m.export_clicked();
     if m.review.is_some() {
-        m.acknowledge_all_asks();
         m.export_from_review();
     }
 }

@@ -43,10 +43,6 @@ Look for `CHK-UV-GUTTER`. UV islands that sit closer than 8 texels let a smaller
 
 The overlay and the check read your Meshes scan, so scan first: scan your MO2 instance in the Meshes view. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage, and landscape diffuses are left out. The toggle is also off while a pin is compared ("Hidden while comparing") and after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on ("Turn on UV coverage check first").
 
-### Review asks "half or full size"
-
-With **Measure whether full size adds anything** on, every export measures each texture's top mip and writes the full texture. A texture whose top mip carries little detail (`CHK-LOW-DETAIL`) is then asked about in Review before the next export: pick **Half size** or **Full size** on its row. Export waits until each row is answered. Half size is saved in `sdc.toml` when you press Export; Full size saves nothing, so the texture is asked about again on the next export. Close writes nothing.
-
 ### A normal map came out as a diffuse
 
 Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, add an `[inputs]` alias, or set `subtype = "normal"` in a `[files]` entry.

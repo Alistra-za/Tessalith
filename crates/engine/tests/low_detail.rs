@@ -101,13 +101,13 @@ fn mtime(p: &Path) -> std::time::SystemTime {
     std::fs::metadata(p).unwrap().modified().unwrap()
 }
 
-/// Note FC2 (amends CL20): Hold measures and records `CHK-LOW-DETAIL`, but writes the full chain, byte for byte
-/// what an Off run writes; no file is withheld.
+/// Warn measures and records `CHK-LOW-DETAIL`, but writes the full chain, byte for byte what an Off run writes; no
+/// file is withheld.
 #[test]
-fn hold_measures_but_writes_the_full_chain() {
+fn warn_measures_but_writes_the_full_chain() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path(), 2);
-    let (s, ev) = run(req(d.path(), "out", LowDetailMode::Hold));
+    let (s, ev) = run(req(d.path(), "out", LowDetailMode::Warn));
     run(req(d.path(), "off", LowDetailMode::Off));
     let w = low_detail(&ev, "up.dds");
     assert_eq!(w.len(), 1, "{ev:?}");
@@ -133,29 +133,6 @@ fn hold_measures_but_writes_the_full_chain() {
     assert_eq!(records(&off), records(&out));
     assert!(low_detail(&ev, "noise.dds").is_empty());
     assert_eq!((s.converted, s.skipped, s.skipped_intentional), (2, 0, 0));
-    assert_eq!(s.exit_code(), 0);
-}
-
-/// CL20 (owner answer 2), kept by FC2: an up-to-date output is measured again under Hold and flagged again, and
-/// stays up to date (never re-encoded).
-#[test]
-fn hold_flags_an_up_to_date_texture_again() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path(), 2);
-    run(req(d.path(), "out", LowDetailMode::Off));
-    let (up, noise) = (d.path().join("out/up.dds"), d.path().join("out/noise.dds"));
-    let (t_up, t_noise) = (mtime(&up), mtime(&noise));
-    let (s, ev) = run(req(d.path(), "out", LowDetailMode::Hold));
-    assert_eq!(low_detail(&ev, "up.dds").len(), 1);
-    for n in ["up.dds", "noise.dds"] {
-        assert_eq!(
-            skips(&ev, n),
-            vec![(SkipKind::UpToDate, None, "up to date".to_string())]
-        );
-    }
-    assert!(low_detail(&ev, "noise.dds").is_empty());
-    assert_eq!((mtime(&up), mtime(&noise)), (t_up, t_noise));
-    assert_eq!((s.converted, s.up_to_date, s.skipped), (0, 2, 0));
     assert_eq!(s.exit_code(), 0);
 }
 
@@ -436,34 +413,4 @@ fn drop_top_mip_on_a_single_level_chain_is_ignored() {
     assert_eq!((s.converted, s.up_to_date), (0, 2));
     assert_eq!(mtime(&up), t0);
     assert_eq!(dds(&up).0, 1024);
-}
-
-/// Review M10: a source re-saved with the same bytes after planning is still measured under Hold (the content was
-/// checked by hash), not failed for a changed stamp.
-#[test]
-fn hold_measures_a_touched_but_identical_source() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path(), 2);
-    run(req(d.path(), "out", LowDetailMode::Off));
-    let sink = Arc::new(VecSink::default());
-    let rep = Reporter::new(sink.clone(), new_batch_id());
-    let e = Engine::new().unwrap();
-    let plan = e
-        .plan(
-            req(d.path(), "out", LowDetailMode::Hold),
-            &rep,
-            &CancelToken::default(),
-        )
-        .unwrap();
-    let src = d.path().join("in/up.png");
-    let f = std::fs::OpenOptions::new().write(true).open(&src).unwrap();
-    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
-        .unwrap();
-    drop(f);
-    let s = e.run(plan, &rep, &CancelToken::default()).unwrap();
-    let ev = sink.take();
-    assert_eq!(s.failed, 0, "{ev:?}");
-    assert_eq!(low_detail(&ev, "up.dds").len(), 1);
-    assert_eq!(skips(&ev, "up.dds")[0].0, SkipKind::UpToDate);
-    assert_eq!(s.exit_code(), 0);
 }

@@ -19,7 +19,7 @@ use crate::manifest::{
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
-use crate::pipeline::{process_file, FileError, FileTracker, Processed};
+use crate::pipeline::{process_file, FileError, FileTracker};
 use crate::policy::*;
 use crate::presets::*;
 use crate::session::{pack_cache_key, AnalysisCache, PackEntry};
@@ -139,9 +139,6 @@ pub enum LowDetailMode {
     Off,
     /// The warning is emitted and the file is written as usual.
     Warn,
-    /// `Warn`, and an eligible up-to-date output is loaded and measured again without encoding, so it is flagged
-    /// again. The full chain is always written: Hold measures, it never withholds a file (Note FC2, amends CL20).
-    Hold,
 }
 
 /// How far a plan's per-file pass has got: `total` is the number of files it loads and resolves (duplicates and
@@ -469,7 +466,7 @@ pub struct BatchSummary {
     pub skipped: u32,
     /// Of `skipped`, those skipped on purpose: `IN-DDS-SKIPPED` inputs, `PACK-CONFLICT` pre-packed files replaced
     /// under `packing.prefer = raw` and outputs kept by an explicit `--on-existing skip` (low-detail textures are no
-    /// longer held, Note FC2). They do not make the batch partial (DECISIONS Notes I, M9 and CL20).
+    /// longer held). They do not make the batch partial (DECISIONS Notes I, M9).
     pub skipped_intentional: u32,
     pub failed: u32,
     /// Written outputs whose validation reported an error (`passed = false`); also counted in `converted`.
@@ -2973,10 +2970,8 @@ impl Engine {
         } else {
             vec![false; ready.len()]
         };
-        // The bool is measure-only: an up-to-date output re-measured under `LowDetailMode::Hold`, never encoded.
-        let mut todo: Vec<(&ResolvedJob, PresetRef, bool)> = vec![];
+        let mut todo: Vec<(&ResolvedJob, PresetRef)> = vec![];
         for (job, current) in ready.into_iter().zip(current) {
-            let mut measure_only = false;
             if cancel.is_cancelled() {
                 summary.cancelled.push(job.input.clone());
                 continue;
@@ -3023,15 +3018,6 @@ impl Engine {
                                 );
                                 continue;
                             }
-                            // Note CL20 (owner answer 2): "flagged again next time" — Hold re-measures an eligible
-                            // up-to-date output; the size half of eligibility is known only after Load.
-                            Some(_)
-                                if current
-                                    && req.low_detail == LowDetailMode::Hold
-                                    && crate::checks::low_detail_profile_eligible(&job.profile) =>
-                            {
-                                measure_only = true;
-                            }
                             Some(_) if current => {
                                 summary.up_to_date += 1;
                                 rep.emit_job(
@@ -3061,7 +3047,7 @@ impl Engine {
                 None => PresetRef::for_preset(&plan.registry, &plan.preset_id, None),
             };
             match preset {
-                Some(p) => todo.push((job, p, measure_only)),
+                Some(p) => todo.push((job, p)),
                 None => {
                     summary.failed += 1;
                     rep.emit_job(
@@ -3084,7 +3070,7 @@ impl Engine {
         // ever blocks on the budget. A pool thread blocked in `acquire` while its nested band-parallel encode stole
         // another file's task could otherwise hold budget forever (deadlock).
         pool.in_place_scope(|scope| {
-            for &(job, ref preset, measure_only) in &todo {
+            for &(job, ref preset) in &todo {
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
                     continue;
@@ -3104,7 +3090,7 @@ impl Engine {
                         lock(state).cancelled.push(job.input.clone());
                         return;
                     }
-                    run_one(job, req, preset, measure_only, cancel, rep, manifest, state);
+                    run_one(job, req, preset, cancel, rep, manifest, state);
                 });
             }
         });
@@ -3123,7 +3109,6 @@ fn run_one(
     job: &ResolvedJob,
     req: &BatchRequest,
     preset: &PresetRef,
-    measure_only: bool,
     cancel: &CancelToken,
     rep: &Reporter,
     manifest: &Manifest,
@@ -3135,32 +3120,10 @@ fn run_one(
     emit(EventKind::FileStarted);
     let tracker = FileTracker::default();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        process_file(
-            job,
-            req,
-            preset,
-            measure_only,
-            cancel,
-            rep,
-            manifest,
-            &tracker,
-        )
+        process_file(job, req, preset, cancel, rep, manifest, &tracker)
     }));
     let (stage, error) = match r {
-        Ok(Ok(Processed::UpToDate(w))) => {
-            // Note FC2: a flagged up-to-date output keeps its full chain; the warning is the record.
-            if let Some(w) = w {
-                emit(EventKind::Warning(w));
-            }
-            lock(state).up_to_date += 1;
-            emit(EventKind::FileSkipped {
-                kind: SkipKind::UpToDate,
-                code: None,
-                reason: "up to date".into(),
-            });
-            return;
-        }
-        Ok(Ok(Processed::Written(out))) => {
+        Ok(Ok(out)) => {
             for w in &out.report.warnings {
                 emit(EventKind::Warning(w.clone()));
             }

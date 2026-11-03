@@ -64,5 +64,5 @@ A Landscape or PBR Landscape set has two optional slots that feed the profile: *
 ## Problems and Review
 
 - With `pbr` on, each listed EDID without a wildcard that no `cs_mato` block of this project names gets an amber Problems row: "XPMF skips <EDID>: no PBRMaterialObjects JSON from this project". Only this project's blocks are checked; PBRMaterialObjects files from other mods are not scanned. <!-- D:GI4 -->
-- Review's list of what will be written has a row per profile (new, replaced or foreign). Stale profiles are listed with the other stale outputs ([Review and Export](GUI-Review-and-Export.md)).
+- Review's list of what will be written has a row per profile (new, replaced or foreign). A profile the project no longer makes is left in place with a note.
 - Texture-Types has the two sub-types ([Texture types](Texture-Types.md)).

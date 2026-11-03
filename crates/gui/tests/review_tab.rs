@@ -4,7 +4,7 @@ use eframe::egui::{self, Key, Modifiers};
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::bottom::BottomTab;
+use sdc_gui::model::bottom::{problems, BottomTab, Level};
 use sdc_gui::model::{pbr_export, AppModel, Selection};
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
@@ -88,7 +88,6 @@ fn export_opens_the_review_tab_and_no_modal() {
     press_export(&mut h);
     h.get_by_label_contains("Blockers (");
     h.get_by_label_contains("Undecided (");
-    h.get_by_label_contains("Warnings (");
     h.get_by_label("What will be written");
     assert!(
         h.query_by_label("Undecided textures").is_none(),
@@ -100,10 +99,9 @@ fn export_opens_the_review_tab_and_no_modal() {
     h.get_by_label("Review");
 }
 
-/// Review C9 (Note FB4): the headings carry their counts, and Warnings says what it does not block.
+/// Review C9 (Note FB4): the headings carry their counts.
 #[test]
-fn the_review_headings_count_and_the_warnings_column_says_what_does_not_block() {
-    use sdc_gui::model::bottom::{problems, Level};
+fn the_review_headings_count_what_blocks_and_what_waits() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.open_review();
@@ -111,24 +109,11 @@ fn the_review_headings_count_and_the_warnings_column_says_what_does_not_block() 
     let blockers =
         pbr_export::export_blocks(&m).len() + usize::from(m.export_folder_chosen().is_none());
     let undecided = m.undecided_keys().len();
-    assert_eq!(pbr_export::export_asks(&m).len(), 0, "nothing asks");
-    let others = problems(&m)
-        .iter()
-        .filter(|p| p.level == Level::Warning)
-        .count();
-    assert!(
-        undecided >= 1 && others >= 1,
-        "undecided {undecided}, others {others}"
-    );
+    assert!(undecided >= 1, "undecided {undecided}");
     let mut h = harness(m);
     h.run();
     h.get_by_label(&format!("Blockers ({blockers})"));
     h.get_by_label(&format!("Undecided ({undecided})"));
-    h.get_by_label("Warnings (0)");
-    h.get_by_label("None that block the export");
-    let s = if others == 1 { "" } else { "s" };
-    h.get_by_label(&format!("{others} warning{s} in Problems (do not block)"));
-    assert!(h.query_by_label_contains("see Problems").is_none());
 }
 
 fn nif_row(blocked: Option<&str>) -> sdc_gui::model::meshes::NifReviewRow {
@@ -142,7 +127,7 @@ fn nif_row(blocked: Option<&str>) -> sdc_gui::model::meshes::NifReviewRow {
     }
 }
 
-/// Note FI7 (4b, O5): a NIF edit waiting only for the export folder is listed under its own footer heading, not warned.
+/// Note FI7 (4b, O5): a NIF edit waiting only for the export folder is listed under its own footer heading.
 #[test]
 fn a_nif_edit_waiting_for_a_folder_is_listed_not_warned() {
     let d = tempfile::tempdir().unwrap();
@@ -159,20 +144,22 @@ fn a_nif_edit_waiting_for_a_folder_is_listed_not_warned() {
     h.get_by_label("NIF edits skipped until an export folder is chosen (1)");
     h.get_by_label(r"meshes\x.nif");
     assert!(h.query_by_label_contains("NIF edits (").is_none());
-    h.get_by_label("Warnings (0)");
+    assert!(h.query_by_label_contains("NIF edits skipped (").is_none());
     h.get_by_label(&format!("Blockers ({blockers})"));
 }
 
-/// Note FI7 (4b): any other blocked reason stays a Warning (FC5).
+/// Note FI7 (4b), Note FM: any other blocked reason is listed under `NIF edits skipped`, with its reason, and gates
+/// nothing.
 #[test]
-fn another_blocked_nif_reason_is_still_a_warning() {
+fn another_blocked_nif_reason_is_listed_as_skipped() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.open_review();
     m.set_nif_review_rows(vec![nif_row(Some("Resolve the conflicts first."))]);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Warnings (1)");
+    h.get_by_label("NIF edits skipped (1)");
+    h.get_by_label(r"meshes\x.nif: Resolve the conflicts first.");
     assert!(h
         .query_by_label_contains("until an export folder")
         .is_none());
@@ -196,50 +183,6 @@ fn review_export_is_disabled_with_the_blocker_count() {
     press(&mut h, "Go to set");
     assert_eq!(h.state().selection, Selection::Set(rock_key));
     assert!(h.state().review.is_some(), "Review stays open while fixing");
-}
-
-#[test]
-fn ticking_every_pitfall_enables_export() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = reviewing(d.path(), &[("alphaprop_thresh", json!(128))]);
-    let text = h.state().review_button_text();
-    assert!(disabled(&h, &text));
-    h.get_by_label("Acknowledge 1 warning first");
-    let asks = pbr_export::export_asks(h.state());
-    assert_eq!(asks.len(), 1);
-    press(&mut h, &asks[0].text);
-    assert!(!disabled(&h, &text));
-    press(&mut h, &text);
-    settle(&mut h);
-    assert!(h.state().export.summary.is_some());
-}
-
-/// R4, owner 2026-10-17. A6: both pitfalls are in rock01 (match8 to a missing `_s` path raises two).
-#[test]
-fn acknowledge_all_ticks_every_pitfall_in_one_click() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = reviewing(d.path(), &[("match8", json!(r"x\leaf_s.dds"))]);
-    let text = h.state().review_button_text();
-    assert!(disabled(&h, &text));
-    h.get_by_label("Acknowledge 2 warnings first");
-    let asks = pbr_export::export_asks(h.state());
-    assert_eq!(asks.len(), 2);
-    press(&mut h, "Acknowledge all");
-    for a in &asks {
-        assert_eq!(
-            h.get_by_label(&a.text).accesskit_node().toggled(),
-            Some(egui::accesskit::Toggled::True),
-            "{}",
-            a.text
-        );
-    }
-    assert!(!disabled(&h, &text));
-    // A pitfall added after the click is unticked. Another missing match path keeps the same two texts, so the new
-    // one is the alpha-flags pitfall.
-    h.state_mut()
-        .set_json_value("landscape/rock01", "alphaprop_thresh", Some(json!(128)));
-    settle(&mut h);
-    h.get_by_label("Acknowledge 1 warning first");
 }
 
 #[test]
@@ -425,7 +368,15 @@ fn the_edited_json_offers_keep_and_overwrite() {
 
 /// The clipped (clickable) rect of the widget labelled `label`, from the last pass.
 fn hit_rect(h: &Harness<'static, AppModel>, label: &str) -> egui::Rect {
-    let rect = h.get_by_label(label).rect();
+    // The Files column lists the same names above the panel: take the one inside the Review panel.
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom-review"))
+        .expect("the Review panel")
+        .outer_rect;
+    let rect = h
+        .query_all_by_label(label)
+        .map(|n| n.rect())
+        .find(|r| r.top() >= panel.top())
+        .unwrap_or_else(|| panic!("{label} in the Review panel"));
     h.ctx.viewport(|v| {
         v.this_pass
             .widgets
@@ -442,24 +393,20 @@ fn hit_rect(h: &Harness<'static, AppModel>, label: &str) -> egui::Rect {
 #[test]
 fn the_columns_stay_above_the_footer() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = reviewing(
-        d.path(),
-        &[
-            ("match8", json!(r"x\leaf_s.dds")),
-            ("alphaprop_thresh", json!(128)),
-        ],
-    );
+    let mut h = reviewing(d.path(), &[("emissive", json!(true))]);
     h.set_size(egui::vec2(1400.0, 700.0));
     h.run();
     // set_size applies on the next pass and nothing asks for another, so run() stops after one pass at the new size
     // (the old wide-card layout happened to request two more); the panels settle on the pass after it.
     h.run_steps(1);
     let footer = h.get_by_label("What will be written").rect().top();
-    let mut labels: Vec<String> = pbr_export::export_asks(h.state())
-        .into_iter()
-        .map(|a| a.text)
+    let mut labels: Vec<String> = h
+        .state()
+        .undecided_keys()
+        .iter()
+        .filter_map(|k| h.state().item(k).map(|i| i.name.clone()))
         .collect();
-    labels.push("Acknowledge all".into());
+    labels.push("Accept all suggestions".into());
     for l in &labels {
         let r = hit_rect(&h, l);
         assert!(
@@ -495,15 +442,24 @@ fn fill_at(h: &Harness<'static, AppModel>, rect: egui::Rect) -> egui::Color32 {
         .expect("the Export button's frame")
 }
 
-/// Tick the only pitfall with one click and one frame, so the fade is caught at its start.
-fn tick_once(h: &mut Harness<'static, AppModel>) {
-    let asks = pbr_export::export_asks(h.state());
-    h.get_by_label(&asks[0].text).scroll_to_me();
+/// Review open on an edited PGPatcher JSON: the gate waits for Keep or Overwrite until `answer_once`.
+fn awaiting_an_answer(dir: &std::path::Path, dt: f32) -> Harness<'static, AppModel> {
+    let mut m = pbr_ready(dir);
+    export_through(&mut m);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    std::fs::write(pgp_json_path(&m), "{ \"edited\": true }\n").unwrap();
+    let mut h = harness_dt(m, dt);
     h.run();
-    h.get_by_label(&asks[0].text).hover();
-    h.run();
-    h.get_by_label(&asks[0].text).click();
-    // The click takes a frame or two to reach the model; the next frame is the first the gate passes.
+    press_export(&mut h);
+    assert!(h.state().review.is_some());
+    assert!(h.state().review_gate().is_err());
+    h
+}
+
+/// Answer Keep with one model call and one frame, so the fade is caught at its start.
+fn answer_once(h: &mut Harness<'static, AppModel>) {
+    h.state_mut().answer_review_json(false);
+    // The next frame is the first the gate passes.
     for _ in 0..6 {
         h.step();
         if h.state().review_gate().is_ok() {
@@ -524,12 +480,12 @@ fn between(c: egui::Color32, a: egui::Color32, b: egui::Color32) -> bool {
 #[test]
 fn export_fades_to_the_accent_and_snaps_back() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = reviewing_dt(d.path(), &[("alphaprop_thresh", json!(128))], 0.05);
+    let mut h = awaiting_an_answer(d.path(), 0.05);
     let text = h.state().review_button_text();
     let accent = h.ctx.global_style().visuals.selection.bg_fill;
     let rest = h.ctx.global_style().visuals.widgets.inactive.weak_bg_fill;
     let off = fill_at(&h, h.get_by_label(&text).rect());
-    tick_once(&mut h);
+    answer_once(&mut h);
     assert!(!disabled(&h, &text));
     let first = fill_at(&h, h.get_by_label(&text).rect());
     assert!(
@@ -540,15 +496,14 @@ fn export_fades_to_the_accent_and_snaps_back() {
         h.step();
     }
     assert_eq!(fill_at(&h, h.get_by_label(&text).rect()), accent);
-    // Untick: the gate fails, the state snaps to 0 and the disabled look returns.
-    let asks = pbr_export::export_asks(h.state());
-    h.get_by_label(&asks[0].text).click();
+    // The answer is taken away: the gate fails, the state snaps to 0 and the disabled look returns.
+    h.state_mut().review.as_mut().unwrap().json_answer = None;
     h.step();
     h.step();
     assert!(disabled(&h, &text));
     assert_eq!(fill_at(&h, h.get_by_label(&text).rect()), off);
-    // Ticking again fades again.
-    tick_once(&mut h);
+    // Answering again fades again.
+    answer_once(&mut h);
     let again = fill_at(&h, h.get_by_label(&text).rect());
     assert!(between(again, rest, accent), "{again:?}");
 }
@@ -559,10 +514,10 @@ fn export_fades_to_the_accent_and_snaps_back() {
 fn reduced_motion_brings_the_export_accent_sooner_than_the_control() {
     let one_step_in = |reduce: bool| {
         let d = tempfile::tempdir().unwrap();
-        let mut h = reviewing_dt(d.path(), &[("alphaprop_thresh", json!(128))], 0.05);
+        let mut h = awaiting_an_answer(d.path(), 0.05);
         h.state_mut().settings.reduce_motion = reduce;
         let text = h.state().review_button_text();
-        tick_once(&mut h);
+        answer_once(&mut h);
         let accent = h.ctx.global_style().visuals.selection.bg_fill;
         (fill_at(&h, h.get_by_label(&text).rect()), accent)
     };
@@ -579,9 +534,9 @@ fn reduced_motion_brings_the_export_accent_sooner_than_the_control() {
 #[test]
 fn the_review_export_works_on_the_frame_it_becomes_ready() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = reviewing_dt(d.path(), &[("alphaprop_thresh", json!(128))], 0.05);
+    let mut h = awaiting_an_answer(d.path(), 0.05);
     let text = h.state().review_button_text();
-    tick_once(&mut h);
+    answer_once(&mut h);
     h.get_by_label(&text).click();
     h.step();
     assert!(h.state().export.running.is_some() || h.state().export.summary.is_some());
@@ -683,8 +638,8 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
 }
 
-/// Note FC12 (supersedes DS26's "no warning"): a portrait photo read as a cube loses its top and bottom; Review says
-/// which part is used, as a Warning to acknowledge before the export.
+/// Note FC12, Note FM: a portrait photo read as a cube loses its top and bottom; Problems says which part is used, as a
+/// Warning row that gates nothing.
 #[test]
 fn portrait_face_is_a_row() {
     use engine::config::Subtype;
@@ -721,35 +676,28 @@ fn portrait_face_is_a_row() {
         asks.iter().any(|a| a == ROW) && asks.iter().any(|a| a == ROW2),
         "{asks:?}"
     );
+    let warning_rows = |m: &AppModel| -> Vec<String> {
+        problems(m)
+            .iter()
+            .filter(|p| p.level == Level::Warning && p.text.starts_with("Only the middle"))
+            .map(|p| p.text.clone())
+            .collect()
+    };
+    let rows = warning_rows(&m);
+    assert!(
+        rows.iter().any(|a| a == ROW) && rows.iter().any(|a| a == ROW2),
+        "{rows:?}"
+    );
     m.open_review();
+    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     let mut h = harness(m);
     h.run();
-    assert!(h
-        .state()
-        .review_gate()
-        .is_err_and(|e| e.starts_with("Acknowledge")));
-    h.get_by_role_and_label(Role::CheckBox, ROW).click();
-    h.run();
-    assert!(h
-        .state()
-        .review
-        .as_ref()
-        .unwrap()
-        .acknowledged
-        .contains(ROW));
-    assert!(
-        h.state()
-            .review_gate()
-            .is_err_and(|e| e.starts_with("Acknowledge")),
-        "the other photo's row still waits"
-    );
+    assert!(h.query_by_label(ROW).is_none(), "Review lists no warnings");
     // A landscape photo (wider than tall) is used whole: no row.
     let w = image::RgbImage::from_fn(128, 64, |x, y| image::Rgb([x as u8, y as u8, 40]));
     w.save(r.join("photo.png")).unwrap();
     w.save(night.join("photo.png")).unwrap();
     h.state_mut().replan();
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
-    assert!(pbr_export::export_asks(h.state())
-        .iter()
-        .all(|a| !a.text.starts_with("Only the middle")));
+    assert!(warning_rows(h.state()).is_empty());
 }

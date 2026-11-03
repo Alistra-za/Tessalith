@@ -504,21 +504,6 @@ fn a_ready_set_and_tile_show_a_green_dot() {
 }
 
 #[test]
-fn the_other_warnings_link_in_review_opens_the_problems_tab() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.open_review();
-    let mut h = harness(m);
-    h.run();
-    assert_eq!(h.state().bottom.tab, BottomTab::Review);
-    h.get_by_label_contains("in Problems (do not block)")
-        .click();
-    h.run();
-    assert!(h.state().bottom.open && h.state().bottom.tab == BottomTab::Problems);
-    assert!(h.state().bottom.filter.is_none());
-}
-
-#[test]
 /// Note FB1 (was the A12 dot): the header Export is clean only with a folder open and chosen and nothing undecided.
 fn the_header_export_is_clean_only_with_a_folder_and_nothing_undecided() {
     let m = AppModel::new(Default::default(), None, session());
@@ -793,7 +778,6 @@ fn the_checks_filter_shows_only_check_rows() {
         green: false,
         parallax: false,
         uv: false,
-        drop_top_mip: false,
     };
     m.set_checks(plastic);
     m.poll();

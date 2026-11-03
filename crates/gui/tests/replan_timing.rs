@@ -378,9 +378,6 @@ fn one_edit_settles() {
             &(|m: &AppModel| export_blocks(m).len()) as &dyn Fn(&AppModel) -> usize,
         ),
         ("export_asks", &|m: &AppModel| export_asks(m).len()),
-        ("unanswered_half_size", &|m: &AppModel| {
-            m.unanswered_half_size()
-        }),
         ("unanswered_overwrites", &|m: &AppModel| {
             m.unanswered_overwrites().len()
         }),
