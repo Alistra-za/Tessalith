@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// `PRAGMA user_version` of the current schema. Older databases are dropped and rebuilt (the store is a cache).
-/// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6).
-pub const SCHEMA_VERSION: i64 = 8;
+/// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6). 9: 2.0 debloat (Note GJ7), the dead tables and
+/// columns dropped. 10: ARMA skin textures as `alt_tex` rows (Note GO4), so every plugin is read again.
+pub const SCHEMA_VERSION: i64 = 10;
 
 const SCHEMA: &str = r#"
 CREATE TABLE path   (id INTEGER PRIMARY KEY, p TEXT NOT NULL UNIQUE);
@@ -18,9 +19,9 @@ CREATE TABLE origin (id INTEGER PRIMARY KEY, kind INTEGER NOT NULL, name TEXT NO
                      parent_origin INTEGER, priority INTEGER NOT NULL, enabled INTEGER NOT NULL,
                      derived_by INTEGER, derived_state INTEGER, UNIQUE(kind, root));
 CREATE TABLE nif_copy (id INTEGER PRIMARY KEY, path_id INTEGER NOT NULL, origin_id INTEGER NOT NULL,
-                     size INTEGER, mtime INTEGER, crc32 INTEGER, parse_status INTEGER NOT NULL,
+                     size INTEGER, mtime INTEGER, parse_status INTEGER NOT NULL,
                      bsver INTEGER, le_mesh INTEGER NOT NULL DEFAULT 0, is_derived INTEGER NOT NULL DEFAULT 0,
-                     source_copy_id INTEGER, derive_check INTEGER, problem TEXT,
+                     source_copy_id INTEGER, problem TEXT,
                      UNIQUE(path_id, origin_id));
 CREATE TABLE shape (copy_id INTEGER NOT NULL, block INTEGER NOT NULL, name TEXT, kind TEXT NOT NULL,
                      shader_kind INTEGER NOT NULL, shader_type INTEGER, slsf1 INTEGER, slsf2 INTEGER,
@@ -40,10 +41,6 @@ CREATE TABLE tex_use (tex_path_id INTEGER, texset_id INTEGER, slot INTEGER,
                      PRIMARY KEY(tex_path_id, texset_id, slot)) WITHOUT ROWID;
 CREATE TABLE nif_winner     (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE TABLE nif_winner_src (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL);
-CREATE TABLE pgp_diff (path_id INTEGER PRIMARY KEY, crc_orig INTEGER NOT NULL, crc_patched INTEGER NOT NULL);
--- Unused since audit 2026-10-16 (Note BE): no longer written, nothing reads it. Drop at the next schema bump.
-CREATE TABLE tex_copy   (path_id INTEGER NOT NULL, origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER,
-                     PRIMARY KEY(path_id, origin_id)) WITHOUT ROWID;
 CREATE TABLE tex_winner (path_id INTEGER PRIMARY KEY, origin_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE INDEX nif_copy_origin ON nif_copy(origin_id);
 -- The texset uniqueness key. SQLite treats NULLs as distinct in UNIQUE, so empty (NULL) slots are folded to 0
@@ -60,8 +57,7 @@ CREATE TABLE plugin (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE N
                      flags INTEGER NOT NULL, masters_json TEXT NOT NULL, error_text TEXT);
 -- rec.mato_flags: the MATO DATA flags of that copy (bit 0 single pass, offset 44), NULL when DATA is under 48 bytes.
 CREATE TABLE rec (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, sig TEXT NOT NULL, edid TEXT,
-                     owner_ok INTEGER NOT NULL DEFAULT 0, txst_flags INTEGER, decal INTEGER, hdpt_flags INTEGER,
-                     mato_flags INTEGER);
+                     owner_ok INTEGER NOT NULL DEFAULT 0, txst_flags INTEGER, decal INTEGER, mato_flags INTEGER);
 CREATE TABLE rec_winner (formid INTEGER PRIMARY KEY, plugin_id INTEGER NOT NULL, n_overrides INTEGER NOT NULL);
 CREATE TABLE txst_slot (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, slot INTEGER NOT NULL,
                      path_id INTEGER NOT NULL);
@@ -69,21 +65,6 @@ CREATE TABLE model_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGE
                      path_id INTEGER NOT NULL);
 CREATE TABLE alt_tex (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, model_slot INTEGER NOT NULL,
                      shape_name TEXT NOT NULL, txst_formid INTEGER, txst_local INTEGER NOT NULL, idx INTEGER NOT NULL);
--- txst_ref rows with role HNAM (HDPT -> extra-part HDPT), GNAM (LTEX -> GRAS) and MODL (ARMO -> ARMA) point at those
--- types, not TXSTs.
-CREATE TABLE txst_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, role TEXT NOT NULL,
-                     txst_formid INTEGER, txst_local INTEGER NOT NULL);
-CREATE TABLE tex_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, role TEXT NOT NULL,
-                     path_id INTEGER NOT NULL);
--- Base FormIDs placed by REFR/ACHR in a plugin's CELL/WRLD groups, once per plugin (filtering spec §3). `base_local`
--- clamped like `local`; `base_formid` set by `resolve_plugins`, NULL when its master is not loaded. A plugin whose
--- `error_text` is set may have an incomplete list (the walk stops at a fault).
-CREATE TABLE placed (plugin_id INTEGER NOT NULL, base_local INTEGER NOT NULL, base_formid INTEGER);
--- Winning records nothing reaches (filtering spec §3), rebuilt with rec_winner. reason: 1 no reference, 2 not
--- placed, 3 head part not playable.
-CREATE TABLE rec_inert (formid INTEGER PRIMARY KEY, reason INTEGER NOT NULL);
-CREATE INDEX placed_base ON placed(base_formid);
-CREATE INDEX placed_plugin ON placed(plugin_id);
 CREATE INDEX rec_formid ON rec(formid);
 CREATE INDEX rec_plugin ON rec(plugin_id, local);
 CREATE INDEX txst_slot_path ON txst_slot(path_id);
@@ -92,10 +73,6 @@ CREATE INDEX model_ref_path ON model_ref(path_id);
 CREATE INDEX model_ref_plugin ON model_ref(plugin_id, local);
 CREATE INDEX alt_tex_txst ON alt_tex(txst_formid);
 CREATE INDEX alt_tex_plugin ON alt_tex(plugin_id, local);
-CREATE INDEX txst_ref_txst ON txst_ref(txst_formid);
-CREATE INDEX txst_ref_plugin ON txst_ref(plugin_id, local);
-CREATE INDEX tex_ref_path ON tex_ref(path_id);
-CREATE INDEX tex_ref_plugin ON tex_ref(plugin_id, local);
 "#;
 
 const SHAPE_COLS: &str = "block, name, kind, shader_kind, shader_type, slsf1, slsf2, texset_id, alpha_flags, \
@@ -103,7 +80,7 @@ const SHAPE_COLS: &str = "block, name, kind, shader_kind, shader_type, slsf1, sl
 
 const TEMP: &str = r#"
 CREATE TEMP TABLE IF NOT EXISTS pending_derived (pid INTEGER PRIMARY KEY, path_id INTEGER NOT NULL,
-                     origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER, crc32 INTEGER,
+                     origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER,
                      parse_status INTEGER NOT NULL, bsver INTEGER, le_mesh INTEGER NOT NULL, problem TEXT,
                      UNIQUE(path_id, origin_id));
 CREATE TEMP TABLE IF NOT EXISTS pending_shape (pid INTEGER NOT NULL, block INTEGER NOT NULL, name TEXT, kind TEXT NOT NULL,
@@ -118,11 +95,10 @@ DELETE FROM pending_shape;
 DELETE FROM pending_derived;
 "#;
 
-/// `origin.kind`. 02 §6 used 3 for BSAs; the controller gave 3 to separators, so BSAs are 4.
+/// `origin.kind`. 3 was MO2 separators until schema 9 (Note GJ7); BSAs keep 4.
 pub const KIND_DATA: i32 = 0;
 pub const KIND_MOD: i32 = 1;
 pub const KIND_OVERWRITE: i32 = 2;
-pub const KIND_SEPARATOR: i32 = 3;
 pub const KIND_BSA: i32 = 4;
 
 /// `nif_copy.parse_status`.
@@ -138,31 +114,6 @@ pub enum DerivedState {
     Incomplete = 1,
     RunningAtScan = 2,
     InOverwrite = 3,
-}
-
-/// `nif_copy.derive_check` as stored (integer) and shown (string).
-pub fn check_code(c: crate::pgp::DeriveCheck) -> i32 {
-    use crate::pgp::DeriveCheck::*;
-    match c {
-        Match => 0,
-        StaleChanged => 1,
-        StaleReordered => 2,
-        Unverified => 3,
-        UnknownSource => 4,
-        DupOf => 5,
-    }
-}
-
-pub fn check_name(code: i32) -> Option<&'static str> {
-    Some(match code {
-        0 => "match",
-        1 => "stale_changed",
-        2 => "stale_reordered",
-        3 => "unverified",
-        4 => "unknown",
-        5 => "dup_of",
-        _ => return None,
-    })
 }
 
 /// Where the game gets a texture slot path from.
@@ -192,8 +143,6 @@ pub struct NifRow {
     pub overridden_by: Option<String>,
     pub n_copies: u32,
     pub derived: bool,
-    /// Own check for a derived copy; for a source copy patched in game, the check of the derived winner.
-    pub derive_check: Option<String>,
     pub le_mesh: bool,
     pub problem: Option<String>,
     /// The game winner is a derived copy whose source copy is this copy.
@@ -411,7 +360,6 @@ pub struct ChunkItem {
     pub origin_id: i64,
     pub size: u64,
     pub mtime: i64,
-    pub crc32: Option<u32>,
     /// Derived copies are staged in `pending_derived` until the post-walk PGPatcher check passes.
     pub derived: bool,
     pub result: CopyResult,
@@ -439,7 +387,6 @@ pub struct CopyMeta {
     pub parse_status: i32,
     pub le_mesh: bool,
     pub problem: Option<String>,
-    pub crc32: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -459,7 +406,6 @@ pub struct DeriveRow {
     pub copy_id: i64,
     pub is_derived: bool,
     pub source_copy_id: Option<i64>,
-    pub derive_check: Option<i32>,
 }
 
 /// One copy of a NIF path ([`Store::copies_of_path`]). `derived`: the copy is PGPatcher output (`nif_copy.is_derived`:
@@ -713,12 +659,12 @@ fn upsert_copy_row(
     let (status, bsver, le, problem) = it.result.record();
     let id: i64 = c
         .prepare_cached(
-            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, is_derived, problem)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, is_derived, problem)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(path_id, origin_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
-               crc32 = excluded.crc32, parse_status = excluded.parse_status, bsver = excluded.bsver,
+               parse_status = excluded.parse_status, bsver = excluded.bsver,
                le_mesh = excluded.le_mesh, is_derived = excluded.is_derived, problem = excluded.problem,
-               source_copy_id = NULL, derive_check = NULL
+               source_copy_id = NULL
              RETURNING id",
         )?
         .query_row(
@@ -727,7 +673,6 @@ fn upsert_copy_row(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                it.crc32.map(i64::from),
                 status,
                 bsver.map(i64::from),
                 le,
@@ -751,8 +696,8 @@ fn stage_derived(
     let (status, bsver, le, problem) = it.result.record();
     let pid: i64 = c
         .prepare_cached(
-            "INSERT OR REPLACE INTO pending_derived(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, problem)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) RETURNING pid",
+            "INSERT OR REPLACE INTO pending_derived(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, problem)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) RETURNING pid",
         )?
         .query_row(
             params![
@@ -760,7 +705,6 @@ fn stage_derived(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                it.crc32.map(i64::from),
                 status,
                 bsver.map(i64::from),
                 le,
@@ -1023,6 +967,7 @@ impl Store {
     }
 
     /// Upserts an origin and enables it at once.
+    #[cfg(feature = "test-hooks")]
     pub fn upsert_origin(&mut self, o: &OriginSpec) -> Result<i64, ScanError> {
         self.upsert_origin_as(o, 1)
     }
@@ -1088,7 +1033,7 @@ impl Store {
 
     pub fn existing_copies(&self) -> Result<HashMap<(i64, i64), CopyMeta>, ScanError> {
         let mut st = self.conn.prepare(
-            "SELECT id, path_id, origin_id, size, mtime, parse_status, le_mesh, problem, crc32 FROM nif_copy",
+            "SELECT id, path_id, origin_id, size, mtime, parse_status, le_mesh, problem FROM nif_copy",
         )?;
         let rows = st.query_map([], |r| {
             Ok((
@@ -1100,7 +1045,6 @@ impl Store {
                     parse_status: r.get(5)?,
                     le_mesh: r.get(6)?,
                     problem: r.get(7)?,
-                    crc32: r.get::<_, Option<i64>>(8)?.map(|c| c as u32),
                 },
             ))
         })?;
@@ -1125,13 +1069,13 @@ impl Store {
     pub fn commit_pending(&mut self) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
-            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, is_derived, problem)
-               SELECT path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, 1, problem
+            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, is_derived, problem)
+               SELECT path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, 1, problem
                FROM pending_derived WHERE true
                ON CONFLICT(path_id, origin_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
-                 crc32 = excluded.crc32, parse_status = excluded.parse_status, bsver = excluded.bsver,
+                 parse_status = excluded.parse_status, bsver = excluded.bsver,
                  le_mesh = excluded.le_mesh, is_derived = 1, problem = excluded.problem,
-                 source_copy_id = NULL, derive_check = NULL;
+                 source_copy_id = NULL;
              DELETE FROM shape WHERE copy_id IN (SELECT c.id FROM nif_copy c JOIN pending_derived d
                ON c.path_id = d.path_id AND c.origin_id = d.origin_id);
              DELETE FROM tex_raw WHERE copy_id IN (SELECT c.id FROM nif_copy c JOIN pending_derived d
@@ -1164,6 +1108,7 @@ impl Store {
     }
 
     /// Writes one copy directly (outside a scan chunk) and returns its id.
+    #[cfg(feature = "test-hooks")]
     pub fn upsert_copy(
         &mut self,
         path: &str,
@@ -1171,7 +1116,6 @@ impl Store {
         size: u64,
         mtime: i64,
         result: CopyResult,
-        crc32: Option<u32>,
     ) -> Result<i64, ScanError> {
         let tx = self.conn.transaction()?;
         let it = ChunkItem {
@@ -1179,7 +1123,6 @@ impl Store {
             origin_id,
             size,
             mtime,
-            crc32,
             derived: false,
             result,
         };
@@ -1322,33 +1265,15 @@ impl Store {
         Ok(v)
     }
 
-    /// Replaces `pgp_diff` with path → (crc32original, crc32patched).
-    pub fn set_pgp_diff(&mut self, diff: &HashMap<String, (u32, u32)>) -> Result<(), ScanError> {
-        let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM pgp_diff", [])?;
-        for (p, (o, n)) in diff {
-            let id = intern_path(&tx, &mut self.intern, p)?;
-            tx.prepare_cached("INSERT OR REPLACE INTO pgp_diff VALUES (?1,?2,?3)")?
-                .execute(params![id, *o as i64, *n as i64])?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Writes the derived-layer columns for every copy, in one transaction.
     pub fn set_derived(&mut self, rows: &[DeriveRow]) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
         {
             let mut u = tx.prepare(
-                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3, derive_check = ?4 WHERE id = ?1",
+                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3 WHERE id = ?1",
             )?;
             for r in rows {
-                u.execute(params![
-                    r.copy_id,
-                    r.is_derived,
-                    r.source_copy_id,
-                    r.derive_check
-                ])?;
+                u.execute(params![r.copy_id, r.is_derived, r.source_copy_id])?;
             }
         }
         tx.commit()?;
@@ -1398,16 +1323,13 @@ impl Store {
         Ok(n)
     }
 
-    /// Origins of the latest run: loose ones and separators by priority (highest first), then BSAs by game rank.
-    /// A separator is listed after the mods it owns: MO2 shows a separator above its mods in ascending priority,
-    /// so in this highest-first order it owns the loose mods listed just above it, up to the previous separator.
-    /// Adjacent separators share a priority and keep modlist.txt order (stored in `parent_origin` for kind 3).
+    /// Origins of the latest run: loose ones by priority (highest first), then BSAs by game rank.
     pub fn mods(&self) -> Result<Vec<ModRow>, ScanError> {
         let mut st = self.conn.prepare(
             "SELECT id, name, kind, priority, derived_by IS NOT NULL,
                     (SELECT count(*) FROM nif_copy c WHERE c.origin_id = origin.id)
              FROM origin WHERE enabled = 1
-             ORDER BY kind = 4, priority DESC, kind = 3 DESC, CASE WHEN kind = 3 THEN parent_origin END, id",
+             ORDER BY kind = 4, priority DESC, id",
         )?;
         let v = st
             .query_map([], |r| {
@@ -1589,6 +1511,7 @@ impl Store {
     }
 
     /// `EXPLAIN QUERY PLAN` detail lines of [`Self::nifs_using_canonical_texture`]'s query (tests check the index).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn canonical_query_plan(&self) -> Result<Vec<String>, ScanError> {
         let mut st = self
@@ -1691,8 +1614,8 @@ fn match_sql(cond: &str) -> String {
 }
 
 /// Columns and joins shared by `nifs_of`, `winners` and `losers`; each adds its own WHERE and ORDER BY.
-const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.derive_check, c.le_mesh, c.problem,
-        w.copy_id, w.n_copies, wc.is_derived, wc.source_copy_id, wc.derive_check, wo.name,
+const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.le_mesh, c.problem,
+        w.copy_id, w.n_copies, wc.is_derived, wc.source_copy_id, wo.name,
         ws.copy_id, so.name, co.name
  FROM nif_copy c JOIN path p ON p.id = c.path_id
  JOIN origin co ON co.id = c.origin_id AND co.enabled = 1
@@ -1707,15 +1630,13 @@ const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.derive_check, c.le_mes
 fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
     let id: i64 = r.get(0)?;
     let derived: bool = r.get(2)?;
-    let own_check: Option<i32> = r.get(3)?;
-    let win: Option<i64> = r.get(6)?;
-    let n: Option<i64> = r.get(7)?;
-    let win_derived: Option<bool> = r.get(8)?;
-    let win_source: Option<i64> = r.get(9)?;
-    let win_check: Option<i32> = r.get(10)?;
-    let win_origin: Option<String> = r.get(11)?;
-    let src: Option<i64> = r.get(12)?;
-    let src_origin: Option<String> = r.get(13)?;
+    let win: Option<i64> = r.get(5)?;
+    let n: Option<i64> = r.get(6)?;
+    let win_derived: Option<bool> = r.get(7)?;
+    let win_source: Option<i64> = r.get(8)?;
+    let win_origin: Option<String> = r.get(9)?;
+    let src: Option<i64> = r.get(10)?;
+    let src_origin: Option<String> = r.get(11)?;
     let wins = win == Some(id);
     let patched_in_game = !wins && win_derived == Some(true) && win_source == Some(id);
     let overridden_by = if wins {
@@ -1727,13 +1648,6 @@ fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
     } else {
         None
     };
-    let check = if derived {
-        own_check
-    } else if patched_in_game {
-        win_check
-    } else {
-        None
-    };
     let row = NifRow {
         copy_id: id,
         path: r.get(1)?,
@@ -1741,10 +1655,9 @@ fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
         overridden_by,
         n_copies: n.unwrap_or(0) as u32,
         derived,
-        derive_check: check.and_then(check_name).map(str::to_string),
-        le_mesh: r.get(4)?,
-        problem: r.get(5)?,
+        le_mesh: r.get(3)?,
+        problem: r.get(4)?,
         patched_in_game,
     };
-    Ok((row, r.get(14)?))
+    Ok((row, r.get(12)?))
 }

@@ -440,12 +440,8 @@ const M5: [f32; 3] = [0.25, 0.125, 0.5];
 /// The 1×1 mip of face +Z of the studio env cube at yaw 0, as the GPU stores it (RGBA16F).
 fn env_last_z() -> [f32; 4] {
     let faces = render3d::hdri::cube_faces(&render3d::hdri::studio().image, 256, 0.0);
-    for (k, f) in faces.iter().enumerate() {
-        let c = render3d::hdri::mip_chain(f, 256).unwrap();
-        eprintln!("DBG face {k}: {:?}", c.last().unwrap()[0]);
-    }
-    let chain = render3d::hdri::mip_chain(&faces[4], 256).unwrap();
-    chain.last().unwrap()[0].map(|v| half::f16::from_f32(v).to_f32())
+    let chains = render3d::hdri::specular_chain(&faces, 256).unwrap();
+    chains[4].last().unwrap()[0].map(|v| half::f16::from_f32(v).to_f32())
 }
 
 fn f16(v: f32) -> f32 {
@@ -575,13 +571,8 @@ fn env_cube_is_built_once_per_yaw() {
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 1);
     s.env_yaw = 0.5;
-    let (_, events) = render3d::perf_log::capture(|| r.render(&s, 64, 64).unwrap());
+    r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 2);
-    let ev = events
-        .iter()
-        .find(|e| e["event"] == "env_cube")
-        .unwrap_or_else(|| panic!("no env_cube event in {events:?}"));
-    println!("env_cube build {} ms", ev["ms"]);
     let mut plain = loaded(cache.path(), &feats(&[ADD]), vec![opaque()]);
     plain.set_deferred(true).unwrap();
     plain.render(&Scene::neutral(), 64, 64).unwrap();
@@ -653,11 +644,7 @@ fn failed_env_cube_build_is_not_retried_for_the_same_yaw() {
     let mut s = Scene::neutral();
     let e = r.render(&s, 64, 64).unwrap_err();
     assert!(e.contains("power of two"), "{e}");
-    let (_, events) = render3d::perf_log::capture(|| r.render(&s, 64, 64).unwrap());
-    assert!(
-        events.iter().all(|e| e["event"] != "env_cube"),
-        "{events:?}"
-    );
+    r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 0);
     s.env_yaw = 0.5;
     assert!(r.render(&s, 64, 64).is_err(), "a new yaw tries again");
@@ -685,4 +672,173 @@ fn missing_env_cube_is_not_the_dc_marker() {
             .GetDesc(&mut d)
     };
     assert_eq!((d.Width, d.Height, d.ArraySize, d.MipLevels), (2, 2, 6, 1));
+}
+
+/// A stand-in SpecularIrradianceCS with CS's interface (one cube SRV, one RWTexture2DArray, one sampler, `roughness`):
+/// writes (roughness, face / 8, the input's 1×1 +X texel, 1), so a test sees which level and face each dispatch wrote
+/// and that the input is bound.
+const MARK_PREFILTER: &str = r#"
+cbuffer SpecularMapFilterSettings : register(b0) { float roughness; };
+TextureCube inputTexture : register(t0);
+RWTexture2DArray<float4> outputTexture : register(u0);
+SamplerState linear_wrap_sampler : register(s0);
+[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
+    uint w, h, d;
+    outputTexture.GetDimensions(w, h, d);
+    if (id.x >= w || id.y >= h) return;
+    float x = inputTexture.SampleLevel(linear_wrap_sampler, float3(1, 0, 0), 99).r;
+    outputTexture[id] = float4(roughness, id.z / 8.0, x, 1);
+}
+"#;
+
+/// The stand-in with `prefilter` as DynamicCubemaps/SpecularIrradianceCS.hlsl.
+fn shaders_with_prefilter(prefilter: &str) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    for f in ["Lighting.hlsl", "DeferredCompositeCS.hlsl"] {
+        std::fs::copy(standin_root().join(f), d.path().join(f)).unwrap();
+    }
+    std::fs::create_dir(d.path().join("DynamicCubemaps")).unwrap();
+    std::fs::write(
+        d.path().join(render3d::composite::Prefilter::SOURCE),
+        prefilter,
+    )
+    .unwrap();
+    d
+}
+
+/// Red of the studio cube's 1×1 box mip of face +X at yaw 0, as RGBA16F stores it.
+fn last_box_x(size: u32) -> f32 {
+    let faces = render3d::hdri::cube_faces(&render3d::hdri::studio().image, size, 0.0);
+    let chain = render3d::hdri::mip_chain(&faces[0], size).unwrap();
+    f16(chain.last().unwrap()[0][0])
+}
+
+/// Note GM1: one dispatch per level 1.. at roughness L / (levels − 1) over all six faces, mip 0 kept as the input, the
+/// input cube bound, and nothing left bound afterwards.
+#[test]
+fn gpu_prefilter_writes_each_level_at_its_roughness() {
+    use render3d::composite::{EnvMaps, Prefilter};
+    let gpu = render3d::device::Gpu::new_warp().unwrap();
+    let (shaders, cache) = (
+        shaders_with_prefilter(MARK_PREFILTER),
+        tempfile::tempdir().unwrap(),
+    );
+    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let mut p = Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path()).unwrap();
+    let img = &render3d::hdri::studio().image;
+    let e = EnvMaps::new_gpu(&gpu, &mut p, img, 16, 0.0).unwrap();
+    assert_eq!(cs_views(&gpu), 0);
+    let faces = render3d::hdri::cube_faces(img, 16, 0.0);
+    let x = last_box_x(16);
+    for f in 0..6u32 {
+        let mip0 = render3d::textures::read_cube_level(&gpu, &e.env, f, 0).unwrap();
+        let want: Vec<[f32; 4]> = faces[f as usize].iter().map(|p| p.map(f16)).collect();
+        assert_eq!(mip0, want, "face {f} mip 0");
+        for l in 1..5u32 {
+            let got = render3d::textures::read_cube_level(&gpu, &e.env, f, l).unwrap();
+            let want = [l as f32 / 4.0, f16(f as f32 / 8.0), x, 1.0];
+            assert_eq!(got.len(), (16usize >> l).pow(2));
+            assert!(
+                got.iter().all(|p| *p == want),
+                "face {f} level {l}: {:?}",
+                got[0]
+            );
+        }
+    }
+}
+
+/// Note GM1: an install whose prefilter has another interface is an Err (the renderer keeps the CPU chain).
+#[test]
+fn prefilter_with_an_unknown_interface_fails_closed() {
+    let gpu = render3d::device::Gpu::new_warp().unwrap();
+    let two_srvs = MARK_PREFILTER
+        .replace(
+            "TextureCube inputTexture : register(t0);",
+            "TextureCube inputTexture : register(t0); TextureCube other : register(t1);",
+        )
+        .replace(
+            ".r;",
+            ".r + other.SampleLevel(linear_wrap_sampler, float3(1, 0, 0), 0).r;",
+        );
+    let (shaders, cache) = (
+        shaders_with_prefilter(&two_srvs),
+        tempfile::tempdir().unwrap(),
+    );
+    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let e = render3d::composite::Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path())
+        .err()
+        .expect("two SRVs");
+    assert!(e.contains("2 SRVs"), "{e}");
+}
+
+/// Note GM1, end to end: with a prefilter in the shaders, the forward DC draw reads the GPU-built cube (the stand-in
+/// adds the level-15 +Z sample: the last level, roughness 1, face 4).
+#[test]
+fn forward_dc_draw_samples_the_gpu_prefiltered_cube() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut plain = loaded(cache.path(), FLAT, vec![opaque()]);
+    plain.render(&Scene::neutral(), 64, 64).unwrap();
+    let base = px(&plain.read_mrt(0).unwrap(), 64, 32, 32);
+    let shaders = shaders_with_prefilter(MARK_PREFILTER);
+    let mut r = renderer_at(shaders.path(), cache.path(), &feats(&[DC]));
+    load(&mut r, vec![opaque()]);
+    r.render(&Scene::neutral(), 64, 64).unwrap();
+    let e = [1.0, 0.5, last_box_x(render3d::hdri::ENV_SIZE)];
+    let got = px(&r.read_mrt(0).unwrap(), 64, 32, 32);
+    assert_store(
+        got,
+        [base[0] + e[0], base[1] + e[1], base[2] + e[2], base[3]],
+    );
+    assert_eq!(r.env_builds(), 1);
+}
+
+/// Note GM1/GM2 against the CPU reference on the user's install: CS's SpecularIrradianceCS on the GPU vs
+/// [`render3d::hdri::specular_chain`] texel by texel, per level, and the GPU build time.
+/// `SDC_CS_SHADERS=…\Shaders cargo test --release -p render3d --test composite installed_prefilter -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn installed_prefilter_matches_the_cpu_chain() {
+    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
+        println!("skipped: set SDC_CS_SHADERS");
+        return;
+    };
+    use render3d::composite::{EnvMaps, Prefilter};
+    let gpu = render3d::device::Gpu::new().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let src = render3d::source::SourceSet::new(shaders.into());
+    let defines = ["CSHADER", "ENABLE_LL"].map(String::from);
+    let mut p = Prefilter::new(&gpu, &src, &defines, cache.path()).unwrap();
+    let img = &render3d::hdri::studio().image;
+    let size = render3d::hdri::ENV_SIZE;
+    EnvMaps::new_gpu(&gpu, &mut p, img, size, 0.3).unwrap();
+    let t = std::time::Instant::now();
+    let e = EnvMaps::new_gpu(&gpu, &mut p, img, size, 0.3).unwrap();
+    let mut gpu_faces: Vec<Vec<Vec<[f32; 4]>>> = vec![];
+    for f in 0..6u32 {
+        let mut levels = vec![];
+        for l in 0..9 {
+            levels.push(render3d::textures::read_cube_level(&gpu, &e.env, f, l).unwrap());
+            if f == 0 && l == 0 {
+                // The first readback waits for the GPU: build + this copy.
+                println!("GPU build: {:?}", t.elapsed());
+            }
+        }
+        gpu_faces.push(levels);
+    }
+    let cpu =
+        render3d::hdri::specular_chain(&render3d::hdri::cube_faces(img, size, 0.3), size).unwrap();
+    for l in 1..9 {
+        let (mut diff, mut sum) = (0.0f64, 0.0f64);
+        for f in 0..6 {
+            for (a, b) in gpu_faces[f][l].iter().zip(&cpu[f][l]) {
+                for k in 0..3 {
+                    diff += (a[k] - b[k]).abs() as f64;
+                    sum += b[k].abs() as f64;
+                }
+            }
+        }
+        println!("level {l}: relative mean abs difference {:.4}", diff / sum);
+        // Measured 0.0005-0.0012 (the GPU's f16 input and output); a half-texel direction slip gave 0.04-0.24.
+        assert!(diff / sum < 0.005, "level {l}: {}", diff / sum);
+    }
 }

@@ -1,7 +1,7 @@
 //! Environment cube from the HDRI (v2 Phase D, D5): CS's cube face convention (CaptureCommon.hlsli:48-76
-//! GetSamplingVector), the yaw turn, the box mips, and the GPU's own cube addressing of the uploaded cube.
+//! GetSamplingVector), the yaw turn, the box mips, the GGX-prefiltered specular chain, and the GPU's own cube addressing of the uploaded cube.
 use render3d::composite::EnvMaps;
-use render3d::hdri::{cube_dir, cube_faces, dir_to_uv, mip_chain, studio, Hdr};
+use render3d::hdri::{cube_dir, cube_faces, dir_to_uv, mip_chain, specular_chain, studio, Hdr};
 use std::f32::consts::PI;
 
 /// `w × h` image whose pixel (x, y) is (x, y, 0): the source pixel of any sample can be read back exactly.
@@ -109,6 +109,44 @@ fn cube_dir_matches_cs_table() {
             assert_eq!(cube_dir(f, x, y, N), norm(*d), "face {f} ({x}, {y})");
         }
     }
+}
+
+/// CS's specular irradiance (SpecularIrradianceCS.hlsl): mip L is the GGX prefilter at roughness L / (levels − 1), so
+/// light on +Z reaches the edge of the side faces next to it at the rough mips, which a per-face box chain never does (the oily
+/// streaks on rough skin, owner 2026-11-02); mip 0 is the input and a constant cube stays constant.
+#[test]
+fn specular_chain_spreads_light_across_faces_and_keeps_a_constant() {
+    const N: usize = 32;
+    let lit: [Vec<[f32; 4]>; 6] = std::array::from_fn(|f| {
+        let v = if f == 4 { 1.0 } else { 0.0 };
+        vec![[v, v, v, 1.0]; N * N]
+    });
+    let chain = specular_chain(&lit, N as u32).unwrap();
+    for (f, face) in chain.iter().enumerate() {
+        assert_eq!(face.len(), 6, "face {f}: 32² down to 1²");
+        assert_eq!(face[0], lit[f], "face {f}: mip 0 is the input");
+    }
+    // +X at mip 3 (4², roughness 0.6): the column next to +Z (x = 0, cube_dir z = −u) gets light, the far column
+    // much less, and the box chain's stays black.
+    let col = |x: usize| (0..4).map(|y| chain[0][3][y * 4 + x][0]).sum::<f32>() / 4.0;
+    let (near, far) = (col(0), col(3));
+    assert!(near > 0.05 && near > 4.0 * far, "near {near} far {far}");
+    assert!(mip_chain(&lit[0], N as u32).unwrap()[3]
+        .iter()
+        .all(|p| p[0] == 0.0));
+    let k = [0.3, 0.6, 0.9, 1.0];
+    let flat: [Vec<[f32; 4]>; 6] = std::array::from_fn(|_| vec![k; N * N]);
+    for (f, face) in specular_chain(&flat, N as u32).unwrap().iter().enumerate() {
+        for (m, level) in face.iter().enumerate() {
+            for p in level {
+                assert!(
+                    (0..4).all(|c| (p[c] - k[c]).abs() < 1e-4),
+                    "face {f} mip {m}: {p:?}"
+                );
+            }
+        }
+    }
+    assert!(specular_chain(&flat, 16).is_err(), "faces are not 16²");
 }
 
 #[test]

@@ -36,9 +36,8 @@ use nif::material::MaterialState;
 use nif::path::TexPath;
 use pgpsim::{Badge, SimInput, SimResult};
 use render3d::builtin::Builtin;
-use render3d::perf_log;
 use render3d::{Glint, ParsedNif, ProjectedLayer, ShapeId, Variant};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -53,7 +52,7 @@ use std::time::Instant;
 /// Memory ids are process-wide: `FileSource::Memory` compares by id, across encoders.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// D5: the preview's encode size cap (`[render3d] set_preview_max` in `gui.toml`, 0 = this).
+/// D5: the preview's encode size cap. The old `[render3d] set_preview_max` key in `gui.toml` is ignored (Note GJ8).
 pub const DEFAULT_CAP: u32 = 2048;
 pub const WAITS_FOR_EXPORT: &str = "Preview encoding waits for the export to finish";
 const BLOCKED_ERROR: &str = "the texture has an error";
@@ -399,19 +398,6 @@ impl Member {
         self.alt = kept;
         self.alt_err = false;
     }
-}
-
-/// One `encode` line in the timing log for a finished encode.
-fn log_encode(kind: SlotKind, mode: PreviewMode, result: &Result<(Vec<u8>, f64), String>) {
-    let f = match result {
-        Ok((dds, ms)) => {
-            json!({"slot": kind.label(), "mode": format!("{mode:?}"), "ms": ms, "bytes": dds.len(), "ok": true})
-        }
-        Err(e) => {
-            json!({"slot": kind.label(), "mode": format!("{mode:?}"), "ok": false, "error": perf_log::first_line(e)})
-        }
-    };
-    perf_log::emit("encode", f);
 }
 
 /// The selected set's encodes, one per filled slot.
@@ -861,7 +847,6 @@ impl Encoder {
             };
             // The other mode's background encode.
             if token != 0 && mem.alt_token == token {
-                log_encode(kind, mode, &result);
                 mem.alt_cancel = None;
                 mem.alt_token = 0;
                 match result {
@@ -894,7 +879,6 @@ impl Encoder {
                 changed = true;
                 continue;
             }
-            log_encode(kind, mode, &result);
             mem.cancel = None;
             mem.token = 0;
             mem.state = match result {
@@ -1915,7 +1899,7 @@ impl SetPreview {
 
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
-        self.v3.poll_at(now);
+        self.v3.poll();
         // A finished encode on a scene that is already loaded is swapped in (`sync_textures`); the scene is pushed
         // for a first load and when an encode failed (the game's copy of the texture must come back).
         let changed = self.enc.poll();
@@ -2936,15 +2920,11 @@ impl SetPreview {
         s: &crate::settings::GuiSettings,
         store_path: Option<PathBuf>,
     ) -> SetPreview {
-        let cap = match s.render3d.set_preview_max {
-            0 => DEFAULT_CAP,
-            n => n.clamp(256, 8192),
-        };
         SetPreview::new(
             s.render3d.shaders.clone(),
             target_of(&s.meshes),
             store_path,
-            cap,
+            DEFAULT_CAP,
         )
     }
 }

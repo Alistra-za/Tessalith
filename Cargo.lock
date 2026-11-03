@@ -1929,8 +1929,8 @@ dependencies = [
 name = "modscan"
 version = "2.0.0"
 dependencies = [
- "crc32fast",
  "esp",
+ "modscan",
  "nif",
  "rayon",
  "rusqlite",
@@ -2506,6 +2506,7 @@ name = "pgpsim"
 version = "2.0.0"
 dependencies = [
  "nif",
+ "pgpsim",
  "serde_json",
 ]
 
@@ -2915,6 +2916,7 @@ dependencies = [
  "image",
  "modscan",
  "nif",
+ "render3d",
  "serde",
  "serde_json",
  "sha2",

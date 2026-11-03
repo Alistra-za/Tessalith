@@ -151,9 +151,9 @@ pub fn prelude(ctx: &egui::Context, v: &mut Viewport3d) {
 /// The toolbar's 3D part, on the caller's line: View ▾ (debug views, background, lights, Reset view), Copy image,
 /// Shader folder…, and the render status.
 pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
-    // The View menu holds sliders and a hex box: it stays open while they are used (AG125's menu).
-    super::path_picker::menu(ui, VIEW_MENU, |ui| look_controls(ui, v))
-        .response
+    // The View menu holds sliders, a hex box and the colour popup: it keeps its own open state, so the popup does
+    // not close it (Note GK).
+    super::columns::combo_menu(ui, "viewport3d-view", VIEW_MENU, |ui| look_controls(ui, v))
         .on_hover_text("Debug view, background, lights, deferred and Reset view");
     let copy = ui
         .add_enabled(v.frame.is_some(), egui::Button::new("Copy image"))
@@ -229,7 +229,7 @@ pub fn le_mesh(v: &Viewport3d) -> bool {
     v.report.as_ref().is_some_and(|r| r.le_mesh)
 }
 
-/// The Details footer's 3D part: the Community Shaders toggle, what is off in the preview, the frame stats and the
+/// The Details footer's 3D part: the Community Shaders toggle, what is off in the preview, the adapter and the
 /// renderer's notes.
 pub fn details(ui: &mut egui::Ui, v: &mut Viewport3d) {
     let mut on = v.features_on;
@@ -322,32 +322,31 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                     }
                 }
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut l.sun, Look::SUN_RANGE.0..=Look::SUN_RANGE.1)
-                        .text("Sun brightness"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut l.point, Look::POINT_RANGE.0..=Look::POINT_RANGE.1)
-                        .text("Point light brightness"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut l.radius, Look::RADIUS_RANGE.0..=Look::RADIUS_RANGE.1)
-                        .logarithmic(true)
-                        .text("Point light radius (x model size)"),
-                );
-                if ui
-                    .small_button("Reset view")
-                    .on_hover_text("Lights, background and camera back to the defaults")
-                    .clicked()
-                {
-                    *l = Look {
-                        deferred: l.deferred,
-                        ..Look::default()
-                    };
-                    v.orbit.reset();
-                }
-            });
+            // One slider per row: wrapped on one line, a label could land beside the next slider (Note GK).
+            ui.add(
+                egui::Slider::new(&mut l.sun, Look::SUN_RANGE.0..=Look::SUN_RANGE.1)
+                    .text("Sun brightness"),
+            );
+            ui.add(
+                egui::Slider::new(&mut l.point, Look::POINT_RANGE.0..=Look::POINT_RANGE.1)
+                    .text("Point light brightness"),
+            );
+            ui.add(
+                egui::Slider::new(&mut l.radius, Look::RADIUS_RANGE.0..=Look::RADIUS_RANGE.1)
+                    .logarithmic(true)
+                    .text("Point light radius (x model size)"),
+            );
+            if ui
+                .small_button("Reset view")
+                .on_hover_text("Lights, background and camera back to the defaults")
+                .clicked()
+            {
+                *l = Look {
+                    deferred: l.deferred,
+                    ..Look::default()
+                };
+                v.orbit.reset();
+            }
             ui.weak("Drag: orbit · middle or Shift+drag: pan · Shift+right drag: turn the sun · wheel: zoom · double-click or Home: recentre");
             if v.look.hdri {
                 ui.weak("Studio HDRI by Poly Haven (CC0): background and ambient light. Shift+right drag turns the sun and the HDRI.");
@@ -400,7 +399,6 @@ pub fn image(ui: &mut egui::Ui, v: &mut Viewport3d) -> egui::Response {
     let tex = match cached {
         Some((fid, t)) if fid == frame.id => t,
         old => {
-            let t0 = std::time::Instant::now();
             let img = egui::ColorImage::from_rgba_unmultiplied(
                 [frame.width as usize, frame.height as usize],
                 &frame.rgba,
@@ -414,7 +412,6 @@ pub fn image(ui: &mut egui::Ui, v: &mut Viewport3d) -> egui::Response {
                     .ctx()
                     .load_texture("viewport3d", img, egui::TextureOptions::LINEAR),
             };
-            v.upload_ms = Some(t0.elapsed().as_secs_f64() * 1000.0);
             ui.ctx()
                 .data_mut(|d| d.insert_temp(id, (frame.id, t.clone())));
             t
@@ -497,20 +494,6 @@ fn footer(ui: &mut egui::Ui, v: &Viewport3d) {
     ui.horizontal_wrapped(|ui| {
         if let Some(off) = off_line(&v.off_in_preview) {
             ui.weak(off);
-        }
-        if let Some(c) = &v.coverage {
-            ui.weak(format!("· {c}"));
-        }
-        if let Some(t) = v.timing {
-            let up = v.upload_ms.unwrap_or(0.0);
-            ui.weak(format!(
-                "· frame {:.1} ms (draw {:.1} · GPU {:.1} · readback {:.1} · upload {:.1})",
-                t.draw_ms + t.gpu_ms + t.readback_ms + up,
-                t.draw_ms,
-                t.gpu_ms,
-                t.readback_ms,
-                up
-            ));
         }
         if let Some((name, warp)) = &v.adapter {
             if *warp {

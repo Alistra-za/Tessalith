@@ -112,6 +112,34 @@ pub struct MaterialState {
     pub has_vertex_colors: bool,
     /// PGPatcher `delete: true`: the shape is not drawn.
     pub hidden: bool,
+    /// The Meshes view's Advanced Skin card (Note GN): preview-only inputs, never in the NIF. The renderer keeps
+    /// them across material edits (`Renderer::set_skin_preview`). None = the shape as loaded; boxed, as most shapes
+    /// have none. Read with [`MaterialState::skin`], written with [`MaterialState::set_skin`].
+    pub skin_preview: Option<Box<SkinPreview>>,
+}
+
+/// The shape as loaded: no pick, dry.
+static NO_SKIN_PREVIEW: SkinPreview = SkinPreview {
+    rfaos: None,
+    wet_map: None,
+    wet: 0.0,
+};
+
+/// Preview-only Advanced Skin inputs of a FaceGen (4) or FaceGen RGB tint (5) shape (Note GN). `rfaos` /
+/// `wet_map`: a texture key the renderer's resolver returns, in place of the name guess (None = Auto). `wet`:
+/// CS's per-geometry wetness (`skinPerGeometry.x`, 0 dry … 1 soaked).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SkinPreview {
+    pub rfaos: Option<String>,
+    pub wet_map: Option<String>,
+    pub wet: f32,
+}
+
+impl SkinPreview {
+    /// CS's wetness code is compiled for the shape: the slider is up or a wetness map is picked.
+    pub fn wet_on(&self) -> bool {
+        self.wet > 0.0 || self.wet_map.is_some()
+    }
 }
 
 /// The empty slot: `canon_texture(b"")` (raw "", norm "", `flags.empty`).
@@ -143,6 +171,7 @@ impl MaterialState {
                 .vertex_desc
                 .is_some_and(|d| VertexDesc(d).has(Attr::Colors)),
             hidden: false,
+            skin_preview: None,
         }
     }
 
@@ -175,7 +204,18 @@ impl MaterialState {
             skinned: false,
             has_vertex_colors: false,
             hidden: false,
+            skin_preview: None,
         }
+    }
+
+    /// The skin card's preview (Note GN); the default when there is none.
+    pub fn skin(&self) -> &SkinPreview {
+        self.skin_preview.as_deref().unwrap_or(&NO_SKIN_PREVIEW)
+    }
+
+    /// Sets the skin card's preview; the default is stored as None, so equal previews compare equal.
+    pub fn set_skin(&mut self, p: SkinPreview) {
+        self.skin_preview = (p != NO_SKIN_PREVIEW).then(|| Box::new(p));
     }
 
     /// SLSF2 bit 23, the TruePBR marker.

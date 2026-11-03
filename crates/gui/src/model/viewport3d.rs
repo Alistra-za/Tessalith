@@ -7,18 +7,18 @@
 //! uploads a frame when its id changes.
 use crate::model::meshes::ScanTarget;
 use crate::worker::{spawn_guarded, WorkerMsg};
-use nif::material::MaterialState;
+use nif::material::{MaterialState, SkinPreview};
 use render3d::builtin::Builtin;
 use render3d::cs_settings::{self, CsSettings};
 use render3d::device::Gpu;
 use render3d::locate::{self, Change, Fingerprint};
-use render3d::perf_log::{self, FrameStats, GapWatch};
 use render3d::scene::{Background, Camera, PointLight, Scene, AUTO_DISTANCE, AUTO_PITCH, AUTO_YAW};
+#[cfg(feature = "test-hooks")]
+use render3d::FrameTiming;
 use render3d::{
-    Availability, CompileDone, CompilePool, DebugOutput, EditKind, FrameTiming, LoadReport,
-    ParsedNif, ProjectedLayer, Renderer, ShapeId, ShapeInfo, ShapeStatus, Variant,
+    Availability, CompileDone, CompilePool, DebugOutput, EditKind, LoadReport, ParsedNif,
+    ProjectedLayer, Renderer, ShapeId, ShapeInfo, ShapeStatus, Variant,
 };
-use serde_json::json;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -174,7 +174,21 @@ pub struct MeshSpec {
     pub le_mesh: bool,
     /// A head part (Note BA: facegendata or an HDPT model): every shape is CS "head" ([`ParsedNif::head_part`]).
     pub head_part: bool,
+    /// Note GO: the shape card's texture set pick, preview only: the TXST's 9 slot paths ("" = empty) in place of
+    /// the shape's own. `textures` holds where each one is read.
+    pub txst: BTreeMap<ShapeId, Vec<String>>,
 }
+
+/// One shape's Advanced Skin card picks (Note GN): the renderer's preview and where each picked key is read (added
+/// to the content's texture map when the preview is applied).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkinEntry {
+    pub preview: SkinPreview,
+    pub sources: Vec<(String, FileSource)>,
+}
+
+/// Every shape's skin card picks, by shape (= NIF block).
+pub type SkinPreviews = BTreeMap<ShapeId, SkinEntry>;
 
 /// What the panel draws: a NIF read through a [`MeshSpec`] (the Meshes view), a parsed NIF whose shape materials
 /// the caller set (the set preview's simulated PGPatcher patch, P1-A), or a built-in shape.
@@ -231,15 +245,6 @@ impl PartialEq for Content {
 }
 
 impl Content {
-    /// What a `load` log line calls this content.
-    pub fn label(&self) -> String {
-        match self {
-            Content::Mesh(s) => format!("mesh:{}", s.key),
-            Content::Parsed { key, .. } => format!("parsed:{key}"),
-            Content::Builtin { shape, .. } => format!("builtin:{shape:?}"),
-        }
-    }
-
     /// BSVER 83: the panel shows the LE text and nothing is loaded (00 §6.5).
     pub fn le_mesh(&self) -> bool {
         match self {
@@ -526,14 +531,12 @@ impl Default for Look {
     }
 }
 
-/// The 3D panel's debug views (AG75, GUI suggestions items 1 and 4). Lit and UV checker are always offered; the others
+/// The 3D panel's debug views (GJ8, GUI suggestions item 1). Lit is always offered; the others
 /// when render3d reports the CS anchor (`V3Reply::DebugSupport`) and a loaded shape has the term ([`Viewport3d::offered`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DebugView {
     #[default]
     Lit,
-    /// A generated checker over every shape's slot 0 (diffuse / base colour): render3d's `override_slot(0, …)`.
-    UvChecker,
     Albedo,
     Normals,
     Roughness,
@@ -542,9 +545,8 @@ pub enum DebugView {
 }
 
 impl DebugView {
-    pub const ALL: [DebugView; 7] = [
+    pub const ALL: [DebugView; 6] = [
         DebugView::Lit,
-        DebugView::UvChecker,
         DebugView::Albedo,
         DebugView::Normals,
         DebugView::Roughness,
@@ -555,7 +557,6 @@ impl DebugView {
     pub fn label(self) -> &'static str {
         match self {
             DebugView::Lit => "Lit",
-            DebugView::UvChecker => "UV checker",
             DebugView::Albedo => "Albedo",
             DebugView::Normals => "Normals",
             DebugView::Roughness => "Roughness",
@@ -564,10 +565,10 @@ impl DebugView {
         }
     }
 
-    /// The render3d output of this view; the UV checker draws Lit (its checker is a slot override).
+    /// The render3d output of this view.
     pub fn output(self) -> DebugOutput {
         match self {
-            DebugView::Lit | DebugView::UvChecker => DebugOutput::Lit,
+            DebugView::Lit => DebugOutput::Lit,
             DebugView::Albedo => DebugOutput::Albedo,
             DebugView::Normals => DebugOutput::NormalWorld,
             DebugView::Roughness => DebugOutput::Roughness,
@@ -588,44 +589,6 @@ impl DebugView {
 /// The status line when render3d cannot draw the selected debug view any more (`DebugSupport(false)`).
 pub const DEBUG_UNSUPPORTED: &str =
     "These Community Shaders have no debug-view anchor in Lighting.hlsl: back to Lit";
-
-/// Side of the UV checker texture; 8×8 cells.
-pub const CHECKER_SIZE: u32 = 256;
-
-/// The UV checker's RGBA8 pixels: 8×8 cells of two greys (grey, so the engine's BGRA order does not matter).
-pub fn checker_rgba() -> Vec<u8> {
-    let n = CHECKER_SIZE;
-    let cell = n / 8;
-    (0..n * n)
-        .flat_map(|i| {
-            let g = if ((i % n) / cell + (i / n) / cell).is_multiple_of(2) {
-                60
-            } else {
-                200
-            };
-            [g, g, g, 255]
-        })
-        .collect()
-}
-
-/// An uncompressed one-level DDS of `rgba` (`w × h`, symmetric in R and B: the engine's Rgba8 is BGRA).
-fn rgba_dds(w: u32, h: u32, rgba: Vec<u8>) -> Vec<u8> {
-    use engine::config::Format;
-    use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
-    let desc = DdsDesc {
-        width: w,
-        height: h,
-        format: Format::Rgba8,
-        srgb: false,
-        header: ResolvedHeader::Dx10,
-    };
-    dds_bytes(&desc, &[rgba]).expect("a valid RGBA8 level")
-}
-
-/// The UV checker as DDS bytes for `Renderer::override_slot`.
-pub fn checker_dds() -> Vec<u8> {
-    rgba_dds(CHECKER_SIZE, CHECKER_SIZE, checker_rgba())
-}
 
 /// Commands to the render thread.
 pub enum V3Cmd {
@@ -679,8 +642,10 @@ pub enum V3Cmd {
     /// The material-object layer (`Renderer::set_projected_layer`, Note GG); sticky. Applied once content is loaded,
     /// with that content's texture map, before a load in the same batch; answered with `ProjectedMissing`.
     SetProjectedLayer(Option<ProjectedLayer>),
-    /// The debug view (sticky, answered with `Reconfigured`). UV checker = render3d's slot-0 override (kept across
-    /// loads, no reload either way).
+    /// The skin card's picks for every shape (Note GN); sticky: applied to the loaded content now and after every
+    /// load. The model sends an empty map when the content becomes another model.
+    SetSkinPreviews(Arc<SkinPreviews>),
+    /// The debug view (sticky, answered with `Reconfigured`).
     SetDebug(DebugView),
     Render {
         id: u64,
@@ -715,12 +680,14 @@ pub enum V3Reply {
     },
     Frame {
         frame: Arc<Frame>,
+        #[cfg(feature = "test-hooks")]
         timing: FrameTiming,
     },
     /// A frame the render thread made on its own because a compile landed (same camera as the last `Render`).
     /// Its id comes from a private range, so the UI uploads it; it never counts as an answered `Render`.
     Refresh {
         frame: Arc<Frame>,
+        #[cfg(feature = "test-hooks")]
         timing: FrameTiming,
     },
     RenderError {
@@ -733,13 +700,11 @@ pub enum V3Reply {
     Reconfigured(u64),
     /// The shapes of the loaded `Parsed`/`Builtin` content: after each load and after each batch of edits.
     Shapes(Vec<ShapeInfo>),
-    /// One `SetMaterial` applied: its kind (`Cbuffer`/`Textures` compile nothing) and render-thread time, or why
-    /// it failed (the old draw stays).
+    /// One `SetMaterial` applied: its kind (`Cbuffer`/`Textures` compile nothing), or why it failed (the old draw
+    /// stays).
     MaterialSet {
         content: u64,
-        id: ShapeId,
         result: Result<EditKind, String>,
-        ms: f64,
     },
     /// One `SwapTexture` applied (or why it was not: the old texture stays).
     TextureSwap {
@@ -761,8 +726,6 @@ pub enum V3Reply {
     },
     /// `Renderer::off_in_preview()`, after the thread starts and after each settings or features change.
     OffInPreview(Vec<String>),
-    /// `Renderer::settings_coverage().line()` whenever it changes (P1-D); `None` = nothing to report.
-    Coverage(Option<String>),
     /// `Renderer::debug_supported()`: after the thread starts, after `SetShaders`, and `false` when a `SetDebug` was
     /// refused.
     DebugSupport(bool),
@@ -778,30 +741,6 @@ pub fn default_cache_dir() -> Option<PathBuf> {
 /// How long the viewport must be busy without a break before the spinner shows.
 pub const SPINNER_DELAY: Duration = Duration::from_millis(300);
 
-/// A command whose effect shows in a later frame (timing log): sent at `at`, answered by the first `Frame` with
-/// an id above `after` (the last render id sent when the command was sent).
-struct Mark {
-    at: Instant,
-    after: u64,
-    what: MarkKind,
-}
-
-enum MarkKind {
-    Edit {
-        shape: u32,
-        kind: Option<EditKind>,
-    },
-    Swap {
-        path: String,
-        variant: Variant,
-        bytes: usize,
-    },
-    Flip {
-        variant: Variant,
-        paths: usize,
-    },
-}
-
 pub struct Viewport3d {
     pub picker: super::picker::Picker,
     pub state: V3State,
@@ -814,19 +753,20 @@ pub struct Viewport3d {
     pub features_on: bool,
     /// The user's loaded CS features this preview leaves off (`V3Reply::OffInPreview`), for the panel line.
     pub off_in_preview: Vec<String>,
-    /// The CS settings coverage line (`V3Reply::Coverage`), shown under the frame when `Some`.
-    pub coverage: Option<String>,
     pub notice: Option<String>,
     /// The CS shaders in use (the `Shaders` folder), as saved in `gui.toml`.
     pub shaders: Option<Fingerprint>,
     /// The last frame; kept while CS moves or disappears until the user answers.
     pub frame: Option<Arc<Frame>>,
+    /// Render-thread timing of the last frame; the ignored perf gates read it.
+    #[cfg(feature = "test-hooks")]
     pub timing: Option<FrameTiming>,
-    /// CPU time of the last upload into egui (set by the UI).
-    pub upload_ms: Option<f64>,
+    /// The kind of every `SetMaterial` the render thread applied (`Ok` replies), for the perf gate.
+    #[cfg(feature = "test-hooks")]
+    pub edit_kinds: Vec<EditKind>,
     /// (adapter, software renderer).
     pub adapter: Option<(String, bool)>,
-    /// Which panel owns this viewport, for the `ui_gap` line.
+    /// Which panel owns this viewport: keys its frame texture in the UI.
     pub panel: &'static str,
     pub render_error: Option<String>,
     pub cache_dir: Option<PathBuf>,
@@ -838,8 +778,6 @@ pub struct Viewport3d {
     /// The edit preview's animation clock; `None` when the content has no animated controller (v2 B3). Owned by
     /// `MeshesModel::tick_anim`.
     pub clock: Option<Clock>,
-    /// The last material edit: its kind and render-thread time in ms.
-    pub last_edit: Option<(EditKind, f64)>,
     /// Texture swaps the render thread refused (a bad DDS, a kind the slot does not read); the set preview lists them.
     pub swap_errors: Vec<String>,
     /// The last Copy image note ("Copied 3D view (W×H)"), shown in the panel's toolbar: the Meshes view has no
@@ -862,6 +800,8 @@ pub struct Viewport3d {
     projected: Option<ProjectedLayer>,
     /// The layer's canonical texture paths the content's texture map could not give (`V3Reply::ProjectedMissing`).
     pub projected_missing: Vec<String>,
+    /// The Advanced Skin card's picks (Note GN), as last set; replayed to a new render thread.
+    skins: Arc<SkinPreviews>,
     content: Option<Content>,
     need_load: bool,
     /// The pending load is a reload of the same model (`set_content(.., true)`): a compile failure keeps the frame.
@@ -903,9 +843,6 @@ pub struct Viewport3d {
     fake_thread: Option<Sender<V3Cmd>>,
     tx: Sender<WorkerMsg>,
     rx: Receiver<WorkerMsg>,
-    gap: GapWatch,
-    marks: Vec<Mark>,
-    load_at: Option<Instant>,
 }
 
 impl Viewport3d {
@@ -921,12 +858,13 @@ impl Viewport3d {
             popup: None,
             features_on: true,
             off_in_preview: vec![],
-            coverage: None,
             notice: None,
             shaders: saved,
             frame: None,
+            #[cfg(feature = "test-hooks")]
             timing: None,
-            upload_ms: None,
+            #[cfg(feature = "test-hooks")]
+            edit_kinds: vec![],
             adapter: None,
             panel: "meshes",
             render_error: None,
@@ -936,7 +874,6 @@ impl Viewport3d {
             shapes: vec![],
             nif_view: false,
             clock: None,
-            last_edit: None,
             swap_errors: vec![],
             status: None,
             notices: vec![],
@@ -948,6 +885,7 @@ impl Viewport3d {
             load_variant_sent: Variant::Source,
             projected: None,
             projected_missing: vec![],
+            skins: Arc::default(),
             edits_sent: 0,
             edits_done: 0,
             reconf_sent: 0,
@@ -976,9 +914,6 @@ impl Viewport3d {
             fake_thread: None,
             tx,
             rx,
-            gap: GapWatch::default(),
-            marks: vec![],
-            load_at: None,
         }
     }
 
@@ -1014,12 +949,6 @@ impl Viewport3d {
         let (t, r) = channel();
         self.fake_thread = Some(t);
         r
-    }
-
-    /// Test seam: the channel the render thread replies on (`poll` drains it).
-    #[cfg(feature = "test-hooks")]
-    pub fn reply_sender_for_test(&self) -> Sender<WorkerMsg> {
-        self.tx.clone()
     }
 
     #[cfg(feature = "test-hooks")]
@@ -1326,6 +1255,8 @@ impl Viewport3d {
         if self.kept_view {
             return;
         }
+        // Another model: the skin card's picks were for the old one's shapes (Note GN).
+        self.set_skin_previews(SkinPreviews::new());
         self.report = le.then(|| LoadReport {
             le_mesh: true,
             ..Default::default()
@@ -1333,6 +1264,34 @@ impl Viewport3d {
         self.bounds = None;
         self.frame = None;
         self.orbit.reset();
+    }
+
+    /// The Advanced Skin card's picks for shape `id` (Note GN), if any.
+    pub fn skin_preview(&self, id: ShapeId) -> Option<&SkinEntry> {
+        self.skins.get(&id)
+    }
+
+    /// Shape `id`'s skin card picks (`None` = the shape as loaded). The render thread applies them to the loaded
+    /// content, and again after every reload of it; a new model clears them ([`Viewport3d::set_content`]).
+    pub fn set_skin_preview(&mut self, id: ShapeId, e: Option<SkinEntry>) {
+        let mut all = (*self.skins).clone();
+        match e {
+            Some(e) => all.insert(id, e),
+            None => all.remove(&id),
+        };
+        self.set_skin_previews(all);
+    }
+
+    fn set_skin_previews(&mut self, all: SkinPreviews) {
+        if *self.skins == all {
+            return;
+        }
+        self.skins = Arc::new(all);
+        if let Some(t) = &self.thread {
+            if t.send(V3Cmd::SetSkinPreviews(self.skins.clone())).is_ok() {
+                self.last_sent = None;
+            }
+        }
     }
 
     /// A JSON-only edit (spec §2.3): one shape's material on the current `Parsed`/`Builtin` content, applied by the
@@ -1361,10 +1320,6 @@ impl Viewport3d {
             return false;
         }
         self.edits_sent += 1;
-        self.mark(MarkKind::Edit {
-            shape: id.0,
-            kind: None,
-        });
         // The next request_frame draws the edit.
         self.last_sent = None;
         true
@@ -1405,89 +1360,18 @@ impl Viewport3d {
         let Some(t) = self.content_thread() else {
             return false;
         };
-        let what = match &cmd {
-            V3Cmd::SwapTexture {
-                path,
-                bytes,
-                variant,
-            } => MarkKind::Swap {
-                path: path.clone(),
-                variant: *variant,
-                bytes: bytes.len(),
-            },
-            V3Cmd::SetTextureVariant { variant, .. } => MarkKind::Flip {
-                variant: *variant,
-                paths: 1,
-            },
-            _ => return false,
-        };
+        if !matches!(
+            cmd,
+            V3Cmd::SwapTexture { .. } | V3Cmd::SetTextureVariant { .. }
+        ) {
+            return false;
+        }
         if t.send(cmd).is_err() {
             return false;
         }
-        self.mark(what);
         // The next request_frame draws it.
         self.last_sent = None;
         true
-    }
-
-    fn mark(&mut self, what: MarkKind) {
-        let after = self.render_sent;
-        // One click flips many paths: they share one line.
-        if let (
-            MarkKind::Flip { variant, paths },
-            Some(Mark {
-                after: a,
-                what:
-                    MarkKind::Flip {
-                        variant: v,
-                        paths: n,
-                    },
-                ..
-            }),
-        ) = (&what, self.marks.last_mut())
-        {
-            if *a == after && v == variant {
-                *n += *paths;
-                return;
-            }
-        }
-        if self.marks.len() >= 64 {
-            self.marks.remove(0);
-        }
-        self.marks.push(Mark {
-            at: Instant::now(),
-            after,
-            what,
-        });
-    }
-
-    /// A frame with id `id` reached the model: log every command it can show.
-    fn answer_marks(&mut self, id: u64) {
-        let (done, keep): (Vec<Mark>, Vec<Mark>) = std::mem::take(&mut self.marks)
-            .into_iter()
-            .partition(|m| m.after < id);
-        self.marks = keep;
-        for m in done {
-            let ms = perf_log::ms_since(m.at);
-            match m.what {
-                MarkKind::Edit { shape, kind } => perf_log::emit(
-                    "edit",
-                    json!({"shape": shape, "kind": kind.map_or("unknown".into(), |k| format!("{k:?}")), "ms_to_frame": ms}),
-                ),
-                MarkKind::Swap {
-                    path,
-                    variant,
-                    bytes,
-                } => perf_log::emit(
-                    "texture_swap",
-                    json!({"path": path, "variant": format!("{variant:?}"), "bytes": bytes, "ms_to_frame": ms}),
-                ),
-                MarkKind::Flip { variant, paths } => perf_log::emit(
-                    "ab_flip",
-                    json!({"paths": paths, "variant": format!("{variant:?}"), "ms_to_frame": ms}),
-                ),
-            }
-        }
     }
 
     /// The variant the next load's resolver bytes count as (the set preview's current mode). Announced to the
@@ -1500,6 +1384,18 @@ impl Viewport3d {
         self.content.as_ref()
     }
 
+    /// The shipped render thread: its command sender.
+    fn spawn_render_thread(&self, shaders: Fingerprint, cache: PathBuf) -> Sender<V3Cmd> {
+        let (ctx, crx) = channel();
+        let features = self.features_on;
+        let settings = self.settings.clone();
+        let me = ctx.clone();
+        spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
+            render_loop(crx, me, tx, shaders, cache, features, settings)
+        });
+        ctx
+    }
+
     fn ensure_thread(&mut self) -> bool {
         if self.thread.is_some() {
             return true;
@@ -1508,22 +1404,12 @@ impl Viewport3d {
             return false;
         };
         #[cfg(feature = "test-hooks")]
-        let faked = self.fake_thread.take();
-        #[cfg(not(feature = "test-hooks"))]
-        let faked: Option<Sender<V3Cmd>> = None;
-        let ctx = match faked {
+        let ctx = match self.fake_thread.take() {
             Some(t) => t,
-            None => {
-                let (ctx, crx) = channel();
-                let features = self.features_on;
-                let settings = self.settings.clone();
-                let me = ctx.clone();
-                spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
-                    render_loop(crx, me, tx, shaders, cache, features, settings)
-                });
-                ctx
-            }
+            None => self.spawn_render_thread(shaders, cache),
         };
+        #[cfg(not(feature = "test-hooks"))]
+        let ctx = self.spawn_render_thread(shaders, cache);
         self.load_variant_sent = Variant::Source; // a new thread starts at the default
         if self.debug != DebugView::Lit && ctx.send(V3Cmd::SetDebug(self.debug)).is_ok() {
             self.reconf_sent += 1;
@@ -1534,6 +1420,9 @@ impl Viewport3d {
         }
         if self.projected.is_some() {
             let _ = ctx.send(V3Cmd::SetProjectedLayer(self.projected.clone()));
+        }
+        if !self.skins.is_empty() {
+            let _ = ctx.send(V3Cmd::SetSkinPreviews(self.skins.clone()));
         }
         self.thread = Some(ctx);
         true
@@ -1567,7 +1456,7 @@ impl Viewport3d {
         self.debug
     }
 
-    /// The debug view selector (AG75). The render thread applies it without a new load of the content.
+    /// The debug view selector (GJ8). The render thread applies it without a new load of the content.
     pub fn set_debug(&mut self, d: DebugView) {
         if self.debug == d {
             return;
@@ -1584,7 +1473,7 @@ impl Viewport3d {
         self.debug_support
     }
 
-    /// The views the selector and the V key offer: Lit and UV checker always; each other view when render3d supports
+    /// The views the selector and the V key offer: Lit always; each other view when render3d supports
     /// debug views and at least one loaded shape has that term (`Availability` not `None`).
     pub fn offered(&self) -> Vec<DebugView> {
         DebugView::ALL
@@ -1661,9 +1550,6 @@ impl Viewport3d {
                 self.load_variant_sent = self.load_variant;
             }
             if thread.send(cmd).is_ok() {
-                self.load_at = Some(Instant::now());
-                // The load drops the queued renders and edits: their marks would never be answered.
-                self.marks.clear();
                 // A queued Render is dropped by the thread when this load reaches it, with no reply.
                 self.render_done = self.render_sent;
                 self.pending_load = Some(id);
@@ -1717,11 +1603,6 @@ impl Viewport3d {
 
     /// Drain replies. True when anything changed.
     pub fn poll(&mut self) -> bool {
-        self.poll_at(Instant::now())
-    }
-
-    /// [`Viewport3d::poll`] with the clock given (the gap watch reads it).
-    pub fn poll_at(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for d in self.picker.take() {
             changed = true;
@@ -1758,29 +1639,13 @@ impl Viewport3d {
         if !self.busy() {
             self.busy_since = None;
         }
-        // After the drain (a frame that takes the last reply asks for no next frame); the app re-arms after drawing.
-        if let Some(gap) = self.gap.tick(now, self.busy()) {
-            perf_log::emit("ui_gap", json!({"gap_ms": gap, "panel": self.panel}));
-        }
         changed
-    }
-
-    /// Re-arms the gap watch at the end of the frame with the owner's busy (the condition that asks for the next
-    /// frame): drawing may have started work (a render) after `poll`, and the set preview has its own.
-    pub fn arm_gap(&mut self, busy: bool) {
-        self.gap.arm(busy);
     }
 
     /// Applies one reply (what `poll` does with each message; public for tests).
     pub fn handle(&mut self, r: V3Reply) {
         match r {
-            V3Reply::Ready { adapter, warp } => {
-                perf_log::emit(
-                    "gpu",
-                    json!({"adapter": adapter, "warp": warp, "cs_root": self.shaders.as_ref().map(|f| f.root.display().to_string())}),
-                );
-                self.adapter = Some((adapter, warp));
-            }
+            V3Reply::Ready { adapter, warp } => self.adapter = Some((adapter, warp)),
             V3Reply::Failed(e) => {
                 self.thread = None;
                 self.pending_load = None;
@@ -1816,28 +1681,34 @@ impl Viewport3d {
                     self.bounds = bounds;
                 }
             }
-            V3Reply::Frame { frame, timing } => {
-                let fid = frame.id;
+            V3Reply::Frame {
+                frame,
+                #[cfg(feature = "test-hooks")]
+                timing,
+            } => {
                 self.render_done = self.render_done.max(frame.id);
                 if self.loaded.is_some() && self.pending_load.is_none() {
                     self.render_error = None;
                     self.frame = Some(frame);
-                    self.timing = Some(timing);
-                    if let Some(t) = self.load_at.take() {
-                        perf_log::emit(
-                            "first_frame",
-                            json!({"ms_since_load": perf_log::ms_since(t)}),
-                        );
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        self.timing = Some(timing);
                     }
-                    self.answer_marks(fid);
                 }
             }
-            V3Reply::Refresh { frame, timing } => {
+            V3Reply::Refresh {
+                frame,
+                #[cfg(feature = "test-hooks")]
+                timing,
+            } => {
                 // Not an answered Render: render_done is untouched. Ignored while the old image is held.
                 if self.loaded.is_some() && self.pending_load.is_none() && !self.held_frame {
                     self.render_error = None;
                     self.frame = Some(frame);
-                    self.timing = Some(timing);
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        self.timing = Some(timing);
+                    }
                 }
             }
             V3Reply::Notice(text) => self.notice = Some(text),
@@ -1873,31 +1744,17 @@ impl Viewport3d {
                     }
                 }
             }
-            V3Reply::MaterialSet {
-                content,
-                id,
-                result,
-                ms,
-            } => {
+            V3Reply::MaterialSet { content, result } => {
                 // A reply for content replaced since: its count was reset with the content.
                 if self.loaded.or(self.pending_load) != Some(content) {
                     return;
                 }
                 self.edits_done = (self.edits_done + 1).min(self.edits_sent);
                 match result {
-                    Ok(kind) => {
-                        for m in &mut self.marks {
-                            if let MarkKind::Edit {
-                                shape,
-                                kind: k @ None,
-                            } = &mut m.what
-                            {
-                                if *shape == id.0 {
-                                    *k = Some(kind);
-                                }
-                            }
-                        }
-                        self.last_edit = Some((kind, ms));
+                    // The kind is only recorded for the perf gate ("cbuffer edits only").
+                    Ok(_kind) => {
+                        #[cfg(feature = "test-hooks")]
+                        self.edit_kinds.push(_kind);
                     }
                     Err(e) => self.render_error = Some(e),
                 }
@@ -1941,7 +1798,6 @@ impl Viewport3d {
             }
             V3Reply::Located { .. } | V3Reply::Chosen { .. } => {}
             V3Reply::OffInPreview(off) => self.off_in_preview = off,
-            V3Reply::Coverage(c) => self.coverage = c,
             V3Reply::DebugSupport(on) => {
                 self.debug_support = on;
                 if !on && self.debug.output() != DebugOutput::Lit {
@@ -2108,19 +1964,6 @@ impl Drop for Viewport3d {
     }
 }
 
-/// Applies user CS settings (C11: a cbuffer rewrite, recompiles only when the defines change, never a reload) and
-/// writes the `settings` log line. The render thread calls it, and tests call it to capture the line.
-pub fn apply_settings(r: &mut Renderer, s: CsSettings) {
-    let t0 = Instant::now();
-    let hash: String = s.hash.chars().take(12).collect();
-    let notes = s.notes.len();
-    r.set_settings(s);
-    perf_log::emit(
-        "settings",
-        json!({"hash": hash, "defines": r.features(), "ms": perf_log::ms_since(t0), "notes": notes}),
-    );
-}
-
 /// The texture resolver over `map` (canonical path → bytes); read errors are collected in `errors`.
 fn resolver<'a>(
     map: &'a HashMap<String, FileSource>,
@@ -2151,6 +1994,16 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
             Ok(nif) => {
                 let mut p = render3d::parse(&nif);
                 p.head_part = spec.head_part;
+                for s in &mut p.shapes {
+                    if let Some(t) = spec.txst.get(&s.id) {
+                        // shortcut: only the slots change, not the TXST's DNAM flags or decal data; apply those if a
+                        // preview mismatch is traced to them.
+                        s.material.slots = t
+                            .iter()
+                            .map(|t| nif::path::canon_texture(t.as_bytes()))
+                            .collect();
+                    }
+                }
                 r.load_parsed_sync(&p, &textures)
             }
             Err(e) => {
@@ -2184,8 +2037,6 @@ struct TexState {
     load: Variant,
     swaps: BTreeMap<(String, Variant), Arc<Vec<u8>>>,
     active: BTreeMap<String, Variant>,
-    /// The UV checker debug view is on (render3d's slot-0 override is set).
-    checker: bool,
 }
 
 impl TexState {
@@ -2219,17 +2070,37 @@ enum TexCmd {
     },
 }
 
-/// [`load`] with the texture state: the load variant first, the logged swaps and flips after.
+/// [`load`] with the texture state and the skin card's picks: the load variant first, the picks and the logged swaps
+/// and flips after.
 fn load_all(
     r: &mut Renderer,
     c: &Content,
     edits: &BTreeMap<ShapeId, MaterialState>,
     tex: &TexState,
+    skins: &SkinPreviews,
 ) -> LoadReport {
     r.set_load_variant(tex.load);
-    let rep = load(r, c, edits);
+    let mut rep = load(r, c, edits);
+    for (id, e) in skins {
+        rep.errors.extend(apply_skin(r, c, *id, Some(e)));
+    }
     tex.replay(r);
     rep
+}
+
+/// One shape's skin card picks on the loaded content (`None`: back to the shape as loaded), resolved through the
+/// content's texture map plus the picks' own sources. Returns the read errors; a shape this content lacks (picks
+/// made for another model) is skipped.
+fn apply_skin(r: &mut Renderer, c: &Content, id: ShapeId, e: Option<&SkinEntry>) -> Vec<String> {
+    let mut map = c.textures().clone();
+    if let Some(e) = e {
+        map.extend(e.sources.iter().cloned());
+    }
+    let bsas = RefCell::new(HashMap::new());
+    let errors = RefCell::new(vec![]);
+    let preview = e.map(|e| e.preview.clone()).unwrap_or_default();
+    let _ = r.set_skin_preview(id, preview, &resolver(&map, &bsas, &errors));
+    errors.into_inner()
 }
 
 /// Whether a swap or material edit goes in the replay log: on success, and on a lost device, since the rebuild
@@ -2283,7 +2154,7 @@ fn render_loop(
         // AU3: render3d's fill (GUI suggestions item 3): colour slots only, so a missing normal no longer tints.
         r.set_missing_texture(Some([255, 0, 255, 255]));
         r.set_features_on(features);
-        apply_settings(&mut r, settings.clone());
+        r.set_settings(settings.clone());
         Ok(r)
     };
     let loaded = |r: &Renderer, id: u64, report: LoadReport| {
@@ -2319,19 +2190,18 @@ fn render_loop(
     let rebuild = |r: &mut Renderer,
                    last: &Option<(u64, Content)>,
                    edits: &BTreeMap<ShapeId, MaterialState>,
-                   tex: &TexState|
+                   tex: &TexState,
+                   skins: &SkinPreviews|
      -> Result<(), String> {
-        let t0 = std::time::Instant::now();
         r.rebuild_device_on(Gpu::new()?)?;
         send(V3Reply::Ready {
             adapter: r.gpu().adapter.clone(),
             warp: r.gpu().warp,
         });
         if let Some((id, c)) = last {
-            let report = load_all(r, c, edits, tex);
+            let report = load_all(r, c, edits, tex, skins);
             loaded(r, *id, report);
         }
-        perf_log::emit("device_rebuild", json!({"ms": perf_log::ms_since(t0)}));
         Ok(())
     };
     let mut last: Option<(u64, Content)> = None;
@@ -2341,17 +2211,18 @@ fn render_loop(
     // The last camera, size and look drawn: what a compile-triggered refresh renders with.
     let mut view: Option<(Camera, u32, u32, Look, f32)> = None;
     let mut refresh_id: u64 = 1 << 62;
-    let mut stats = FrameStats::default();
     let mut backdrop_told = false;
     // The deferred failure last reported (`Renderer::deferred_error`), so a late fallback is told once.
     let mut deferred_told: Option<String> = None;
     // The look's deferred choice (the last SetDeferred): a shaders, features or settings change retries it after a
     // fallback (D-P36). A failed retry is told by the check after render only when its error is new.
     let mut want_deferred = false;
-    let mut last_coverage: Option<String> = None;
     // A material-object layer not applied yet: it waits for content, whose texture map resolves its textures.
     let mut layer_due: Vec<Option<ProjectedLayer>> = vec![];
+    // The skin card's picks (Note GN): applied after every load of `last`.
+    let mut skins: Arc<SkinPreviews> = Arc::default();
     while let Ok(first) = rx.recv() {
+        let mut skins_due: Option<Arc<SkinPreviews>> = None;
         // Dropped at the end of the batch, after every other reply: answers each features/settings command.
         let mut ack = ReconfAck(0, &send);
         let mut reload = false;
@@ -2402,7 +2273,7 @@ fn render_loop(
                     None
                 }
                 V3Cmd::SetSettings(s) => {
-                    apply_settings(&mut r, s);
+                    r.set_settings(s);
                     if want_deferred && !r.deferred() {
                         let _ = r.set_deferred(true);
                     }
@@ -2456,14 +2327,11 @@ fn render_loop(
                     }
                     None
                 }
+                V3Cmd::SetSkinPreviews(s) => {
+                    skins_due = Some(s);
+                    None
+                }
                 V3Cmd::SetDebug(d) => {
-                    let on = d == DebugView::UvChecker;
-                    if tex.checker != on {
-                        tex.checker = on;
-                        // render3d keeps the override across loads, swaps and edits: no reload either way.
-                        let _ = r.override_slot(0, on.then(checker_dds).as_deref());
-                        debug_changed = true;
-                    }
                     if r.debug_output() != d.output() {
                         match r.set_debug_output(d.output()) {
                             Ok(()) => debug_changed = true,
@@ -2526,18 +2394,31 @@ fn render_loop(
             // Shapes re-permuted or rewritten: report them and redraw from the last camera (a load does both itself).
             compiled_changed |= !reload;
         }
+        // A load in this batch applies the whole map; otherwise only the shapes whose picks changed.
+        if let Some(new) = skins_due {
+            let changed: std::collections::BTreeSet<ShapeId> = skins
+                .keys()
+                .chain(new.keys())
+                .filter(|id| skins.get(id) != new.get(id))
+                .copied()
+                .collect();
+            skins = new;
+            if let (false, Some((_, c))) = (reload, &last) {
+                for id in changed {
+                    for e in apply_skin(&mut r, c, id, skins.get(&id)) {
+                        send(V3Reply::Notice(e));
+                    }
+                    compiled_changed = true;
+                }
+            }
+        }
         if reload {
             if let Some((id, c)) = &last {
-                let t0 = std::time::Instant::now();
-                let report = load_all(&mut r, c, &edits, &tex);
-                perf_log::emit(
-                    "load",
-                    json!({"content": c.label(), "shapes": report.shapes, "pending": report.pending, "build_ms": perf_log::ms_since(t0)}),
-                );
+                let report = load_all(&mut r, c, &edits, &tex, &skins);
                 if r.gpu().is_removed() {
                     // Lost during the load: rebuild and load again now; with no shapes no Render would follow to
                     // trigger the rebuild.
-                    if let Err(e) = rebuild(&mut r, &last, &edits, &tex) {
+                    if let Err(e) = rebuild(&mut r, &last, &edits, &tex, &skins) {
                         return send(V3Reply::Failed(e));
                     }
                 } else {
@@ -2552,17 +2433,11 @@ fn render_loop(
                     if content != *lid {
                         continue;
                     }
-                    let t0 = std::time::Instant::now();
                     let result = edit(&mut r, c, id, m.clone());
                     if log_for_replay(&result) {
                         edits.insert(id, m);
                     }
-                    send(V3Reply::MaterialSet {
-                        content,
-                        id,
-                        result,
-                        ms: t0.elapsed().as_secs_f64() * 1000.0,
-                    });
+                    send(V3Reply::MaterialSet { content, result });
                 }
                 send(V3Reply::Shapes(r.shapes()));
             }
@@ -2599,12 +2474,6 @@ fn render_loop(
         if reshaded {
             send(V3Reply::DebugSupport(r.debug_supported()));
         }
-        // A settings apply or a new program can change it; sent only on change.
-        let coverage = r.settings_coverage().line();
-        if coverage != last_coverage {
-            send(V3Reply::Coverage(coverage.clone()));
-            last_coverage = coverage;
-        }
         if restyled {
             send(V3Reply::OffInPreview(r.off_in_preview()));
         }
@@ -2633,7 +2502,7 @@ fn render_loop(
         if let Err(e) = &result {
             if e.starts_with(render3d::device::DEVICE_REMOVED) {
                 // Device lost (TDR, driver update): a new device (maybe WARP), the content again, one retry.
-                if let Err(e) = rebuild(&mut r, &last, &edits, &tex) {
+                if let Err(e) = rebuild(&mut r, &last, &edits, &tex, &skins) {
                     return send(V3Reply::Failed(e));
                 }
                 backdrop_told = false;
@@ -2662,18 +2531,20 @@ fn render_loop(
                     rgba,
                     id,
                 });
+                #[cfg(feature = "test-hooks")]
                 let timing = r.last_timing();
-                if let Some(s) = stats.push(
-                    std::time::Instant::now(),
-                    timing.draw_ms,
-                    timing.draw_ms + timing.gpu_ms + timing.readback_ms,
-                ) {
-                    perf_log::emit("frame_stats", s);
-                }
                 if refresh {
-                    send(V3Reply::Refresh { frame, timing });
+                    send(V3Reply::Refresh {
+                        frame,
+                        #[cfg(feature = "test-hooks")]
+                        timing,
+                    });
                 } else {
-                    send(V3Reply::Frame { frame, timing });
+                    send(V3Reply::Frame {
+                        frame,
+                        #[cfg(feature = "test-hooks")]
+                        timing,
+                    });
                 }
             }
             // A failed refresh is dropped: the next real Render reports the error with an id the model knows.

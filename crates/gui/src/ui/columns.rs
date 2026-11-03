@@ -745,7 +745,7 @@ fn filter_row(ui: &mut egui::Ui, model: &mut AppModel) {
         } else {
             format!("Filter ({k}) ▾")
         };
-        combo_menu(ui, &text, |ui| filter_popup(ui, model));
+        combo_menu(ui, "textures-filter", &text, |ui| filter_popup(ui, model));
         let lo = ColumnPrefs::TILE_RANGE.0;
         let hi = ColumnPrefs::tile_cap(ui.ctx().pixels_per_point());
         let tile = model.prefs.tile;
@@ -777,24 +777,35 @@ fn filter_row(ui: &mut egui::Ui, model: &mut AppModel) {
     });
 }
 
-/// Where [`combo_menu`] keeps the pass it was last shown open in. shortcut: one id, so one combo menu in the app;
-/// key it by the button id if a second one is added.
+/// Where a [`combo_menu`] keeps the pass it was last shown open in, under `.with(key)`; the bare id holds
+/// `(pass, key id)` of the last one open, for [`combo_menu_open`].
 const COMBO_MENU: &str = "sdc-combo-menu";
 
-/// Whether the combo menu was open at the last pass. [`super::actions::keys`] holds the shortcuts then, as it does for
+/// Whether a combo menu was open at the last pass. [`super::actions::keys`] holds the shortcuts then, as it does for
 /// egui's own popups, so Esc reaches the menu. A menu not drawn at the last pass (another view) is closed.
 pub(crate) fn combo_menu_open(ctx: &egui::Context) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|d| d.get_temp::<u64>(egui::Id::new(COMBO_MENU)))
-        .is_some_and(|p| p + 1 == pass)
+    ctx.data(|d| d.get_temp::<(u64, egui::Id)>(egui::Id::new(COMBO_MENU)))
+        .is_some_and(|(p, _)| p + 1 == pass)
 }
 
-/// A menu that holds combos (final review I2). A combo's popup takes egui's one open-popup slot, which would close a
-/// menu kept there, so this menu keeps its own open state; and a click while one of its combos is open (a pick, or a
-/// click off it) only closes that combo. A click outside, Esc or the button closes the menu.
-fn combo_menu(ui: &mut egui::Ui, label: &str, content: impl FnOnce(&mut egui::Ui)) {
+/// A menu that holds combos or colour pickers (final review I2; the 3D View menu, Note GK). A child popup takes
+/// egui's one open-popup slot, which would close a menu kept there, so this menu keeps its own open state, under
+/// `key`; and a click while one of its popups is open (a pick, or a click off it) only closes that popup. A click
+/// outside, Esc or the button closes the menu.
+pub(crate) fn combo_menu(
+    ui: &mut egui::Ui,
+    key: &str,
+    label: &str,
+    content: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    let any = egui::Id::new(COMBO_MENU);
+    let id = any.with(key);
+    let pass = ui.ctx().cumulative_pass_nr();
     let button = ui.button(label);
-    let mut open = combo_menu_open(ui.ctx());
+    let mut open = ui
+        .data(|d| d.get_temp::<u64>(id))
+        .is_some_and(|p| p + 1 == pass);
     let child_open = egui::Popup::is_any_open(ui.ctx());
     if button.clicked() {
         open = !open;
@@ -806,14 +817,21 @@ fn combo_menu(ui: &mut egui::Ui, label: &str, content: impl FnOnce(&mut egui::Ui
     if shown.is_some_and(|r| !child_open && !button.clicked() && r.response.clicked_elsewhere()) {
         open = false;
     }
-    let (id, pass) = (egui::Id::new(COMBO_MENU), ui.ctx().cumulative_pass_nr());
     ui.data_mut(|d| {
         if open {
             d.insert_temp(id, pass);
+            d.insert_temp(any, (pass, id));
         } else {
             d.remove::<u64>(id);
+            // Only this menu's own mark: another menu drawn earlier this pass may be the open one.
+            if d.get_temp::<(u64, egui::Id)>(any)
+                .is_some_and(|(_, k)| k == id)
+            {
+                d.remove::<(u64, egui::Id)>(any);
+            }
         }
     });
+    button
 }
 
 /// How far a tile button moves the size.

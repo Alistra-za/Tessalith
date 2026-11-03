@@ -1,7 +1,6 @@
 //! The set preview's model (P1-A Tasks 13–14): encodes, fingerprint and change classification, query keys,
 //! PGPatcher simulation per shape, and the orchestration without a GPU.
 mod support;
-use render3d::perf_log;
 use sdc_gui::model::items::{ItemKind, ItemStatus};
 use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::preview::DEBOUNCE;
@@ -879,7 +878,7 @@ pub fn scan_db_with(dir: &Path, slots: &[&str], le_mesh: bool) -> PathBuf {
     };
     let path = "meshes/landscape/rocks/rock01.nif";
     let id = s
-        .upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let pid = s.path_ids(&[path]).unwrap()[0];
     s.set_winners(&[(pid, (id, 1))].into_iter().collect(), &Default::default())
@@ -1287,7 +1286,8 @@ fn an_unchanged_frame_within_the_throttle_does_no_work() {
     m.select_set(&key);
     let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
     run(&mut s, &m);
-    let (checks, scene) = (s.checks, s.v3.content().cloned());
+    let checks = s.checks;
+    let content = s.v3.content().cloned();
     let t = Instant::now();
     s.shown = true;
     s.poll_at(&m, t);
@@ -1302,7 +1302,7 @@ fn an_unchanged_frame_within_the_throttle_does_no_work() {
     s.poll_at(&m, t + THROTTLE * 3);
     assert_eq!(s.checks, after + 1);
     assert!(!s.busy());
-    assert_eq!(s.v3.content().cloned(), scene, "no scene was rebuilt");
+    assert!(s.v3.content() == content.as_ref(), "no scene was rebuilt");
 }
 
 #[test]
@@ -1952,36 +1952,9 @@ fn members_sharing_a_path_with_one_other_copy_do_not_swap_and_drop_every_frame()
         c.len()
     );
 }
-// ---- P1-B Task 9: encode lines ----
 
 #[test]
-fn an_encode_completion_is_logged_with_its_slot_mode_time_and_size() {
-    let (_d, m, mut enc, slots) = started();
-    let t = Instant::now();
-    enc.sync(&m, slots, t, true);
-    enc.pump(m.session.as_ref(), t, false);
-    let k = *enc.members.keys().next().unwrap();
-    let tok = enc.token_of(k);
-    let ((), ev) = perf_log::capture(|| {
-        enc.inject(k, tok, DEFAULT_CAP, fake());
-        assert!(enc.poll());
-    });
-    let e: Vec<_> = ev.iter().filter(|e| e["event"] == "encode").collect();
-    assert_eq!(e.len(), 1, "{ev:?}");
-    assert_eq!(
-        (
-            e[0]["ms"].as_f64(),
-            e[0]["bytes"].as_u64(),
-            e[0]["ok"].as_bool()
-        ),
-        (Some(1.0), Some(8), Some(true))
-    );
-    assert_eq!(e[0]["mode"], "Encoded");
-    assert!(e[0]["slot"].is_string());
-}
-
-#[test]
-fn the_set_preview_tags_its_viewport_for_the_gap_watch() {
+fn the_set_preview_tags_its_viewport() {
     assert_eq!(
         SetPreview::new(None, None, None, DEFAULT_CAP).v3.panel,
         "set_preview"

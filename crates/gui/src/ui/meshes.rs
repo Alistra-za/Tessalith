@@ -6,13 +6,12 @@ use crate::model::meshes::pg_entries::{
     READING_JSON,
 };
 use crate::model::meshes::{
-    alpha_line, display_path, flag_bits, overridden_text, plugins_line, shader_type_name,
-    slot_name, Banner, MeshesModel, ScanTarget, DERIVED_CHIP, LE_WARNING, MISSING_NOTE,
-    PLUGINS_NOT_READ_NOTE, SLSF1_NAMES, SLSF2_NAMES, STALE_CHIP, UNUSED_NOTE,
+    alpha_line, display_path, overridden_text, plugins_line, shader_type_name, slot_name, Banner,
+    MeshesModel, ScanTarget, LE_WARNING,
 };
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use eframe::egui;
-use modscan::plugin_store::{record_label, MeshUse};
+use modscan::plugin_store::record_label;
 use modscan::store::{NifRow, ShapeView, TexResolution, KIND_BSA, KIND_DATA};
 use std::collections::HashMap;
 
@@ -48,6 +47,10 @@ mod edit_ctrl;
 mod edit_extra;
 mod edit_fields;
 mod edit_panel;
+mod skin_preview;
+mod txst_preview;
+use crate::model::meshes::skin_preview::has_skin_card;
+use skin_preview::SkinAct;
 /// Problems listed under "Scan details"; the count is always shown.
 const MAX_LISTED: usize = 200;
 
@@ -217,7 +220,7 @@ pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
             )
             .clicked()
         {
-            m.request_scan(false);
+            m.request_scan();
         }
     });
     r.response.on_hover_text(hover);
@@ -283,13 +286,7 @@ fn bar_has_content(m: &MeshesModel) -> bool {
             || !r.problems.is_empty()
             || r.plugins.is_some()
     });
-    m.scanning()
-        || !m.status.is_empty()
-        || details
-        || m.has_store()
-        || m.file_refs.is_some()
-        || m.error.is_some()
-        || m.banner.is_some()
+    m.scanning() || !m.status.is_empty() || details || m.error.is_some() || m.banner.is_some()
 }
 
 fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
@@ -339,10 +336,6 @@ fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 });
         }
     }
-    if (m.has_store() || m.file_refs.is_some()) && ui.button("Plugin file references…").clicked()
-    {
-        m.refs_open = true;
-    }
     if let Some(e) = m.error.clone() {
         ui.horizontal_wrapped(|ui| {
             ui.colored_label(RED, e);
@@ -357,15 +350,7 @@ fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
             match b {
                 Banner::PgpRunning => {
                     if ui.button("Retry").clicked() {
-                        m.request_scan(false);
-                    }
-                    if ui.button("Scan without PGPatcher output").clicked() {
-                        m.request_scan(true);
-                    }
-                }
-                Banner::PgpStale(_) => {
-                    if ui.button("Show list").clicked() {
-                        m.show_stale_list();
+                        m.request_scan();
                     }
                 }
                 Banner::PgpIncomplete(_) => {}
@@ -591,13 +576,16 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
 }
 
 /// The mod picker (Note GC): "Any mod" lists every path's winner; a mod lists its own copies. Greyed while a scan
-/// runs, as the list's selection is.
+/// runs, as the list's selection is. Note GK: a filter box on top, focused when the list opens, narrows the mods to
+/// those holding every typed word (any case); Enter picks the first match.
 fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let text = match m.selected_mod {
         Some(id) => m.mod_name(id).to_string(),
         None => "Any mod".to_string(),
     };
     let mut pick = None;
+    let query_id = egui::Id::new("meshes-mod-picker-filter");
+    let pass = ui.ctx().cumulative_pass_nr();
     // Rule 3.5: the combo's width is a minimum, so it gets an exact slot.
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
     ui.allocate_ui(size, |ui| {
@@ -606,20 +594,54 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 .selected_text(text)
                 .width(size.x)
                 .truncate()
+                // A click in the filter box keeps the list open; a pick closes it below.
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
+                    // (text, last pass drawn): a list not drawn at the last pass has just opened.
+                    let (mut q, fresh) = match ui.data(|d| d.get_temp::<(String, u64)>(query_id)) {
+                        Some((q, p)) if p + 1 == pass => (q, false),
+                        _ => (String::new(), true),
+                    };
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut q)
+                            .hint_text("Filter: words of the mod name")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if fresh {
+                        r.request_focus();
+                    }
+                    ui.data_mut(|d| d.insert_temp(query_id, (q.clone(), pass)));
+                    let q = q.to_lowercase();
+                    let words: Vec<&str> = q.split_whitespace().collect();
+                    let hits: Vec<_> = m
+                        .picker_mods()
+                        .filter(|r| {
+                            let n = r.name.to_lowercase();
+                            words.iter().all(|w| n.contains(w))
+                        })
+                        .collect();
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        pick = hits.first().map(|r| Some(r.id));
+                    }
                     if ui
                         .selectable_label(m.selected_mod.is_none(), "Any mod")
                         .clicked()
                     {
                         pick = Some(None);
                     }
-                    for r in m.picker_mods() {
+                    for r in &hits {
                         if ui
                             .selectable_label(m.selected_mod == Some(r.id), &r.name)
                             .clicked()
                         {
                             pick = Some(Some(r.id));
                         }
+                    }
+                    if hits.is_empty() && !words.is_empty() {
+                        ui.weak("No mod name has every word");
+                    }
+                    if pick.is_some() {
+                        ui.close();
                     }
                 })
                 .response
@@ -633,8 +655,8 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
     }
 }
 
-/// A row's chips, warnings first (Note GC16): the problem, the out-of-date patch, LE, the edit badge, the status, a
-/// PGPatcher copy, then the mod's own chips (generated by PGPatcher, a BSA, the game Data folder). Each is
+/// A row's chips, warnings first (Note GC16): the problem, LE, the edit badge, the status, a
+/// PGPatcher copy, then the mod's own chips (a BSA, the game Data folder). Each is
 /// (colour, the short text the row shows, the full text).
 fn row_chips(
     m: &MeshesModel,
@@ -644,12 +666,6 @@ fn row_chips(
     let mut v = Vec::new();
     if n.problem.is_some() {
         v.push((RED, "Problem", "Problem"));
-    }
-    if n.derive_check
-        .as_deref()
-        .is_some_and(|c| c.starts_with("stale"))
-    {
-        v.push((AMBER, "Stale patch", STALE_CHIP));
     }
     if n.le_mesh {
         v.push((AMBER, "LE", "LE"));
@@ -676,9 +692,6 @@ fn row_chips(
     // shortcut: a scan of `mods` per drawn row (only the rows on screen); index it by name if mod lists grow past
     // a few thousand.
     if let Some(r) = m.mods.iter().find(|r| r.name == origin) {
-        if r.derived {
-            v.push((BLUE, "Generated", DERIVED_CHIP));
-        }
         match r.kind {
             KIND_BSA => v.push((egui::Color32::GRAY, "BSA", "BSA")),
             KIND_DATA => v.push((egui::Color32::GRAY, "game Data", "game Data")),
@@ -829,9 +842,6 @@ fn detail_head(ui: &mut egui::Ui, m: &mut MeshesModel, row: Option<&NifRow>) {
         if let Some(by) = &n.overridden_by {
             ui.label(format!("Overridden by {by}"));
         }
-        if let Some(c) = &n.derive_check {
-            ui.label(format!("PGPatcher check: {c}"));
-        }
         plugin_overrides(ui, m);
     }
     // v2 B8: during an edit the toggle always shows; In game is pgpsim over the edited NIF.
@@ -951,6 +961,8 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
     }
     let scan_ctrls = m.shown_copy().and_then(|c| m.scan_ctrls.get(&c).cloned());
     let (mut clicked, mut open, mut pick, mut pick_root) = (None, None, None, None);
+    let mut skin_act = None;
+    let mut txst_act = None;
     egui::ScrollArea::vertical()
         .id_salt("meshes-shapes-scroll")
         .auto_shrink([false, false])
@@ -1042,6 +1054,9 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
                             if p.is_some() {
                                 clicked = p;
                             }
+                            if let Some(f) = txst_preview::row(ui, m, s) {
+                                txst_act = Some((s.block, f));
+                            }
                             title
                         }
                         None => {
@@ -1057,8 +1072,31 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
                     }
                 });
                 ui.add_space(CARD_GAP);
+                // Note GN: the Advanced Skin card under a FaceGen / FaceGen RGB tint shape's card.
+                if let Some(s) = view.filter(|s| has_skin_card(s.shader_kind, s.shader_type)) {
+                    card(ui, false, |ui| {
+                        if let Some(a) = skin_preview::body(ui, m, s) {
+                            skin_act = Some((s.block, a));
+                        }
+                    });
+                    ui.add_space(CARD_GAP);
+                }
             }
         });
+    match skin_act {
+        Some((block, SkinAct::Pick(map, p))) => {
+            if let Err(e) = m.set_skin_map(block, map, p) {
+                m.error = Some(e);
+            }
+        }
+        Some((block, SkinAct::Wet(w))) => m.set_skin_wet(block, w),
+        None => {}
+    }
+    if let Some((block, f)) = txst_act {
+        if let Err(e) = m.set_txst(block, f) {
+            m.error = Some(e);
+        }
+    }
     if let Some(p) = clicked {
         m.show_users(&p);
     }
@@ -1151,24 +1189,13 @@ fn open_button(ui: &mut egui::Ui, m: &MeshesModel, path: &str, open: &mut Option
     }
 }
 
-/// Winning plugin records that use this mesh and the shapes they re-texture (esp spec §4.2). Inert records (filtering
-/// spec §3) only behind "Show inert", dimmed, with their reason. Information only.
-fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
-    let (uses, inert, show) = (&m.plugin_uses, &m.plugin_inert, &mut m.show_inert_uses);
-    let n_inert = uses
-        .iter()
-        .filter(|u| inert.contains_key(&u.formid))
-        .count();
-    egui::CollapsingHeader::new(format!("Plugin overrides ({})", uses.len() - n_inert))
+/// Winning plugin records that use this mesh and the shapes they re-texture (esp spec §4.2), every one of them
+/// (Note GJ7: no inert filtering). Information only.
+fn plugin_overrides(ui: &mut egui::Ui, m: &MeshesModel) {
+    let shown = &m.plugin_uses;
+    egui::CollapsingHeader::new(format!("Plugin overrides ({})", shown.len()))
         .id_salt("meshes-plugin-overrides")
         .show(ui, |ui| {
-            if n_inert > 0 {
-                ui.checkbox(&mut *show, format!("Show inert ({n_inert})"));
-            }
-            let shown: Vec<&MeshUse> = uses
-                .iter()
-                .filter(|u| *show || !inert.contains_key(&u.formid))
-                .collect();
             egui::ScrollArea::vertical()
                 .id_salt("meshes-plugin-overrides-scroll")
                 .max_height(240.0)
@@ -1177,19 +1204,11 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
                         ui.label("No plugin record of the latest scan uses this mesh.");
                     }
                     for (i, u) in shown.iter().take(MAX_LISTED).enumerate() {
-                        let text = format!(
+                        ui.label(format!(
                             "{}{}",
                             record_label(u.edid.as_deref(), u.formid, &u.sig, &u.plugin),
                             overridden_text(u.n_overrides)
-                        );
-                        match inert.get(&u.formid) {
-                            Some(why) => {
-                                ui.weak(format!("{text} · {why}"));
-                            }
-                            None => {
-                                ui.label(text);
-                            }
-                        }
+                        ));
                         ui.indent(("plugin-swaps", i), |ui| {
                             for s in &u.swaps {
                                 // formid 0 = the TXST's master is not in the load order
@@ -1202,7 +1221,32 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
                                         s.txst_formid
                                     )
                                 };
-                                ui.label(format!("{} → {target}", s.shape_name));
+                                // Note GO: the game goes by the 3D index (GO4: a skin texture by the skin shapes),
+                                // so a swap that matches no shape re-textures nothing.
+                                let (line, hit, miss) = if s.is_skin() {
+                                    let field = txst_preview::skin_field(u.model_slot);
+                                    let hit = m
+                                        .shapes
+                                        .iter()
+                                        .any(|v| v.shader_kind == 1 && v.shader_type == Some(5));
+                                    let miss = "No Skin Tint shape in this NIF".to_string();
+                                    (format!("{field} → {target}"), hit, miss)
+                                } else {
+                                    let hit = u32::try_from(s.index).is_ok_and(|i| {
+                                        m.shapes.iter().any(|v| v.index3d == Some(i))
+                                    });
+                                    let miss = format!("No shape #{} in this NIF", s.index);
+                                    (
+                                        format!("#{} {} → {target}", s.index, s.shape_name),
+                                        hit,
+                                        miss,
+                                    )
+                                };
+                                ui.label(line);
+                                // No shapes read (a NIF that failed to read): nothing to judge against.
+                                if !hit && !m.shapes.is_empty() {
+                                    ui.colored_label(AMBER, miss);
+                                }
                             }
                         });
                     }
@@ -1210,110 +1254,6 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
                         ui.label(format!("… and {} more", shown.len() - MAX_LISTED));
                     }
                 });
-        });
-}
-
-/// A window, not part of the top bar: opening it must not resize the panels.
-fn refs_window(ctx: &egui::Context, m: &mut MeshesModel) {
-    let mut open = m.refs_open;
-    egui::Window::new("Plugin file references")
-        .id(egui::Id::new("meshes-plugin-file-refs-window"))
-        .open(&mut open)
-        .default_size([900.0, 500.0])
-        .resizable(true)
-        .vscroll(false)
-        .show(ctx, |ui| {
-            if m.scanning() {
-                ui.label("Available after the scan finishes.");
-                return;
-            }
-            if m.file_refs.is_none() {
-                m.load_file_refs();
-            }
-            file_refs(ui, m);
-        });
-    m.refs_open = open;
-}
-
-/// Most rows drawn in the file-reference list.
-const MAX_REF_ROWS: usize = 1000;
-
-/// "Plugin file references" (esp spec §4.4): counts, filter, copy; no actions.
-fn file_refs(ui: &mut egui::Ui, m: &mut MeshesModel) {
-    let (missing, unused) = m
-        .file_refs
-        .as_ref()
-        .map_or((0, 0), |r| (r.missing.len(), r.unused.len()));
-    let mut copy = false;
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(!m.refs_unused, format!("Missing ({missing})"))
-            .clicked()
-        {
-            m.refs_unused = false;
-        }
-        if ui
-            .selectable_label(m.refs_unused, format!("Unused ({unused})"))
-            .clicked()
-        {
-            m.refs_unused = true;
-        }
-        ui.add(
-            egui::TextEdit::singleline(&mut m.refs_filter)
-                .hint_text("filter")
-                .desired_width(200.0),
-        );
-        copy = ui.button("Copy").clicked();
-    });
-    ui.weak(if m.refs_unused {
-        UNUSED_NOTE
-    } else {
-        MISSING_NOTE
-    });
-    if m.refs_unused && m.report.as_ref().is_some_and(|r| r.plugins.is_none()) {
-        ui.weak(PLUGINS_NOT_READ_NOTE);
-    }
-    if !m.refs_unused && !m.missing_inert.is_empty() {
-        let n = m.missing_inert.len();
-        ui.checkbox(&mut m.show_inert_refs, format!("Show inert ({n})"));
-    }
-    // Rows are chosen after the controls above, so a tab or filter change shows this frame, not the next.
-    let inert: std::sync::Arc<Vec<String>> = if !m.refs_unused && m.show_inert_refs {
-        m.refs_inert_lines()
-    } else {
-        Default::default()
-    };
-    if copy {
-        let mut text = m.refs_lines().join("\n");
-        if !inert.is_empty() {
-            text.push('\n');
-            text.push_str(&inert.join("\n"));
-        }
-        ui.ctx().copy_text(text);
-    }
-    let n = m.refs_lines().len();
-    if n == 0 && inert.is_empty() {
-        ui.label("Nothing listed.");
-        return;
-    }
-    ui.set_max_width(ui.available_width());
-    // Wrapping rows bounded to the window; rendering is capped so 68k Unused rows stay fast (Copy still takes all).
-    egui::ScrollArea::vertical()
-        .id_salt("meshes-file-refs-scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // One budget over live then inert rows.
-            for l in m.refs_lines().iter().take(MAX_REF_ROWS) {
-                ui.add(egui::Label::new(l.as_str()).wrap());
-            }
-            let left = MAX_REF_ROWS.saturating_sub(n);
-            for l in inert.iter().take(left) {
-                ui.add(egui::Label::new(egui::RichText::new(l.as_str()).weak()).wrap());
-            }
-            let more = (n + inert.len()).saturating_sub(MAX_REF_ROWS);
-            if more > 0 {
-                ui.weak(format!("… and {more} more — narrow with the filter"));
-            }
         });
 }
 
@@ -1405,101 +1345,54 @@ fn shape(
             ui.label(c);
         });
     }
-    let details = egui::CollapsingHeader::new("Details")
-        // Final review Minor 1: per edit session (0 outside Edit), so another NIF's card never inherits it.
-        .id_salt((
-            "shape-details",
-            m.edit.as_ref().map_or(0, |e| e.session),
-            s.block,
-        ))
-        .show(ui, |ui| shape_details(ui, m, s));
-    // One "Details" per card: each is named after its shape (rule 8.4).
-    let label = format!("Details of NIF block {}", s.block);
-    details.header_response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, &label)
-    });
+    // No resolved texture, nothing to show: no empty header (Note GJ8).
+    let winners = winning_mods(m, s);
+    if !winners.is_empty() {
+        let details = egui::CollapsingHeader::new("Details")
+            // Final review Minor 1: per edit session (0 outside Edit), so another NIF's card never inherits it.
+            .id_salt((
+                "shape-details",
+                m.edit.as_ref().map_or(0, |e| e.session),
+                s.block,
+            ))
+            .show(ui, |ui| shape_details(ui, &winners));
+        // One "Details" per card: each is named after its shape (rule 8.4).
+        let label = format!("Details of NIF block {}", s.block);
+        details.header_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, &label)
+        });
+    }
     (clicked, picked)
 }
 
-/// The closed part of a shape card: block and 3D index, SLSF1/SLSF2, geometry, which mod wins each texture, raw slot
-/// strings.
-fn shape_details(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) {
-    let index = s
-        .index3d
-        .map_or_else(|| "not in the scene tree".to_string(), |i| i.to_string());
-    ui.label(format!(
-        "NIF block {} · PGPatcher 3D index {index}",
-        s.block
-    ));
-    for (label, v, names) in [
-        ("SLSF1", s.slsf1, &SLSF1_NAMES),
-        ("SLSF2", s.slsf2, &SLSF2_NAMES),
-    ] {
-        if let Some(v) = v {
-            egui::CollapsingHeader::new(format!("{label} 0x{v:08X}"))
-                .id_salt(("slsf", s.block, label))
-                .show(ui, |ui| {
-                    for l in flag_bits(names, v) {
-                        ui.label(l);
-                    }
-                });
-        }
-    }
-    let mut geo = vec![];
-    if s.skinned {
-        geo.push("skinned".to_string());
-    }
-    if let Some(v) = s.num_vertices {
-        geo.push(format!("{v} vertices"));
-    }
-    if let Some(t) = s.num_triangles {
-        geo.push(format!("{t} triangles"));
-    }
-    if !geo.is_empty() {
-        ui.label(geo.join(" · "));
-    }
+/// Which mod wins each of the shape's textures: (slot index, "→ mod (N copies)") for every slot the scan resolved.
+fn winning_mods(m: &MeshesModel, s: &ShapeView) -> Vec<(usize, String)> {
+    let mut out = vec![];
     for (i, t) in s.textures.iter().enumerate() {
-        let origin = match t.as_ref().and_then(|p| m.resolved.get(p)) {
+        match t.as_ref().and_then(|p| m.resolved.get(p)) {
             Some(TexResolution::Found { origin, n_copies }) if *n_copies > 1 => {
-                Some(format!("→ {origin} ({n_copies} copies)"))
+                out.push((i, format!("→ {origin} ({n_copies} copies)")));
             }
-            Some(TexResolution::Found { origin, .. }) => Some(format!("→ {origin}")),
-            _ => None,
-        };
-        let raw = s.raw.get(i).and_then(|r| r.as_ref()).map(|raw| {
-            let f = &raw.flags;
-            let names: Vec<&str> = [
-                (f.empty, "empty"),
-                (f.rebased, "rebased"),
-                (f.prefixed, "prefixed"),
-                (f.non_dds, "not .dds"),
-            ]
-            .into_iter()
-            .filter_map(|(on, n)| on.then_some(n))
-            .collect();
-            match names.is_empty() {
-                true => format!("raw: {}", raw.raw),
-                false => format!("raw: {} [{}]", raw.raw, names.join(", ")),
-            }
-        });
-        if origin.is_none() && raw.is_none() {
-            continue;
+            Some(TexResolution::Found { origin, .. }) => out.push((i, format!("→ {origin}"))),
+            _ => {}
         }
+    }
+    out
+}
+
+/// The closed part of a shape card: which mod wins each texture (the SLSF flag lists are in the NIF edit panel;
+/// the geometry and raw slot lines were removed, Note GJ8).
+fn shape_details(ui: &mut egui::Ui, winners: &[(usize, String)]) {
+    for (i, origin) in winners {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("slot {}", i + 1))
                 .on_hover_text(format!("NIF texture index {i}"));
-            if let Some(o) = origin {
-                ui.label(o);
-            }
-            if let Some(r) = raw {
-                ui.weak(r);
-            }
+            ui.label(origin);
         });
     }
 }
 
 fn dialogs(ctx: &egui::Context, m: &mut MeshesModel) {
-    refs_window(ctx, m);
     if let Some(d) = m.dialog.clone() {
         let (mut use_it, mut choose, mut folder) = (false, false, false);
         egui::Modal::new(egui::Id::new("meshes-mo2")).show(ctx, |ui| {
@@ -1519,24 +1412,6 @@ fn dialogs(ctx: &egui::Context, m: &mut MeshesModel) {
         } else if folder {
             m.picker
                 .request(ctx, PickerPurpose::ScanFolder, None, PickerSpec::folder());
-        }
-    }
-    if let Some(list) = &m.stale_list {
-        let mut close = false;
-        egui::Modal::new(egui::Id::new("meshes-stale")).show(ctx, |ui| {
-            ui.set_max_width(560.0);
-            ui.heading("Out-of-date PGPatcher patches");
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    for (path, origin) in list {
-                        ui.label(format!("{} ({origin})", display_path(path)));
-                    }
-                });
-            close = ui.button("Close").clicked();
-        });
-        if close {
-            m.stale_list = None;
         }
     }
 }

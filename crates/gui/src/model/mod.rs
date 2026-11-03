@@ -32,7 +32,6 @@ pub mod pack_fills;
 pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
-pub mod plugin_refs;
 pub mod presets;
 pub mod preview;
 pub mod readout;
@@ -514,8 +513,6 @@ pub struct AppModel {
     pub gpu_max_dim: u32,
     /// False when eframe found no usable GPU adapter: the preview is off, everything else works (M3a spec §7).
     pub gpu_available: bool,
-    /// The set editor "Used by plugins" reads (esp spec 4.1).
-    pub plugin_refs: plugin_refs::SetPluginRefs,
     /// Design §5.1, §6: the CS PBR scan reads (statics, EDID checks, the material-object picker).
     pub cs_pbr: cs_pbr::CsPbrScan,
     /// Keyboard navigation, the shortcut sheet and the command palette (items 5 and 19).
@@ -835,7 +832,6 @@ impl AppModel {
             ignored_by_plan: false,
             replan_pushes: (0, None),
             close_ready: false,
-            plugin_refs: Default::default(),
             cs_pbr: Default::default(),
             nav: Default::default(),
             shell: Vec::new(),

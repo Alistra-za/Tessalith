@@ -1,15 +1,12 @@
 //! The background shader compile (03 §1.4): plain-data jobs in, plain-data results out. Only plain data crosses
 //! threads (`ExpandedSource`, `Defines`, `Compiled` are `Send`); the render thread owns every device object.
 use crate::compile::{cached, compile, Compiled, CompiledPair, ProgramKey};
-use crate::perf_log;
 use crate::permutation::Defines;
 use crate::source::ExpandedSource;
-use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
 
 /// Spec §2.2: two workers, below-normal priority, not a setting (the encoder shares the CPU).
 pub const WORKERS: usize = 2;
@@ -44,49 +41,26 @@ pub struct CompileDone {
     pub result: Result<Arc<CompiledPair>, String>,
 }
 
-/// One stage: a disk-cache hit, or a compile. The flag says which.
-fn stage(job: &CompileJob, d: &Defines, target: &str) -> (Result<Compiled, String>, bool) {
+/// One stage: a disk-cache hit, or a compile.
+fn stage(job: &CompileJob, d: &Defines, target: &str) -> Result<Compiled, String> {
     match cached(&job.src, d, target, &job.cache_dir) {
-        Some(c) => (Ok(c), true),
-        None => (compile(&job.src, d, target, &job.cache_dir), false),
+        Some(c) => Ok(c),
+        None => compile(&job.src, d, target, &job.cache_dir),
     }
 }
 
-/// Both stages; the flag is true only when both came from the disk cache.
-fn pair(job: &CompileJob) -> (Result<CompiledPair, String>, bool) {
-    let (vs, vs_hit) = stage(job, &job.vs, "vs_5_0");
-    let vs = match vs {
-        Ok(v) => v,
-        Err(e) => return (Err(format!("vs: {e}")), false),
-    };
-    let (ps, ps_hit) = stage(job, &job.ps, "ps_5_0");
-    match ps {
-        Ok(ps) => (Ok(CompiledPair { vs, ps }), vs_hit && ps_hit),
-        Err(e) => (Err(format!("ps: {e}")), false),
-    }
+/// Both stages.
+fn pair(job: &CompileJob) -> Result<CompiledPair, String> {
+    let vs = stage(job, &job.vs, "vs_5_0").map_err(|e| format!("vs: {e}"))?;
+    let ps = stage(job, &job.ps, "ps_5_0").map_err(|e| format!("ps: {e}"))?;
+    Ok(CompiledPair { vs, ps })
 }
 
-/// Compiles (or reads from the disk cache) both stages and logs one `compile` line. A panic inside the compiler
-/// becomes an error result, so a job is never lost and a shape never stays `Pending` for ever.
+/// Compiles (or reads from the disk cache) both stages. A panic inside the compiler becomes an error result, so a
+/// job is never lost and a shape never stays `Pending` for ever.
 pub fn run_job(job: CompileJob) -> CompileDone {
-    let t0 = Instant::now();
-    let (result, hit) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pair(&job)))
-        .unwrap_or_else(|_| {
-            (
-                Err(format!("{PANIC_PREFIX} the shader compiler panicked")),
-                false,
-            )
-        });
-    let mut f = json!({
-        "key": perf_log::short(&job.key.0),
-        "ms": perf_log::ms_since(t0),
-        "cache": if hit { "hit" } else { "miss" },
-        "ok": result.is_ok(),
-    });
-    if let Err(e) = &result {
-        f["error"] = json!(perf_log::first_line(e));
-    }
-    perf_log::emit("compile", f);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pair(&job)))
+        .unwrap_or_else(|_| Err(format!("{PANIC_PREFIX} the shader compiler panicked")));
     CompileDone {
         key: job.key,
         result: result.map(Arc::new),

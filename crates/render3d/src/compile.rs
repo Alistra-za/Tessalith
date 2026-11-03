@@ -236,6 +236,18 @@ pub fn cached(
     Some(hit)
 }
 
+/// "K=V" → (K, V); bare K → (K, "1") as in permutation.rs.
+pub(crate) fn to_defines<'a>(list: impl IntoIterator<Item = &'a String>) -> Defines {
+    Defines(
+        list.into_iter()
+            .map(|d| match d.split_once('=') {
+                Some((k, v)) => (k.to_string(), v.to_string()),
+                None => (d.clone(), "1".to_string()),
+            })
+            .collect(),
+    )
+}
+
 /// Compiles `src` (entry `main`) for `target` with `d`, or returns the disk-cache entry.
 pub fn compile(
     src: &ExpandedSource,

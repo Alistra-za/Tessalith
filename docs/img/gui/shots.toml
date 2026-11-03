@@ -260,12 +260,6 @@ scenario = "meshes_view"
 used_by = ["GUI-Meshes.md"]
 
 [[shot]]
-id = "plugin-refs"
-page = "GUI-Meshes"
-scenario = "plugin_refs"
-used_by = ["GUI-Meshes.md"]
-
-[[shot]]
 id = "mo2-popup"
 page = "GUI-Main-Window"
 scenario = "mo2_popup"

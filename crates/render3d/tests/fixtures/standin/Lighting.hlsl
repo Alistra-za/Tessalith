@@ -22,7 +22,9 @@
 //   linearLightingSettings.ambientMult, so a settings change that only rewrites the static cbuffer block shows in
 //   pixels (P1-C settings tests).
 // - STANDIN_SKIN (with STANDIN_FLAT): CS's SkinPerGeometry (b7) and skin extra map (t71) are declared, and the flat
-//   colour adds skinMaterialFlags.x x the t71 RGB, so the RFAOS lookup shows in pixels (P1-C Task 8 tests).
+//   colour adds skinMaterialFlags.x x the t71 RGB, so the RFAOS lookup shows in pixels (P1-C Task 8 tests). For the
+//   skin card (Note GN) it also adds 0.01 x skinMaterialFlags.y x the t74 RGB (small: the tests read t74 through
+//   draw_bound), and with WETNESS_EFFECTS 0.5 x skinPerGeometry.x in blue.
 // - STANDIN_REPLAY (with STANDIN_FLAT): the flat colour adds DirLightColor (PS b2), so a replay reads every PS
 //   cbuffer and a zero-padded short b2 adds nothing (v2 D2 tests).
 // - DEFERRED (render3d's deferred define): main writes CS's 8 render targets (PsOut, CS's field names). Diffuse is
@@ -152,6 +154,7 @@ cbuffer SkinPerGeometry : register(b7)
     float4 skinMaterialFlags;
 };
 Texture2D<float4> TexSkinExtraSampler : register(t71);
+Texture2D<float4> TexSkinWetnessSampler : register(t74);
 #endif
 
 #if defined(STANDIN_PROJECTED) && defined(PROJECTED_UV)
@@ -183,6 +186,10 @@ float4 shade(VsOut i)
 #endif
 #if defined(STANDIN_SKIN)
     col += skinMaterialFlags.x * TexSkinExtraSampler.SampleLevel(DiffuseSampler, i.Uv, 0).rgb;
+    col += 0.01 * skinMaterialFlags.y * TexSkinWetnessSampler.SampleLevel(DiffuseSampler, i.Uv, 0).rgb;
+#if defined(WETNESS_EFFECTS)
+    col.b += 0.5 * skinPerGeometry.x;
+#endif
 #endif
 #if defined(STANDIN_REPLAY)
     col += DirLightColor.rgb;

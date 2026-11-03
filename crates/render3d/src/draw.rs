@@ -7,8 +7,10 @@ use crate::compile::{Compiled, Reflection, SrvKind};
 use crate::device::Gpu;
 use crate::material::{pipe, write_material, write_skin_flags, Bound, Pipe, ProjectedLayer};
 use crate::mesh::GpuMesh;
+#[cfg(feature = "test-hooks")]
+use crate::scene::Scene;
 use crate::scene::{
-    rows, write_static, LightValues, Mat3x4, PointValues, Scene, SceneFields, View, ViewValues,
+    rows, write_static, LightValues, Mat3x4, PointValues, SceneFields, View, ViewValues,
 };
 use nif::material::MaterialState;
 use windows::Win32::Graphics::Direct3D11::{
@@ -173,6 +175,7 @@ impl ShapeDraw {
 
     /// P0's writer, kept as the reference for the pixel-identity test: the whole scene by name into every
     /// cbuffer, every frame, and every cbuffer uploaded. Returns the number of uploads.
+    #[cfg(feature = "test-hooks")]
     pub fn update_by_name(
         &mut self,
         gpu: &Gpu,

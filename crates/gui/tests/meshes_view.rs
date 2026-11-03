@@ -2,11 +2,11 @@
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use modscan::plugin_store::{MeshUse, MissingRef, ShapeSwap};
+use modscan::plugin_store::{MeshUse, ShapeSwap};
 use modscan::plugins::PluginStats;
 use modscan::scan::Report;
 use modscan::store::{ModRow, NifRow, ShapeView, TexResolution};
-use sdc_gui::model::meshes::{Banner, FileRefs, MeshesDialog, MeshesModel, NifFilter, ScanTarget};
+use sdc_gui::model::meshes::{Banner, MeshesDialog, MeshesModel, NifFilter, ScanTarget};
 use sdc_gui::settings::MeshesSettings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,7 +43,6 @@ fn nif(copy_id: i64, path: &str) -> NifRow {
         overridden_by: None,
         n_copies: 1,
         derived: false,
-        derive_check: None,
         le_mesh: false,
         problem: None,
         patched_in_game: false,
@@ -59,21 +58,23 @@ fn model_with(banner: Option<Banner>) -> MeshesModel {
     m
 }
 
+/// Note GJ8: the "Scan without PGPatcher output" button is gone. A running PGPatcher still says why the scan is
+/// paused and that closing it and pressing Retry rescans.
 #[test]
-fn running_banner_offers_retry_and_skip() {
+fn no_scan_without_pgpatcher_output_button() {
     let mut h = harness(model_with(Some(Banner::PgpRunning)));
     h.run();
-    h.get_by_label("PGPatcher is running — scan paused.");
-    h.get_by_label("Retry");
-    h.get_by_label("Scan without PGPatcher output").click();
-    h.run();
-    assert!(h.state_mut().take_request().is_some_and(|r| r.skip_derived));
+    h.get_by_label(
+        "PGPatcher is running, so the scan is paused. Close PGPatcher and press Retry to scan.",
+    );
+    assert!(h
+        .query_all_by_label("Scan without PGPatcher output")
+        .next()
+        .is_none());
+    assert!(!h.state_mut().take_request());
     h.get_by_label("Retry").click();
     h.run();
-    assert!(h
-        .state_mut()
-        .take_request()
-        .is_some_and(|r| !r.skip_derived));
+    assert!(h.state_mut().take_request());
 }
 
 #[test]
@@ -82,7 +83,6 @@ fn mod_list_and_badges() {
     m.nifs = Arc::new(vec![NifRow {
         wins: false,
         n_copies: 2,
-        derive_check: Some("stale_changed".into()),
         patched_in_game: true,
         ..nif(1, "meshes/x.nif")
     }]);
@@ -94,28 +94,24 @@ fn mod_list_and_badges() {
     // Review C17: the row says the path is under meshes\ (a dimmed prefix), so !ube/… reads as a path.
     h.get_by_label("meshes/x.nif");
     h.get_by_label("Patched by PGPatcher (in game)");
-    h.get_by_label("PGPatcher patch out of date");
 }
 
 /// Note GC16 (review fix 3): in a row too narrow for every chip, the warnings come first and stay in sight, and
 /// hovering the chips lists every one in full (rule 3.4), the mod's own chip too.
 #[test]
-fn a_patched_stale_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip() {
-    use sdc_gui::model::meshes::{DERIVED_CHIP, STALE_CHIP};
+fn a_patched_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip() {
     let mut m = MeshesModel::empty();
     m.mods = vec![mod_row(1, "PGPatcher output", 1, true)];
     let row = NifRow {
         wins: false,
         patched_in_game: true,
         le_mesh: true,
-        derive_check: Some("stale_changed".into()),
         ..nif(1, "meshes/x.nif")
     };
     m.winners = Arc::new(vec![(row, "PGPatcher output".to_string())]);
     let mut h = harness(m);
     h.run();
-    // A label cut by its cell is elided ("…"), so each warning's rect must hold its whole shown text: the short
-    // "Stale patch" at least (its full name is the AccessKit name).
+    // A label cut by its cell is elided ("…"), so the warning's rect must hold its whole shown text.
     let font = eframe::egui::TextStyle::Small.resolve(&h.ctx.global_style());
     let width = |text: &str| {
         h.ctx.fonts_mut(|f| {
@@ -124,27 +120,25 @@ fn a_patched_stale_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip
                 .x
         })
     };
-    for (name, shown) in [(STALE_CHIP, "Stale patch"), ("LE", "LE")] {
-        let r = h.get_by_role_and_label(Role::Label, name).rect();
-        assert!(
-            r.width() + 0.5 >= width(shown),
-            "{name} is cut by its cell: {r:?}"
-        );
-    }
+    let r = h.get_by_role_and_label(Role::Label, "LE").rect();
+    assert!(
+        r.width() + 0.5 >= width("LE"),
+        "LE is cut by its cell: {r:?}"
+    );
     h.get_by_role_and_label(Role::Label, "LE").hover();
     h.run();
-    for text in [
-        "Patched by PGPatcher (in game)",
-        STALE_CHIP,
-        "LE",
-        DERIVED_CHIP,
-    ] {
+    for text in ["Patched by PGPatcher (in game)", "LE"] {
         assert_eq!(
             h.query_all_by_label(text).count(),
             2,
             "{text}: the chip and its line on hover"
         );
     }
+    // Note GJ8: the mod-level "Generated" chip is gone; the row's own PGPatcher chip says it.
+    assert!(h
+        .query_all_by_label("Generated by PGPatcher")
+        .next()
+        .is_none());
 }
 
 #[test]
@@ -235,17 +229,13 @@ fn shapes_show_shader_type_flags_and_slot_resolution() {
     h.get_by_label("LE mesh: optimise it for SSE, e.g. with Cathedral Assets Optimizer.");
     h.get_by_label_contains("Body");
     h.get_by_label_contains("Environment Map (1)");
-    // Meshes UI T2: flags, counts, origins and raw paths sit in Details, closed by default.
-    assert!(h.query_by_label_contains("SLSF1 0x80000101").is_none());
+    // Meshes UI T2: the winning mod of each texture sits in Details, closed by default.
+    assert!(h.query_by_label_contains("→ A (2 copies)").is_none());
     h.get_by_label("Details of NIF block 4").click();
     h.run();
-    h.get_by_label_contains("SLSF1 0x80000101");
-    h.get_by_label_contains("SLSF2 0x00000021");
-    h.get_by_label_contains("120 vertices");
     h.get_by_label("textures/a.dds");
     h.get_by_label_contains("→ A (2 copies)");
     h.get_by_label_contains("→ missing");
-    h.get_by_label_contains("C:\\Game\\Data\\Textures\\b_n.dds");
     h.get_by_label("(1 empty slot)");
     // Clicking a texture asks who else uses it (no store here: an empty answer).
     h.get_by_label("textures/a.dds").click();
@@ -257,15 +247,11 @@ fn shapes_show_shader_type_flags_and_slot_resolution() {
 }
 
 #[test]
-fn incomplete_and_stale_banners_use_the_spec_text() {
+fn the_incomplete_banner_uses_the_spec_text() {
     assert_eq!(
         Banner::PgpIncomplete("PGP".into()).text(),
         "PGPatcher output 'PGP' looks incomplete (no ParallaxGen_Diff.json). Re-run PGPatcher."
     );
-    let mut h = harness(model_with(Some(Banner::PgpStale(3))));
-    h.run();
-    h.get_by_label("PGPatcher output is out of date for 3 meshes.");
-    h.get_by_label("Show list");
 }
 
 #[test]
@@ -382,9 +368,9 @@ fn a_scan_through_the_worker_fills_mods_nifs_and_both_sides_of_a_patched_mesh() 
     let mut m = scan_model(db);
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     assert!(m.scanning());
     wait(&mut m);
     assert_eq!(m.error, None);
@@ -418,7 +404,7 @@ fn a_scan_through_the_worker_fills_mods_nifs_and_both_sides_of_a_patched_mesh() 
 }
 
 #[test]
-fn a_running_pgpatcher_is_a_banner_and_skip_scans_without_its_output() {
+fn a_running_pgpatcher_is_a_banner_and_retry_scans_once_it_is_closed() {
     let d = instance("+PGP\n+A\n");
     put(d.path(), "mods/A/meshes/x.nif", None);
     put(d.path(), "mods/PGP/meshes/x.nif", None);
@@ -429,22 +415,26 @@ fn a_running_pgpatcher_is_a_banner_and_skip_scans_without_its_output() {
     m.procs = || vec!["pgpatcher.exe".to_string()];
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.banner, Some(Banner::PgpRunning));
-    m.request_scan(true);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    // PGPatcher closed: Retry is the same request, and the scan runs.
+    m.procs = Vec::new;
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     assert_eq!(m.banner, None);
-    assert!(m.mods.iter().all(|r| r.name != "PGP"));
+    assert!(m.mods.iter().any(|r| r.name == "PGP"));
 }
 
+/// Note GJ6: a PGPatcher copy whose source no longer matches the Diff (the old "stale" case) is an ordinary derived
+/// row: the PGPatcher chip and the In game / Source toggle, and no Stale chip, banner or "PGPatcher check" line.
 #[test]
-fn stale_output_raises_the_stale_banner_with_its_list() {
+fn a_derived_row_has_no_stale_chip_or_banner() {
     let d = instance("+PGP\n+A\n");
     put(d.path(), "mods/A/meshes/x.nif", None);
     put(d.path(), "mods/PGP/meshes/x.nif", None);
@@ -457,16 +447,27 @@ fn stale_output_raises_the_stale_banner_with_its_list() {
     let mut m = scan_model(d.path().join("scan.db"));
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
-    assert_eq!(m.banner, Some(Banner::PgpStale(1)));
-    m.show_stale_list();
-    assert_eq!(
-        m.stale_list.as_deref(),
-        Some(&[("meshes/x.nif".to_string(), "PGP".to_string())][..])
-    );
+    assert_eq!(m.banner, None);
+    // Any mod lists the PGPatcher copy, the game's winner for the path.
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("PGPatcher");
+    let a_id = h.state().mods.iter().find(|r| r.name == "A").unwrap().id;
+    h.state_mut().select_mod(a_id);
+    let copy = h.state().nifs[0].copy_id;
+    h.state_mut().select_nif(copy);
+    h.run();
+    h.get_by_label("In game");
+    h.get_by_label("Source");
+    for text in ["Stale patch", "PGPatcher patch out of date", "Show list"] {
+        assert!(h.query_by_label(text).is_none(), "{text}");
+    }
+    assert_eq!(h.query_all_by_label_contains("out of date").count(), 0);
+    assert_eq!(h.query_all_by_label_contains("PGPatcher check").count(), 0);
 }
 
 #[test]
@@ -544,9 +545,9 @@ fn owner_meshes_view() {
     m.choose_instance(root);
     println!("target: {:?}", m.target);
     let t = Instant::now();
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait_for(&mut m, Duration::from_secs(900));
     println!("scan: {:.1} s wall", t.elapsed().as_secs_f64());
     println!("status: {}", m.status);
@@ -558,14 +559,17 @@ fn owner_meshes_view() {
     }
     let kinds = |k: i32| m.mods.iter().filter(|r| r.kind == k).count();
     println!(
-        "mods list: {} rows (data {}, mods {}, overwrite {}, separators {}, bsa {}); derived chips: {:?}",
+        "mods list: {} rows (data {}, mods {}, overwrite {}, bsa {}); derived chips: {:?}",
         m.mods.len(),
         kinds(0),
         kinds(1),
         kinds(2),
-        kinds(3),
         kinds(4),
-        m.mods.iter().filter(|r| r.derived).map(|r| r.name.as_str()).collect::<Vec<_>>()
+        m.mods
+            .iter()
+            .filter(|r| r.derived)
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>()
     );
     let Some(id) = m
         .mods
@@ -587,18 +591,9 @@ fn owner_meshes_view() {
     for n in m.nifs.iter() {
         *labels.entry(n.status_label()).or_default() += 1;
     }
-    let stale = m
-        .nifs
-        .iter()
-        .filter(|n| {
-            n.derive_check
-                .as_deref()
-                .is_some_and(|c| c.starts_with("stale"))
-        })
-        .count();
     let le = m.nifs.iter().filter(|n| n.le_mesh).count();
     let problems = m.nifs.iter().filter(|n| n.problem.is_some()).count();
-    println!("badges: {labels:?}; stale chips {stale}; LE {le}; problems {problems}");
+    println!("badges: {labels:?}; LE {le}; problems {problems}");
     if let Some(n) = m.nifs.iter().find(|n| n.patched_in_game).cloned() {
         let t = Instant::now();
         m.select_nif(n.copy_id);
@@ -682,7 +677,7 @@ fn the_path_filter_and_the_chips_combine() {
     assert!(h.query_by_label("meshes/rock/big.nif").is_none());
 }
 
-/// B (highest) and A both have rock.nif; A also has tree/oak.nif; the separator owns B.
+/// B (highest) and A both have rock.nif; A also has tree/oak.nif; modlist.txt has a separator line the scan skips.
 fn scanned() -> (tempfile::TempDir, MeshesModel) {
     scanned_with(None)
 }
@@ -698,9 +693,9 @@ fn scanned_with(oak: Option<&[u8]>) -> (tempfile::TempDir, MeshesModel) {
     m.procs = || vec![];
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     (d, m)
@@ -732,9 +727,9 @@ fn hold_scan_lock(dir: &Path) -> std::fs::File {
 
 /// Starts a scan; the caller ends it (`wait`).
 fn start_scan(m: &mut MeshesModel) {
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     assert!(m.scanning());
 }
 
@@ -1134,6 +1129,71 @@ fn the_mod_picker_lists_mods_with_nifs_and_picking_one_lists_its_copies() {
     );
 }
 
+/// Owner 2026-11-02 (Note GK): with thousands of mods the picker takes typed text. Its filter box has the focus when it
+/// opens, a click in it keeps the list open, every word narrows the list (any case), "Any mod" stays, Enter picks the
+/// first match, and the box is empty again at the next open.
+#[test]
+fn the_mod_picker_filters_by_typed_words_and_enter_picks_the_first_match() {
+    let (_d, mut m) = scanned();
+    for (i, name) in ["Starsight Eyes", "Arch_Solitude", "CommunityShaders_AIO"]
+        .into_iter()
+        .enumerate()
+    {
+        m.mods.push(mod_row(100 + i as i64, name, 0, false));
+    }
+    let mut h = harness(m);
+    h.run();
+    picker(&h, "Any mod").click();
+    h.run();
+    let filter = |h: &Harness<'static, MeshesModel>| {
+        h.query_all_by_role(Role::TextInput)
+            .find(|n| n.is_focused())
+            .map(|n| n.value().unwrap_or_default())
+    };
+    assert_eq!(
+        filter(&h).as_deref(),
+        Some(""),
+        "the filter box has the focus"
+    );
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| n.is_focused())
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "B"); // still open
+    h.query_all_by_role(Role::TextInput)
+        .find(|n| n.is_focused())
+        .unwrap()
+        .type_text("SOL arch");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Arch_Solitude");
+    h.get_by_role_and_label(Role::Button, "Any mod");
+    for gone in ["A", "B", "Starsight Eyes", "CommunityShaders_AIO"] {
+        assert!(
+            h.query_by_role_and_label(Role::Button, gone).is_none(),
+            "{gone} is still listed"
+        );
+    }
+    h.key_press(eframe::egui::Key::Enter);
+    h.run();
+    assert_eq!(h.state().selected_mod, Some(101));
+    assert!(
+        h.query_by_role_and_label(Role::Button, "Starsight Eyes")
+            .is_none(),
+        "the pick closes the list"
+    );
+    picker(&h, "Arch_Solitude").click();
+    h.run();
+    assert_eq!(
+        filter(&h).as_deref(),
+        Some(""),
+        "a fresh filter at the next open"
+    );
+    for name in ["A", "B", "Starsight Eyes", "CommunityShaders_AIO"] {
+        h.get_by_role_and_label(Role::Button, name);
+    }
+}
+
 /// Note GC test 4: in "Any mod", Overridden lists the losing copies, each with its own mod; Wins is hidden there
 /// (every row wins) and comes back with a picked mod.
 #[test]
@@ -1267,7 +1327,6 @@ fn stats(
             .iter()
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect(),
-        sub_ms: vec![],
     }
 }
 
@@ -1289,7 +1348,7 @@ fn scan_details_show_the_plugin_line_and_problems() {
     h.run();
     h.get_by_label("Scan details").click();
     h.run();
-    h.get_by_label("Plugins: 3 (2 cached), 120 records, 45 ms");
+    h.get_by_label("Plugins: 3 (2 cached), 120 records");
     h.get_by_label("Plugin M.esp: missing master Missing.esm");
 }
 
@@ -1304,7 +1363,7 @@ fn scan_details_show_an_empty_plugin_pass() {
     h.run();
     h.get_by_label("Scan details").click();
     h.run();
-    h.get_by_label("Plugins: 0 (0 cached), 0 records, 0 ms");
+    h.get_by_label("Plugins: 0 (0 cached), 0 records");
 }
 
 /// esp spec §4.2: records that use the mesh, and per re-textured shape `shape → TXST EDID`. No PGPatcher warning.
@@ -1332,7 +1391,7 @@ fn plugin_overrides_list_records_and_shape_swaps() {
     h.get_by_label("Plugin overrides (1)").click();
     h.run();
     h.get_by_label("RockStat [00012345] STAT — Skyrim.esm · overridden 2×");
-    h.get_by_label("Shape0 → DirtTXST [00000ABC]");
+    h.get_by_label("#0 Shape0 → DirtTXST [00000ABC]");
 }
 
 /// A swap whose TXST master is missing says so instead of showing FormID 00000000.
@@ -1359,7 +1418,7 @@ fn an_unresolved_swap_target_is_labelled() {
     h.run();
     h.get_by_label("Plugin overrides (1)").click();
     h.run();
-    h.get_by_label("Shape0 → unresolved TXST");
+    h.get_by_label("#0 Shape0 → unresolved TXST");
 }
 
 #[test]
@@ -1374,97 +1433,72 @@ fn plugin_overrides_say_when_no_record_uses_the_mesh() {
     h.get_by_label("No plugin record of the latest scan uses this mesh.");
 }
 
-/// esp spec §4.4: counts, filter, copy; no actions.
+/// 2.0 debloat (Note GJ7, owner 2026-11-02 "drop Show inert"): a STAT no reference places (once hidden as "not
+/// placed") is listed next to a MISC (a type never judged), both in the count, with no Show inert control.
 #[test]
-fn plugin_file_references_list_missing_and_unused_with_a_filter() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/missing/nothere.dds".into(),
-            n_records: 6,
-            records: vec!["GhostTXST [00000AB0] TXST — Skyrim.esm".into()],
-        }],
-        unused: vec![
-            "textures/unused/lonely.dds".into(),
-            "textures/other/x.dds".into(),
-        ],
-    });
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label(
-        "textures/missing/nothere.dds ← GhostTXST [00000AB0] TXST — Skyrim.esm; … 5 more",
-    );
-    h.get_by_label("Copy");
-    h.get_by_label("Unused (2)").click();
-    h.run();
-    h.get_by_label("textures/unused/lonely.dds");
-    h.state_mut().refs_filter = "LONELY".into();
-    h.run();
-    h.get_by_label("textures/unused/lonely.dds");
-    assert!(h.query_by_label("textures/other/x.dds").is_none());
-    assert!(
-        h.query_by_label_contains("Delete").is_none()
-            && h.query_by_label_contains("Move").is_none()
-    );
-}
-
-#[test]
-fn plugin_file_references_when_nothing_is_listed() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs::default());
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("Missing (0)");
-    h.get_by_label("Nothing listed.");
-}
-
-/// Ruling R6: the timing log gets one `plugins` line per finished scan.
-#[test]
-fn a_finished_scan_logs_the_plugin_timing() {
-    use sdc_gui::model::meshes::log_plugins;
-    let r = Report {
-        plugins: Some(stats(3, 2, 120, 45, &[])),
+fn plugin_overrides_list_every_record_without_an_inert_toggle() {
+    let (d, mut m) = scanned();
+    let rec = |id: u32, sig: &[u8; 4], edid: &str| esp::Rec {
+        local_formid: id,
+        sig: *sig,
+        edid: Some(edid.into()),
+        payload: esp::Payload {
+            models: vec![esp::ModelRef {
+                slot: 0,
+                path: "meshes/rock.nif".into(),
+                alt: vec![],
+            }],
+            ..Default::default()
+        },
+    };
+    let facts = esp::PluginFacts {
+        name: "P.esp".into(),
+        records: vec![rec(0x800, b"STAT", "Lonely"), rec(0x801, b"MISC", "Kept")],
         ..Default::default()
     };
-    let ((), ev) = render3d::perf_log::capture(|| log_plugins(&r));
-    assert_eq!(ev.len(), 1, "{ev:?}");
-    assert_eq!(ev[0]["event"], "plugins");
-    assert_eq!(
-        (
-            ev[0]["n"].as_u64(),
-            ev[0]["cached"].as_u64(),
-            ev[0]["records"].as_u64(),
-            ev[0]["ms"].as_u64()
-        ),
-        (Some(3), Some(2), Some(120), Some(45))
-    );
-    let ((), none) = render3d::perf_log::capture(|| log_plugins(&Report::default()));
-    assert!(none.is_empty());
+    {
+        let mut s = modscan::store::Store::open(&d.path().join("scan.db")).unwrap();
+        let file = modscan::plugin_store::PluginFile {
+            name: "P.esp",
+            path: "P.esp",
+            size: Some(1),
+            mtime: 0,
+        };
+        let id = s.write_plugin(&file, &facts).unwrap();
+        s.resolve_plugins(&[(id, 0)], &[[id, 0, 0, 0x00FF_FFFF]])
+            .unwrap();
+    }
+    let a_id = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a_id);
+    let copy = m
+        .nifs
+        .iter()
+        .find(|n| n.path == "meshes/rock.nif")
+        .unwrap()
+        .copy_id;
+    m.select_nif(copy);
+    assert_eq!(m.error, None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Plugin overrides (2)").click();
+    h.run();
+    h.get_by_label("Lonely [00000800] STAT — P.esp");
+    h.get_by_label("Kept [00000801] MISC — P.esp");
+    assert!(h.query_by_label_contains("Show inert").is_none());
 }
 
-/// Review I1: no read while a scan runs; a started scan drops the cached lists.
+/// 2.0 debloat (Note GJ5): the Plugin file references window is gone; a scanned store shows no button for it.
 #[test]
-fn file_references_are_not_read_during_a_scan_and_a_started_scan_drops_them() {
-    let (_d, mut m) = scanned();
-    m.load_file_refs();
-    assert!(m.file_refs.is_some());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
-    assert!(m.scanning());
+fn the_meshes_header_has_no_plugin_file_references_button() {
+    let (_d, m) = scanned();
+    let mut h = harness(m);
+    h.run();
     assert!(
-        m.file_refs.is_none(),
-        "the old lists are dropped when a scan starts"
+        h.query_all_by_label_contains("Plugin file references")
+            .next()
+            .is_none(),
+        "the button is gone"
     );
-    m.load_file_refs();
-    assert!(m.file_refs.is_none(), "no read while the scan runs");
-    wait(&mut m);
-    m.load_file_refs();
-    assert!(m.file_refs.is_some());
 }
 
 /// Review M1: a failed shape read leaves no stale plugin list.
@@ -1493,37 +1527,6 @@ fn a_failed_shape_read_clears_the_plugin_overrides() {
     assert!(m.plugin_uses.is_empty());
 }
 
-/// Review M4: after a Folder scan (plugins not read) Unused says so instead of implying plugins were checked.
-#[test]
-fn unused_says_plugins_were_not_read_after_a_folder_scan() {
-    let note = sdc_gui::model::meshes::PLUGINS_NOT_READ_NOTE;
-    let run = |plugins: Option<PluginStats>| {
-        let mut m = model_with(None);
-        m.file_refs = Some(FileRefs::default());
-        m.report = Some(Report {
-            plugins,
-            ..Default::default()
-        });
-        m.refs_unused = true;
-        let mut h = harness(m);
-        h.run();
-        h.get_by_label("Plugin file references…").click();
-        h.run();
-        h.query_by_label(note).is_some()
-    };
-    assert!(run(None));
-    assert!(!run(Some(stats(1, 1, 1, 1, &[]))));
-}
-
-/// Trace 2026-10-22 #6: `unused_textures` leaves LOD textures out (modscan lod_skip.rs); the note must not say they
-/// are listed.
-#[test]
-fn unused_note_says_lod_textures_are_left_out() {
-    let note = sdc_gui::model::meshes::UNUSED_NOTE;
-    assert!(note.contains("LOD textures are left out"), "{note}");
-    assert!(!note.contains("LOD, interface"), "{note}");
-}
-
 /// Review M5: the list is cut at 200; the rest is counted.
 #[test]
 fn plugin_overrides_say_how_many_more_are_cut() {
@@ -1546,69 +1549,6 @@ fn plugin_overrides_say_how_many_more_are_cut() {
     h.get_by_label("Plugin overrides (205)").click();
     h.run();
     h.get_by_label("… and 5 more");
-}
-
-/// Long plugin-reference rows wrap inside their column instead of widening the panels.
-fn long_line() -> String {
-    format!(
-        "textures/clutter/{}.dds",
-        "journalralis19to23_n ".repeat(20).trim().replace(' ', "_")
-    )
-}
-
-fn x_of(h: &Harness<'static, MeshesModel>, label: &str) -> f32 {
-    h.get_by_label(label).rect().min.x
-}
-
-#[test]
-fn long_file_ref_rows_do_not_widen_the_layout() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    let mut h = harness(m);
-    h.run();
-    let mod_x =
-        |h: &Harness<'static, MeshesModel>| h.get_by_role_and_label(Role::Label, "A").rect().min.x;
-    let (mods_x, nifs_x) = (mod_x(&h), x_of(&h, "meshes/x.nif"));
-    let long = long_line();
-    h.state_mut().file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: long.clone(),
-            n_records: 3,
-            records: vec!["BCS_JournalRalis19 [2F056C6B] TXST — Book Covers Skyrim.esp".repeat(4)],
-        }],
-        unused: vec![],
-    });
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    assert_eq!((mod_x(&h), x_of(&h, "meshes/x.nif")), (mods_x, nifs_x));
-    let row = h.get_by_label_contains(&long);
-    assert!(
-        row.rect().max.x <= 1400.0,
-        "row runs off screen: {:?}",
-        row.rect()
-    );
-    assert!(
-        row.rect().height() > 30.0,
-        "row did not wrap: {:?}",
-        row.rect()
-    );
-}
-
-#[test]
-fn file_ref_rows_are_capped_and_overrides_wrap() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![],
-        unused: (0..1500).map(|i| format!("textures/u/{i}.dds")).collect(),
-    });
-    m.refs_unused = true;
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("… and 500 more — narrow with the filter");
 }
 
 #[test]
@@ -1637,219 +1577,6 @@ fn long_override_labels_wrap_inside_the_column() {
     h.run();
     let r = h.get_by_label_contains("SSSSSSSSSS").rect();
     assert!(r.max.x <= 1400.0 && r.height() > 30.0, "{r:?}");
-}
-
-fn refs_model() -> MeshesModel {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/a.dds".into(),
-            n_records: 1,
-            records: vec!["R [00000001] TXST — A.esp".into()],
-        }],
-        unused: vec![],
-    });
-    m
-}
-
-#[test]
-fn opening_plugin_file_references_does_not_move_the_panels() {
-    let mut h = harness(refs_model());
-    h.run();
-    let before = (
-        h.get_by_role_and_label(Role::Label, "A").rect(),
-        h.get_by_label("meshes/x.nif").rect(),
-    );
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    assert_eq!(
-        (
-            h.get_by_role_and_label(Role::Label, "A").rect(),
-            h.get_by_label("meshes/x.nif").rect()
-        ),
-        before
-    );
-}
-
-#[test]
-fn a_long_file_ref_row_wraps_inside_the_window() {
-    let mut m = refs_model();
-    m.file_refs.as_mut().unwrap().missing[0].path = format!("textures/{}.dds", "q".repeat(400));
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    let win = h.get_by_label("Plugin file references").rect();
-    let row = h.get_by_label_contains("qqqqqqqqqq").rect();
-    assert!(row.height() > 30.0, "row did not wrap: {row:?}");
-    assert!(row.max.x <= 1400.0, "{row:?} {win:?}");
-}
-
-/// Filtering spec §3 / ruling R12: inert records are left out of "Plugin overrides" and its count, shown dimmed with
-/// their reason behind "Show inert (N)".
-#[test]
-fn plugin_overrides_hide_inert_records_until_asked() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    m.selected_nif = Some(1);
-    let used = |formid: u32, edid: &str| MeshUse {
-        formid,
-        edid: Some(edid.into()),
-        sig: "STAT".into(),
-        plugin: "Skyrim.esm".into(),
-        model_slot: 0,
-        n_overrides: 0,
-        swaps: vec![],
-    };
-    m.plugin_uses = vec![used(1, "Placed"), used(2, "Lonely")];
-    m.plugin_inert = [(2u32, "not placed")].into_iter().collect();
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin overrides (1)").click();
-    h.run();
-    h.get_by_label("Placed [00000001] STAT — Skyrim.esm");
-    assert!(h.query_by_label_contains("Lonely").is_none());
-    h.get_by_label("Show inert (1)").click();
-    h.run();
-    h.get_by_label("Lonely [00000002] STAT — Skyrim.esm · not placed");
-}
-
-/// Ruling R12: Missing lists live paths; paths only inert records name come dimmed behind "Show inert (N)".
-#[test]
-fn missing_files_of_inert_records_show_on_request() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/live.dds".into(),
-            n_records: 1,
-            records: vec!["A [00000001] TXST — S.esm".into()],
-        }],
-        unused: vec![],
-    });
-    m.missing_inert = vec![MissingRef {
-        path: "meshes/lonely.nif".into(),
-        n_records: 1,
-        records: vec!["Lonely [00000002] STAT — S.esm (not placed)".into()],
-    }];
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("Missing (1)");
-    assert!(h.query_by_label_contains("lonely.nif").is_none());
-    h.get_by_label("Show inert (1)").click();
-    h.run();
-    h.get_by_label("meshes/lonely.nif ← Lonely [00000002] STAT — S.esm (not placed)");
-}
-
-fn missing_ref(path: String) -> MissingRef {
-    MissingRef {
-        path,
-        n_records: 1,
-        records: vec!["R [00000001] STAT — S.esm".into()],
-    }
-}
-
-fn budget_model(live: usize, inert: usize) -> MeshesModel {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: (0..live)
-            .map(|i| missing_ref(format!("textures/live{i:04}.dds")))
-            .collect(),
-        unused: vec!["textures/unused/u.dds".into()],
-    });
-    m.missing_inert = (0..inert)
-        .map(|i| missing_ref(format!("meshes/inert{i:04}.nif")))
-        .collect();
-    m.show_inert_refs = true;
-    m
-}
-
-fn rows_with(h: &Harness<'static, MeshesModel>, needle: &str) -> usize {
-    h.query_all_by_label_contains(needle).count()
-}
-
-/// Review I2: one 1000-row budget over live then inert rows; the remainder is reported.
-#[test]
-fn missing_rows_share_one_budget_and_report_the_remainder() {
-    let mut h = harness(budget_model(900, 300));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    assert_eq!(rows_with(&h, "textures/live"), 900);
-    assert_eq!(rows_with(&h, "meshes/inert"), 100);
-    h.get_by_label("… and 200 more — narrow with the filter");
-}
-
-#[test]
-fn inert_only_overflow_is_reported() {
-    let mut h = harness(budget_model(0, 1200));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    assert_eq!(rows_with(&h, "meshes/inert"), 1000);
-    h.get_by_label("… and 200 more — narrow with the filter");
-}
-
-/// Review M3: switching tab shows the new tab's rows at once, with no stale inert rows.
-#[test]
-fn switching_to_unused_drops_the_inert_rows_in_the_same_frame() {
-    let mut h = harness(budget_model(1, 1));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label_contains("meshes/inert0000.nif");
-    h.get_by_label("Unused (1)").click();
-    h.step();
-    assert!(h.query_by_label_contains("meshes/inert").is_none());
-    h.get_by_label("textures/unused/u.dds");
-}
-
-/// Review I1: Show inert does not follow the selection to another NIF, nor survive a rescan.
-#[test]
-fn show_inert_resets_on_nif_change_and_on_scan() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/a.nif"), nif(2, "meshes/b.nif")]);
-    m.select_nif(1);
-    m.show_inert_uses = true;
-    m.select_nif(2);
-    assert!(!m.show_inert_uses);
-
-    let (_d, mut m) = scanned();
-    (m.show_inert_uses, m.show_inert_refs) = (true, true);
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
-    assert!(!m.show_inert_uses && !m.show_inert_refs, "scan start");
-    (m.show_inert_uses, m.show_inert_refs) = (true, true);
-    wait(&mut m);
-    assert!(!m.show_inert_uses && !m.show_inert_refs, "scan end");
-}
-
-/// Final review M4: the inert Missing lines are built once per filter, not per frame.
-#[test]
-fn inert_ref_lines_are_cached_until_the_filter_changes() {
-    let mut m = budget_model(0, 3);
-    let a = m.refs_inert_lines();
-    assert!(std::sync::Arc::ptr_eq(&a, &m.refs_inert_lines()));
-    m.refs_filter = "inert0001".into();
-    let c = m.refs_inert_lines();
-    assert!(!std::sync::Arc::ptr_eq(&a, &c));
-    assert_eq!(c.len(), 1);
-}
-
-/// Re-review (M4): a reload that replaces the inert paths shows the new lines although the filter is unchanged.
-#[test]
-fn reloading_file_references_replaces_the_cached_inert_lines() {
-    let (_d, mut m) = scanned();
-    m.missing_inert = vec![missing_ref("meshes/old.nif".into())];
-    assert_eq!(m.refs_inert_lines().len(), 1);
-    m.load_file_refs(); // the store has no inert paths
-    assert!(m.missing_inert.is_empty());
-    assert!(m.refs_inert_lines().is_empty(), "stale cached lines");
 }
 
 fn shapes_model(shapes: Vec<ShapeView>) -> MeshesModel {
@@ -1956,17 +1683,59 @@ fn shader_line_is_the_bare_type_name_and_slots_are_indented() {
     h.get_by_label_contains("NIF texture index 0");
 }
 
+/// Note GJ8: the Details of a shape with flags, geometry and a raw slot string show the winning-mod line and none of
+/// the extras (the NIF edit panel has the flag lists).
 #[test]
-fn slsf_expander_lists_set_bits_by_name() {
-    let mut h = harness(shapes_model(vec![shape(vec![None])]));
+fn shape_details_keeps_only_the_winning_mod_line() {
+    let mut s = shape(vec![Some("textures/a.dds")]);
+    s.raw[0] = Some(modscan::store::RawSlot {
+        raw: "C:\\Game\\Data\\Textures\\a.dds".into(),
+        flags: nif::path::PathFlags {
+            rebased: true,
+            ..Default::default()
+        },
+    });
+    let mut m = shapes_model(vec![s]);
+    m.resolved.insert(
+        "textures/a.dds".into(),
+        TexResolution::Found {
+            origin: "A".into(),
+            n_copies: 2,
+        },
+    );
+    let mut h = harness(m);
     h.run();
     h.get_by_label("Details of NIF block 4").click();
     h.run();
-    assert!(h.query_by_label("Specular (0)").is_none());
-    h.get_by_label_contains("SLSF1 0x80000101").click();
+    h.get_by_label_contains("→ A (2 copies)");
+    for gone in [
+        "SLSF1",
+        "SLSF2",
+        "120 vertices",
+        "triangles",
+        "PGPatcher 3D index",
+        "raw:",
+    ] {
+        assert!(
+            h.query_all_by_label_contains(gone).next().is_none(),
+            "{gone} is gone from Details"
+        );
+    }
+}
+
+/// Note GJ8: a shape with no resolved texture has no Details header (it would open to nothing).
+#[test]
+fn a_shape_with_no_resolved_texture_has_no_details_header() {
+    let mut m = shapes_model(vec![shape(vec![Some("textures/a.dds"), None])]);
+    m.resolved
+        .insert("textures/a.dds".into(), TexResolution::Missing);
+    let mut h = harness(m);
     h.run();
-    h.get_by_label("Specular (0)");
-    h.get_by_label("Receive_Shadows (8)");
+    h.get_by_label_contains("Body");
+    assert!(h
+        .query_all_by_label_contains("Details of NIF block")
+        .next()
+        .is_none());
 }
 
 /// Meshes UI T2: a card is framed with a full-width header button ("Select shape #N name"); Shader, Textures and
@@ -1987,7 +1756,15 @@ fn shape_cards_are_selectable_with_four_facts_and_closed_details() {
         alpha_threshold: Some(5),
         ..shape(vec![None])
     };
-    let mut h = harness(shapes_model(vec![a, b]));
+    let mut m = shapes_model(vec![a, b]);
+    m.resolved.insert(
+        "textures/a.dds".into(),
+        TexResolution::Found {
+            origin: "A".into(),
+            n_copies: 1,
+        },
+    );
+    let mut h = harness(m);
     h.run();
     let first = h.get_by_role_and_label(Role::Button, "Select shape #1 First");
     let second = h
@@ -1999,17 +1776,15 @@ fn shape_cards_are_selectable_with_four_facts_and_closed_details() {
     h.get_by_label("No NiAlphaProperty");
     h.get_by_label("Alpha: blend Src Alpha → Inv Src Alpha · test Greater, threshold 5");
     h.get_by_label("(2 empty slots)");
-    assert!(
-        h.query_by_label_contains("120 vertices").is_none(),
-        "Details closed"
-    );
     // The scan has no controller data: no Controllers line outside edit mode (T2 review Minor 6).
     assert!(h.query_by_label("Controllers:").is_none());
+    // Only the first card has a resolved texture, so only it has a Details header, closed.
     assert_eq!(
         h.query_all_by_label_contains("Details of NIF block")
             .count(),
-        2
+        1
     );
+    assert!(h.query_by_label_contains("→ A").is_none(), "Details closed");
     h.get_by_role_and_label(Role::Button, "Select shape #1 First")
         .click();
     h.run();
@@ -2017,14 +1792,8 @@ fn shape_cards_are_selectable_with_four_facts_and_closed_details() {
 }
 
 #[test]
-fn flag_bits_name_every_bit_and_alpha_reads_in_words() {
-    use sdc_gui::model::meshes::{alpha_line, flag_bits, SLSF1_NAMES};
-    assert_eq!(
-        flag_bits(&SLSF1_NAMES, 0x8000_0101),
-        ["Specular (0)", "Receive_Shadows (8)", "ZBuffer_Test (31)"]
-    );
-    // A bit past the table.
-    assert_eq!(flag_bits(&["A"], 0b110), ["bit 1", "bit 2"]);
+fn alpha_reads_in_words() {
+    use sdc_gui::model::meshes::alpha_line;
     assert_eq!(
         alpha_line(0x12ED, 5),
         "Alpha: blend Src Alpha → Inv Src Alpha · test Greater, threshold 5"
@@ -2052,9 +1821,9 @@ fn a_running_pgpatcher_pauses_the_scan() {
     m.procs = || vec!["pgpatcher.exe".to_string()];
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.status, "Scan paused: PGPatcher is running.");
     assert_eq!(m.banner, Some(Banner::PgpRunning));
@@ -2070,9 +1839,9 @@ fn reload_closes_a_mod_that_became_derived() {
     let copy = m.nifs[0].copy_id;
     m.select_nif(copy);
     put(d.path(), "mods/B/PGPatcher.esp", Some(b"e"));
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     assert!(m.mods.iter().any(|r| r.id == b && r.derived));
@@ -2088,9 +1857,9 @@ fn cancelled_or_failed_scan_does_not_mark_a_completed_scan() {
     let (_d, mut m) = scanned();
     assert!(m.scan_completed);
     m.procs = || vec!["pgpatcher.exe".to_string()];
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.banner, Some(Banner::PgpRunning));
     assert!(!m.scan_completed);
@@ -2105,9 +1874,9 @@ fn a_scan_that_stops_before_begin_scan_keeps_the_store_settled() {
         sdc_gui::model::AppModel::new(sdc_gui::settings::GuiSettings::default(), None, session);
     let (_d, mut m) = scanned();
     let run_scan = |app: &mut sdc_gui::model::AppModel, m: &mut MeshesModel| {
-        m.request_scan(false);
-        let req = m.take_request().unwrap();
-        m.start(req);
+        m.request_scan();
+        assert!(m.take_request());
+        m.start();
         app.scan_started();
         wait(m);
         app.scan_finished(m.scan_completed, m.store_untouched);

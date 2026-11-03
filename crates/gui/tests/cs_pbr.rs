@@ -305,7 +305,6 @@ fn a_block_made_by_an_edit_or_a_template_moves_the_sets_own_mapped_values() {
     assert_eq!(e.settings["hair"], json!(true));
 }
 
-use sdc_gui::model::plugin_refs::set_key;
 use sdc_gui::model::sets::{set_views, SetView};
 use sdc_gui::model::AppModel;
 use support::export_through;
@@ -724,4 +723,36 @@ fn the_first_read_of_a_frame_opens_a_valid_scan_db() {
     m.poll();
     let key = set_key(&rock(&m)).unwrap();
     assert!(m.scan_facts(&key).is_ok(), "a later frame opens it again");
+}
+
+/// Ruling R9: the set's own match key, with the derived `match_diffuse` when it names none.
+#[test]
+fn the_set_key_is_pgpatchers_match_rule() {
+    use modscan::store::TexKey;
+    let d = tempfile::tempdir().unwrap();
+    let model = support::pbr_opened(d.path());
+    let mut v = set_views(&model).into_iter().next().unwrap();
+    v.settings.clear();
+    v.derived_match = Some(r"landscape\rock01.dds".into());
+    assert_eq!(
+        set_key(&v),
+        Some(TexKey::Suffix {
+            slot: 0,
+            stem: r"landscape\rock01".into()
+        })
+    );
+    v.settings.insert(
+        "match_normal".into(),
+        serde_json::json!(r"landscape\rock01_n.dds"),
+    );
+    assert_eq!(
+        set_key(&v),
+        Some(TexKey::Suffix {
+            slot: 1,
+            stem: r"landscape\rock01_n".into()
+        })
+    );
+    v.settings.clear();
+    v.derived_match = None;
+    assert_eq!(set_key(&v), None);
 }

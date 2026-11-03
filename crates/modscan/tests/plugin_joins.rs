@@ -1,8 +1,8 @@
-//! esp scanner spec §6 "Store joins": set → TXST, NIF → alternate texture, missing / unused.
+//! esp scanner spec §6 "Store joins": set → TXST, NIF → alternate texture.
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
 mod common;
-use b::{alt, edid, form, grup, plugin, rec, sub, top, zstr};
+use b::{alt, edid, plugin, rec, sub, top, zstr};
 use common::{instance_fixture, put};
 use modscan::mo2::Instance;
 use modscan::plugin_store::{ShapeSwap, TxstUse};
@@ -13,28 +13,10 @@ use std::sync::atomic::AtomicBool;
 const DIRT: u32 = 0x0000_0ABC;
 const GHOST: u32 = 0x0000_0AB0;
 
-/// A CELL group placing `bases` (filtering spec §3), so the fixture's TXSTs and STATs are live, not inert.
-fn placing(bases: &[u32]) -> Vec<u8> {
-    let refs: Vec<Vec<u8>> = bases
-        .iter()
-        .enumerate()
-        .map(|(i, &b)| rec(b"REFR", 0x0F00 + i as u32, &[form(b"NAME", b)]))
-        .collect();
-    let cell = 0x0F80u32.to_le_bytes();
-    grup(
-        b"CELL",
-        0,
-        &[grup(
-            &0u32.to_le_bytes(),
-            2,
-            &[grup(&0u32.to_le_bytes(), 3, &[grup(&cell, 9, &refs)])],
-        )],
-    )
-}
-
 /// Skyrim.esm: DirtTXST (TX00 dirt02, TX01 dirt02_n, TX02 old/gone), GhostTXST (missing texture), RockStat
-/// (meshes/x.nif with Shape0 → DirtTXST), GhostStat (missing mesh), FireFX (EFSH, present texture). A.esp overrides
-/// DirtTXST without TX02. Loose textures: dirt02, dirt02_n, effects/fire, unused/lonely, pbr/landscape/dirt02.
+/// (meshes/x.nif with Shape0 → DirtTXST), GhostStat (missing mesh). Nothing places them (no CELL group): since Note
+/// GJ7 that does not hide a record. A.esp overrides DirtTXST without TX02. Loose textures: dirt02, dirt02_n,
+/// effects/fire, unused/lonely, pbr/landscape/dirt02.
 fn fixture() -> tempfile::TempDir {
     let d = instance_fixture("+B\n+A\n");
     let r = d.path();
@@ -104,15 +86,6 @@ fn fixture() -> tempfile::TempDir {
                         ),
                     ],
                 ),
-                top(
-                    b"EFSH",
-                    &[rec(
-                        b"EFSH",
-                        0xE00,
-                        &[edid("FireFX"), sub(b"ICON", &zstr("Effects\\Fire.dds"))],
-                    )],
-                ),
-                placing(&[DIRT, GHOST, 0xDEF, 0xD00]),
             ],
         ),
     );
@@ -187,17 +160,6 @@ fn txst_users_and_mesh_overrides() {
         txst_edid: Some("DirtTXST".into()),
         index: 0,
     };
-    let users = s.alt_users_of(&[DIRT]).unwrap();
-    assert_eq!(users.len(), 1);
-    assert_eq!(
-        (
-            users[0].edid.as_deref(),
-            users[0].sig.as_str(),
-            users[0].plugin.as_str()
-        ),
-        (Some("RockStat"), "STAT", "Skyrim.esm")
-    );
-    assert_eq!(users[0].swap, swap);
     let uses = s.plugin_uses_of_mesh("meshes/x.nif").unwrap();
     assert_eq!(uses.len(), 1);
     assert_eq!(
@@ -211,39 +173,72 @@ fn txst_users_and_mesh_overrides() {
         .is_empty());
 }
 
-/// Review Focus 5: a path only an overridden copy names is not missing; PGPatcher output is not unused.
+/// Note GO: the winning copy's textures (A.esp's DirtTXST has no TX02), in NIF slot order.
 #[test]
-fn missing_and_unused_lists() {
+fn txst_textures_are_the_winning_copys_in_nif_slot_order() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    let missing = s.plugin_missing_files().unwrap();
-    let paths: Vec<&str> = missing.iter().map(|m| m.path.as_str()).collect();
+    let mut want = vec![String::new(); 9];
+    want[0] = "textures/landscape/dirt02.dds".into();
+    want[1] = "textures/landscape/dirt02_n.dds".into();
+    assert_eq!(s.txst_textures(DIRT).unwrap(), Some(want));
+    assert_eq!(s.txst_textures(0xDEF).unwrap(), None, "a STAT is no TXST");
+    assert_eq!(s.txst_textures(0x1234).unwrap(), None);
+}
+
+/// Note GO4: an ARMA's skin textures are swaps marked SKIN_TEXTURE, NAM1 on the female models (MOD3), NAM0 on the
+/// male ones (MOD2), next to its alternate textures.
+#[test]
+fn arma_skin_textures_are_skin_swaps_of_their_sexs_models() {
+    use modscan::plugin_store::SKIN_TEXTURE;
+    let d = instance_fixture("+A\n");
+    let r = d.path();
+    let txst = |id: u32, e: &str| rec(b"TXST", id, &[edid(e), sub(b"TX00", &zstr("a.dds"))]);
+    let arma = rec(
+        b"ARMA",
+        0xD00,
+        &[
+            edid("NakedTorso"),
+            sub(b"MOD2", &zstr("m.nif")),
+            sub(b"MOD3", &zstr("f.nif")),
+            sub(b"MO3S", &alt(&[("Body", GHOST, 0)])),
+            sub(b"NAM0", &GHOST.to_le_bytes()),
+            sub(b"NAM1", &DIRT.to_le_bytes()),
+        ],
+    );
+    put(
+        r,
+        "Game/Data/Skyrim.esm",
+        &plugin(
+            esp::FLAG_ESM,
+            &[],
+            &[
+                top(b"TXST", &[txst(DIRT, "DirtTXST"), txst(GHOST, "GhostTXST")]),
+                top(b"ARMA", &[arma]),
+            ],
+        ),
+    );
+    put(r, "profiles/Default/plugins.txt", b"");
+    let mut s = Store::open(&r.join("scan.db")).unwrap();
+    mo2(&d, &mut s);
+    let f = s.plugin_uses_of_mesh("meshes/f.nif").unwrap();
+    assert_eq!(f.len(), 1);
+    let skin = ShapeSwap {
+        shape_name: String::new(),
+        txst_formid: DIRT,
+        txst_edid: Some("DirtTXST".into()),
+        index: SKIN_TEXTURE,
+    };
+    assert_eq!(f[0].swaps[0], skin, "the skin texture sorts first");
+    assert!(f[0].swaps[0].is_skin());
+    assert_eq!(f[0].swaps[1].index, 0, "MO3S kept");
+    let m = s.plugin_uses_of_mesh("meshes/m.nif").unwrap();
+    assert_eq!(m[0].swaps.len(), 1);
     assert_eq!(
-        paths,
-        ["meshes/missing/ghost.nif", "textures/missing/nothere.dds"]
+        (m[0].swaps[0].txst_formid, m[0].swaps[0].index),
+        (GHOST, SKIN_TEXTURE)
     );
-    assert_eq!(
-        missing[1].records,
-        ["GhostTXST [00000AB0] TXST — Skyrim.esm"]
-    );
-    assert_eq!(missing[1].n_records, 1);
-    let unused = s.unused_textures().unwrap();
-    assert!(
-        unused.contains(&"textures/unused/lonely.dds".to_string()),
-        "{unused:?}"
-    );
-    for used in [
-        "textures/landscape/dirt02.dds",
-        "textures/landscape/dirt02_n.dds",
-        "textures/effects/fire.dds",
-        "textures/pbr/landscape/dirt02.dds",
-    ] {
-        assert!(
-            !unused.contains(&used.to_string()),
-            "{used} listed: {unused:?}"
-        );
-    }
 }
 
 /// Review Focus 4.
@@ -263,38 +258,16 @@ fn a_folder_scan_hides_plugin_rows_and_the_next_mo2_scan_restores_them() {
     )
     .unwrap();
     assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
-    assert!(s.plugin_missing_files().unwrap().is_empty());
     let r = mo2(&d, &mut s);
     let p = r.plugins.unwrap();
     assert_eq!(p.cached, p.n, "nothing re-parsed");
     assert_eq!(s.txsts_matching(&dirt_key(), 50).unwrap().len(), 1);
 }
 
-/// Skyrim.esm (master Missing.esm, not loaded) with: TXSTs naming a BSA-only, an inactive-origin, a FaceGen and a
-/// seven-times-referenced texture; an unresolved STAT whose raw FormID collides with a resolved one.
+/// Skyrim.esm (master Missing.esm, not loaded) with an unresolved STAT whose raw FormID collides with a resolved one.
 fn fixture2() -> tempfile::TempDir {
     let d = instance_fixture("+A\\n");
     let r = d.path();
-    let t = |id: u32, name: &str, path: &str| {
-        rec(
-            b"TXST",
-            0x0100_0000 | id,
-            &[edid(name), sub(b"TX00", &zstr(path))],
-        )
-    };
-    let mut txsts = vec![
-        t(0x101, "BsaTXST", "Bsa\\OnlyBsa.dds"),
-        t(0x102, "OffTXST", "Off\\Inactive.dds"),
-        t(
-            0x103,
-            "FaceTXST",
-            "Actors\\Character\\FaceGenData\\FaceTint\\Skyrim.esm\\00000001.dds",
-        ),
-        t(0x104, "NifTXST", "Nifonly\\Used.dds"),
-    ];
-    for i in 0..7u32 {
-        txsts.push(t(0x200 + i, &format!("Lot{i}"), "Many\\Lots.dds"));
-    }
     let stat =
         |id: u32, name: &str, m: &str| rec(b"STAT", id, &[edid(name), sub(b"MODL", &zstr(m))]);
     put(
@@ -303,84 +276,18 @@ fn fixture2() -> tempfile::TempDir {
         &plugin(
             esp::FLAG_ESM,
             &["Missing.esm"],
-            &[
-                top(b"TXST", &txsts),
-                top(
-                    b"STAT",
-                    &[
-                        stat(0x0000_0ABC, "Orphan", "Missing\\Orphan.nif"),
-                        stat(0x0100_0ABC, "Real", "Real.nif"),
-                    ],
-                ),
-                placing(&[
-                    0x0100_0101,
-                    0x0100_0102,
-                    0x0100_0103,
-                    0x0100_0104,
-                    0x0100_0200,
-                    0x0100_0201,
-                    0x0100_0202,
-                    0x0100_0203,
-                    0x0100_0204,
-                    0x0100_0205,
-                    0x0100_0206,
-                    0x0100_0ABC,
-                ]),
-            ],
+            &[top(
+                b"STAT",
+                &[
+                    stat(0x0000_0ABC, "Orphan", "Missing\\Orphan.nif"),
+                    stat(0x0100_0ABC, "Real", "Real.nif"),
+                ],
+            )],
         ),
     );
     put(r, "profiles/Default/plugins.txt", b"# none\\n");
     d
 }
-
-/// Registers `path` as a winning texture of a fresh origin (a BSA-like one when `enabled`, an inactive one otherwise).
-fn provide(s: &Store, path: &str, enabled: bool) {
-    let c = s.conn();
-    let n: i64 = c
-        .query_row("SELECT count(*) FROM origin", [], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO origin(kind, name, root, priority, enabled) VALUES (9, 'x', ?1, 0, ?2)",
-        rusqlite::params![format!("fake{n}"), enabled],
-    )
-    .unwrap();
-    let o = c.last_insert_rowid();
-    c.execute("INSERT OR IGNORE INTO path(p) VALUES (?1)", [path])
-        .unwrap();
-    let p: i64 = c
-        .query_row("SELECT id FROM path WHERE p = ?1", [path], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO tex_winner(path_id, origin_id, n_copies) VALUES (?1, ?2, 1)",
-        [p, o],
-    )
-    .unwrap();
-}
-
-#[test]
-fn missing_respects_archives_inactive_origins_facegen_and_caps_records() {
-    let d = fixture2();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    provide(&s, "textures/bsa/onlybsa.dds", true);
-    provide(&s, "textures/off/inactive.dds", false);
-    let missing = s.plugin_missing_files().unwrap();
-    let paths: Vec<&str> = missing.iter().map(|m| m.path.as_str()).collect();
-    assert_eq!(
-        paths,
-        [
-            "meshes/real.nif",
-            "textures/many/lots.dds",
-            "textures/nifonly/used.dds",
-            "textures/off/inactive.dds"
-        ]
-    );
-    let lots = &missing[1];
-    assert_eq!(lots.n_records, 7);
-    assert_eq!(lots.records.len(), 5);
-    assert_eq!(lots.records[0], "Lot0 [00000200] TXST — Skyrim.esm");
-}
-
 /// An unresolved record (owner_ok = 0) keeps a raw FormID that can equal a resolved winner's.
 #[test]
 fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
@@ -396,13 +303,6 @@ fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
         )
         .unwrap();
     assert_eq!(ok, 1, "fixture: Orphan is unresolved");
-    let missing = s.plugin_missing_files().unwrap();
-    assert!(
-        missing
-            .iter()
-            .all(|m| m.path != "meshes/missing/orphan.nif"),
-        "{missing:?}"
-    );
     assert!(s
         .plugin_uses_of_mesh("meshes/missing/orphan.nif")
         .unwrap()
@@ -413,29 +313,6 @@ fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
 }
 
 #[test]
-fn a_texture_only_a_nif_uses_is_not_unused() {
-    let d = fixture();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    let used: String = s
-        .conn()
-        .query_row(
-            "SELECT p.p FROM tex_use u JOIN path p ON p.id = u.tex_path_id WHERE p.p NOT IN
-               (SELECT p2.p FROM txst_slot t JOIN path p2 ON p2.id = t.path_id) LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    provide(&s, &used, true);
-    assert!(!s.unused_textures().unwrap().contains(&used), "{used}");
-    provide(&s, "textures/zzz/orphan.dds", true);
-    assert!(s
-        .unused_textures()
-        .unwrap()
-        .contains(&"textures/zzz/orphan.dds".to_string()));
-}
-
-#[test]
 fn zero_limit_matches_nothing() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
@@ -443,14 +320,22 @@ fn zero_limit_matches_nothing() {
     assert!(s.txsts_matching(&dirt_key(), 0).unwrap().is_empty());
 }
 
-/// Final review I1: a scan cancelled mid-parse leaves every origin disabled; Missing and Unused are then empty, not
-/// "every referenced file is missing".
+/// Final review I1: a scan cancelled mid-parse leaves every origin disabled (the store reads as incomplete). The
+/// record winners of the earlier scan are not touched by it (only a taint or a cancel at the plugin pass empties
+/// them, below), so this pins the disabled origins and the `Cancelled` result.
 #[test]
-fn a_cancelled_scan_leaves_missing_and_unused_empty() {
+fn a_cancelled_scan_leaves_every_origin_disabled() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    let enabled = |s: &Store| -> i64 {
+        s.conn()
+            .query_row("SELECT count(*) FROM origin WHERE enabled = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    };
+    assert!(enabled(&s) > 0, "fixture: a finished scan enables origins");
     for i in 0..600 {
         put(d.path(), &format!("mods/A/meshes/c{i}.nif"), b"x");
     }
@@ -468,19 +353,16 @@ fn a_cancelled_scan_leaves_missing_and_unused_empty() {
         &|| vec![],
     );
     assert!(matches!(r, Err(modscan::ScanError::Cancelled)), "{r:?}");
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
+    assert_eq!(enabled(&s), 0);
 }
-
-/// Trace-debug wave 2 #7: a tainted scan (PGPatcher started mid-scan) empties the winners; Missing and Unused are
-/// then empty, not "every path a winning record names".
+/// Trace-debug wave 2 #7: a tainted scan (PGPatcher started mid-scan) empties the winners; the plugin rows are
+/// then empty, not stale.
 #[test]
-fn a_tainted_scan_leaves_missing_and_unused_empty() {
+fn a_tainted_scan_leaves_plugin_rows_empty() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     let calls = std::sync::atomic::AtomicUsize::new(0);
     let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
     let r = run(&src, &mut s, &AtomicBool::new(false), &|_| {}, &|| {
@@ -492,19 +374,17 @@ fn a_tainted_scan_leaves_missing_and_unused_empty() {
     })
     .unwrap();
     assert!(r.tainted);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
+    assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
 }
 
 /// Codex review of BW: a scan cancelled at the start of the plugin pass has already replaced the asset winners;
 /// the old record winners must not survive, and the next clean scan restores them.
 #[test]
-fn a_scan_cancelled_at_the_plugin_pass_leaves_missing_and_unused_empty() {
+fn a_scan_cancelled_at_the_plugin_pass_leaves_plugin_rows_empty() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     std::fs::write(d.path().join("profiles/Default/modlist.txt"), "-B\n-A\n").unwrap();
     let cancel = AtomicBool::new(false);
     let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
@@ -521,10 +401,51 @@ fn a_scan_cancelled_at_the_plugin_pass_leaves_missing_and_unused_empty() {
     )
     .unwrap();
     assert!(r.plugins.is_none(), "{:?}", r.notes);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
+    assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     std::fs::write(d.path().join("profiles/Default/modlist.txt"), "+B\n+A\n").unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
+}
+
+/// Note BA (restored from plugin_inert.rs, Note GJ7): a mesh is a head part when it sits under facegendata or an HDPT names it as its model (MODL).
+#[test]
+fn head_part_meshes_are_facegen_paths_or_hdpt_models() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
+    let with_model = |sig: &[u8; 4], local, path: &str| esp::Rec {
+        local_formid: local,
+        sig: *sig,
+        edid: None,
+        payload: esp::Payload {
+            models: vec![esp::ModelRef {
+                slot: 0,
+                path: path.into(),
+                alt: vec![],
+            }],
+            ..Default::default()
+        },
+    };
+    let facts = esp::PluginFacts {
+        name: "A.esp".into(),
+        records: vec![
+            with_model(b"HDPT", 0x800, "meshes/actors/character/mouth.nif"),
+            with_model(b"STAT", 0x801, "meshes/clutter/rock.nif"),
+        ],
+        ..Default::default()
+    };
+    let f = modscan::plugin_store::PluginFile {
+        name: "A.esp",
+        path: "A.esp",
+        size: Some(1),
+        mtime: 0,
+    };
+    s.write_plugin(&f, &facts).unwrap();
+    assert!(s
+        .is_head_part_mesh("meshes/actors/character/mouth.nif")
+        .unwrap());
+    assert!(!s.is_head_part_mesh("meshes/clutter/rock.nif").unwrap());
+    assert!(!s.is_head_part_mesh("meshes/never/seen.nif").unwrap());
+    assert!(s
+        .is_head_part_mesh("meshes/actors/character/facegendata/facegeom/skyrim.esm/00013bbf.nif")
+        .unwrap());
 }

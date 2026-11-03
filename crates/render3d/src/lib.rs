@@ -9,6 +9,7 @@ pub mod debug;
 pub mod device;
 pub mod draw;
 pub mod glint_noise;
+#[cfg(feature = "test-hooks")]
 pub mod golden;
 pub mod hdri;
 pub mod includes;
@@ -16,9 +17,9 @@ pub mod locate;
 pub mod material;
 pub mod mesh;
 pub mod parse;
-pub mod perf_log;
 pub mod permutation;
 pub mod pool;
+#[cfg(feature = "test-hooks")]
 pub mod replay;
 pub mod scene;
 pub mod source;
@@ -32,6 +33,7 @@ pub use material::{
 };
 pub use parse::{parse, ParsedNif, ParsedShape, ShapeId};
 pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
+#[cfg(feature = "test-hooks")]
 pub use replay::{load_fixture, Replay, ReplayOut};
 
 use background::Backdrop;
@@ -41,7 +43,7 @@ use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
 use locate::Fingerprint;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
-use nif::material::MaterialState;
+use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
 pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
@@ -98,6 +100,7 @@ pub struct LoadReport {
 }
 
 /// Where the time of the last [`Renderer::render`] went, in milliseconds.
+#[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FrameTiming {
     /// CPU time to record the draws (cbuffer updates, state, `DrawIndexed`).
@@ -160,8 +163,6 @@ struct Wanted {
     src: Arc<ExpandedSource>,
     vs: Defines,
     ps: Defines,
-    /// When the shape started waiting (the `shape_ready` line's `ms_pending`).
-    since: std::time::Instant,
 }
 
 impl Wanted {
@@ -185,6 +186,7 @@ enum Lookup {
 }
 
 /// The floats of `var` as written in the first of `cbs` that has it.
+#[cfg(feature = "test-hooks")]
 fn cb_floats(cbs: &[draw::Cb], var: &str) -> Option<Vec<f32>> {
     let cb = cbs.iter().find(|c| c.writer.has(var))?;
     let f = cb.writer.resolve(var)?;
@@ -302,10 +304,26 @@ fn is_head(m: &MaterialState, head_part: bool) -> bool {
     head_part || m.shader_type == 4
 }
 
-/// [`textures::rfaos_candidates`] of a material (slot 1 normal, slot 7 specular).
+/// [`textures::rfaos_candidates`] of a material (slot 1 normal, slot 7 specular), or only the skin card's pick
+/// (Note GN).
 fn rfaos_candidates(m: &MaterialState) -> Vec<String> {
     let norm = |i: usize| m.slots.get(i).map_or("", |p| p.norm.as_str());
-    textures::rfaos_candidates(m.shader_type, norm(1), norm(7))
+    match &m.skin().rfaos {
+        Some(p) if matches!(m.shader_type, 4 | 5) => vec![p.clone()],
+        _ => textures::rfaos_candidates(m.shader_type, norm(1), norm(7)),
+    }
+}
+
+/// The t74 wetness map candidates (Note GN): none unless the card's wetness is on (a dry shape draws as loaded),
+/// then the card's pick, else [`textures::wet_candidates`].
+fn wet_candidates(m: &MaterialState) -> Vec<String> {
+    let norm = |i: usize| m.slots.get(i).map_or("", |p| p.norm.as_str());
+    let p = m.skin();
+    match &p.wet_map {
+        _ if !p.wet_on() || !matches!(m.shader_type, 4 | 5) => vec![],
+        Some(w) => vec![w.clone()],
+        None => textures::wet_candidates(m.shader_type, norm(1), norm(7)),
+    }
 }
 
 /// The 3D preview renderer: message-shaped (load bytes → report, render scene → pixels) so it can later move
@@ -323,8 +341,6 @@ pub struct Renderer {
     features_on: bool,
     /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source, reset by `set_shaders`.
     old_ll: std::cell::OnceCell<bool>,
-    /// The last coverage of every program at hand (P1-D), for the panel line; dropped with the programs.
-    coverage: HashMap<ProgramKey, cs_settings::Coverage>,
     /// One expanded `Lighting.hlsl` per shaders folder (03 §5); dropped with the folder by `set_shaders`.
     sources: SourceSet,
     /// Device objects by pair key; dropped by `set_shaders` and by a device rebuild.
@@ -367,6 +383,7 @@ pub struct Renderer {
     fixed_pipeline: bool,
     target: Option<Target>,
     encode_srgb: bool,
+    #[cfg(feature = "test-hooks")]
     timing: FrameTiming,
     /// The GPU-idle event query, created once (03 §7).
     query: ID3D11Query,
@@ -375,17 +392,16 @@ pub struct Renderer {
     /// Cbuffer uploads of the last frame.
     uploads: usize,
     /// Test hook: draw with P0's by-name writer (every field, every cbuffer, every frame).
+    #[cfg(feature = "test-hooks")]
     reference_writer: bool,
     /// The HDRI background pass, made on the first `Background::Hdri` frame.
     backdrop: Option<Result<Backdrop, String>>,
     /// [`Renderer::set_missing_texture`]: the colour a missing colour-slot texture shows; `None` = neutral defaults.
     missing_fill: Option<[u8; 4]>,
-    /// [`Renderer::override_slot`]: NIF slot → the DDS bytes (kept to re-upload on a new device) and the texture every
-    /// shape shows there. Not cleared by a load.
-    overrides: BTreeMap<usize, (Arc<[u8]>, textures::Texture)>,
     /// [`Renderer::set_debug_output`]: the term the next permutations write instead of the lit colour.
     debug: DebugOutput,
     /// Test hook (D6c): render_replay also reads the depth back.
+    #[cfg(feature = "test-hooks")]
     replay_depth: bool,
     /// [`Renderer::set_deferred`]: opaque shapes draw the DEFERRED permutation into the 8 CS render targets.
     deferred: bool,
@@ -394,11 +410,16 @@ pub struct Renderer {
     /// Why deferred mode is off ("Deferred preview unavailable: …"), if a composite failed.
     deferred_error: Option<String>,
     /// Successful composite builds (test hook).
+    #[cfg(feature = "test-hooks")]
     composite_builds: usize,
     /// The env cube from the HDRI (v2 D5), keyed by `Scene::env_yaw` bits; built in `render` only when the composite
     /// or a drawn program reads one.
     env: Option<(u32, composite::EnvMaps)>,
+    /// CS's GPU env prefilter (Note GM1) and the defines it was built for; Err = it does not build from these shaders
+    /// (the CPU [`hdri::specular_chain`] runs instead). Rebuilt with the composite's defines.
+    prefilter: Option<(Vec<String>, Result<composite::Prefilter, String>)>,
     /// Env cube builds (test hook).
+    #[cfg(feature = "test-hooks")]
     env_builds: usize,
     /// Side of the env cube ([`hdri::ENV_SIZE`]; a test hook can make it invalid to fake a failed build).
     env_size: u32,
@@ -504,17 +525,21 @@ impl Renderer {
             query,
             last_frame: None,
             uploads: 0,
+            #[cfg(feature = "test-hooks")]
             reference_writer: false,
             backdrop: None,
             missing_fill: None,
-            overrides: BTreeMap::new(),
             debug: DebugOutput::Lit,
+            #[cfg(feature = "test-hooks")]
             replay_depth: false,
             deferred: false,
             composite: None,
             deferred_error: None,
+            #[cfg(feature = "test-hooks")]
             composite_builds: 0,
             env: None,
+            prefilter: None,
+            #[cfg(feature = "test-hooks")]
             env_builds: 0,
             env_size: hdri::ENV_SIZE,
             projected: None,
@@ -531,7 +556,6 @@ impl Renderer {
             settings: CsSettings::default(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
-            coverage: HashMap::new(),
             programs: HashMap::new(),
             compiled: HashMap::new(),
             inflight: HashSet::new(),
@@ -554,6 +578,7 @@ impl Renderer {
             fixed_pipeline: false,
             target: None,
             encode_srgb: false,
+            #[cfg(feature = "test-hooks")]
             timing: FrameTiming::default(),
         })
     }
@@ -580,41 +605,6 @@ impl Renderer {
     pub fn set_settings(&mut self, s: CsSettings) {
         self.settings = s;
         self.apply_settings_defines();
-        self.refresh_coverage();
-    }
-
-    /// Re-reports every program at hand (settings or the features toggle changed what is written).
-    fn refresh_coverage(&mut self) {
-        let at_hand: Vec<(ProgramKey, BTreeSet<String>)> = self
-            .programs
-            .iter()
-            .filter_map(|(k, p)| p.as_ref().ok().map(|p| (k.clone(), program_fields(p))))
-            .collect();
-        for (k, f) in at_hand {
-            self.note_coverage(k, f);
-        }
-    }
-
-    /// The union of every program's coverage (P1-D): the panel shows `line()` when it is `Some`.
-    pub fn settings_coverage(&self) -> cs_settings::Coverage {
-        let mut all = cs_settings::Coverage::default();
-        for c in self.coverage.values() {
-            all.unset.extend(c.unset.iter().cloned());
-            all.unmatched.extend(c.unmatched.iter().cloned());
-        }
-        all
-    }
-
-    /// Logs and keeps one program's coverage (`settings_coverage` line). The coverage depends only on names, so
-    /// a non-head draw stands for the program.
-    fn note_coverage(&mut self, key: ProgramKey, fields: BTreeSet<String>) {
-        let values = cs_settings::feature_data(&self.settings, &fields, self.features_on, false);
-        let c = cs_settings::coverage(&self.settings, &fields, &values);
-        perf_log::emit(
-            "settings_coverage",
-            serde_json::json!({"key": perf_log::short(&key.0), "unset": c.unset, "unmatched": c.unmatched}),
-        );
-        self.coverage.insert(key, c);
     }
 
     pub fn settings(&self) -> &CsSettings {
@@ -626,7 +616,6 @@ impl Renderer {
     pub fn set_features_on(&mut self, on: bool) {
         self.features_on = on;
         self.apply_settings_defines();
-        self.refresh_coverage();
     }
 
     /// Features CS loaded (Info.ini, or the Features inis) that this preview does not compile, in name order, for
@@ -796,8 +785,8 @@ impl Renderer {
         self.shaders = shaders;
         self.programs.clear();
         self.composite = None;
+        (self.prefilter, self.env) = (None, None);
         self.old_ll = std::cell::OnceCell::new();
-        self.coverage.clear();
         // The LL generation may have changed, so the display encode (follows linear_lighting) must be re-derived.
         self.encode_srgb = self.linear_lighting();
     }
@@ -806,6 +795,7 @@ impl Renderer {
         &self.shaders
     }
 
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn encode_srgb(&self) -> bool {
         self.encode_srgb
@@ -813,6 +803,7 @@ impl Renderer {
 
     /// sRGB-encode the frame on readback (off by default). Turn it on for display when the features include
     /// `ENABLE_LL`: Linear Lighting draws in linear working space; without it the output is already gamma-space.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_encode_srgb(&mut self, on: bool) {
         self.encode_srgb = on;
@@ -838,6 +829,7 @@ impl Renderer {
     }
 
     /// Test hook (D6c): `render_replay` also returns the depth after the draw over the crop (`ReplayOut::depth`).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_replay_depth_readback(&mut self, on: bool) {
         self.replay_depth = on;
@@ -906,7 +898,10 @@ impl Renderer {
             &self.cache_dir,
         )?;
         self.composite = Some(c);
-        self.composite_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.composite_builds += 1;
+        }
         Ok(())
     }
 
@@ -917,7 +912,6 @@ impl Renderer {
     /// path), so the next frame is complete. A shape whose forward build fails is `Failed` without its old draw
     /// on screen: render never draws a DEFERRED program into a forward target.
     fn composite_failed(&mut self, e: String) {
-        perf_log::emit("composite_failed", serde_json::json!({ "error": &e }));
         self.composite = None;
         self.deferred = false;
         self.deferred_error = Some(format!("Deferred preview unavailable: {e}"));
@@ -948,24 +942,28 @@ impl Renderer {
     }
 
     /// Test hook: the current composite.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn composite(&self) -> Option<&Composite> {
         self.composite.as_ref()
     }
 
     /// Test hook: env cube builds since this renderer was made (one per yaw while something reads it).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn env_builds(&self) -> usize {
         self.env_builds
     }
 
     /// Test hook: the env cube side for the next builds (a size that is not a power of two makes the build fail).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_env_size(&mut self, size: u32) {
         self.env_size = size;
     }
 
     /// Test hook: successful composite builds since this renderer was made.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn composite_builds(&self) -> usize {
         self.composite_builds
@@ -988,6 +986,7 @@ impl Renderer {
     }
 
     /// Timing of the last successful [`Renderer::render`].
+    #[cfg(feature = "test-hooks")]
     pub fn last_timing(&self) -> FrameTiming {
         self.timing
     }
@@ -1000,6 +999,7 @@ impl Renderer {
 
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
     /// frame), the reference the resolved path must match pixel for pixel.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn set_reference_writer(&mut self, on: bool) {
         self.reference_writer = on;
@@ -1125,7 +1125,8 @@ impl Renderer {
                     path.norm
                 )),
                 None => {
-                    // Another shape's edit may have evicted the entry; `evicted_missing` keeps it (as in plain_srv).
+                    // Another shape's edit may have evicted the entry; `evicted_missing` keeps it. `rebind` applies the
+                    // same missing fill from its entry's `missing` flag.
                     let gone = entry.is_none() && self.evicted_missing.contains(&path.norm);
                     if gone || entry.is_some_and(|e| e.missing) {
                         missing.insert(reg);
@@ -1135,29 +1136,18 @@ impl Renderer {
         }
         // CS_SKIN's t71: the first RFAOS candidate in `tex_cache` with a texture (resolve_textures asked for them,
         // linear). A hot-swap does not rebind it: sdc never encodes or swaps an RFAOS file (not a set member), and
-        // a reload picks up an external edit.
-        if let Some(kind) = draw::srv_kind_at(&program.ps.reflection, 71) {
-            let found = rfaos_candidates(m)
+        // a reload picks up an external edit. t74 (the skin card's wetness map, Note GN) the same way.
+        for (reg, candidates) in [(71, rfaos_candidates(m)), (74, wet_candidates(m))] {
+            let Some(kind) = draw::srv_kind_at(&program.ps.reflection, reg) else {
+                continue;
+            };
+            let found = candidates
                 .iter()
                 .find_map(|c| self.tex_cache.get(c).and_then(TexEntry::current))
                 .filter(|t| t.kind == kind)
                 .map(|t| t.srv.clone());
             if let Some(srv) = found {
-                real.insert(71, srv);
-            }
-        }
-        for (slot, (_, t)) in &self.overrides {
-            let Some(reg) = textures::register_for_slot(m.shader_type, pbr, msn, *slot) else {
-                continue;
-            };
-            if let Some(kind) =
-                draw::srv_kind_at(&program.ps.reflection, reg).filter(|k| *k != t.kind)
-            {
-                rep.warnings.push(format!(
-                    "{}: the slot {slot} override is kind {:?} but t{reg} reads {kind:?}; not shown",
-                    nif::text::label(name),
-                    t.kind
-                ));
+                real.insert(reg, srv);
             }
         }
         let mut srvs = vec![];
@@ -1169,10 +1159,6 @@ impl Renderer {
                     srvs.push((20, v));
                     continue;
                 }
-            }
-            if let Some(v) = self.override_at(m, *reg, *kind) {
-                srvs.push((*reg, v));
-                continue;
             }
             // Not in `Bound`: no PBR flag or EnvmapData bit reads t3/t8/t10/t11.
             if let Some(v) = self.projected_srv(m, *reg, *kind)? {
@@ -1214,17 +1200,22 @@ impl Renderer {
                 self.texture(&path.norm, false, true, textures, rep);
             }
         }
-        // Derived guesses: a candidate the resolver lacks is not a missing texture (decode errors still count).
-        let mut quiet = LoadReport::default();
-        for c in rfaos_candidates(m) {
-            if self
-                .texture(&c, true, false, textures, &mut quiet)
-                .is_some()
-            {
-                break;
+        // Derived guesses: a candidate the resolver lacks is not a missing texture (decode errors still count). A
+        // skin card pick (Note GN) is asked for by name, so a pick the resolver lacks is missing.
+        let p = m.skin();
+        for (picked, candidates) in [
+            (p.rfaos.is_some(), rfaos_candidates(m)),
+            (p.wet_map.is_some(), wet_candidates(m)),
+        ] {
+            let mut quiet = LoadReport::default();
+            for c in candidates {
+                let r = if picked { &mut *rep } else { &mut quiet };
+                if self.texture(&c, true, picked, textures, r).is_some() {
+                    break;
+                }
             }
+            rep.errors.append(&mut quiet.errors);
         }
-        rep.errors.append(&mut quiet.errors);
     }
 
     /// Builds one shape's draw for material `m` on `program`: textures (already in `tex_cache`), vertex streams
@@ -1324,13 +1315,7 @@ impl Renderer {
             &program_key(&src, "main", "vs_5_0", &vs.0),
             &program_key(&src, "main", "ps_5_0", &ps.0),
         );
-        Ok(Wanted {
-            key,
-            src,
-            vs,
-            ps,
-            since: std::time::Instant::now(),
-        })
+        Ok(Wanted { key, src, vs, ps })
     }
 
     /// The program if it is at hand without compiling: device objects, a memoised result (made into device
@@ -1341,15 +1326,10 @@ impl Renderer {
         }
         if !self.compiled.contains_key(&w.key) {
             let dir = &self.cache_dir;
-            let t0 = std::time::Instant::now();
             if let (Some(vs), Some(ps)) = (
                 cached(&w.src, &w.vs, "vs_5_0", dir),
                 cached(&w.src, &w.ps, "ps_5_0", dir),
             ) {
-                perf_log::emit(
-                    "compile",
-                    serde_json::json!({"key": perf_log::short(&w.key.0), "ms": perf_log::ms_since(t0), "cache": "hit", "ok": true}),
-                );
                 self.compiled
                     .insert(w.key.clone(), Ok(Arc::new(CompiledPair { vs, ps })));
             }
@@ -1360,9 +1340,6 @@ impl Renderer {
             Some(Ok(pair)) => {
                 let built = create_program(&self.gpu, pair.vs.clone(), pair.ps.clone());
                 self.programs.insert(w.key.clone(), built.clone());
-                if let Ok(p) = &built {
-                    self.note_coverage(w.key.clone(), program_fields(p));
-                }
                 ready(&built)
             }
         }
@@ -1417,14 +1394,6 @@ impl Renderer {
             Lookup::Ready(p) => self.swap(id, &p, m, rep),
             Lookup::Failed(e) => self.fail(id, e, true),
             Lookup::Waiting => {
-                perf_log::emit(
-                    "shape_pending",
-                    serde_json::json!({
-                        "shape": id.0,
-                        "key": perf_log::short(&wanted.key.0),
-                        "showing_previous": self.shapes.get(&id).is_some_and(|s| s.draw.is_some()),
-                    }),
-                );
                 if self.inflight.insert(wanted.key.clone()) {
                     self.jobs
                         .push(wanted.job(&self.cache_dir, &self.load_epoch));
@@ -1462,7 +1431,6 @@ impl Renderer {
             let Some(w) = self.shapes.get_mut(id).and_then(|s| s.wanted.take()) else {
                 continue;
             };
-            let since = w.since;
             let m = self.shapes[id].material.clone();
             match self.lookup(&w) {
                 Lookup::Ready(p) => self.swap(*id, &p, &m, &mut LoadReport::default()),
@@ -1471,14 +1439,6 @@ impl Renderer {
                     self.fail(*id, "the program is missing after its compile".into(), true)
                 }
             }
-            perf_log::emit(
-                "shape_ready",
-                serde_json::json!({
-                    "shape": id.0,
-                    "ms_pending": perf_log::ms_since(since),
-                    "ok": self.shapes.get(id).is_some_and(|s| s.status == ShapeStatus::Drawing),
-                }),
-            );
         }
         // A worker panic is not a property of the program: forget it so the next edit retries.
         if matches!(self.compiled.get(&key), Some(Err(e)) if e.starts_with(pool::PANIC_PREFIX)) {
@@ -1531,7 +1491,10 @@ impl Renderer {
         n.encode_srgb = self.encode_srgb;
         n.async_compile = self.async_compile;
         n.load_variant = self.load_variant;
-        n.reference_writer = self.reference_writer;
+        #[cfg(feature = "test-hooks")]
+        {
+            n.reference_writer = self.reference_writer;
+        }
         n.compiled = std::mem::take(&mut self.compiled);
         n.missing_fill = self.missing_fill;
         n.debug = self.debug;
@@ -1542,17 +1505,6 @@ impl Renderer {
             match textures::load_dds(&n.gpu, &bytes) {
                 Ok(t) => n.projected_tex.push((reg, bytes, t)),
                 Err(e) => eprintln!("render3d: projected t{reg} dropped on the new device: {e}"),
-            }
-        }
-        // Device objects do not move: upload each override again (it decoded before, so a failure is not expected).
-        for (slot, (bytes, _)) in std::mem::take(&mut self.overrides) {
-            match textures::load_dds(&n.gpu, &bytes) {
-                Ok(t) => {
-                    n.overrides.insert(slot, (bytes, t));
-                }
-                Err(e) => {
-                    eprintln!("render3d: slot {slot} override dropped on the new device: {e}")
-                }
             }
         }
         *self = n;
@@ -1723,7 +1675,41 @@ impl Renderer {
     /// previous draw stays on screen and the status is `Failed { showing_previous: true }`; the result is still
     /// `Ok(kind)`. A hidden material stops drawing the shape and keeps its draw for later. Slot paths the
     /// resolver did not return before are asked for again (bytes that did not decode are not). `Err` only for an id that is not loaded.
+    ///
+    /// `m.skin_preview` is ignored: the shape keeps the one [`Renderer::set_skin_preview`] set (Note GN).
     pub fn set_material(
+        &mut self,
+        id: ShapeId,
+        mut m: MaterialState,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<EditKind, String> {
+        if let Some(s) = self.shapes.get(&id) {
+            m.skin_preview.clone_from(&s.material.skin_preview);
+        }
+        self.apply_material(id, m, textures)
+    }
+
+    /// The Meshes view's Advanced Skin card (Note GN): shape `id`'s preview-only RFAOS / wetness picks and wetness,
+    /// applied like a [`Renderer::set_material`] edit (a pick → `Textures`, wetness on/off → `Permutation`, a slider
+    /// move → `Cbuffer`). It lasts until the next load. A non-skin shape ignores it. Picks are resolved through
+    /// `textures`; one it lacks is a missing texture.
+    pub fn set_skin_preview(
+        &mut self,
+        id: ShapeId,
+        p: SkinPreview,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<EditKind, String> {
+        let mut m = self
+            .shapes
+            .get(&id)
+            .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?
+            .material
+            .clone();
+        m.set_skin(p);
+        self.apply_material(id, m, textures)
+    }
+
+    fn apply_material(
         &mut self,
         id: ShapeId,
         m: MaterialState,
@@ -1880,9 +1866,6 @@ impl Renderer {
     ///
     /// Returns the `(shape, register)` pairs rebound. `Err`, with nothing stored or changed, for a DDS that does
     /// not decode or a texture of another kind than a register reads (a cube into a 2D slot).
-    ///
-    /// A register under a slot override (`override_slot`) keeps showing the override; the entry and `Bound` still
-    /// change, and the pair is not returned.
     pub fn replace_texture(
         &mut self,
         path: &str,
@@ -1933,125 +1916,6 @@ impl Renderer {
             .is_ok_and(|touched| !touched.is_empty())
     }
 
-    /// Shows `dds` in NIF texture slot `slot` of every shape (through each shape's slot→register rule), now and for
-    /// later loads, over both variants, even where the slot path is empty. `None` removes it and rebinds what a load
-    /// would bind (the active texture, the missing fill or the default). `Bound` and the material are never changed.
-    /// A register of another kind keeps its binding (a load lists it under `warnings`). Err, with nothing changed, for
-    /// a DDS that does not decode. Returns the `(shape, register)` pairs rebound.
-    pub fn override_slot(
-        &mut self,
-        slot: usize,
-        dds: Option<&[u8]>,
-    ) -> Result<Vec<(ShapeId, u32)>, String> {
-        match dds {
-            Some(b) => {
-                let t = textures::load_dds(&self.gpu, b)
-                    .map_err(|e| with_context(&format!("slot {slot} override"), e))?;
-                self.overrides.insert(slot, (Arc::from(b), t));
-            }
-            None => {
-                if self.overrides.remove(&slot).is_none() {
-                    return Ok(vec![]);
-                }
-            }
-        }
-        let mut touched = vec![];
-        for (id, reg, kind) in self.slot_targets(slot) {
-            let Some(built) = self.shapes[&id].draw.as_ref().map(|d| d.built.clone()) else {
-                continue;
-            };
-            let srv = match self.overrides.get(&slot) {
-                Some((_, t)) if t.kind == kind => t.srv.clone(),
-                Some(_) => continue,
-                None => self.plain_srv(&built, slot, reg, kind)?,
-            };
-            if let Some(e) = self
-                .shapes
-                .get_mut(&id)
-                .and_then(|s| s.draw.as_mut())
-                .and_then(|d| d.srvs.iter_mut().find(|(r, _)| *r == reg))
-            {
-                e.1 = srv;
-                touched.push((id, reg));
-            }
-        }
-        Ok(touched)
-    }
-
-    /// The override texture a draw built for `m` shows at `reg`, if an override's slot maps there and its kind is the
-    /// register's.
-    fn override_at(
-        &self,
-        m: &MaterialState,
-        reg: u32,
-        kind: SrvKind,
-    ) -> Option<ID3D11ShaderResourceView> {
-        let msn = m.slsf1 & (1 << 12) != 0;
-        self.overrides
-            .iter()
-            .find(|(slot, (_, t))| {
-                t.kind == kind
-                    && textures::register_for_slot(m.shader_type, m.is_pbr(), msn, **slot)
-                        == Some(reg)
-            })
-            .map(|(_, (_, t))| t.srv.clone())
-    }
-
-    /// `(shape, register, kind)` for every visible draw whose built material maps NIF slot `slot` to a register it
-    /// binds, with or without a path: [`Renderer::texture_targets`] keyed by slot.
-    fn slot_targets(&self, slot: usize) -> Vec<(ShapeId, u32, SrvKind)> {
-        let mut out = vec![];
-        for (id, s) in &self.shapes {
-            let Some(d) = s.draw.as_ref().filter(|_| s.status != ShapeStatus::Hidden) else {
-                continue;
-            };
-            let m = &d.built;
-            let msn = m.slsf1 & (1 << 12) != 0;
-            let Some(reg) = textures::register_for_slot(m.shader_type, m.is_pbr(), msn, slot)
-            else {
-                continue;
-            };
-            let Some(view) = d.srvs.iter().find(|(r, _)| *r == reg).map(|(_, v)| v) else {
-                continue;
-            };
-            if let Some(kind) = textures::view_kind(view) {
-                out.push((*id, reg, kind));
-            }
-        }
-        out
-    }
-
-    /// What `bind_textures` binds at `reg` for slot `slot` of `m` without an override: the active texture of the
-    /// slot's path, else the missing fill (colour registers of a missing path, cached or evicted) or the register's
-    /// default.
-    fn plain_srv(
-        &mut self,
-        m: &MaterialState,
-        slot: usize,
-        reg: u32,
-        kind: SrvKind,
-    ) -> Result<ID3D11ShaderResourceView, String> {
-        let norm = m
-            .slots
-            .get(slot)
-            .map(|p| p.norm.as_str())
-            .filter(|n| !n.is_empty());
-        let entry = norm.and_then(|n| self.tex_cache.get(n));
-        if let Some(t) = entry.and_then(TexEntry::current).filter(|t| t.kind == kind) {
-            return Ok(t.srv.clone());
-        }
-        // An edit evicts a texture-less missing entry; its provenance lives on in `evicted_missing`.
-        let missing = match entry {
-            Some(e) => e.missing,
-            None => norm.is_some_and(|n| self.evicted_missing.contains(n)),
-        };
-        let rgba = match self.missing_fill {
-            Some(fill) if missing && colour_register(reg, kind) => fill,
-            _ => textures::default_for(reg, m.shader_type, m.is_pbr()),
-        };
-        self.default_srv(kind, rgba)
-    }
-
     /// `(shape, register, kind)` for every register a visible shape with a draw reads `path` through (the same slot →
     /// register rule as the load). Hidden shapes are left alone (their next build reads the entry). A pending or failed shape
     /// still draws its previous `ShapeDraw`, so it is rebound too, but its cbuffers are kept (its `material` is the
@@ -2091,15 +1955,10 @@ impl Renderer {
     fn rebind(&mut self, path: &str, entry: TexEntry) -> Result<Vec<(ShapeId, u32)>, String> {
         let mut plan = vec![];
         for (id, reg, kind) in self.texture_targets(path) {
-            let (shader_type, pbr, name, under) = {
+            let (shader_type, pbr, name) = {
                 let s = &self.shapes[&id];
                 let b = s.draw.as_ref().map_or(&s.material, |d| &d.built);
-                (
-                    b.shader_type,
-                    b.is_pbr(),
-                    s.name.clone(),
-                    self.override_at(b, reg, kind).is_some(),
-                )
+                (b.shader_type, b.is_pbr(), s.name.clone())
             };
             let real = match entry.current() {
                 Some(t) if t.kind != kind => {
@@ -2122,13 +1981,13 @@ impl Renderer {
                     self.default_srv(kind, rgba)?
                 }
             };
-            plan.push((id, reg, srv, real.is_some(), under));
+            plan.push((id, reg, srv, real.is_some()));
         }
         self.tex_cache.insert(path.to_string(), entry);
         let ll = self.linear_lighting();
         let fixed = self.fixed_pipeline;
         let mut touched = vec![];
-        for (id, reg, srv, real, under) in plan {
+        for (id, reg, srv, real) in plan {
             let Some(s) = self.shapes.get_mut(&id) else {
                 continue;
             };
@@ -2137,10 +1996,8 @@ impl Renderer {
             let Some(d) = s.draw.as_mut() else {
                 continue;
             };
-            if !under {
-                if let Some(slot) = d.srvs.iter_mut().find(|(r, _)| *r == reg) {
-                    slot.1 = srv;
-                }
+            if let Some(slot) = d.srvs.iter_mut().find(|(r, _)| *r == reg) {
+                slot.1 = srv;
             }
             let was = d.bound.regs.contains(&reg);
             if real {
@@ -2158,15 +2015,14 @@ impl Renderer {
                 );
                 d.rewrite_material(&material, ll, &fv, fixed, self.projected.as_ref());
             }
-            if !under {
-                touched.push((id, reg));
-            }
+            touched.push((id, reg));
         }
         Ok(touched)
     }
 
     /// Diagnostic hook: the PS defines the shape's material compiles with, the PS reflection of that program (if it
     /// is at hand), and the shape's draw as (register, DXGI format of the bound view) pairs.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_diag(&mut self, id: ShapeId) -> Option<DrawDiag> {
         let m = self.shapes.get(&id)?.material.clone();
@@ -2191,12 +2047,14 @@ impl Renderer {
 
     /// Test hook: the floats of `var` as written in the shape's pixel-stage cbuffers (`None` without a draw or when
     /// the PS does not reflect `var`).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_cb_floats(&self, id: ShapeId, var: &str) -> Option<Vec<f32>> {
         cb_floats(&self.shapes.get(&id)?.draw.as_ref()?.ps_cbs, var)
     }
 
     /// Test hook: [`Renderer::draw_cb_floats`] over the shape's vertex-stage cbuffers (v2 D6c).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_vs_cb_floats(&self, id: ShapeId, var: &str) -> Option<Vec<f32>> {
         cb_floats(&self.shapes.get(&id)?.draw.as_ref()?.vs_cbs, var)
@@ -2209,6 +2067,7 @@ impl Renderer {
     }
 
     /// Test hook: the COM pointer of the shape's index buffer. A hot-swap must leave it alone (no mesh reload).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_identity(&self, id: ShapeId) -> Option<usize> {
         use windows::core::Interface;
@@ -2221,6 +2080,7 @@ impl Renderer {
 
     /// Test hook: the `(kind, rgba)` of the 1×1 default bound at `reg` of the shape's draw; `None` when a real
     /// texture (or an override) is bound there, or there is no draw.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_default_at(&self, id: ShapeId, reg: u32) -> Option<(SrvKind, [u8; 4])> {
         use windows::core::Interface;
@@ -2233,6 +2093,7 @@ impl Renderer {
     }
 
     /// Test hook: the registers the shape's draw counts as real textures (`Bound`), sorted.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_bound(&self, id: ShapeId) -> Option<Vec<u32>> {
         let d = self.shapes.get(&id)?.draw.as_ref()?;
@@ -2243,17 +2104,17 @@ impl Renderer {
 
     /// Test hook: RT `rt` of the last frame's target, whole, as f32 RGBA ([`Target::read_f32`]). Err without a frame
     /// or for an RT the target does not have (1-7 on a forward target).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn read_mrt(&self, rt: usize) -> Result<Vec<f32>, String> {
         let t = self.target.as_ref().ok_or("no frame rendered")?;
         t.read_f32(&self.gpu, rt, [0, 0, t.width, t.height])
     }
 
-    /// Drops the current target (render's recreation branch; a test seam). The context holds references to bound
+    /// Drops the current target (render's recreation branch). The context holds references to bound
     /// views, so they are unbound first: otherwise the old textures outlive this drop while the new ones are made.
     /// `render` binds only the target's RTVs and DSV (no SRV or UAV of it), and rebinds them every frame.
-    #[doc(hidden)]
-    pub fn drop_target(&mut self) {
+    fn release_target(&mut self) {
         // The composite binds the target's SRVs and UAV to the CS stage (and unbinds them); null them here too.
         let srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
         let uavs: [Option<windows::Win32::Graphics::Direct3D11::ID3D11UnorderedAccessView>; 8] =
@@ -2269,7 +2130,15 @@ impl Renderer {
         self.target = None;
     }
 
+    /// Test hook: [`Renderer::release_target`] on its own.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn drop_target(&mut self) {
+        self.release_target();
+    }
+
     /// Test hook: views bound to the compute stage (SRVs 0..20 + UAVs 0..8).
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn bound_cs_views(&self) -> usize {
         let mut srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
@@ -2284,6 +2153,7 @@ impl Renderer {
     }
 
     /// Test hook: how many render target views the immediate context has bound.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn bound_rtvs(&self) -> usize {
         let mut rtvs: [Option<windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView>; 8] =
@@ -2295,6 +2165,7 @@ impl Renderer {
 
     /// Test hook: (width, height) of every texture of the current target: depth, colour, RT1-7, then the main UAV's
     /// resource.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn target_dims(&self) -> Vec<(u32, u32)> {
         use windows::core::Interface;
@@ -2401,6 +2272,7 @@ impl Renderer {
     /// [`Target::readback_display`]). Errors (device
     /// removed, allocation failure) are text; see [`device`] for the device-removed contract.
     pub fn render(&mut self, scene: &Scene, w: u32, h: u32) -> Result<Vec<u8>, String> {
+        #[cfg(feature = "test-hooks")]
         let t0 = std::time::Instant::now();
         let (w, h) = (w.max(1), h.max(1));
         // Features, settings or shaders changed the composite's defines: rebuild (disk cache), or fall back forward.
@@ -2441,7 +2313,7 @@ impl Renderer {
             .as_ref()
             .is_none_or(|t| t.width != w || t.height != h || t.deferred() != deferred_frame)
         {
-            self.drop_target();
+            self.release_target();
             self.target = Some(if deferred_frame {
                 Target::new_deferred(&self.gpu, w, h)?
             } else {
@@ -2460,29 +2332,36 @@ impl Renderer {
                     .is_some_and(|d| !d.env_regs.is_empty())
             });
         let yaw = scene.env_yaw.to_bits();
-        // shortcut: a CPU rebuild per yaw change (~11-16 ms in release, D5 report: the 25 MB equirect gather, the f16
-        // conversion and the upload); if a yaw drag stutters, build the cube on the GPU from the backdrop's texture.
-        if want_env && self.env.as_ref().is_none_or(|e| e.0 != yaw) {
-            let t = std::time::Instant::now();
+        let defines = self.composite_defines();
+        // A rebuild per yaw change: CS's GGX levels on the GPU (Note GM1), else on the CPU (~40 ms in release, Note GL1).
+        if want_env
+            && (self.env.as_ref().is_none_or(|e| e.0 != yaw)
+                || self.prefilter.as_ref().is_some_and(|p| p.0 != defines))
+        {
             self.env = None;
-            match composite::EnvMaps::new(
-                &self.gpu,
-                &hdri::studio().image,
-                self.env_size,
-                scene.env_yaw,
-            ) {
+            if self.prefilter.as_ref().is_none_or(|p| p.0 != defines) {
+                let p =
+                    composite::Prefilter::new(&self.gpu, &self.sources, &defines, &self.cache_dir);
+                self.prefilter = Some((defines, p));
+            }
+            let img = &hdri::studio().image;
+            let built = match &mut self.prefilter {
+                Some((_, Ok(p))) => {
+                    composite::EnvMaps::new_gpu(&self.gpu, p, img, self.env_size, scene.env_yaw)
+                }
+                _ => composite::EnvMaps::new(&self.gpu, img, self.env_size, scene.env_yaw),
+            };
+            match built {
                 Ok(e) => {
                     self.env = Some((yaw, e));
-                    self.env_builds += 1;
-                    perf_log::emit(
-                        "env_cube",
-                        serde_json::json!({ "ms": perf_log::ms_since(t) }),
-                    );
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        self.env_builds += 1;
+                    }
                 }
                 Err(e) => {
                     // Review M4: remembered for this yaw (the 2×2 black default: no reflection), so the next frames
                     // draw without rebuilding; a new yaw tries again. This frame reports the error.
-                    perf_log::emit("env_cube_failed", serde_json::json!({ "error": &e }));
                     let black = self.default_srv(SrvKind::Cube, [0, 0, 0, 255])?;
                     self.env = Some((
                         yaw,
@@ -2517,11 +2396,7 @@ impl Renderer {
         let mut uploads = 0;
         if scene.background == Background::Hdri && self.backdrop.is_none() {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
-            let made = Backdrop::new(&self.gpu);
-            if let Err(e) = &made {
-                perf_log::emit("backdrop_failed", serde_json::json!({ "error": e }));
-            }
-            self.backdrop = Some(made);
+            self.backdrop = Some(Backdrop::new(&self.gpu));
         }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
@@ -2598,21 +2473,24 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&rtvs), &target.dsv);
                         bound_all = want;
                     }
-                    uploads += if self.reference_writer {
-                        {
-                            // Test hook only (P0's reference writer): recomputed every frame.
-                            let fv = values_for(
-                                &self.settings,
-                                self.features_on,
-                                self.head_part,
-                                &s.fields,
-                                &s.built,
-                            );
-                            s.update_by_name(gpu, scene, &view, &fv)
-                        }
+                    // Test hook only (P0's reference writer, recomputed every frame): the default build takes the
+                    // shipped path with no check.
+                    #[cfg(feature = "test-hooks")]
+                    let n = if self.reference_writer {
+                        let fv = values_for(
+                            &self.settings,
+                            self.features_on,
+                            self.head_part,
+                            &s.fields,
+                            &s.built,
+                        );
+                        s.update_by_name(gpu, scene, &view, &fv)
                     } else {
                         s.update(gpu, &inputs)
                     };
+                    #[cfg(not(feature = "test-hooks"))]
+                    let n = s.update(gpu, &inputs);
+                    uploads += n;
                     ctx.IASetInputLayout(&s.mesh.layout);
                     for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
                         ctx.IASetVertexBuffers(
@@ -2673,19 +2551,28 @@ impl Renderer {
             ctx.RSSetState(&self.raster);
         }
         self.uploads = uploads;
-        let draw_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let t1 = std::time::Instant::now();
+        #[cfg(feature = "test-hooks")]
+        let (draw_ms, t1) = (
+            t0.elapsed().as_secs_f64() * 1000.0,
+            std::time::Instant::now(),
+        );
         wait_idle(gpu, &self.query)?;
-        let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
-        let t2 = std::time::Instant::now();
+        #[cfg(feature = "test-hooks")]
+        let (gpu_ms, t2) = (
+            t1.elapsed().as_secs_f64() * 1000.0,
+            std::time::Instant::now(),
+        );
         let px = target.readback_display(gpu, self.encode_srgb)?;
         // Only a fully successful frame may suppress the next one's writes.
         self.last_frame = Some((scene.clone(), view));
-        self.timing = FrameTiming {
-            draw_ms,
-            gpu_ms,
-            readback_ms: t2.elapsed().as_secs_f64() * 1000.0,
-        };
+        #[cfg(feature = "test-hooks")]
+        {
+            self.timing = FrameTiming {
+                draw_ms,
+                gpu_ms,
+                readback_ms: t2.elapsed().as_secs_f64() * 1000.0,
+            };
+        }
         Ok(px)
     }
 }

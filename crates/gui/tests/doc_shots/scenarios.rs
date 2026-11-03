@@ -67,7 +67,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("preview_encoded", preview_encoded),
     ("preview_normal", preview_normal),
     ("meshes_view", meshes_view),
-    ("plugin_refs", plugin_refs),
     ("mo2_popup", mo2_popup),
     ("skin_card", skin_card),
     ("landscape_card", landscape_card),
@@ -895,7 +894,6 @@ fn nif_row(copy_id: i64, path: &str) -> modscan::store::NifRow {
         overridden_by: None,
         n_copies: 1,
         derived: false,
-        derive_check: None,
         le_mesh: false,
         problem: None,
         patched_in_game: false,
@@ -967,33 +965,6 @@ fn meshes_view(dir: &Path) -> Frame {
         img: h.render().expect("render"),
         crop: None,
     }
-}
-
-/// GUI-Meshes: the Plugin file references window.
-fn plugin_refs(dir: &Path) -> Frame {
-    let mut h = meshes(dir, |_| {});
-    let r = reveal(&mut h, |h| {
-        let m = &mut h.state_mut().meshes;
-        m.file_refs = Some(sdc_gui::model::meshes::FileRefs {
-            missing: vec![modscan::plugin_store::MissingRef {
-                path: "textures/clutter/banner_missing.dds".into(),
-                n_records: 2,
-                records: vec!["BannerTXST [00000AB0] TXST — Banners.esp".into()],
-            }],
-            unused: vec![
-                "textures/architecture/stone/oldwall.dds".into(),
-                "textures/clutter/banner03.dds".into(),
-            ],
-        });
-        m.refs_open = true;
-    });
-    let _ = r;
-    let w = h
-        .query_all_by_role(Role::Window)
-        .find(|n| n.accesskit_node().label().as_deref() == Some("Plugin file references"))
-        .expect("the window")
-        .rect();
-    shot(&mut h, w)
 }
 
 /// GUI-Main-Window: the MO2… popup.

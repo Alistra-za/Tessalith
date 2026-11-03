@@ -489,12 +489,11 @@ pub fn spawn_dds_thumbs(tx: Sender<WorkerMsg>, paths: Vec<(PathBuf, SourceStamp)
 }
 
 /// Meshes view (plan A Task 12): scan `source` into the store at `db` (opened on this thread; the UI keeps its own
-/// read connection). `procs` lists running process names for the PGPatcher gate; `skip_derived` scans without the
-/// PGPatcher output. Progress and the result go to `tx`; a panic becomes `Panicked { what: "scan" }`.
+/// read connection). `procs` lists running process names for the PGPatcher gate. Progress and the result go to `tx`;
+/// a panic becomes `Panicked { what: "scan" }`.
 pub fn start_scan(
     source: modscan::scan::Source,
     db: PathBuf,
-    skip_derived: bool,
     procs: fn() -> Vec<String>,
     tx: Sender<WorkerMsg>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
@@ -508,14 +507,7 @@ pub fn start_scan(
             });
         };
         let result = modscan::store::Store::open(&db).and_then(|mut store| {
-            modscan::scan::run_with(
-                &source,
-                &mut store,
-                &cancel,
-                &progress,
-                &procs,
-                skip_derived,
-            )
+            modscan::scan::run(&source, &mut store, &cancel, &progress, &procs)
         });
         let _ = tx.send(WorkerMsg::Scanned(result));
     });

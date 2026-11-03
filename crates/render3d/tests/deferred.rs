@@ -325,5 +325,4 @@ fn installed_cs_deferred_plane_smoke() {
     let n = px(&r.read_mrt(2).unwrap(), 1600, 800, 450);
     println!("RT2 centre {n:?}");
     assert!(n.iter().any(|v| *v != 0.0), "NormalGlossiness written");
-    println!("coverage {:?}", r.settings_coverage());
 }

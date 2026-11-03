@@ -62,7 +62,7 @@ While a text field has the keyboard (the search box, a name, a number), the shor
 | Preview | PageDown | Smaller mip |
 | Sets | F2 | Rename the outputs of the selected sets, or the inputs of the selected textures |
 | 3D preview | Home | Recentre the 3D view (as a double-click) |
-| 3D preview | V | Next 3D debug view (Lit, UV checker) |
+| 3D preview | V | Next 3D debug view (Lit, Albedo, Normals, …) |
 | 3D preview | Ctrl+Shift+C | Copy the 3D view as an image |
 | JSON editor | F8 | Next error in the PGPatcher JSON editor |
 | JSON editor | Shift+F8 | Previous error in the PGPatcher JSON editor |

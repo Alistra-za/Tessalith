@@ -7,9 +7,9 @@ use modscan::plugins::{clamp_local, is_light, plugin_files, prefixes};
 use std::fs;
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
-use b::{alt, edid, form, plugin, rec, sub, top, zstr};
+use b::{alt, edid, plugin, rec, sub, top, zstr};
 use modscan::plugins::{scan_plugins, PluginStats};
-use modscan::scan::{run, run_with, Source, PLUGINS_CANCELLED};
+use modscan::scan::{run, Source, PLUGINS_CANCELLED};
 use modscan::store::Store;
 use modscan::ScanError;
 use std::sync::atomic::AtomicBool;
@@ -189,11 +189,15 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
                     )],
                 ),
                 top(
-                    b"LTEX",
+                    b"STAT",
                     &[rec(
-                        b"LTEX",
+                        b"STAT",
                         0x0200_0802,
-                        &[edid("LTex"), form(b"TNAM", 0x0100_0800)],
+                        &[
+                            edid("LSwap"),
+                            sub(b"MODL", &zstr("lt.nif")),
+                            sub(b"MODS", &alt(&[("LT", 0x0100_0800, 0)])),
+                        ],
                     )],
                 ),
             ],
@@ -215,11 +219,15 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
             0,
             &["Skyrim.esm", "L.esp"],
             &[top(
-                b"LTEX",
+                b"STAT",
                 &[rec(
-                    b"LTEX",
+                    b"STAT",
                     0x0200_0900,
-                    &[edid("FTex"), form(b"TNAM", 0x0100_0801)],
+                    &[
+                        edid("FSwap"),
+                        sub(b"MODL", &zstr("ft.nif")),
+                        sub(b"MODS", &alt(&[("FT", 0x0100_0801, 0)])),
+                    ],
                 )],
             )],
         ),
@@ -274,17 +282,17 @@ fn formids_follow_the_load_order_full_and_light() {
         0xFE00_1803,
         ".esl without the flag is light too"
     );
-    assert_eq!(formid(&s, "FTex"), 0x0200_0900);
+    assert_eq!(formid(&s, "FSwap"), 0x0200_0900);
     let txst_of = |e: &str| {
-        one_i64(&s, "SELECT t.txst_formid FROM txst_ref t JOIN rec r ON r.plugin_id = t.plugin_id AND r.local = t.local WHERE r.edid = ?1", [e]) as u32
+        one_i64(&s, "SELECT t.txst_formid FROM alt_tex t JOIN rec r ON r.plugin_id = t.plugin_id AND r.local = t.local WHERE r.edid = ?1", [e]) as u32
     };
     assert_eq!(
-        txst_of("LTex"),
+        txst_of("LSwap"),
         0x0100_0800,
         "a light plugin's reference into a full master"
     );
     assert_eq!(
-        txst_of("FTex"),
+        txst_of("FSwap"),
         0xFE00_0801,
         "Review Focus 1: a full plugin's reference into a light master"
     );
@@ -596,32 +604,6 @@ fn the_scan_runs_the_plugin_pass_for_mo2_only() {
         0,
         "no load order after a Folder scan"
     );
-}
-
-/// Ruling F-6: "Scan without PGPatcher output" drops PGPatcher mods from the NIF pass only; plugins stay in the order.
-#[test]
-fn skip_derived_keeps_plugins_of_pgpatcher_mods() {
-    let d = load_order(ORDER);
-    fs::create_dir_all(d.path().join("mods/B/meshes/_pgpatcher_dups")).unwrap();
-    let mut store = Store::open(&d.path().join("scan.db")).unwrap();
-    let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
-    let r = run_with(
-        &src,
-        &mut store,
-        &AtomicBool::new(false),
-        &|_| {},
-        &|| vec![],
-        true,
-    )
-    .unwrap();
-    let p = r.plugins.expect("plugin stats");
-    assert_eq!(p.n, 5, "{:?}", p.problems);
-    assert!(
-        !p.problems.iter().any(|(n, _)| n == "z.esl" || n == "f.esp"),
-        "{:?}",
-        p.problems
-    );
-    assert_eq!(formid(&store, "ZStat"), 0xFE00_1803);
 }
 
 /// Ruling R13/F-5: a cancel during the plugin pass ends the run Ok with a note and no plugin stats.

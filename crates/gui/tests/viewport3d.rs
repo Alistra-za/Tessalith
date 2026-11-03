@@ -3,10 +3,8 @@
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use render3d::locate::{Change, Fingerprint};
-use render3d::perf_log;
 use sdc_gui::model::meshes::LE_WARNING;
 use sdc_gui::model::viewport3d::{self as v3, V3State, Viewport3d};
-use sdc_gui::worker::WorkerMsg;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -306,6 +304,7 @@ fn femalebody_viewport(cache: &Path) -> Option<Viewport3d> {
         textures,
         le_mesh: false,
         head_part: false,
+        txst: Default::default(),
     }));
     Some(v)
 }
@@ -610,6 +609,7 @@ fn spec(key: i64, le_mesh: bool) -> v3::MeshSpec {
         textures: Default::default(),
         le_mesh,
         head_part: false,
+        txst: Default::default(),
     }
 }
 
@@ -954,11 +954,8 @@ fn parsed_content_loads_once_and_material_edits_follow_the_load() {
     assert_eq!(v.shapes.len(), 1);
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(3),
         result: Ok(EditKind::Cbuffer),
-        ms: 0.2,
     });
-    assert_eq!(v.last_edit, Some((EditKind::Cbuffer, 0.2)));
     assert!(!v.busy());
     v.request_frame(64, 64);
     assert!(matches!(cmds.try_recv(), Ok(v3::V3Cmd::Render { .. })));
@@ -1098,17 +1095,13 @@ fn a_stale_material_reply_does_not_touch_the_new_contents_edits() {
     // A's late reply (an error) must neither free B's pending edit nor show its error.
     v.handle(v3::V3Reply::MaterialSet {
         content: a,
-        id: ShapeId(0),
         result: Err("old".into()),
-        ms: 1.0,
     });
     assert!(v.busy());
     assert!(v.render_error.is_none());
     v.handle(v3::V3Reply::MaterialSet {
         content: b,
-        id: ShapeId(0),
         result: Ok(EditKind::Same),
-        ms: 1.0,
     });
     assert!(!v.busy());
 }
@@ -1144,9 +1137,7 @@ fn a_failed_edit_on_the_only_shape_keeps_the_camera_live() {
     let _ = cmds.try_recv();
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(0),
         result: Err("compile".into()),
-        ms: 1.0,
     });
     v.handle(v3::V3Reply::Shapes(vec![info(ShapeStatus::Failed {
         error: "compile".into(),
@@ -1243,10 +1234,12 @@ fn femalebody_playback_holds_30_fps() {
             println!(
                 "deferred {deferred}, {w}x{h}: playback {wall:.2} ms/frame wall, {render:.2} ms render (FrameTiming)"
             );
-            assert_eq!(
-                v.last_edit.map(|e| e.0),
-                Some(render3d::EditKind::Cbuffer),
-                "cbuffer edits only"
+            assert!(
+                v.edit_kinds
+                    .iter()
+                    .all(|k| *k == render3d::EditKind::Cbuffer),
+                "cbuffer edits only: {:?}",
+                v.edit_kinds
             );
             assert!(
                 wall < 33.3,
@@ -1635,9 +1628,7 @@ fn an_edit_waiting_for_its_shader_keeps_the_camera_live_on_the_old_draw() {
     let _ = cmds.try_recv();
     v.handle(v3::V3Reply::MaterialSet {
         content: id,
-        id: ShapeId(0),
         result: Ok(EditKind::Permutation),
-        ms: 1.0,
     });
     v.handle(v3::V3Reply::Shapes(vec![info(pending(true))]));
     v.orbit.drag(10.0, 0.0);
@@ -1738,35 +1729,6 @@ fn a_real_load_compiles_in_the_background_then_draws_and_goes_idle() {
         assert!(!v.poll());
         assert!(!v.busy());
     }
-}
-
-/// GUI suggestions item 4: the UV checker goes on and off through render3d's slot override. Neither direction loads
-/// the content again: a `Loaded` reply for the loaded id would set `report` (R14).
-#[test]
-fn the_uv_checker_toggles_without_a_reload() {
-    let cache = tempfile::tempdir().unwrap();
-    let mut m = MaterialState::builtin_default();
-    m.alpha = Some(nif::props::Alpha {
-        flags: 0x200,
-        threshold: 0,
-    }); // DO_ALPHA_TEST: the stand-in's pixel permutation compiles
-    let mut v = real_viewport(cache.path(), m);
-    run_idle(&mut v);
-    v.report = None;
-    v.set_debug(v3::DebugView::UvChecker);
-    run_idle(&mut v);
-    v.set_debug(v3::DebugView::Lit);
-    run_idle(&mut v);
-    assert!(
-        v.report.is_none(),
-        "no Loaded reply: nothing was loaded again"
-    );
-    assert_eq!(
-        v.offered(),
-        [v3::DebugView::Lit, v3::DebugView::UvChecker],
-        "the stand-in has no debug anchor"
-    );
-    assert!(!v.debug_support());
 }
 
 #[test]
@@ -1966,8 +1928,6 @@ fn a_texture_swap_reaches_the_render_thread_and_survives_a_reload() {
     wait_for(&mut v, 1, id1);
 }
 
-// ---- P1-B Task 9: timing log events ----
-
 fn frame_reply(v: &mut Viewport3d, id: u64) {
     v.handle(v3::V3Reply::Frame {
         frame: Arc::new(v3::Frame {
@@ -1978,249 +1938,6 @@ fn frame_reply(v: &mut Viewport3d, id: u64) {
         }),
         timing: Default::default(),
     });
-}
-
-fn named<'a>(ev: &'a [serde_json::Value], n: &str) -> Vec<&'a serde_json::Value> {
-    ev.iter().filter(|e| e["event"] == n).collect()
-}
-
-#[test]
-fn ui_gap_is_logged_only_when_work_was_in_flight() {
-    let (_d, mut v, cmds) = confirmed();
-    let nif = Arc::new(render3d::ParsedNif::default());
-    v.set_content(Some(parsed(1, &nif, &[])), false);
-    v.request_frame(64, 64);
-    let Ok(v3::V3Cmd::LoadParsed { id, .. }) = cmds.try_recv() else {
-        panic!("LoadParsed")
-    };
-    assert!(v.busy());
-    let t0 = Instant::now();
-    let at = |ms: u64| t0 + Duration::from_millis(ms);
-    let ((), ev) = perf_log::capture(|| {
-        v.poll_at(at(0));
-        v.poll_at(at(150)); // busy before: a freeze
-        loaded(
-            &mut v,
-            id,
-            render3d::LoadReport {
-                shapes: 1,
-                ..Default::default()
-            },
-        );
-        assert!(!v.busy());
-        v.poll_at(at(200)); // short gap
-        v.poll_at(at(10_000)); // the previous frame found nothing in flight: idle
-    });
-    let gaps = named(&ev, "ui_gap");
-    assert_eq!(gaps.len(), 1, "{ev:?}");
-    assert_eq!(gaps[0]["gap_ms"], 150.0);
-    assert_eq!(gaps[0]["panel"], "meshes");
-}
-
-#[test]
-fn the_frame_that_drains_the_last_reply_does_not_arm_the_gap_watch() {
-    let (_d, mut v, cmds) = confirmed();
-    let nif = Arc::new(render3d::ParsedNif::default());
-    v.set_content(Some(parsed(1, &nif, &[])), false);
-    v.request_frame(64, 64);
-    let Ok(v3::V3Cmd::LoadParsed { id, .. }) = cmds.try_recv() else {
-        panic!("LoadParsed")
-    };
-    let t0 = Instant::now();
-    let at = |ms: u64| t0 + Duration::from_millis(ms);
-    let ((), ev) = perf_log::capture(|| {
-        v.poll_at(at(0));
-        v.reply_sender_for_test()
-            .send(WorkerMsg::Viewport3d(v3::V3Reply::Loaded {
-                id,
-                report: render3d::LoadReport {
-                    shapes: 1,
-                    ..Default::default()
-                },
-                bounds: Some(([0.0; 3], 1.0)),
-            }))
-            .unwrap();
-        v.poll_at(at(16)); // takes the reply: nothing left in flight, egui stops asking for frames
-        assert!(!v.busy());
-        v.poll_at(at(2_000)); // the next input, two seconds later: idle, not a freeze
-    });
-    assert!(named(&ev, "ui_gap").is_empty(), "{ev:?}");
-
-    // Drawing after the drain starts a render; the app re-arms with that, so a blocked next frame is a freeze.
-    let ((), ev) = perf_log::capture(|| {
-        v.request_frame(64, 64);
-        assert!(v.busy());
-        v.arm_gap(v.busy());
-        v.poll_at(at(2_500));
-    });
-    let gaps = named(&ev, "ui_gap");
-    assert_eq!(gaps.len(), 1, "{ev:?}");
-    assert_eq!(gaps[0]["gap_ms"], 500.0);
-}
-
-#[test]
-fn the_load_edit_swap_and_flip_lines_are_written_when_the_frame_that_shows_them_arrives() {
-    use render3d::{EditKind, ShapeId, Variant};
-    let (_d, mut v, cmds) = confirmed();
-    let nif = Arc::new(render3d::ParsedNif::default());
-    v.set_content(Some(parsed(1, &nif, &[])), false);
-    let ((), ev) = perf_log::capture(|| {
-        v.request_frame(64, 64);
-        let Ok(v3::V3Cmd::LoadParsed { id, .. }) = cmds.try_recv() else {
-            panic!("LoadParsed")
-        };
-        loaded(
-            &mut v,
-            id,
-            render3d::LoadReport {
-                shapes: 1,
-                ..Default::default()
-            },
-        );
-        v.request_frame(64, 64);
-        let Ok(v3::V3Cmd::Render { id: r1, .. }) = cmds.try_recv() else {
-            panic!("Render")
-        };
-        frame_reply(&mut v, r1);
-    });
-    let ff = named(&ev, "first_frame");
-    assert_eq!(ff.len(), 1, "{ev:?}");
-    assert!(ff[0]["ms_since_load"].as_f64().unwrap() >= 0.0);
-    // Commands sent after that frame was requested.
-    let r1 = v.render_sent_for_test();
-    let cid = v.loaded_for_test().unwrap();
-    let ((), early) = perf_log::capture(|| {
-        assert!(v.set_material(ShapeId(0), MaterialState::builtin_default()));
-        assert!(v.swap_texture(
-            "textures/a.dds".into(),
-            Arc::new(vec![1, 2, 3]),
-            Variant::Encoded
-        ));
-        assert!(v.set_texture_variant("textures/a.dds".into(), Variant::Source));
-        assert!(v.set_texture_variant("textures/b.dds".into(), Variant::Source));
-        // The edit's kind arrives with the thread's MaterialSet reply.
-        v.handle(v3::V3Reply::MaterialSet {
-            content: cid,
-            id: ShapeId(0),
-            result: Ok(EditKind::Permutation),
-            ms: 1.0,
-        });
-        // A frame requested before the commands cannot show them.
-        frame_reply(&mut v, r1);
-    });
-    assert!(
-        named(&early, "edit").is_empty() && named(&early, "texture_swap").is_empty(),
-        "{early:?}"
-    );
-    let ((), late) = perf_log::capture(|| {
-        v.request_frame(64, 64);
-        // The edit and texture commands come first; the Render that can show them is the last one.
-        let r2 = std::iter::from_fn(|| cmds.try_recv().ok())
-            .find_map(|c| match c {
-                v3::V3Cmd::Render { id, .. } => Some(id),
-                _ => None,
-            })
-            .expect("a Render for the commands");
-        // Refresh frames (rendered after a compile result) never answer a command.
-        v.handle(v3::V3Reply::Refresh {
-            frame: Arc::new(v3::Frame {
-                width: 2,
-                height: 2,
-                rgba: vec![0; 16],
-                id: 1 << 62,
-            }),
-            timing: Default::default(),
-        });
-        frame_reply(&mut v, r2);
-    });
-    let edit = named(&late, "edit");
-    let swap = named(&late, "texture_swap");
-    let flip = named(&late, "ab_flip");
-    assert_eq!((edit.len(), swap.len(), flip.len()), (1, 1, 1), "{late:?}");
-    assert_eq!(
-        (edit[0]["shape"].as_u64(), edit[0]["kind"].as_str()),
-        (Some(0), Some("Permutation"))
-    );
-    assert_eq!(swap[0]["path"], "textures/a.dds");
-    assert_eq!(
-        (swap[0]["variant"].as_str(), swap[0]["bytes"].as_u64()),
-        (Some("Encoded"), Some(3))
-    );
-    assert_eq!(
-        (flip[0]["paths"].as_u64(), flip[0]["variant"].as_str()),
-        (Some(2), Some("Source"))
-    );
-    for e in [edit[0], swap[0], flip[0]] {
-        assert!(e["ms_to_frame"].as_f64().unwrap() >= 0.0, "{e}");
-    }
-}
-/// The render thread's lines (`gpu`, `compile`, `load`, `frame_stats` aside) reach the log file.
-#[test]
-fn a_real_render_thread_writes_gpu_compile_load_and_first_frame_lines() {
-    use nif::material::MaterialState;
-    let log_dir = tempfile::tempdir().unwrap();
-    let log = perf_log::start_in(log_dir.path()).expect("a log");
-    let path = log.path().to_path_buf();
-    let standin = PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../render3d/tests/fixtures/standin"
-    ));
-    let fp = render3d::locate::fingerprint(&standin, None).unwrap();
-    let cache = tempfile::tempdir().unwrap();
-    let mut v = Viewport3d::new(Some(fp.clone()));
-    v.cache_dir = Some(cache.path().to_path_buf());
-    v.on_located(Ok(Some(fp)));
-    let mut material = MaterialState::builtin_default();
-    material.alpha = Some(nif::props::Alpha {
-        flags: 0x200,
-        threshold: 0,
-    }); // the stand-in refuses the other permutations
-    v.set_content(
-        Some(v3::Content::Builtin {
-            key: 7,
-            shape: render3d::builtin::Builtin::Sphere,
-            material,
-            textures: Arc::new(std::collections::HashMap::new()),
-        }),
-        false,
-    );
-    let t = Instant::now();
-    loop {
-        v.request_frame(64, 64);
-        v.poll();
-        if !v.busy() {
-            break;
-        }
-        assert!(t.elapsed().as_secs() < 60, "the viewport did not settle");
-        std::thread::yield_now();
-    }
-    assert!(v.frame.is_some());
-    drop(log);
-    // A pool worker may still hold a temporary handle for an instant: wait for `run_end`.
-    let t = Instant::now();
-    let text = loop {
-        let text = std::fs::read_to_string(&path).unwrap();
-        if text.contains("\"run_end\"") || t.elapsed().as_secs() > 10 {
-            break text;
-        }
-        std::thread::yield_now();
-    };
-    let ev: Vec<serde_json::Value> = text
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    for want in ["run_start", "gpu", "compile", "load", "first_frame"] {
-        assert!(
-            ev.iter().any(|e| e["event"] == want),
-            "no {want} line in {text}"
-        );
-    }
-    // Other tests of this binary may have render threads writing to the same live log.
-    assert!(
-        ev.iter()
-            .any(|e| e["event"] == "load" && e["content"] == "builtin:Sphere" && e["shapes"] == 1),
-        "{text}"
-    );
 }
 
 // ---- P1-C Task 5: the user's CS settings (T-S4b) ----
@@ -2389,10 +2106,10 @@ fn the_off_line_lists_what_the_renderer_leaves_off() {
     h.get_by_label_contains("Off in this preview: Dynamic Cubemaps, LOD Blending");
 }
 
-// ---- P1-C Task 6: the `settings` timing-log line ----
+// ---- P1-C Task 6: default settings ----
 
 #[test]
-fn applying_settings_writes_a_settings_line() {
+fn default_settings_define_linear_lighting_only() {
     let standin = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../render3d/tests/fixtures/standin"
@@ -2405,22 +2122,8 @@ fn applying_settings_writes_a_settings_line() {
         cache.path().to_path_buf(),
     )
     .unwrap();
-    let s = CsSettings {
-        hash: "0123456789abcdef0123".into(),
-        notes: vec!["Info.ini missing".into()],
-        ..Default::default()
-    };
-    let ((), ev) = perf_log::capture(|| v3::apply_settings(&mut r, s));
-    let e = named(&ev, "settings");
-    assert_eq!(e.len(), 1, "{ev:?}");
-    assert_eq!(e[0]["hash"], "0123456789ab");
-    assert_eq!(
-        e[0]["defines"],
-        serde_json::json!(["ENABLE_LL"]),
-        "default settings: LL only"
-    );
-    assert_eq!(e[0]["notes"], 1);
-    assert!(e[0]["ms"].as_f64().unwrap() >= 0.0, "{}", e[0]);
+    r.set_settings(CsSettings::default());
+    assert_eq!(r.features(), ["ENABLE_LL"], "default settings: LL only");
 }
 
 #[test]
@@ -2710,35 +2413,6 @@ fn choose_folder_reads_the_settings_through_the_last_scan_target() {
     assert_eq!(v.settings().hash, read_json_settings(CHANGED).hash);
 }
 
-/// P1-D: the coverage line shows under the frame only when the renderer reports one.
-#[test]
-fn the_coverage_line_shows_only_when_reported() {
-    let mut v = Viewport3d::with_state(V3State::Ready);
-    v.handle(v3::V3Reply::Coverage(Some(
-        "CS settings: 3 fields unset, 1 keys unmatched".into(),
-    )));
-    let mut h = harness(v);
-    h.run();
-    h.get_by_label_contains("CS settings: 3 fields unset, 1 keys unmatched");
-    let mut h = harness(Viewport3d::with_state(V3State::Ready));
-    h.run();
-    assert!(h.query_by_label_contains("CS settings:").is_none());
-}
-
-/// P1-D: a `Some` -> `None` coverage reply clears the footer line. The render thread send cadence has no harness in
-/// these tests, so it is not pinned here.
-#[test]
-fn the_coverage_line_clears_when_the_renderer_stops_reporting() {
-    let mut v = Viewport3d::with_state(V3State::Ready);
-    v.handle(v3::V3Reply::Coverage(Some(
-        "CS settings: 1 fields unset, 0 keys unmatched".into(),
-    )));
-    v.handle(v3::V3Reply::Coverage(None));
-    let mut h = harness(v);
-    h.run();
-    assert!(h.query_by_label_contains("CS settings:").is_none());
-}
-
 // ---- audit finding 14: recompiles on a loaded mesh ----
 
 fn loaded_mesh() -> (
@@ -2881,8 +2555,8 @@ fn the_sun_turn_round_trips_through_gui_toml() {
 #[test]
 fn the_debug_selector_lists_only_views_the_renderer_can_make() {
     use v3::DebugView;
-    // Without render3d's support (no thread yet) only Lit and UV checker are offered.
-    assert_eq!(DebugView::ALL.len(), 7);
+    // Without render3d's support (no thread yet) only Lit is offered.
+    assert_eq!(DebugView::ALL.len(), 6);
     let mut h = harness(Viewport3d::with_state(V3State::Ready));
     h.run();
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
@@ -2891,38 +2565,27 @@ fn the_debug_selector_lists_only_views_the_renderer_can_make() {
     for missing in ["Albedo", "Normals", "Roughness", "Metallic", "AO"] {
         assert!(h.query_by_label(missing).is_none(), "{missing} is offered");
     }
-    h.get_by_label("UV checker").click();
-    h.run();
-    assert_eq!(h.state().debug(), DebugView::UvChecker);
+    // The menu lists exactly the offered views, and nothing else of the debug set.
+    let listed: Vec<DebugView> = DebugView::ALL
+        .into_iter()
+        .filter(|d| h.query_by_label(d.label()).is_some())
+        .collect();
+    assert_eq!(listed, h.state().offered());
+    assert_eq!(listed, [DebugView::Lit]);
 }
 
 #[test]
 fn a_debug_view_change_goes_to_the_render_thread_and_waits_for_its_answer() {
     let (mut v, cmds) = rendered();
-    v.set_debug(v3::DebugView::UvChecker);
+    v.set_debug(v3::DebugView::Albedo);
     assert!(matches!(
         cmds.try_recv(),
-        Ok(v3::V3Cmd::SetDebug(v3::DebugView::UvChecker))
+        Ok(v3::V3Cmd::SetDebug(v3::DebugView::Albedo))
     ));
     assert!(v.busy());
     v.handle(v3::V3Reply::Reconfigured(1));
-    v.set_debug(v3::DebugView::UvChecker);
+    v.set_debug(v3::DebugView::Albedo);
     assert!(cmds.try_recv().is_err(), "no change, nothing sent");
-}
-
-#[test]
-fn the_uv_checker_is_a_checker() {
-    let rgba = v3::checker_rgba();
-    let n = v3::CHECKER_SIZE as usize;
-    assert_eq!(rgba.len(), n * n * 4);
-    let px = |x: usize, y: usize| rgba[(y * n + x) * 4..(y * n + x) * 4 + 4].to_vec();
-    let cell = n / 8;
-    assert_ne!(px(0, 0), px(cell, 0), "neighbours differ");
-    assert_ne!(px(0, 0), px(0, cell));
-    assert_eq!(px(0, 0), px(cell, cell), "diagonals match");
-    assert_eq!(px(0, 0)[3], 255);
-    let f = engine::dds::read_dds(&v3::checker_dds()).unwrap();
-    assert_eq!((f.width, f.height), (v3::CHECKER_SIZE, v3::CHECKER_SIZE));
 }
 
 #[test]
@@ -2982,19 +2645,26 @@ fn the_3d_keys_reset_cycle_and_are_listed() {
         assert_eq!(a.area, Area::View3d);
         assert_eq!(keys_text(id), keys);
     }
-    let mut v = Viewport3d::with_state(V3State::Ready);
+    let (mut v, _cmds) = rendered();
     v.orbit.pan(30.0, 5.0);
+    v.handle(v3::V3Reply::DebugSupport(true));
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(
+        0,
+        MaterialState::builtin_default(),
+    )]));
     let mut h = harness(v);
-    h.run();
+    // The shape is still drawing: busy, so it repaints; step instead of run().
+    h.run_steps(4);
     h.key_press(Key::Home);
-    h.run();
+    h.run_steps(4);
     assert_eq!(h.state().orbit, v3::Orbit::default());
     h.key_press(Key::V);
-    h.run();
-    assert_eq!(h.state().debug(), v3::DebugView::UvChecker);
-    h.key_press(Key::V);
-    h.run();
-    assert_eq!(h.state().debug(), v3::DebugView::Lit);
+    h.run_steps(4);
+    assert_eq!(
+        h.state().debug(),
+        v3::DebugView::Albedo,
+        "Lit, then the next offered"
+    );
 }
 
 fn shape_info(id: u32, m: MaterialState) -> ShapeInfo {
@@ -3020,11 +2690,11 @@ fn offered_views_follow_support_and_the_loaded_materials() {
         0,
         MaterialState::builtin_default(),
     )]));
-    assert_eq!(v.offered(), [Lit, UvChecker], "no support reported yet");
+    assert_eq!(v.offered(), [Lit], "no support reported yet");
     v.handle(v3::V3Reply::DebugSupport(true));
     assert_eq!(
         v.offered(),
-        [Lit, UvChecker, Albedo, Normals, Roughness, Ao],
+        [Lit, Albedo, Normals, Roughness, Ao],
         "non-PBR: no Metallic"
     );
     assert_eq!(v.stand_in(Roughness), Some("1 − specular mask"));
@@ -3037,11 +2707,11 @@ fn offered_views_follow_support_and_the_loaded_materials() {
         shape_info(0, face),
         shape_info(1, pbr()),
     ]));
-    assert_eq!(v.offered().len(), 7, "one PBR shape offers everything");
-    assert_eq!(Lit.next(&v.offered()), UvChecker);
+    assert_eq!(v.offered().len(), 6, "one PBR shape offers everything");
+    assert_eq!(Lit.next(&v.offered()), Albedo);
     assert_eq!(Ao.next(&v.offered()), Lit, "wraps over the offered views");
     assert_eq!(
-        Metallic.next(&[Lit, UvChecker]),
+        Metallic.next(&[Lit, Albedo]),
         Lit,
         "a view not offered goes to the first"
     );
@@ -3085,7 +2755,7 @@ fn losing_debug_support_falls_back_to_lit_with_a_status_line() {
         cmds.try_recv(),
         Ok(v3::V3Cmd::SetDebug(v3::DebugView::Lit))
     ));
-    assert_eq!(v.offered(), [v3::DebugView::Lit, v3::DebugView::UvChecker]);
+    assert_eq!(v.offered(), [v3::DebugView::Lit]);
 }
 
 #[test]
@@ -3101,13 +2771,30 @@ fn the_view_section_lists_the_offered_views_with_the_stand_in_hover() {
     h.run_steps(4);
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
     h.run_steps(4);
-    for offered in ["Lit", "UV checker", "Albedo", "Normals", "Roughness", "AO"] {
+    for offered in ["Lit", "Albedo", "Normals", "Roughness", "AO"] {
         h.get_by_label(offered);
     }
     assert!(h.query_by_label("Metallic").is_none());
     h.get_by_label("Roughness").hover();
     h.run_steps(4);
     h.get_by_label_contains("1 − specular mask");
+}
+
+/// Note GJ8: the Debug view selector no longer lists a UV checker; every other view is still there.
+#[test]
+fn the_debug_view_menu_has_no_uv_checker() {
+    let (mut v, _cmds) = rendered();
+    v.handle(v3::V3Reply::DebugSupport(true));
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr())]));
+    let mut h = harness(v);
+    h.run_steps(4);
+    h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
+    h.run_steps(4);
+    for view in v3::DebugView::ALL {
+        h.get_by_label(view.label());
+    }
+    assert!(h.query_by_label("UV checker").is_none());
+    assert_eq!(v3::DebugView::ALL.len(), 6);
 }
 
 /// Audit 3 item 3: two panels both count frame ids from 1; each keeps its own texture.

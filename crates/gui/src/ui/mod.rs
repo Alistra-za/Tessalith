@@ -22,7 +22,6 @@ pub mod meshes;
 pub mod messages;
 pub mod path_picker;
 pub mod pgp_fields;
-pub mod plugin_refs;
 pub mod presets;
 pub mod preview;
 pub mod problems;

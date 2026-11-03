@@ -297,13 +297,10 @@ fn every_built_in_shape_is_selectable() {
 // ---- Task 16: hooks ----
 
 #[test]
-fn the_cap_setting_defaults_to_2048_and_round_trips() {
+fn the_cap_is_2048_and_settings_round_trip() {
     let d = tempfile::tempdir().unwrap();
-    let mut s = sdc_gui::settings::GuiSettings::default();
-    assert_eq!(s.render3d.set_preview_max, 0);
+    let s = sdc_gui::settings::GuiSettings::default();
     assert_eq!(SetPreview::from_settings(&s, None).enc.cap, DEFAULT_CAP);
-    s.render3d.set_preview_max = 1024;
-    assert_eq!(SetPreview::from_settings(&s, None).enc.cap, 1024);
     assert!(SetPreview::from_settings(&s, None).enabled);
     let p = d.path().join("gui.toml");
     s.save(&p).unwrap();
@@ -411,25 +408,26 @@ fn hiding_the_panel_during_work_lets_the_app_go_idle_and_the_scene_lands_on_re_s
 }
 
 #[test]
-fn an_old_gui_toml_without_the_cap_gives_the_default_and_out_of_range_values_clamp() {
+fn an_old_gui_toml_with_set_preview_max_loads() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("gui.toml");
+    // A 1.x file that set the removed knob (Note GJ8): it loads without an error and the cap is the fixed 2048.
     std::fs::write(
         &p,
         "[render3d]
+set_preview_max = 4096
 ",
     )
     .unwrap();
-    let (s, _) = sdc_gui::settings::GuiSettings::load(&p);
-    assert_eq!(s.render3d.set_preview_max, 0);
+    let (s, err) = sdc_gui::settings::GuiSettings::load(&p);
+    assert_eq!(err, None);
     assert_eq!(SetPreview::from_settings(&s, None).enc.cap, DEFAULT_CAP);
-    let cap = |n: u32| {
-        let mut s = sdc_gui::settings::GuiSettings::default();
-        s.render3d.set_preview_max = n;
-        SetPreview::from_settings(&s, None).enc.cap
-    };
-    assert_eq!((cap(1), cap(255), cap(256)), (256, 256, 256));
-    assert_eq!((cap(8192), cap(8193), cap(u32::MAX)), (8192, 8192, 8192));
+    assert_eq!(DEFAULT_CAP, 2048);
+    // Saving drops the key.
+    s.save(&p).unwrap();
+    assert!(!std::fs::read_to_string(&p)
+        .unwrap()
+        .contains("set_preview_max"));
 }
 
 #[test]

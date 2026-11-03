@@ -29,6 +29,7 @@ fn m(shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool) -> Material {
         specular_strength: 1.0,
         projected: false,
         projected_glint: false,
+        wetness: false,
     }
 }
 fn names(d: &render3d::permutation::Defines) -> Vec<&str> {

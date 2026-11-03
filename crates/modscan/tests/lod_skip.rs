@@ -1,9 +1,8 @@
-//! LOD content (PGPatcher's blocklist) is skipped entirely: no LOD NIF copies, no LOD paths from plugin records, no
-//! LOD textures in Unused.
+//! LOD content (PGPatcher's blocklist) is skipped entirely: no LOD NIF copies, no LOD paths from plugin records.
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
 mod common;
-use b::{edid, form, grup, plugin, rec, sub, top, zstr};
+use b::{edid, plugin, rec, sub, top, zstr};
 use common::{bsa, instance_fixture, put};
 use modscan::mo2::Instance;
 use modscan::scan::{run, Source};
@@ -31,20 +30,6 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
             ("meshes\\bsa", "okb.nif", &n),
         ]),
     );
-    let refs = [
-        rec(b"REFR", 0x0F00, &[form(b"NAME", 0x801)]),
-        rec(b"REFR", 0x0F01, &[form(b"NAME", 0x800)]),
-    ];
-    let cell = 0x0F80u32.to_le_bytes();
-    let placed = grup(
-        b"CELL",
-        0,
-        &[grup(
-            &0u32.to_le_bytes(),
-            2,
-            &[grup(&0u32.to_le_bytes(), 3, &[grup(&cell, 9, &refs)])],
-        )],
-    );
     put(
         r,
         "mods/A/A.esp",
@@ -68,7 +53,6 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
                         &[edid("LodStat"), sub(b"MODL", &zstr("lod\\gone.nif"))],
                     )],
                 ),
-                placed,
             ],
         ),
     );
@@ -78,12 +62,20 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
     let rep = run(&src, &mut s, &AtomicBool::new(false), &|_| {}, &|| vec![]).unwrap();
     assert_eq!(rep.nifs, 2);
     assert_eq!(s.copy_ids().unwrap().len(), 2);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
+    // The plugin records named only LOD paths, which the scan drops: no model or texture-set rows remain.
+    let n: i64 = s
+        .conn()
+        .query_row(
+            "SELECT (SELECT count(*) FROM model_ref) + (SELECT count(*) FROM txst_slot)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
     // LOD textures stay in tex_winner: a normal NIF may reference one.
     let n: i64 = s
         .conn()
         .query_row("SELECT count(*) FROM tex_winner", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 2);
-    assert_eq!(s.unused_textures().unwrap(), ["textures/t/lonely.dds"]);
 }

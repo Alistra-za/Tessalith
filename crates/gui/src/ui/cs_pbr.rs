@@ -4,13 +4,13 @@
 //! drawing.
 use super::columns::{AMBER, RED};
 use crate::model::cs_pbr::{
-    check_edid, check_text, field_label, fields, pgp_box_text, single_pass_text, statics_text,
-    templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics, StaticsStatus,
-    GLINT_FIELDS, LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX, PGP_BOX_UNAVAILABLE,
+    check_edid, check_text, field_label, fields, pgp_box_text, set_key, single_pass_text,
+    statics_text, templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics,
+    StaticsStatus, GLINT_FIELDS, LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX,
+    PGP_BOX_UNAVAILABLE,
 };
 use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
-use crate::model::plugin_refs::set_key;
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
 use crate::model::AppModel;
 use eframe::egui;

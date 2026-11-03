@@ -392,8 +392,8 @@ impl eframe::App for SdcApp {
         self.state.set3d.poll(&self.model);
         // Both views offer the scan (the Textures view has its row under the header).
         self.meshes.activate();
-        if let Some(req) = self.meshes.take_request() {
-            self.meshes.start(req);
+        if self.meshes.take_request() {
+            self.meshes.start();
             // `begin_scan` disables every origin until the scan ends.
             if self.meshes.scanning() {
                 self.model.scan_started();
@@ -451,10 +451,6 @@ impl eframe::App for SdcApp {
             self.model.settings.render3d.shaders = Some(fp);
             self.model.save_settings();
         }
-
-        // The 3D gap watches expect a next frame exactly when their panel asks for one (after drawing).
-        self.meshes.v3.arm_gap(self.meshes.v3.busy());
-        self.state.set3d.v3.arm_gap(self.state.set3d.busy());
 
         // Worker results arrive on a channel, not as input events: keep frames coming while one is pending.
         let visible = self.model.busy()

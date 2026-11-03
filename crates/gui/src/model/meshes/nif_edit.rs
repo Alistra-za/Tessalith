@@ -175,8 +175,10 @@ pub struct NifEdit {
     /// session's own, so it needs no key.
     sim_cache: BTreeMap<ShapeId, SimCache>,
     /// `simulate_shape` calls so far (the cache's misses).
+    #[cfg(feature = "test-hooks")]
     pub sim_runs: usize,
     /// Entries `shape_matches` tested to find candidates (fix round 2: the index keeps this far below a full scan).
+    #[cfg(feature = "test-hooks")]
     pub match_tests: usize,
     /// v2 B8: In game (simulated) is showing: each shape's simulated material and its lines. None on Edited source.
     /// `preview_nif` draws these materials, so `materials()` and every `before` follow the shown side.
@@ -718,7 +720,9 @@ impl NifEdit {
             anim_shown: None,
             anim_last: vec![],
             sim_cache: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
             sim_runs: 0,
+            #[cfg(feature = "test-hooks")]
             match_tests: 0,
             in_game: None,
             pg_supplied: vec![],
@@ -1466,15 +1470,22 @@ impl NifEdit {
                     let cands = match &c.cands {
                         Some((slots, g, v)) if *slots == s.material.slots && *g == gen => v.clone(),
                         _ => {
+                            #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))]
                             let (v, tested) = candidates(files, &nif_path, &s.material.slots);
-                            self.match_tests += tested;
+                            #[cfg(feature = "test-hooks")]
+                            {
+                                self.match_tests += tested;
+                            }
                             c.cands = Some((s.material.slots.clone(), gen, v.clone()));
                             v
                         }
                     };
                     let out = simulate_shape(files, &cands, &nif_path, &s.material, exists);
                     c.out = Some((s.material.clone(), gen, rev, out.clone()));
-                    self.sim_runs += 1;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        self.sim_runs += 1;
+                    }
                     out
                 }
             };

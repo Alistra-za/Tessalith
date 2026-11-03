@@ -112,14 +112,7 @@ fn shapes_of_shares_one_name_across_rows() {
         })
         .collect();
     let id = s
-        .upsert_copy(
-            "meshes/x.nif",
-            o,
-            1,
-            1,
-            CopyResult::Scanned(scan_of(rows)),
-            None,
-        )
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan_of(rows)))
         .unwrap();
     let v = s.shapes_of(id).unwrap();
     assert_eq!(v.len(), 2000);
@@ -157,7 +150,7 @@ fn raw_strings_and_flags_are_kept_for_odd_slots() {
         },
     ]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let v = s.shapes_of(id).unwrap();
     assert_eq!(v.len(), 2);
@@ -197,7 +190,6 @@ fn raw_strings_and_flags_are_kept_for_odd_slots() {
             2,
             2,
             CopyResult::Scanned(scan_of(vec![])),
-            None,
         )
         .unwrap();
     assert_eq!(id, id2);
@@ -221,7 +213,7 @@ fn more_than_nine_slots_is_recorded_as_a_problem() {
         alpha: None,
     }]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::from(Ok(scan)), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::from(Ok(scan)))
         .unwrap();
     let (status, problem): (i32, Option<String>) = s
         .conn()
@@ -254,7 +246,7 @@ fn schema_v3_rebuilds_old_databases_and_sets_pragmas() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(v, modscan::store::SCHEMA_VERSION);
-    assert_eq!(v, 8);
+    assert_eq!(v, 10);
     let n: i64 = c
         .query_row("SELECT count(*) FROM shape", [], |r| r.get(0))
         .unwrap();
@@ -341,7 +333,7 @@ fn put(s: &mut Store, path: &str, o: i64, block: u32, shader: Shader, skinned: b
         shader,
         alpha: None,
     }]);
-    s.upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan), None)
+    s.upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan))
         .unwrap()
 }
 
@@ -426,7 +418,6 @@ fn query_store() -> (tempfile::TempDir, Store, HashMap<&'static str, i64>) {
         copy_id: ids["d"],
         is_derived: true,
         source_copy_id: Some(ids["d_src"]),
-        derive_check: Some(0),
     }])
     .unwrap();
     let names = ["a", "b", "c", "d", "e", "f", "g"];
@@ -674,7 +665,7 @@ fn open_read_only_never_creates_rebuilds_or_writes() {
     }
     assert!(matches!(
         Store::open_read_only(&old),
-        Err(modscan::ScanError::SchemaVersion { found: 2, want: 8 })
+        Err(modscan::ScanError::SchemaVersion { found: 2, want }) if want == modscan::store::SCHEMA_VERSION
     ));
     let n: i64 = rusqlite::Connection::open(&old)
         .unwrap()
@@ -738,7 +729,7 @@ fn small_store(nifs: &[(&str, Shapes)]) -> (tempfile::TempDir, Store) {
             })
             .collect();
         ids.push(
-            s.upsert_copy(path, a, 1, 1, CopyResult::Scanned(scan_of(rows)), None)
+            s.upsert_copy(path, a, 1, 1, CopyResult::Scanned(scan_of(rows)))
                 .unwrap(),
         );
     }
@@ -1051,15 +1042,8 @@ fn a_cold_scan_runs_with_synchronous_off_and_ends_normal() {
     assert_eq!(pragma(&s, "synchronous"), 0, "OFF during a cold scan");
     s.end_scan().unwrap();
     assert_eq!(pragma(&s, "synchronous"), 1);
-    s.upsert_copy(
-        "meshes/a.nif",
-        1,
-        1,
-        1,
-        CopyResult::Failed("x".into()),
-        None,
-    )
-    .unwrap();
+    s.upsert_copy("meshes/a.nif", 1, 1, 1, CopyResult::Failed("x".into()))
+        .unwrap();
     s.begin_scan().unwrap();
     assert_eq!(pragma(&s, "synchronous"), 1, "a warm scan keeps NORMAL");
     s.end_scan().unwrap();
@@ -1158,7 +1142,7 @@ fn shapes_of_round_trips_the_3d_index() {
     ]);
     scan.index3d = BTreeMap::from([(7, 0)]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let v: Vec<(u32, Option<u32>)> = s
         .shapes_of(id)
@@ -1189,7 +1173,6 @@ fn a_derived_copy_keeps_its_3d_index_through_commit_pending() {
         origin_id: o,
         size: 1,
         mtime: 1,
-        crc32: None,
         derived: true,
         result: CopyResult::Scanned(scan),
     }])
@@ -1199,24 +1182,48 @@ fn a_derived_copy_keeps_its_3d_index_through_commit_pending() {
     assert_eq!(s.shapes_of(id).unwrap()[0].index3d, Some(5));
 }
 
+/// 2.0 debloat (Note GJ7): a 1.x store (schema 8) is a version mismatch: read-only opens ask for a scan, and the next
+/// read-write open rebuilds it empty, without the dropped tables.
 #[test]
-fn a_schema_7_database_is_rebuilt_with_the_index3d_column() {
+fn a_schema_8_store_opens_empty() {
     let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("v7.db");
+    let p = d.path().join("v8.db");
     {
-        let c = rusqlite::Connection::open(&p).unwrap();
-        c.execute_batch(
-            "CREATE TABLE shape (copy_id INTEGER, block INTEGER, PRIMARY KEY(copy_id, block));
-             INSERT INTO shape VALUES (1, 1); PRAGMA user_version = 7;",
+        let mut s = Store::open(&p).unwrap();
+        s.upsert_origin(&OriginSpec {
+            kind: KIND_MOD,
+            name: "A".into(),
+            root: "C:/mods/A".into(),
+            parent: None,
+            priority: 1,
+            derived_by: None,
+            derived_state: None,
+        })
+        .unwrap();
+        // A 1.x table, as a real schema-8 file has it.
+        s.conn()
+            .execute_batch("CREATE TABLE tex_ref (x INTEGER); PRAGMA user_version = 8;")
+            .unwrap();
+    }
+    assert!(matches!(
+        Store::open_read_only(&p),
+        Err(modscan::ScanError::SchemaVersion { found: 8, want }) if want == modscan::store::SCHEMA_VERSION
+    ));
+    let s = Store::open(&p).unwrap();
+    let origins: i64 = s
+        .conn()
+        .query_row("SELECT count(*) FROM origin", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(origins, 0, "rebuilt: no origin left");
+    let gone: i64 = s
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('tex_ref', 'txst_ref', 'placed', 'rec_inert', 'pgp_diff', 'tex_copy')",
+            [],
+            |r| r.get(0),
         )
         .unwrap();
-    }
-    let s = Store::open(&p).unwrap();
-    let n: i64 = s
-        .conn()
-        .query_row("SELECT count(index3d) FROM shape", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(n, 0, "rebuilt: the column exists and the old row is gone");
+    assert_eq!(gone, 0, "the dropped tables are not recreated");
 }
 
 /// Audit 2026-10-15 item 17: texsets (and their tex_use rows) that no live or pending shape uses are dropped at the
@@ -1266,7 +1273,7 @@ fn winners_read_time_on_100k_paths() {
     for (i, p) in paths.iter().enumerate() {
         let o = if i % 10 == 0 { b } else { a };
         let id = s
-            .upsert_copy(p, o, 1, 1, CopyResult::Scanned(scan_of(vec![])), None)
+            .upsert_copy(p, o, 1, 1, CopyResult::Scanned(scan_of(vec![])))
             .unwrap();
         game.insert(pid[i], (id, 1));
     }
@@ -1323,7 +1330,6 @@ fn copies_of_path_orders_loose_by_priority_then_bsas() {
         copy_id: ids[2],
         is_derived: true,
         source_copy_id: None,
-        derive_check: None,
     }])
     .unwrap();
     let c = s.copies_of_path(p).unwrap();

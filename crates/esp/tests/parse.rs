@@ -311,116 +311,36 @@ fn a_trailing_xxxx_is_an_incomplete_subrecord_and_keeps_earlier_facts() {
     );
 }
 
-fn placed(sig: &[u8; 4], id: u32, base: u32) -> Vec<u8> {
-    rec(
-        sig,
-        id,
-        &[edid("R"), form(b"NAME", base), sub(b"DATA", &[0u8; 24])],
-    )
-}
-
-/// Filtering spec §3; group types per xEdit dev-4.1.6 `wbImplementation.pas` `TwbGroupRecord.GetName` (1-10). The base
-/// FormID of every REFR/ACHR under CELL and WRLD, once each, ascending; other records there are skipped unread.
+/// Note GJ7: CELL groups are skipped by size, unread; of a WRLD group only the worldspace records are read (their
+/// cloud model), and its children (cells, references) are skipped by size like any nested group.
 #[test]
-fn placed_references_in_interior_and_exterior_cells() {
-    let cell = 0x0000_1000u32.to_le_bytes();
-    let interior = grup(
-        b"CELL",
-        0,
-        &[grup(
-            &0u32.to_le_bytes(),
-            2,
-            &[grup(
-                &0u32.to_le_bytes(),
-                3,
-                &[
-                    rec(b"CELL", 0x1000, &[edid("Room")]),
-                    grup(
-                        &cell,
-                        6,
-                        &[
-                            grup(
-                                &cell,
-                                8,
-                                &[
-                                    placed(b"REFR", 0x2001, 0x0100_0800),
-                                    placed(b"ACHR", 0x2002, 0x7777),
-                                ],
-                            ),
-                            grup(
-                                &cell,
-                                9,
-                                &[
-                                    placed(b"REFR", 0x2003, 0x0100_0800),
-                                    rec(b"NAVM", 0x2004, &[vec![0xFF; 32]]),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            )],
-        )],
-    );
-    let (wrld, ext) = (0x0000_3000u32.to_le_bytes(), 0x0000_3001u32.to_le_bytes());
-    let packed = [form(b"NAME", 0x0ABC), sub(b"DATA", &[0u8; 24])].concat();
-    let exterior = grup(
-        b"WRLD",
-        0,
-        &[
-            rec(b"WRLD", 0x3000, &[edid("Tamriel")]),
-            grup(
-                &wrld,
-                1,
-                &[grup(
-                    &[0u8; 4],
-                    4,
-                    &[grup(
-                        &[0u8; 4],
-                        5,
-                        &[
-                            rec(b"CELL", 0x3001, &[]),
-                            grup(
-                                &ext,
-                                6,
-                                &[grup(
-                                    &ext,
-                                    9,
-                                    &[rec_raw(
-                                        b"REFR",
-                                        0x3002,
-                                        FLAG_COMPRESSED,
-                                        &compressed(&packed),
-                                    )],
-                                )],
-                            ),
-                        ],
-                    )],
-                )],
-            ),
-        ],
-    );
+fn cells_and_world_children_are_skipped_unread() {
+    let garbage = grup(&[0u8; 4], 6, &[vec![0xFF; 64]]);
     let f = parse(
         "x.esp",
         &plugin(
             0,
             &[],
             &[
-                interior,
-                exterior,
+                grup(b"CELL", 0, std::slice::from_ref(&garbage)),
+                top(
+                    b"WRLD",
+                    &[rec(b"WRLD", 0x3000, &[edid("Tamriel")]), garbage],
+                ),
                 top(b"STAT", &[rec(b"STAT", 0x0100_0800, &[edid("Rock")])]),
             ],
         ),
     );
     assert!(f.errors.is_empty(), "{:?}", f.errors);
-    assert_eq!(f.placed, vec![0x0ABC, 0x7777, 0x0100_0800]);
-    // The STAT and the WRLD record itself (its cloud model is read); placed references are not records.
-    assert_eq!(f.records.len(), 2);
+    let sigs: Vec<&[u8; 4]> = f.records.iter().map(|r| &r.sig).collect();
+    assert_eq!(sigs, [b"WRLD", b"STAT"]);
 }
 
-/// Review focus 4: a bad nested group is reported and ends only its own group.
+/// Review focus 4: a bad nested group inside a wanted group is reported, ends only its own group, and later groups
+/// are read.
 #[test]
-fn a_bad_nested_cell_group_is_reported_and_later_groups_are_read() {
-    let mut bad = grup(&[0u8; 4], 6, &[placed(b"REFR", 1, 0x10)]);
+fn a_bad_nested_group_is_reported_and_later_groups_are_read() {
+    let mut bad = grup(&[0u8; 4], 1, &[vec![0xEE; 16]]);
     bad[4..8].copy_from_slice(&10_000u32.to_le_bytes()); // runs past its parent
     let f = parse(
         "x.esp",
@@ -428,7 +348,7 @@ fn a_bad_nested_cell_group_is_reported_and_later_groups_are_read() {
             0,
             &[],
             &[
-                grup(b"CELL", 0, &[bad]),
+                top(b"WRLD", &[bad]),
                 top(b"STAT", &[rec(b"STAT", 0x0100_0800, &[edid("Rock")])]),
             ],
         ),
@@ -438,109 +358,14 @@ fn a_bad_nested_cell_group_is_reported_and_later_groups_are_read() {
     assert_eq!(f.records.len(), 1);
 }
 
-/// Review focus 4: nesting is capped, so a crafted file cannot overflow the stack.
+/// A wanted top group cut off by the end of the file is reported and what is inside is still read.
 #[test]
-fn groups_nested_too_deep_are_an_error_not_a_stack_overflow() {
-    let mut g = grup(&[0u8; 4], 9, &[placed(b"REFR", 1, 0x10)]);
-    for _ in 0..20 {
-        g = grup(&[0u8; 4], 6, &[g]);
-    }
-    let f = parse("x.esp", &plugin(0, &[], &[grup(b"CELL", 0, &[g])]));
-    assert_eq!(f.errors.len(), 1, "{:?}", f.errors);
-    assert!(f.errors[0].contains("nested deeper"), "{:?}", f.errors);
-    assert!(f.placed.is_empty());
-}
-
-fn nested(n: usize) -> Vec<u8> {
-    let mut g = grup(&[0u8; 4], 9, &[placed(b"REFR", 1, 0x10)]);
-    for _ in 1..n {
-        g = grup(&[0u8; 4], 6, &[g]);
-    }
-    g
-}
-
-/// The depth cap is exact: 8 groups nested under a CELL group are read, a 9th is an error.
-#[test]
-fn nesting_limit_is_eight_groups() {
-    let ok = parse("x.esp", &plugin(0, &[], &[grup(b"CELL", 0, &[nested(8)])]));
-    assert!(ok.errors.is_empty(), "{:?}", ok.errors);
-    assert_eq!(ok.placed, vec![0x10]);
-    let bad = parse("x.esp", &plugin(0, &[], &[grup(b"CELL", 0, &[nested(9)])]));
-    assert_eq!(bad.errors.len(), 1, "{:?}", bad.errors);
-    assert!(bad.placed.is_empty());
-}
-
-#[test]
-fn a_zero_base_is_not_a_placement() {
-    let f = parse(
-        "x.esp",
-        &plugin(
-            0,
-            &[],
-            &[grup(
-                b"CELL",
-                0,
-                &[placed(b"REFR", 1, 0), placed(b"REFR", 2, 0x20)],
-            )],
-        ),
-    );
-    assert!(f.errors.is_empty(), "{:?}", f.errors);
-    assert_eq!(f.placed, vec![0x20]);
-}
-
-#[test]
-fn temporary_children_group_type_10_is_walked() {
-    let c = 0x1000u32.to_le_bytes();
-    let f = parse(
-        "x.esp",
-        &plugin(
-            0,
-            &[],
-            &[grup(
-                b"CELL",
-                0,
-                &[grup(&c, 10, &[placed(b"ACHR", 1, 0x30)])],
-            )],
-        ),
-    );
-    assert!(f.errors.is_empty(), "{:?}", f.errors);
-    assert_eq!(f.placed, vec![0x30]);
-}
-
-/// A fault in one CELL top group does not lose the placements of the next one.
-#[test]
-fn a_faulty_cell_group_does_not_lose_the_next_one() {
-    let mut bad = grup(&[0u8; 4], 6, &[placed(b"REFR", 1, 0x10)]);
-    bad[4..8].copy_from_slice(&10_000u32.to_le_bytes());
-    let good = grup(&[0u8; 4], 6, &[placed(b"REFR", 2, 0x40)]);
-    let f = parse(
-        "x.esp",
-        &plugin(
-            0,
-            &[],
-            &[grup(b"CELL", 0, &[bad]), grup(b"CELL", 0, &[good])],
-        ),
-    );
-    assert_eq!(f.errors.len(), 1, "{:?}", f.errors);
-    assert_eq!(f.placed, vec![0x40]);
-}
-
-/// A CELL/WRLD top group cut off by the end of the file is reported and what is inside is still read.
-#[test]
-fn a_truncated_cell_top_group_is_reported_and_read() {
-    let mut b = plugin(
-        0,
-        &[],
-        &[grup(
-            b"WRLD",
-            0,
-            &[grup(&[0u8; 4], 6, &[placed(b"REFR", 1, 0x50)])],
-        )],
-    );
+fn a_truncated_top_group_is_reported_and_read() {
+    let mut b = plugin(0, &[], &[top(b"STAT", &[rec(b"STAT", 1, &[edid("Rock")])])]);
     let at = plugin(0, &[], &[]).len();
     b[at + 4..at + 8].copy_from_slice(&100_000u32.to_le_bytes());
     let f = parse("x.esp", &b);
     assert_eq!(f.errors.len(), 1, "{:?}", f.errors);
     assert!(f.errors[0].contains("runs past the end"), "{:?}", f.errors);
-    assert_eq!(f.placed, vec![0x50]);
+    assert_eq!(f.records.len(), 1);
 }

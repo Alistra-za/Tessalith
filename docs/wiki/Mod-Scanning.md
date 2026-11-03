@@ -14,7 +14,6 @@ Scanning is read-only and never changes your mods, your MO2 instance or your gam
 | Path pickers | The input name box and its ▾ list, and the match pickers in the PGPatcher JSON editor, list texture paths and mesh folders the scan found. |
 | Rename warnings | Renaming an output that scanned meshes still use under its old name (as the diffuse, slot 0) is flagged amber. PBR sets under `cs` are not flagged. |
 | 3D preview | *Auto* in the set preview shows the set on a scanned game mesh that uses its diffuse. |
-| Plugin references | The set editor's "Used by plugins" and the Meshes view's "Plugin file references…" window. |
 
 Your own choices in `sdc.toml` always win over scan evidence.
 
@@ -38,7 +37,7 @@ If you start `tessalith.exe` from inside MO2, it detects that and asks: "Opened 
 
 ### A folder
 
-**Scan a folder…** scans the meshes under one folder, for example an extracted mod or a mod you are building. A folder scan has no plugin pass, so plugin references and the complex-grass auto-tag are not available.
+**Scan a folder…** scans the meshes under one folder, for example an extracted mod or a mod you are building. A folder scan has no plugin pass, so **Plugin overrides** and the complex-grass auto-tag are not available.
 
 ### Running a scan
 
@@ -63,13 +62,12 @@ Banners about PGPatcher:
 
 | Banner | Meaning and action |
 |---|---|
-| PGPatcher is running — scan paused. | Close PGPatcher and press **Retry**, or **Scan without PGPatcher output**. |
+| PGPatcher is running, so the scan is paused. Close PGPatcher and press Retry to scan. | **Retry** rescans. |
 | PGPatcher output '<name>' looks incomplete (no ParallaxGen_Diff.json). Re-run PGPatcher. | The marker set is incomplete. |
-| PGPatcher output is out of date for N meshes. | Source meshes changed since PGPatcher ran. **Show list** lists them. Re-run PGPatcher. |
 
 ## The Meshes view
 
-The mesh list, mesh detail, shapes and plugin file references are on [The Meshes view](GUI-Meshes.md).
+The mesh list, mesh detail (with Plugin overrides) and shapes are on [The Meshes view](GUI-Meshes.md).
 
 ## Error messages
 
