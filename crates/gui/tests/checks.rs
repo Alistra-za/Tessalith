@@ -1066,6 +1066,22 @@ fn checks_settings_default_on_and_load_from_an_old_gui_toml() {
     assert!(!back.checks.plastic);
 }
 
+/// Note FM24: the removed `[checks] drop_top_mip` switch in an old gui.toml loads quietly and is dropped on save.
+#[test]
+fn a_removed_drop_top_mip_key_in_gui_toml_is_ignored() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    std::fs::write(&p, "[checks]\ndrop_top_mip = true\nplastic = false\n").unwrap();
+    let (s, err) = GuiSettings::load(&p);
+    assert!(err.is_none(), "{err:?}");
+    assert!(!s.checks.plastic, "the other keys still load");
+    assert!(s.checks.low_detail);
+    s.save(&p).unwrap();
+    assert!(!std::fs::read_to_string(&p)
+        .unwrap()
+        .contains("drop_top_mip"));
+}
+
 // ---- Task 3: the end-of-export summary and the green suggestion ---------------------------------------------------
 
 #[test]

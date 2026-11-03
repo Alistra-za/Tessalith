@@ -174,3 +174,13 @@ AD5	AD		back	FM		partial	2026-11-03		goes: the Review stale-output row and its D
 AG90	AG		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
 DR9	DR		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
 DV7	DV		back	FM		partial	2026-11-03		goes: the Review stale-output row and its Delete (FM24); stays: the file is left in place
+CL25	CL		back	FM		partial	2026-11-03		goes: ExportModel accepting a LowDetail or UpToDate skip on a Running row (no held or measure-only run); stays: the rest
+CL¶- Carried to Task 5:	CL		back	FM		partial	2026-11-03		goes: the export-model skip clause and the Drop mip 0 switch setting Hold mode; stays: out_size, Clear, check_of
+CN62	CN		back	FM		partial	2026-11-03		goes: the order before the acknowledgements; stays: the Also rows of the gate
+CN64	CN		back	FM		partial	2026-11-03		goes: a held export's second pass; stays: the worker and the end of an Also export
+CN66	CN		back	FM		partial	2026-11-03		goes: start_export_pass turning Hold into Warn; stays: progress and the Off phases
+FL¶- `review_gate()` in steady state	FL		back	FM		partial	2026-11-03		goes: the asks and half-size parts of the gate; stays: the timing
+FC¶- **No false JSON stale rows.**	FC		back	FM		archive-item	2026-11-03		whole: the stale JSON rows are gone (FM24)
+FC¶- **A failed save undoes the half size.**	FC		back	FM		archive-item	2026-11-03		whole: no half-size write (FM24)
+FC¶- **No auto-record onto the half step.**	FC		back	FM		archive-item	2026-11-03		whole: no half step (FM24)
+FC¶- **Review footer.**	FC		back	FM		partial	2026-11-03		goes: the stale list in the footer; stays: the NIF and JSON lists share one scroll area

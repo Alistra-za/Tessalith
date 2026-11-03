@@ -371,7 +371,6 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             let v = *on;
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, name));
         }
-
         if c != now {
             actions.push(Action::Checks(c));
         }

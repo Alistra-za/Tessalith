@@ -830,6 +830,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Advanced.** `drop_top_mip` is an `ADVANCED_FIELDS` row, "Half size" (Note FC2): a tick box with ↺, like `resize`. ↺ removes the key in one undo step, and unticking also removes it (`set_field` routes `false` to `clear_field`), because a written `false` would stay as a provenance entry (Task 4 M9). On a single-level chain (`mips.levels = "none"` or a count of 0 or 1), `field_lock` disables the row with "No mips to drop", and `set_field` refuses `true` there, so bulk edits and Copy settings never write it either (fix round 1, M6). A half size ticked here, or copied, is never measured first.
   - **Copy settings.** A saved half size is a tick like any other field (`Half size: true`); there is no dialog (Note FC2).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - Carried to Task 5: `out_size` writes n−1 levels for `Count(n)` (M4); Clear removes the key rather than writing `false` (M9); `check_of(ChkLowDetail)`; the export model accepting LowDetail and UpToDate skips on a running row; the "Drop mip 0" switch sets Hold mode, not `Profile::drop_top_mip`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CL25 Export rows and the size estimate (Task 5).** `check_of(CHK-LOW-DETAIL) = LowDetail`, so a Warn-mode export row is a `Level::Check` Problems row: hidden by the "Fake resolution" switch, counted by the Checks filter and the end summary, and never in the Export dot's `ready_rows` (K2). `ExportModel` accepts a `LowDetail` or `UpToDate` skip on a `Running` row (the engine emits `FileStarted` before a held or measure-only run); every other skip keeps the old rule, and neither calls `finished_at`, so the pace ignores them. `out_size::estimate` drops level 0 for `drop_top_mip` on a chain of more than one level: half the size and one level less (`Count(n)` writes n − 1; `full` is a full chain of the half size).
+
 ## Note CI — NIF editing v2 Phase A (NIF team, 2026-10-20)
 
 ARCHIVED (superseded by Note GD5, 2026-10-29)
@@ -1021,6 +1027,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **CN73 Task 11 review fixes (M1-M4).** M1: `also_root()` is the PBR folder only in the cs mode, so a tick left from it in the vanilla mode changes neither the plan's root nor `skip_root` (gated on `also_root()`) nor the NIF root; Review still names TA20. M2: a PBR-phase error is not notified by `also_finished` (its note stays); `export_ended`'s Err path logs it once, with the dialog, as a plain export's. M3: `engine::also::check_names` is `pub`, and Review's gate runs it after `ExportConfig::check()`, so a custom name equal to another folder's default (`names.vanilla = "Mod PBR"`) is refused at Review naming `export.names.vanilla`. The CI29/P16 expression moved from `app.rs` into `AppModel::nif_export_root()` (same value; `app.rs` calls it), so a test pins it; the worker's `ExportDone` mapping is `worker::also_done`, unit-tested. M4: Undo/Redo stay unguarded during an export (the finishers use the roots captured at its start); the guard's comment says so. Two engine refusals the gate cannot foresee (`project_name`, an unreadable `_sdc/also.json`) still arrive as the export's error.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CN62 Review's Also rows (Review Focus 5, P1, P9, TA19, TA20).** `review_gate`, with a tick on, after the blocks and before the acknowledgements: `Review::toml_unwritable` ("sdc.toml is read-only: Also export settings could not be saved"; an `Option<String>` because `Review` derives `Default`, taken in `open_review` and again on every Review Export click, never per frame); the cs mode (TA20's text, added so the predictable refusal never reaches `run_also`); `also::check_location(&[root], &also_location(), &also_folders())`; `ExportConfig::check()`. The first `Err` is the button's reason and nothing writes. Known gap: the engine's folder-name collision check (`check_names`, a custom name equal to another folder's default) is private, so that case surfaces only at run time, as the export's error. `review_button_text` reads "Export {n} files to {k} folders" (k = 2, or 3 with CM, TA30); `n` is still this project's planned files.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CN64 The worker and the end of an Also export (CN56).** `start_export_pass(fresh)` calls `worker::spawn_export_also` while a tick is on (a held export's second pass never does). It runs `run_also(session.engine(), session.cache(), ..)` under `spawn_guarded(.., "export", ..)`, so the `Panicked` router ends it. It sends `AlsoFinished(Box<AlsoSummary>)`, then `ExportDone`: `Err` when `run_also` failed or `AlsoSummary::error` names the PBR phase (CN56: `run_also` is `Ok` then; nothing is written after a failed PBR run, as after a failed plain export); otherwise `Ok(combined())` with `converted += copied`, because `batch_done` counts leave the O4 copies out. `AlsoFinished` becomes export notes (the summary's notes, the copies, the sets not derived, a cancel after a phase), never a dialog; a Vanilla or CM phase error is an Error message, and that export's end line is logged as an Error too, while the PBR folder's JSON finishers still run (its run was complete).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CN66 Progress and low detail (P8, P10, TA24).** One `drawer_epoch` per Also export; progress stays rows counted model-side, and the bar may step back as each phase plans its rows. `shortcut:` the first phase's `BatchDone` stops the pace clock (an ETA across phases; upgrade if users ask). `start_export_pass` turns Hold into Warn for an Also export (Off stays Off); `run_also` runs the Vanilla and CM phases with `LowDetailMode::Off`.
 
 ## Note CM — NIF v2 Phase B: animation clock, key editor, controllers, clips, In game preview (NIF team, 2026-10-21)
 
@@ -1573,6 +1588,18 @@ ARCHIVED (superseded by Note FM, 2026-11-03)
 ARCHIVED (superseded by Note FM, 2026-11-03)
   - **Undecided sets keep their recorded outputs.** `stale_outputs` skips records whose source belongs to a set that has an unresolved or blocked job, so an undecided PBR set's old `textures\pbr\` DDS files are not listed with Delete; deciding the set to a recipe that no longer writes them lists them. Test `an_undecided_pbr_set_leaves_its_recorded_dds_unlisted`.
 
+ARCHIVED (superseded by Note FM, 2026-11-03)
+  - **No false JSON stale rows.** `refresh_stale_json` derives the PGPatcher JSON path from the export folder whatever `prepare` gives, counts CS PBR files it refused as made, and skips the complex-material check when `PendingCm.partial` (a ticked set without its complex `_m`). Test `an_undecided_pbr_set_leaves_its_recorded_json_unlisted`.
+
+ARCHIVED (superseded by Note FM, 2026-11-03)
+  - **A failed save undoes the half size.** `start_export_pass` calls `undo_half_step()` when the save after the half-size write fails. Test `a_failed_save_after_the_half_size_write_undoes_it`.
+
+ARCHIVED (superseded by Note FM, 2026-11-03)
+  - **No auto-record onto the half step.** `record_auto_decisions` waits while `review.half_step` is the top of the history. Test `an_automatic_recording_does_not_land_on_the_half_size_step`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Review footer.** The NIF, stale and JSON lists share one scroll area of at most a third of the tab, drawn with `show_rows`. Test `the_review_footer_lays_out_only_the_rows_on_screen`.
+
 ## Note FE — BC6H peak-preserving mode (agent, 2026-10-31)
 
 ARCHIVED (superseded by Note FF1, 2026-10-31)
@@ -1766,6 +1793,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **FL2 `prepare` and `plan_sets`.** `Engine::plan_full` is `prepare` (setup, discovery, `[files]`, grouping, joins, typed roles, set edits, duplicates; it emits `batch_started`, CFG-PRESET-SKIPPED, the `[inputs]` read-as warnings, IN-UNREADABLE, SET-EDIT-STALE and `file_discovered`, in that order) followed by `plan_sets(&Prepared, scope)` (pass 1 onward). `plan_cached` and `Session::plan` both call it, so a full plan emits what it did before, in the same order. `prepare` and `plan_sets` share one base `ResolveCtx` (`base_ctx`). `api::tests::prepared_plans_twice_equal` plans one `Prepared` twice to equal jobs, skips, helpers and events. Two costs taken with it: pass 1 stats each source once and hands the stamp and hints to `resolve_one`, and the GUI's plan request borrows the cached set views instead of building them three times (`model::tests::building_the_plan_request_clones_no_set_views`).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - `review_gate()` in steady state: 0.01 ms, its parts (blocks, asks, half-size, overwrites, export files, undecided) at most 0.01 ms each, so it is not cached.
 
 ## Note D — exact opaque alpha flag
 

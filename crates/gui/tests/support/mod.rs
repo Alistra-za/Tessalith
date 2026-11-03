@@ -201,7 +201,7 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
-/// Export as a user would: Export, then, if Review opened, acknowledge its pitfalls and press its Export.
+/// Export as a user would: Export, then, if Review opened, press its Export.
 pub fn export_through(m: &mut AppModel) {
     m.export_clicked();
     if m.review.is_some() {

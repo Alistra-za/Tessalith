@@ -112,7 +112,7 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Undecided.** A texture that waits for your answer (its sub-type, what its alpha means, its cube layout, or an acknowledgement). The Textures column counts them (*n undecided*), the pill is *Undecided*, a Problems row reads *Undecided: …*, and each row's button is *Decide…*. Export skips them.
 - **Not ready.** A set with a problem in the set or in one of its textures. It is the Sets column's *Not ready* pill, the opposite of *Ready*.
 - **Blocker.** A problem that stops the export (a red dot). Fix it or remove the texture and export again.
-- **Warning.** A problem that does not stop the export (an amber dot). Export writes the file anyway; Review asks you to tick the ones that need it.
+- **Warning.** A problem that does not stop the export (an amber dot). Export writes the file anyway.
 - **Check.** A hint from an artist check (Advanced → Checks): a map that will probably look wrong in game. It never blocks and never changes "ready" (a weak grey dot).
 - **Pin.** *Pin this slot (always use this file)* keeps a set slot's file as it is in Tessalith (saved in `sdc-project.toml`, never in the PGPatcher JSON). *Pinned* in the preview is the encode you compare against.
 - **PGPatcher lock.** PGPatcher keeps the mesh's own texture in a slot ([Slot menus](GUI-Sets-Column.md#slot-menus)).

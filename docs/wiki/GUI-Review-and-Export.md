@@ -16,7 +16,9 @@ What **Export** does, the Review panel that opens when something needs a look fi
 
 **Copy CLI command** (Files tab) copies the `sdc convert` command that reproduces this export from the command line: the same folder (with `--recursive`), output and thread count, and `--accept-suggestions high`, as the GUI plans. Because Export saved `sdc.toml` first, that command gives the same manifest records and the same DDS bytes for everything `sdc.toml` decides. One thing it does not carry over: the CLI reads neither `sdc-project.toml` nor the scan. Set edits (moved files, created sets, borrows, set renames, output names, set shaders) and the mesh and grass evidence from the scan do not apply to `sdc convert`, so sets that depend on them come out differently. The sub-types and alpha meanings that evidence decided are written to `sdc.toml`, so those carry over.
 
-Files an earlier export wrote that the project no longer produces stay in the export folder; Tessalith never deletes them. at once in `_sdc/generated.json` beside `sdc-project.toml`, so discarding unsaved edits after an export, a crash, or a read-only `sdc-project.toml` does not make the next export ask about Tessalith's own JSON. <!-- D:FC11 -->
+The hash of each JSON Tessalith writes is recorded at once in `_sdc/generated.json` beside `sdc-project.toml`, so discarding unsaved edits after an export, a crash, or a read-only `sdc-project.toml` does not make the next export ask about Tessalith's own JSON. <!-- D:FC11 -->
+
+Files an earlier export wrote that the project no longer produces stay in the export folder; Tessalith never deletes them.
 
 With [Also export as Vanilla and CM](GUI-Also-Export.md) on, Export always opens Review, and Review's Export writes three folders.
 
@@ -35,6 +37,7 @@ Each column's heading carries its count: **Blockers (n)**, **Undecided (n)**. Pi
 
 - **Blockers** (red), with **Go to set**. A missing export folder is a blocker, so it counts. Export stays greyed out, with the reason beside it ("Fix 2 blockers first"), until they are fixed.
 - **Undecided**: one row per texture with its question: a sub-type box and **✓**, the alpha choices, or **Acknowledge for this texture** (or **Drop the alpha anyway**, see [Words](GUI-Main-Window.md#words)). Click the name to select the texture. **Accept all suggestions** works as in [Problems](GUI-Problems.md#deciding-in-problems); the others stay listed. A texture decided here leaves the list.
+
 **Overwrite questions** (in Blockers): a PGPatcher JSON edited outside Tessalith ("<name> was edited outside Tessalith") and a NIF whose export path holds a file Tessalith did not write ("<path> was not written by Tessalith") each have **Keep the edited file** or **Overwrite it**. Neither is chosen until you click, and Review's **Export** stays off ("Answer Keep or Overwrite for <name>") until every one is answered. The answer is tied to the file as it is now: a change to the file before you press Export is asked again; a change during the export is kept, with a note. The answer applies to the next export only; closing Review or a reload clears it. The Community Shaders PBR and complex-material JSON show their state only; a file of those edited outside Tessalith is kept, with a note.
 
 **What will be written**: the number of DDS files and one line per JSON file with its state on disk: *will be written*, *will be replaced (written by Tessalith)*, *edited outside Tessalith* or *cannot be read; kept*.

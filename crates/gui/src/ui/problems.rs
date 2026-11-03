@@ -281,7 +281,6 @@ fn fix_button(
                 .is_some()
                 .then_some(crate::model::also::EXPORT_RUNNING),
         ),
-
     };
     clicked.then(|| fix.clone())
 }

@@ -661,7 +661,7 @@ fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
     out
 }
 
-/// P17: the EXACT groups and rows Review shows. An absence-only test passes after any rename, so this lists everything
+/// P17: the EXACT groups and rows Review shows. The list is intentionally exact: a new, renamed or returning group or row must fail this test and be added on purpose. An absence-only test passes after any rename, so this lists everything
 /// drawn in the tab for one fixture: an undecided project with its export folder chosen, one NIF edit written and
 /// one blocked. There is no Warnings group, no half-size question and no Stale outputs group.
 #[test]
