@@ -323,3 +323,91 @@ fn encode_now_during_an_export_runs_when_the_export_ends() {
     assert!(matches!(m.preview.encoded, EncodedState::Done(_)));
     assert!(m.preview.notice.is_none(), "and goes once it has run");
 }
+
+/// The labels of the expanded preview's toolbar controls, sorted.
+fn toolbar_controls(m: AppModel) -> Vec<String> {
+    use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let bar = PanelState::load(&h.ctx, egui::Id::new("preview-toolbar"))
+        .expect("the toolbar is drawn")
+        .outer_rect;
+    let mut out = vec![];
+    for role in [
+        Role::Button,
+        Role::CheckBox,
+        Role::SpinButton,
+        Role::Slider,
+        Role::ComboBox,
+    ] {
+        for n in h.query_all_by_role(role) {
+            if bar.contains_rect(n.rect()) {
+                if let Some(l) = n.accesskit_node().label() {
+                    out.push(l);
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Note FM26: the preview offers the side-by-side pair with Heatmap, Lens, Tile 3×3 and UV coverage, and the HDR
+/// exposure only for an HDR texture. Pin, Compare, Split and the Range overlay are gone.
+#[test]
+fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
+    let base = [
+        "1:1",
+        "A",
+        "B",
+        "Encode now",
+        "Fit",
+        "G",
+        "Heatmap",
+        "Lens",
+        "Live encode",
+        "R",
+        "RGBA",
+        "Tile 3×3",
+        "UNORM",
+        "UV coverage overlay",
+        "sRGB",
+        "α-mask",
+        "✕ Close",
+    ];
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.expand("landscape/rock01_rmaos");
+    settle(&mut m);
+    m.encode_now();
+    settle(&mut m);
+    assert_eq!(toolbar_controls(m), base);
+
+    // An HDR texture adds the exposure slider and drops sRGB / UNORM.
+    let d = tempfile::tempdir().unwrap();
+    let root = support::mod_folder(d.path());
+    raw_dds(
+        &root.join("landscape").join("sky.dds"),
+        10,
+        8,
+        &[0, 0x3C, 0, 0x3C, 0, 0x3C, 0, 0x3C],
+    );
+    let mut m = opened(d.path());
+    m.expand("landscape/sky.dds");
+    settle(&mut m);
+    let got = toolbar_controls(m);
+    assert!(got.contains(&"Exposure".to_string()), "{got:?}");
+    for gone in [
+        "Side by side",
+        "Split",
+        "Pin this result",
+        "Unpin",
+        "Range overlay",
+    ] {
+        assert!(!got.iter().any(|l| l == gone), "{gone} is back: {got:?}");
+    }
+}

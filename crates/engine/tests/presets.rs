@@ -1132,6 +1132,23 @@ fn removed_codes_in_allow_lists_are_named() {
     }
 }
 
+/// Note FM26: the Value range and Plastic look checks are gone, and so are their codes. An allow list that names one
+/// gets the removal message from config and `Code::parse_allow` (so `--set` and `--allow` too).
+#[test]
+fn removed_check_codes_in_allow_lists_are_named() {
+    for code in ["CHK-RANGE", "CHK-PLASTIC"] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains(code), "{e}");
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 2.0"), "{e}");
+        let e = engine::overrides::parse_set(&format!("allow=[\"{code}\"]")).unwrap_err();
+        assert!(e.contains(code), "{e}");
+    }
+    // The checks that stay are still allowable.
+    assert!(Code::parse_allow("CHK-PARALLAX").is_ok());
+}
+
 /// Trace-debug #15: a quoted dotted key under `[files."x"]` used to pass the field check and then read as null (the
 /// value silently dropped). It is refused with the way to write it; the unquoted form still works.
 #[test]

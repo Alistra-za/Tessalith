@@ -6,37 +6,15 @@ use super::AppModel;
 use crate::pgp::settings::{feature_on, Feature, Settings};
 use crate::settings::ChecksSettings;
 use engine::analyse::{Analysis, ChannelStats};
-use engine::checks::{luma_code, BandCounts, CheckStats, LUMA_BLACK, LUMA_BRIGHT, LUMA_DARK};
+use engine::checks::{BandCounts, CheckStats};
 use engine::codes::{Code, Warning};
 use engine::config::{Category, Subtype};
 use engine::policy::ResolvedJob;
 use engine::presets::AlphaContent;
-use engine::session::Thumbnail;
 use engine::shader::Shader;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 
-/// Albedo: warn when more than this share of texels is darker than 30 or brighter than 240 (luma codes). Tuned on
-/// the 10k set (DECISIONS CL8): 0.05 flagged 43 % of PBR albedos.
-// shortcut: the share counts transparent texels too, so a cutout albedo is judged on its black background (CL8);
-// weight the bands by alpha if cutouts raise false warnings.
-pub const RANGE_SHARE: f64 = 0.50;
-/// Metallic (G of `_rmaos`): warn when more than this share is grey (codes 26..=229). 0.20 flagged 19 % (CL8).
-pub const METAL_GREY_SHARE: f64 = 0.40;
-/// Roughness (R of `_rmaos`): warn when more than this share is at code 0 or 255.
-pub const ROUGH_EXTREME_SHARE: f64 = 0.50;
-/// AO (B of `_rmaos`): warn when its mean is below this.
-pub const AO_DARK_MEAN: f64 = 0.35;
-/// Emissive: warn when fewer than this share of texels are black (luma code `<= LUMA_BLACK`).
-pub const EMISSIVE_BLACK_MIN: f64 = 0.25;
-/// Dark metal: warn when more than this share of texels are metal (`_rmaos` G >= 128) with albedo luma < 155.
-pub const DARK_METAL_SHARE: f64 = 0.50;
-/// A metal map needs at least this share of metal texels before dark metal is judged.
-pub const DARK_METAL_MIN_METAL: f64 = 0.02;
-/// Plastic: a vanilla `_n` whose alpha is at least this share >= 250 (or missing) has no specular map.
-pub const PLASTIC_SHARE: f64 = 0.95;
-const PLASTIC_CS_IGNORES: &str =
-    "Only matters for vanilla: Community Shaders doesn't read this normal map's alpha for specular on";
 /// Green guess: the flipped curl is under this ratio of the as-stored curl.
 pub const GREEN_RATIO: f64 = 0.5;
 /// Green guess: below this as-stored curl the map is too flat to judge.
@@ -53,8 +31,6 @@ pub const SCALE_FACTOR: f64 = 2.0;
 /// The check a `CHK-*` code belongs to; its switch hides it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Check {
-    Range,
-    Plastic,
     LowDetail,
     Green,
     Parallax,
@@ -64,8 +40,6 @@ pub enum Check {
 /// Every `CHK-*` code's check; `None` for any other code.
 pub fn check_of(code: Code) -> Option<Check> {
     Some(match code {
-        Code::ChkRange => Check::Range,
-        Code::ChkPlastic => Check::Plastic,
         Code::ChkLowDetail => Check::LowDetail,
         Code::ChkGreenGuess | Code::ChkZSign => Check::Green,
         Code::ChkParallax | Code::ChkParallaxScale => Check::Parallax,
@@ -77,8 +51,6 @@ pub fn check_of(code: Code) -> Option<Check> {
 /// Whether `c`'s switch is on.
 pub fn switch_on(on: &ChecksSettings, c: Check) -> bool {
     match c {
-        Check::Range => on.range,
-        Check::Plastic => on.plastic,
         Check::LowDetail => on.low_detail,
         Check::Green => on.green,
         Check::Parallax => on.parallax,
@@ -111,83 +83,6 @@ pub fn height_neutral(shader: Option<Shader>, resolved: &Settings) -> HeightNeut
     }
 }
 
-/// A per-texel value-range rule: the share of texels where `bad` is true is the share the check compares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RangeRule {
-    AlbedoLuma,
-    MetalGrey,
-    RoughExtreme,
-    EmissiveBackground,
-}
-
-impl RangeRule {
-    pub fn bad(self, px: [u8; 4]) -> bool {
-        match self {
-            RangeRule::AlbedoLuma => {
-                let l = luma_code(px[0], px[1], px[2]);
-                !(LUMA_DARK..=LUMA_BRIGHT).contains(&l)
-            }
-            RangeRule::MetalGrey => (26..=229).contains(&px[1]),
-            RangeRule::RoughExtreme => px[0] == 0 || px[0] == 255,
-            RangeRule::EmissiveBackground => luma_code(px[0], px[1], px[2]) > LUMA_BLACK,
-        }
-    }
-    pub fn id(self) -> &'static str {
-        match self {
-            RangeRule::AlbedoLuma => "albedo_luma",
-            RangeRule::MetalGrey => "metal_grey",
-            RangeRule::RoughExtreme => "rough_extreme",
-            RangeRule::EmissiveBackground => "emissive_background",
-        }
-    }
-    /// The texels `bad` is true for, from the band counts.
-    pub fn count(self, s: &CheckStats) -> u64 {
-        match self {
-            RangeRule::AlbedoLuma => s.luma_dark + s.luma_bright,
-            RangeRule::MetalGrey => s.texels - s.bands[1].low - s.bands[1].high,
-            RangeRule::RoughExtreme => s.bands[0].eq0 + s.bands[0].eq255,
-            RangeRule::EmissiveBackground => s.texels - s.luma_black,
-        }
-    }
-    /// The share above which the rule warns.
-    fn limit(self) -> f64 {
-        match self {
-            RangeRule::AlbedoLuma => RANGE_SHARE,
-            RangeRule::MetalGrey => METAL_GREY_SHARE,
-            RangeRule::RoughExtreme => ROUGH_EXTREME_SHARE,
-            RangeRule::EmissiveBackground => 1.0 - EMISSIVE_BLACK_MIN,
-        }
-    }
-    fn message(self, share: f64) -> String {
-        let p = pct(share);
-        match self {
-            RangeRule::AlbedoLuma => format!(
-                "albedo: {p} % of texels are darker than 30/255 or brighter than 240/255 (PBR guidance 30–240)"
-            ),
-            RangeRule::MetalGrey => format!(
-                "metallic (G): {p} % of texels are grey (26–229/255); metal is usually 0 or 255, grey reads as half metal"
-            ),
-            RangeRule::RoughExtreme => format!(
-                "roughness (R): {p} % of texels are at 0 or 255; few real surfaces are perfectly smooth or rough"
-            ),
-            RangeRule::EmissiveBackground => format!(
-                "emissive: only {} % of texels are black, so most of the surface glows",
-                pct(1.0 - share)
-            ),
-        }
-    }
-}
-
-/// The per-texel rules of a sub-type (AO dark is a mean, not a rule).
-pub fn rules_for(st: Subtype) -> &'static [RangeRule] {
-    match st {
-        Subtype::PbrAlbedo => &[RangeRule::AlbedoLuma],
-        Subtype::Rmaos => &[RangeRule::RoughExtreme, RangeRule::MetalGrey],
-        Subtype::PbrEmissive | Subtype::Glow => &[RangeRule::EmissiveBackground],
-        _ => &[],
-    }
-}
-
 /// `n / d`, 0.0 when `d` is 0.
 fn share(n: u64, d: u64) -> f64 {
     if d == 0 {
@@ -201,16 +96,11 @@ fn pct(s: f64) -> String {
     format!("{:.0}", s * 100.0)
 }
 
-fn range(rule: &str, msg: String) -> Warning {
-    Warning::new(Code::ChkRange, msg).with_data(json!({ "rule": rule }))
-}
-
-/// Checks 1, 2, 4 and 5 of one texture, from its cached stats. Empty without stats. `shader` is the set's shader.
+/// Checks 4 and 5 of one texture, from its cached stats. Empty without stats.
 pub fn texture_checks(
     job: &ResolvedJob,
     a: &Analysis,
     neutral: HeightNeutral,
-    shader: Option<Shader>,
     on: &ChecksSettings,
 ) -> Vec<Warning> {
     let Some(s) = &a.checks else {
@@ -218,37 +108,6 @@ pub fn texture_checks(
     };
     let st = job.profile.subtype;
     let mut out = vec![];
-    if on.range {
-        for &r in rules_for(st) {
-            let sh = share(r.count(s), s.texels);
-            if sh > r.limit() {
-                out.push(range(r.id(), r.message(sh)));
-            }
-        }
-        if st == Subtype::Rmaos && s.texels > 0 && a.channels[2].mean < AO_DARK_MEAN {
-            out.push(range(
-                "ao_dark",
-                format!(
-                    "AO (B) averages {:.2}; a dark AO darkens the whole surface",
-                    a.channels[2].mean
-                ),
-            ));
-        }
-    }
-    if on.plastic
-        && st == Subtype::Normal
-        && (a.alpha == AlphaContent::None || share(a.alpha_hist.ge250, s.texels) >= PLASTIC_SHARE)
-    {
-        let msg =
-            "_n has no specular in its alpha (missing or all white): the surface may look plastic";
-        // Note CL37 (owner 2026-10-20): CS hair and Advanced Skin take specular elsewhere.
-        let msg = match shader {
-            Some(Shader::Hair) => format!("{msg}. {PLASTIC_CS_IGNORES} hair"),
-            Some(Shader::AdvancedSkin) => format!("{msg}. {PLASTIC_CS_IGNORES} skin"),
-            _ => msg.to_string(),
-        };
-        out.push(Warning::new(Code::ChkPlastic, msg));
-    }
     if on.green && st.category() == Category::Normal {
         if st != Subtype::Msn && !s.two_channel && s.texels > 0 && a.channels[2].mean < 0.5 {
             out.push(Warning::new(
@@ -278,10 +137,7 @@ pub fn texture_checks(
     // Note CO (X-S6): a finding on a generated map says so.
     let stem = job.input.file_stem().unwrap_or_default().to_string_lossy();
     if engine::group::is_generated(&stem) {
-        for w in out
-            .iter_mut()
-            .filter(|w| matches!(w.code, Code::ChkRange | Code::ChkParallax))
-        {
+        for w in out.iter_mut().filter(|w| w.code == Code::ChkParallax) {
             w.message = format!("generated: {}", w.message);
         }
     }
@@ -352,29 +208,6 @@ fn parallax_checks(
     out
 }
 
-/// The share of texels that are metal (`rmaos` G >= 128) with albedo luma < 155. `None` when the sizes differ or
-/// fewer than 2 % of texels are metal.
-pub fn dark_metal_share(albedo: &Thumbnail, rmaos: &Thumbnail) -> Option<f64> {
-    if (albedo.width, albedo.height) != (rmaos.width, rmaos.height)
-        || albedo.rgba.len() != rmaos.rgba.len()
-    {
-        return None;
-    }
-    let (mut metal, mut dark) = (0u64, 0u64);
-    let (pa, pr) = (
-        albedo.rgba.as_chunks::<4>().0,
-        rmaos.rgba.as_chunks::<4>().0,
-    );
-    for (a, r) in pa.iter().zip(pr) {
-        if r[1] >= 128 {
-            metal += 1;
-            dark += u64::from(luma_code(a[0], a[1], a[2]) < 155);
-        }
-    }
-    let texels = (albedo.rgba.len() / 4) as u64;
-    (texels > 0 && share(metal, texels) >= DARK_METAL_MIN_METAL).then(|| share(dark, texels))
-}
-
 /// The keys whose scale is more than `SCALE_FACTOR` from the rest: both of a pair, else against the lower median.
 /// Scales that are not finite or `<= 0` are left out.
 pub fn scale_outliers(scales: &[(String, f64)]) -> Vec<String> {
@@ -411,14 +244,6 @@ pub(crate) struct CheckState {
     key: Option<(u64, u64, ChecksSettings, u64)>,
     /// Bumped whenever `items` is replaced by a plan or cleared by a new folder.
     pub plans_applied: u64,
-}
-
-#[cfg(test)]
-impl CheckState {
-    /// Add one result to `key` without a refresh (unit tests).
-    pub(crate) fn push_item_warning(&mut self, key: &str, w: Warning) {
-        self.items.entry(key.to_string()).or_default().push(w);
-    }
 }
 
 fn filled(slots: &std::collections::BTreeMap<SlotKind, SlotFill>, k: SlotKind) -> bool {
@@ -468,14 +293,12 @@ impl AppModel {
         let on = self.settings.checks;
         let views = super::sets::views(self);
         let mut neutral = HashMap::new();
-        let mut shaders = HashMap::new();
         let mut scales = vec![];
         let mut items: HashMap<String, Vec<Warning>> = HashMap::new();
         for v in views.iter().filter(|v| !v.key.is_empty()) {
             let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
             let resolved = super::auto_flags::resolved(v.pbr, &v.slots, &v.settings);
             neutral.insert(v.key.as_str(), height_neutral(shader, &resolved));
-            shaders.insert(v.key.as_str(), shader);
             if matches!(shader, Some(Shader::Landscape | Shader::PbrLandscape))
                 && filled(&v.slots, SlotKind::Height)
             {
@@ -497,13 +320,7 @@ impl AppModel {
                 .and_then(|k| neutral.get(k))
                 .copied()
                 .unwrap_or(HeightNeutral::Half);
-            let sh = i
-                .set_key
-                .as_deref()
-                .and_then(|k| shaders.get(k))
-                .copied()
-                .flatten();
-            let ws = texture_checks(job, a, n, sh, &on);
+            let ws = texture_checks(job, a, n, &on);
             if !ws.is_empty() {
                 items.insert(i.key.clone(), ws);
             }
@@ -535,32 +352,6 @@ impl AppModel {
             }
         }
         self.uv.any_colour = any_colour;
-        if on.range {
-            for v in views.iter() {
-                let member = |st: Subtype| {
-                    v.members
-                        .iter()
-                        .filter_map(|k| self.item(k))
-                        .find(|i| i.job.as_ref().is_some_and(|j| j.profile.subtype == st))
-                };
-                let (Some(al), Some(rm)) = (member(Subtype::PbrAlbedo), member(Subtype::Rmaos))
-                else {
-                    continue;
-                };
-                let (Some(ta), Some(tr)) = (&al.thumb, &rm.thumb) else {
-                    continue;
-                };
-                if let Some(sh) = dark_metal_share(ta, tr).filter(|&s| s > DARK_METAL_SHARE) {
-                    items.entry(al.key.clone()).or_default().push(range(
-                        "dark_metal",
-                        format!(
-                            "albedo: {} % of texels are metal (from the _rmaos) with luma under 155; metal albedo is usually bright",
-                            pct(sh)
-                        ),
-                    ));
-                }
-            }
-        }
         let mut sets: HashMap<String, Vec<Warning>> = HashMap::new();
         if on.parallax {
             for k in scale_outliers(&scales) {

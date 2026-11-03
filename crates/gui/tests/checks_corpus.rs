@@ -5,7 +5,7 @@ use engine::api::*;
 use engine::config::{Category, Subtype, Target};
 use engine::events::*;
 use engine::session::AnalysisCache;
-use sdc_gui::model::checks::{texture_checks, HeightNeutral, RangeRule};
+use sdc_gui::model::checks::{texture_checks, HeightNeutral};
 use sdc_gui::settings::ChecksSettings;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -52,7 +52,7 @@ fn checks_counts_on_textures_10k() {
     // Per-threshold distributions over the sub-type each rule reads.
     let mut dist: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     let (mut normals, mut vanilla_n) = (0usize, 0usize);
-    let (mut curl_ratio, mut steep, mut albedo) = (vec![], vec![], vec![]);
+    let (mut curl_ratio, mut steep) = (vec![], vec![]);
     for job in &plan.jobs {
         let Some(a) = c.analysis(job) else { continue };
         let Some(s) = &a.checks else { continue };
@@ -67,55 +67,30 @@ fn checks_counts_on_textures_10k() {
         if let Some(x) = s.steep {
             steep.push(x);
         }
-        if s.texels > 0 {
-            albedo.push(RangeRule::AlbedoLuma.count(s) as f64 / s.texels as f64);
-        }
         *subtypes.entry(format!("{st:?}")).or_default() += 1;
         let sh = |n: u64| n as f64 / s.texels.max(1) as f64;
         let mut add = |k: &'static str, v: f64| dist.entry(k).or_default().push(v);
-        match st {
-            Subtype::PbrAlbedo => {
-                let k = if a.alpha == engine::presets::AlphaContent::Varying {
-                    "albedo out-of-range share, alpha varying"
-                } else {
-                    "albedo out-of-range share, opaque"
-                };
-                add(k, sh(RangeRule::AlbedoLuma.count(s)));
-                add("albedo dark share", sh(s.luma_dark));
-                add("albedo bright share", sh(s.luma_bright));
-            }
-            Subtype::Rmaos => {
-                add("rmaos metal-grey share", sh(RangeRule::MetalGrey.count(s)));
-            }
-            Subtype::PbrEmissive | Subtype::Glow => {
-                add("emissive black share", sh(s.luma_black));
-            }
-            Subtype::Height => {
-                add("height steep share", s.steep.unwrap_or(0.0));
-                add(
-                    "height range used (codes)",
-                    f64::from(a.channels[0].max - a.channels[0].min) * 255.0,
-                );
-                add(
-                    "height clip share (0 or 255)",
-                    sh(s.bands[0].eq0 + s.bands[0].eq255),
-                );
-                add("height mean", a.channels[0].mean);
-            }
-            _ => {}
+        if st == Subtype::Height {
+            add("height steep share", s.steep.unwrap_or(0.0));
+            add(
+                "height range used (codes)",
+                f64::from(a.channels[0].max - a.channels[0].min) * 255.0,
+            );
+            add(
+                "height clip share (0 or 255)",
+                sh(s.bands[0].eq0 + s.bands[0].eq255),
+            );
+            add("height mean", a.channels[0].mean);
         }
-        for w in texture_checks(job, &a, HeightNeutral::Half, None, &on) {
-            // The rule (range) or the kind of finding (parallax), so each threshold has its own count.
-            let kind = match w.data["rule"].as_str() {
-                Some(r) => r.to_string(),
-                None if w.code == engine::codes::Code::ChkParallax => {
-                    ["only", "clipped", "4/255", "white", "steps"]
-                        .into_iter()
-                        .find(|k| w.message.contains(k))
-                        .unwrap_or("other")
-                        .to_string()
-                }
-                None => String::new(),
+        for w in texture_checks(job, &a, HeightNeutral::Half, &on) {
+            // The kind of finding (parallax), so each threshold has its own count.
+            let kind = if w.code == engine::codes::Code::ChkParallax {
+                ["only", "clipped", "4/255", "white", "steps"]
+                    .into_iter()
+                    .find(|k| w.message.contains(k))
+                    .unwrap_or("other")
+            } else {
+                ""
             };
             *codes
                 .entry(format!("{} {kind} ({st:?})", w.code.as_str()))
@@ -147,8 +122,4 @@ fn checks_counts_on_textures_10k() {
     let qs = [0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99];
     println!("curl flipped/as_stored: {:?}", quantiles(curl_ratio, &qs));
     println!("steep share: {:?}", quantiles(steep, &qs));
-    println!(
-        "albedo-luma out-of-range share (all jobs): {:?}",
-        quantiles(albedo, &qs)
-    );
 }

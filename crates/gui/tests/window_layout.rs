@@ -2,7 +2,7 @@
 mod support;
 use eframe::egui::{self, pos2, vec2, Rect};
 use sdc_gui::layout::{fit_window, initial_window, native_points, SaveDebounce, DEFAULT_SIZE};
-use sdc_gui::model::view::{Channel, Layout};
+use sdc_gui::model::view::Channel;
 use sdc_gui::model::viewport3d::Look;
 use sdc_gui::settings::*;
 use std::time::{Duration, Instant};
@@ -32,7 +32,6 @@ fn full() -> LayoutSettings {
         sets_filters: vec!["attention".into(), "no-json".into()],
         sets_shader: Some("pbr_landscape".into()),
         preview_channel: 3,
-        preview_layout: "split".into(),
         look: Some(LookSettings {
             hdri: Some(true),
             grey: None,
@@ -93,7 +92,7 @@ live_encode = true
 meshes_view = true
 filters = ["warnings", "bogus", 7, "failed"]
 preview_channel = 99
-preview_layout = "diagonal"
+preview_layout = "split"
 [layout.widths]
 textures = 120.0
 sets = 300
@@ -123,7 +122,6 @@ radius = 0.0
         vec!["warnings".to_string(), "failed".to_string()]
     );
     assert_eq!(l.preview_channel, 0, "channel 99 is ignored");
-    assert_eq!(l.preview_layout, "side-by-side");
     assert_eq!(
         l.widths,
         [("sets".to_string(), 300.0)].into(),
@@ -151,7 +149,7 @@ fn a_whole_layout_of_the_wrong_type_is_ignored() {
 }
 
 #[test]
-fn channels_layouts_and_looks_convert_both_ways() {
+fn channels_and_looks_convert_both_ways() {
     for c in [
         Channel::Rgba,
         Channel::R,
@@ -163,10 +161,6 @@ fn channels_layouts_and_looks_convert_both_ways() {
         assert_eq!(Channel::from_id(c.shader_id()), Some(c));
     }
     assert_eq!(Channel::from_id(99), None);
-    for l in [Layout::SideBySide, Layout::Split] {
-        assert_eq!(Layout::from_name(l.name()), Some(l));
-    }
-    assert_eq!(Layout::from_name("diagonal"), None);
     let look = Look {
         hdri: true,
         bg: [0.5, 0.25, 0.0],
@@ -329,14 +323,12 @@ fn the_app_writes_a_changed_layout_once_per_two_seconds_and_on_exit() {
     app.model.filter.warnings = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(100));
     app.model.view.channel = Channel::G;
-    app.model.view.layout = Layout::Split;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(1500));
     assert!(!path.exists(), "inside the 2 s");
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2200));
     let (s, _) = GuiSettings::load(&path);
     assert_eq!(s.layout.filters, vec!["warnings".to_string()]);
     assert_eq!(s.layout.preview_channel, Channel::G.shader_id() as u8);
-    assert_eq!(s.layout.preview_layout, "split");
     // A change after that waits for its own 2 s, but the exit writes it.
     app.model.filter.failed = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2300));
@@ -366,7 +358,6 @@ fn a_new_app_starts_from_the_saved_layout() {
     assert!(s.attention && s.no_json && !s.ready);
     assert_eq!(s.shader, Some(engine::shader::Shader::PbrLandscape));
     assert_eq!(app.model.view.channel, Channel::B);
-    assert_eq!(app.model.view.layout, Layout::Split);
     assert_eq!(
         app.meshes.v3.look,
         Look {

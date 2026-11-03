@@ -111,30 +111,16 @@ fn derive_results_are_rows_with_the_values_on_hover() {
     );
 }
 
-/// The fixture with only the plastic check on and one plain warning row: a Warning row and a Check row.
-fn with_a_check(d: &std::path::Path) -> AppModel {
-    let mut m = opened(d);
-    decide_all(&mut m);
-    m.set_checks(sdc_gui::settings::ChecksSettings {
-        range: false,
-        plastic: true,
-        low_detail: false,
-        green: false,
-        parallax: false,
-        uv: false,
-    });
-    m.poll();
-    m.invalidate_views();
-    m
-}
-
-/// One PBR set whose dark albedo raises a check and nothing else (as `checks.rs`'s `pbr_wall`).
+/// One PBR set whose flat `_p` raises a CHK-PARALLAX check and nothing else (as `checks.rs`'s `pbr_wall`).
 fn wall_with_a_check(dir: &std::path::Path) -> AppModel {
     use image::{ImageBuffer, Rgb};
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb([20u8, 20, 20]))
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
         .save(r.join("wall.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
+        .save(r.join("wall_p.png"))
         .unwrap();
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 10, 200]))
         .save(r.join("wall_rmaos.png"))
@@ -210,7 +196,7 @@ fn checks_are_not_amber_and_not_blocking() {
 #[test]
 fn problems_shows_one_count() {
     let d = tempfile::tempdir().unwrap();
-    let m = with_a_check(d.path());
+    let m = wall_with_a_check(d.path());
     let n = problems(&m).len();
     let mut h = harness(m);
     h.run();

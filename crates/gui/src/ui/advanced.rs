@@ -284,9 +284,7 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Checks", |ui| {
         let now = model.settings.checks;
         let mut c = now;
-        let boxes: [(&mut bool, &str, &str); 6] = [
-            (&mut c.range, "Value range", "Value range check"),
-            (&mut c.plastic, "Plastic look", "Plastic look check"),
+        let boxes: [(&mut bool, &str, &str); 4] = [
             (&mut c.low_detail, "Low detail", "Low detail check"),
             (&mut c.green, "Green direction", "Green direction check"),
             (&mut c.parallax, "Parallax", "Parallax check"),

@@ -190,9 +190,6 @@ pub struct LayoutSettings {
     /// The preview channel, as `Channel::shader_id`.
     #[serde(deserialize_with = "lenient")]
     pub preview_channel: u8,
-    /// `side-by-side` or `split`.
-    #[serde(deserialize_with = "lenient")]
-    pub preview_layout: String,
     /// The Meshes view's 3D look and the set preview's.
     #[serde(deserialize_with = "lenient")]
     pub look: Option<LookSettings>,
@@ -224,7 +221,6 @@ impl Default for LayoutSettings {
             sets_filters: vec![],
             sets_shader: None,
             preview_channel: 0,
-            preview_layout: "side-by-side".into(),
             look: None,
             set_look: None,
             settings_window: None,
@@ -276,9 +272,6 @@ impl LayoutSettings {
         };
         if self.preview_channel > 5 {
             self.preview_channel = 0;
-        }
-        if !["side-by-side", "split"].contains(&self.preview_layout.as_str()) {
-            self.preview_layout = "side-by-side".into();
         }
         for l in [&mut self.look, &mut self.set_look].into_iter().flatten() {
             l.clamp();

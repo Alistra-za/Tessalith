@@ -1,12 +1,12 @@
-//! The expanded preview (M3a spec §6): the toolbar, two linked viewports (source left, encoded right, or one
-//! viewport cut by a divider), the notes and readouts under them, and the compact settings strip beside them.
+//! The expanded preview (M3a spec §6): the toolbar, two linked viewports (source left, encoded right), the notes and
+//! readouts under them, and the compact settings strip beside them.
 //! All state lives in the model (`AppModel::view`, `AppModel::preview`); this file maps input to model calls.
 use crate::model::cube_cross::FACE_LABELS;
 use crate::model::items::ItemKind;
 use crate::model::overlay::OverlayKind;
 use crate::model::preview::NO_GPU;
 use crate::model::preview::{EncodedState, PreviewOut, SourceState};
-use crate::model::view::{self, readouts, skipped_note, Channel, Layout, ViewState};
+use crate::model::view::{self, readouts, skipped_note, Channel, ViewState};
 use crate::model::AppModel;
 use crate::render::{self, Params, Slot, UploadPath};
 use crate::ui::columns::{strip_button, STRIP_WIDTH};
@@ -23,9 +23,7 @@ pub const PREVIEW_MIN: f32 = 480.0;
 pub const WIDE_WINDOW: f32 = 1280.0;
 /// Why Heatmap and Tile 3×3 are off for a cube (the cross is 4×3 faces, with no source image of that shape).
 const NOT_FOR_CUBES: &str = "Not for cubes";
-const NO_RANGE_WARNING: &str = "This texture has no value-range warning to paint";
 const GAP: f32 = 6.0;
-const DIVIDER_GRAB: f32 = 10.0;
 const PANE_BG: Color32 = Color32::from_gray(38);
 const CHANNELS: [(Channel, &str); 6] = [
     (Channel::Rgba, "RGBA"),
@@ -44,8 +42,6 @@ pub struct GpuStatus {
     pub source: bool,
     pub encoded: Option<UploadPath>,
     pub heatmap: bool,
-    /// The pinned encode, while it is compared.
-    pub pinned: Option<UploadPath>,
 }
 
 /// Drawing state that is not part of the model.
@@ -201,7 +197,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
     let requests = egui::Panel::top(toolbar_id)
         .show(ui, |ui| toolbar(ui, model, &info))
         .inner;
-    // The panel clips to last frame's height: a row the toolbar just gained (first draw, a pin) shows next frame.
+    // The panel clips to last frame's height: a row the toolbar just gained (first draw) shows next frame.
     if height(ui) != before {
         ui.ctx().request_repaint();
     }
@@ -290,24 +286,9 @@ fn caption_label(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).small().weak());
 }
 
-/// Side by side, Split, the pin controls, Heatmap, Lens, Tile 3×3, Fit, 1:1 and, for HDR, the exposure.
+/// Heatmap, Lens, Tile 3×3, the cube's face labels, UV coverage, Fit, 1:1 and, for HDR, the exposure.
 fn view_cluster(ui: &mut egui::Ui, model: &mut AppModel, info: &Info, requests: &mut Requests) {
     caption_label(ui, "View");
-    let layout = model.view.layout;
-    if ui
-        .selectable_label(layout == Layout::SideBySide, "Side by side")
-        .clicked()
-    {
-        model.view.layout = Layout::SideBySide;
-    }
-    if ui
-        .selectable_label(layout == Layout::Split, "Split")
-        .on_hover_text("One viewport cut by a divider: source on the left, encoded on the right")
-        .clicked()
-    {
-        model.view.layout = Layout::Split;
-    }
-    pin_controls(ui, model);
     // `add_enabled`, not `add_enabled_ui`: a nested scope's first widget never wraps, so it ran under ✕ Close.
     let heatmap = egui::Button::selectable(model.view.heatmap, "Heatmap");
     if ui
@@ -353,33 +334,6 @@ fn view_cluster(ui: &mut egui::Ui, model: &mut AppModel, info: &Info, requests: 
             model.view.face_labels = !on;
         }
     }
-    // Drawn for every texture and greyed with the reason, as UV coverage is (Note FC13, CL28 supersedes the "only
-    // with a per-texel value-range warning" rule).
-    {
-        let offered = model
-            .expanded
-            .as_deref()
-            .is_some_and(|k| model.range_overlay_offered(k));
-        let on = offered && model.view.overlay == Some(OverlayKind::Range);
-        // Review M3: the overlay is drawn on the source pane, which a compared pin replaces.
-        let comparing = model.comparing_pin();
-        let why = if !offered {
-            NO_RANGE_WARNING
-        } else {
-            "Hidden while comparing"
-        };
-        let r = ui
-            .add_enabled(offered && !comparing, egui::Button::selectable(on, "Range"))
-            .on_hover_text("Paint the source texels outside the expected value range in magenta")
-            .on_disabled_hover_text(why);
-        // ui-rules 8.4: distinct from any other "Range".
-        r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, r.enabled(), on, "Range overlay")
-        });
-        if r.clicked() {
-            model.view.overlay = (!on).then_some(OverlayKind::Range);
-        }
-    }
     uv_toggle(ui, model);
     requests.fit = ui
         .button("Fit")
@@ -420,38 +374,6 @@ fn encode_cluster(ui: &mut egui::Ui, model: &mut AppModel) {
     }
     if encode_button(ui, model) {
         model.encode_now();
-    }
-}
-
-/// **Pin this result**, and while a result is pinned: **Compare: Source | Pinned** and **Unpin**.
-fn pin_controls(ui: &mut egui::Ui, model: &mut AppModel) {
-    let pin = ui
-        .add_enabled(model.can_pin(), egui::Button::new("Pin this result"))
-        .on_hover_text(format!(
-            "Keep this encode to compare against the next one ({})",
-            super::actions::keys_text("pin")
-        ))
-        .on_disabled_hover_text("Needs a finished encode of the current settings");
-    if pin.clicked() {
-        model.pin_this();
-    }
-    if model.preview.pin.is_none() {
-        return;
-    }
-    let pinned = model.comparing_pin();
-    ui.label("Compare:");
-    if ui.selectable_label(!pinned, "Source").clicked() {
-        model.set_compare_pinned(false);
-    }
-    if ui
-        .selectable_label(pinned, "Pinned")
-        .on_hover_text("Side by side and Split show the pinned encode against the current one")
-        .clicked()
-    {
-        model.set_compare_pinned(true);
-    }
-    if ui.small_button("Unpin").clicked() {
-        model.unpin();
     }
 }
 
@@ -510,16 +432,19 @@ fn notes(
     readout: Option<&[String]>,
 ) {
     if model.view.heatmap && info.heatmap_possible() {
-        let (label, updating) = (model.heatmap_label(), model.heatmap_updating());
-        legend(ui, &mut model.view.full_scale, label, updating);
+        let updating = model.heatmap_updating();
+        legend(
+            ui,
+            &mut model.view.full_scale,
+            "Heatmap |Δ| Source vs Encoded",
+            updating,
+        );
     }
     // A fixed height (the five lines of a normal map), so the viewports do not move as the pointer enters them;
     // otherwise a pointer near their bottom edge would flip the strip on and off every frame.
     ui.scope(|ui| {
         let line = ui.text_style_height(&egui::TextStyle::Small) + ui.spacing().item_spacing.y;
-        // Two more lines while a pin is compared (the pinned values and their difference).
-        let lines = if model.comparing_pin() { 7.0 } else { 5.0 };
-        ui.set_min_height(lines * line);
+        ui.set_min_height(5.0 * line);
         match readout {
             Some(lines) => {
                 for l in lines {
@@ -625,36 +550,16 @@ fn viewports(
     state: &mut PreviewUi,
     key: &str,
 ) -> bool {
-    let split = model.view.layout == Layout::Split;
     let half = ((rect.width() - GAP) / 2.0).max(1.0);
-    let (left, right) = if split {
-        (rect, rect)
-    } else {
-        (
-            Rect::from_min_size(rect.min, egui::vec2(half, rect.height())),
-            Rect::from_min_size(
-                egui::pos2(rect.min.x + half + GAP, rect.min.y),
-                egui::vec2(half, rect.height()),
-            ),
-        )
-    };
-    let divider_x = rect.min.x + rect.width() * model.view.split;
-    let responses = if split {
-        vec![ui.allocate_rect(rect, Sense::click_and_drag())]
-    } else {
-        vec![
-            ui.allocate_rect(left, Sense::click_and_drag()),
-            ui.allocate_rect(right, Sense::click_and_drag()),
-        ]
-    };
-    // The divider is added after the viewport so that it wins the pointer where they overlap.
-    let divider = split.then(|| {
-        let grab = Rect::from_center_size(
-            egui::pos2(divider_x, rect.center().y),
-            egui::vec2(DIVIDER_GRAB, rect.height()),
-        );
-        ui.interact(grab, ui.id().with("preview-divider"), Sense::drag())
-    });
+    let left = Rect::from_min_size(rect.min, egui::vec2(half, rect.height()));
+    let right = Rect::from_min_size(
+        egui::pos2(rect.min.x + half + GAP, rect.min.y),
+        egui::vec2(half, rect.height()),
+    );
+    let responses = [
+        ui.allocate_rect(left, Sense::click_and_drag()),
+        ui.allocate_rect(right, Sense::click_and_drag()),
+    ];
 
     let size = [left.width(), left.height()];
     let mip = model.view.mip;
@@ -671,59 +576,15 @@ fn viewports(
         }
         interact(ui, &mut model.view, &responses, size, mip_size);
     }
-    if let Some(d) = &divider {
-        if d.dragged() {
-            let dx = d.drag_delta().x / rect.width().max(1.0);
-            model.view.split = (model.view.split + dx).clamp(0.02, 0.98);
-        }
-        if d.hovered() || d.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-        }
-    }
-
-    let divider_x = rect.min.x + rect.width() * model.view.split;
-    let (left_vis, right_vis) = if split {
-        (
-            Rect::from_min_max(rect.min, egui::pos2(divider_x, rect.max.y)),
-            Rect::from_min_max(egui::pos2(divider_x, rect.min.y), rect.max),
-        )
-    } else {
-        (left, right)
-    };
     let mut encode = false;
     let mut face_pick = None;
-    let left_draw = if model.comparing_pin() {
-        draw_pinned_pane(ui, model, gpu, left, left_vis, size)
-    } else {
-        let overlay = overlay_texture(ui, model, state, key);
-        draw_source_pane(
-            ui,
-            model,
-            info,
-            gpu,
-            left,
-            left_vis,
-            size,
-            overlay,
-            &mut face_pick,
-        )
-    };
-    let right_draw = draw_encoded_pane(ui, model, info, gpu, right, right_vis, size, &mut encode);
+    let overlay = overlay_texture(ui, model, state, key);
+    let left_draw = draw_source_pane(ui, model, info, gpu, left, size, overlay, &mut face_pick);
+    let right_draw = draw_encoded_pane(ui, model, info, gpu, right, size, &mut encode);
     if let Some(face) = face_pick {
         model.set_source_face(face);
     }
-    if let Some((pinned, current)) = model.pin_captions() {
-        caption(ui, left_vis, &pinned, false);
-        caption(ui, right_vis, &current, true);
-    }
-    if split {
-        ui.painter().vline(
-            divider_x,
-            rect.y_range(),
-            egui::Stroke::new(1.5, Color32::from_gray(200)),
-        );
-    }
-    // The cursor as a fraction of the pane it is over: both panes (or both sides of Split) share it.
+    // The cursor as a fraction of the pane it is over: both panes share it.
     let hover = responses
         .iter()
         .find_map(|r| r.hover_pos().map(|p| (r.rect.min, p)))
@@ -740,9 +601,9 @@ fn viewports(
     }
     if let (true, Some(s)) = (model.view.lens, hover) {
         let (uv_offset, uv_scale) = masked(&model.view, info).lens_uv(size, mip_size, s);
-        for (pane, vis, drawn) in [(left, left_vis, left_draw), (right, right_vis, right_draw)] {
+        for (pane, drawn) in [(left, left_draw), (right, right_draw)] {
             let centre = pane.min + egui::vec2(s[0] * size[0], s[1] * size[1]);
-            lens(ui, centre, vis, drawn, uv_offset, uv_scale);
+            lens(ui, centre, pane, drawn, uv_offset, uv_scale);
         }
     }
     if encode {
@@ -853,13 +714,10 @@ fn uv_toggle(ui: &mut egui::Ui, model: &mut AppModel) {
     let key = model.expanded.clone().unwrap_or_default();
     let offered = model.uv_offered(&key);
     let on = model.view.overlay == Some(OverlayKind::Uv);
-    let comparing = model.comparing_pin();
     // Review I2: a failed read (cached, K18) disables the toggle with its error lines, and paints nothing.
     let failed = model.uv_failed(&key);
     let reason = match offered {
         Err(why) => why.to_string(),
-        // Review M3 (as Range): the overlay is drawn on the source pane, which a compared pin replaces.
-        Ok(()) if comparing => "Hidden while comparing".to_string(),
         Ok(()) => failed
             .as_deref()
             .map(crate::model::uv_coverage::summary)
@@ -896,19 +754,17 @@ fn uv_toggle(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// The overlay's texture while its toggle is on and offered: the range overlay from its worker job (`overlay_for`),
-/// UV coverage from its cached mask, by an overlay job too (`uv_coverage`, `uv_overlay`, CL44).
+/// The overlay's texture while its toggle is on and offered: UV coverage from its cached mask, built by an overlay
+/// job (`uv_coverage`, `uv_overlay`, CL44).
 fn overlay_texture(
     ui: &egui::Ui,
     model: &mut AppModel,
     state: &mut PreviewUi,
     key: &str,
 ) -> Option<egui::TextureId> {
-    let offered = match model.view.overlay {
-        Some(OverlayKind::Range) => model.range_overlay_offered(key),
-        Some(OverlayKind::Uv) => model.uv_offered(key).is_ok() && model.uv_failed(key).is_none(),
-        None => false,
-    };
+    let offered = model.view.overlay == Some(OverlayKind::Uv)
+        && model.uv_offered(key).is_ok()
+        && model.uv_failed(key).is_none();
     if !offered {
         // Review M7: off frees the full-size image and its texture.
         state.overlay_tex = None;
@@ -917,16 +773,11 @@ fn overlay_texture(
         }
         return None;
     }
-    let SourceState::Ready(s) = &model.preview.source else {
+    if !matches!(model.preview.source, SourceState::Ready(_)) {
         return None;
-    };
-    let mip = model.view.mip.saturating_sub(s.first_level);
-    let img = if model.view.overlay == Some(OverlayKind::Uv) {
-        model.uv_coverage(key)?;
-        model.uv_overlay(key)?
-    } else {
-        model.overlay_for(key, mip, OverlayKind::Range)?
-    };
+    }
+    model.uv_coverage(key)?;
+    let img = model.uv_overlay(key)?;
     if !state
         .overlay_tex
         .as_ref()
@@ -980,12 +831,11 @@ fn draw_source_pane(
     info: &Info,
     gpu: &GpuStatus,
     viewport: Rect,
-    visible: Rect,
     size: [f32; 2],
     overlay: Option<egui::TextureId>,
     face_pick: &mut Option<usize>,
 ) -> Option<(Slot, Params)> {
-    ui.painter().rect_filled(visible, 0.0, PANE_BG);
+    ui.painter().rect_filled(viewport, 0.0, PANE_BG);
     let text = match &model.preview.source {
         SourceState::Loading => Some("Loading source…".to_string()),
         SourceState::Failed(e) => Some(e.clone()),
@@ -1009,84 +859,20 @@ fn draw_source_pane(
             _ => (info.face_of(mip), mip.saturating_sub(s.first_level)),
         };
         let params = params_for(&masked(&model.view, info), size, own, in_texture, tonemap);
-        paint_clipped(ui, viewport, visible, Slot::Source, params);
+        paint_clipped(ui, viewport, viewport, Slot::Source, params);
         drawn = Some((Slot::Source, params));
         if let Some(id) = overlay {
             let (pic, uv) = picture_rects(&masked(&model.view, info), viewport, size, own);
             ui.painter()
-                .with_clip_rect(visible.intersect(ui.clip_rect()))
+                .with_clip_rect(viewport.intersect(ui.clip_rect()))
                 .image(id, pic, uv, Color32::WHITE);
         }
     }
-    pane_overlay(ui, visible, "Source", None, text.as_deref(), false);
+    pane_overlay(ui, viewport, "Source", None, text.as_deref(), false);
     if info.six_files && text.is_none() {
-        *face_pick = face_selector(ui, visible, model.view.source_face);
+        *face_pick = face_selector(ui, viewport, model.view.source_face);
     }
     drawn
-}
-
-/// The left pane while comparing with a pin: the pinned encode, or the dash when it lacks the mip on view.
-fn draw_pinned_pane(
-    ui: &mut egui::Ui,
-    model: &AppModel,
-    gpu: &GpuStatus,
-    viewport: Rect,
-    visible: Rect,
-    size: [f32; 2],
-) -> Option<(Slot, Params)> {
-    ui.painter().rect_filled(visible, 0.0, PANE_BG);
-    let mip = model.view.mip;
-    let pin = model.compared_pin()?;
-    let uploaded = matches!(gpu.pinned, Some(UploadPath::Bc | UploadPath::CpuDecoded(_)));
-    let text = if let Some(missing) = model.pin_missing_text(mip) {
-        Some(missing)
-    } else if !gpu.renderer {
-        Some("No GPU preview")
-    } else if !uploaded {
-        Some("No preview of the pinned result")
-    } else {
-        None
-    };
-    let mut drawn = None;
-    if text.is_none() {
-        let first = pin.out.result.source.first_level;
-        let params = params_for(
-            &model.view,
-            size,
-            (pin.out.result.source.dims.get(mip).copied()).unwrap_or((1, 1)),
-            mip.saturating_sub(first),
-            pin.out.result.format.is_hdr(),
-        );
-        paint_clipped(ui, viewport, visible, Slot::Pinned, params);
-        drawn = Some((Slot::Pinned, params));
-    }
-    pane_overlay(ui, visible, "Pinned", None, text, false);
-    drawn
-}
-
-/// A small caption under a pane's title, wrapped to the pane (the current side's right-aligned).
-fn caption(ui: &egui::Ui, visible: Rect, text: &str, right: bool) {
-    let colour = Color32::from_gray(230);
-    let wrap = (visible.width() - 12.0).max(20.0);
-    let galley = ui.painter().layout(
-        text.to_string(),
-        egui::FontId::proportional(11.0),
-        colour,
-        wrap,
-    );
-    let x = if right {
-        visible.max.x - 6.0 - galley.size().x
-    } else {
-        visible.min.x + 6.0
-    };
-    let pos = egui::pos2(x, visible.min.y + 26.0);
-    let painter = ui.painter().with_clip_rect(visible);
-    painter.rect_filled(
-        Rect::from_min_size(pos, galley.size()).expand(2.0),
-        2.0,
-        Color32::from_black_alpha(150),
-    );
-    painter.galley(pos, galley, colour);
 }
 
 /// The source pane's face selector for a six-file cube: six small buttons, +X to -Z, at the pane's top right.
@@ -1162,11 +948,10 @@ fn draw_encoded_pane(
     info: &Info,
     gpu: &GpuStatus,
     viewport: Rect,
-    visible: Rect,
     size: [f32; 2],
     encode: &mut bool,
 ) -> Option<(Slot, Params)> {
-    ui.painter().rect_filled(visible, 0.0, PANE_BG);
+    ui.painter().rect_filled(viewport, 0.0, PANE_BG);
     let heat = model.view.heatmap && gpu.heatmap && !info.cube_item;
     let (badge, text, offer_encode) = match &model.preview.encoded {
         // A blocked item has no encode to offer: its reason shows here too (an odd-sized cube face says so).
@@ -1212,7 +997,7 @@ fn draw_encoded_pane(
             );
             params.channel = 0;
             params.view_linear = 0;
-            paint_clipped(ui, viewport, visible, Slot::Heatmap, params);
+            paint_clipped(ui, viewport, viewport, Slot::Heatmap, params);
             drawn = Some((Slot::Heatmap, params));
         } else if let (true, Some(out)) = (uploaded, &info.shown) {
             let tonemap = out.result.format.is_hdr();
@@ -1224,7 +1009,7 @@ fn draw_encoded_pane(
                 mip.saturating_sub(first),
                 tonemap,
             );
-            paint_clipped(ui, viewport, visible, Slot::Encoded, params);
+            paint_clipped(ui, viewport, viewport, Slot::Encoded, params);
             drawn = Some((Slot::Encoded, params));
             if info.cross && model.view.face_labels {
                 let (pic, _) = picture_rects(
@@ -1233,23 +1018,17 @@ fn draw_encoded_pane(
                     size,
                     info.size_of(mip),
                 );
-                face_labels(ui, pic, visible);
+                face_labels(ui, pic, viewport);
             }
         }
     }
     if drawn.is_some() && matches!(model.preview.encoded, EncodedState::Encoding { .. }) {
         ui.painter()
-            .rect_filled(visible, 0.0, Color32::from_black_alpha(128));
+            .rect_filled(viewport, 0.0, Color32::from_black_alpha(128));
     }
-    let comparing = model.comparing_pin();
-    let title = match (heat, comparing) {
-        (true, true) => "Current vs Pinned |Δ|",
-        (true, false) => "Difference",
-        (false, true) => "Current",
-        (false, false) => "Encoded",
-    };
+    let title = if heat { "Difference" } else { "Encoded" };
     let button = offer_encode && can_encode(model);
-    if pane_overlay(ui, visible, title, badge, text.as_deref(), button) {
+    if pane_overlay(ui, viewport, title, badge, text.as_deref(), button) {
         *encode = true;
     }
     drawn

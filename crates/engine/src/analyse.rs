@@ -113,7 +113,7 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
     let mut finite = [0u64; 4];
     let mut len_n = 0u64;
     let (mut gray, mut len_err, mut peak) = (true, 0.0f64, 0f32);
-    let mut codes = hints.bands.then(|| Box::new([[0u64; 256]; 5]));
+    let mut codes = hints.bands.then(|| Box::new([[0u64; 256]; 4]));
     for p in &img.px {
         for (c, (s, &v)) in ch.iter_mut().zip(p).enumerate() {
             if !v.is_finite() {
@@ -412,17 +412,12 @@ mod tests {
             BandCounts {
                 eq0: 1,
                 le4: 1,
-                low: 2,
-                high: 2,
                 ge251: 1,
                 eq255: 1
             }
         );
         assert_eq!(s.bands[3], s.bands[0]);
-        assert_eq!(
-            (s.luma_dark, s.luma_bright, s.luma_black, s.texels),
-            (2, 1, 1, 4)
-        );
+        assert_eq!(s.texels, 4);
         assert!(!s.two_channel);
         assert_eq!((s.curl, s.steep), (None, None));
         assert_eq!(analyse(&img, &RGBA8).checks, None);

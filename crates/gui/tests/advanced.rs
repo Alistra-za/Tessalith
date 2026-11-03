@@ -424,13 +424,11 @@ fn advanced_has_no_batch_or_preview_size_rows() {
         "Low detail check",
         "Mipmaps",
         "Parallax check",
-        "Plastic look check",
         "Preset inspector",
         "Presets…",
         "Preview",
         "UV coverage check",
         "Unmatched [files] entries",
-        "Value range check",
     ];
     assert_eq!(labels, want);
 }

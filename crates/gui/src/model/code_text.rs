@@ -74,8 +74,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         GrassDetectSource => "This looks like grass from its source — confirm the grass setting",
         ValGrassDetect => "The grass check failed on the output — check the grass settings",
         PbrGrassDetect => "Community Shaders would read this grass albedo as complex grass — change its alpha or name",
-        ChkRange => "Some pixel values are outside the range this map type should use — adjust the map",
-        ChkPlastic => "This material may look like plastic — check its roughness and metal values",
         ChkZSign => "This normal map's blue channel points the wrong way — flip it",
         ChkParallax => "The parallax height looks wrong for this map — check the height map",
         ChkParallaxScale => "The parallax scale looks too strong or too weak for this set — adjust it",
@@ -221,17 +219,17 @@ mod tests {
             "preset 'x': alias is bad"
         );
         assert_eq!(
-            without_codes("acknowledge CHK-RANGE to use it"),
+            without_codes("acknowledge CHK-PARALLAX to use it"),
             "acknowledge to use it"
         );
         // No empty backticks, and no doubled space, where a quoted code goes.
         assert_eq!(
-            without_codes("raises `CHK-RANGE` and `DIM-NPOT`."),
+            without_codes("raises `CHK-PARALLAX` and `DIM-NPOT`."),
             "raises and ."
         );
         assert_eq!(
-            first_code("see CHK-RANGE and DIM-NPOT"),
-            Some(Code::ChkRange)
+            first_code("see CHK-PARALLAX and DIM-NPOT"),
+            Some(Code::ChkParallax)
         );
         // A banner line that leads with a code says its sentence, then the detail.
         assert_eq!(

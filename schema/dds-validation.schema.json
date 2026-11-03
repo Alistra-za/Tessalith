@@ -126,8 +126,6 @@
         "GRASS-DETECT-SOURCE",
         "VAL-GRASS-DETECT",
         "PBR-GRASS-DETECT",
-        "CHK-RANGE",
-        "CHK-PLASTIC",
         "CHK-GREEN-GUESS",
         "CHK-Z-SIGN",
         "CHK-PARALLAX",

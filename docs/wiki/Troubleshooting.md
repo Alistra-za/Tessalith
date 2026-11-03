@@ -31,17 +31,13 @@ Or rename the file `_normalgl`, `_normaldx` or `_n` (`_n` means DirectX). Nothin
 
 Look for `CHK-GREEN-GUESS` on its normal map (the ⓘ badge on the set card, or the texture's settings panel). A normal map whose green channel points the wrong way lights from the wrong side, and a face that should catch the torch looks black. The check reads the map's slopes and says it "looks OpenGL"; it is a hint, not a fix, and it is weak on straight ridges. If it is right, press **Treat as OpenGL (flip green)**, or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel points the wrong way too.
 
-### A surface looks too shiny or plastic
-
-Look for `CHK-PLASTIC` on its `_n` ([plastic `_n` alpha](Set-Shaders.md#height-maps-and-the-artist-checks)). Add an alpha that varies, or ignore the warning when the mesh sets its own specular. Also check `CHK-RANGE` on an `_rmaos` (extreme roughness) or on an albedo that is too bright; the preview's **Range** toggle shows which texels break the rule.
-
 ### Dark seams at a distance
 
 Look for `CHK-UV-GUTTER`. UV islands that sit closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The warning needs a Meshes scan. **Check all UV coverage** in Advanced reads every colour texture of the folder; a texture that no scanned mesh uses raises nothing.
 
 ### UV coverage is greyed out
 
-The overlay and the check read your Meshes scan, so scan first: scan your MO2 instance in the Meshes view. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage, and landscape diffuses are left out. The toggle is also off while a pin is compared ("Hidden while comparing") and after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on ("Turn on UV coverage check first").
+The overlay and the check read your Meshes scan, so scan first: scan your MO2 instance in the Meshes view. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage, and landscape diffuses are left out. The toggle is also off after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on ("Turn on UV coverage check first").
 
 ### A normal map came out as a diffuse
 

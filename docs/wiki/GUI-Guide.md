@@ -36,7 +36,7 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Texture settings panel](GUI-Texture-Panel.md): the settings of one texture, deciding, BC7 weighting, how edits are written.
 - [Advanced drawer](GUI-Advanced-Drawer.md): batch, preview and interface settings.
 - [Helpers, RNM layers and cubemaps](GUI-Helpers-RNM-and-Cubemaps.md): the Helpers group and panel, RNM layers, the cube controls.
-- [The 2D preview](GUI-Preview.md): source beside encode, readouts, pin and compare.
+- [The 2D preview](GUI-Preview.md): source beside encode, readouts.
 - [Generate from normal map](GUI-Generate-From-Normal.md): height, AO and curvature from a normal.
 - [The set editor](GUI-Set-Editor.md): slot rows, packed channel sources, the shader.
 - [The 3D preview](GUI-Set-Preview-3D.md): a set on a mesh with Community Shaders.
@@ -44,7 +44,7 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Set materials](GUI-Set-Materials.md): the skin, terrain and grass material cards.
 - [The bottom panel, Messages and toasts](GUI-Bottom-Tabs.md): the panel's tabs and the session log.
 - [Problems](GUI-Problems.md): every row and its fix button, deciding from the list.
-- [Artist checks](GUI-Artist-Checks.md): the six checks, overlays, half size.
+- [Artist checks](GUI-Artist-Checks.md): the four checks, the UV overlay, half size.
 - [Review and Export](GUI-Review-and-Export.md): Export, the Review panel, the Files tab.
 - [Also export as Vanilla and CM](GUI-Also-Export.md): the extra Vanilla and CM folders.
 - [Presets](GUI-Presets.md): the preset creator.

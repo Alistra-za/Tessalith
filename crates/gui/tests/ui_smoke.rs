@@ -776,8 +776,6 @@ fn the_preview_toolbar_changes_the_view() {
     h.run();
     press(&mut h, "G");
     assert_eq!(h.state().view.channel, sdc_gui::model::view::Channel::G);
-    press(&mut h, "Split");
-    assert_eq!(h.state().view.layout, sdc_gui::model::view::Layout::Split);
     press(&mut h, "UNORM");
     assert!(h.state().view.view_linear);
     press(&mut h, "Live encode");
@@ -873,7 +871,7 @@ fn toolbar_node(h: &Harness<'static, AppModel>, label: &str, contains: bool) -> 
 }
 
 /// K9/K10: the toolbar's controls in reading order (row, then x).
-const TOOLBAR_ORDER: [(&str, bool); 24] = [
+const TOOLBAR_ORDER: [(&str, bool); 20] = [
     ("Channels", false),
     ("RGBA", false),
     ("R", false),
@@ -882,14 +880,10 @@ const TOOLBAR_ORDER: [(&str, bool); 24] = [
     ("A", false),
     ("α-mask", false),
     ("View", false),
-    ("Side by side", false),
-    ("Split", false),
-    ("Pin this result", false),
     ("Heatmap", false),
     ("Lens", false),
     ("Tile 3×3", false),
-    // K7: both overlay toggles are drawn for every texture, enabled or not (Task 8; Note FC13 for Range).
-    ("Range overlay", false),
+    // K7: the UV overlay toggle is drawn for every texture, enabled or not (Task 8).
     ("UV coverage overlay", false),
     ("Fit", false),
     ("1:1", false),
@@ -932,8 +926,7 @@ fn expanded_at(width: f32, advanced: bool) -> (Harness<'static, AppModel>, tempf
     (h, d)
 }
 
-/// `extra`: conditional controls drawn after "Tile 3×3" and before the overlay toggles, by AccessKit name (none now:
-/// Note FC13 draws the Range toggle for every texture, so it is in `TOOLBAR_ORDER`).
+/// `extra`: conditional controls drawn after "Tile 3×3" and before the overlay toggle, by AccessKit name (none now).
 fn assert_toolbar_layout(h: &Harness<'static, AppModel>, extra: &[&str]) {
     let bar = toolbar_rect(h);
     let tile = TOOLBAR_ORDER
@@ -999,30 +992,8 @@ fn the_toolbar_groups_channels_view_and_encode() {
     assert_toolbar_layout(&h, &[]);
 }
 
-/// Task 6 (K7, CE12, CE20): with a dark albedo expanded, the "Range overlay" toggle sits after "Tile 3×3", inside the
-/// toolbar, and nothing runs under ✕ Close, at 1100, 1280 and 1600 px.
-#[test]
-fn the_toolbar_pin_holds_with_the_range_toggle() {
-    for width in [1100.0, 1280.0, 1600.0] {
-        let d = tempfile::tempdir().unwrap();
-        let mut model = pbr_wall(d.path(), 20, [128, 10, 200]);
-        model.expand("test/wall.png");
-        assert!(model.wait_idle(std::time::Duration::from_secs(60)));
-        assert!(model.range_overlay_offered("test/wall.png"));
-        let mut h = Harness::builder()
-            .with_size(eframe::egui::vec2(width, 800.0))
-            .build_ui_state(
-                |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
-                model,
-            );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-        h.run();
-        assert_toolbar_layout(&h, &[]);
-    }
-}
-
-/// Task 8 (K7, CE20): the "UV coverage overlay" toggle, enabled (a scan with rows, here after the Range toggle) and
-/// disabled (no scan, as in the other toolbar tests), sits after "Tile 3×3", inside the toolbar and never under
+/// Task 8 (K7, CE20): the "UV coverage overlay" toggle, enabled (a scan with rows) and disabled (no scan, as in the
+/// other toolbar tests), sits after "Tile 3×3", inside the toolbar and never under
 /// ✕ Close, at 1100, 1280 and 1600 px.
 #[test]
 fn the_toolbar_pin_holds_with_the_uv_toggle() {
@@ -1235,21 +1206,6 @@ fn at_1100_wide_the_advanced_drawer_leaves_the_preview_its_width() {
         bar.width()
     );
     assert_toolbar_layout(&h, &[]);
-    // A pinned result adds Compare: Source / Pinned and Unpin to the View cluster; they stay in the toolbar too.
-    h.state_mut().encode_now();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert!(h.state().can_pin());
-    h.state_mut().pin_this();
-    h.run();
-    let bar = toolbar_rect(&h);
-    for label in ["Compare:", "Source", "Pinned", "Unpin"] {
-        let r = toolbar_node(&h, label, false);
-        assert!(
-            bar.contains_rect(r),
-            "{label} {r:?} outside the toolbar {bar:?}"
-        );
-    }
     assert_toolbar_layout(&h, &[]);
     h.state_mut().collapse();
     h.run();

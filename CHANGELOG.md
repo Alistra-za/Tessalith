@@ -50,6 +50,8 @@
 - Renamed: *Pin this slot (always use this file)*, *Keep the original texture* / *Let PGPatcher replace the texture*, the **PGPatcher JSON** editor (was TruePBR JSON) and its **+ Add a delete section**. "Used by plugins" numbers slots from 1.
 - The input name box edits the whole path by segment (double-click, Ctrl+Left/Right, Ctrl+Up/Down lists); the path lock rail is gone.
 - The command palette's Enter acts only after you type or move the highlight. Automatic types alone no longer ask on close. In the Meshes view with a NIF selected the bottom panel leaves room for the 3D preview.
+- Preview: **Pin this result**, the Compare controls, the `P` key and the **Split** layout are removed, with the **Side by side** button and the `preview_layout` setting. The preview shows the source beside the encode. An old `gui.toml` with `preview_layout` loads, and the key drops on the next save.
+- The **Value range** and **Plastic look** artist checks are removed (`CHK-RANGE`, `CHK-PLASTIC`), with the preview's **Range** overlay and their two switches in Advanced → Checks. Four checks remain. An allow list naming either code is an error that says so, and an old `[checks]` line for either in `gui.toml` is ignored.
 - Fixes:
   - NIF validate reads non-ASCII texture paths and BSX names as Windows-1252, the same as apply.
   - The 2D and set previews update when a helper's Invert or Read changes, or when a bake, cube face or derive source changes.

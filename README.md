@@ -38,7 +38,7 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 - Doesn't need to be launched from MO2, but can be. From MO2 it fills in your MO2 location the first time, It skips MO2's virtual file system either way.
 
 **GUI**
-- Encoded-mip preview, pixel readout, pin and compare.
+- Encoded-mip preview and pixel readout.
 - [3D preview](docs/wiki/GUI-Set-Preview-3D.md#set-preview-3d) that matches Community Shaders' deferred rendering (**Accurate (deferred)**).
 - Context-menu options for slots and lock commands.
 - Colour picker with hex and RGB (0–255) inputs; outputs are converted to decimal.

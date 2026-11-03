@@ -159,8 +159,6 @@ These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert me
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CHK-RANGE` | warning | Values outside the expected range ([checks](GUI-Artist-Checks.md#artist-checks)). | Check the map; the preview's **Range** toggle shows the texels. |
-| `CHK-PLASTIC` | warning | A vanilla `_n` whose alpha gives a flat, full specular ([checks](GUI-Artist-Checks.md#artist-checks)). | Add a varying alpha, or ignore. |
 | `CHK-GREEN-GUESS` | info | The normal map's slopes look like OpenGL green. | **Treat as OpenGL (flip green)**, or ignore. |
 | `CHK-Z-SIGN` | warning | A normal map's blue channel points the wrong way ([checks](Set-Shaders.md#height-maps-and-the-artist-checks)). | Check the source. |
 | `CHK-PARALLAX` | warning | A height map, judged against the set's neutral height (0.5, or 1.0 with a multilayer coat), uses little range, clips, is mostly white or is too steep. | Check the height map. |

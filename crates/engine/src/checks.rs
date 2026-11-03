@@ -1,5 +1,5 @@
-//! Artist check stats (v2 artist checks, checks 1, 2, 4 and 5): value bands, luma, the normal map's curl and the
-//! share of steep neighbour steps. They ride inside the cached [`crate::analyse::Analysis`] (DECISIONS Note CL).
+//! Artist check stats (v2 artist checks, checks 4 and 5): value bands, the normal map's curl and the share of steep
+//! neighbour steps. They ride inside the cached [`crate::analyse::Analysis`] (DECISIONS Note CL).
 //! Check 3 (fake resolution) is measured on the export chain instead: [`detail_ratio`], [`low_detail_eligible`].
 use crate::analyse::{code8, AnalyseHints};
 use crate::config::{Category, MipKeyword, MipLevels, Profile, ResizeMode, Subtype};
@@ -8,16 +8,6 @@ use crate::image::Rgba32F;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Codes at or below this are "low" (about 0.1).
-pub const BAND_LOW: u8 = 25;
-/// Codes at or above this are "high" (about 0.9).
-pub const BAND_HIGH: u8 = 230;
-/// Luma codes below this are dark.
-pub const LUMA_DARK: u8 = 30;
-/// Luma codes above this are bright.
-pub const LUMA_BRIGHT: u8 = 240;
-/// Luma codes at or below this are black.
-pub const LUMA_BLACK: u8 = 8;
 /// A neighbour step of this many codes or more is steep.
 pub const STEEP_CODES: u8 = 32;
 
@@ -27,10 +17,6 @@ pub const STEEP_CODES: u8 = 32;
 pub struct BandCounts {
     pub eq0: u64,
     pub le4: u64,
-    /// Codes `<= BAND_LOW`.
-    pub low: u64,
-    /// Codes `>= BAND_HIGH`.
-    pub high: u64,
     pub ge251: u64,
     pub eq255: u64,
 }
@@ -40,17 +26,15 @@ impl BandCounts {
     fn add(&mut self, c: u8, n: u64) {
         self.eq0 += n * u64::from(c == 0);
         self.le4 += n * u64::from(c <= 4);
-        self.low += n * u64::from(c <= BAND_LOW);
-        self.high += n * u64::from(c >= BAND_HIGH);
         self.ge251 += n * u64::from(c >= 251);
         self.eq255 += n * u64::from(c == 255);
     }
 }
 
-/// Per-texel code histograms for [`CheckStats`]: R, G, B, A and luma. Five increments per texel instead of 27
-/// counters (which spilled out of registers on every texel, DECISIONS Note CL42); folded once by
+/// Per-texel code histograms for [`CheckStats`]: R, G, B and A. Four increments per texel instead of a counter per
+/// band (which spilled out of registers on every texel, DECISIONS Note CL42); folded once by
 /// [`CheckStats::from_hist`].
-pub(crate) type CodeHist = [[u64; 256]; 5];
+pub(crate) type CodeHist = [[u64; 256]; 4];
 
 /// Mean squared curl of a normal map's slope field, read as stored and with green flipped. A real height field's
 /// slopes have no curl, so the smaller one names the green convention.
@@ -67,12 +51,6 @@ pub struct CheckStats {
     pub two_channel: bool,
     /// R, G, B, A.
     pub bands: [BandCounts; 4],
-    /// Luma codes `< LUMA_DARK`.
-    pub luma_dark: u64,
-    /// Luma codes `> LUMA_BRIGHT`.
-    pub luma_bright: u64,
-    /// Luma codes `<= LUMA_BLACK`.
-    pub luma_black: u64,
     pub curl: Option<Curl>,
     /// Share of neighbour pairs whose step is at least [`STEEP_CODES`], in the hinted channel.
     pub steep: Option<f64>,
@@ -85,7 +63,6 @@ impl CheckStats {
         for (b, &v) in h.iter_mut().zip(&c) {
             b[usize::from(v)] += 1;
         }
-        h[4][usize::from(luma_code(c[0], c[1], c[2]))] += 1;
     }
     /// The stats of the texels counted into `h` (curl and steep unset).
     pub(crate) fn from_hist(two_channel: bool, h: &CodeHist) -> Self {
@@ -93,9 +70,6 @@ impl CheckStats {
             texels: h[0].iter().sum(),
             two_channel,
             bands: [BandCounts::default(); 4],
-            luma_dark: 0,
-            luma_bright: 0,
-            luma_black: 0,
             curl: None,
             steep: None,
         };
@@ -103,22 +77,9 @@ impl CheckStats {
             for (b, hc) in s.bands.iter_mut().zip(h) {
                 b.add(c, hc[usize::from(c)]);
             }
-            let n = h[4][usize::from(c)];
-            s.luma_dark += n * u64::from(c < LUMA_DARK);
-            s.luma_bright += n * u64::from(c > LUMA_BRIGHT);
-            s.luma_black += n * u64::from(c <= LUMA_BLACK);
         }
         s
     }
-}
-
-/// Rec. 709 luma of 8-bit codes, rounded to a code.
-pub fn luma_code(r: u8, g: u8, b: u8) -> u8 {
-    let v = 0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b);
-    // Same as `v.round()` for v >= 0 (the fraction is exact), without the libm call it is on baseline x86-64; it ran
-    // on every texel and was most of the check stats' load-time cost (DECISIONS Note CL42).
-    let t = v as u32;
-    (t + u32::from(v - f64::from(t) >= 0.5)) as u8
 }
 
 /// What to measure for a texture whose canonical suffix is `suffix`; nothing when `checks` is off (the CLI).
@@ -436,23 +397,20 @@ mod tests {
         assert_eq!(steep_share(&sq, 0), 0.0);
     }
 
+    /// Note FM26: an entry the analysis cache wrote before the luma counts and the low / high bands went (version 2
+    /// was unreleased then) still reads, and the counts that stay keep their values.
     #[test]
-    fn luma_code_uses_rec_709_weights_rounded() {
-        assert_eq!(luma_code(255, 255, 255), 255);
-        assert_eq!(luma_code(0, 0, 0), 0);
-        assert_eq!(luma_code(255, 0, 0), 54); // 0.2126 * 255 = 54.2
-        assert_eq!(luma_code(0, 255, 0), 182); // 182.4
-        assert_eq!(luma_code(0, 0, 255), 18); // 18.4
-
-        // Exactly `round()` of the Rec. 709 sum for every code triple (CL42 replaced the libm call).
-        for r in 0..=255u8 {
-            for g in 0..=255u8 {
-                for b in 0..=255u8 {
-                    let v = 0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b);
-                    assert_eq!(luma_code(r, g, b), v.round() as u8, "{r} {g} {b}");
-                }
-            }
-        }
+    fn check_stats_written_with_the_removed_counts_still_read() {
+        let band = |eq0: u64| serde_json::json!({"eq0": eq0, "le4": 1, "low": 2, "high": 3, "ge251": 4, "eq255": 5});
+        let old = serde_json::json!({
+            "texels": 9, "two_channel": false,
+            "bands": [band(7), band(0), band(0), band(0)],
+            "luma_dark": 1, "luma_bright": 2, "luma_black": 3,
+            "curl": null, "steep": 0.25,
+        });
+        let s: CheckStats = serde_json::from_value(old).unwrap();
+        assert_eq!((s.texels, s.bands[0].eq0, s.bands[0].ge251), (9, 7, 4));
+        assert_eq!(s.steep, Some(0.25));
     }
 
     #[test]

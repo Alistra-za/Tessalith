@@ -21,7 +21,7 @@ These come back at the next start:
 - the Textures or Meshes view;
 - the Textures filters, sort and tile size;
 - the Sets filter pills and shader (not the search text);
-- the preview channel and layout;
+- the preview channel;
 - the 3D View controls (background, sun and its turn, point light, radius, Accurate (deferred)).
 
 The zoom, the selection and the open folder are not remembered.

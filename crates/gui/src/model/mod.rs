@@ -32,7 +32,6 @@ pub mod pack_fills;
 pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
-pub mod pin;
 pub mod plugin_refs;
 pub mod presets;
 pub mod preview;

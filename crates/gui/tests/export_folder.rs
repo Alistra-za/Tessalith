@@ -111,11 +111,6 @@ fn header_export_reads_review_until_clean() {
     );
     assert!(!m.export_is_clean());
     decide_all(&mut m);
-    // K3: the fixture's flat `_normal` raises CHK-PLASTIC, which is not about this test.
-    m.set_checks(sdc_gui::settings::ChecksSettings {
-        plastic: false,
-        ..Default::default()
-    });
     idle(&mut m);
     assert_eq!(m.undecided(), 0);
     let n = m.export_files();
@@ -157,10 +152,6 @@ fn decided_with_folder(dir: &std::path::Path) -> AppModel {
     m.set_export_folder(dir.join("out"));
     idle(&mut m);
     decide_all(&mut m);
-    m.set_checks(sdc_gui::settings::ChecksSettings {
-        plastic: false,
-        ..Default::default()
-    });
     idle(&mut m);
     assert_eq!(m.undecided(), 0);
     m

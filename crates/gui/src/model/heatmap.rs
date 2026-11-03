@@ -5,7 +5,7 @@
 //! current key only in its full scale is shown at once, so a slider drag never leaves the heatmap blank (AG63);
 //! any other result for an older key is dropped.
 use crate::model::preview::PreviewOut;
-use crate::model::view::{heatmap_of, heatmap_vs_pin, Channel};
+use crate::model::view::{heatmap_of, Channel};
 use crate::model::AppModel;
 use crate::worker::{or_send, spawn_guarded, WorkerMsg};
 use std::sync::Arc;
@@ -24,31 +24,18 @@ pub(crate) struct HeatKey {
     mip: usize,
     channel: Channel,
     full_scale: f32,
-    /// The pinned encode the current one is compared with (DECISIONS AG69): its id and images.
-    pin: Option<u64>,
 }
 
 impl HeatKey {
     /// Same picture, only the full scale may differ.
     fn same_view(&self, o: &HeatKey) -> bool {
-        Arc::ptr_eq(&self.out, &o.out)
-            && self.mip == o.mip
-            && self.channel == o.channel
-            && self.pin_id() == o.pin_id()
-    }
-
-    fn pin_id(&self) -> Option<u64> {
-        self.pin
+        Arc::ptr_eq(&self.out, &o.out) && self.mip == o.mip && self.channel == o.channel
     }
 }
 
 impl PartialEq for HeatKey {
     fn eq(&self, o: &HeatKey) -> bool {
-        Arc::ptr_eq(&self.out, &o.out)
-            && self.mip == o.mip
-            && self.channel == o.channel
-            && self.full_scale == o.full_scale
-            && self.pin_id() == o.pin_id()
+        self.same_view(o) && self.full_scale == o.full_scale
     }
 }
 
@@ -81,7 +68,6 @@ impl AppModel {
             mip: self.view.mip,
             channel: self.view.channel,
             full_scale: self.view.full_scale,
-            pin: self.compared_pin().map(|p| p.id),
         })
     }
 
@@ -95,9 +81,6 @@ impl AppModel {
         if h.running.is_some() || h.shown.as_ref().is_some_and(|(k, _)| *k == want) {
             return;
         }
-        // The pin's images go to the job only, never into the key: unpinning must free them (AG71).
-        let pin_out = self.compared_pin().map(|p| p.out.clone());
-        let h = &mut self.preview.heat;
         h.next_id += 1;
         let id = h.next_id;
         h.running = Some((id, want.clone()));
@@ -105,12 +88,7 @@ impl AppModel {
             // A panic is this job's "no heatmap" (trace-debug #26), so its key is not retried every frame.
             let made = or_send(
                 tx,
-                || match &pin_out {
-                    Some(pin) => {
-                        heatmap_vs_pin(&want.out, pin, want.mip, want.channel, want.full_scale)
-                    }
-                    None => heatmap_of(&want.out, want.mip, want.channel, want.full_scale),
-                },
+                || heatmap_of(&want.out, want.mip, want.channel, want.full_scale),
                 |_| WorkerMsg::Heatmap { id, image: None },
             );
             let image = made.map(|(width, height, rgba)| {
@@ -145,12 +123,9 @@ impl AppModel {
     pub fn heatmap_image(&self) -> Option<Arc<HeatImage>> {
         let (key, image) = self.preview.heat.shown.as_ref()?;
         let want = self.heat_wanted()?;
-        // Another mip, or the other comparison (source or pin), is not this picture; only the scale may lag.
-        (key.mip == want.mip && key.pin_id() == want.pin_id())
-            .then(|| image.clone())
-            .flatten()
+        // Another mip is not this picture; only the scale may lag.
+        (key.mip == want.mip).then(|| image.clone()).flatten()
     }
-
     /// The heatmap is on but the one for the current key has not landed (the legend says "updating…").
     pub fn heatmap_updating(&self) -> bool {
         self.heat_wanted().is_some_and(|w| {

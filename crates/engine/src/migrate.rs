@@ -237,6 +237,16 @@ pub const REMOVED: &[Removed] = &[
         value: Some("ALSO-OWNED-UNREADABLE"),
         hint: "ALSO-OWNED-UNREADABLE was removed in 2.0 (an Also export keeps no also.json record); delete it from the list",
     },
+    Removed {
+        key: "allow",
+        value: Some("CHK-RANGE"),
+        hint: "CHK-RANGE was removed in 2.0 (the Value range check is gone); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("CHK-PLASTIC"),
+        hint: "CHK-PLASTIC was removed in 2.0 (the Plastic look check is gone); delete it from the list",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

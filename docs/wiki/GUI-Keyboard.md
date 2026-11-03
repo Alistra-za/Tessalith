@@ -51,7 +51,6 @@ While a text field has the keyboard (the search box, a name, a number), the shor
 | Preview | ] | Next texture |
 | Preview | L | Magnifier lens on or off |
 | Preview | T | Tile the picture 3×3 on or off |
-| Preview | P | Pin this result |
 | Preview | 1 | Show RGBA |
 | Preview | 2 | Show R |
 | Preview | 3 | Show G |

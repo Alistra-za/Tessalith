@@ -405,12 +405,6 @@ fn an_exported_short_normal_still_shows_one_z_row() {
             "landscape/x_n.png".into()
         ))
     );
-    // The panel is 240 px tall: hide the two plastic check rows so the File row is drawn.
-    let checks = h.state().settings.checks;
-    h.state_mut().set_checks(sdc_gui::settings::ChecksSettings {
-        plastic: false,
-        ..checks
-    });
     h.state_mut().poll();
     h.state_mut().invalidate_views();
     h.run();
@@ -512,11 +506,6 @@ fn the_header_export_is_clean_only_with_a_folder_and_nothing_undecided() {
     let mut m = opened(d.path());
     assert!(!m.export_is_clean(), "textures are undecided");
     decide_all(&mut m);
-    // K3: the fixture's flat, alpha-less rock01_normal raises CHK-PLASTIC; this test is about the other rows.
-    m.set_checks(sdc_gui::settings::ChecksSettings {
-        plastic: false,
-        ..Default::default()
-    });
     m.poll();
     for i in m.items.iter_mut() {
         i.warnings.clear();
@@ -770,16 +759,8 @@ fn the_checks_filter_shows_only_check_rows() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
-    // Only the plastic check: the fixture's flat, alpha-less rock01_normal raises it.
-    let plastic = sdc_gui::settings::ChecksSettings {
-        range: false,
-        plastic: true,
-        low_detail: false,
-        green: false,
-        parallax: false,
-        uv: false,
-    };
-    m.set_checks(plastic);
+    // Only the Z-sign check: give_a_check blues out the fixture's rock01_normal.
+    give_a_check(&mut m, d.path());
     m.poll();
     for i in m.items.iter_mut() {
         i.warnings.clear();
@@ -821,8 +802,8 @@ fn the_checks_filter_shows_only_check_rows() {
     assert_eq!(shown(&h, &check), 1);
     // With no check rows there is no Checks button.
     h.state_mut().set_checks(sdc_gui::settings::ChecksSettings {
-        plastic: false,
-        ..plastic
+        green: false,
+        ..Default::default()
     });
     h.state_mut().poll();
     h.run();

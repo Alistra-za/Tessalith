@@ -91,7 +91,7 @@ A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown)
 
 **Unclear layout.** A single image Tessalith cannot place (a square one with no `cubemap.layout`, say) shows "This image could be several cube layouts: pick one" in the settings panel's *Undecided* box, once the sub-type is confirmed. Pick a layout there: 360° panorama, mirror ball, angular map or single photo (a cross or strip would already have been recognised). It is written for that file only. In the Review tab its row has a **Set layout ▾** menu with the same layouts.
 
-**Cube preview.** The encoded side draws all six faces of the mip on show as one cross (4 by 3 faces), sized like a 2D preview, so a big cube previews at a lower mip. *Face labels* (on by default) names each face. *Heatmap*, *Tile 3×3* and *Pin* are off for a cube ("Not for cubes"), and there is no texel readout.
+**Cube preview.** The encoded side draws all six faces of the mip on show as one cross (4 by 3 faces), sized like a 2D preview, so a big cube previews at a lower mip. *Face labels* (on by default) names each face. *Heatmap* and *Tile 3×3* are off for a cube ("Not for cubes"), and there is no texel readout.
 
 - A six-file set has six source buttons, +X to -Z, over the source side. Each shows the processed face (after turns, flips, sizing and mips), the same picture as its cell in the cross.
 - A single-image cube's source side shows the input file itself (panorama, ball, cross, strip or photo).

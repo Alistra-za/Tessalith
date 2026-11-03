@@ -14,7 +14,7 @@
 //! and IN-ALIAS-INVALID / IN-ALIAS-STALE (an `[inputs]` alias that was refused or matched no file, M6 Track F3b)
 //! and ALPHA-PARALLAX-NO-ALPHA (`alpha.parallax` on for a complex `_m` whose source has no alpha, DECISIONS AH2).
 //! and PBR-GRASS-DETECT (a PBR grass albedo CS would read as complex grass) (PBR grass design 2026-10-14 §4.4).
-//! and the six `CHK-*` codes of the GUI's artist checks, and CHK-LOW-DETAIL of check 3 at convert time (v2 artist checks, DECISIONS Note CL).
+//! and the four `CHK-*` codes of the GUI's artist checks, and CHK-LOW-DETAIL of check 3 at convert time (v2 artist checks, DECISIONS Note CL).
 //! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
 //! and the three `GEN-*` codes of generated maps: GEN-REPLACED, GEN-STALE (GUI only) and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
@@ -135,8 +135,6 @@ codes! {
     ValGrassDetect = "VAL-GRASS-DETECT" => Error,
     PbrGrassDetect = "PBR-GRASS-DETECT" => Warning,
     // v2 artist checks (DECISIONS Note CL): GUI-only check results, never emitted by the engine's plan or run.
-    ChkRange = "CHK-RANGE" => Warning,
-    ChkPlastic = "CHK-PLASTIC" => Warning,
     ChkGreenGuess = "CHK-GREEN-GUESS" => Info,
     ChkZSign = "CHK-Z-SIGN" => Warning,
     ChkParallax = "CHK-PARALLAX" => Warning,
@@ -249,7 +247,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 94);
+        assert_eq!(Code::ALL.len(), 92);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

@@ -206,3 +206,46 @@ CL¶- **Check all** covers every offered item	CL		back	FM		partial	2026-11-03		g
 BS5	BS		back	FM		partial	2026-11-03		goes: the flash in the reset state; stays: the folder-change reset
 BS8	BS		back	FM		partial	2026-11-03		goes: does not flash; stays: no edit for a move to its own place
 FC¶- **One accent.**	FC		back	FM		partial	2026-11-03		goes: the slot flash; stays: one accent, RNM outline
+AG64	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG65	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG66	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG67	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG68	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG69	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG70	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG71	AG		back	FM		archive-item	2026-11-03		whole: preview Pin and Compare are removed (Note FM26)
+AG8	AG		back	FM		archive-item	2026-11-03		whole: the pin is removed (Note FM26)
+AG¶- Task 9 pin and compare	AG		back	FM		archive-item	2026-11-03		whole: index line for the removed pin items AG64-AG71
+CL9	CL		back	FM		archive-item	2026-11-03		whole: the per-texel RangeRule set is removed with CHK-RANGE
+CL13	CL		back	FM		archive-item	2026-11-03		whole: dark metal is removed with CHK-RANGE
+CL37	CL		back	FM		archive-item	2026-11-03		whole: CHK-PLASTIC is removed
+CL38	CL		back	FM		archive-item	2026-11-03		whole: CHK-PLASTIC is removed
+CE18	CE		back	FM		archive-item	2026-11-03		whole: a record of uncommitted shots, one of them pinned
+FC¶- **Range overlay is drawn for every texture	FC		back	FM		archive-item	2026-11-03		whole: the Range overlay is removed
+AG14	AG		back	FM		partial	2026-11-03		goes: Split in the hover-text list; stays: the other hovers
+AG17	AG		back	FM		partial	2026-11-03		goes: the saved preview layout and its load rule; stays: the rest of the layout memory
+AG21	AG		back	FM		partial	2026-11-03		goes: the layout in the probe; stays: the capture rule
+AG54	AG		back	FM		partial	2026-11-03		goes: the Split sentence; stays: the readout
+AG57	AG		back	FM		partial	2026-11-03		goes: the Split sentence; stays: the lens
+AQ1	AQ		back	FM		partial	2026-11-03		goes: Split in the reader list; stays: the cause
+AQ3	AQ		back	FM		partial	2026-11-03		goes: Split and the Pin and compare sentence; stays: the readers fixed
+CE13	CE		back	FM		partial	2026-11-03		goes: a pin adding Compare and Unpin; stays: the one repaint
+CE14	CE		back	FM		partial	2026-11-03		goes: Side by side in the toggle list; stays: the filled button rule
+CL1	CL		back	FM		partial	2026-11-03		goes: the luma counts, the low and high bands; stays: bands, curl, steep
+CL2	CL		back	FM		partial	2026-11-03		goes: luma in the hints; stays: the hints by suffix
+CL4	CL		back	FM		partial	2026-11-03		goes: the luma test; stays: the other tests
+CL5	CL		back	FM		partial	2026-11-03		goes: dark metal per set; stays: the check rows and the scale outliers
+CL7	CL		back	FM		partial	2026-11-03		goes: CHK-RANGE, CHK-PLASTIC and the rule ids; stays: the other codes and severities
+CL8	CL		back	FM		partial	2026-11-03		goes: the range, metal grey, rough, AO, emissive, plastic and dark metal thresholds; stays: the others
+CL10	CL		back	FM		partial	2026-11-03		goes: Plastic; stays: Z sign and green
+CL15	CL		back	FM		partial	2026-11-03		goes: Value range and Plastic look boxes; stays: the section
+CL16	CL		back	FM		partial	2026-11-03		goes: dark metal in the test list and the plastic fixture sentence; stays: the tests
+CL28	CL		back	FM		partial	2026-11-03		goes: the Range overlay toggle and its paint; stays: the overlay job machinery
+CL29	CL		back	FM		partial	2026-11-03		goes: the range rule set key and the pin; stays: the worker hand-over and no-blink rules
+CL31	CL		back	FM		partial	2026-11-03		goes: Range and pin in the toggle text; stays: UV coverage in the GUI
+CL42	CL		back	FM		partial	2026-11-03		goes: the luma histogram and luma_code; stays: histograms for the bands
+CL44	CL		back	FM		partial	2026-11-03		goes: the range overlay in the job description; stays: the UV mask cache
+DT17	DT		back	FM		partial	2026-11-03		goes: the Pin button off for a cube; stays: the cube controls
+CO74	CO		back	FM		partial	2026-11-03		goes: CHK-RANGE in the generated prefix; stays: CHK-PARALLAX
+GE16	GE		back	FM		partial	2026-11-03		goes: the v2_jobs_poll.rs test claim; stays: the fix list
+FC¶- **Tests.** `sets_filter.rs`	FC		back	FM		partial	2026-11-03		goes: the range overlay tests; stays: the other tests

@@ -52,7 +52,7 @@ const ALPHA_SENTENCE: &str =
 fn no_code_text_in_problems_rows() {
     let (_d, mut m) = with_only_warnings(&[
         Warning::new(Code::LossAlphaData, "alpha is lost in this format"),
-        Warning::new(Code::ChkRange, "albedo values leave the 30-240 range"),
+        Warning::new(Code::ChkParallax, "_p uses only 0/255 of its range"),
     ]);
     m.open_problems(None);
     let mut h = harness(m);

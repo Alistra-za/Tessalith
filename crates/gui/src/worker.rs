@@ -82,7 +82,7 @@ pub enum WorkerMsg {
         id: u64,
         image: Option<Arc<crate::model::heatmap::HeatImage>>,
     },
-    /// The preview overlay of job `generation` (`AppModel::overlay_for`), ready to upload; `None` when the job
+    /// The preview overlay of job `generation` (`AppModel::uv_overlay_job`), ready to upload; `None` when the job
     /// panicked.
     Overlay {
         generation: u64,

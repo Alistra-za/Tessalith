@@ -37,6 +37,16 @@ pub fn mod_folder(dir: &Path) -> PathBuf {
     dir.join("textures")
 }
 
+/// Rewrites the opened fixture's `rock01_normal.png` with a blue of 0 and plans again, so the folder has one check
+/// result (CHK-Z-SIGN on that normal) once it is a tangent-space normal; the fixture's own flat normal has none.
+pub fn give_a_check(m: &mut AppModel, dir: &Path) {
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 0]))
+        .save(dir.join("textures/landscape/rock01_normal.png"))
+        .unwrap();
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
 /// A session of its own per call: a shared one would drop another test's cache entries on every plan (audit 8).
 pub fn session() -> Arc<engine::session::Session> {
     Arc::new(engine::session::Session::new().unwrap())
@@ -247,8 +257,7 @@ pub fn outside_sets<'a, S>(
 }
 
 /// Task 6: a PBR set under `textures/test` (`wall.png` at grey `albedo`, `wall_rmaos.png` filled with `rmaos`),
-/// opened as the app opens a folder, shader Pbr. Luma 20 gives the albedo a per-texel CHK-RANGE; luma 100 with a
-/// metal `_rmaos` (G 255) gives it only `dark_metal`.
+/// opened as the app opens a folder, shader Pbr.
 pub fn pbr_wall(dir: &Path, albedo: u8, rmaos: [u8; 3]) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();

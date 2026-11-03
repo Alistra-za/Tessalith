@@ -357,16 +357,14 @@ fn export_never_asks_about_check_warnings() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
+    give_a_check(&mut m, d.path());
     m.poll();
     let c: usize = m
         .items
         .iter()
         .map(|i| m.check_warnings(&i.key).len())
         .sum::<usize>();
-    assert!(
-        c > 0,
-        "the fixture raises a check result (flat alpha-less normal)"
-    );
+    assert!(c > 0, "the fixture raises a check result (blue-0 normal)");
     for i in sdc_gui::model::pbr_export::export_blocks(&m)
         .iter()
         .chain(sdc_gui::model::pbr_export::export_asks(&m).iter())
@@ -384,11 +382,12 @@ fn export_never_asks_about_check_warnings() {
 
 const SUMMARY: &str = "Checks: 1 warning on 1 texture; see Problems";
 
-/// A decided folder whose only check result is the fixture's plastic `_n`.
+/// A decided folder whose only check result is the Z sign of its `_n`.
 fn with_one_check() -> (tempfile::TempDir, AppModel) {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
+    give_a_check(&mut m, d.path());
     m.poll();
     assert_eq!(
         sdc_gui::model::checks::checks_summary(&m).as_deref(),

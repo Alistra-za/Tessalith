@@ -12,7 +12,7 @@ use engine::codes::{Code, Severity, Warning};
 use engine::config::{Subtype, Target};
 use engine::events::*;
 use engine::policy::ResolvedJob;
-use engine::session::{AnalysisCache, Thumbnail};
+use engine::session::AnalysisCache;
 use engine::shader::Shader;
 use image::{ImageBuffer, Rgb, Rgba};
 use sdc_gui::model::bottom::{self, At, Level, ProblemsFilter};
@@ -88,192 +88,6 @@ fn all_on() -> ChecksSettings {
 }
 
 #[test]
-/// RANGE_SHARE (0.50 after the 10k tuning, CL8): 51 of 100 texels at luma 20 warn, 49 do not.
-fn albedo_out_of_range_luma_raises_chk_range_above_range_share() {
-    let at = (RANGE_SHARE * 100.0).round() as u32;
-    let check = |dark: u32| {
-        let d = tempfile::tempdir().unwrap();
-        let (j, a) = planned(
-            d.path(),
-            "wall.png",
-            rgb(10, 10, move |x, y| {
-                if y * 10 + x < dark {
-                    [20, 20, 20]
-                } else {
-                    [128, 128, 128]
-                }
-            }),
-        );
-        let j = as_subtype(j, Subtype::PbrAlbedo);
-        texture_checks(&j, &a, HeightNeutral::Half, None, &all_on())
-    };
-    let ws = check(at + 1);
-    let r = with(Code::ChkRange, &ws);
-    assert_eq!(r.len(), 1, "{ws:?}");
-    assert_eq!(r[0].data, json!({"rule": "albedo_luma"}));
-    assert_eq!(r[0].severity, Severity::Warning);
-    assert!(with(Code::ChkRange, &check(at - 1)).is_empty());
-    // The switch hides it.
-    let d = tempfile::tempdir().unwrap();
-    let (j, a) = planned(d.path(), "wall.png", rgb(10, 10, |_, _| [20, 20, 20]));
-    let j = as_subtype(j, Subtype::PbrAlbedo);
-    let off = ChecksSettings {
-        range: false,
-        ..all_on()
-    };
-    assert!(texture_checks(&j, &a, HeightNeutral::Half, None, &off).is_empty());
-}
-
-#[test]
-fn range_rule_bad_agrees_with_the_band_counts() {
-    let mut s = 12345u32;
-    let mut next = move || {
-        s = s.wrapping_mul(1_103_515_245).wrapping_add(12345);
-        (s >> 16) as u8
-    };
-    let px: Vec<[u8; 3]> = (0..64 * 64)
-        .map(|i| {
-            // Every fourth texel at an edge code, so each rule sees both outcomes.
-            if i % 8 == 0 {
-                [0, 255, 3]
-            } else if i % 8 == 4 {
-                [0, 0, 0]
-            } else {
-                [next(), next(), next()]
-            }
-        })
-        .collect();
-    let d = tempfile::tempdir().unwrap();
-    let p2 = px.clone();
-    let (_, a) = planned(
-        d.path(),
-        "noise.png",
-        rgb(64, 64, move |x, y| p2[(y * 64 + x) as usize]),
-    );
-    let st = a.checks.unwrap();
-    for rule in [
-        RangeRule::AlbedoLuma,
-        RangeRule::MetalGrey,
-        RangeRule::RoughExtreme,
-        RangeRule::EmissiveBackground,
-    ] {
-        let bad = px
-            .iter()
-            .filter(|c| rule.bad([c[0], c[1], c[2], 255]))
-            .count() as u64;
-        assert_eq!(bad, rule.count(&st), "{}", rule.id());
-        assert!(bad > 0 && bad < st.texels, "{}: {bad}", rule.id());
-    }
-    assert_eq!(rules_for(Subtype::PbrAlbedo), &[RangeRule::AlbedoLuma]);
-    assert_eq!(
-        rules_for(Subtype::Rmaos),
-        &[RangeRule::RoughExtreme, RangeRule::MetalGrey]
-    );
-    assert_eq!(rules_for(Subtype::Glow), &[RangeRule::EmissiveBackground]);
-    assert!(rules_for(Subtype::Normal).is_empty());
-}
-
-#[test]
-fn ao_dark_is_a_mean_check_without_an_overlay_rule() {
-    let d = tempfile::tempdir().unwrap();
-    let (j, a) = planned(d.path(), "wall_rmaos.png", rgb(8, 8, |_, _| [128, 0, 51]));
-    let j = as_subtype(j, Subtype::Rmaos);
-    let ws = texture_checks(&j, &a, HeightNeutral::Half, None, &all_on());
-    let r = with(Code::ChkRange, &ws);
-    assert_eq!(r.len(), 1, "{ws:?}");
-    assert_eq!(r[0].data, json!({"rule": "ao_dark"}));
-    assert!(rules_for(Subtype::Rmaos)
-        .iter()
-        .all(|r| r.id() != "ao_dark"));
-}
-
-#[test]
-fn a_vanilla_n_with_no_alpha_or_white_alpha_raises_plastic_softly() {
-    let plastic = |st: Subtype, alpha: Option<u8>| {
-        let d = tempfile::tempdir().unwrap();
-        let (j, a) = match alpha {
-            None => planned(d.path(), "wall_n.png", rgb(8, 8, |_, _| [128, 128, 255])),
-            Some(v) => planned(
-                d.path(),
-                "wall_n.png",
-                rgba(8, 8, move |_, _| [128, 128, 255, v]),
-            ),
-        };
-        let j = as_subtype(j, st);
-        texture_checks(&j, &a, HeightNeutral::Half, None, &all_on())
-            .into_iter()
-            .filter(|w| w.code == Code::ChkPlastic)
-            .collect::<Vec<_>>()
-    };
-    for ws in [
-        plastic(Subtype::Normal, None),
-        plastic(Subtype::Normal, Some(255)),
-    ] {
-        assert_eq!(ws.len(), 1, "{ws:?}");
-        assert!(
-            ws[0].message.contains("may look plastic"),
-            "{}",
-            ws[0].message
-        );
-        assert_eq!(ws[0].severity, Severity::Warning);
-    }
-    assert!(plastic(Subtype::Normal, Some(90)).is_empty());
-    assert!(plastic(Subtype::PbrNormal, None).is_empty());
-}
-
-#[test]
-/// Task 11 (Note CL37, owner 2026-10-20): on hair and Advanced Skin, CS doesn't read the `_n` alpha for specular, so
-/// CHK-PLASTIC still warns but says it only matters for vanilla. A plain set keeps today's text.
-fn plastic_on_hair_and_advanced_skin_says_it_only_matters_for_vanilla() {
-    let d = tempfile::tempdir().unwrap();
-    let (j, a) = planned(d.path(), "wall_n.png", rgb(8, 8, |_, _| [128, 128, 255]));
-    let j = as_subtype(j, Subtype::Normal);
-    let msg = |sh: Option<Shader>| {
-        let ws = texture_checks(&j, &a, HeightNeutral::Half, sh, &all_on());
-        let p = with(Code::ChkPlastic, &ws);
-        assert_eq!(p.len(), 1, "{sh:?}: {ws:?}");
-        assert_eq!(p[0].severity, Severity::Warning);
-        assert_eq!(p[0].data, serde_json::Value::Null);
-        p[0].message.clone()
-    };
-    let base =
-        "_n has no specular in its alpha (missing or all white): the surface may look plastic";
-    let only = "Only matters for vanilla: Community Shaders doesn't read this normal map's alpha for specular on";
-    assert_eq!(msg(Some(Shader::Hair)), format!("{base}. {only} hair"));
-    assert_eq!(
-        msg(Some(Shader::AdvancedSkin)),
-        format!("{base}. {only} skin")
-    );
-    for sh in [None, Some(Shader::Default), Some(Shader::Skin)] {
-        assert_eq!(msg(sh), base, "{sh:?}");
-    }
-}
-
-#[test]
-/// Task 11 (Note CL38): an `_msn` never raises CHK-PLASTIC, with or without an `_s` in its set (specular comes
-/// from the `_s`; the check only reads a tangent-space `_n`).
-fn an_msn_raises_no_plastic_with_or_without_an_s() {
-    for files in [&["body_msn.png", "body_s.png"][..], &["body_msn.png"][..]] {
-        let d = tempfile::tempdir().unwrap();
-        let input = d.path().join("in");
-        std::fs::create_dir_all(&input).unwrap();
-        for f in files {
-            rgb(8, 8, |_, _| [128, 128, 255])(&input.join(f));
-        }
-        let (j, a) = planned(d.path(), "body_msn.png", |_| {});
-        assert_eq!(j.profile.subtype, Subtype::Msn, "{files:?}");
-        assert!(
-            with(
-                Code::ChkPlastic,
-                &texture_checks(&j, &a, HeightNeutral::Half, Some(Shader::Skin), &all_on())
-            )
-            .is_empty(),
-            "{files:?}"
-        );
-    }
-}
-
-#[test]
 fn a_two_channel_normal_raises_no_z_sign() {
     let d = tempfile::tempdir().unwrap();
     let (j, mut a) = planned(d.path(), "wall_n.png", rgb(8, 8, |_, _| [128, 128, 0]));
@@ -282,7 +96,7 @@ fn a_two_channel_normal_raises_no_z_sign() {
     let z = |a: &Analysis| {
         with(
             Code::ChkZSign,
-            &texture_checks(&j, a, HeightNeutral::Half, None, &all_on()),
+            &texture_checks(&j, a, HeightNeutral::Half, &all_on()),
         )
         .len()
     };
@@ -294,7 +108,7 @@ fn a_two_channel_normal_raises_no_z_sign() {
     let msn = as_subtype(j.clone(), Subtype::Msn);
     assert!(with(
         Code::ChkZSign,
-        &texture_checks(&msn, &a, HeightNeutral::Half, None, &all_on())
+        &texture_checks(&msn, &a, HeightNeutral::Half, &all_on())
     )
     .is_empty());
 }
@@ -305,7 +119,7 @@ fn green_guess_is_info_and_only_when_the_file_does_not_flip() {
     let (j, mut a) = planned(d.path(), "wall_n.png", rgb(8, 8, |_, _| [128, 128, 255]));
     let j = as_subtype(j, Subtype::PbrNormal);
     let guess = |j: &ResolvedJob, a: &Analysis| {
-        texture_checks(j, a, HeightNeutral::Half, None, &all_on())
+        texture_checks(j, a, HeightNeutral::Half, &all_on())
             .into_iter()
             .filter(|w| w.code == Code::ChkGreenGuess)
             .collect::<Vec<_>>()
@@ -347,7 +161,7 @@ fn parallax_judges_against_0_5_except_pbr_inner_layer_and_skips_vanilla_multilay
         }),
     );
     let j = as_subtype(j, Subtype::Height);
-    let at = |n| parallax(&texture_checks(&j, &a, n, None, &all_on()));
+    let at = |n| parallax(&texture_checks(&j, &a, n, &all_on()));
     let half = at(HeightNeutral::Half);
     assert!(half.iter().any(|m| m.contains("mostly white")), "{half:?}");
     assert!(
@@ -369,7 +183,7 @@ fn parallax_judges_against_0_5_except_pbr_inner_layer_and_skips_vanilla_multilay
     );
     let j = as_subtype(j, Subtype::Height);
     for n in [HeightNeutral::Half, HeightNeutral::White] {
-        let ms = parallax(&texture_checks(&j, &a, n, None, &all_on()));
+        let ms = parallax(&texture_checks(&j, &a, n, &all_on()));
         assert!(ms.iter().any(|m| m.contains("clipped")), "{n:?}: {ms:?}");
     }
 
@@ -384,13 +198,7 @@ fn parallax_judges_against_0_5_except_pbr_inner_layer_and_skips_vanilla_multilay
         }),
     );
     let j = as_subtype(j, Subtype::Height);
-    let ms = parallax(&texture_checks(
-        &j,
-        &a,
-        HeightNeutral::Half,
-        None,
-        &all_on(),
-    ));
+    let ms = parallax(&texture_checks(&j, &a, HeightNeutral::Half, &all_on()));
     assert!(ms.iter().all(|m| !m.contains("clipped")), "{ms:?}");
 }
 
@@ -407,13 +215,7 @@ fn cpm_alpha_at_or_below_4_counts_as_parallax_off() {
         );
         let mut j = as_subtype(j, Subtype::ComplexMaterial);
         j.profile.alpha.parallax = parallax_on;
-        parallax(&texture_checks(
-            &j,
-            &a,
-            HeightNeutral::Half,
-            None,
-            &all_on(),
-        ))
+        parallax(&texture_checks(&j, &a, HeightNeutral::Half, &all_on()))
     };
     let ms = cpm(3, Some(true));
     assert!(
@@ -429,14 +231,7 @@ fn cpm_alpha_at_or_below_4_counts_as_parallax_off() {
     let (j, a) = planned(d.path(), "wall_m.png", rgb(64, 64, |_, _| [128, 128, 128]));
     let mut j = as_subtype(j, Subtype::ComplexMaterial);
     j.profile.alpha.parallax = Some(true);
-    assert!(parallax(&texture_checks(
-        &j,
-        &a,
-        HeightNeutral::Half,
-        None,
-        &all_on()
-    ))
-    .is_empty());
+    assert!(parallax(&texture_checks(&j, &a, HeightNeutral::Half, &all_on())).is_empty());
 }
 
 #[test]
@@ -496,30 +291,6 @@ fn landscape_sets_whose_scale_differs_by_more_than_2x_are_flagged() {
     assert!(scale_outliers(&v(&[("a", f64::NAN), ("b", 1.0), ("c", 9.0)])).len() == 2);
 }
 
-fn thumb(n: usize, f: impl Fn(usize) -> [u8; 4]) -> Thumbnail {
-    Thumbnail {
-        width: n as u32,
-        height: 1,
-        rgba: (0..n).flat_map(f).collect(),
-    }
-}
-
-#[test]
-fn dark_metal_share_reads_the_two_thumbnails() {
-    let albedo = thumb(100, |_| [40, 40, 40, 255]);
-    assert_eq!(
-        dark_metal_share(&albedo, &thumb(50, |_| [0, 255, 0, 255])),
-        None
-    );
-    let one = thumb(100, |i| [0, if i == 0 { 255 } else { 0 }, 0, 255]);
-    assert_eq!(dark_metal_share(&albedo, &one), None);
-    let sixty = thumb(100, |i| [0, if i < 60 { 255 } else { 0 }, 0, 255]);
-    let s = dark_metal_share(&albedo, &sixty).unwrap();
-    assert!((s - 0.6).abs() < 1e-9, "{s}");
-    let empty = thumb(0, |_| [0; 4]);
-    assert_eq!(dark_metal_share(&empty, &empty), None);
-}
-
 // ---- the model ----------------------------------------------------------------------------------------------------
 
 /// A bumpy tangent-space normal stored with OpenGL green (Y up) while its name says DirectX.
@@ -541,20 +312,26 @@ fn gl_bumpy(path: &Path) {
     .unwrap();
 }
 
-/// A PBR set under `textures/test`: `wall.png` at luma `albedo`, a clean `wall_rmaos.png` and a `wall_n.png`, flat,
-/// or with `flipped` a bumpy one stored with the other green. Opened as the app opens a folder, shader Pbr, target cs.
-fn pbr_wall(dir: &Path, albedo: u8, flipped: bool) -> AppModel {
-    pbr_sets(dir, &[("wall", albedo)], flipped)
+/// A PBR set under `textures/test`: `wall.png`, a clean `wall_rmaos.png` and a `wall_n.png`, flat, or with `flipped`
+/// a bumpy one stored with the other green. With `flat_p` it also has a flat `wall_p.png`, which raises one
+/// CHK-PARALLAX row ("uses only 0/255 of its range"). Opened as the app opens a folder, shader Pbr, target cs.
+fn pbr_wall(dir: &Path, flat_p: bool, flipped: bool) -> AppModel {
+    pbr_sets(dir, &[("wall", flat_p)], flipped)
 }
 
-/// `pbr_wall` with one PBR set per `(stem, albedo luma)`.
-fn pbr_sets(dir: &Path, sets: &[(&str, u8)], flipped: bool) -> AppModel {
+/// `pbr_wall` with one PBR set per `(stem, flat_p)`.
+fn pbr_sets(dir: &Path, sets: &[(&str, bool)], flipped: bool) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
-    for &(stem, albedo) in sets {
-        ImageBuffer::from_fn(64, 64, |_, _| Rgb([albedo, albedo, albedo]))
+    for &(stem, flat_p) in sets {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
             .save(r.join(format!("{stem}.png")))
             .unwrap();
+        if flat_p {
+            ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
+                .save(r.join(format!("{stem}_p.png")))
+                .unwrap();
+        }
         ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 10, 200]))
             .save(r.join(format!("{stem}_rmaos.png")))
             .unwrap();
@@ -606,21 +383,21 @@ fn check_rows(m: &AppModel) -> Vec<bottom::Problem> {
 #[test]
 fn turning_a_check_off_hides_its_warnings_without_a_replan() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     let rows = check_rows(&m);
     assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].code, Some(Code::ChkRange));
-    assert_eq!(rows[0].at, At::Texture("test/wall.png".into()));
+    assert_eq!(rows[0].code, Some(Code::ChkParallax));
+    assert_eq!(rows[0].at, At::Texture("test/wall_p.png".into()));
     let (gen, rev) = (m.generation(), m.items_rev());
     bottom::problems(&m);
     let builds = bottom::problems_builds(&m);
     m.set_checks(ChecksSettings {
-        range: false,
+        parallax: false,
         ..ChecksSettings::default()
     });
     m.poll();
     assert!(check_rows(&m).is_empty());
-    assert!(m.check_warnings("test/wall.png").is_empty());
+    assert!(m.check_warnings("test/wall_p.png").is_empty());
     assert!(m.items_rev() > rev, "invalidate_views ran");
     assert_eq!(bottom::problems_builds(&m), builds + 1);
     assert_eq!(m.generation(), gen, "no re-plan");
@@ -629,8 +406,8 @@ fn turning_a_check_off_hides_its_warnings_without_a_replan() {
     m.set_checks(ChecksSettings::default());
     m.poll();
     assert_eq!(check_rows(&m).len(), 1);
-    ImageBuffer::from_fn(32, 32, |_, _| Rgb([128u8, 128, 128]))
-        .save(d.path().join("textures/test/wall.png"))
+    ImageBuffer::from_fn(64, 64, |_, y| Rgb([(y * 3) as u8; 3]))
+        .save(d.path().join("textures/test/wall_p.png"))
         .unwrap();
     m.replan();
     assert!(m.wait_idle(Duration::from_secs(60)));
@@ -641,7 +418,7 @@ fn turning_a_check_off_hides_its_warnings_without_a_replan() {
 #[test]
 fn opening_another_folder_drops_the_old_check_rows() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     assert_eq!(check_rows(&m).len(), 1);
     let other = tempfile::tempdir().unwrap();
     let r = other.path().join("textures/plain");
@@ -651,7 +428,7 @@ fn opening_another_folder_drops_the_old_check_rows() {
         .unwrap();
     m.open_folder(other.path().join("textures"));
     m.poll();
-    assert!(m.check_warnings("test/wall.png").is_empty());
+    assert!(m.check_warnings("test/wall_p.png").is_empty());
     assert!(check_rows(&m).is_empty(), "{:?}", check_rows(&m));
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(check_rows(&m).is_empty());
@@ -662,17 +439,17 @@ fn opening_another_folder_drops_the_old_check_rows() {
 fn undo_restores_the_check_rows_an_edit_removed() {
     use sdc_gui::model::Answer;
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     assert_eq!(check_rows(&m).len(), 1);
-    // As a plain diffuse the value-range rule does not apply.
-    m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+    // As a plain diffuse the parallax check does not apply.
+    m.decide("test/wall_p.png", Answer::Subtype(Subtype::Diffuse));
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(check_rows(&m).is_empty(), "{:?}", check_rows(&m));
     m.undo();
     assert!(m.wait_idle(Duration::from_secs(60)));
     let rows = check_rows(&m);
     assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].at, At::Texture("test/wall.png".into()));
+    assert_eq!(rows[0].at, At::Texture("test/wall_p.png".into()));
 }
 
 /// Review M2: under a Set filter the checks filter keeps the set. Note FC3: it is the `Checks` pill (no count of its
@@ -680,7 +457,7 @@ fn undo_restores_the_check_rows_an_edit_removed() {
 #[test]
 fn the_checks_pill_under_a_set_filter_keeps_the_set() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_sets(d.path(), &[("wall", 20), ("rock", 20)], false);
+    let mut m = pbr_sets(d.path(), &[("wall", true), ("rock", true)], false);
     assert_eq!(check_rows(&m).len(), 2);
     let wall = set_key(&m, "wall");
     m.open_problems(Some(ProblemsFilter::Set(wall.clone())));
@@ -694,7 +471,7 @@ fn the_checks_pill_under_a_set_filter_keeps_the_set() {
     );
     let rows = bottom::filtered(h.state(), h.state().bottom.filter.as_ref());
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].at, At::Texture("test/wall.png".into()));
+    assert_eq!(rows[0].at, At::Texture("test/wall_p.png".into()));
     assert!(h.query_by_label_contains("Checks 1").is_none());
     h.get_by_label(sdc_gui::ui::problems::CHECKS_PILL).click();
     h.run();
@@ -713,7 +490,7 @@ fn not_auto(m: &sdc_gui::model::AppModel) -> Vec<bottom::Problem> {
 #[test]
 fn soft_check_rows_are_listed_but_leave_ready_alone() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_wall(d.path(), 20, false);
+    let m = pbr_wall(d.path(), true, false);
     assert!(sdc_gui::model::pbr_export::export_blocks(&m).is_empty());
     assert!(sdc_gui::model::pbr_export::export_asks(&m).is_empty());
     let all = not_auto(&m);
@@ -737,47 +514,12 @@ fn soft_check_rows_are_listed_but_leave_ready_alone() {
     assert!(m.export_is_clean());
 }
 
-#[test]
-/// Task 11 fix M1 (Note CL37): `refresh_checks` passes the set's shader, so a hair set's flat `_n` lists the
-/// vanilla-only wording on its Problems row.
-fn a_hair_sets_plastic_row_has_the_hair_wording() {
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path().join("textures/hair");
-    std::fs::create_dir_all(&r).unwrap();
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb([120u8, 90, 60]))
-        .save(r.join("braid.png"))
-        .unwrap();
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
-        .save(r.join("braid_n.png"))
-        .unwrap();
-    let mut m = support::opened_as_the_app(d.path().join("textures"), d.path().join("export"));
-    m.poll();
-    let v = sdc_gui::model::sets::views(&m);
-    let v = v
-        .iter()
-        .find(|v| v.key.ends_with("braid"))
-        .expect("the set");
-    assert_eq!(v.shader.as_ref().map(|p| p.shader), Some(Shader::Hair));
-    let rows: Vec<_> = check_rows(&m)
-        .into_iter()
-        .filter(|p| p.code == Some(Code::ChkPlastic))
-        .collect();
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(
-        rows[0].text.ends_with(
-            "Only matters for vanilla: Community Shaders doesn't read this normal map's alpha for specular on hair"
-        ),
-        "{}",
-        rows[0].text
-    );
-}
-
 /// Note FC3 (supersedes CL5/CL7's "never rows"): the green guess, an Info result, is a check row because it has an
 /// action, `Treat as OpenGL`; it still leaves "ready" alone.
 #[test]
 fn the_green_guess_is_a_check_row_with_treat_as_opengl() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 128, true);
+    let mut m = pbr_wall(d.path(), false, true);
     let n = m.item("test/wall_n.png").expect("the normal");
     assert_eq!(n.status, sdc_gui::model::items::ItemStatus::Ready);
     let ws = m.check_warnings("test/wall_n.png");
@@ -830,7 +572,7 @@ fn harness(model: AppModel, width: f32) -> Harness<'static, AppModel> {
 #[test]
 fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_wall(d.path(), 20, true);
+    let m = pbr_wall(d.path(), true, true);
     assert!(m
         .check_warnings("test/wall_n.png")
         .iter()
@@ -882,7 +624,7 @@ fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
 
     // On a card narrower than WIDE_CARD the badge wraps with the pill and stays inside the card.
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_wall(d.path(), 20, true);
+    let m = pbr_wall(d.path(), true, true);
     let mut h = harness(m, 1100.0);
     // The Sets column at its minimum: its card is under WIDE_CARD (CD9).
     h.ctx
@@ -961,7 +703,7 @@ fn a_narrow_set_card_keeps_its_name() {
 fn mead_card(width: f32, warned: bool) -> (Harness<'static, AppModel>, egui::Rect, egui::Rect) {
     use engine::codes::{Code, Warning};
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_sets(d.path(), &[("mead_bottle", 20)], true);
+    let mut m = pbr_sets(d.path(), &[("mead_bottle", true)], true);
     if warned {
         let key = set_key(&m, "mead_bottle");
         m.sets.iter_mut().find(|s| s.key == key).unwrap().warnings = vec![
@@ -1008,7 +750,7 @@ fn a_wide_set_card_keeps_its_one_row_heading() {
 #[test]
 fn the_drop_zone_hint_is_whole() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_sets(d.path(), &[("mead_bottle", 20)], true);
+    let m = pbr_sets(d.path(), &[("mead_bottle", true)], true);
     let mut h = harness(m, 1100.0);
     h.ctx
         .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 0.0f32));
@@ -1023,15 +765,15 @@ fn the_drop_zone_hint_is_whole() {
 #[test]
 fn an_undecided_members_check_results_are_not_on_the_badge() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     let i = m
         .items
         .iter()
-        .position(|i| i.key == "test/wall.png")
+        .position(|i| i.key == "test/wall_p.png")
         .unwrap();
     m.items[i].status = sdc_gui::model::items::ItemStatus::NeedsDecision;
     m.invalidate_views();
-    assert!(!m.check_warnings("test/wall.png").is_empty());
+    assert!(!m.check_warnings("test/wall_p.png").is_empty());
     assert!(check_rows(&m).is_empty());
     let mut h = harness(m, 1600.0);
     h.run();
@@ -1042,7 +784,7 @@ fn an_undecided_members_check_results_are_not_on_the_badge() {
 #[test]
 fn an_info_only_badge_is_named_info_only() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_wall(d.path(), 128, true);
+    let m = pbr_wall(d.path(), false, true);
     let mut h = harness(m, 1600.0);
     h.run();
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Check results: info only");
@@ -1057,29 +799,35 @@ fn checks_settings_default_on_and_load_from_an_old_gui_toml() {
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_none(), "{err:?}");
     let c = s.checks;
-    assert!(c.range && c.plastic && c.low_detail && c.green && c.parallax && c.uv);
+    assert!(c.low_detail && c.green && c.parallax && c.uv);
     let mut s = s;
-    s.checks.plastic = false;
+    s.checks.green = false;
     s.save(&p).unwrap();
     let (back, _) = GuiSettings::load(&p);
     assert_eq!(back.checks, s.checks);
-    assert!(!back.checks.plastic);
+    assert!(!back.checks.green);
 }
 
-/// Note FM24: the removed `[checks] drop_top_mip` switch in an old gui.toml loads quietly and is dropped on save.
+/// Notes FM24 and FM26: the removed `[checks]` switches (`drop_top_mip`, `range`, `plastic`) in an old gui.toml load
+/// quietly and are dropped on save.
 #[test]
-fn a_removed_drop_top_mip_key_in_gui_toml_is_ignored() {
+fn removed_check_keys_in_gui_toml_are_ignored() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("gui.toml");
-    std::fs::write(&p, "[checks]\ndrop_top_mip = true\nplastic = false\n").unwrap();
+    std::fs::write(
+        &p,
+        "[checks]\ndrop_top_mip = true\nrange = false\nplastic = false\nuv = false\n",
+    )
+    .unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_none(), "{err:?}");
-    assert!(!s.checks.plastic, "the other keys still load");
+    assert!(!s.checks.uv, "the other keys still load");
     assert!(s.checks.low_detail);
     s.save(&p).unwrap();
-    assert!(!std::fs::read_to_string(&p)
-        .unwrap()
-        .contains("drop_top_mip"));
+    let text = std::fs::read_to_string(&p).unwrap();
+    for gone in ["drop_top_mip", "range", "plastic"] {
+        assert!(!text.contains(gone), "{gone} survived the save: {text}");
+    }
 }
 
 // ---- Task 3: the end-of-export summary and the green suggestion ---------------------------------------------------
@@ -1103,20 +851,20 @@ fn checks_summary_text_has_plurals_and_counts_sets_apart() {
 #[test]
 fn checks_summary_counts_warning_level_check_results_only() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_sets(d.path(), &[("a", 20), ("b", 20)], false);
+    let m = pbr_sets(d.path(), &[("a", true), ("b", true)], false);
     assert_eq!(
         checks_summary(&m).as_deref(),
         Some("Checks: 2 warnings on 2 textures; see Problems")
     );
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_wall(d.path(), 128, true); // only the Info CHK-GREEN-GUESS
+    let m = pbr_wall(d.path(), false, true); // only the Info CHK-GREEN-GUESS
     assert_eq!(checks_summary(&m), None);
 }
 
 #[test]
 fn check_warnings_are_not_copied_into_the_export_rows() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     m.export_clicked();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(m.export.rows.iter().all(|r| r
@@ -1126,7 +874,7 @@ fn check_warnings_are_not_copied_into_the_export_rows() {
     let rows = bottom::problems(&m);
     let chk: Vec<_> = rows
         .iter()
-        .filter(|p| p.code == Some(Code::ChkRange))
+        .filter(|p| p.code == Some(Code::ChkParallax))
         .collect();
     assert_eq!(chk.len(), 1, "{rows:?}");
     assert!(matches!(chk[0].at, At::Texture(_)));
@@ -1138,22 +886,22 @@ fn check_warnings_are_not_copied_into_the_export_rows() {
 #[test]
 fn a_check_row_click_selects_its_texture() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 20, false);
+    let mut m = pbr_wall(d.path(), true, false);
     m.open_problems(None);
     let mut h = harness(m, 1400.0);
     h.run();
-    h.get_by_label("test/wall.png").click();
+    h.get_by_label("test/wall_p.png").click();
     h.run();
     assert_eq!(
         h.state().selected_items(),
-        vec!["test/wall.png".to_string()]
+        vec!["test/wall_p.png".to_string()]
     );
 }
 
 #[test]
 fn an_n_that_looks_opengl_offers_treat_as_opengl() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_wall(d.path(), 128, true);
+    let mut m = pbr_wall(d.path(), false, true);
     m.select_item("test/wall_n.png");
     let mut h = harness(m, 1400.0);
     h.run();
@@ -1206,17 +954,17 @@ fn an_unstated_normal_that_looks_opengl_gets_the_hint_on_its_own_line() {
     assert_eq!(h.query_all_by_label_contains("CHK-GREEN-GUESS").count(), 0);
 }
 
-/// Two landscape sets `a` (albedo luma 20) and `b` (128), each with a bumpy GL-green `_n` (an Info result) and a
-/// full-range `_p`; b has displacement scale 5, so both sets are scale outliers (a set row each).
+/// Two landscape sets `a` and `b`, each with a bumpy GL-green `_n` (an Info result) and a flat `_p` (a CHK-PARALLAX
+/// warning); b has displacement scale 5, so both sets are scale outliers (a set row each).
 fn landscape_pair(dir: &Path) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
-    for (stem, l) in [("a", 20u8), ("b", 128)] {
-        ImageBuffer::from_fn(64, 64, |_, _| Rgb([l, l, l]))
+    for stem in ["a", "b"] {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
             .save(r.join(format!("{stem}.png")))
             .unwrap();
         gl_bumpy(&r.join(format!("{stem}_n.png")));
-        ImageBuffer::from_fn(64, 64, |x, y| Rgb([((x + y) * 2) as u8; 3]))
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 128]))
             .save(r.join(format!("{stem}_p.png")))
             .unwrap();
     }
@@ -1289,10 +1037,10 @@ fn done_row(job_key: &str, warnings: Vec<Warning>) -> sdc_gui::model::export::Ro
 fn the_summary_covers_what_the_export_wrote_not_the_whole_project() {
     let d = tempfile::tempdir().unwrap();
     let mut m = landscape_pair(d.path());
-    let job = m.item("test/a_n.png").unwrap().job_key.clone();
+    let job = m.item("test/a_p.png").unwrap().job_key.clone();
     m.export.rows = vec![done_row(&job, vec![])];
     m.invalidate_views();
-    // a_n and its set; b_n and set b were not exported.
+    // a_p and its set; b_p and set b were not exported.
     assert_eq!(
         checks_summary(&m).as_deref(),
         Some("Checks: 2 warnings on 1 texture and 1 set; see Problems")
@@ -1303,8 +1051,8 @@ fn the_summary_covers_what_the_export_wrote_not_the_whole_project() {
 fn a_texture_with_an_item_row_and_a_file_row_counts_once() {
     let d = tempfile::tempdir().unwrap();
     let mut m = landscape_pair(d.path());
-    let job = m.item("test/a_n.png").unwrap().job_key.clone();
-    let low = Warning::new(Code::ChkRange, "an engine export-row check result");
+    let job = m.item("test/a_p.png").unwrap().job_key.clone();
+    let low = Warning::new(Code::ChkLowDetail, "an engine export-row check result");
     m.export.rows = vec![done_row(&job, vec![low])];
     m.invalidate_views();
     let rows = check_rows(&m);
@@ -1312,7 +1060,7 @@ fn a_texture_with_an_item_row_and_a_file_row_counts_once() {
         rows.iter().any(|p| matches!(&p.at, At::File(_))),
         "{rows:?}"
     );
-    // plastic (Texture) + ChkRange (File) on a_n: two warnings, one texture, plus a's set row.
+    // parallax (Texture) + ChkLowDetail (File) on a_p: two warnings, one texture, plus a's set row.
     assert_eq!(
         checks_summary(&m).as_deref(),
         Some("Checks: 3 warnings on 1 texture and 1 set; see Problems")
@@ -1335,7 +1083,7 @@ fn a_set_row_click_selects_the_set() {
     assert!(sel[0].ends_with("/a") || sel[0].ends_with("/b"));
 }
 
-/// Note CO (Task 7, X-S6): range and parallax findings on a generated map say "generated: ".
+/// Note CO (Task 7, X-S6): a parallax finding on a generated map says "generated: ".
 #[test]
 fn check_findings_on_generated_maps_say_generated() {
     let white = || {
@@ -1348,32 +1096,11 @@ fn check_findings_on_generated_maps_say_generated() {
         let d = tempfile::tempdir().unwrap();
         let (j, a) = planned(d.path(), name, white());
         let j = as_subtype(j, Subtype::Height);
-        let ms = parallax(&texture_checks(
-            &j,
-            &a,
-            HeightNeutral::Half,
-            None,
-            &all_on(),
-        ));
+        let ms = parallax(&texture_checks(&j, &a, HeightNeutral::Half, &all_on()));
         assert!(!ms.is_empty(), "{name}");
         assert!(
             ms.iter().all(|m| m.starts_with("generated: ") == prefixed),
             "{name}: {ms:?}"
         );
     }
-    // CHK-RANGE: a dark albedo, read as if it were generated.
-    let d = tempfile::tempdir().unwrap();
-    let (j, a) = planned(
-        d.path(),
-        "wall_p_generated.png",
-        rgb(64, 64, |_, _| [20, 20, 20]),
-    );
-    let j = as_subtype(j, Subtype::PbrAlbedo);
-    let ws = texture_checks(&j, &a, HeightNeutral::Half, None, &all_on());
-    let r = with(Code::ChkRange, &ws);
-    assert!(!r.is_empty());
-    assert!(
-        r.iter().all(|w| w.message.starts_with("generated: ")),
-        "{r:?}"
-    );
 }

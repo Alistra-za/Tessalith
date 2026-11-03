@@ -2,7 +2,7 @@
 //! window is fitted to the monitors, and the debounce that keeps the file from being written every frame.
 use crate::model::sets_filter::SetsFilter;
 use crate::model::texture_view::{ColumnPrefs, SetFilter, SortKey};
-use crate::model::view::{Channel, Layout, ViewState};
+use crate::model::view::{Channel, ViewState};
 use crate::model::viewport3d::Look;
 use crate::model::Filter;
 use crate::settings::{
@@ -207,7 +207,6 @@ pub struct Probe {
     /// The Sets filter without its search, which is not saved (R17).
     sets: SetsFilter,
     channel: Channel,
-    layout: Layout,
     looks: (Look, Look),
     settings_window: Option<Rect>,
     details: [bool; DETAILS_NAMES.len()],
@@ -247,7 +246,6 @@ pub fn probe(
             ..sets.clone()
         },
         channel: view.channel,
-        layout: view.layout,
         looks: (*looks.0, *looks.1),
         settings_window: settings_window_now(ctx),
         details: DETAILS_NAMES.map(|n| crate::ui::viewport3d::details_open(ctx, n)),
@@ -304,7 +302,6 @@ pub fn capture(
         .collect();
     l.sets_shader = sets.shader.map(|s| s.id().to_string());
     l.preview_channel = view.channel.shader_id() as u8;
-    l.preview_layout = view.layout.name().to_string();
     l.look = look_now(looks.0, &prev.look);
     l.set_look = look_now(looks.1, &prev.set_look);
     let content = ctx.content_rect();
@@ -431,7 +428,7 @@ pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
     }
 }
 
-/// The Textures and Sets filters, the preview channel and layout the file names; an unknown one is skipped. The
+/// The Textures and Sets filters and the preview channel the file names; an unknown one is skipped. The
 /// Sets search is left as it is (not saved, R17).
 pub fn restore_model(
     l: &LayoutSettings,
@@ -468,5 +465,4 @@ pub fn restore_model(
         }),
     };
     view.channel = Channel::from_id(u32::from(l.preview_channel)).unwrap_or_default();
-    view.layout = Layout::from_name(&l.preview_layout).unwrap_or_default();
 }

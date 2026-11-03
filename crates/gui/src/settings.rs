@@ -42,8 +42,6 @@ pub struct GuiSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChecksSettings {
-    pub range: bool,
-    pub plastic: bool,
     pub low_detail: bool,
     pub green: bool,
     pub parallax: bool,
@@ -53,8 +51,6 @@ pub struct ChecksSettings {
 impl Default for ChecksSettings {
     fn default() -> Self {
         ChecksSettings {
-            range: true,
-            plastic: true,
             low_detail: true,
             green: true,
             parallax: true,

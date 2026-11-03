@@ -33,34 +33,9 @@ impl Channel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Layout {
-    #[default]
-    SideBySide,
-    Split,
-}
-
-impl Layout {
-    /// The name in `gui.toml`.
-    pub fn name(self) -> &'static str {
-        match self {
-            Layout::SideBySide => "side-by-side",
-            Layout::Split => "split",
-        }
-    }
-    pub fn from_name(s: &str) -> Option<Layout> {
-        [Layout::SideBySide, Layout::Split]
-            .into_iter()
-            .find(|l| l.name() == s)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewState {
     pub channel: Channel,
-    pub layout: Layout,
-    /// Where the divider sits in `Layout::Split`, 0..1 of the viewport's width.
-    pub split: f32,
     /// Show the stored values as linear data (the "UNORM" view).
     pub view_linear: bool,
     pub heatmap: bool,
@@ -90,8 +65,6 @@ impl Default for ViewState {
     fn default() -> Self {
         ViewState {
             channel: Channel::Rgba,
-            layout: Layout::SideBySide,
-            split: 0.5,
             view_linear: false,
             heatmap: false,
             mip: 0,
@@ -254,34 +227,14 @@ pub fn heatmap(
     channel: Channel,
     full_scale: f32,
 ) -> (u32, u32, Vec<u8>) {
-    heatmap_between(
-        source.width,
-        source.height,
-        &source.px,
-        decoded,
-        channel,
-        full_scale,
-    )
-}
-
-/// The same ramp for |a − b| of two `width × height` images (the source against an encode, or the pinned encode
-/// against the current one).
-pub fn heatmap_between(
-    width: u32,
-    height: u32,
-    a: &[[f32; 4]],
-    b: &[[f32; 4]],
-    channel: Channel,
-    full_scale: f32,
-) -> (u32, u32, Vec<u8>) {
-    let mut out = Vec::with_capacity(b.len() * 4);
-    for (s, d) in a.iter().zip(b) {
+    let mut out = Vec::with_capacity(decoded.len() * 4);
+    for (s, d) in source.px.iter().zip(decoded) {
         let e: [f32; 4] = std::array::from_fn(|c| (s[c] - d[c]).abs());
         let t = (channel_error(e, channel) / full_scale.max(f32::MIN_POSITIVE)).clamp(0.0, 1.0);
         out.extend(ramp(t));
         out.push(255);
     }
-    (width, height, out)
+    (source.width, source.height, out)
 }
 
 /// The error `channel` measures: that channel, alpha for the mask, the largest of R, G and B for RGBA.
@@ -315,26 +268,6 @@ pub fn heatmap_of(
     let src = out.result.source.levels.get(i)?;
     let dec = out.decoded.get(i)?;
     (dec.len() == src.px.len()).then(|| heatmap(src, dec, channel, full_scale))
-}
-
-/// The heatmap of absolute mip `mip` of `cur` against the same mip of the pinned encode `pin`. `None` when either
-/// lacks that mip or the two disagree in size.
-pub fn heatmap_vs_pin(
-    cur: &PreviewOut,
-    pin: &PreviewOut,
-    mip: usize,
-    channel: Channel,
-    full_scale: f32,
-) -> Option<(u32, u32, Vec<u8>)> {
-    let (w, h) = *cur.result.source.dims.get(mip)?;
-    let a = cur
-        .decoded
-        .get(mip.checked_sub(cur.result.source.first_level)?)?;
-    let b = pin
-        .decoded
-        .get(mip.checked_sub(pin.result.source.first_level)?)?;
-    let same_size = pin.result.source.dims.get(mip) == Some(&(w, h));
-    (same_size && a.len() == b.len()).then(|| heatmap_between(w, h, b, a, channel, full_scale))
 }
 
 /// One line naming every mip left out because it is above the preview limit.
