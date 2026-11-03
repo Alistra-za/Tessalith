@@ -91,9 +91,10 @@ pub struct DropState {
     /// Note FM32: the first card in view last frame and where its top sat in the content. The next frame keeps it
     /// there while the heights of the cards above it change (estimates become measured).
     pub anchor: Option<(String, f32)>,
-    /// Note FM32: the reveal's target was laid out last frame, so this frame scrolls to its measured rect instead of
-    /// jumping to the offset the heights give (the mean moves as cards are measured, and would re-aim each frame).
-    pub reveal_seen: bool,
+    /// Note FM32: the key of the reveal's target when it was laid out last frame, so this frame scrolls to its measured
+    /// rect instead of jumping to the offset the heights give (the mean moves as cards are measured, and would re-aim
+    /// each frame). Another target, or a frame with no reveal, takes the jump path again.
+    pub reveal_seen: Option<String>,
     /// Note FM32: the widget with the keyboard focus when the last frame's list ended. A stand-in that holds the focus
     /// and was not the holder then took it this frame (Tab), as opposed to a focused card the wheel scrolled away.
     pub focus: Option<egui::Id>,
@@ -546,6 +547,51 @@ fn filter_strips(
     button
 }
 
+/// Note FM32: a set card's AccessKit node, the same for the drawn card and its stand-in: one stop named for the set,
+/// its place in the order, and whether it is selected. The role is Button, as the card is click-sensing.
+fn card_node(
+    n: &mut egui::accesskit::Node,
+    v: &SetView,
+    (index, total): (usize, usize),
+    selected: bool,
+    rect: egui::Rect,
+) {
+    n.set_role(egui::accesskit::Role::Button);
+    n.set_label(format!("Set {}, position {} of {total}", v.id, index + 1));
+    n.set_selected(selected);
+    n.add_action(egui::accesskit::Action::Focus);
+    n.set_bounds(egui::accesskit::Rect {
+        x0: rect.min.x.into(),
+        y0: rect.min.y.into(),
+        x1: rect.max.x.into(),
+        y1: rect.max.y.into(),
+    });
+}
+
+/// Note FM32 (R4): a card outside the clip rect allocates `size` and stands in with the card's widget id: a Tab stop
+/// and an AccessKit node named for the set. Returns its rect and whether it took the focus this frame (`held` is the
+/// holder last frame). K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep theirs.
+fn stand_in(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    size: egui::Vec2,
+    held: Option<egui::Id>,
+    v: &SetView,
+    at: (usize, usize),
+    selected: bool,
+) -> (egui::Rect, bool) {
+    let rect = ui.allocate_space(size).1;
+    let layer = ui.layer_id();
+    let ctx = ui.ctx();
+    // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
+    let gained = ctx.memory_mut(|m| {
+        m.interested_in_focus(id, layer);
+        m.focused() == Some(id) && held != Some(id)
+    });
+    ctx.accesskit_node_builder(id, |n| card_node(n, v, at, selected, rect));
+    (rect, gained)
+}
+
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -622,16 +668,18 @@ pub fn draw(
     // the target lands at the top of the view, a little below it (the sum of the rounded allocations above it is not
     // quite the sum of the heights), so it is whole on screen whatever its true height; bottom-aligning an estimated
     // height left it cut off, and a second scroll moved it.
-    let jump = reveal_at.filter(|_| !st.reveal_seen).and_then(|n| {
-        let (off, view_h) = st.view?;
-        let top: f32 = visible[..n]
-            .iter()
-            .map(|&i| card_h(&views[i].id) + gap.y)
-            .sum();
-        let h = card_h(&views[visible[n]].id);
-        let outside = top + h <= off || top >= off + view_h;
-        outside.then(|| (top - 2.0 * gap.y).max(0.0))
-    });
+    let jump = reveal_at
+        .filter(|_| st.reveal_seen != reveal)
+        .and_then(|n| {
+            let (off, view_h) = st.view?;
+            let top: f32 = visible[..n]
+                .iter()
+                .map(|&i| card_h(&views[i].id) + gap.y)
+                .sum();
+            let h = card_h(&views[visible[n]].id);
+            let outside = top + h <= off || top >= off + view_h;
+            outside.then(|| (top - 2.0 * gap.y).max(0.0))
+        });
     // Note FM32: the first card in view last frame keeps its place: when the heights above it changed since (the
     // mean of the measured ones moves, a resize re-flowed them), the offset moves by the same amount.
     let anchored = || {
@@ -664,10 +712,11 @@ pub fn draw(
             let probe =
                 egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
             let id = ui.id().with(("set-card", &v.key, &v.id));
+            let selected = !v.key.is_empty() && sel_sets.contains(&v.key);
             let (rect, used) = if ui.is_rect_visible(probe) {
                 let look = PillLook {
                     dragging: dragged.as_deref() == Some(v.id.as_str()),
-                    selected: !v.key.is_empty() && sel_sets.contains(&v.key),
+                    selected,
                     bulk: sel_sets.len() >= 2,
                     id,
                 };
@@ -700,27 +749,17 @@ pub fn draw(
                 rects.insert(index, out.rect);
                 (out.rect, out.rect.height())
             } else {
-                // R4: a card outside the clip rect allocates its last height instead of being laid out, and stands in
-                // with its widget id: a Tab stop and an AccessKit node named for the set. The focus scrolls the real
-                // card into view (Note FM32). K9: `allocate_space` takes one auto id, as the card's scope does, so later
-                // cards keep their ids.
-                let rect = ui.allocate_space(probe.size()).1;
-                // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
-                let gained = ctx.memory_mut(|m| {
-                    m.interested_in_focus(id, ui.layer_id());
-                    m.focused() == Some(id) && st.focus != Some(id)
-                });
-                ctx.accesskit_node_builder(id, |n| {
-                    n.set_role(egui::accesskit::Role::Button);
-                    n.set_label(format!("Set {}", v.id));
-                    n.add_action(egui::accesskit::Action::Focus);
-                    n.set_bounds(egui::accesskit::Rect {
-                        x0: rect.min.x.into(),
-                        y0: rect.min.y.into(),
-                        x1: rect.max.x.into(),
-                        y1: rect.max.y.into(),
-                    });
-                });
+                // R4: a card outside the clip rect stands in for its last height. The focus it takes scrolls the real
+                // card into view (Note FM32).
+                let (rect, gained) = stand_in(
+                    ui,
+                    id,
+                    probe.size(),
+                    st.focus,
+                    v,
+                    (index, views.len()),
+                    selected,
+                );
                 if gained {
                     if v.key.is_empty() {
                         ui.scroll_to_rect_animation(
@@ -764,7 +803,8 @@ pub fn draw(
     });
     st.view = Some((out.state.offset.y, out.inner_rect.height()));
     st.anchor = anchor;
-    st.reveal_seen = reveal_at.is_some() && reveal_drawn;
+    st.reveal_seen = reveal.clone().filter(|_| reveal_drawn);
+    let go_to = reveal.is_some();
     st.focus = ctx.memory(|m| m.focused());
     // Review I1: aim again next frame until the target is laid out with every height around it measured.
     if reveal_at.is_some() && !(reveal_drawn && !resized) && st.reveal_tries < REVEAL_TRIES {
@@ -775,7 +815,8 @@ pub fn draw(
         st.reveal_tries = 0;
     }
     // Note FM32: Tab reached an off-screen card: the next frame scrolls it in and draws it, keeping the focus.
-    if let Some(k) = focused {
+    // A Go to set in the same frame wins: the card keeps its focus, and the Tab does not pull the view off the target.
+    if let Some(k) = focused.filter(|_| !go_to) {
         st.reveal_tries = 0;
         model.nav.reveal_set = Some(k);
         ctx.request_repaint();
@@ -1308,6 +1349,10 @@ fn pill(
     });
     let dropped = scoped.inner;
     let resp = scoped.response;
+    // Note FM32: named as its stand-in is, so a card keeps its name when it scrolls in (a Tab stop for the card itself).
+    ui.ctx().accesskit_node_builder(resp.id, |n| {
+        card_node(n, v, (index, total), selected, resp.rect)
+    });
     if !editing.on {
         resp.clone().on_hover_text(editing.why);
     }

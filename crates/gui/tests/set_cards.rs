@@ -712,8 +712,9 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
         .filter(|&n| pos_rect(&h, n, 60).is_none())
         .collect();
     assert!(off.len() > 30, "most cards are off screen: {}", off.len());
+    let node_name = |n: usize| format!("Set {}, position {n} of 60", ids[n - 1]);
     for &n in &off {
-        let name = format!("Set {}", ids[n - 1]);
+        let name = node_name(n);
         assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}'s node");
     }
     // Tab from the Sets filter walks the cards: it reaches an off-screen card's stand-in, which scrolls its card in.
@@ -734,10 +735,42 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
         pos_rect(&h, next, 60).is_some(),
         "Tab never scrolled card {next} in"
     );
-    // The focus survived the swap from the stand-in to the drawn card.
+    // The focus survived the swap from the stand-in to the drawn card: the focused node is that card, by its name.
+    let focused: Vec<String> = h
+        .query_all_by_role(Role::Button)
+        .filter(|n| n.is_focused())
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(focused, [node_name(next)], "the focus follows the card in");
+}
+
+#[test]
+fn a_go_to_set_in_the_same_frame_wins_over_a_tab_reveal() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let m = many_sets(d.path(), 60);
+    let (ids, views) = (set_ids(&m), sdc_gui::model::sets::views(&m));
+    let (far, near) = (views[59].key.clone(), 45);
+    let mut h = many(m);
+    h.run();
+    // The focus lands on a far card's stand-in in the very frame a Go to set to the last card is pending.
+    h.query_all_by_role_and_label(
+        Role::Button,
+        &format!("Set {}, position {near} of 60", ids[near - 1]),
+    )
+    .next()
+    .expect("the stand-in")
+    .focus();
+    h.state_mut().0.nav.reveal_set = Some(far);
+    h.step();
+    h.run();
     assert!(
-        h.ctx.memory(|m| m.focused()).is_some(),
-        "the focus follows the stand-in into the drawn card"
+        h.state().0.nav.reveal_set.is_none(),
+        "the Tab asks for no scroll of its own"
+    );
+    assert!(
+        pos_rect(&h, 60, 60).is_some(),
+        "the Go to set stays where it landed"
     );
 }
 
@@ -818,48 +851,4 @@ fn a_far_jump_does_not_shift_the_scroll() {
         ys.windows(2).all(|w| (w[0] - w[1]).abs() < 1.5),
         "card 200 moved between frames: {ys:?}"
     );
-}
-
-/// Frame cost of a 300-set project at the top of the list, with AccessKit off (a window without a screen reader) and
-/// on, and the widgets a frame registers.
-/// `cargo test -p sdc-gui --test set_cards frame_cost -- --ignored --nocapture`
-#[test]
-#[ignore = "measurement: prints the frame time and widget count"]
-fn frame_cost_of_300_sets() {
-    let d = tempfile::tempdir().unwrap();
-    let ctx = egui::Context::default();
-    sdc_gui::fonts::install_system_fonts(&ctx).expect("system fonts");
-    let (mut m, mut st) = (many_sets(d.path(), 300), sdc_gui::ui::State::default());
-    let frame = |m: &mut AppModel, st: &mut sdc_gui::ui::State| {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1500.0, 900.0),
-            )),
-            ..Default::default()
-        };
-        let out = ctx.run_ui(input, |ui| sdc_gui::ui::draw_with(ui, m, st));
-        out.drop_without_applying_deltas();
-    };
-    for accesskit in [false, true] {
-        if accesskit {
-            ctx.enable_accesskit();
-        }
-        for _ in 0..10 {
-            frame(&mut m, &mut st);
-        }
-        let mut best = std::time::Duration::MAX;
-        for _ in 0..7 {
-            let t = std::time::Instant::now();
-            for _ in 0..60 {
-                frame(&mut m, &mut st);
-            }
-            best = best.min(t.elapsed() / 60);
-        }
-        let widgets: usize = ctx.viewport(|v| {
-            let w = &v.this_pass.widgets;
-            w.layer_ids().map(|l| w.get_layer(l).count()).sum()
-        });
-        println!("FRAME_COST accesskit={accesskit} per frame {best:?}; widgets {widgets}");
-    }
 }

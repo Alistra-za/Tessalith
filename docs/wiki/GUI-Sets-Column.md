@@ -35,7 +35,7 @@ Members in no slot follow as plain thumbnails. The open set's card is highlighte
 
 When the Sets column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name, so the name is never shown as "…". The "Drop here to start a new set" hint wraps instead of being cut.
 
-The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}", and Tab to it scrolls it into view. The cost:
+The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", as a card on screen is, and Tab to it scrolls it into view. The cost:
 
 - a context menu or shader list open on a card closes when the card scrolls away;
 - the scroll bar's thumb changes length as card heights are learned (a new column width re-estimates them at once).
