@@ -62,7 +62,30 @@ cfg_enum!(ColorContent, "lowercase" { Srgb, Linear });
 cfg_enum!(ColorTag, "lowercase" { Srgb, Unorm, NotApplicable = "n/a" });
 cfg_enum!(AlphaPolicy, "snake_case" { Remove, Cutout, Blend, CutoutBlend, Data });
 cfg_enum!(AlphaCompare, "lowercase" { Gt, Ge });
-cfg_enum!(GraySource, "lowercase" { R, Luma });
+// `//` on purpose, as on `Subtype`: a `///` doc on a variant turns the schema into `oneOf`.
+cfg_enum!(GraySource, "lowercase" { R, G, B, A, Luma });
+impl GraySource {
+    /// The value a grayscale read takes from one texel: the picked channel, or Rec. 709 luma (Note FM36).
+    pub fn read(self, q: &[f32; 4]) -> f32 {
+        match self {
+            GraySource::R => q[0],
+            GraySource::G => q[1],
+            GraySource::B => q[2],
+            GraySource::A => q[3],
+            GraySource::Luma => crate::pack::assemble::luma(q),
+        }
+    }
+    /// The channel as provenance and warnings name it: `R`, `G`, `B`, `A` or `luma`.
+    pub fn label(self) -> &'static str {
+        match self {
+            GraySource::R => "R",
+            GraySource::G => "G",
+            GraySource::B => "B",
+            GraySource::A => "A",
+            GraySource::Luma => "luma",
+        }
+    }
+}
 cfg_enum!(MipKeyword, "lowercase" { Full, None });
 cfg_enum!(MipFilter, "lowercase" { Box, Tent, Mitchell, Kaiser });
 cfg_enum!(#[derive(Default)] MipEdge, "lowercase" { #[default] Wrap, Clamp });

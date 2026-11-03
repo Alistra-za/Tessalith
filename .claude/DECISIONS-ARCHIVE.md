@@ -23,6 +23,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 - **M9 Pre-packed conflict** is keyed on an image member whose canonical suffix equals the recipe's suffix (`rmaos`, `rfaos`, `p` under `cs`; `m` under `cpm`/`vanilla`). A re-encoded DDS member is written, so it conflicts like an image; a skipped DDS member never conflicts (Note BV1). With `packing.prefer = raw` the replaced file is skipped with `PACK-CONFLICT` and counts as an intentional skip (Note I). Exception (never write neither): when the recipe's sources differ in size, the sizes are checked first, the pre-packed file stays a job (no skip, no `PACK-CONFLICT`) and the recipe fails with `PACK-SIZE-MISMATCH`. When `packing.prefer = raw` but the raw sources differ in size, the recipe fails (`PACK-SIZE-MISMATCH`) and the pre-packed file is kept; it converts under the normal never-auto-decide rule (its sub-type is a suggestion, so it needs `--accept-suggestions` or a rule).
   - (pointer, Note CO7: a generated member that a real map replaces is skipped `GEN-REPLACED` before M9, so it never reaches M9 and `packing.prefer` never sees it.)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **M6 Two-pass resolve:** `packing.*` of a packed output is read from its profile resolved with a placeholder analysis (the packed image does not exist yet); the real packed image is then assembled, analysed and resolved again for everything else. A rule that matches on `alpha` therefore cannot change `packing.*`. The same holds for `channels.grayscale_source`: the value of that first profile is stored in `PackJob::gray` and used by the plan-time assembly, the provenance, the report and the pipeline's assembly, so the written image is the analysed one even when the final profile's value differs.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **M12 Provenance:** the recipe's sub-type is `recipe:<kind>`; each packed channel is recorded under `pack.r`, `pack.g`, `pack.b`, `pack.a` as `source:<file>:R` (`source:<file>:luma` with `channels.grayscale_source = luma`, `source:1-<file>:R` when inverted), `default:<value>` or `fill:<code>`.
+
 ## Note N — M3a converter GUI decisions (owner and M3a plan, 2026-10-10)
 
 ARCHIVED (wording before the edit; superseded in part by Note CA1, 2026-10-18)

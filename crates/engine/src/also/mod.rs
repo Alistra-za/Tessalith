@@ -401,7 +401,10 @@ pub fn derive_sets(
                 .filter_map(role)
                 .map(|j| j.input.clone())
                 .collect(),
-            gray: GraySource::R,
+            // The raw maps are read as the set's packed output reads them (Note FM36).
+            gray: packed(RecipeKind::Rmaos)
+                .or_else(|| packed(RecipeKind::Parallax))
+                .map_or(GraySource::R, |pk| pk.gray),
         });
     }
     (out, drop, notes)

@@ -580,6 +580,9 @@
     "GraySource": {
       "enum": [
         "r",
+        "g",
+        "b",
+        "a",
         "luma"
       ],
       "type": "string"

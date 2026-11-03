@@ -4,7 +4,7 @@ How raw maps such as roughness, metallic and AO pack into the files each shader 
 
 ## Packing raw maps
 
-Raw single-channel maps (from the exporter names above) are not converted on their own. They are packed into the layout the target reads. One source per role is used; if a set has two roughness maps, the first by path wins and the other is reported as `PACK-UNUSED-INPUT`.
+Raw single-channel maps (from the exporter names above) are not converted on their own. They are packed into the layout the target reads. One source per role is used; if a set has two roughness maps, the first by path wins and the other is reported as `PACK-UNUSED-INPUT`. A raw map is read from its red channel; for a map that keeps its value in another channel, set [`channels.grayscale_source`](Project-Config-Fields.md#channels).
 
 An `_orm` file counts as three raw maps at once: AO from its R channel, roughness from G and metallic from B. Every recipe below that reads roughness, AO or metallic takes them from it. A separate map for the same slot (an `_roughness` next to the `_orm`) wins that slot. An `_rfaos` has no metallic channel, so it leaves the `_orm` metallic unused. Slots an `_orm` does not hold (specular, height, fuzz) come from their own maps, the fill, or the default, as usual. So an `_rmaos` built from an `_orm` alone has `packing.fill.specular` in alpha, or 1 when no fill is set.
 

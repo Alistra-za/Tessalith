@@ -667,8 +667,7 @@ impl ChannelSource {
                 match (channel, gray) {
                     (Some(LUMA_CHANNEL), _) => "luma",
                     (Some(c), _) => ["R", "G", "B", "A"][usize::from(*c)],
-                    (None, GraySource::R) => "R",
-                    (None, GraySource::Luma) => "luma",
+                    (None, g) => g.label(),
                 }
             ))),
             ChannelSource::Fill { code, .. } => Some(Provenance::Fill(code.to_string())),

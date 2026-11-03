@@ -26,6 +26,20 @@ fn run(
     sets_cli: &[&str],
     allow: &[Code],
 ) -> ResolvedJob {
+    run_info(target, game, suffix, sets, img, &RGBA8, sets_cli, allow)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_info(
+    target: Target,
+    game: &str,
+    suffix: Option<&str>,
+    sets: &[&str],
+    img: Rgba32F,
+    info: &SourceInfo,
+    sets_cli: &[&str],
+    allow: &[Code],
+) -> ResolvedJob {
     let reg = PresetRegistry::builtin().unwrap();
     let overrides: Vec<_> = sets_cli.iter().map(|s| parse_set(s).unwrap()).collect();
     let allow: BTreeSet<Code> = allow.iter().copied().collect();
@@ -56,7 +70,7 @@ fn run(
         members: vec![0],
         suffixes: sets.iter().map(|s| s.to_string()).collect(),
     };
-    let a = analyse(&img, &RGBA8);
+    let a = analyse(&img, info);
     resolve_file(
         &ctx,
         &FileFacts {
@@ -65,7 +79,7 @@ fn run(
             alias: None,
             set: &set,
             analysis: &a,
-            info: &RGBA8,
+            info,
         },
     )
 }
@@ -2741,5 +2755,84 @@ fn photo_defaults_to_heavy_blur() {
     assert_eq!(
         cube(&["cubemap.layout=equirect"]).profile.cubemap.blur,
         None
+    );
+}
+
+/// Note FM36: R and B flat, G and A not (alpha ramps too), so R is a bad pick and G is the first channel to suggest.
+fn green_data() -> Rgba32F {
+    let mut img = Rgba32F::new(64, 64, [0.5, 0.0, 0.5, 1.0]);
+    for (i, px) in img.px.iter_mut().enumerate() {
+        px[1] = (i % 64) as f32 / 63.0;
+        px[3] = (i / 64) as f32 / 63.0;
+    }
+    img
+}
+
+fn height_with(pick: Option<&str>, img: Rgba32F, info: &SourceInfo) -> ResolvedJob {
+    let pick = pick.map(|p| format!("channels.grayscale_source={p}"));
+    let mut sets = vec!["subtype=height"];
+    sets.extend(pick.as_deref());
+    run_info(
+        Target::Cs,
+        "textures/a/x_p.png",
+        Some("p"),
+        &["p"],
+        img,
+        info,
+        &sets,
+        &[],
+    )
+}
+
+#[test]
+fn chan_not_gray_names_the_pick_and_suggests_a_channel() {
+    let text = |pick| {
+        let j = height_with(pick, green_data(), &RGBA8);
+        warning(&j, Code::ChanNotGray).message.clone()
+    };
+    // The default pick R is flat while G varies.
+    let m = text(None);
+    assert!(
+        m.contains("keeping R") && m.contains("R is flat and G varies"),
+        "{m}"
+    );
+    assert!(m.contains(r#"channels.grayscale_source = "g""#), "{m}");
+    // B is flat too, and the first varying channel is still G.
+    let m = text(Some("b"));
+    assert!(
+        m.contains("keeping B") && m.contains("B is flat and G varies"),
+        "{m}"
+    );
+    // G varies: the pick is named and nothing is suggested.
+    let m = text(Some("g"));
+    assert!(m.contains("keeping G") && !m.contains("flat"), "{m}");
+    let m = text(Some("luma"));
+    assert!(m.contains("keeping luma") && !m.contains("flat"), "{m}");
+}
+
+#[test]
+fn an_alpha_pick_needs_an_alpha_channel_and_is_not_a_discarded_alpha() {
+    // An RGBA source with varying alpha: the alpha is the data, so nothing blocks and nothing warns.
+    let j = height_with(Some("a"), green_data(), &RGBA8);
+    assert!(
+        !codes(&j).contains(&Code::ChanNotGray) && !codes(&j).contains(&Code::LossAlphaData),
+        "{:?}",
+        j.warnings
+    );
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    // The same alpha under the default pick is discarded, which blocks (the unchanged rule).
+    let j = height_with(None, green_data(), &RGBA8);
+    assert!(codes(&j).contains(&Code::LossAlphaData), "{:?}", j.warnings);
+    // A source with no alpha channel reads 255: CHAN-NOT-GRAY names the pick.
+    let rgb = SourceInfo {
+        channels: 3,
+        has_alpha: false,
+        ..RGBA8
+    };
+    let j = height_with(Some("a"), Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 1.0]), &rgb);
+    let m = &warning(&j, Code::ChanNotGray).message;
+    assert!(
+        m.contains("no alpha channel") && m.contains("keeping A"),
+        "{m}"
     );
 }

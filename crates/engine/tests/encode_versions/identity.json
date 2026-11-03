@@ -48,6 +48,13 @@
     "subtype": "diffuse",
     "width": 64
   },
+  "cov/textures/c/gpick_rmaos.dds": {
+    "format": "Bc7 { srgb: false }",
+    "height": 64,
+    "payload_sha256@avx2": "dcc8d143e607232ca965ed25f197b222af0c48435bd7c7b76951026ad943fd39",
+    "subtype": "rmaos",
+    "width": 64
+  },
   "cov/textures/c/gray_bc4.dds": {
     "format": "Bc4",
     "height": 64,
@@ -81,6 +88,13 @@
     "height": 64,
     "payload_sha256": "d617d9d5f85304141c6981c85b85f6abbcbe1fea040c19ed7b06eac85482b00a",
     "subtype": "generic_two_channel",
+    "width": 64
+  },
+  "cov/textures/c/rpick_rmaos.dds": {
+    "format": "Bc7 { srgb: false }",
+    "height": 64,
+    "payload_sha256@avx2": "329188f2e272595c8d5e4e78e113f8442d4b487e04935b596118861e19f58a08",
+    "subtype": "rmaos",
     "width": 64
   },
   "cov/textures/c/srgb_bc1.dds": {

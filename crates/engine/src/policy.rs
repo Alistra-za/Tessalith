@@ -1598,6 +1598,38 @@ fn cube_checks(p: &Profile, add: &mut impl FnMut(Code, String)) {
     }
 }
 
+/// `CHAN-NOT-GRAY`'s text for a grayscale map that reads `pick` (Note FM36), or `None` when the pick fits the
+/// source: an A pick needs an alpha channel (else it reads 255); any other pick assumes R = G = B. When a single
+/// channel is picked and is flat while another varies, the first varying one in R, G, B, A order is suggested.
+fn gray_pick_problem(pick: GraySource, a: &Analysis, has_alpha: bool) -> Option<String> {
+    if pick == GraySource::A {
+        return (!has_alpha).then(|| "no alpha channel; keeping A, which reads as 255".into());
+    }
+    if a.grayscale {
+        return None;
+    }
+    let mut why = format!("R/G/B differ by more than 4/255; keeping {}", pick.label());
+    let flat = |c: usize| a.channels[c].max - a.channels[c].min <= 4.0 / 255.0;
+    let picked = match pick {
+        GraySource::R => Some(0),
+        GraySource::G => Some(1),
+        GraySource::B => Some(2),
+        GraySource::A | GraySource::Luma => None,
+    };
+    if let Some(p) = picked.filter(|&p| flat(p)) {
+        let by_channel = [GraySource::R, GraySource::G, GraySource::B, GraySource::A];
+        if let Some(s) = (0..4).find(|&c| c != p && !flat(c)).map(|c| by_channel[c]) {
+            why += &format!(
+                "; {} is flat and {} varies (channels.grayscale_source = \"{}\")",
+                pick.label(),
+                s.label(),
+                s.label().to_lowercase()
+            );
+        }
+    }
+    Some(why)
+}
+
 /// The category a profile of `st` written as `format` has: a `skin_wet` height form (grey, or BC4) is a grayscale
 /// map (DECISIONS Note R-skin-1).
 fn category_of(st: Subtype, format: Format, grayscale: bool) -> Category {
@@ -1866,8 +1898,12 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     // PBR normal's alpha is vanilla specular that PBR does not use, so dropping it is silent. Any other
     // discarded varying alpha (an inferred remove, or a format that cannot store it) still blocks.
     let explicit_remove = alpha_explicit && p.alpha.policy == AlphaPolicy::Remove;
+    // A grayscale map that picks A (`channels.grayscale_source = "a"`) packs the alpha as its data (Note FM36).
+    let alpha_is_data =
+        p.category == Category::Grayscale && p.channels.grayscale_source == GraySource::A;
     if a.alpha == AlphaContent::Varying
         && !explicit_remove
+        && !alpha_is_data
         && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p))
     {
         // A PBR normal's vanilla specular alpha is dropped silently (no code); anything else blocks.
@@ -1903,14 +1939,10 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             );
         }
     }
-    if p.category == Category::Grayscale && !a.grayscale {
-        add(
-            ChanNotGray,
-            format!(
-                "R/G/B differ by more than 4/255; keeping {:?}",
-                p.channels.grayscale_source
-            ),
-        );
+    if p.category == Category::Grayscale {
+        if let Some(why) = gray_pick_problem(p.channels.grayscale_source, a, f.info.has_alpha) {
+            add(ChanNotGray, why);
+        }
     }
     if p.category == Category::Normal
         && st != Subtype::Msn

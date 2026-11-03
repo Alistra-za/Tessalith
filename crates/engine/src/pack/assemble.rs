@@ -1,5 +1,5 @@
 //! The packed float image of a recipe (spec §6.4 "Sources", "Dimensions", "Precision"). Each source contributes
-//! its R channel (luma with `channels.grayscale_source = luma`), an `_orm` or `_rmaos` the channel each slot names
+//! the channel `channels.grayscale_source` picks (R, G, B, A or luma), an `_orm` or `_rmaos` the channel each slot names
 //! (Notes AL, CM; an `_rmaos` A is read too); any other alpha is ignored. Values stay as decoded
 //! floats, so 16-bit sources keep their precision until Quantise. Sources are decoded **one at a time**: the peak
 //! is the output plus one decoded source, inside the 3x per-file estimate of `api::estimated_bytes`, which reads
@@ -230,10 +230,7 @@ pub(crate) fn assemble_into(
         for (o, q) in image.px.iter_mut().zip(&src.px) {
             all_grey &= grey(q);
             let luma = luma(q);
-            let v = match gray {
-                GraySource::R => q[0],
-                GraySource::Luma => luma,
-            };
+            let v = gray.read(q);
             for &(c, invert, channel) in &targets {
                 let v = match channel {
                     None => v,
@@ -243,7 +240,14 @@ pub(crate) fn assemble_into(
                 o[c] = if invert { 1.0 - v } else { v };
             }
         }
-        if !all_grey && !multi {
+        // What the check measures is the channel packed: an alpha pick needs an alpha channel (a source without one
+        // reads 255), any other pick needs the grey R = G = B it assumes (Note FM36).
+        let fine = if gray == GraySource::A {
+            si.has_alpha
+        } else {
+            all_grey
+        };
+        if !fine && !multi {
             non_gray.push(s.path.clone());
         }
     }

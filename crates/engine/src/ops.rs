@@ -162,24 +162,27 @@ pub fn preprocess(img: Rgba32F, p: &Profile) -> Work {
 pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) -> Work {
     let domain = domain_for(p);
     let alpha_present = p.alpha.policy != AlphaPolicy::Remove;
-    let nonfinite_samples = sanitize_non_finite(&mut img, domain == Domain::Hdr, alpha_present);
     let grayscale = p.category == Category::Grayscale;
+    // A grayscale map that picks A reads the source alpha even when the alpha is then dropped (Note FM36).
+    let read_a = grayscale && p.channels.grayscale_source == GraySource::A;
+    let keep_a = alpha_present || read_a;
+    let nonfinite_samples = sanitize_non_finite(&mut img, domain == Domain::Hdr, keep_a);
     for px in &mut img.px {
-        if !alpha_present {
+        if !keep_a {
             px[3] = 1.0; // (1) the channel is dropped; A = 255 is synthesised when the block input is built
         }
         if let Some(s) = &p.channels.swizzle {
             *px = swizzle(*px, s); // (2)
-            if !alpha_present {
+            if !keep_a {
                 px[3] = 1.0; // a swizzle such as `rgb0` must not bring back a dropped alpha
             }
         }
         if grayscale {
-            let g = match p.channels.grayscale_source {
-                GraySource::R => px[0],
-                GraySource::Luma => 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2],
-            };
+            let g = p.channels.grayscale_source.read(px);
             px[..3].fill(g);
+        }
+        if !alpha_present {
+            px[3] = 1.0; // the dropped alpha, read just above when A was picked
         }
         match domain {
             // (3) `flip_green` is already set by Resolve for `green_convention = opengl`
@@ -351,6 +354,23 @@ mod tests {
         p.channels.swizzle = Some("bgr1".into());
         let w = preprocess(Rgba32F::new(1, 1, [0.1, 0.2, 0.3, 0.4]), &p);
         assert_eq!(w.img.px[0], [0.3, 0.2, 0.1, 1.0]);
+    }
+
+    #[test]
+    fn grayscale_picks_g_b_and_the_alpha_a_remove_would_drop() {
+        let px = [0.1, 0.2, 0.3, 0.4];
+        for (pick, want) in [
+            (GraySource::R, 0.1),
+            (GraySource::G, 0.2),
+            (GraySource::B, 0.3),
+            (GraySource::A, 0.4),
+        ] {
+            let mut p = profile(Subtype::Height);
+            p.channels.grayscale_source = pick;
+            assert_eq!(p.alpha.policy, AlphaPolicy::Remove, "Height drops alpha");
+            let w = preprocess(Rgba32F::new(1, 1, px), &p);
+            assert_eq!(w.img.px[0], [want, want, want, 1.0], "{pick:?}");
+        }
     }
 
     #[test]

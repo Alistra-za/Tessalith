@@ -299,3 +299,5 @@ FC¶- **Undecided is the one word.**	FC		back	FM		partial	2026-11-03		goes: the 
 FI11	FI		back	FM		partial	2026-11-03		goes: the Decide… menu leads with Alpha means: and its guard test; stays: the rest (Note FM35)
 FI14	FI		back	FM		partial	2026-11-03		goes: the example row Undecided: what its alpha means. This alpha channel carries data; stays: the Acknowledge text, the engine check, the rest (Note FM35)
 FK¶- `ui_smoke::the_texture_panel_waits_for_the_plan_its_answer_started`	FK		back	FM		partial	2026-11-03		goes: the alpha buttons (by role); stays: the Alpha combo and the wait (Note FM35)
+M6	M		back	FM		partial	2026-11-03		goes: channels.grayscale_source is only R or luma; stays: the two-pass rule and PackJob::gray (Note FM36)
+M12	M		back	FM		partial	2026-11-03		goes: the provenance example names only R and luma; stays: the recipe sub-type and the pack.* keys (Note FM36)

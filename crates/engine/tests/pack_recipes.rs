@@ -373,6 +373,17 @@ fn channel_provenance_strings() {
         s("iron_rough.png", false).provenance(GraySource::Luma),
         Some(Provenance::Source("iron_rough.png:luma".into()))
     );
+    // Note FM36: a G, B or A pick names its channel.
+    for (pick, name) in [
+        (GraySource::G, "G"),
+        (GraySource::B, "B"),
+        (GraySource::A, "A"),
+    ] {
+        assert_eq!(
+            s("x_rough.png", false).provenance(pick),
+            Some(Provenance::Source(format!("x_rough.png:{name}")))
+        );
+    }
     assert_eq!(
         ChannelSource::Default { value: 0.5 }.provenance(GraySource::R),
         Some(Provenance::Default("0.5".into()))

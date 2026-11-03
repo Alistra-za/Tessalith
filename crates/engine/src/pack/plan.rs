@@ -1164,16 +1164,18 @@ pub fn finish_recipe(
     }
     job.warnings.extend(c.resized.clone());
     for p in non_gray {
+        let pick = c.job.gray;
+        let why = if pick == GraySource::A {
+            "no alpha channel; packing its A as 255".to_string()
+        } else {
+            format!(
+                "R/G/B differ by more than 4/255; packing its {}",
+                pick.label()
+            )
+        };
         job.warnings.push(Warning::new(
             Code::ChanNotGray,
-            format!(
-                "{}: R/G/B differ by more than 4/255; packing its {}",
-                name(p),
-                match c.job.gray {
-                    GraySource::R => "R",
-                    GraySource::Luma => "luma",
-                }
-            ),
+            format!("{}: {why}", name(p)),
         ));
     }
     job.pack = Some(c.job.clone());

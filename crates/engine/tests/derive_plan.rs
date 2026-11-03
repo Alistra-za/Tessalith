@@ -1163,6 +1163,39 @@ fn derive_and_pack_candidates_fail_alone() {
     assert!(p.jobs.iter().all(|j| j.pack.is_none()));
 }
 
+/// Note FM36: the Also derive reads a set's raw maps as the set's packed `_rmaos` does, so a G pick on the packed
+/// output reaches `DeriveSet::gray` and the default stays R.
+#[test]
+fn the_derive_set_reads_the_packed_outputs_grayscale_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    let dir = inputs.join("textures/pbr/arm");
+    png(&dir.join("steel.png"), 16, 16, [200, 200, 200, 255]);
+    png(&dir.join("steel_n.png"), 16, 16, [128, 128, 255, 255]);
+    png(&dir.join("steel_roughness.png"), 16, 16, [0, 120, 0, 255]);
+    png(&dir.join("steel_ao.png"), 16, 16, [200, 200, 200, 255]);
+    let gray = |pick: Option<&str>| {
+        let mut r = request(&inputs, &d.path().join("pbr"), Target::Cs);
+        r.overrides.extend(pick.map(|p| {
+            parse_set(&format!(
+                "file:**/steel_rmaos.png.channels.grayscale_source={p}"
+            ))
+            .unwrap()
+        }));
+        let (cs, _) = plan(r);
+        let sets = derive_sets(&cs);
+        assert_eq!(
+            sets.len(),
+            1,
+            "{:#?}",
+            cs.jobs.iter().map(|j| &j.output).collect::<Vec<_>>()
+        );
+        sets[0].gray
+    };
+    assert_eq!(gray(None), engine::config::GraySource::R);
+    assert_eq!(gray(Some("g")), engine::config::GraySource::G);
+}
+
 /// `<dir>/textures/landscape/<base>{,_n,_rmaos}.png` (16², opaque), plus `_p` (R 100) when `p`. `_rmaos`: rough
 /// 0.8, metal 1 (landscape ignores it), AO 128.
 fn landscape(dir: &Path, base: &str, p: bool) {

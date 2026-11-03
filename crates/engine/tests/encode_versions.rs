@@ -277,7 +277,7 @@ fn rnm_fixture(dir: &Path) {
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
 /// opaque BC1, a BC1 1-bit alpha cutout, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a
-/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, a two-size `_rmaos` pack, plus BC4 and BC5. Returns the
+/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, a two-size `_rmaos` pack, an `_rmaos` pack read from G (and its R twin), plus BC4 and BC5. Returns the
 /// `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
@@ -393,6 +393,16 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
     };
     add("twosize_roughness", ramp(64), &[]);
     add("twosize_ao", ramp(32), &[]);
+    // Note FM36: a pack whose roughness holds its value in G (R is 0), read with `channels.grayscale_source = "g"`.
+    // `rpick` is the same pack under the default R pick, so the two pins differ only if the override took effect.
+    for name in ["gpick", "rpick"] {
+        let g = DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 64, |x, y| {
+            Rgb([0, ((x + y) * 2) as u8, 0])
+        }));
+        add(&format!("{name}_roughness"), g, &[]);
+        add(&format!("{name}_ao"), ramp(64), &[]);
+    }
+    sets.push("file:**/c/gpick_rmaos.png.channels.grayscale_source=g".into());
     sets
 }
 
@@ -585,11 +595,19 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     assert_eq!(dims("npot_1000_bc1"), (Some(1024), Some(1024)));
     assert_eq!(dims("height_half"), (Some(256), Some(256)));
     assert_eq!(dims("twosize_rmaos"), (Some(64), Some(64)));
+    assert_eq!(dims("gpick_rmaos"), (Some(64), Some(64)));
     t200_pins_the_cutoff(c.path());
     // The tent pin only means something if the weighted tent changes bytes against the box cutout.
     let sha =
         |name: &str| identity[&format!("cov/textures/c/{name}.dds")]["payload_sha256"].clone();
     assert_ne!(sha("cutout_bc3_tent"), sha("cutout_bc3"));
+    // `_rmaos` is BC7, so its hash is the ISA-keyed one.
+    let bc7 = |name: &str| {
+        identity[&format!("cov/textures/c/{name}.dds")]
+            [format!("payload_sha256@{}", engine::manifest::dispatched_isa())]
+        .clone()
+    };
+    assert_ne!(bc7("gpick_rmaos"), bc7("rpick_rmaos"));
     let formats: BTreeSet<&str> = identity
         .values()
         .map(|p| p["format"].as_str().unwrap())
@@ -615,6 +633,8 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "npot_1000_bc1",
         "height_half",
         "twosize_rmaos",
+        "gpick_rmaos",
+        "rpick_rmaos",
     ] {
         assert!(covered(name), "identity pins miss the {name} fixture");
     }

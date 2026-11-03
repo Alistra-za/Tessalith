@@ -171,6 +171,59 @@ fn non_grey_sources_are_named_and_luma_is_honoured() {
     assert!((a.image.at(0, 0)[2] - luma).abs() < 1e-6);
 }
 
+/// Note FM36: `grayscale_source` picks the channel a raw source packs. `x_rough.png` holds its value in G (R is 0, B
+/// is 90, alpha ramps), so each pick reads a different plane.
+#[test]
+fn a_pick_reads_g_b_or_alpha_and_the_check_measures_that_channel() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("x_rough.png");
+    image::ImageBuffer::from_fn(4, 4, |x, _| {
+        image::Rgba([0u8, x as u8 * 60, 90, 255 - x as u8 * 50])
+    })
+    .save(&p)
+    .unwrap();
+    let rgb = d.path().join("y_ao.png");
+    ImageBuffer::from_fn(4, 4, |_, _| Rgb([7u8, 7, 7]))
+        .save(&rgb)
+        .unwrap();
+    let mk = |path: &PathBuf| {
+        job(
+            RecipeKind::Rmaos,
+            [
+                src(path, RawMap::Roughness, false),
+                ChannelSource::Default { value: 0.0 },
+                ChannelSource::Default { value: 1.0 },
+                ChannelSource::Default { value: 1.0 },
+            ],
+            &[(path, RawMap::Roughness)],
+        )
+    };
+    let read = |pick, path: &PathBuf| assemble(&mk(path), pick).unwrap();
+    for (pick, want) in [
+        (GraySource::R, [0.0, 0.0, 0.0, 0.0]),
+        (GraySource::G, [0.0, 60.0, 120.0, 180.0].map(|v| v / 255.0)),
+        (GraySource::B, [90.0 / 255.0; 4]),
+        (
+            GraySource::A,
+            [255.0, 205.0, 155.0, 105.0].map(|v| v / 255.0),
+        ),
+    ] {
+        let a = read(pick, &p);
+        for (x, w) in want.into_iter().enumerate() {
+            close(a.image.at(x as u32, 0)[0], w);
+        }
+    }
+    // The check follows the pick: R, G and B ask for grey, so this colour source is named; A asks for alpha, which
+    // it has.
+    assert_eq!(read(GraySource::G, &p).non_gray, std::slice::from_ref(&p));
+    assert!(read(GraySource::A, &p).non_gray.is_empty());
+    // A grey source with no alpha channel: fine for G, named for A (it reads 255).
+    assert!(read(GraySource::G, &rgb).non_gray.is_empty());
+    let a = read(GraySource::A, &rgb);
+    assert_eq!(a.non_gray, std::slice::from_ref(&rgb));
+    close(a.image.at(1, 1)[0], 1.0);
+}
+
 /// Note FM30: sources of one aspect ratio are sized to the largest, whatever their order, and the smaller ones are
 /// enlarged by linear interpolation when assembled.
 #[test]
