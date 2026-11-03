@@ -1729,35 +1729,6 @@ fn a_real_load_compiles_in_the_background_then_draws_and_goes_idle() {
     }
 }
 
-/// GUI suggestions item 4: the UV checker goes on and off through render3d's slot override. Neither direction loads
-/// the content again: a `Loaded` reply for the loaded id would set `report` (R14).
-#[test]
-fn the_uv_checker_toggles_without_a_reload() {
-    let cache = tempfile::tempdir().unwrap();
-    let mut m = MaterialState::builtin_default();
-    m.alpha = Some(nif::props::Alpha {
-        flags: 0x200,
-        threshold: 0,
-    }); // DO_ALPHA_TEST: the stand-in's pixel permutation compiles
-    let mut v = real_viewport(cache.path(), m);
-    run_idle(&mut v);
-    v.report = None;
-    v.set_debug(v3::DebugView::UvChecker);
-    run_idle(&mut v);
-    v.set_debug(v3::DebugView::Lit);
-    run_idle(&mut v);
-    assert!(
-        v.report.is_none(),
-        "no Loaded reply: nothing was loaded again"
-    );
-    assert_eq!(
-        v.offered(),
-        [v3::DebugView::Lit, v3::DebugView::UvChecker],
-        "the stand-in has no debug anchor"
-    );
-    assert!(!v.debug_support());
-}
-
 #[test]
 fn a_real_compile_failure_is_listed_and_the_panel_goes_idle() {
     let cache = tempfile::tempdir().unwrap();
@@ -2582,8 +2553,8 @@ fn the_sun_turn_round_trips_through_gui_toml() {
 #[test]
 fn the_debug_selector_lists_only_views_the_renderer_can_make() {
     use v3::DebugView;
-    // Without render3d's support (no thread yet) only Lit and UV checker are offered.
-    assert_eq!(DebugView::ALL.len(), 7);
+    // Without render3d's support (no thread yet) only Lit is offered.
+    assert_eq!(DebugView::ALL.len(), 6);
     let mut h = harness(Viewport3d::with_state(V3State::Ready));
     h.run();
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
@@ -2592,38 +2563,23 @@ fn the_debug_selector_lists_only_views_the_renderer_can_make() {
     for missing in ["Albedo", "Normals", "Roughness", "Metallic", "AO"] {
         assert!(h.query_by_label(missing).is_none(), "{missing} is offered");
     }
-    h.get_by_label("UV checker").click();
+    h.get_by_label("Lit").click();
     h.run();
-    assert_eq!(h.state().debug(), DebugView::UvChecker);
+    assert_eq!(h.state().debug(), DebugView::Lit);
 }
 
 #[test]
 fn a_debug_view_change_goes_to_the_render_thread_and_waits_for_its_answer() {
     let (mut v, cmds) = rendered();
-    v.set_debug(v3::DebugView::UvChecker);
+    v.set_debug(v3::DebugView::Albedo);
     assert!(matches!(
         cmds.try_recv(),
-        Ok(v3::V3Cmd::SetDebug(v3::DebugView::UvChecker))
+        Ok(v3::V3Cmd::SetDebug(v3::DebugView::Albedo))
     ));
     assert!(v.busy());
     v.handle(v3::V3Reply::Reconfigured(1));
-    v.set_debug(v3::DebugView::UvChecker);
+    v.set_debug(v3::DebugView::Albedo);
     assert!(cmds.try_recv().is_err(), "no change, nothing sent");
-}
-
-#[test]
-fn the_uv_checker_is_a_checker() {
-    let rgba = v3::checker_rgba();
-    let n = v3::CHECKER_SIZE as usize;
-    assert_eq!(rgba.len(), n * n * 4);
-    let px = |x: usize, y: usize| rgba[(y * n + x) * 4..(y * n + x) * 4 + 4].to_vec();
-    let cell = n / 8;
-    assert_ne!(px(0, 0), px(cell, 0), "neighbours differ");
-    assert_ne!(px(0, 0), px(0, cell));
-    assert_eq!(px(0, 0), px(cell, cell), "diagonals match");
-    assert_eq!(px(0, 0)[3], 255);
-    let f = engine::dds::read_dds(&v3::checker_dds()).unwrap();
-    assert_eq!((f.width, f.height), (v3::CHECKER_SIZE, v3::CHECKER_SIZE));
 }
 
 #[test]
@@ -2683,19 +2639,26 @@ fn the_3d_keys_reset_cycle_and_are_listed() {
         assert_eq!(a.area, Area::View3d);
         assert_eq!(keys_text(id), keys);
     }
-    let mut v = Viewport3d::with_state(V3State::Ready);
+    let (mut v, _cmds) = rendered();
     v.orbit.pan(30.0, 5.0);
+    v.handle(v3::V3Reply::DebugSupport(true));
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(
+        0,
+        MaterialState::builtin_default(),
+    )]));
     let mut h = harness(v);
-    h.run();
+    // The shape is still drawing: busy, so it repaints; step instead of run().
+    h.run_steps(4);
     h.key_press(Key::Home);
-    h.run();
+    h.run_steps(4);
     assert_eq!(h.state().orbit, v3::Orbit::default());
     h.key_press(Key::V);
-    h.run();
-    assert_eq!(h.state().debug(), v3::DebugView::UvChecker);
-    h.key_press(Key::V);
-    h.run();
-    assert_eq!(h.state().debug(), v3::DebugView::Lit);
+    h.run_steps(4);
+    assert_eq!(
+        h.state().debug(),
+        v3::DebugView::Albedo,
+        "Lit, then the next offered"
+    );
 }
 
 fn shape_info(id: u32, m: MaterialState) -> ShapeInfo {
@@ -2721,11 +2684,11 @@ fn offered_views_follow_support_and_the_loaded_materials() {
         0,
         MaterialState::builtin_default(),
     )]));
-    assert_eq!(v.offered(), [Lit, UvChecker], "no support reported yet");
+    assert_eq!(v.offered(), [Lit], "no support reported yet");
     v.handle(v3::V3Reply::DebugSupport(true));
     assert_eq!(
         v.offered(),
-        [Lit, UvChecker, Albedo, Normals, Roughness, Ao],
+        [Lit, Albedo, Normals, Roughness, Ao],
         "non-PBR: no Metallic"
     );
     assert_eq!(v.stand_in(Roughness), Some("1 − specular mask"));
@@ -2738,11 +2701,11 @@ fn offered_views_follow_support_and_the_loaded_materials() {
         shape_info(0, face),
         shape_info(1, pbr()),
     ]));
-    assert_eq!(v.offered().len(), 7, "one PBR shape offers everything");
-    assert_eq!(Lit.next(&v.offered()), UvChecker);
+    assert_eq!(v.offered().len(), 6, "one PBR shape offers everything");
+    assert_eq!(Lit.next(&v.offered()), Albedo);
     assert_eq!(Ao.next(&v.offered()), Lit, "wraps over the offered views");
     assert_eq!(
-        Metallic.next(&[Lit, UvChecker]),
+        Metallic.next(&[Lit, Albedo]),
         Lit,
         "a view not offered goes to the first"
     );
@@ -2786,7 +2749,7 @@ fn losing_debug_support_falls_back_to_lit_with_a_status_line() {
         cmds.try_recv(),
         Ok(v3::V3Cmd::SetDebug(v3::DebugView::Lit))
     ));
-    assert_eq!(v.offered(), [v3::DebugView::Lit, v3::DebugView::UvChecker]);
+    assert_eq!(v.offered(), [v3::DebugView::Lit]);
 }
 
 #[test]
@@ -2802,13 +2765,30 @@ fn the_view_section_lists_the_offered_views_with_the_stand_in_hover() {
     h.run_steps(4);
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
     h.run_steps(4);
-    for offered in ["Lit", "UV checker", "Albedo", "Normals", "Roughness", "AO"] {
+    for offered in ["Lit", "Albedo", "Normals", "Roughness", "AO"] {
         h.get_by_label(offered);
     }
     assert!(h.query_by_label("Metallic").is_none());
     h.get_by_label("Roughness").hover();
     h.run_steps(4);
     h.get_by_label_contains("1 − specular mask");
+}
+
+/// Note GJ8: the Debug view selector no longer lists a UV checker; every other view is still there.
+#[test]
+fn the_debug_view_menu_has_no_uv_checker() {
+    let (mut v, _cmds) = rendered();
+    v.handle(v3::V3Reply::DebugSupport(true));
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr())]));
+    let mut h = harness(v);
+    h.run_steps(4);
+    h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
+    h.run_steps(4);
+    for view in v3::DebugView::ALL {
+        h.get_by_label(view.label());
+    }
+    assert!(h.query_by_label("UV checker").is_none());
+    assert_eq!(v3::DebugView::ALL.len(), 6);
 }
 
 /// Audit 3 item 3: two panels both count frame ids from 1; each keeps its own texture.

@@ -523,7 +523,7 @@ pub static ACTIONS: &[Action] = &[
     ),
     listed(
         "3d-debug",
-        "Next 3D debug view (Lit, UV checker)",
+        "Next 3D debug view (Lit, Albedo, Normals, …)",
         View3d,
         &[key(Key::V)],
     ),

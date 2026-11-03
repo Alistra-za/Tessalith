@@ -517,14 +517,12 @@ impl Default for Look {
     }
 }
 
-/// The 3D panel's debug views (AG75, GUI suggestions items 1 and 4). Lit and UV checker are always offered; the others
+/// The 3D panel's debug views (AG75, GUI suggestions item 1). Lit is always offered; the others
 /// when render3d reports the CS anchor (`V3Reply::DebugSupport`) and a loaded shape has the term ([`Viewport3d::offered`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DebugView {
     #[default]
     Lit,
-    /// A generated checker over every shape's slot 0 (diffuse / base colour): render3d's `override_slot(0, …)`.
-    UvChecker,
     Albedo,
     Normals,
     Roughness,
@@ -533,9 +531,8 @@ pub enum DebugView {
 }
 
 impl DebugView {
-    pub const ALL: [DebugView; 7] = [
+    pub const ALL: [DebugView; 6] = [
         DebugView::Lit,
-        DebugView::UvChecker,
         DebugView::Albedo,
         DebugView::Normals,
         DebugView::Roughness,
@@ -546,7 +543,6 @@ impl DebugView {
     pub fn label(self) -> &'static str {
         match self {
             DebugView::Lit => "Lit",
-            DebugView::UvChecker => "UV checker",
             DebugView::Albedo => "Albedo",
             DebugView::Normals => "Normals",
             DebugView::Roughness => "Roughness",
@@ -555,10 +551,10 @@ impl DebugView {
         }
     }
 
-    /// The render3d output of this view; the UV checker draws Lit (its checker is a slot override).
+    /// The render3d output of this view.
     pub fn output(self) -> DebugOutput {
         match self {
-            DebugView::Lit | DebugView::UvChecker => DebugOutput::Lit,
+            DebugView::Lit => DebugOutput::Lit,
             DebugView::Albedo => DebugOutput::Albedo,
             DebugView::Normals => DebugOutput::NormalWorld,
             DebugView::Roughness => DebugOutput::Roughness,
@@ -579,44 +575,6 @@ impl DebugView {
 /// The status line when render3d cannot draw the selected debug view any more (`DebugSupport(false)`).
 pub const DEBUG_UNSUPPORTED: &str =
     "These Community Shaders have no debug-view anchor in Lighting.hlsl: back to Lit";
-
-/// Side of the UV checker texture; 8×8 cells.
-pub const CHECKER_SIZE: u32 = 256;
-
-/// The UV checker's RGBA8 pixels: 8×8 cells of two greys (grey, so the engine's BGRA order does not matter).
-pub fn checker_rgba() -> Vec<u8> {
-    let n = CHECKER_SIZE;
-    let cell = n / 8;
-    (0..n * n)
-        .flat_map(|i| {
-            let g = if ((i % n) / cell + (i / n) / cell).is_multiple_of(2) {
-                60
-            } else {
-                200
-            };
-            [g, g, g, 255]
-        })
-        .collect()
-}
-
-/// An uncompressed one-level DDS of `rgba` (`w × h`, symmetric in R and B: the engine's Rgba8 is BGRA).
-fn rgba_dds(w: u32, h: u32, rgba: Vec<u8>) -> Vec<u8> {
-    use engine::config::Format;
-    use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
-    let desc = DdsDesc {
-        width: w,
-        height: h,
-        format: Format::Rgba8,
-        srgb: false,
-        header: ResolvedHeader::Dx10,
-    };
-    dds_bytes(&desc, &[rgba]).expect("a valid RGBA8 level")
-}
-
-/// The UV checker as DDS bytes for `Renderer::override_slot`.
-pub fn checker_dds() -> Vec<u8> {
-    rgba_dds(CHECKER_SIZE, CHECKER_SIZE, checker_rgba())
-}
 
 /// Commands to the render thread.
 pub enum V3Cmd {
@@ -670,8 +628,7 @@ pub enum V3Cmd {
     /// The material-object layer (`Renderer::set_projected_layer`, Note GG); sticky. Applied once content is loaded,
     /// with that content's texture map, before a load in the same batch; answered with `ProjectedMissing`.
     SetProjectedLayer(Option<ProjectedLayer>),
-    /// The debug view (sticky, answered with `Reconfigured`). UV checker = render3d's slot-0 override (kept across
-    /// loads, no reload either way).
+    /// The debug view (sticky, answered with `Reconfigured`).
     SetDebug(DebugView),
     Render {
         id: u64,
@@ -1467,7 +1424,7 @@ impl Viewport3d {
         self.debug_support
     }
 
-    /// The views the selector and the V key offer: Lit and UV checker always; each other view when render3d supports
+    /// The views the selector and the V key offer: Lit always; each other view when render3d supports
     /// debug views and at least one loaded shape has that term (`Availability` not `None`).
     pub fn offered(&self) -> Vec<DebugView> {
         DebugView::ALL
@@ -2021,8 +1978,6 @@ struct TexState {
     load: Variant,
     swaps: BTreeMap<(String, Variant), Arc<Vec<u8>>>,
     active: BTreeMap<String, Variant>,
-    /// The UV checker debug view is on (render3d's slot-0 override is set).
-    checker: bool,
 }
 
 impl TexState {
@@ -2290,13 +2245,6 @@ fn render_loop(
                     None
                 }
                 V3Cmd::SetDebug(d) => {
-                    let on = d == DebugView::UvChecker;
-                    if tex.checker != on {
-                        tex.checker = on;
-                        // render3d keeps the override across loads, swaps and edits: no reload either way.
-                        let _ = r.override_slot(0, on.then(checker_dds).as_deref());
-                        debug_changed = true;
-                    }
                     if r.debug_output() != d.output() {
                         match r.set_debug_output(d.output()) {
                             Ok(()) => debug_changed = true,

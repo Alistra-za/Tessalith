@@ -9,7 +9,7 @@ use std::fs;
 mod b;
 use b::{alt, edid, plugin, rec, sub, top, zstr};
 use modscan::plugins::{scan_plugins, PluginStats};
-use modscan::scan::{run, run_with, Source, PLUGINS_CANCELLED};
+use modscan::scan::{run, Source, PLUGINS_CANCELLED};
 use modscan::store::Store;
 use modscan::ScanError;
 use std::sync::atomic::AtomicBool;
@@ -604,32 +604,6 @@ fn the_scan_runs_the_plugin_pass_for_mo2_only() {
         0,
         "no load order after a Folder scan"
     );
-}
-
-/// Ruling F-6: "Scan without PGPatcher output" drops PGPatcher mods from the NIF pass only; plugins stay in the order.
-#[test]
-fn skip_derived_keeps_plugins_of_pgpatcher_mods() {
-    let d = load_order(ORDER);
-    fs::create_dir_all(d.path().join("mods/B/meshes/_pgpatcher_dups")).unwrap();
-    let mut store = Store::open(&d.path().join("scan.db")).unwrap();
-    let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
-    let r = run_with(
-        &src,
-        &mut store,
-        &AtomicBool::new(false),
-        &|_| {},
-        &|| vec![],
-        true,
-    )
-    .unwrap();
-    let p = r.plugins.expect("plugin stats");
-    assert_eq!(p.n, 5, "{:?}", p.problems);
-    assert!(
-        !p.problems.iter().any(|(n, _)| n == "z.esl" || n == "f.esp"),
-        "{:?}",
-        p.problems
-    );
-    assert_eq!(formid(&store, "ZStat"), 0xFE00_1803);
 }
 
 /// Ruling R13/F-5: a cancel during the plugin pass ends the run Ok with a note and no plugin stats.

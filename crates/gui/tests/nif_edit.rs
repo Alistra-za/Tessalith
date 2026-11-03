@@ -774,7 +774,7 @@ fn files_with(le: bool, modlist: &str) -> tempfile::TempDir {
 fn scan_and_select(m: &mut MeshesModel, root: &Path) {
     m.activate_with(None);
     m.use_instance(root.to_path_buf(), "Default".into());
-    m.request_scan(false);
+    m.request_scan();
     let req = m.take_request().unwrap();
     m.start(req);
     let t = Instant::now();
@@ -1597,14 +1597,12 @@ fn edit_cards_show_the_edited_values() {
         "{:?}",
         e.outcomes
     );
-    let f1_now = e.model.lighting[&shader].lighting.slsf1;
     let mut h = view(m);
     h.run_steps(4);
     h.get_by_label(&shader_type_name(new_ty));
     h.get_by_label(&format!("Details of NIF block {shape}"))
         .click();
     h.run_steps(2);
-    h.get_by_label(&format!("SLSF1 0x{f1_now:08X}"));
     h.get_by_label("textures/edited/card.dds");
     h.get_by_label(&want_alpha);
 }
@@ -5592,33 +5590,6 @@ fn clicking_the_colour_strip_scrubs() {
     assert!((c.t - 0.25).abs() < 0.01, "{c:?}");
 }
 
-/// C5b screenshots: the colour strip with an HDR key at 1100 and 1600 px, saved to `SDC_C5B_SHOTS` (default: the
-/// temp dir). Needs a GPU: `cargo test -p sdc-gui --test nif_edit -- --ignored render_the_colour_strip`.
-#[test]
-#[ignore]
-fn render_the_colour_strip() {
-    let out = std::env::var("SDC_C5B_SHOTS")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
-    for w in [1100.0, 1600.0] {
-        let (m, _) = colour_scene([2.0, 0.5, 0.0], [0.2, 0.4, 0.6]);
-        let mut h = Harness::builder()
-            .with_size(egui::vec2(w, 1000.0))
-            .wgpu()
-            .build_ui_state(
-                |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
-                m,
-            );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-        h.run_steps(2);
-        tab(&mut h, "Controllers");
-        reveal(&mut h, "Emissive colour colour strip");
-        let img = h.render().expect("render");
-        img.save(out.join(format!("c5b-strip-{w}.png")))
-            .expect("save png");
-    }
-}
-
 fn pos_keys(m: &MeshesModel, ctrl: u32) -> KeyGroup<[f32; 3]> {
     match &m.edit.as_ref().unwrap().keys[&(ctrl, None)] {
         Ok(KeyData::Pos(g)) => g.clone(),
@@ -7173,85 +7144,6 @@ fn an_already_pbr_shape_says_so() {
     assert_eq!(notes(&m, shape), [ALREADY_PBR]);
 }
 
-/// Owner data (B8 brief, not a gate): the JSON read, then per shape the candidate scan (once per slot change) and
-/// one simulation over the candidates (each change), for a shape that matches an owner entry.
-#[test]
-#[ignore]
-fn in_game_cost_on_the_owner_json() {
-    let Ok(root) = std::env::var("SDC_ACHERUS") else {
-        println!("skipped: set SDC_ACHERUS");
-        return;
-    };
-    let inst = modscan::mo2::Instance::load(Path::new(&root), Some("Nexus")).unwrap();
-    let t = Instant::now();
-    let files = pg_entries(&inst).unwrap();
-    let read = t.elapsed();
-    let entries: usize = files.iter().map(|f| f.entries.len()).sum();
-    let e = NifEdit::open(
-        fixture("TestNifFile_Skinned_SE.nif"),
-        copy("A", 1, false),
-        "meshes/x.nif",
-        None,
-        None,
-    )
-    .unwrap();
-    let mut mat = e.materials()[0].1.clone();
-    // A diffuse the owner's JSON names: the last file's first string match_diffuse.
-    let md = files
-        .iter()
-        .rev()
-        .flat_map(|f| &f.entries)
-        .find_map(|e| e.get("match_diffuse")?.as_str().map(String::from))
-        .expect("a match_diffuse");
-    mat.set_slot_raw(0, &format!("textures{md}.dds"));
-    for (label, m) in [("no match", e.materials()[0].1.clone()), ("match", mat)] {
-        let t = Instant::now();
-        let (c, tested) = candidates(&files, r"meshes\x.nif", &m.slots);
-        let scan = t.elapsed();
-        let t = Instant::now();
-        let (_, notes) = simulate_shape(&files, &c, r"meshes\x.nif", &m, &|_| true);
-        println!(
-            "{label}: {} files, {entries} entries: pg_entries {read:?}; candidates {scan:?} ({} files, {tested} \
-             entries tested); simulate {:?} ({notes:?})",
-            files.len(),
-            c.len(),
-            t.elapsed()
-        );
-    }
-    // Fix round 2: on the owner's JSON the index gives the full scan's matches, for every match_diffuse there.
-    let t = Instant::now();
-    let mut shapes = 0;
-    for md in files
-        .iter()
-        .flat_map(|f| &f.entries)
-        .filter_map(|e| e.get("match_diffuse")?.as_str())
-    {
-        let mut m = e.materials()[0].1.clone();
-        m.set_slot_raw(0, &format!("textures{md}.dds"));
-        let scan: Vec<(usize, Vec<usize>)> = files
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let hit = (0..f.entries.len())
-                    .filter(|&j| pgpsim::shape_matches(&f.entries[j], r"meshes\x.nif", &m.slots))
-                    .collect::<Vec<_>>();
-                (i, hit)
-            })
-            .filter(|(_, h)| !h.is_empty())
-            .collect();
-        assert_eq!(
-            candidates(&files, r"meshes\x.nif", &m.slots).0,
-            scan,
-            "{md}"
-        );
-        shapes += 1;
-    }
-    println!(
-        "index = full scan for {shapes} owner diffuse paths ({:?})",
-        t.elapsed()
-    );
-}
-
 /// Fix round 2 (B-P38): the first In game build of a 20-shape mesh against a 5000-entry JSON tests only each
 /// shape's indexed candidates, never every entry, on the UI thread.
 #[test]
@@ -7609,106 +7501,6 @@ fn notes_or_none(m: &MeshesModel, b: u32) -> Option<Vec<String>> {
 }
 
 // ---- B-P41: key-drag cost on a many-controller owner NIF (final review minor 5) ----
-
-/// One key-drag tick (`push` with the drag's merge key: `reapply`) on the owner NIF with the most lighting controllers a
-/// scan of the loose meshes\effects, actors and magic folders found (2026-10-21): vanilla fxtg09nocturnalbirds.nif,
-/// 608 controllers and 2 sequences. The loose extract of it is disabled, so it is read from the vanilla mesh BSAs
-/// (the winning copy). Release build; not a gate.
-#[test]
-#[ignore]
-fn key_drag_tick_cost_on_a_many_controller_owner_nif() {
-    let Ok(root) = std::env::var("SDC_ACHERUS") else {
-        println!("skipped: set SDC_ACHERUS");
-        return;
-    };
-    const PATH: &str = r"meshes\effects\fxtg09nocturnalbirds.nif";
-    let data = Path::new(&root).join("Stock Game").join("Data");
-    let bytes = ["Skyrim - Meshes0.bsa", "Skyrim - Meshes1.bsa"]
-        .iter()
-        .find_map(|n| {
-            let b = vfs::bsa::Bsa::open(&data.join(n)).ok()?;
-            let e = b
-                .entries
-                .iter()
-                .find(|e| e.norm.replace('/', "\\").eq_ignore_ascii_case(PATH))?;
-            b.read(e).ok()
-        })
-        .expect("the NIF in the vanilla mesh BSAs");
-    let mut e = NifEdit::open(bytes, copy("A", 1, false), "meshes/x.nif", None, None).unwrap();
-    // The first controller (free or in a clip) with two float or colour keys or more, on a shape's shader or alpha.
-    let (at, clip, keys) = e
-        .keys
-        .iter()
-        .filter_map(|((c, clip), k)| match k {
-            Ok(k @ KeyData::Float(g)) if g.keys.len() >= 2 => Some((*c, *clip, k.clone())),
-            Ok(k @ KeyData::Pos(g)) if g.keys.len() >= 2 => Some((*c, *clip, k.clone())),
-            _ => None,
-        })
-        .find_map(|(c, clip, k)| {
-            let m = &e.model;
-            let (s, owner, prop) = m.shapes.iter().find_map(|s| {
-                let lit = s.shader.and_then(|b| m.lighting.get(&b)).map(|l| &l.prop);
-                let alpha = s.alpha.and_then(|b| m.alphas.get(&b)).map(|a| &a.prop);
-                [
-                    (nif::edit::Owner::Shader, lit),
-                    (nif::edit::Owner::Alpha, alpha),
-                ]
-                .into_iter()
-                .find_map(|(o, p)| p.filter(|p| p.ctrls.contains(&c)).map(|p| (s, o, p)))
-            })?;
-            let cm = &m.ctrls[&c];
-            let i = prop.ctrls.iter().position(|&b| b == c)?;
-            let nth = prop.ctrls[..i]
-                .iter()
-                .filter_map(|b| m.ctrls.get(b))
-                .filter(|p| p.class == cm.class && p.var == cm.var)
-                .count() as u32;
-            let at = Anchor {
-                block: c,
-                kind: cm.class.to_string(),
-                shape: s.name.as_deref().map(str::to_string),
-                role: Role::Ctrl {
-                    owner,
-                    class: cm.class.to_string(),
-                    var: cm.var,
-                    nth,
-                },
-            };
-            Some((at, clip, k))
-        })
-        .expect("a keyed controller");
-    let tick = |v: f32| {
-        let mut k = keys.clone();
-        match &mut k {
-            KeyData::Float(g) => g.keys[1].value = v,
-            KeyData::Pos(g) => g.keys[1].value[0] = v,
-            KeyData::Bool(_) => unreachable!(),
-        }
-        Op::SetKeys {
-            at: at.clone(),
-            clip,
-            clip_name: None,
-            keys: k,
-            base: keys.clone(),
-        }
-    };
-    let merge = Some(nif::edit::merge_key(&tick(0.0)));
-    e.push(vec![tick(0.0)], merge.clone());
-    let n = 20;
-    let t = Instant::now();
-    for i in 1..=n {
-        e.push(vec![tick(i as f32 * 0.01)], merge.clone());
-    }
-    let per = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
-    assert_eq!(e.doc.ops.len(), 1, "one drag, one op");
-    assert_eq!(e.outcomes, [nif::edit::Outcome::Applied]);
-    println!(
-        "{} controllers, {} sequences, {} shapes, clip {clip:?}: {per:.2} ms per drag tick",
-        e.model.ctrls.len(),
-        e.model.sequences.len(),
-        e.model.shapes.len()
-    );
-}
 
 // ---- Key fixes: stale key errors (Note CM33), Add key after the last key (B-P43), stop follows keys (B-P44) ----
 
@@ -8795,38 +8587,6 @@ fn new_clip_ticks_clear_when_the_shape_changes() {
     assert!(!on(&h), "back on S, the old tick is gone");
 }
 
-/// C5 screenshots (egui-ui-rules step 5): the Controllers tab with a clip picked at 1100, 1280 and 1600 px, saved
-/// to `SDC_C5_SHOTS` (default: the temp dir). Needs a GPU:
-/// `cargo test -p sdc-gui --test nif_edit -- --ignored render_the_clips_tab`.
-#[test]
-#[ignore]
-fn render_the_clips_tab() {
-    let out = std::env::var("SDC_C5_SHOTS")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
-    for w in [1100.0, 1280.0, 1600.0] {
-        let mut m = clip_scene();
-        let seq = convert(&mut m);
-        m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-        let mut h = Harness::builder()
-            .with_size(egui::vec2(w, 1000.0))
-            .wgpu()
-            .build_ui_state(
-                |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
-                m,
-            );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-        h.run_steps(2);
-        tab(&mut h, "Controllers");
-        for (part, label) in [("top", "Clip name"), ("bottom", "Add clip")] {
-            reveal(&mut h, label);
-            let img = h.render().expect("render");
-            img.save(out.join(format!("c5-clips-{w}-{part}.png")))
-                .expect("save png");
-        }
-    }
-}
-
 // ---- Note CS: SLSF1 bits that need a shader type (owner) ----
 
 const SKIN_TINT: &str =
@@ -9689,7 +9449,7 @@ fn cards_stay_when_the_controller_read_fails() {
     // The scan reads the good bytes; both copies then turn into junk before the NIF is selected (and read again).
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
-    m.request_scan(false);
+    m.request_scan();
     let req = m.take_request().unwrap();
     m.start(req);
     let t = Instant::now();

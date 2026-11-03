@@ -120,23 +120,9 @@ pub fn run(
     progress: &dyn Fn(Progress),
     procs: &dyn Fn() -> Vec<String>,
 ) -> Result<Report, ScanError> {
-    run_with(src, store, cancel, progress, procs, false)
-}
-
-/// `run`, optionally without the PGPatcher output ("Scan without PGPatcher output", Task 12 / ruling R6). With
-/// `skip_derived`, a running PGPatcher does not block or taint the scan, mods carrying the PGPatcher signature are
-/// left out of the run (as if disabled), and in other origins every derived path (dups, diff-listed) is skipped.
-pub fn run_with(
-    src: &Source,
-    store: &mut Store,
-    cancel: &AtomicBool,
-    progress: &dyn Fn(Progress),
-    procs: &dyn Fn() -> Vec<String>,
-    skip_derived: bool,
-) -> Result<Report, ScanError> {
     // Declared first so it drops last, after end_scan, on every path including a panic.
     let _lock = ScanLock::take(store.conn.path(), Duration::ZERO)?;
-    let r = scan_body(src, store, cancel, progress, procs, skip_derived);
+    let r = scan_body(src, store, cancel, progress, procs);
     if let Err(e) = &r {
         // Pending rows must not outlive a failed run (first error wins). A crash after a cold direct write keeps
         // the derived copies; their size/mtime re-parse guards them.
@@ -185,24 +171,23 @@ mod corrupt_tests {
     }
 }
 
-/// The scan itself; `run_with` adds `Store::end_scan` on every outcome.
+/// The scan itself; `run` adds `Store::end_scan` on every outcome.
 fn scan_body(
     src: &Source,
     store: &mut Store,
     cancel: &AtomicBool,
     progress: &dyn Fn(Progress),
     procs: &dyn Fn() -> Vec<String>,
-    skip_derived: bool,
 ) -> Result<Report, ScanError> {
     // 1. Process gate.
-    if !skip_derived && pgp::running(&procs()) {
+    if pgp::running(&procs()) {
         return Err(ScanError::PgpRunning);
     }
     let mut report = Report::default();
     let mut t = Instant::now();
 
     // 2. Origins.
-    let (mut loose, bsas) = match src {
+    let (loose, bsas) = match src {
         Source::Mo2(inst) => {
             let (l, missing) = loose_origins(inst)?;
             report.missing_mods = missing;
@@ -223,12 +208,7 @@ fn scan_body(
             vec![],
         ),
     };
-    // Plugins are not NIF-derived output and the load order must not shrink with the PGPatcher mods (ruling F-6).
-    let plugin_origins = loose.clone();
-    if skip_derived {
-        // BSA ranks above were computed with these mods present, as MO2 sees them.
-        loose.retain(|o| o.kind != OriginKind::Mod || pgp::signature(&o.root) == Signature::None);
-    }
+
     store.begin_scan()?;
     let mut loose_ids = Vec::with_capacity(loose.len());
     // Whole-origin derived flag (Mod with a signature) and the parsed diff, per loose origin.
@@ -243,10 +223,8 @@ fn scan_body(
             (OriginKind::Mod, _) => Some(DerivedState::Ok),
             _ => Some(DerivedState::InOverwrite),
         };
-        whole_derived[i] = !skip_derived && o.kind == OriginKind::Mod && sig != Signature::None;
+        whole_derived[i] = o.kind == OriginKind::Mod && sig != Signature::None;
         sig_any[i] = sig != Signature::None;
-        // Without the PGPatcher output, the origin is recorded as ordinary; its derived paths are dropped below.
-        let state = state.filter(|_| !skip_derived);
         let id = store.upsert_origin_staged(&OriginSpec {
             kind: kind_code(o.kind),
             name: o.name.clone(),
@@ -298,8 +276,7 @@ fn scan_body(
 
     // 3. Walk.
     let mut failed_bsas = HashSet::new();
-    let (mut copies, mut locs, opened, tex) =
-        walk(&loose, &bsas, &mut report, &mut failed_bsas, progress);
+    let (copies, locs, opened, tex) = walk(&loose, &bsas, &mut report, &mut failed_bsas, progress);
     report.phase_ms.push(("walk", lap(&mut t)));
     // A BSA that failed to open (locked, being redeployed) is not enabled, so delete_unseen keeps its cached rows.
     let enable_bsa_ids: Vec<i64> = bsa_ids
@@ -310,7 +287,7 @@ fn scan_body(
         .map(|(_, id)| id)
         .collect();
     let (mut parse_ms, mut write_ms) = (0u64, 0u64);
-    let mut derived: Vec<bool> = copies
+    let derived: Vec<bool> = copies
         .iter()
         .map(|c| match c.origin {
             OriginRef::Loose(i) => {
@@ -319,13 +296,7 @@ fn scan_body(
             OriginRef::Bsa(_) => false,
         })
         .collect();
-    if skip_derived {
-        let mut keep = derived.iter().map(|d| !d);
-        copies.retain(|_| keep.next().unwrap_or(true));
-        let mut keep = derived.iter().map(|d| !d);
-        locs.retain(|_| keep.next().unwrap_or(true));
-        derived = vec![false; copies.len()];
-    }
+
     let origin_id = |o: OriginRef| match o {
         OriginRef::Loose(i) => loose_ids[i],
         OriginRef::Bsa(i) => bsa_ids[i],
@@ -443,7 +414,7 @@ fn scan_body(
     });
 
     // 5. Re-check the process gate: a run that overlapped PGPatcher keeps the previous derived rows.
-    if !skip_derived && pgp::running(&procs()) {
+    if pgp::running(&procs()) {
         report.tainted = true;
         store.discard_pending()?;
         // No resolve ran: the old winners would name origins of the previous run, so the lists stay empty until a
@@ -553,7 +524,7 @@ fn scan_body(
     // 8. Plugins (esp spec §2.2), after the NIF/texture pass, same cancel and progress. A Folder has no load order.
     match src {
         Source::Mo2(inst) => {
-            match crate::plugins::scan_plugins(inst, &plugin_origins, store, cancel, progress) {
+            match crate::plugins::scan_plugins(inst, &loose, store, cancel, progress) {
                 Ok(p) => {
                     report.phase_ms.push(("plugins", p.ms));
                     report.plugins = Some(p);

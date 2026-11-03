@@ -52,7 +52,7 @@ use std::time::Instant;
 /// Memory ids are process-wide: `FileSource::Memory` compares by id, across encoders.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// D5: the preview's encode size cap (`[render3d] set_preview_max` in `gui.toml`, 0 = this).
+/// D5: the preview's encode size cap. The old `[render3d] set_preview_max` key in `gui.toml` is ignored (Note GJ8).
 pub const DEFAULT_CAP: u32 = 2048;
 pub const WAITS_FOR_EXPORT: &str = "Preview encoding waits for the export to finish";
 const BLOCKED_ERROR: &str = "the texture has an error";
@@ -2928,15 +2928,11 @@ impl SetPreview {
         s: &crate::settings::GuiSettings,
         store_path: Option<PathBuf>,
     ) -> SetPreview {
-        let cap = match s.render3d.set_preview_max {
-            0 => DEFAULT_CAP,
-            n => n.clamp(256, 8192),
-        };
         SetPreview::new(
             s.render3d.shaders.clone(),
             target_of(&s.meshes),
             store_path,
-            cap,
+            DEFAULT_CAP,
         )
     }
 }
