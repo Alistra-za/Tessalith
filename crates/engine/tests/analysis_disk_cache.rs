@@ -1,5 +1,4 @@
 //! The analysis disk cache (DECISIONS Note DZ): a later session decodes nothing it already analysed.
-use encoders_sys::Bc1Model;
 use engine::analysis_store::AnalysisStore;
 use engine::api::*;
 use engine::config::Target;
@@ -46,9 +45,7 @@ fn request(dir: &Path) -> BatchRequest {
 }
 
 fn session(cache: &Path) -> Session {
-    Session::new(Bc1Model::Ideal)
-        .unwrap()
-        .with_disk_cache(cache.to_path_buf())
+    Session::new().unwrap().with_disk_cache(cache.to_path_buf())
 }
 
 fn plan(s: &Session, dir: &Path) -> Plan {
@@ -170,7 +167,7 @@ fn a_corrupt_entry_is_a_miss_and_is_replaced() {
 fn without_a_disk_dir_nothing_is_written() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     plan(&s, d.path());
     assert!(!d.path().join("out").exists());
     let mut top: Vec<_> = entries(d.path())

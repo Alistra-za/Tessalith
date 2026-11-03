@@ -11,7 +11,7 @@ Click the strip at the right edge to open it. With a set selected in 2D, the sam
 | Section | Contents |
 |---|---|
 | Preset inspector | Headed *How {file}'s settings resolve* for the selected texture. Under it: the batch preset, and the user presets that loaded (with their files); with none loaded, a **Presets…** button opens the preset creator. Field names read in words (the key shows on hover); long values are cut to fit and show in full on hover. *Show only what differs from sdc-base* hides values equal to the base preset. Built-in presets are read-only. |
-| Batch | Worker threads, Memory budget (MiB), BC1 decoder (Ideal, Ideal (round 4), NVIDIA, AMD). The BC1 decoder is read at start, so a change shows "restart Tessalith to apply". |
+| Batch | Worker threads, Memory budget (MiB). |
 | Preview | Largest previewed side, Allow 16384 previews, Live encode. |
 | Mipmaps | Levels for the selected texture. |
 | Advanced texture fields | BC7 weighting ([BC7 weighting](GUI-Texture-Panel.md#bc7-weighting-against-bc3)), BC1 transparent black, BC4/BC5 search radius (*Default*, *Maximum*, *Fast (preview)*), DDS header (Auto, DX10 extended header, Legacy FourCC), Resize, Half size. |

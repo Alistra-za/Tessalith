@@ -2,7 +2,7 @@
 //! side, as three engine runs. Fixtures are generated: a PBR set `textures/pbr/arm/steel`, a plain set
 //! `textures/clutter/cup`, a PBR landscape set `textures/landscape/dirt` and a complex-material set
 //! `textures/clutter/plate` (a raw `_height`: cs packs a `_p`, vanilla a complex `_m`, Note AZ2). The byte-identity test
-//! with a non-default BC1 model is `also_export_bc1.rs` (the model is process-global).
+//! with a BC1 output is `also_export_bc1.rs`.
 mod also_support;
 use also_support::*;
 use engine::also::*;
@@ -279,7 +279,7 @@ fn a_1x_twin_without_encode_version_is_re_encoded_and_the_copy_records_the_curre
     );
 }
 #[test]
-fn a_changed_bc1_model_re_copies_the_plain_sets() {
+fn a_1x_bc1_target_re_copies_the_plain_sets() {
     let (_d, m, loc) = project(cup);
     let mut req = request(&m, &loc);
     req.overrides
@@ -287,12 +287,12 @@ fn a_changed_bc1_model_re_copies_the_plain_sets() {
     also(req.clone(), &spec(&loc, &[AlsoTarget::Vanilla]))
         .0
         .unwrap();
-    // The model is process-global (one per test binary), so the earlier export is made to look like an Nvidia one:
-    // its PBR record says so, and this Ideal export must re-encode cup.dds and copy it again.
+    // The earlier export is made to look like a 1.x one (encoded against a decoder model): its PBR record says so,
+    // and this export must re-encode cup.dds and copy it again.
     let pbr = loc.join("Mod PBR");
     let mut rec: ManifestRecord =
         serde_json::from_value(record(&pbr, "textures/clutter/cup.dds").raw).unwrap();
-    rec.bc1_model = Some("nvidia".into());
+    rec.bc1_model = Some("ideal".into());
     Manifest::at(&pbr).append(&rec).unwrap();
     let s = also(req, &spec(&loc, &[AlsoTarget::Vanilla])).0.unwrap();
     assert_eq!(phase(&s, Phase::Pbr).converted, 1, "{s:#?}");

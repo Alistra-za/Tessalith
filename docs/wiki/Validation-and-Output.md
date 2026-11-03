@@ -76,18 +76,9 @@ A file with an error from validation is still written. It is reported as `ok ...
 
 The messages are quoted word for word under [Cubemaps](Cubemaps.md#checks). The last check keeps the verdict for 2D files: a 2D `_e` or `cubemaps\` file gets the warning and still passes, and `--strict-cubemaps` makes it fail (the default flips only in 2.0). Every other 2D file is judged as before. A cube is judged on all six faces, and each message names the face and mip. See [Cubemaps](Cubemaps.md).
 
-### The BC1 decoder model
+### The BC1 encode target
 
-Different GPUs decode BC1 colour slightly differently. `--bc1-decoder` (and *BC1 decoder* in the GUI's Advanced drawer) picks which decoder rgbcx encodes BC1 blocks against and validation decodes with:
-
-| Value | Model |
-|---|---|
-| `ideal` (default) | Exact interpolation. |
-| `ideal-round4` | Ideal with rounding. |
-| `nvidia` | NVIDIA hardware. |
-| `amd` | AMD hardware. |
-
-The model is recorded in every manifest record. Only BC1 and BC3 outputs compare it, so changing it re-encodes those on the next `if-changed` run.
+NVIDIA and AMD GPUs decode BC1 colour slightly differently. BC1 blocks, and the colour half of BC3, are encoded so that the error is lowest for both decoders together. The gain is in [Research](Research.md). Validation, previews and readouts decode BC1 as NVIDIA does. The record's `bc1_model` is `dual`; 1.x records name a decoder model, so each BC1 and BC3 output re-encodes once. <!-- D:FM17 -->
 
 ## The manifest
 
@@ -105,7 +96,7 @@ A record holds:
 | `source`, `source_sha256`, `sources` | The input file and its hash; for packed or baked outputs, every source. |
 | `output` | The output path relative to the output root. |
 | `validation` | The validation summary. |
-| `bc1_model` | The BC1 decoder model. |
+| `bc1_model` | The BC1 encode target (`dual`). |
 | `shader` | The set's shader and why. |
 | `output_stamp` | Size and modified time of the output as written. |
 
@@ -121,7 +112,7 @@ The JSON Schema is available with `sdc presets schema manifest`.
 
 - the encoder versions (and the rgbcx patch for BC3/BC4/BC5);
 - the output file's size and modified time;
-- the BC1 decoder model, for BC1 and BC3;
+- the BC1 encode target, for BC1 and BC3;
 - the record passed validation;
 - the texture type's encode version (bumped only when a release changes that type's output);
 - every source file's content (by SHA-256), including packing sources, the baked normal map and RNM layers;

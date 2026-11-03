@@ -3,7 +3,6 @@ use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind, EVENT_SCHEMA};
 use sdc_gui::model::export::*;
 use sdc_gui::model::*;
-use sdc_gui::settings::Bc1Choice;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -112,18 +111,13 @@ fn export_stops_when_the_save_fails() {
 
 #[test]
 fn the_cli_command_reproduces_the_export() {
-    let c = cli_command(
-        Path::new("C:/mods/x/textures"),
-        Path::new("D:/out dir"),
-        Bc1Choice::Nvidia,
-        0,
-    );
+    let c = cli_command(Path::new("C:/mods/x/textures"), Path::new("D:/out dir"), 0);
     assert_eq!(
         c,
-        r#"sdc convert "C:/mods/x/textures" --recursive -o "D:/out dir" --accept-suggestions high --bc1-decoder nvidia"#
+        r#"sdc convert "C:/mods/x/textures" --recursive -o "D:/out dir" --accept-suggestions high"#
     );
-    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), Bc1Choice::Ideal, 6);
-    assert!(c.ends_with("--bc1-decoder ideal --jobs 6"));
+    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), 6);
+    assert!(c.ends_with("--accept-suggestions high --jobs 6"));
 }
 
 fn ev(seq: u64, job: &str, path: &str, kind: EventKind) -> EngineEvent {
@@ -250,23 +244,6 @@ fn the_report_is_written_as_json_lines_or_markdown_by_extension() {
         std::fs::read_to_string(&md).unwrap(),
         m.export.to_markdown()
     );
-}
-
-#[test]
-fn the_copied_cli_command_uses_the_sessions_decoder_not_the_pending_setting() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    // The shared test session runs the ideal model; the setting changes for the next launch only.
-    m.set_bc1_choice(Bc1Choice::Nvidia);
-    assert!(m.restart_needed);
-    assert_eq!(m.session_bc1(), Bc1Choice::Ideal);
-    let c = cli_command(
-        m.root.as_ref().unwrap(),
-        &m.export_root(),
-        m.session_bc1(),
-        m.settings.jobs,
-    );
-    assert!(c.contains("--bc1-decoder ideal"), "{c}");
 }
 
 /// Audit left-out (DECISIONS Note Y7): rows are found by key; a packed-source drop keeps the index right.

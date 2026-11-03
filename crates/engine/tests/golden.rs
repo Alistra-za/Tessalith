@@ -2,7 +2,6 @@
 //! asserts the format, `_SRGB` tag, header form, mip count, alpha-policy outcome and warning codes. Nothing is
 //! committed but this file and no byte hashes are asserted (those belong to the `pinned-isa` CI job).
 mod cube_support;
-use encoders_sys::Bc1Model;
 use engine::api::*;
 use engine::codes::{Code, Severity, Warning};
 use engine::config::Target;
@@ -143,7 +142,7 @@ fn levels(f: &DdsFile) -> Vec<Vec<[u8; 4]>> {
     f.levels
         .iter()
         .map(
-            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()], None).unwrap() {
+            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap() {
                 Decoded::Ldr(px) => px,
                 Decoded::Hdr(_) => panic!("expected an LDR format"),
             },
@@ -1267,7 +1266,7 @@ fn hdr_float_emissive_content_is_linear() {
     );
     let f = dds(d.path(), "textures/pbr/lamp_g.dds");
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Hdr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Hdr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("BC6H decodes to float");
     };
     // BC6H error scales with the block's range, not the texel (measured max 3.2 % of the 4.0 peak); the sRGB
@@ -1807,7 +1806,7 @@ fn near_opaque_normal_alpha_is_removed_with_an_info() {
 /// level of the roughness chain the encoder receives is within 1/255 of the f64 reference, and the bake widens it.
 #[test]
 fn variance_bake_matches_the_f64_reference() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     for (nw, mw, member, shift) in [
         (64u32, 64u32, "rmaos", 0i32),
         (128, 64, "rmaos", 1),
@@ -1871,7 +1870,7 @@ fn variance_bake_matches_the_f64_reference() {
 /// same job without its bake.
 #[test]
 fn a_flat_normal_leaves_the_roughness_chain_bit_identical() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/pbr/iron_n.png", flat_normal(64));
     put(d.path(), "textures/pbr/iron_rmaos.png", rough_member(64));
@@ -1893,7 +1892,7 @@ fn a_flat_normal_leaves_the_roughness_chain_bit_identical() {
 /// Spec §6.3: a non-PBR `_n` never bakes; `renormalize_bake` set on it changes nothing.
 #[test]
 fn renormalize_bake_on_a_non_pbr_normal_is_inert() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/a/wall_n.png", bumpy_normal(64));
     let (_, plain) = planned_chain(
@@ -1919,7 +1918,7 @@ fn renormalize_bake_on_a_non_pbr_normal_is_inert() {
 /// a flat `_cnr` keeps its alpha bit for bit, as with the self-bake off.
 #[test]
 fn cnr_self_bake_matches_the_reference_and_a_flat_coat_keeps_its_alpha() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     let coat_alpha = |x: u32, y: u32| (40 + (x * 3 + y) % 200) as u8;
     // Bumpy.
     let d = tempfile::tempdir().unwrap();
@@ -2048,7 +2047,7 @@ fn reference_length(n: &image::RgbImage, level: u32, x: u32, y: u32) -> f64 {
 /// roughness (R = 0) stays 0 and a near-mirror `_cnr` coat keeps its alpha, as with the bake off.
 #[test]
 fn a_flat_but_noisy_normal_keeps_mirror_roughness_at_every_mip() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     let noisy = noisy_flat_normal(64);
     // Measurement: every footprint is above the floor, and without it this fixture is the reported lift.
     let mut min_l = 1.0f64;
@@ -2127,7 +2126,7 @@ fn a_flat_but_noisy_normal_keeps_mirror_roughness_at_every_mip() {
 /// reference; at ±5 codes (0.99923) it is below the floor and adds nothing.
 #[test]
 fn a_tilt_just_above_the_noise_floor_still_widens() {
-    let session = Session::new(Bc1Model::Ideal).unwrap();
+    let session = Session::new().unwrap();
     let mirror = rgba(64, |_, _| [0, 0, 200, 255]);
     for (k, widens) in [(6u8, true), (5, false)] {
         let n = tilted_columns(64, k);
@@ -2423,7 +2422,7 @@ fn rgba16f_output_keeps_float_values_and_is_cs_only() {
     let f = dds(d.path(), "textures/pbr/lamp_g.dds");
     assert_dds(&f, DdsPixelFormat::Rgba16f, HeaderKind::Dx10, 7);
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Hdr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Hdr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!()
     };
     let src = hdr_emissive().to_rgb32f();
@@ -3686,7 +3685,7 @@ fn surfaces(f: &DdsFile) -> Vec<Vec<[u8; 4]>> {
     f.surfaces()
         .into_iter()
         .map(
-            |(w, h, r)| match decode_level(f.format, w, h, &f.data[r], None).unwrap() {
+            |(w, h, r)| match decode_level(f.format, w, h, &f.data[r]).unwrap() {
                 Decoded::Ldr(px) => px,
                 Decoded::Hdr(_) => panic!("expected an LDR format"),
             },

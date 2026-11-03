@@ -751,7 +751,7 @@ fn a_grass_stack_on_an_opaque_albedo_keeps_its_spec_alpha() {
     let f = read_dds(&std::fs::read(out.join("textures/landscape/grass/g.dds")).unwrap()).unwrap();
     let (w, h, r) = f.levels[0].clone();
     assert_eq!((w, h), (16, 32));
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     for q in &px[(16 * 16)..] {
@@ -1359,7 +1359,7 @@ fn landscape_without_p_has_an_opaque_diffuse() {
     assert_eq!(s.converted, 2);
     let f = read_dds(&std::fs::read(out.join("textures/landscape/dirt.dds")).unwrap()).unwrap();
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     assert!(px.iter().all(|q| q[3] == 255));

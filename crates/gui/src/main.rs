@@ -22,8 +22,7 @@ fn build_model() -> AppModel {
         .as_deref()
         .map(settings::GuiSettings::load)
         .unwrap_or_default();
-    // The BC1 decoder model is read once at launch (spec §4.6).
-    let mut model = match Session::new(s.bc1_decoder.model()) {
+    let mut model = match Session::new() {
         Ok(session) => {
             // Analyses are reused across runs (Note DZ); no `LOCALAPPDATA`, no store.
             let session = sdc_gui::with_analysis_cache(

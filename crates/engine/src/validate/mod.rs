@@ -11,7 +11,6 @@ use crate::dds::{check_header, read_dds};
 use crate::decode::{decode_level, Decoded};
 use crate::quantize::EncoderInput;
 use alpha::{alpha_stats, opaque_block_violations, AlphaStats};
-use encoders_sys::Bc1Model;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -86,8 +85,6 @@ pub struct ValidationInput<'a> {
     pub base_coverage: Option<f64>,
     /// Peak luminance of the HDR source (enables the BC6H peak check).
     pub source_peak: Option<f32>,
-    /// rgbcx decoder model used to decode BC1.
-    pub bc1_model: Bc1Model,
     pub expected_levels: Option<u32>,
 }
 
@@ -192,7 +189,6 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
             ),
         ));
     }
-    let model = matches!(p.format, Format::Bc1).then_some(inp.bc1_model);
     // A cube's surfaces are face-major (DECISIONS DS10); a 2D file has one face.
     let per_face = file.levels.len().max(1);
     let mip = |l: usize| {
@@ -216,7 +212,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
     };
     let mut decoded = vec![];
     for (lw, lh, range) in file.surfaces() {
-        match decode_level(file.format, lw, lh, &file.data[range], model) {
+        match decode_level(file.format, lw, lh, &file.data[range]) {
             Ok(d) => decoded.push((lw, lh, d)),
             Err(e) => {
                 w.push(Warning::new(Code::ValHeader, format!("decode failed: {e}")));

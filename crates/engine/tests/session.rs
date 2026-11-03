@@ -1,5 +1,4 @@
 //! M3a Task 7: the session cache re-resolves without reloading (spec §4.4) and makes thumbnails.
-use encoders_sys::Bc1Model;
 use engine::api::*;
 use engine::config::Target;
 use engine::events::*;
@@ -42,7 +41,7 @@ fn plan(s: &Session, r: BatchRequest) -> Plan {
 fn replanning_reuses_analyses_and_a_target_change_reloads_only_pack_sources() {
     let d = tempfile::tempdir().unwrap();
     fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     plan(&s, req(d.path(), Target::Cs));
     // Pass 1 loads the three files; pass 2 assembles _rmaos from its two sources.
     assert_eq!(s.cache().loads(), 5);
@@ -66,7 +65,7 @@ fn replanning_reuses_analyses_and_a_target_change_reloads_only_pack_sources() {
 fn a_changed_file_reloads_once() {
     let d = tempfile::tempdir().unwrap();
     fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     plan(&s, req(d.path(), Target::Cs));
     let before = s.cache().loads();
     // A different size is a different stamp, whatever the timestamp resolution.
@@ -88,7 +87,7 @@ fn a_changed_file_reloads_once() {
 fn a_changed_pack_source_reassembles_its_recipe() {
     let d = tempfile::tempdir().unwrap();
     fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let p = plan(&s, req(d.path(), Target::Cs));
     let stamp = |p: &Plan| p.jobs.iter().find_map(|j| j.pack.as_ref()).unwrap().sources[0].stamp;
     let before_stamp = stamp(&p);
@@ -134,7 +133,7 @@ fn thumbnails_of_float_and_16_bit_sources_are_visible() {
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([30000u16, 30000, 30000]))
         .save(d.path().join("in/deep.png"))
         .unwrap();
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
     r.overrides = vec![parse_set("file:deep.png.subtype=diffuse").unwrap()];
     let p = plan(&s, r);
@@ -148,7 +147,7 @@ fn thumbnails_of_float_and_16_bit_sources_are_visible() {
 fn a_packed_image_with_an_unstamped_source_is_not_cached() {
     let d = tempfile::tempdir().unwrap();
     fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let p = plan(&s, req(d.path(), Target::Cs));
     let pk = p.jobs.iter().find_map(|j| j.pack.clone()).unwrap();
     assert!(pk.sources.iter().all(|s| s.stamp.is_some()));
@@ -172,7 +171,7 @@ fn a_plan_of_another_folder_drops_the_first_folders_entries() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     fixture(a.path());
     fixture(b.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     plan(&s, req(a.path(), Target::Cs));
     let iron_a = a.path().join("in").join("iron.png");
     let t = s.cache().thumbnail_of(&iron_a).unwrap();
@@ -191,7 +190,7 @@ fn a_cancelled_plan_keeps_the_cached_entries() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     fixture(a.path());
     fixture(b.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     plan(&s, req(a.path(), Target::Cs));
     let cancel = CancelToken::default();
     cancel.cancel();
@@ -221,7 +220,7 @@ fn plan_progress_counts_every_planned_file_and_belongs_to_one_request() {
     ImageBuffer::from_fn(8, 8, |_, _| Rgb([1u8, 2, 3]))
         .save(r.join("iron.tga"))
         .unwrap();
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let with = |p: &PlanProgress| {
         let mut q = req(d.path(), Target::Cs);
         q.plan_progress = Some(p.clone());
@@ -274,7 +273,7 @@ fn a_warm_replan_admits_no_bytes_for_cached_sources() {
     ImageBuffer::from_fn(64, 64, |x, y| Rgb([x as u8, y as u8, 9]))
         .save(d.path().join("in/iron.png"))
         .unwrap();
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     assert!(plan(&s, req(d.path(), Target::Cs)).peak_admitted_bytes > 0);
     let warm = plan(&s, req(d.path(), Target::Cs));
     assert_eq!(s.cache().loads(), 1);

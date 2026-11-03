@@ -13,8 +13,7 @@ use support::*;
 fn a_source_changed_on_disk_is_flagged_and_reloads_alone() {
     let d = tempfile::tempdir().unwrap();
     // Its own session: the shared one counts the loads of tests running in parallel.
-    let session =
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap());
+    let session = std::sync::Arc::new(engine::session::Session::new().unwrap());
     let settings = sdc_gui::settings::GuiSettings {
         export_folder: Some(d.path().join("export")),
         ..Default::default()

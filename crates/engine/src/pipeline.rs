@@ -16,8 +16,8 @@ use crate::events::{EventKind, Reporter, Stage};
 use crate::image::Rgba32F;
 use crate::load::load_image_as;
 use crate::manifest::{
-    bc1_model_id, dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256,
-    sha256_file, EncoderVersions, Manifest, ManifestRecord, PresetRef, SourceRef, ENGINE_VERSION,
+    dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, sha256_file,
+    EncoderVersions, Manifest, ManifestRecord, PresetRef, SourceRef, BC1_ENCODE_ID, ENGINE_VERSION,
     MANIFEST_SCHEMA,
 };
 use crate::mips::build_chain_with;
@@ -655,7 +655,6 @@ pub fn process_file(
         encoder_input: Some(&prep.inputs),
         base_coverage: prep.base_coverage,
         source_peak: prep.source_peak,
-        bc1_model: req.bc1_model,
         expected_levels: Some(total),
     });
     // Test hook (Note DM, `test-hooks` only): record this output's encode-input hash for the encode-version guard.
@@ -688,7 +687,7 @@ pub fn process_file(
         sources,
         output: output_key(&req.output_root, &job.output),
         validation: report.summary.clone(),
-        bc1_model: Some(bc1_model_id(req.bc1_model).into()),
+        bc1_model: Some(BC1_ENCODE_ID.into()),
         shader: job.shader.clone(),
         output_stamp: None,
         copied_from: None,

@@ -1,6 +1,5 @@
 //! Command-line arguments (spec §8) and their translation into an engine `BatchRequest`.
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use encoders_sys::Bc1Model;
 use engine::api::{BatchRequest, OnExisting};
 use engine::codes::Code;
 use engine::config::{RawMap, Target};
@@ -78,25 +77,6 @@ impl From<OnExistingArg> for OnExisting {
     }
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-pub enum Bc1Arg {
-    Ideal,
-    IdealRound4,
-    Nvidia,
-    Amd,
-}
-
-impl From<Bc1Arg> for Bc1Model {
-    fn from(b: Bc1Arg) -> Bc1Model {
-        match b {
-            Bc1Arg::Ideal => Bc1Model::Ideal,
-            Bc1Arg::IdealRound4 => Bc1Model::IdealRound4,
-            Bc1Arg::Nvidia => Bc1Model::Nvidia,
-            Bc1Arg::Amd => Bc1Model::Amd,
-        }
-    }
-}
-
 #[derive(Args, Clone)]
 pub struct BatchArgs {
     /// Image files or folders.
@@ -155,15 +135,10 @@ pub struct ConvertArgs {
     /// Also write <name>.dds.json next to each output.
     #[arg(long)]
     pub sidecar: bool,
-    #[arg(long, value_enum, default_value = "ideal")]
-    pub bc1_decoder: Bc1Arg,
 }
 
 #[derive(Args)]
 pub struct EncodersArgs {
-    /// BC1 decoder model to report as active (the batch-wide default is `ideal`).
-    #[arg(long, value_enum, default_value = "ideal")]
-    pub bc1_decoder: Bc1Arg,
     /// Print one JSON object instead of the human report.
     #[arg(long)]
     pub json: bool,
@@ -173,9 +148,6 @@ pub struct EncodersArgs {
 pub struct InspectArgs {
     #[command(flatten)]
     pub batch: BatchArgs,
-    /// BC1 decoder model used to decode DDS inputs.
-    #[arg(long, value_enum, default_value = "ideal")]
-    pub bc1_decoder: Bc1Arg,
 }
 
 #[derive(Args)]
@@ -202,8 +174,6 @@ pub struct ValidateArgs {
     /// Write one JSON object per file to stdout (the human report goes to stderr).
     #[arg(long)]
     pub json: bool,
-    #[arg(long, value_enum, default_value = "ideal")]
-    pub bc1_decoder: Bc1Arg,
 }
 
 /// The schema to print. Mirrors `engine::schemas::SchemaKind`, which stays free of clap.

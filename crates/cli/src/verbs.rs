@@ -5,7 +5,6 @@
 //! object per file) and `validate`'s human report moves to stderr.
 use crate::args::*;
 use crate::human::TeeSink;
-use encoders_sys::Bc1Model;
 use engine::api::{CancelToken, Engine, EngineError};
 use engine::codes::{Code, Warning};
 use engine::config::*;
@@ -84,7 +83,7 @@ fn read_file(path: &Path) -> Result<(Vec<u8>, DdsFile), String> {
 }
 
 /// The `dds_info` object for one file: header facts and per-mip decoded-alpha statistics.
-fn dds_info(path: &Path, model: Bc1Model) -> DdsInfo {
+fn dds_info(path: &Path) -> DdsInfo {
     let path_s = path.to_string_lossy().replace('\\', "/");
     let file = match read_file(path) {
         Ok((_, f)) => f,
@@ -108,7 +107,7 @@ fn dds_info(path: &Path, model: Bc1Model) -> DdsInfo {
                 decode_error: None,
             };
             if carries_alpha(file.format) {
-                match decode_level(file.format, *w, *h, &file.data[r.clone()], Some(model)) {
+                match decode_level(file.format, *w, *h, &file.data[r.clone()]) {
                     Ok(Decoded::Ldr(px)) => m.alpha = Some(alpha_stats(&px)),
                     Ok(Decoded::Hdr(_)) => {}
                     Err(e) => m.decode_error = Some(e.to_string()),
@@ -381,7 +380,6 @@ impl EventSink for RelativeRoot {
 /// command line or a config is invalid (2), or an input could not be read (1, spec §8).
 pub fn inspect(a: InspectArgs) -> Result<i32, EngineError> {
     let json = a.batch.json;
-    let model: Bc1Model = a.bc1_decoder.into();
     if let Some(p) = a.batch.inputs.iter().find(|p| !p.exists()) {
         return Err(EngineError::Usage(format!(
             "input not found: {}",
@@ -408,13 +406,13 @@ pub fn inspect(a: InspectArgs) -> Result<i32, EngineError> {
     });
     let engine = Engine::new()?;
     let preset_skips = engine.preflight(&req)?;
-    // The BC1 model is global rgbcx state; set it before any decode.
-    encoders_sys::init(model).map_err(|e| EngineError::Fatal(e.to_string()))?;
+    // rgbcx's mode is global state; set it before any decode.
+    encoders_sys::init();
     let found = discover(&a.batch.inputs, root.path(), a.batch.recursive)
         .map_err(|e| EngineError::Usage(format!("discover: {e}")))?;
     let mut unreadable = 0u32;
     for f in found.iter().filter(|f| f.kind == InputKind::Dds) {
-        let info = dds_info(&f.path, model);
+        let info = dds_info(&f.path);
         unreadable += u32::from(matches!(info, DdsInfo::Unreadable(_)));
         let v = serde_json::to_value(&info).unwrap_or(Value::Null);
         if json {
@@ -443,7 +441,6 @@ pub fn inspect(a: InspectArgs) -> Result<i32, EngineError> {
     }
 
     req.dry_run = true;
-    req.bc1_model = model;
     let events = Arc::new(VecSink::default());
     let mut sinks: Vec<Arc<dyn EventSink>> = vec![events.clone()];
     if json {
@@ -506,12 +503,12 @@ const VARYING_ALPHA_BELOW: u8 = engine::analyse::CS_COMPLEX_GATE_CODE;
 const FLAT_ALPHA_MIN: u8 = 254;
 
 /// The smallest decoded alpha of mip 0, for formats that carry alpha (`None` for others and on decode errors).
-fn mip0_alpha_min(file: &DdsFile, model: Bc1Model) -> Option<u8> {
+fn mip0_alpha_min(file: &DdsFile) -> Option<u8> {
     if !carries_alpha(file.format) {
         return None;
     }
     let (w, h, r) = file.levels.first()?;
-    match decode_level(file.format, *w, *h, &file.data[r.clone()], Some(model)) {
+    match decode_level(file.format, *w, *h, &file.data[r.clone()]) {
         Ok(Decoded::Ldr(px)) => Some(alpha_stats(&px).min),
         _ => None,
     }
@@ -631,10 +628,9 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
         )));
     }
     let target = a.target.map_or(Target::Cs, Target::from);
-    let model: Bc1Model = a.bc1_decoder.into();
     let json = a.json;
-    // The BC1 model is global rgbcx state; set it before any decode.
-    encoders_sys::init(model).map_err(|e| EngineError::Fatal(e.to_string()))?;
+    // rgbcx's mode is global state; set it before any decode.
+    encoders_sys::init();
     let reg = Engine::new()?.registry().clone();
     let explicit: Option<Subtype> = a
         .subtype
@@ -683,7 +679,7 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
                 continue;
             }
         };
-        let alpha_min = mip0_alpha_min(&file, model);
+        let alpha_min = mip0_alpha_min(&file);
         let (st, mut note) = match explicit {
             Some(st) => (st, None),
             None => available_or_fallback(infer_subtype(path, &file, target, alpha_min), target),
@@ -719,7 +715,6 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
                     encoder_input: None,
                     base_coverage: None,
                     source_peak: None,
-                    bc1_model: model,
                     expected_levels: None,
                 })
             }
@@ -1033,12 +1028,12 @@ fn alias_list(aliases: &BTreeMap<String, String>) -> Option<String> {
     })
 }
 
-/// `sdc encoders`: the vendored encoder versions, the ISA the ISPC kernels dispatch to, the active BC1
-/// model. Result verb: stdout (DECISIONS Note J); `--json` prints one object.
+/// `sdc encoders`: the vendored encoder versions, the ISA the ISPC kernels dispatch to, the BC1
+/// encode target. Result verb: stdout (DECISIONS Note J); `--json` prints one object.
 pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
     let v = engine::manifest::EncoderVersions::current();
     let isa = engine::manifest::dispatched_isa();
-    let model = engine::manifest::bc1_model_id(a.bc1_decoder.into());
+    let model = engine::manifest::BC1_ENCODE_ID;
     if a.json {
         out!(
             "{}",
@@ -1062,7 +1057,7 @@ pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
     );
     out!("ISPC Texture Compressor {} (BC6H)", v.ispctc);
     out!("ISPC {} objects; dispatched ISA on this CPU: {isa}", v.ispc);
-    out!("BC1 decoder model: {model}");
+    out!("BC1 encode target: {model}");
     Ok(0)
 }
 

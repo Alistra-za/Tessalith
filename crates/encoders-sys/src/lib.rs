@@ -12,50 +12,30 @@ pub use bc7::{
 };
 pub use rgbcx::*;
 
-use std::sync::OnceLock;
+use std::sync::Once;
 
-/// rgbcx BC1 decoder model; values equal `rgbcx::bc1_approx_mode`.
+/// The BC1 decoder an error is measured against; values equal `rgbcx::bc1_approx_mode`. Encoding always targets both
+/// (`cBC1Dual = 4`, set by [`init`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Bc1Model {
-    Ideal = 0,
     Nvidia = 1,
     Amd = 2,
-    IdealRound4 = 3,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InitError {
-    #[error("encoders already initialised with BC1 model {active:?}; {requested:?} needs a new process (rgbcx::init is global)")]
-    ModelMismatch {
-        active: Bc1Model,
-        requested: Bc1Model,
-    },
-}
+/// rgbcx's BC1 mode: score NVIDIA and AMD decoder error together (README-VENDOR.md, patch "rgbcx BC1 dual").
+const BC1_DUAL: i32 = 4;
 
-static ACTIVE: OnceLock<Bc1Model> = OnceLock::new();
+static INIT: Once = Once::new();
 
-/// Initialise rgbcx and bc7e once per process. Later calls succeed only with the same model.
-pub fn init(model: Bc1Model) -> Result<(), InitError> {
-    let active = *ACTIVE.get_or_init(|| {
-        unsafe { ffi::sdc_init(model as i32) };
-        model
-    });
-    if active == model {
-        Ok(())
-    } else {
-        Err(InitError::ModelMismatch {
-            active,
-            requested: model,
-        })
-    }
+/// Initialise rgbcx and bc7e once per process. Safe to call from any thread, any number of times.
+pub fn init() {
+    // SAFETY: `Once` runs `sdc_init` once, as it requires (rgbcx::init writes global state).
+    INIT.call_once(|| unsafe { ffi::sdc_init(BC1_DUAL) });
 }
 
 pub(crate) fn ensure_init() {
-    let _ = ACTIVE.get_or_init(|| {
-        unsafe { ffi::sdc_init(Bc1Model::Ideal as i32) };
-        Bc1Model::Ideal
-    });
+    init();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,14 +44,14 @@ pub struct Versions {
     pub ispctc: &'static str,
     pub ispc: &'static str,
     pub bc7e_patch: Option<&'static str>,
-    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search); README-VENDOR.md.
+    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search; BC1 dual); README-VENDOR.md.
     pub rgbcx_patch: Option<&'static str>,
 }
 
 pub fn versions() -> Versions {
     Versions {
         bc7enc_rdo: "b943862",
-        rgbcx_patch: Some("bc4-round-to-nearest+bc4-search"),
+        rgbcx_patch: Some("bc4-round-to-nearest+bc4-search+bc1-dual"),
         ispctc: "79ddbc9",
         ispc: "1.31.0",
         bc7e_patch: Some("0001-exact-opaque-alpha"),

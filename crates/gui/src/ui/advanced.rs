@@ -1,12 +1,12 @@
 //! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, batch and preview settings,
 //! the rarely changed texture fields, and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
-use super::columns::{strip_button, AMBER, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
+use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
 use super::settings_panel::{field_row, toml_read_only_reason, Ctx, RowEdit};
 use crate::model::fields::{advanced_field_views, levels_view, provenance_text};
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::{AppModel, Selection};
-use crate::settings::{Bc1Choice, ChecksSettings, PREVIEW_SIZES};
+use crate::settings::{ChecksSettings, PREVIEW_SIZES};
 use eframe::egui;
 use engine::derive::recipe::LegacyParams;
 use engine::policy::ResolvedJob;
@@ -28,7 +28,6 @@ enum Action {
     PreviewMax(u32),
     Allow16k(bool),
     Live(bool),
-    Bc1(Bc1Choice),
     ReduceMotion(bool),
     Checks(ChecksSettings),
     CheckAllUv,
@@ -86,7 +85,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
 pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
     let mut actions = vec![];
     inspector(ui, model, state);
-    batch(ui, model, &mut actions);
+    batch(ui, model);
     preview_settings(ui, model, &mut actions);
     interface(ui, model, &mut actions);
     checks(ui, model, &mut actions);
@@ -102,7 +101,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::PreviewMax(n) => model.set_preview_max(n),
             Action::Allow16k(on) => model.set_allow_16k_preview(on),
             Action::Live(on) => model.set_live(on),
-            Action::Bc1(c) => model.set_bc1_choice(c),
             Action::ReduceMotion(on) => model.set_reduce_motion(on),
             Action::Checks(c) => model.set_checks(c),
             Action::CheckAllUv => model.check_all_uv(),
@@ -255,15 +253,6 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
     }
 }
 
-fn bc1_label(c: Bc1Choice) -> &'static str {
-    match c {
-        Bc1Choice::Ideal => "Ideal",
-        Bc1Choice::IdealRound4 => "Ideal (round 4)",
-        Bc1Choice::Nvidia => "NVIDIA",
-        Bc1Choice::Amd => "AMD",
-    }
-}
-
 /// A number box; true once its value is settled (a drag ended, or a typed value was accepted).
 /// The in-progress drag value is held in egui memory, so a caller that rebuilds `value` from the model each frame
 /// still gets the final dragged value on release, not the model's old one.
@@ -286,7 +275,7 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     r.drag_stopped() || (r.changed() && !r.dragged())
 }
 
-fn batch(ui: &mut egui::Ui, model: &mut AppModel, actions: &mut Vec<Action>) {
+fn batch(ui: &mut egui::Ui, model: &mut AppModel) {
     section(ui, "Batch", |ui| {
         let mut settled = false;
         egui::Grid::new("batch").num_columns(2).show(ui, |ui| {
@@ -296,28 +285,12 @@ fn batch(ui: &mut egui::Ui, model: &mut AppModel, actions: &mut Vec<Action>) {
             ui.label("Memory budget (MiB)");
             settled |= settled_drag(ui, &mut model.settings.mem_budget_mb, 16.0, 0..=1_048_576);
             ui.end_row();
-            ui.label("BC1 decoder");
-            let current = model.settings.bc1_decoder;
-            egui::ComboBox::from_id_salt("bc1-decoder")
-                .selected_text(bc1_label(current))
-                .show_ui(ui, |ui| {
-                    for c in Bc1Choice::ALL {
-                        if ui.selectable_label(c == current, bc1_label(c)).clicked() && c != current
-                        {
-                            actions.push(Action::Bc1(c));
-                        }
-                    }
-                });
-            ui.end_row();
         });
         ui.label(
             egui::RichText::new("0 threads = one per core; 0 MiB = half of the physical memory.")
                 .small()
                 .weak(),
         );
-        if model.restart_needed {
-            ui.colored_label(AMBER, "restart Tessalith to apply");
-        }
         if settled {
             model.save_settings();
         }

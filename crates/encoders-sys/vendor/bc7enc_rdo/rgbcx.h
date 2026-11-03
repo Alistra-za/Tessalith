@@ -90,7 +90,12 @@ namespace rgbcx
 		
 		// This mode matches AMD Compressonator's output. It rounds 4-color colors 2,3 (not 3-color color 2).
 		// This matches the D3D9 docs on DXT1.
-		cBC1IdealRound4 = 3
+		cBC1IdealRound4 = 3,
+
+		// sdc patch (bc1 dual, see README-VENDOR.md): encode only. Every candidate is scored against both the NVidia and
+		// the AMD palette (per texel the selector minimising err_nv + err_amd; block error = that sum). Not a decoder:
+		// unpack_bc1/unpack_bc3 must not be called with it.
+		cBC1Dual = 4
 	};
 
 	enum class eNoClamp { cNoClamp };

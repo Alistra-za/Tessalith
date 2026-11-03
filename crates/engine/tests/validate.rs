@@ -1,4 +1,3 @@
-use encoders_sys::Bc1Model;
 use engine::codes::{Code, Severity};
 use engine::config::*;
 use engine::dds::*;
@@ -65,7 +64,6 @@ fn run(
         encoder_input: enc,
         base_coverage,
         source_peak: None,
-        bc1_model: Bc1Model::Ideal,
         expected_levels,
     })
 }
@@ -417,7 +415,7 @@ fn hdr_encoder_input_texel_count_mismatch_is_a_header_error() {
 
 #[test]
 fn bc1_is_opaque_with_the_rgbcx_model_and_transparent_texels_are_errors() {
-    encoders_sys::init(Bc1Model::Ideal).unwrap();
+    encoders_sys::init();
     let mut p = profile(Subtype::Diffuse);
     p.format = Format::Bc1;
     let (b, inputs) = dds(
@@ -680,7 +678,6 @@ fn bc6h_peak_ratio() {
             encoder_input: None,
             base_coverage: None,
             source_peak: Some(peak),
-            bc1_model: Bc1Model::Ideal,
             expected_levels: Some(1),
         })
     };

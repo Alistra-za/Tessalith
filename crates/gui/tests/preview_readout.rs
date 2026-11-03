@@ -376,11 +376,10 @@ fn dds_preview_refuses_when_no_mip_fits_the_limit() {
         header: ResolvedHeader::Dx10,
     };
     std::fs::write(&path, dds_bytes(&desc, &[vec![0; 64 * 64 * 4]]).unwrap()).unwrap();
-    let Err(err) = sdc_gui::model::preview::dds_preview(&path, 16, encoders_sys::Bc1Model::Ideal)
-    else {
+    let Err(err) = sdc_gui::model::preview::dds_preview(&path, 16) else {
         panic!("refused");
     };
     assert!(err.contains("above the preview limit"), "{err}");
     // A chain that reaches the limit still previews from the first mip within it.
-    assert!(sdc_gui::model::preview::dds_preview(&path, 64, encoders_sys::Bc1Model::Ideal).is_ok());
+    assert!(sdc_gui::model::preview::dds_preview(&path, 64).is_ok());
 }

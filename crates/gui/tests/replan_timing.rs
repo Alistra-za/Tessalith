@@ -94,7 +94,7 @@ fn one_edit_settles() {
     );
 
     // 2. Open the copy (the analysis disk cache in scratch: a cold open), then wait.
-    let session = engine::session::Session::new(encoders_sys::Bc1Model::Ideal)
+    let session = engine::session::Session::new()
         .unwrap()
         .with_disk_cache(tmp.path().join("analysis-cache"));
     let export = tmp.path().join("export");

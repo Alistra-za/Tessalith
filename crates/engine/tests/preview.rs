@@ -1,5 +1,4 @@
 //! M3a Task 8: `Session::preview` mips equal the same mips of the DDS `run` writes, byte for byte.
-use encoders_sys::Bc1Model;
 use engine::api::*;
 use engine::config::Target;
 use engine::dds::read_dds;
@@ -81,7 +80,7 @@ fn request(dir: &Path, sets: &[&str]) -> BatchRequest {
 fn check(max_size: u32, expect_first: usize) {
     let d = tempfile::tempdir().unwrap();
     let sets = fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let rep = Reporter::new(Arc::new(NullSink), "t");
     let plan = s
         .plan(request(d.path(), &sets), &rep, &CancelToken::default())
@@ -147,7 +146,7 @@ fn bright_spot_job(dir: &Path) -> (Session, ResolvedJob) {
     }))
     .save(p)
     .unwrap();
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let rep = Reporter::new(Arc::new(NullSink), "t");
     let mut req = request(dir, &[]);
     req.recursive = true;
@@ -182,7 +181,7 @@ fn a_bc6h_preview_from_a_smaller_mip_measures_the_peak_of_that_mip() {
 fn normal_len_has_one_entry_per_encoded_level() {
     let d = tempfile::tempdir().unwrap();
     let sets = fixture(d.path());
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let rep = Reporter::new(Arc::new(NullSink), "t");
     let plan = s
         .plan(request(d.path(), &sets), &rep, &CancelToken::default())

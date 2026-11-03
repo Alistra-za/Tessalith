@@ -18,7 +18,7 @@ use std::sync::Arc;
 /// changes what it produces: entries written under another value are ignored. The pin test (analysis_version.rs)
 /// fails when those change for what it runs: PNG (8-bit, 16-bit, gray), 2D BC1/BC5/BC7 and single-cube DDS, two
 /// packs, and the `Analysis` schema. PSD and Krita/ORA decoding are not run by it: bump by hand (Note DZ4).
-pub const ANALYSIS_VERSION: u32 = 1;
+pub const ANALYSIS_VERSION: u32 = 2;
 
 const EXT: &str = "ent";
 

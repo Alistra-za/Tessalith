@@ -2100,9 +2100,7 @@ fn cancelled_or_failed_scan_does_not_mark_a_completed_scan() {
 /// it was, so the Used-by lists and UV coverage come back; a cancelled scan (store disabled) still keeps them off.
 #[test]
 fn a_scan_that_stops_before_begin_scan_keeps_the_store_settled() {
-    let session = std::sync::Arc::new(
-        engine::session::Session::new(encoders_sys::Bc1Model::Ideal).expect("an encoder session"),
-    );
+    let session = std::sync::Arc::new(engine::session::Session::new().expect("an encoder session"));
     let mut app =
         sdc_gui::model::AppModel::new(sdc_gui::settings::GuiSettings::default(), None, session);
     let (_d, mut m) = scanned();

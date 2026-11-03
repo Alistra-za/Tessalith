@@ -1035,6 +1035,26 @@ fn a_set_override_naming_nvtt_is_refused_with_the_hint() {
     }
 }
 
+/// Note FM17: `bc1_model` (the 1.x BC1 decoder-model key) is refused by name.
+#[test]
+fn bc1_model_in_a_config_is_named() {
+    for text in [
+        "bc1_model = \"nvidia\"\n",
+        "[defaults]\nbc1_model = \"amd\"\n",
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err().to_string();
+        assert!(
+            e.contains("bc1_model") && e.contains("NVIDIA + AMD"),
+            "{text}: {e}"
+        );
+    }
+    let e = engine::overrides::parse_set("bc1_model=nvidia").unwrap_err();
+    assert!(
+        e.contains("bc1_model") && e.contains("removed in 2.0"),
+        "{e}"
+    );
+}
+
 /// Note FM16: the five `validation.*` thresholds are constants and the project-wide `[defaults]` fill is gone, so
 /// each is refused by name in a config (inline or dotted, any table), a preset and `--set`; `validation.mips` and a
 /// per-file fill still load.

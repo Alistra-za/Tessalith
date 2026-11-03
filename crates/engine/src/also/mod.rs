@@ -1158,7 +1158,7 @@ fn run_phases(
             .and_then(|t| {
                 let e = pbr_records.get(&output_key(pbr_root, &t.output))?;
                 // TA25: only a current twin is copied, so a failed or stale PBR output is encoded instead.
-                is_up_to_date(e, t, &encoders, vreq.bc1_model).then(|| Copy {
+                is_up_to_date(e, t, &encoders).then(|| Copy {
                     job: j.clone(),
                     twin: e.clone(),
                     twin_output: t.output.clone(),

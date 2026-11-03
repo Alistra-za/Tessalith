@@ -1,7 +1,6 @@
 //! Cube checks shared by `sdc inspect` and `sdc validate` (DECISIONS Note DS12). They read raw texels.
 use crate::dds::{DdsFile, DdsPixelFormat};
 use crate::decode::{decode_level, Decoded};
-use encoders_sys::Bc1Model;
 
 /// True when `game_path` has a `textures` component directly followed by `cubemaps` or its stem ends in `_e` (ASCII case-insensitive, either separator).
 fn expects_cube(game_path: &str) -> bool {
@@ -42,7 +41,7 @@ fn pos_y_is_lit(f: &DdsFile) -> bool {
     let Some((w, h, r)) = f.surfaces().get(2 * n).cloned() else {
         return false;
     };
-    match decode_level(f.format, w, h, &f.data[r], Some(Bc1Model::Ideal)) {
+    match decode_level(f.format, w, h, &f.data[r]) {
         Ok(Decoded::Ldr(px)) => px.first().is_some_and(|p| p[..3].iter().any(|&c| c > 0)),
         Ok(Decoded::Hdr(px)) => px.first().is_some_and(|p| p.iter().any(|&c| c > 0.0)),
         Err(_) => false,

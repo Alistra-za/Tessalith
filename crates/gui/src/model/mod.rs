@@ -527,8 +527,6 @@ pub struct AppModel {
     pub gpu_max_dim: u32,
     /// False when eframe found no usable GPU adapter: the preview is off, everything else works (M3a spec §7).
     pub gpu_available: bool,
-    /// The BC1 decoder choice differs from the session's model, which is fixed at launch (M3a spec §4.6).
-    pub restart_needed: bool,
     /// The set editor "Used by plugins" reads (esp spec 4.1).
     pub plugin_refs: plugin_refs::SetPluginRefs,
     /// Design §5.1, §6: the CS PBR scan reads (statics, EDID checks, the material-object picker).
@@ -852,7 +850,6 @@ impl AppModel {
             ignored_by_plan: false,
             replan_pushes: (0, None),
             close_ready: false,
-            restart_needed: false,
             plugin_refs: Default::default(),
             cs_pbr: Default::default(),
             nav: Default::default(),
@@ -2819,12 +2816,12 @@ impl AppModel {
                 _ => ask.push((item.input.clone(), stamp)),
             }
         }
-        let Some(session) = self.session.as_ref().filter(|_| !ask.is_empty()) else {
+        if ask.is_empty() || self.session.is_none() {
             return;
-        };
+        }
         self.dds_thumb_requests += ask.len();
         self.dds_thumbs_asked.extend(ask.iter().cloned());
-        spawn_dds_thumbs(self.tx.clone(), ask, session.bc1_model());
+        spawn_dds_thumbs(self.tx.clone(), ask);
     }
 
     /// Note FI1: a DDS tile image landed. True when an item took it (the caller invalidates the views once). An
@@ -3807,26 +3804,6 @@ impl AppModel {
         self.save_settings();
     }
 
-    /// The BC1 decoder for the next launch. The session's model is fixed, so a difference needs a restart.
-    pub fn set_bc1_choice(&mut self, c: crate::settings::Bc1Choice) {
-        self.settings.bc1_decoder = c;
-        self.save_settings();
-        self.restart_needed = self
-            .session
-            .as_ref()
-            .is_some_and(|s| s.bc1_model() != c.model());
-    }
-
-    /// The BC1 decoder the session runs with. The setting may differ (it applies after a restart), so anything that
-    /// must match what the engine did here (the CLI command) reads this.
-    pub fn session_bc1(&self) -> crate::settings::Bc1Choice {
-        self.session
-            .as_ref()
-            .map_or(self.settings.bc1_decoder, |s| {
-                crate::settings::Bc1Choice::from_model(s.bc1_model())
-            })
-    }
-
     pub fn is_dirty(&self) -> bool {
         self.project.as_ref().is_some_and(ProjectDoc::is_dirty)
             || self.tentative_edits().is_some()
@@ -4299,8 +4276,7 @@ mod tests {
     use std::path::Path;
 
     pub(super) fn bare_model() -> AppModel {
-        let session =
-            Arc::new(Session::new(encoders_sys::Bc1Model::Ideal).expect("an encoder session"));
+        let session = Arc::new(Session::new().expect("an encoder session"));
         AppModel::new(GuiSettings::default(), None, session)
     }
 
@@ -4336,11 +4312,7 @@ mod tests {
             export_folder: Some(export.clone()),
             ..GuiSettings::default()
         };
-        let mut m = AppModel::new(
-            settings,
-            None,
-            Arc::new(Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
-        );
+        let mut m = AppModel::new(settings, None, Arc::new(Session::new().unwrap()));
         m.accept = AcceptSuggestions::None;
         m.open_folder(dir.join("textures"));
         assert!(m.wait_idle(Duration::from_secs(60)));
@@ -4450,8 +4422,7 @@ mod tests {
             export_folder: Some(d.path().join("export")),
             ..GuiSettings::default()
         };
-        let session =
-            Arc::new(Session::new(encoders_sys::Bc1Model::Ideal).expect("an encoder session"));
+        let session = Arc::new(Session::new().expect("an encoder session"));
         let mut m = AppModel::new(settings, None, session);
         // Note FC1: no High accept, so no recording adds its own plan to the count.
         m.accept = AcceptSuggestions::None;
@@ -4574,8 +4545,7 @@ mod tests {
             export_folder: Some(d.join("export")),
             ..GuiSettings::default()
         };
-        let session =
-            Arc::new(Session::new(encoders_sys::Bc1Model::Ideal).expect("an encoder session"));
+        let session = Arc::new(Session::new().expect("an encoder session"));
         let mut m = AppModel::new(settings, None, session);
         m.accept = AcceptSuggestions::None;
         m.open_folder(d.join("textures"));

@@ -156,7 +156,7 @@ fn reference_decode(fmt: DdsPixelFormat, w: u32, h: u32, data: &[u8]) -> Vec<[f3
             let mut px = [[0f32; 4]; 16];
             match fmt {
                 DdsPixelFormat::Bc1 { .. } => {
-                    let d = bc1_decode_block(blk.try_into().unwrap(), Bc1Model::Ideal);
+                    let d = bc1_decode_block(blk.try_into().unwrap(), Bc1Model::Nvidia);
                     for (o, p) in px.iter_mut().zip(d) {
                         *o = p.map(f32::from);
                     }
@@ -365,8 +365,7 @@ fn encode_write_read_decode_round_trip_every_format_and_header_form() {
             assert_eq!((*lw, *lh), dims[i], "{tag} level {i}");
             let got = &file.data[range.clone()];
             assert_eq!(got, &blocks[..], "{tag} level {i}: block bytes differ");
-            let model = matches!(want_fmt, P::Bc1 { .. }).then_some(Bc1Model::Ideal);
-            let Decoded::Ldr(px) = decode_level(file.format, *lw, *lh, got, model).unwrap() else {
+            let Decoded::Ldr(px) = decode_level(file.format, *lw, *lh, got).unwrap() else {
                 panic!("{tag}: expected LDR")
             };
             let reference = reference_decode(file.format, *lw, *lh, got);
@@ -429,7 +428,7 @@ fn bc6h_round_trip_through_dds() {
     for (i, (lw, lh, range)) in file.levels.iter().enumerate() {
         let got = &file.data[range.clone()];
         assert_eq!(got, &levels[i][..]);
-        let Decoded::Hdr(px) = decode_level(file.format, *lw, *lh, got, None).unwrap() else {
+        let Decoded::Hdr(px) = decode_level(file.format, *lw, *lh, got).unwrap() else {
             panic!("expected HDR")
         };
         let reference = reference_decode(file.format, *lw, *lh, got);
@@ -456,14 +455,9 @@ fn reads_bench_outputs_and_rejects_garbage() {
         let f = read_dds(&b).unwrap();
         assert_eq!(f.format, DdsPixelFormat::Bc7 { srgb: false });
         assert_eq!(f.levels.len() as u32, f.mip_count);
-        let Decoded::Ldr(px) = decode_level(
-            f.format,
-            f.width,
-            f.height,
-            &f.data[f.levels[0].2.clone()],
-            None,
-        )
-        .unwrap() else {
+        let Decoded::Ldr(px) =
+            decode_level(f.format, f.width, f.height, &f.data[f.levels[0].2.clone()]).unwrap()
+        else {
             panic!()
         };
         assert_eq!(px.len(), (f.width * f.height) as usize);
@@ -624,41 +618,27 @@ fn cubemap_flag_is_reported_and_all_faces_required() {
 #[test]
 fn bc4_and_bc5_decode_layouts() {
     let block4 = [255u8, 0, 0, 0, 0, 0, 0, 0]; // endpoint0 = 255, all indices 0
-    let Decoded::Ldr(p) = decode_level(DdsPixelFormat::Bc4, 4, 4, &block4, None).unwrap() else {
+    let Decoded::Ldr(p) = decode_level(DdsPixelFormat::Bc4, 4, 4, &block4).unwrap() else {
         panic!()
     };
     assert_eq!(p[0], [255, 255, 255, 255]);
     let mut block5 = [0u8; 16];
     block5[0] = 200;
     block5[8] = 100;
-    let Decoded::Ldr(p) = decode_level(DdsPixelFormat::Bc5, 4, 4, &block5, None).unwrap() else {
+    let Decoded::Ldr(p) = decode_level(DdsPixelFormat::Bc5, 4, 4, &block5).unwrap() else {
         panic!()
     };
     assert_eq!(p[0], [200, 100, 0, 255]);
 }
 
 #[test]
-fn bc1_with_a_model_decodes_through_rgbcx() {
+fn bc1_decodes_through_rgbcx_as_nvidia() {
     let block = [0x1f, 0xf8, 0xe0, 0x07, 0x1b, 0x1b, 0x1b, 0x1b];
-    for m in [
-        Bc1Model::Ideal,
-        Bc1Model::Nvidia,
-        Bc1Model::Amd,
-        Bc1Model::IdealRound4,
-    ] {
-        let Decoded::Ldr(px) =
-            decode_level(DdsPixelFormat::Bc1 { srgb: false }, 4, 4, &block, Some(m)).unwrap()
-        else {
-            panic!()
-        };
-        let want = bc1_decode_block(&block, m);
-        assert_eq!(px, want.to_vec(), "{m:?}");
-    }
-    let Decoded::Ldr(px) =
-        decode_level(DdsPixelFormat::Bc1 { srgb: false }, 4, 4, &block, None).unwrap()
+    let Decoded::Ldr(px) = decode_level(DdsPixelFormat::Bc1 { srgb: false }, 4, 4, &block).unwrap()
     else {
         panic!()
     };
+    assert_eq!(px, bc1_decode_block(&block, Bc1Model::Nvidia).to_vec());
     assert_eq!(px[0][3], 255);
 }
 
@@ -723,7 +703,7 @@ fn reads_and_decodes_uncompressed_and_legacy_forms() {
             assert_eq!(f.format, *fmt);
             assert_eq!(f.levels, vec![(2, 1, 0..data.len())]);
             assert_eq!(
-                decode_level(f.format, 2, 1, &f.data, None).unwrap(),
+                decode_level(f.format, 2, 1, &f.data).unwrap(),
                 Decoded::Ldr(vec![*p0, *p1]),
                 "{fmt:?}"
             );
@@ -763,7 +743,7 @@ fn reads_and_decodes_uncompressed_and_legacy_forms() {
         let f = read_dds(&file).unwrap();
         assert_eq!(f.format, DdsPixelFormat::Rgba16f);
         assert_eq!(
-            decode_level(f.format, 1, 1, &f.data, None).unwrap(),
+            decode_level(f.format, 1, 1, &f.data).unwrap(),
             Decoded::Hdr(vec![[1.0, 0.0, 1.0]])
         );
     }
@@ -790,7 +770,7 @@ fn reads_and_decodes_uncompressed_and_legacy_forms() {
         let f = read_dds(&file).unwrap();
         assert_eq!(f.format, DdsPixelFormat::Rgba32f);
         assert_eq!(
-            decode_level(f.format, 1, 1, &f.data, None).unwrap(),
+            decode_level(f.format, 1, 1, &f.data).unwrap(),
             Decoded::Hdr(vec![[1.5, 2.5, 3.5]])
         );
     }
@@ -953,7 +933,7 @@ fn level_size_overflow_is_checked_in_reader_and_writer() {
         })
     );
     // Also when only a deeper level would overflow nothing else misreports it.
-    let r = decode_level(P::Rgba32f, u32::MAX, u32::MAX, &[0; 64], None);
+    let r = decode_level(P::Rgba32f, u32::MAX, u32::MAX, &[0; 64]);
     assert_eq!(r.unwrap_err(), DdsError::Truncated);
 }
 
@@ -985,7 +965,7 @@ fn every_truncation_and_every_header_byte_flip_is_handled() {
             b[i] = v;
             if let Ok(f) = read_dds(&b) {
                 for (w, h, r) in &f.levels {
-                    let _ = decode_level(f.format, *w, *h, &f.data[r.clone()], None);
+                    let _ = decode_level(f.format, *w, *h, &f.data[r.clone()]);
                 }
                 let _ = check_header(&f);
             }
@@ -1017,7 +997,7 @@ fn decode_rejects_short_data_and_survives_arbitrary_blocks() {
                     data.iter_mut()
                         .for_each(|b| *b = if seed % 16 == 0 { 0 } else { 0xff });
                 }
-                let d = decode_level(fmt, w, h, &data, None).unwrap();
+                let d = decode_level(fmt, w, h, &data).unwrap();
                 let len = match d {
                     Decoded::Ldr(v) => v.len(),
                     Decoded::Hdr(v) => v.len(),
@@ -1025,11 +1005,11 @@ fn decode_rejects_short_data_and_survives_arbitrary_blocks() {
                 assert_eq!(len, (w * h) as usize, "{fmt:?} {w}x{h}");
             }
             assert_eq!(
-                decode_level(fmt, w, h, &vec![0; n - 1], None).unwrap_err(),
+                decode_level(fmt, w, h, &vec![0; n - 1]).unwrap_err(),
                 DdsError::Truncated
             );
             assert_eq!(
-                decode_level(fmt, w, h, &[], None).unwrap_err(),
+                decode_level(fmt, w, h, &[]).unwrap_err(),
                 DdsError::Truncated
             );
             assert!(n >= bs);
@@ -1038,23 +1018,23 @@ fn decode_rejects_short_data_and_survives_arbitrary_blocks() {
         for first in 0..=255u8 {
             let mut blk = noise(first as u64 + 1000, bs);
             blk[0] = first;
-            decode_level(fmt, 4, 4, &blk, None).unwrap();
+            decode_level(fmt, 4, 4, &blk).unwrap();
         }
         // Absurd dimensions with a small buffer: error, not allocation.
         assert_eq!(
-            decode_level(fmt, u32::MAX, u32::MAX, &vec![0; bs], None).unwrap_err(),
+            decode_level(fmt, u32::MAX, u32::MAX, &vec![0; bs]).unwrap_err(),
             DdsError::Truncated
         );
         assert_eq!(
-            decode_level(fmt, 1 << 20, 1 << 20, &vec![0; bs], None).unwrap_err(),
+            decode_level(fmt, 1 << 20, 1 << 20, &vec![0; bs]).unwrap_err(),
             DdsError::Truncated
         );
         assert!(matches!(
-            decode_level(fmt, 0, 4, &vec![0; bs], None),
+            decode_level(fmt, 0, 4, &vec![0; bs]),
             Err(DdsError::Unsupported(_))
         ));
         assert!(matches!(
-            decode_level(fmt, 4, 0, &vec![0; bs], None),
+            decode_level(fmt, 4, 0, &vec![0; bs]),
             Err(DdsError::Unsupported(_))
         ));
     }
@@ -1068,15 +1048,15 @@ fn decode_rejects_short_data_and_survives_arbitrary_blocks() {
         P::Rgba32f,
     ] {
         assert_eq!(
-            decode_level(fmt, u32::MAX, 3, &[0; 32], None).unwrap_err(),
+            decode_level(fmt, u32::MAX, 3, &[0; 32]).unwrap_err(),
             DdsError::Truncated
         );
         assert_eq!(
-            decode_level(fmt, 2, 2, &[0; 3], None).unwrap_err(),
+            decode_level(fmt, 2, 2, &[0; 3]).unwrap_err(),
             DdsError::Truncated
         );
         let n = fmt.level_size(3, 2);
-        let d = decode_level(fmt, 3, 2, &noise(5, n + 5), None).unwrap(); // extra bytes ignored
+        let d = decode_level(fmt, 3, 2, &noise(5, n + 5)).unwrap(); // extra bytes ignored
         match d {
             Decoded::Ldr(v) => assert_eq!(v.len(), 6),
             Decoded::Hdr(v) => assert_eq!(v.len(), 6),
@@ -1180,15 +1160,15 @@ fn decode_level_rgba_keeps_float_alpha_and_scales_ldr() {
         .flat_map(|v| half::f16::from_f32(*v).to_le_bytes())
         .collect();
     assert_eq!(
-        decode_level_rgba(DdsPixelFormat::Rgba16f, 1, 1, &h, None).unwrap(),
+        decode_level_rgba(DdsPixelFormat::Rgba16f, 1, 1, &h).unwrap(),
         vec![[2.0, 0.5, 0.25, 0.75]]
     );
     assert_eq!(
-        decode_level_rgba(DdsPixelFormat::R8, 1, 1, &[51], None).unwrap(),
+        decode_level_rgba(DdsPixelFormat::R8, 1, 1, &[51]).unwrap(),
         vec![[0.2, 0.2, 0.2, 1.0]]
     );
     assert_eq!(
-        decode_level_rgba(DdsPixelFormat::Rgba16f, 2, 2, &h, None).unwrap_err(),
+        decode_level_rgba(DdsPixelFormat::Rgba16f, 2, 2, &h).unwrap_err(),
         DdsError::Truncated
     );
 }
@@ -1224,7 +1204,7 @@ fn a_padded_pitch_is_a_header_issue_not_a_panic() {
         "{:?}",
         check_header(&f)
     );
-    assert!(decode_level(f.format, 3, 2, &f.data[f.levels[0].2.clone()], None).is_ok());
+    assert!(decode_level(f.format, 3, 2, &f.data[f.levels[0].2.clone()]).is_ok());
 }
 
 /// Fix wave (final review minor 1): a DX10 header with `D3D10_RESOURCE_DIMENSION_TEXTURE3D` is a volume even without

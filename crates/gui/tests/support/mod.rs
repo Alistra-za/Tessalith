@@ -40,7 +40,7 @@ pub fn mod_folder(dir: &Path) -> PathBuf {
 /// A session of its own per call: a shared one would drop another test's cache entries on every plan (audit 8). The
 /// BC1 model is process-global (spec §4.6) and the same for all of them.
 pub fn session() -> Arc<engine::session::Session> {
-    Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap())
+    Arc::new(engine::session::Session::new().unwrap())
 }
 
 pub fn opened(dir: &Path) -> AppModel {

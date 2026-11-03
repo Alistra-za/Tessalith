@@ -4,7 +4,6 @@ use super::cube_cross;
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::AppModel;
 use crate::worker::{spawn_dds, spawn_encode, spawn_source};
-use encoders_sys::Bc1Model;
 use engine::api::CancelToken;
 use engine::config::Format;
 use engine::dds::DdsPixelFormat;
@@ -256,7 +255,6 @@ fn decode_chain(
     dims: &[(u32, u32)],
     first_level: usize,
     levels: &[Vec<u8>],
-    bc1: Bc1Model,
 ) -> Vec<Vec<[f32; 4]>> {
     levels
         .iter()
@@ -264,7 +262,7 @@ fn decode_chain(
         .map(|(i, data)| {
             let (w, h) = dims[first_level + i];
             let pixels = w as usize * h as usize;
-            match decode_level_rgba(fmt, w, h, data, Some(bc1)) {
+            match decode_level_rgba(fmt, w, h, data) {
                 Ok(mut v) => {
                     v.resize(pixels, [0.0, 0.0, 0.0, 1.0]);
                     v
@@ -277,17 +275,17 @@ fn decode_chain(
 
 /// CPU decode of every encoded mip of `r` (a mip that fails to decode comes back black, never missing). A cube
 /// (`faces == 6`, face-major levels) decodes to one horizontal cross per mip (Note DT16).
-pub fn decode_levels(r: &PreviewResult, bc1: Bc1Model) -> Vec<Vec<[f32; 4]>> {
+pub fn decode_levels(r: &PreviewResult) -> Vec<Vec<[f32; 4]>> {
     let s = &r.source;
     let fmt = r.format.pixel_format(r.srgb);
     if r.faces != 6 {
-        return decode_chain(fmt, &s.dims, s.first_level, &r.levels, bc1);
+        return decode_chain(fmt, &s.dims, s.first_level, &r.levels);
     }
     let per_face = r.levels.len() / 6;
     let faces: Vec<_> = r
         .levels
         .chunks(per_face.max(1))
-        .map(|f| decode_chain(fmt, &s.dims, s.first_level, f, bc1))
+        .map(|f| decode_chain(fmt, &s.dims, s.first_level, f))
         .collect();
     (0..per_face)
         .map(|i| {
@@ -299,7 +297,7 @@ pub fn decode_levels(r: &PreviewResult, bc1: Bc1Model) -> Vec<Vec<[f32; 4]>> {
 }
 
 /// A DDS input as stored: its mips within `max`, no source side (M3a spec §2.2).
-pub fn dds_preview(path: &std::path::Path, max: u32, bc1: Bc1Model) -> Result<PreviewOut, String> {
+pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let f = engine::dds::read_dds(&bytes).map_err(|e| e.to_string())?;
     // DECISIONS S5: every uncompressed layout previews (N11 ends); BC2 and signed BC6H still cannot.
@@ -336,7 +334,7 @@ pub fn dds_preview(path: &std::path::Path, max: u32, bc1: Bc1Model) -> Result<Pr
         .map(|(_, _, r)| f.data[r.clone()].to_vec())
         .collect();
     // Decoded as the file's own layout: for a format sdc never writes, `format` above is only the display kind.
-    let decoded = decode_chain(f.format, &dims, first_level, &levels, bc1);
+    let decoded = decode_chain(f.format, &dims, first_level, &levels);
     let result = PreviewResult {
         source: SourcePreview {
             first_level,
@@ -359,10 +357,7 @@ pub fn dds_preview(path: &std::path::Path, max: u32, bc1: Bc1Model) -> Result<Pr
 /// shortcut: a mipless 4K DDS decodes its full level once on the worker; read a cached thumb from the DZ disk cache
 /// if open time shows it.
 /// shortcut: an HDR (BC6H, float) DDS is clamped, not tone-mapped; upgrade if HDR tiles look blown out.
-pub fn dds_thumbnail(
-    path: &std::path::Path,
-    bc1: Bc1Model,
-) -> Result<engine::session::Thumbnail, String> {
+pub fn dds_thumbnail(path: &std::path::Path) -> Result<engine::session::Thumbnail, String> {
     use engine::session::THUMB_MAX;
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let f = engine::dds::read_dds(&bytes).map_err(|e| e.to_string())?;
@@ -376,8 +371,7 @@ pub fn dds_thumbnail(
     let dims: Vec<(u32, u32)> = f.levels.iter().map(|(w, h, _)| (*w, *h)).collect();
     let first = first_level_within(&dims, THUMB_MAX);
     let (w, h, range) = f.levels.get(first).ok_or("no mip levels")?.clone();
-    let mut px =
-        decode_level_rgba(f.format, w, h, &f.data[range], Some(bc1)).map_err(|e| e.to_string())?;
+    let mut px = decode_level_rgba(f.format, w, h, &f.data[range]).map_err(|e| e.to_string())?;
     px.resize(w as usize * h as usize, [0.0, 0.0, 0.0, 1.0]);
     let img = engine::image::Rgba32F {
         width: w,
@@ -706,14 +700,14 @@ impl AppModel {
         if !self.gpu_available {
             return;
         }
-        let Some(session) = self.session.clone() else {
+        if self.session.is_none() {
             return;
-        };
+        }
         let max = self.preview_limit();
         let (token, cancel) = self.preview.fresh_token();
         self.preview.inflight_encode = Some((token, cancel));
         self.preview.encoded = EncodedState::Encoding { previous: None };
-        spawn_dds(self.tx.clone(), path, max, session.bc1_model(), token);
+        spawn_dds(self.tx.clone(), path, max, token);
     }
 
     pub(super) fn on_source(&mut self, token: u64, result: Result<Arc<SourcePreview>, String>) {

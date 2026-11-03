@@ -18,7 +18,7 @@ fn bytes(px: &[[u8; 4]; 16]) -> [u8; 64] {
     b
 }
 
-/// Encode one BC1 block from 16 RGBA texels (alpha is ignored) at the top rgbcx level (DECISIONS Note FM).
+/// Encode one BC1 block from 16 RGBA texels (alpha is ignored) at the top rgbcx level, scored for NVIDIA + AMD together (DECISIONS Note FM).
 pub fn bc1_encode_block(
     px: &[[u8; 4]; 16],
     allow_3color: bool,
@@ -122,12 +122,12 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
     out
 }
 
-/// Decode one BC1 block with rgbcx under the given decoder model (validation and vendor previews).
+/// Decode one BC1 block with rgbcx under the given vendor decoder model (validation and previews).
 pub fn bc1_decode_block(block: &[u8; 8], model: Bc1Model) -> [[u8; 4]; 16] {
     ensure_init();
     let mut px = [0u8; 64];
     // SAFETY: `block` is 8 bytes and `px` 64 bytes (16 RGBA texels); `model` comes from the closed
-    // `Bc1Model` enum (0..=3), the values of `rgbcx::bc1_approx_mode`.
+    // `Bc1Model` enum (1 or 2), the values of `rgbcx::bc1_approx_mode`.
     unsafe { ffi::sdc_bc1_decode(block.as_ptr(), px.as_mut_ptr(), model as i32) };
     let mut out = [[0u8; 4]; 16];
     for (i, o) in out.iter_mut().enumerate() {

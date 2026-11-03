@@ -273,9 +273,7 @@ mod tests {
         image::RgbImage::from_pixel(16, 16, image::Rgb([0, 10, 200]))
             .save(root.join("wall_rmaos.png"))
             .unwrap();
-        let session = Arc::new(
-            engine::session::Session::new(encoders_sys::Bc1Model::Ideal).expect("a session"),
-        );
+        let session = Arc::new(engine::session::Session::new().expect("a session"));
         let mut m = AppModel::new(GuiSettings::default(), None, session);
         m.open_folder(dir.join("textures"));
         assert!(m.wait_idle(Duration::from_secs(60)));

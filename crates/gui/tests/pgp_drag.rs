@@ -169,7 +169,7 @@ fn the_evidence_revision_moves_only_when_the_evidence_changes() {
     let mut m = sdc_gui::model::AppModel::new(
         sdc_gui::settings::GuiSettings::default(),
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     let t: std::collections::BTreeMap<String, bool> = [("a".to_string(), true)].into();
     let r0 = m.evidence_rev;

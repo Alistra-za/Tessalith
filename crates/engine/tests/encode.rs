@@ -410,7 +410,7 @@ fn blocks_are_in_raster_order() {
         bcdec_rs::bc7(&bc7[q * 16..q * 16 + 16], &mut d, 16);
         assert!(d.chunks(4).all(|t| close(t, want)), "BC7 block {q}");
         let blk: &[u8; 8] = bc1[q * 8..q * 8 + 8].try_into().unwrap();
-        let d = encoders_sys::bc1_decode_block(blk, encoders_sys::Bc1Model::Ideal);
+        let d = encoders_sys::bc1_decode_block(blk, encoders_sys::Bc1Model::Nvidia);
         assert!(d.iter().all(|t| close(t, want)), "BC1 block {q}");
     }
 }

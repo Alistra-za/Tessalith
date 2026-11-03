@@ -18,7 +18,7 @@ BC12	BC		back	FM		archive-item	2026-11-02		whole: NVTT temp folders are gone
 BC13	BC		back	FM		partial	2026-11-02		goes: the nvtt::TempDir sentence; stays: decode_peak and the open list
 BQ3	BQ		back	FM		archive-item	2026-11-02		whole: the nvcompress working folder is gone
 BS3	BS		back	FM		partial	2026-11-02		goes: the AF3/NVTT probe comparison
-CN33	CN		back	FM		partial	2026-11-02		goes: NVTT version in the up-to-date check
+CN33	CN		back	FM		partial	2026-11-02		goes: NVTT version in the up-to-date check; a changed BC1 model re-encodes the twin
 CP4	CP		back	FM		partial	2026-11-02		goes: NVTT in the backend list; then (FM15) another backend and the encoder hidden reason
 CV3	CV		back	FM		archive-item	2026-11-02		whole: NVTT timeout and cancel kill_tree
 CV15	CV		back	FM		archive-item	2026-11-02		whole: the bulk Encoder row NVTT lock
@@ -40,3 +40,6 @@ CP11	CP		back	FM		partial	2026-11-02		goes: non-bc7e backends; stays: the other 
 FF1	FF		back	FM		partial	2026-11-02		goes: the max refusal sentence; stays: the mapping
 FM15	FM		back	FM		partial	2026-11-02		goes: the constants and the shim #if branches stay; stays: the rest of the item
 R-fills-2	R		back	FM		partial	2026-11-02		goes: old project-wide defaults.packing.fill keys still load and apply, and the legacy line with Clear; stays: per-output fills on the card
+F¶- BC1 decoder model:	F		back	FM		archive-item	2026-11-02		BC1 always encodes for NVIDIA + AMD (FM17); no decoder setting
+CN32	CN		back	FM		partial	2026-11-02		goes: run_also never sets bc1_model and the process-global BC1 model sentence; stays: the phases and rules
+CN64	CN		back	FM		partial	2026-11-02		goes: req.bc1_model = session.bc1_model(); stays: the worker and the end of an Also export

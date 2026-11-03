@@ -1476,9 +1476,7 @@ mod tests {
                 .save(r.join(n))
                 .unwrap();
         }
-        let session = Arc::new(
-            engine::session::Session::new(encoders_sys::Bc1Model::Ideal).expect("a session"),
-        );
+        let session = Arc::new(engine::session::Session::new().expect("a session"));
         let mut m = AppModel::new(crate::settings::GuiSettings::default(), None, session);
         m.open_folder(d.path().join("textures"));
         assert!(m.wait_idle(Duration::from_secs(60)));

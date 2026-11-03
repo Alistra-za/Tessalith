@@ -5,7 +5,6 @@ use egui_kittest::Harness;
 use sdc_gui::model::inspector::*;
 use sdc_gui::model::preview::{EncodedState, SourceState};
 use sdc_gui::model::AppModel;
-use sdc_gui::settings::Bc1Choice;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use support::*;
@@ -54,7 +53,7 @@ fn unmatched_entries_are_listed_and_removable() {
 }
 
 #[test]
-fn preview_size_and_bc1_choice_follow_their_rules() {
+fn preview_size_follows_its_rules() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.set_preview_max(16384);
@@ -65,10 +64,6 @@ fn preview_size_and_bc1_choice_follow_their_rules() {
     m.settings.allow_16k_preview = true;
     m.set_preview_max(16384);
     assert_eq!(m.settings.preview_max, 16384);
-    m.set_bc1_choice(Bc1Choice::Nvidia);
-    assert!(m.restart_needed);
-    m.set_bc1_choice(Bc1Choice::Ideal);
-    assert!(!m.restart_needed);
 }
 
 #[test]
@@ -225,7 +220,6 @@ fn the_open_drawer_shows_its_sections() {
         "Advanced texture fields",
         "Unmatched [files] entries",
         "Show only what differs from sdc-base",
-        "BC1 decoder",
     ] {
         assert!(
             h.query_all_by_label_contains(label).count() >= 1,
@@ -438,18 +432,17 @@ fn remove_drops_an_unmatched_entry() {
 }
 
 #[test]
-fn the_restart_notice_appears_when_the_bc1_choice_differs() {
+fn the_batch_section_has_no_bc1_decoder_setting() {
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
     model.settings.advanced_open = true;
     let mut h = harness(model);
     h.run();
+    h.get_by_label_contains("Worker threads");
+    assert!(h.query_by_label_contains("BC1 decoder").is_none());
     assert!(h
         .query_by_label_contains("restart Tessalith to apply")
         .is_none());
-    h.state_mut().set_bc1_choice(Bc1Choice::Amd);
-    h.run();
-    h.get_by_label_contains("restart Tessalith to apply");
 }
 
 #[test]

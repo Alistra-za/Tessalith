@@ -57,28 +57,19 @@ fn quads(v: Vec<u8>) -> Vec<[u8; 4]> {
 
 /// Decode a `w` x `h` level to RGBA8 (LDR) or RGB f32 (HDR).
 ///
-/// BC1 with `Some(model)` decodes through rgbcx at that model; with `None` through `bcdec_rs`. BC4 gives
+/// BC1 decodes through rgbcx as an NVIDIA GPU does (Note FM); the other block formats use `bcdec_rs`. BC4 gives
 /// `[r, r, r, 255]` and BC5 `[r, g, 0, 255]` (unsigned), BC6H gives RGB floats, half and float formats drop
 /// alpha. sRGB tags are not applied.
-pub fn decode_level(
-    fmt: DdsPixelFormat,
-    w: u32,
-    h: u32,
-    data: &[u8],
-    bc1_model: Option<Bc1Model>,
-) -> Result<Decoded, DdsError> {
+pub fn decode_level(fmt: DdsPixelFormat, w: u32, h: u32, data: &[u8]) -> Result<Decoded, DdsError> {
     use DdsPixelFormat::*;
     let need = level_len(fmt, w, h, data)?;
     let data = &data[..need];
     Ok(match fmt {
-        Bc1 { .. } => Decoded::Ldr(quads(blocks(w, h, data, 8, 4, |b, o| match bc1_model {
-            Some(m) => {
-                let blk: &[u8; 8] = b.try_into().expect("8-byte block");
-                for (i, p) in bc1_decode_block(blk, m).iter().enumerate() {
-                    o[i * 4..i * 4 + 4].copy_from_slice(p);
-                }
+        Bc1 { .. } => Decoded::Ldr(quads(blocks(w, h, data, 8, 4, |b, o| {
+            let blk: &[u8; 8] = b.try_into().expect("8-byte block");
+            for (i, p) in bc1_decode_block(blk, Bc1Model::Nvidia).iter().enumerate() {
+                o[i * 4..i * 4 + 4].copy_from_slice(p);
             }
-            None => bcdec_rs::bc1(b, o, 16),
         }))),
         Bc2 { .. } => Decoded::Ldr(quads(blocks(w, h, data, 16, 4, |b, o| {
             bcdec_rs::bc2(b, o, 16)
@@ -162,7 +153,6 @@ pub fn decode_level_rgba(
     w: u32,
     h: u32,
     data: &[u8],
-    bc1_model: Option<Bc1Model>,
 ) -> Result<Vec<[f32; 4]>, DdsError> {
     use DdsPixelFormat::*;
     match fmt {
@@ -190,7 +180,7 @@ pub fn decode_level_rgba(
                     .collect()
             })
         }
-        _ => Ok(match decode_level(fmt, w, h, data, bc1_model)? {
+        _ => Ok(match decode_level(fmt, w, h, data)? {
             Decoded::Ldr(v) => v.iter().map(|p| p.map(|c| f32::from(c) / 255.0)).collect(),
             Decoded::Hdr(v) => v.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
         }),

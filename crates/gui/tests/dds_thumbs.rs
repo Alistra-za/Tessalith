@@ -31,8 +31,7 @@ fn red_dds(path: &Path, format: Format, size: u32, levels: usize) {
 }
 
 fn assert_red_thumb(path: &Path) {
-    let t = dds_thumbnail(path, encoders_sys::Bc1Model::Ideal)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let t = dds_thumbnail(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert!(t.width.max(t.height) <= 128, "{}x{}", t.width, t.height);
     assert_eq!(t.rgba.len(), (t.width * t.height * 4) as usize);
     let c = (((t.height / 2) * t.width + t.width / 2) * 4) as usize;

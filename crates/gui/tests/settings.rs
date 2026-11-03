@@ -6,7 +6,6 @@ fn defaults_follow_the_spec() {
     assert_eq!(s.preview_max, 4096);
     assert!(!s.live_encode, "preview encoding is off by default");
     assert!(!s.allow_16k_preview);
-    assert_eq!(s.bc1_decoder, Bc1Choice::Ideal);
     assert!(!s.reduce_motion, "motion is on by default");
 }
 
@@ -61,11 +60,17 @@ fn recent_keeps_ten() {
     assert_eq!(s.recent[0], std::path::PathBuf::from("C:/f11"));
 }
 
+/// 2.0 dropped the BC1 decoder setting; a 1.x gui.toml that still has the key loads, and the next save drops it.
 #[test]
-fn the_bc1_choice_maps_back_from_the_sessions_model() {
-    for c in Bc1Choice::ALL {
-        assert_eq!(Bc1Choice::from_model(c.model()), c);
-    }
+fn a_1x_gui_toml_with_bc1_decoder_still_loads() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    std::fs::write(&p, "bc1_decoder = \"amd\"\npreview_max = 2048\n").unwrap();
+    let (s, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert_eq!(s.preview_max, 2048);
+    s.save(&p).unwrap();
+    assert!(!std::fs::read_to_string(&p).unwrap().contains("bc1_decoder"));
 }
 
 #[test]

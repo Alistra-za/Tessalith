@@ -118,7 +118,6 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists. See below. |
 | `--dry-run` | off | Plan and report, write nothing. |
 | `--sidecar` | off | Also write `<name>.dds.json` next to each output with its record. |
-| `--bc1-decoder ideal\|ideal-round4\|nvidia\|amd` | `ideal` | Which hardware decoder model is used when BC1/BC3 output is decoded for validation. |
 
 ### Also export as Vanilla / CM
 
@@ -133,7 +132,7 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 | Value | Behaviour |
 |---|---|
-| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 decoder model (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. With `--sidecar`, a missing sidecar on an up-to-date output is written from the manifest record; the file re-encodes only if that write fails. |
+| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 encode target (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. With `--sidecar`, a missing sidecar on an up-to-date output is written from the manifest record; the file re-encodes only if that write fails. |
 | `skip` | Keep every existing output. Counted as skipped on purpose. |
 | `overwrite` | Always re-encode. |
 
@@ -207,7 +206,7 @@ sdc convert src --recursive --accept-suggestions high --allow DIM-NPOT
 sdc inspect [OPTIONS] <INPUTS>...
 ```
 
-Takes the [shared batch flags](#shared-batch-flags) plus `--bc1-decoder`. Nothing is written. Missing inputs are a usage error (`input not found: <path>`).
+Takes the [shared batch flags](#shared-batch-flags). Nothing is written. Missing inputs are a usage error (`input not found: <path>`).
 
 For a DDS input it prints the header and an alpha report per mip:
 
@@ -261,7 +260,6 @@ Runs the post-encode checks on DDS files that already exist, including files mad
 | `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders do not promise it. |
 | `--strict-cubemaps` | off | Fail a flat 2D file the game reads as a cube (a name ending in `_e`, or under `textures\cubemaps\`). Without it that check is a warning and the file passes. See [Cubemaps](Cubemaps.md). |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
-| `--bc1-decoder <model>` | `ideal` | Decoder model for BC1/BC3. |
 
 The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules rather than on Tessalith's preferred format. A cube DDS is judged as a `cubemap`, and a 2D file whose name ends in `_e` or that sits under `textures\cubemaps\` gets a warning and still passes; `--strict-cubemaps` fails it (the game reads it as a cube). See [Validation and output](Validation-and-Output.md#cube-checks). A format Tessalith never writes has only its header checked and is reported as not judged.
 
@@ -307,7 +305,7 @@ sdc presets schema all --out schemas
 ## sdc encoders
 
 ```text
-sdc encoders [--bc1-decoder <model>] [--json]
+sdc encoders [--json]
 ```
 
 Prints the versions of the linked encoders:
@@ -317,7 +315,7 @@ bc7e (bc7enc_rdo <commit>) patch <patch id or none>
 rgbcx (bc7enc_rdo <commit>) patch <patch id or none>
 ISPC Texture Compressor <version> (BC6H)
 ISPC <version> objects; dispatched ISA on this CPU: <isa>
-BC1 decoder model: ideal
+BC1 encode target: dual
 ```
 
 `--json` prints one JSON object instead.

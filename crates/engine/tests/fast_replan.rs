@@ -380,9 +380,8 @@ fn edited(base: &BatchRequest, edits: &[(String, Option<toml::Table>)]) -> Batch
 /// A session that planned the base fixture in full, and the base request it planned.
 fn planned_session() -> (fast_fixture::FastFixture, Session, BatchRequest) {
     let fx = fast_fixture();
-    let session = Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
-    let mut base_req = fx.req.clone();
-    base_req.bc1_model = session.bc1_model();
+    let session = Session::new().unwrap();
+    let base_req = fx.req.clone();
     (fx, session, base_req)
 }
 

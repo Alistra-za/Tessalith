@@ -18,7 +18,6 @@ use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::stored_rgb;
 use crate::skeleton::Skeleton;
 use crate::validate::{validate, ValidationInput, ValidationSummary};
-use encoders_sys::Bc1Model;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -312,18 +311,17 @@ impl std::error::Error for Partial {
     }
 }
 
-/// An engine for one GUI window: encoders initialised once (the BC1 model is process-global, spec §4.6).
+/// An engine for one GUI window: encoders initialised once (rgbcx's mode is process-global, spec §4.6).
 pub struct Session {
     engine: Engine,
     cache: AnalysisCache,
-    bc1_model: Bc1Model,
     /// The last uncancelled full plan's skeleton (fast re-plan), replaced wholesale by the next one.
     skeleton: Mutex<Option<Arc<Skeleton>>>,
 }
 
 impl Session {
-    pub fn new(bc1_model: Bc1Model) -> Result<Session, EngineError> {
-        encoders_sys::init(bc1_model).map_err(|e| EngineError::Fatal(e.to_string()))?;
+    pub fn new() -> Result<Session, EngineError> {
+        encoders_sys::init();
         Ok(Session {
             engine: Engine::new()?,
             cache: AnalysisCache {
@@ -331,7 +329,6 @@ impl Session {
                 checks: true,
                 ..Default::default()
             },
-            bc1_model,
             skeleton: Mutex::new(None),
         })
     }
@@ -342,24 +339,19 @@ impl Session {
         self.cache.disk = Some(store);
         self
     }
-    pub fn bc1_model(&self) -> Bc1Model {
-        self.bc1_model
-    }
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
     pub fn cache(&self) -> &AnalysisCache {
         &self.cache
     }
-    /// `Engine::plan` through the cache; the request's BC1 model is the session's. Leaves the skeleton (and the
-    /// cache's trim) alone.
+    /// `Engine::plan` through the cache. Leaves the skeleton (and the cache's trim) alone.
     pub fn plan(
         &self,
-        mut req: BatchRequest,
+        req: BatchRequest,
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<Plan, EngineError> {
-        req.bc1_model = self.bc1_model;
         Ok(self.engine.plan_full(&req, rep, cancel, &self.cache)?.0)
     }
 
@@ -368,11 +360,10 @@ impl Session {
     /// token, which no re-plan cancels, so its skeleton could land after a newer edit's plan.
     pub fn plan_and_keep(
         &self,
-        mut req: BatchRequest,
+        req: BatchRequest,
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<Plan, EngineError> {
-        req.bc1_model = self.bc1_model;
         let (plan, prepared, pbr) = self.engine.plan_full(&req, rep, cancel, &self.cache)?;
         self.keep_skeleton(&plan, prepared, &pbr, cancel);
         Ok(plan)
@@ -421,14 +412,7 @@ impl Session {
         if req.derive.is_some() {
             return Err(Partial::NeedsFull(DERIVE));
         }
-        // `plan` signs the request with the session's BC1 model.
-        let sig = if req.bc1_model == self.bc1_model {
-            req.sig_without_files()
-        } else {
-            let mut r = req.clone();
-            r.bc1_model = self.bc1_model;
-            r.sig_without_files()
-        };
+        let sig = req.sig_without_files();
         let (skel, hit) = Skeleton::patch_sig(self.skeleton().as_deref(), sig, changed)
             .map_err(|e| Partial::NeedsFull(e.0))?;
         let scope = skel.scope(&hit);
@@ -570,11 +554,10 @@ impl Session {
             encoder_input: Some(&prep.inputs),
             base_coverage: prep.base_coverage,
             source_peak: prep.source_peak,
-            bc1_model: self.bc1_model,
             expected_levels: Some(per_face),
         });
         let normal_len = if p.subtype.category() == Category::Normal {
-            normal_lengths(&bytes, levels.len(), self.bc1_model)
+            normal_lengths(&bytes, levels.len())
         } else {
             vec![]
         };
@@ -650,7 +633,7 @@ pub struct PreviewResult {
 
 /// Per mip: decode with the engine's decoder and measure |length - 1| of RGB read as `2v - 1` (for BC5, whose blue
 /// is reconstructed, the excess `max(0, x^2 + y^2 - 1)`).
-fn normal_lengths(dds_bytes: &[u8], levels: usize, bc1_model: Bc1Model) -> Vec<NormalLenStats> {
+fn normal_lengths(dds_bytes: &[u8], levels: usize) -> Vec<NormalLenStats> {
     let unmeasured = NormalLenStats {
         mean_err: f64::NAN,
         max_err: f64::NAN,
@@ -661,7 +644,7 @@ fn normal_lengths(dds_bytes: &[u8], levels: usize, bc1_model: Bc1Model) -> Vec<N
     let bc5 = matches!(f.format.as_format(), Some((Format::Bc5, _)));
     f.levels
         .iter()
-        .map(|(w, h, r)| decode_level(f.format, *w, *h, &f.data[r.clone()], Some(bc1_model)))
+        .map(|(w, h, r)| decode_level(f.format, *w, *h, &f.data[r.clone()]))
         .map(|d| {
             let Ok(Decoded::Ldr(px)) = d else {
                 return unmeasured;
@@ -713,7 +696,7 @@ mod tests {
             r.recursive = true;
             r
         };
-        let s = Session::new(Bc1Model::Ideal).unwrap();
+        let s = Session::new().unwrap();
         let rep = Reporter::new(Arc::new(NullSink), "t");
         s.plan_and_keep(req(), &rep, &CancelToken::default())
             .unwrap();
@@ -756,7 +739,7 @@ mod tests {
         let mut req =
             BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
         req.recursive = true;
-        let s = Session::new(Bc1Model::Ideal).unwrap();
+        let s = Session::new().unwrap();
         let rep = Reporter::new(Arc::new(NullSink), "t");
         let plan = s.plan(req.clone(), &rep, &CancelToken::default()).unwrap();
         assert!(!plan.jobs.is_empty(), "it planned");

@@ -191,17 +191,14 @@ fn validate_flags_254_as_info_and_passes_bench_bc7() {
     let Some(bench) = bench_dds("bc7e_u6") else {
         return;
     };
-    for model in ["ideal", "nvidia"] {
-        let o = sdc()
-            .args(["validate", "--subtype", "diffuse", "--target", "vanilla"])
-            .args(["--bc1-decoder", model])
-            .arg(&bench)
-            .output()
-            .unwrap();
-        assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-        let err = text(&o.stdout);
-        assert!(err.contains("ALPHA-254") && err.contains("ok"), "{err}");
-    }
+    let o = sdc()
+        .args(["validate", "--subtype", "diffuse", "--target", "vanilla"])
+        .arg(&bench)
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let err = text(&o.stdout);
+    assert!(err.contains("ALPHA-254") && err.contains("ok"), "{err}");
 }
 
 #[test]
@@ -462,19 +459,14 @@ fn inspect_json_is_deterministic_and_relative_to_the_mapped_root() {
 }
 
 #[test]
-fn inspect_honours_bc1_decoder_and_exits_1_when_an_input_cannot_be_read() {
+fn inspect_exits_1_when_an_input_cannot_be_read() {
     let d = tempfile::tempdir().unwrap();
     let dds = converted_normal(d.path());
-    for model in ["ideal", "ideal-round4", "nvidia", "amd"] {
-        let o = sdc()
-            .args(["inspect", "--bc1-decoder", model])
-            .arg(&dds)
-            .output()
-            .unwrap();
-        assert_eq!(code(&o), 0, "{model}: {}", text(&o.stderr));
-    }
+    let o = sdc().arg("inspect").arg(&dds).output().unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    // 1.x's flag is gone.
     let o = sdc()
-        .args(["inspect", "--bc1-decoder", "bogus"])
+        .args(["inspect", "--bc1-decoder", "nvidia"])
         .arg(&dds)
         .output()
         .unwrap();

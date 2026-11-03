@@ -111,7 +111,7 @@ fn converts_from_every_source_and_records_them() {
     assert_eq!(s.converted, 1, "{ev:#?}");
     let f = read_dds(&std::fs::read(d.path().join("out/iron_rmaos.dds")).unwrap()).unwrap();
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     for (i, p) in px.iter().enumerate() {

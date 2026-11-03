@@ -66,7 +66,7 @@ fn a_gui_export_and_sdc_convert_agree() {
         export_folder: Some(d.path().join("gui-out")),
         ..GuiSettings::default()
     };
-    let session = Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap());
+    let session = Arc::new(engine::session::Session::new().unwrap());
     let mut m = AppModel::new(settings, None, session);
     m.open_folder(root.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
@@ -102,7 +102,6 @@ fn a_gui_export_and_sdc_convert_agree() {
         .arg(&root)
         .args(["--recursive", "-o"])
         .arg(d.path().join("cli-out"))
-        .args(["--bc1-decoder", "ideal"])
         .env("APPDATA", d.path().join("no-appdata"))
         .output()
         .unwrap();

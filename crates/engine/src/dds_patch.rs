@@ -133,7 +133,7 @@ pub fn plan_patch(bytes: &[u8], req: &PatchRequest) -> Result<Option<HeaderPatch
         let (Some(a), Some(b)) = (cum(i), cum(i + 1)) else {
             return false;
         };
-        matches!(decode_level(f.format, w, h, &f.data[a..b], None),
+        matches!(decode_level(f.format, w, h, &f.data[a..b]),
             Ok(Decoded::Ldr(px)) if px.iter().any(|p| p[3] < 255))
     };
     if format == Format::Bc1 && (0..stored).any(transparent) {

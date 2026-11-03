@@ -2,7 +2,7 @@
   "cov/textures/c/blend_bc3.dds": {
     "format": "Bc3 { srgb: false }",
     "height": 64,
-    "payload_sha256": "32042c354c519004932e37a38d56593f15be80f4e0cdbfbcc0401aac207f4426",
+    "payload_sha256": "d10aa6970ed0f8db483dbc6de1d0d2865489b8ada919319a9b53fa006e14d810",
     "subtype": "diffuse",
     "width": 64
   },
@@ -16,7 +16,7 @@
   "cov/textures/c/cutout_bc3.dds": {
     "format": "Bc3 { srgb: false }",
     "height": 64,
-    "payload_sha256": "031d2a6574bc1312acea9c0d424f0885b5272702bd2d7ab04dff8f3e7c97f78a",
+    "payload_sha256": "d0566a31942df8c3ab86199d730a69682d05810b2256b637dcd07a8ec8356baa",
     "subtype": "diffuse",
     "width": 64
   },
@@ -37,7 +37,7 @@
   "cov/textures/c/opaque_bc1.dds": {
     "format": "Bc1 { srgb: false }",
     "height": 64,
-    "payload_sha256": "f4dd4fb06a8d9e26ddfda2fb80d45f93cbceac1c831294d33047c1880f084bb8",
+    "payload_sha256": "d44f278c767aea470f8094a5edcdd3370dbb06b2416cdf666f6b20d385bb8d58",
     "subtype": "diffuse",
     "width": 64
   },
@@ -51,28 +51,28 @@
   "cov/textures/c/srgb_bc1.dds": {
     "format": "Bc1 { srgb: true }",
     "height": 64,
-    "payload_sha256": "f4dd4fb06a8d9e26ddfda2fb80d45f93cbceac1c831294d33047c1880f084bb8",
+    "payload_sha256": "d44f278c767aea470f8094a5edcdd3370dbb06b2416cdf666f6b20d385bb8d58",
     "subtype": "pbr_albedo",
     "width": 64
   },
   "cov/textures/c/srgb_bc3.dds": {
     "format": "Bc3 { srgb: true }",
     "height": 64,
-    "payload_sha256": "32042c354c519004932e37a38d56593f15be80f4e0cdbfbcc0401aac207f4426",
+    "payload_sha256": "d10aa6970ed0f8db483dbc6de1d0d2865489b8ada919319a9b53fa006e14d810",
     "subtype": "pbr_albedo",
     "width": 64
   },
   "cov/textures/c/wide_bc1.dds": {
     "format": "Bc1 { srgb: false }",
     "height": 16,
-    "payload_sha256": "1b054c3ffb4849b7ad1054a88bce1bc57551cd858a71d4de9361878c942b11f3",
+    "payload_sha256": "510d45bc8c2a9a62b97e4157341b103357ed0673471b557ed4ffdc53609cbcaa",
     "subtype": "diffuse",
     "width": 32
   },
   "cov/textures/c/wide_bc3.dds": {
     "format": "Bc3 { srgb: false }",
     "height": 16,
-    "payload_sha256": "5c48c5bdd55d6cdb808f8e11866b30e592701ad196562ab40598ccd6e4c05606",
+    "payload_sha256": "0d60ade067c4f74d2e857c1897e8705b392972a93d9e3abddca9892af667b7b1",
     "subtype": "diffuse",
     "width": 32
   },

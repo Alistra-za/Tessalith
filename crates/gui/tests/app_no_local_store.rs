@@ -46,7 +46,7 @@ fn with_analysis_cache_stores_under_the_given_folder_only() {
     let src = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
     let textures = support::mod_folder(src.path());
-    let new = || engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+    let new = || engine::session::Session::new().unwrap();
 
     // No LOCALAPPDATA: no store, nothing written.
     plan_once(

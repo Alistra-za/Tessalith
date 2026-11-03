@@ -134,7 +134,7 @@ fn levels(f: &DdsFile) -> Vec<Vec<[u8; 4]>> {
     f.levels
         .iter()
         .map(
-            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()], None).unwrap() {
+            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap() {
                 Decoded::Ldr(px) => px,
                 Decoded::Hdr(_) => panic!("expected an LDR format"),
             },

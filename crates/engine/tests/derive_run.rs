@@ -127,7 +127,7 @@ fn run(plan: Plan) -> (BatchSummary, Vec<EngineEvent>) {
 fn mip0(path: &Path) -> (DdsPixelFormat, u32, u32, Vec<[u8; 4]>) {
     let f = read_dds(&std::fs::read(path).unwrap()).unwrap();
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     (f.format, w, h, px)

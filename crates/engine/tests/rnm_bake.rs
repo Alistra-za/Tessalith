@@ -49,7 +49,7 @@ fn detail(dir: &Path, h: u32) {
 fn mean_r(dir: &Path, level: usize) -> f64 {
     let f = read_dds(&std::fs::read(dir.join("out/iron_rmaos.dds")).unwrap()).unwrap();
     let (w, h, r) = f.levels[level].clone();
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     px.iter().map(|p| f64::from(p[0])).sum::<f64>() / px.len() as f64

@@ -101,7 +101,7 @@ fn alphas(dir: &Path) -> Vec<Vec<u8>> {
     f.levels
         .iter()
         .map(
-            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()], None).unwrap() {
+            |(w, h, r)| match decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap() {
                 Decoded::Ldr(px) => px.iter().map(|p| p[3]).collect(),
                 Decoded::Hdr(_) => panic!("HDR output for an _m"),
             },

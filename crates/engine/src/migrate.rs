@@ -117,6 +117,11 @@ pub const REMOVED: &[Removed] = &[
         value: None,
         hint: "fills are set per set; delete the [defaults] packing.fill line by hand, then set each fill on its packed output's card",
     },
+    Removed {
+        key: "bc1_model",
+        value: None,
+        hint: "BC1 always encodes for NVIDIA + AMD in 2.0; delete the key",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

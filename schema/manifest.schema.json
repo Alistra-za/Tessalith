@@ -1230,7 +1230,7 @@
   "properties": {
     "bc1_model": {
       "default": null,
-      "description": "The batch BC1 decoder model ([`bc1_model_id`]) that rgbcx encoded the BC1 colour blocks against (BC1 and\nBC3) and that validation decoded BC1 with. `None` in records written before the field existed.",
+      "description": "The BC1 target ([`BC1_ENCODE_ID`]) that rgbcx encoded the BC1 colour blocks for (BC1 and BC3). 1.x records hold\nthe decoder model the batch chose; `None` in records written before the field existed.",
       "type": [
         "string",
         "null"

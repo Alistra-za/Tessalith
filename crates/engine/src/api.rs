@@ -14,8 +14,8 @@ use crate::group::{group_sets_with, join_skin_wet, member_split, SuffixSplit, Te
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
 use crate::manifest::{
-    bc1_model_id, encode_version, output_key, profile_sha256, sha256_file, EncoderVersions,
-    Manifest, ManifestEntry, PresetRef,
+    encode_version, output_key, profile_sha256, sha256_file, EncoderVersions, Manifest,
+    ManifestEntry, PresetRef, BC1_ENCODE_ID,
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
@@ -25,7 +25,6 @@ use crate::presets::*;
 use crate::session::{pack_cache_key, AnalysisCache, PackEntry};
 use crate::shader::{MeshAlpha, Shader, ShaderPick};
 use crate::suggest::{is_pbr_set, SuggestContext};
-use encoders_sys::Bc1Model;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::cell::Cell;
@@ -118,7 +117,6 @@ pub struct BatchRequest {
     pub jobs: usize,
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
     pub mem_budget: u64,
-    pub bc1_model: Bc1Model,
     /// Also write `<name>.dds.json` next to each output.
     pub sidecar: bool,
     pub dry_run: bool,
@@ -188,7 +186,6 @@ impl BatchRequest {
             on_existing: OnExisting::IfChanged,
             jobs: 0,
             mem_budget: 0,
-            bc1_model: Bc1Model::Ideal,
             sidecar: false,
             dry_run: false,
             plan_progress: None,
@@ -244,7 +241,6 @@ impl BatchRequest {
             on_existing,
             jobs,
             mem_budget,
-            bc1_model,
             sidecar,
             dry_run,
             plan_progress: _,
@@ -252,7 +248,7 @@ impl BatchRequest {
             derive,
             skip_root,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 33] = [
+        let fields: [&dyn std::fmt::Debug; 32] = [
             inputs,
             output_root,
             target,
@@ -280,7 +276,6 @@ impl BatchRequest {
             on_existing,
             jobs,
             mem_budget,
-            bc1_model,
             sidecar,
             dry_run,
             low_detail,
@@ -922,13 +917,12 @@ pub(crate) fn encode_current(e: &ManifestEntry, now: &str) -> bool {
 /// (the bytes of every source and the channel each feeds, for a packed output), profile, the sub-type's encode
 /// version (DECISIONS Note DM; a record without one is stale) and encoders, a comparable record (known schema, encoders and preset present) and a passing validation, so a
 /// failed output is re-encoded and reported again rather than counted as up to date
-/// (controller ruling O2). BC1 and BC3 outputs also need the same batch BC1 decoder model: rgbcx encodes their
-/// colour blocks against it (BC3's colour half is a BC1 block), and validation decodes BC1 with it (review I2).
+/// (controller ruling O2). BC1 and BC3 outputs also need the current BC1 encode id ([`BC1_ENCODE_ID`]): a record from
+/// another BC1 target (1.x encoded against one decoder model) is encoded again.
 pub(crate) fn is_up_to_date(
     e: &ManifestEntry,
     job: &ResolvedJob,
     encoders: &EncoderVersions,
-    bc1_model: Bc1Model,
 ) -> bool {
     let Some(rec) = e.encoders.as_ref() else {
         return false;
@@ -953,7 +947,7 @@ pub(crate) fn is_up_to_date(
         return false;
     }
     if matches!(job.profile.format, Format::Bc1 | Format::Bc3)
-        && e.bc1_model.as_deref() != Some(bc1_model_id(bc1_model))
+        && e.bc1_model.as_deref() != Some(BC1_ENCODE_ID)
     {
         return false;
     }
@@ -2974,8 +2968,8 @@ impl Engine {
             return Ok(summary);
         }
 
-        // Carry 8: the BC1 model is global rgbcx state; set it once before any encode, decode or validate.
-        encoders_sys::init(req.bc1_model).map_err(|e| EngineError::Fatal(e.to_string()))?;
+        // Carry 8: rgbcx's mode is global state; set it once before any encode, decode or validate.
+        encoders_sys::init();
         std::fs::create_dir_all(&req.output_root).map_err(|e| {
             EngineError::Fatal(format!("output root {}: {e}", req.output_root.display()))
         })?;
@@ -2998,7 +2992,7 @@ impl Engine {
                             && job.output.exists()
                             && existing
                                 .get(&output_key(&req.output_root, &job.output))
-                                .is_some_and(|e| is_up_to_date(e, job, &encoders, req.bc1_model))
+                                .is_some_and(|e| is_up_to_date(e, job, &encoders))
                     })
                     .collect()
             })
@@ -3960,15 +3954,15 @@ mod tests {
             encode_version: Some(crate::manifest::encode_version(job.profile.subtype).into()),
             encoders: Some(enc.clone()),
             preset: PresetRef::for_preset(&reg, "cs-quality", None),
-            bc1_model: Some("ideal".into()),
+            bc1_model: Some(BC1_ENCODE_ID.into()),
             output_stamp: SourceStamp::of(&job.output),
             copied_from: None,
             raw: serde_json::json!({ "validation": { "passed": true } }),
         };
-        let up = |e: &ManifestEntry, job: &ResolvedJob, m: Bc1Model| is_up_to_date(e, job, &enc, m);
+        let up = |e: &ManifestEntry, job: &ResolvedJob| is_up_to_date(e, job, &enc);
         let good = entry_for(&job);
         assert_eq!(job.profile.format, Format::Bc7);
-        assert!(up(&good, &job, Bc1Model::Ideal));
+        assert!(up(&good, &job));
         let with = |f: &dyn Fn(&mut ManifestEntry)| {
             let mut e = good.clone();
             f(&mut e);
@@ -4035,35 +4029,30 @@ mod tests {
             ),
         ];
         for (what, e) in &not_up {
-            assert!(!up(e, &job, Bc1Model::Ideal), "{what}");
+            assert!(!up(e, &job), "{what}");
         }
         // Spec: the engine version no longer decides; a matching encode version from another engine is current.
-        assert!(up(
-            &with(&|e| e.engine_version = "0.0.0".into()),
-            &job,
-            Bc1Model::Ideal
-        ));
+        assert!(up(&with(&|e| e.engine_version = "0.0.0".into()), &job));
         // A 1.x record has no encode_version: stale whatever the type's arm is.
         for v in ["1.0.0", "1.1.0"] {
             let legacy = with(&|e| {
                 e.encode_version = None;
                 e.engine_version = v.into()
             });
-            assert!(!up(&legacy, &job, Bc1Model::Ideal), "{v}");
+            assert!(!up(&legacy, &job), "{v}");
         }
-        // The BC1 model only matters for formats rgbcx encodes against it.
-        assert!(up(&with(&|e| e.bc1_model = None), &job, Bc1Model::Nvidia));
+        // The BC1 encode id only matters for the formats whose colour blocks rgbcx encodes as BC1.
+        assert!(up(&with(&|e| e.bc1_model = None), &job));
         for format in [Format::Bc1, Format::Bc3] {
             job.profile.format = format;
             let e = entry_for(&job);
-            assert!(up(&e, &job, Bc1Model::Ideal), "{format:?}");
-            assert!(!up(&e, &job, Bc1Model::Nvidia), "{format:?} other model");
+            assert!(up(&e, &job), "{format:?}");
+            let mut v1 = e.clone();
+            v1.bc1_model = Some("ideal".into());
+            assert!(!up(&v1, &job), "{format:?} 1.x target");
             let mut old = e.clone();
             old.bc1_model = None;
-            assert!(
-                !up(&old, &job, Bc1Model::Ideal),
-                "{format:?} unrecorded model"
-            );
+            assert!(!up(&old, &job), "{format:?} unrecorded target");
         }
         // The rgbcx BC4 patch only changes BC3/BC4/BC5 output; a record from before it stays current for the rest.
         for format in [
@@ -4079,21 +4068,13 @@ mod tests {
             let mut old = entry_for(&job);
             old.encoders.as_mut().unwrap().rgbcx_patch = None;
             let stale = matches!(format, Format::Bc3 | Format::Bc4 | Format::Bc5);
-            assert_eq!(
-                up(&old, &job, Bc1Model::Ideal),
-                !stale,
-                "{format:?} pre-patch record"
-            );
+            assert_eq!(up(&old, &job), !stale, "{format:?} pre-patch record");
             // The tag from before the BC4 search (round-to-nearest only) is stale the same way. The fake hash only
             // proves that any other tag string is stale, not the real old value format.
             let mut older = entry_for(&job);
             older.encoders.as_mut().unwrap().rgbcx_patch =
                 Some("bc4-round-to-nearest@sha256:00".into());
-            assert_eq!(
-                up(&older, &job, Bc1Model::Ideal),
-                !stale,
-                "{format:?} old-tag record"
-            );
+            assert_eq!(up(&older, &job), !stale, "{format:?} old-tag record");
         }
     }
 

@@ -90,7 +90,7 @@ fn out(d: &TempDir, name: &str) -> DdsFile {
 
 fn texels(f: &DdsFile) -> Vec<[u8; 4]> {
     let (w, h, r) = f.levels[0].clone();
-    match decode_level(f.format, w, h, &f.data[r], None).unwrap() {
+    match decode_level(f.format, w, h, &f.data[r]).unwrap() {
         Decoded::Ldr(px) => px,
         Decoded::Hdr(_) => panic!("expected an LDR format"),
     }

@@ -173,7 +173,7 @@ fn model_on(dir: &Path, files: &[&str]) -> sdc_gui::model::AppModel {
             ..Default::default()
         },
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     m.user_presets = Some(dir.join("presets"));
     m.open_folder(root);

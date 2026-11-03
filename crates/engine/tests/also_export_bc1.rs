@@ -1,6 +1,5 @@
-//! Track A Task 7 (DECISIONS Note CN): the PBR folder of an Also export equals a plain export byte for byte, with
-//! `bc1_model = Nvidia` (not the default Ideal, so a dropped model would show). Its own binary: the BC1 model is
-//! process-global rgbcx state (see `api_init.rs`).
+//! Track A Task 7 (DECISIONS Note CN): the PBR folder of an Also export equals a plain export byte for byte, with a
+//! BC1 output among them.
 mod also_support;
 use also_support::*;
 use engine::api::*;
@@ -19,7 +18,6 @@ fn the_pbr_folder_is_byte_identical_to_a_plain_export() {
         plate(m);
     });
     let mut req = request(&m, &loc);
-    req.bc1_model = encoders_sys::Bc1Model::Nvidia;
     req.overrides
         .push(parse_set("file:**/cup.png.format=bc1").unwrap());
     let s = also(req.clone(), &spec(&loc, BOTH)).0.unwrap();
@@ -56,5 +54,5 @@ fn the_pbr_folder_is_byte_identical_to_a_plain_export() {
     };
     let (a, b) = (strip(&pbr), strip(&plain));
     assert_eq!(a, b);
-    assert_eq!(a["textures/clutter/cup.dds"]["bc1_model"], "nvidia");
+    assert_eq!(a["textures/clutter/cup.dds"]["bc1_model"], "dual");
 }

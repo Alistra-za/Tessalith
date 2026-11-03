@@ -301,8 +301,8 @@ pub struct ManifestRecord {
     /// The canonical key from [`output_key`].
     pub output: String,
     pub validation: ValidationSummary,
-    /// The batch BC1 decoder model ([`bc1_model_id`]) that rgbcx encoded the BC1 colour blocks against (BC1 and
-    /// BC3) and that validation decoded BC1 with. `None` in records written before the field existed.
+    /// The BC1 target ([`BC1_ENCODE_ID`]) that rgbcx encoded the BC1 colour blocks for (BC1 and BC3). 1.x records hold
+    /// the decoder model the batch chose; `None` in records written before the field existed.
     #[serde(default)]
     pub bc1_model: Option<String>,
     /// The set's shader and why (M6 spec §4.4); `None` in records written before shaders existed.
@@ -317,16 +317,8 @@ pub struct ManifestRecord {
     pub copied_from: Option<crate::policy::SourceStamp>,
 }
 
-/// The stable id of a BC1 decoder model, as `--bc1-decoder` spells it (spec §8).
-pub fn bc1_model_id(m: encoders_sys::Bc1Model) -> &'static str {
-    use encoders_sys::Bc1Model::*;
-    match m {
-        Ideal => "ideal",
-        IdealRound4 => "ideal-round4",
-        Nvidia => "nvidia",
-        Amd => "amd",
-    }
-}
+/// The BC1 target of every BC1 and BC3 output: rgbcx scores NVIDIA and AMD decoder error together (Note FM).
+pub const BC1_ENCODE_ID: &str = "dual";
 
 /// What the up-to-date check needs from a stored record, read tolerantly: a field added to or removed from
 /// `Profile`, `ValidationSummary` or the other embedded types never makes an older record unreadable.

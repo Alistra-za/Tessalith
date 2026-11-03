@@ -60,7 +60,7 @@ fn cube_preview(cap: u32) -> Arc<sdc_gui::model::preview::PreviewOut> {
         .unwrap()
         .plan(r, &rep, &CancelToken::default())
         .unwrap();
-    let session = Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap());
+    let session = Arc::new(engine::session::Session::new().unwrap());
     let (tx, rx) = channel();
     spawn_encode(
         tx,

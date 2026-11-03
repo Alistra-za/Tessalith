@@ -1,6 +1,5 @@
 //! Track C Task 9 (DECISIONS Note CL40): an explicit `mips.normal = renormalize_bake` on a set's `normal` bakes its
 //! footprint variance into the set's complex material `_m` gloss (G); off by default, the `_n` itself unchanged.
-use encoders_sys::Bc1Model;
 use engine::api::*;
 use engine::codes::Code;
 use engine::config::{NormalMips, Subtype, Target};
@@ -103,7 +102,7 @@ fn wall_set(dir: &Path, bumpy: impl Fn(u32) -> bool) {
 }
 
 fn chain(p: &Plan, name: &str) -> Vec<Rgba32F> {
-    let s = Session::new(Bc1Model::Ideal).unwrap();
+    let s = Session::new().unwrap();
     let c = s
         .preview_source(job(p, name), 16384, &CancelToken::default())
         .unwrap();

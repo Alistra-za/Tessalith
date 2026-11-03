@@ -770,16 +770,14 @@ mod tests {
     #[test]
     fn session_keeps_the_skeleton_of_its_last_full_plan() {
         let fx = fast_fixture();
-        let session = crate::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+        let session = crate::session::Session::new().unwrap();
         assert!(session.skeleton().is_none());
         let rep = Reporter::new(Arc::new(NullSink), "t");
         session
             .plan_and_keep(fx.req.clone(), &rep, &CancelToken::default())
             .unwrap();
         let s = session.skeleton().expect("a full plan stores its skeleton");
-        let mut req = fx.req.clone();
-        req.bc1_model = session.bc1_model();
-        assert_eq!(s.req_sig, req.sig_without_files());
+        assert_eq!(s.req_sig, fx.req.sig_without_files());
         assert!(!s.key_sets.is_empty());
     }
 
@@ -789,7 +787,7 @@ mod tests {
     #[test]
     fn writer_clash_catches_a_new_collision() {
         let fx = fast_fixture();
-        let session = crate::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+        let session = crate::session::Session::new().unwrap();
         let rep = Reporter::new(Arc::new(NullSink), "t");
         let full = session
             .plan_and_keep(fx.req.clone(), &rep, &CancelToken::default())

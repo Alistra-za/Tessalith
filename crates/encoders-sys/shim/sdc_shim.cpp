@@ -37,7 +37,7 @@ SDC_BC7E_TARGET(sse4)
 SDC_BC7E_TARGET(avx)
 SDC_BC7E_TARGET(avx2)
 
-// Must run exactly once (Rust guards it with OnceLock): rgbcx::init writes global state.
+// Must run exactly once (Rust guards it with Once): rgbcx::init writes global state.
 void sdc_init(int bc1_mode) {
     rgbcx::init(static_cast<rgbcx::bc1_approx_mode>(bc1_mode));
     ispc::bc7e_compress_block_init();

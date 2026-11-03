@@ -38,7 +38,7 @@ fn detail(dir: &Path, name: &str, w: u32, h: u32) {
 fn texels(dir: &Path, name: &str) -> Vec<[u8; 4]> {
     let f = read_dds(&std::fs::read(dir.join("out").join(name)).unwrap()).unwrap();
     let (w, h, r) = f.levels[0].clone();
-    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+    let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
         panic!("LDR expected")
     };
     px

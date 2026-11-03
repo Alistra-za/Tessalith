@@ -101,7 +101,7 @@ fn alpha(d: &Path, name: &str) -> (engine::dds::DdsPixelFormat, Vec<u8>) {
     let bytes = std::fs::read(out(d, name)).unwrap();
     let f = read_dds(&bytes).unwrap();
     let (w, h, r) = f.surfaces()[0].clone();
-    let px = decode_level_rgba(f.format, w, h, &f.data[r], None).unwrap();
+    let px = decode_level_rgba(f.format, w, h, &f.data[r]).unwrap();
     (
         f.format,
         px.iter().map(|p| (p[3] * 255.0).round() as u8).collect(),

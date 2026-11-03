@@ -108,7 +108,7 @@ fn presets_schema_prints_one_schema_or_writes_all() {
 }
 
 #[test]
-fn encoders_reports_versions_isa_and_model() {
+fn encoders_reports_versions_isa_and_bc1_target() {
     let (code, out, err) = stdout_of(&["encoders"]);
     assert_eq!(code, 0);
     assert!(err.is_empty(), "result verbs print on stdout: {err}");
@@ -117,14 +117,12 @@ fn encoders_reports_versions_isa_and_model() {
         "79ddbc9",
         "1.31.0",
         "0001-exact-opaque-alpha@sha256:",
-        "patch bc4-round-to-nearest+bc4-search@sha256:",
+        "patch bc4-round-to-nearest+bc4-search+bc1-dual@sha256:",
         "dispatched ISA",
-        "BC1 decoder model: ideal",
+        "BC1 encode target: dual",
     ] {
         assert!(out.contains(needle), "{needle} not in {out}");
     }
-    let (_, out, _) = stdout_of(&["encoders", "--bc1-decoder", "nvidia"]);
-    assert!(out.contains("BC1 decoder model: nvidia"), "{out}");
 }
 
 #[test]
@@ -135,12 +133,12 @@ fn encoders_json_is_one_object() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["kind"], "encoders");
     assert_eq!(v["ispc"], "1.31.0");
-    assert_eq!(v["bc1_model"], "ideal");
+    assert_eq!(v["bc1_model"], "dual");
     assert!(v["bc7e_patch"].as_str().unwrap().contains("@sha256:"));
     assert!(v["rgbcx_patch"]
         .as_str()
         .unwrap()
-        .starts_with("bc4-round-to-nearest+bc4-search@sha256:"));
+        .starts_with("bc4-round-to-nearest+bc4-search+bc1-dual@sha256:"));
     assert!(["sse2", "sse4", "avx", "avx2"].contains(&v["isa"].as_str().unwrap()));
 }
 

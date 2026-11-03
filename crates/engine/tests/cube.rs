@@ -913,7 +913,7 @@ fn cube_validation_reads_every_face() {
         .surfaces()
         .into_iter()
         .map(
-            |(w, h, r)| match decode_level(f.format, w, h, &f.data[r], None).unwrap() {
+            |(w, h, r)| match decode_level(f.format, w, h, &f.data[r]).unwrap() {
                 Decoded::Ldr(px) => EncoderInput::Ldr(px),
                 Decoded::Hdr(_) => unreachable!(),
             },
@@ -927,7 +927,6 @@ fn cube_validation_reads_every_face() {
             encoder_input: Some(&inputs),
             base_coverage: None,
             source_peak: None,
-            bc1_model: encoders_sys::Bc1Model::Ideal,
             expected_levels: Some(6),
         })
     };
@@ -974,7 +973,7 @@ fn cube_preview_is_the_pos_x_face() {
     // A face size the 2D path would never produce from 32-px files, so this proves the cube path ran.
     let p = plan(d.path(), &["cubemap.face_size=16"]);
     let j = job(&p, "chrome_e.dds");
-    let s = engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+    let s = engine::session::Session::new().unwrap();
     let pv = s.preview(j, 4096, &CancelToken::default()).unwrap();
     assert_eq!(pv.source.first_level, 0);
     assert_eq!(pv.source.dims[0], (16, 16));
@@ -1022,7 +1021,7 @@ fn face_rotate_applies_to_six_face_files() {
     let surf = f.surfaces();
     for (k, face) in faces.iter().enumerate() {
         let (w, h, r) = surf[k * 6].clone();
-        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
             unreachable!()
         };
         assert!(px == texels8(face), "face {k} differs");
@@ -1077,7 +1076,7 @@ fn cube_mips_average_in_game_gamma() {
         .enumerate()
         .filter(|(k, _)| k % 3 == 1)
     {
-        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
             unreachable!()
         };
         // Mip 1 is 2x2: each texel averages a 2x2 block of the checkerboard. The solid-angle weights favour the
@@ -1117,7 +1116,7 @@ fn cube_float_source_is_only_reencoded() {
         .enumerate()
         .filter(|(k, _)| k % per == 0)
     {
-        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r], None).unwrap() else {
+        let Decoded::Ldr(px) = decode_level(f.format, w, h, &f.data[r]).unwrap() else {
             unreachable!()
         };
         assert!(
@@ -1445,7 +1444,7 @@ fn cube_preview_has_six_faces() {
     let fs = arrow_faces(64);
     png8(&hstrip(&fs)).save(dir.join("chrome_e.png")).unwrap();
     let p = plan(d.path(), &["format=rgba8"]);
-    let s = engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+    let s = engine::session::Session::new().unwrap();
     let pv = s
         .preview(&p.jobs[0], 4096, &CancelToken::default())
         .unwrap();
@@ -1471,7 +1470,7 @@ fn two_d_preview_has_one_face() {
         .save(dir.join("wall_d.png"))
         .unwrap();
     let p = plan(d.path(), &[]);
-    let s = engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap();
+    let s = engine::session::Session::new().unwrap();
     let pv = s
         .preview(&p.jobs[0], 4096, &CancelToken::default())
         .unwrap();

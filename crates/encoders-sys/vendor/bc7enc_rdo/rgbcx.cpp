@@ -444,8 +444,52 @@ namespace rgbcx
 		}
 	}
 
+	// sdc patch (bc1 dual, see README-VENDOR.md): single-colour table for cBC1Dual. Error = squared NVidia error +
+	// squared AMD error of the interpolated value (no 3% term, that is Ideal-only); equal endpoints still win ties.
+	static void prepare_bc1_single_color_table_dual(bc1_match_entry* pTable, const uint8_t* pExpand, int size, bool half)
+	{
+		for (int i = 0; i < 256; i++)
+		{
+			int lowest_e = INT_MAX;
+			for (int lo = 0; lo < size; lo++)
+			{
+				const int lo_e = pExpand[lo];
+
+				for (int hi = 0; hi < size; hi++)
+				{
+					const int hi_e = pExpand[hi];
+
+					int vn, va;
+					if (half)
+					{
+						vn = (size == 32) ? interp_half_5(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1NVidia) : interp_half_6(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1NVidia);
+						va = (size == 32) ? interp_half_5(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1AMD) : interp_half_6(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1AMD);
+					}
+					else
+					{
+						vn = (size == 32) ? interp_5(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1NVidia) : interp_6(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1NVidia);
+						va = (size == 32) ? interp_5(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1AMD) : interp_6(hi, lo, hi_e, lo_e, bc1_approx_mode::cBC1AMD);
+					}
+
+					const int e = squarei(vn - i) + squarei(va - i);
+
+					if ((e < lowest_e) || ((e == lowest_e) && (lo == hi)))
+					{
+						pTable[i].m_hi = static_cast<uint8_t>(hi);
+						pTable[i].m_lo = static_cast<uint8_t>(lo);
+						lowest_e = e;
+					}
+				} // hi
+			} // lo
+
+			pTable[i].m_e = static_cast<uint8_t>(std::min(lowest_e, (int)UINT8_MAX));
+		}
+	}
+
 	static void prepare_bc1_single_color_table_half(bc1_match_entry* pTable, const uint8_t* pExpand, int size, bc1_approx_mode mode)
 	{
+		if (mode == bc1_approx_mode::cBC1Dual) { prepare_bc1_single_color_table_dual(pTable, pExpand, size, true); return; } // sdc patch (bc1 dual)
+
 		for (int i = 0; i < 256; i++)
 		{
 			int lowest_e = 256;
@@ -484,6 +528,8 @@ namespace rgbcx
 
 	static void prepare_bc1_single_color_table(bc1_match_entry* pTable, const uint8_t* pExpand, int size, bc1_approx_mode mode)
 	{
+		if (mode == bc1_approx_mode::cBC1Dual) { prepare_bc1_single_color_table_dual(pTable, pExpand, size, false); return; } // sdc patch (bc1 dual)
+
 		for (int i = 0; i < 256; i++)
 		{
 			int lowest_e = 256;
@@ -912,8 +958,131 @@ namespace rgbcx
 		}
 	}
 
+	// sdc patch (bc1 dual, see README-VENDOR.md): cBC1Dual scoring. Both palettes ([0] NVidia, [1] AMD) of a 4- or
+	// 3-colour block (entry 3 of a 3-colour block is black in both); a texel's error under selector s is its NVidia
+	// error plus its AMD error. bc1_get_block_colors4/3 above never see cBC1Dual (their final else is NVidia): every
+	// caller of them dispatches to the functions below first.
+	struct bc1_dual_palette { int r[2][4], g[2][4], b[2][4]; };
+
+	static inline void bc1_get_dual_palette(bc1_dual_palette& p, bool three, int lr, int lg, int lb, int hr, int hg, int hb)
+	{
+		const int r0 = (lr << 3) | (lr >> 2), g0 = (lg << 2) | (lg >> 4), b0 = (lb << 3) | (lb >> 2);
+		const int r3 = (hr << 3) | (hr >> 2), g3 = (hg << 2) | (hg >> 4), b3 = (hb << 3) | (hb >> 2);
+		for (int k = 0; k < 2; k++)
+		{
+			p.r[k][0] = r0; p.g[k][0] = g0; p.b[k][0] = b0;
+		}
+		if (three)
+		{
+			for (int k = 0; k < 2; k++)
+			{
+				p.r[k][1] = r3; p.g[k][1] = g3; p.b[k][1] = b3;
+				p.r[k][3] = 0; p.g[k][3] = 0; p.b[k][3] = 0;
+			}
+			p.r[0][2] = interp_half_5_nv(lr, hr); p.g[0][2] = interp_half_6_nv(g0, g3); p.b[0][2] = interp_half_5_nv(lb, hb);
+			p.r[1][2] = interp_half_5_6_amd(r0, r3); p.g[1][2] = interp_half_5_6_amd(g0, g3); p.b[1][2] = interp_half_5_6_amd(b0, b3);
+		}
+		else
+		{
+			for (int k = 0; k < 2; k++)
+			{
+				p.r[k][3] = r3; p.g[k][3] = g3; p.b[k][3] = b3;
+			}
+			p.r[0][1] = interp_5_nv(lr, hr); p.g[0][1] = interp_6_nv(g0, g3); p.b[0][1] = interp_5_nv(lb, hb);
+			p.r[0][2] = interp_5_nv(hr, lr); p.g[0][2] = interp_6_nv(g3, g0); p.b[0][2] = interp_5_nv(hb, lb);
+			p.r[1][1] = interp_5_6_amd(r0, r3); p.g[1][1] = interp_5_6_amd(g0, g3); p.b[1][1] = interp_5_6_amd(b0, b3);
+			p.r[1][2] = interp_5_6_amd(r3, r0); p.g[1][2] = interp_5_6_amd(g3, g0); p.b[1][2] = interp_5_6_amd(b3, b0);
+		}
+	}
+
+	static inline uint32_t bc1_dual_err(const bc1_dual_palette& p, uint32_t s, const color32& c)
+	{
+		return squarei(p.r[0][s] - c.r) + squarei(p.g[0][s] - c.g) + squarei(p.b[0][s] - c.b) +
+			squarei(p.r[1][s] - c.r) + squarei(p.g[1][s] - c.g) + squarei(p.b[1][s] - c.b);
+	}
+
+	// 4-colour: like bc1_find_sels4_fullerr (same tie rule, same early-out) on the summed error. Every 4-colour
+	// selector search (noerr, fasterr, check2, fullerr, forced) uses it under cBC1Dual.
+	static uint32_t bc1_find_sels4_dual(const color32* pSrc_pixels, int lr, int lg, int lb, int hr, int hg, int hb, uint8_t sels[16], uint32_t cur_err, const uint8_t* pForce_selectors)
+	{
+		bc1_dual_palette p;
+		bc1_get_dual_palette(p, false, lr, lg, lb, hr, hg, hb);
+
+		uint32_t total_err = 0;
+		if (pForce_selectors)
+		{
+			memcpy(sels, pForce_selectors, 16);
+			for (uint32_t i = 0; i < 16; i++)
+				total_err += bc1_dual_err(p, pForce_selectors[i], pSrc_pixels[i]);
+			return total_err;
+		}
+
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			uint32_t best_err = bc1_dual_err(p, 0, pSrc_pixels[i]);
+			uint8_t best_sel = 0;
+			for (uint32_t j = 1; (j < 4) && best_err; j++)
+			{
+				const uint32_t err = bc1_dual_err(p, j, pSrc_pixels[i]);
+				if ((err < best_err) || ((err == best_err) && (j == 3)))
+				{
+					best_err = err;
+					best_sel = (uint8_t)j;
+				}
+			}
+
+			total_err += best_err;
+			if (total_err >= cur_err)
+				break;
+
+			sels[i] = best_sel;
+		}
+		return total_err;
+	}
+
+	// 3-colour: like bc1_find_sels3_fullerr on the summed error (black, selector 3, costs its error twice).
+	static uint32_t bc1_find_sels3_dual(bool use_black, const color32* pSrc_pixels, int lr, int lg, int lb, int hr, int hg, int hb, uint8_t sels[16], uint32_t cur_err, const uint8_t* pForce_selectors)
+	{
+		bc1_dual_palette p;
+		bc1_get_dual_palette(p, true, lr, lg, lb, hr, hg, hb);
+
+		uint32_t total_err = 0;
+		if (pForce_selectors)
+		{
+			memcpy(sels, pForce_selectors, 16);
+			for (uint32_t i = 0; i < 16; i++)
+				total_err += bc1_dual_err(p, pForce_selectors[i], pSrc_pixels[i]);
+			return total_err;
+		}
+
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			uint32_t best_err = bc1_dual_err(p, 0, pSrc_pixels[i]);
+			uint32_t best_sel = 0;
+			const uint32_t last = use_black ? 3 : 2;
+			for (uint32_t j = 1; j <= last; j++)
+			{
+				const uint32_t err = bc1_dual_err(p, j, pSrc_pixels[i]);
+				if (err < best_err)
+				{
+					best_err = err;
+					best_sel = j;
+				}
+			}
+
+			total_err += best_err;
+			if (total_err >= cur_err)
+				return total_err;
+
+			sels[i] = (uint8_t)best_sel;
+		}
+		return total_err;
+	}
+
 	static inline void bc1_find_sels4_noerr(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], const uint8_t* pForce_selectors)
 	{
+		if (g_bc1_approx_mode == bc1_approx_mode::cBC1Dual) { bc1_find_sels4_dual(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels, UINT32_MAX, pForce_selectors); return; } // sdc patch (bc1 dual)
+
 		if (pForce_selectors)
 		{
 			memcpy(sels, pForce_selectors, 16);
@@ -1082,6 +1251,8 @@ namespace rgbcx
 
 	static inline uint32_t bc1_find_sels4(uint32_t flags, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err, const uint8_t* pForce_selectors)
 	{
+		if (g_bc1_approx_mode == bc1_approx_mode::cBC1Dual) return bc1_find_sels4_dual(pSrc_pixels, lr, lg, lb, hr, hg, hb, sels, cur_err, pForce_selectors); // sdc patch (bc1 dual)
+
 		uint32_t err;
 
 		if (pForce_selectors)
@@ -1119,6 +1290,8 @@ namespace rgbcx
 
 	static inline uint32_t bc1_find_sels3_fullerr(bool use_black, const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err, const uint8_t* pForce_selectors)
 	{
+		if (g_bc1_approx_mode == bc1_approx_mode::cBC1Dual) return bc1_find_sels3_dual(use_black, pSrc_pixels, lr, lg, lb, hr, hg, hb, sels, cur_err, pForce_selectors); // sdc patch (bc1 dual)
+
 		uint32_t block_r[4], block_g[4], block_b[4];
 		bc1_get_block_colors3(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
@@ -3154,6 +3327,8 @@ namespace rgbcx
 
 	bool unpack_bc1_block_colors(const void* pBlock_bits, color32* c, bc1_approx_mode mode)
 	{
+		assert(mode != bc1_approx_mode::cBC1Dual); // sdc patch (bc1 dual): encode-only, no palette to decode with
+
 		const bc1_block* pBlock = static_cast<const bc1_block*>(pBlock_bits);
 
 		const uint32_t l = pBlock->get_low_color();

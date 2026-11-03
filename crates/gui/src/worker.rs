@@ -2,7 +2,6 @@
 //! catches panics at the thread boundary (spec §7.6) and reports through one channel the UI drains each frame.
 use crate::model::items::PlanView;
 use crate::model::preview::{dds_preview, dds_thumbnail, decode_levels, PreviewOut};
-use encoders_sys::Bc1Model;
 use engine::api::{BatchRequest, BatchSummary, CancelToken, EngineError, PlanProgress};
 use engine::events::{EngineEvent, EventSink, Reporter, VecSink};
 use engine::policy::{ResolvedJob, SourceStamp};
@@ -270,8 +269,6 @@ pub fn spawn_export_also(
     cancel: CancelToken,
 ) {
     spawn_guarded(tx, "export", move |tx| {
-        let mut req = req;
-        req.bc1_model = session.bc1_model();
         let result = engine::also::start_also(
             session.engine(),
             session.cache(),
@@ -433,7 +430,6 @@ pub fn spawn_encode(
     token: u64,
 ) {
     spawn_guarded(tx, "preview", move |tx| {
-        let bc1 = session.bc1_model();
         let result = or_send(
             tx,
             || {
@@ -445,7 +441,7 @@ pub fn spawn_encode(
                     )
                     .map(|r| {
                         Arc::new(PreviewOut {
-                            decoded: decode_levels(&r, bc1),
+                            decoded: decode_levels(&r),
                             result: r,
                         })
                     })
@@ -461,11 +457,11 @@ pub fn spawn_encode(
 }
 
 /// A DDS input shows only its own bytes: read the file, keep the mips within `max`, decode them.
-pub fn spawn_dds(tx: Sender<WorkerMsg>, path: PathBuf, max: u32, bc1: Bc1Model, token: u64) {
+pub fn spawn_dds(tx: Sender<WorkerMsg>, path: PathBuf, max: u32, token: u64) {
     spawn_guarded(tx, "preview", move |tx| {
         let result = or_send(
             tx,
-            || dds_preview(&path, max, bc1).map(Arc::new),
+            || dds_preview(&path, max).map(Arc::new),
             |e| WorkerMsg::Encoded {
                 token,
                 result: Err(e),
@@ -479,15 +475,14 @@ pub fn spawn_dds(tx: Sender<WorkerMsg>, path: PathBuf, max: u32, bc1: Bc1Model, 
 /// shortcut: `dds_thumbnail` reads the whole file (`fs::read`), so a folder of 4K DDS reads every byte once per
 /// session; read the header and the tail mips only, or keep the thumbs in the DZ analysis disk cache, if open time
 /// shows it.
-pub fn spawn_dds_thumbs(tx: Sender<WorkerMsg>, paths: Vec<(PathBuf, SourceStamp)>, bc1: Bc1Model) {
+pub fn spawn_dds_thumbs(tx: Sender<WorkerMsg>, paths: Vec<(PathBuf, SourceStamp)>) {
     spawn_guarded(tx, "dds thumbnails", move |tx| {
         for (path, stamp) in paths {
             // A decoder panic fails this file only (it lands as a refused file, not read again), not the batch.
-            let thumb = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                dds_thumbnail(&path, bc1)
-            }))
-            .unwrap_or_else(|_| Err("the DDS decoder panicked".to_string()))
-            .map(Arc::new);
+            let thumb =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dds_thumbnail(&path)))
+                    .unwrap_or_else(|_| Err("the DDS decoder panicked".to_string()))
+                    .map(Arc::new);
             let _ = tx.send(WorkerMsg::DdsThumb { path, stamp, thumb });
         }
     });

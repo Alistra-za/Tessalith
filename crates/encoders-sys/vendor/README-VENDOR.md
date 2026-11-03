@@ -2,7 +2,7 @@
 
 | Path | Upstream | Commit | Licence |
 |---|---|---|---|
-| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest and BC4 search patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
+| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search and BC1 dual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
 | ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patch 0001 | MIT (kernel.ispc modified; change notice at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18) with ISPC 1.31.0: `-O2 --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions` | — | Apache-2.0 |
@@ -19,7 +19,7 @@ Provenance of the first objects: the bc7e objects are byte-identical to the ones
 because the bench's copies embed the bench's absolute source path; same source and flags,
 but the files differ from the bench's.
 
-Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest and BC4 search patches at
+Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search and BC1 dual patches at
 the end of this file).
 
 Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) changes bc7e. `bc7e/bc7e.ispc` is the pristine `bc7enc_rdo/bc7e.ispc` with that patch applied:
@@ -88,3 +88,16 @@ Before this patch (round-to-nearest only) `rgbcx.cpp` had SHA-256 `6f4d4664daa95
 (the upstream b943862 file; round-to-nearest did not touch it) and `rgbcx.h` `38f1bd4551dab3700552d9a9d726946a527bb9072dc3337dc58794f3d9fef87e`.
 
 `bc7enc_rdo/rgbcx_table4_small.h` was removed: `rgbcx.cpp` includes it only when `RGBCX_USE_SMALLER_TABLES` is 1, so that macro must stay 0.
+
+Patch "rgbcx BC1 dual" (2026-11-02) applies on top of BC4 search, marked
+`sdc patch (bc1 dual, see README-VENDOR.md)`. `rgbcx.h` gains `bc1_approx_mode::cBC1Dual = 4`, an encode-only target
+that `encoders_sys::init` selects for every BC1 and BC3 colour block: under it every BC1 candidate is scored against both the NVidia and the AMD palette, each texel's selector minimises
+err_nv + err_amd (squared RGB error), and the block error is that sum. `rgbcx.cpp` adds the single-colour table builder
+for it (`init`; error = squared NVidia + squared AMD error of the interpolant, no 3% term), `bc1_get_dual_palette`,
+`bc1_find_sels4_dual` and `bc1_find_sels3_dual` (3-colour black costs its error twice), and a leading
+`if (cBC1Dual)` dispatch in `bc1_find_sels4_noerr`, `bc1_find_sels4` and `bc1_find_sels3_fullerr`. Under cBC1Dual every
+4-colour selector search is the full per-texel search whatever the level's MSE flags. Endpoint fits (least squares,
+total orderings, endpoint search) are unchanged. `unpack_bc1_block_colors` asserts the mode is not cBC1Dual (decoding
+uses mode 1 or 2). BC4 and BC5 take no new code path. Before this patch `rgbcx.cpp` had SHA-256
+`cf4d034b3277c9f942814896d7ce70eeaeb5d33c2011a897f784389b1858da95` and `rgbcx.h`
+`e49b480432cb4de1985295999a9c9397b969ee701bb5638cda3a1db259202845`. Measurements: the bc1-dual research report (`reports/bc1-dual/REPORT-dual-mode.md`, outside the repo).

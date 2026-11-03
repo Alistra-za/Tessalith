@@ -905,7 +905,7 @@ fn helper_keys_in_sdc_toml_match_the_gui() {
     let bytes = std::fs::read(fx.dds("textures/a/x.dds")).unwrap();
     let f = read_dds(&bytes).unwrap();
     let (w, h, r) = f.surfaces()[0].clone();
-    let px = engine::decode::decode_level_rgba(f.format, w, h, &f.data[r], None).unwrap();
+    let px = engine::decode::decode_level_rgba(f.format, w, h, &f.data[r]).unwrap();
     for (i, p) in px.iter().enumerate() {
         let (x, y) = (i as u32 % 32, i as u32 / 32);
         let a = (p[3] * 255.0).round() as u8;

@@ -1062,9 +1062,7 @@ mod tests {
 
     #[test]
     fn context_does_not_clone_the_whole_view_list() {
-        let session = Arc::new(
-            engine::session::Session::new(encoders_sys::Bc1Model::Ideal).expect("a session"),
-        );
+        let session = Arc::new(engine::session::Session::new().expect("a session"));
         let m = AppModel::new(crate::settings::GuiSettings::default(), None, session);
         SET_VIEWS_CLONES.with(|c| c.set(0));
         for _ in 0..5 {

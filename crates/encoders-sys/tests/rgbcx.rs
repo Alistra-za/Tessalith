@@ -24,12 +24,7 @@ fn bc1_with_transparent_black_off_always_decodes_opaque() {
         *p = [0, 0, 0, 255];
     }
     let enc = bc1_encode_block(&b, true, false);
-    for model in [
-        Bc1Model::Ideal,
-        Bc1Model::Nvidia,
-        Bc1Model::Amd,
-        Bc1Model::IdealRound4,
-    ] {
+    for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
         assert!(
             bc1_decode_block(&enc, model).iter().all(|p| p[3] == 255),
             "{model:?}"

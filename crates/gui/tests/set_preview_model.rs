@@ -1080,7 +1080,7 @@ fn source_mode_texels_match_the_encoded_texels() {
         let texels = |mode| {
             let f = read_dds(&encode(session, &src, 32, mode, &cancel).unwrap()).unwrap();
             let (w, h, r) = f.levels[0].clone();
-            decode_level_rgba(f.format, w, h, &f.data[r], None).unwrap()
+            decode_level_rgba(f.format, w, h, &f.data[r]).unwrap()
         };
         let (enc, raw) = (texels(PreviewMode::Encoded), texels(PreviewMode::Source));
         assert_eq!(enc.len(), raw.len());

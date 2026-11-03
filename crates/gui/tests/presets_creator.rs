@@ -224,7 +224,7 @@ fn a_saved_remap_reaches_the_plan_without_a_restart() {
     let mut m = sdc_gui::model::AppModel::new(
         settings,
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     m.user_presets = Some(presets.clone());
     m.open_folder(root);
@@ -276,7 +276,7 @@ fn a_saved_preset_is_offered_in_the_header_and_picking_it_plans_with_it() {
             ..Default::default()
         },
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     m.user_presets = Some(d.path().join("presets"));
     m.open_folder(root);
@@ -370,7 +370,7 @@ fn a_deleted_preset_named_in_sdc_toml_falls_back_with_a_banner() {
             ..Default::default()
         },
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     m.user_presets = Some(d.path().join("presets"));
     m.open_folder(root);
@@ -422,7 +422,7 @@ fn a_startup_banner_survives_a_replan_until_dismissed() {
             ..Default::default()
         },
         None,
-        std::sync::Arc::new(engine::session::Session::new(encoders_sys::Bc1Model::Ideal).unwrap()),
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
     );
     m.keep_banner("Settings were not read, defaults are used: bad".into());
     m.open_folder(root);

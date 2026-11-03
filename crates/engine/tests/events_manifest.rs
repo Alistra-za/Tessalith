@@ -31,7 +31,7 @@ fn record(
         sources: vec![],
         output: output.into(),
         validation: Default::default(),
-        bc1_model: Some("ideal".into()),
+        bc1_model: Some(engine::manifest::BC1_ENCODE_ID.into()),
         shader: Some(ShaderPick {
             shader: Shader::Default,
             provenance: ShaderOrigin::Fallback,
@@ -338,10 +338,13 @@ fn encoder_versions_come_from_the_encoders_crate() {
         .unwrap(),
     );
     let rgbcx = hex::encode(sha2::Sha256::digest(&both));
-    assert_eq!(v.rgbcx_patch, Some("bc4-round-to-nearest+bc4-search"));
+    assert_eq!(
+        v.rgbcx_patch,
+        Some("bc4-round-to-nearest+bc4-search+bc1-dual")
+    );
     assert_eq!(
         e.rgbcx_patch.as_deref(),
-        Some(format!("bc4-round-to-nearest+bc4-search@sha256:{rgbcx}").as_str())
+        Some(format!("bc4-round-to-nearest+bc4-search+bc1-dual@sha256:{rgbcx}").as_str())
     );
 }
 

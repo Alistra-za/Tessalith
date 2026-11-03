@@ -354,7 +354,7 @@ fn copy_cli_command_names_the_location_when_also_is_on() {
     tick(&mut m, AlsoTarget::Vanilla);
     let root = m.root.clone().unwrap();
     let slash = |p: &Path| p.to_string_lossy().replace('\\', "/");
-    let c = cli_command(&root, &m.cli_output(), m.session_bc1(), 0);
+    let c = cli_command(&root, &m.cli_output(), 0);
     assert!(c.contains(&format!("-o \"{}\"", slash(&loc))), "{c}");
     assert!(!c.contains(&slash(&d.path().join("out"))), "{c}");
 }

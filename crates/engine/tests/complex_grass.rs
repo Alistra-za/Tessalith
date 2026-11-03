@@ -286,7 +286,7 @@ fn a_tagged_grass_texture_is_one_bc7_unorm_file_down_to_one_by_two() {
 fn decoded_corner(f: &engine::dds::DdsFile) -> [u8; 4] {
     use engine::decode::{decode_level, Decoded};
     let (w, h, r) = f.levels[0].clone();
-    match decode_level(f.format, w, h, &f.data[r], None).unwrap() {
+    match decode_level(f.format, w, h, &f.data[r]).unwrap() {
         Decoded::Ldr(px) => px[((h - 1) * w) as usize],
         Decoded::Hdr(_) => panic!("LDR expected"),
     }
@@ -351,7 +351,6 @@ fn a_corner_no_encode_can_fix_is_val_grass_detect() {
             encoder_input: Some(std::slice::from_ref(&input)),
             base_coverage: None,
             source_peak: None,
-            bc1_model: encoders_sys::Bc1Model::Ideal,
             expected_levels: Some(1),
         });
         let named = r.warnings.iter().any(|w| w.code == Code::ValGrassDetect);

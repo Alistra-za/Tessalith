@@ -1,5 +1,4 @@
 //! GUI-only settings (M3a spec §5.5): `%APPDATA%\sdc\gui.toml`. Never part of `sdc.toml`.
-use encoders_sys::Bc1Model;
 use serde::{Deserialize, Serialize};
 mod layout;
 pub use layout::*;
@@ -8,51 +7,6 @@ use std::path::{Path, PathBuf};
 
 /// Preview size limits offered (M3a spec §6.5); 16384 only when `allow_16k_preview` is set.
 pub const PREVIEW_SIZES: [u32; 5] = [1024, 2048, 4096, 8192, 16384];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Bc1Choice {
-    #[default]
-    Ideal,
-    IdealRound4,
-    Nvidia,
-    Amd,
-}
-
-impl Bc1Choice {
-    pub const ALL: [Bc1Choice; 4] = [
-        Bc1Choice::Ideal,
-        Bc1Choice::IdealRound4,
-        Bc1Choice::Nvidia,
-        Bc1Choice::Amd,
-    ];
-    pub fn model(self) -> Bc1Model {
-        match self {
-            Bc1Choice::Ideal => Bc1Model::Ideal,
-            Bc1Choice::IdealRound4 => Bc1Model::IdealRound4,
-            Bc1Choice::Nvidia => Bc1Model::Nvidia,
-            Bc1Choice::Amd => Bc1Model::Amd,
-        }
-    }
-    /// The choice that selects `model`.
-    pub fn from_model(model: Bc1Model) -> Bc1Choice {
-        match model {
-            Bc1Model::Ideal => Bc1Choice::Ideal,
-            Bc1Model::IdealRound4 => Bc1Choice::IdealRound4,
-            Bc1Model::Nvidia => Bc1Choice::Nvidia,
-            Bc1Model::Amd => Bc1Choice::Amd,
-        }
-    }
-    /// The `sdc convert --bc1-decoder` value.
-    pub fn cli(self) -> &'static str {
-        match self {
-            Bc1Choice::Ideal => "ideal",
-            Bc1Choice::IdealRound4 => "ideal-round4",
-            Bc1Choice::Nvidia => "nvidia",
-            Bc1Choice::Amd => "amd",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -65,8 +19,6 @@ pub struct GuiSettings {
     pub allow_16k_preview: bool,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
     pub live_encode: bool,
-    /// Read at launch; a change applies after a restart (spec §4.6).
-    pub bc1_decoder: Bc1Choice,
     /// Worker threads; 0 = one per core.
     pub jobs: usize,
     /// Memory budget in MiB; 0 = half of physical memory.
@@ -153,7 +105,6 @@ impl Default for GuiSettings {
             preview_max: 4096,
             allow_16k_preview: false,
             live_encode: false,
-            bc1_decoder: Bc1Choice::Ideal,
             jobs: 0,
             mem_budget_mb: 0,
             textures_hidden: false,

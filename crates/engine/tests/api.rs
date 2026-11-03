@@ -527,9 +527,9 @@ fn sidecar_is_written_for_an_up_to_date_output() {
     assert_eq!(v["output"], "armor/iron.dds");
 }
 
-/// I2: every record carries the batch BC1 decoder model.
+/// I2: every record carries the BC1 encode target.
 #[test]
-fn records_carry_the_bc1_model() {
+fn records_carry_the_bc1_target() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
     let mut req = request(d.path());
@@ -539,7 +539,7 @@ fn records_carry_the_bc1_model() {
     assert_eq!(s.converted, 2, "{ev:#?}");
     let m = Manifest::at(&d.path().join("out")).load().unwrap();
     for key in ["armor/iron.dds", "armor/iron_n.dds"] {
-        assert_eq!(m[key].raw["bc1_model"], "ideal", "{key}");
+        assert_eq!(m[key].raw["bc1_model"], "dual", "{key}");
     }
     assert_eq!(m["armor/iron.dds"].raw["profile"]["format"], "bc1");
 }

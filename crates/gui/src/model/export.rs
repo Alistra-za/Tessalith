@@ -1,5 +1,4 @@
 //! Export and its report (M3a spec §2.5, §2.6, §5.5).
-use crate::settings::Bc1Choice;
 use engine::api::{BatchSummary, CancelToken};
 use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind};
@@ -355,13 +354,12 @@ pub fn export_folder_problem(root: &Path, export: &Path) -> Option<String> {
 /// The `sdc convert` command that reproduces the export from the saved `sdc.toml` (M3a spec §2.5). The GUI plans
 /// with High suggestions accepted (Note U3), so the command does too (audit 08c-2). Set edits in
 /// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither.
-pub fn cli_command(root: &Path, export: &Path, bc1: Bc1Choice, jobs: usize) -> String {
+pub fn cli_command(root: &Path, export: &Path, jobs: usize) -> String {
     let q = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "/"));
     let mut c = format!(
-        "sdc convert {} --recursive -o {} --accept-suggestions high --bc1-decoder {}",
+        "sdc convert {} --recursive -o {} --accept-suggestions high",
         q(root),
-        q(export),
-        bc1.cli()
+        q(export)
     );
     if jobs > 0 {
         c += &format!(" --jobs {jobs}");

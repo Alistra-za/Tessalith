@@ -54,7 +54,6 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
     req.on_existing = a.on_existing.into();
     req.dry_run = a.dry_run;
     req.sidecar = a.sidecar;
-    req.bc1_model = a.bc1_decoder.into();
     // Before planning, so a Ctrl-C during a long scan is not lost. A failed install is not fatal, but it is
     // reported: without the handler Ctrl-C ends the process at once, as for any console program.
     let cancel = CancelToken::default();
