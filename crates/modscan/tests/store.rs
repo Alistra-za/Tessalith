@@ -200,6 +200,57 @@ fn raw_strings_and_flags_are_kept_for_odd_slots() {
     assert_eq!(n, 0);
 }
 
+/// Note GP7: the edit cards build their rows with `shape_views`, so it must equal what the store reads back for a
+/// copy written from the same scan (every shader arm, odd slots, alpha, the 3D index, more than nine slots).
+#[test]
+fn shape_views_equal_the_stored_rows() {
+    let (_d, mut s, o) = store();
+    let odd: Vec<_> = [
+        b"Textures\\A_d.DDS".as_slice(),
+        b"C:\\Skyrim\\Data\\textures\\b.dds".as_slice(),
+        b"c_n".as_slice(),
+        b"".as_slice(),
+    ]
+    .map(canon_texture)
+    .to_vec();
+    let many: Vec<_> = (0..11)
+        .map(|i| canon_texture(format!("textures\\m{i}.dds").as_bytes()))
+        .collect();
+    let row = |block, shader, alpha| ShapeRow {
+        block,
+        head: head(block % 2 == 0),
+        shader,
+        alpha,
+    };
+    let mut scan = scan_of(vec![
+        row(0, Shader::None, None),
+        row(
+            1,
+            Shader::Lighting(lighting(), odd.into()),
+            Some(nif::props::Alpha {
+                flags: 4845,
+                threshold: 128,
+            }),
+        ),
+        row(2, Shader::Effect(effect(b"fx\\glow.dds").into()), None),
+        row(
+            3,
+            Shader::Other {
+                kind: "BSWaterShaderProperty".into(),
+            },
+            None,
+        ),
+        row(4, Shader::Lighting(lighting(), many.into()), None),
+    ]);
+    scan.index3d = BTreeMap::from([(1, 0), (4, 2)]);
+    let id = s
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan.clone()))
+        .unwrap();
+    let views = modscan::store::shape_views(&scan);
+    assert_eq!(views.len(), 5);
+    assert_eq!(views, s.shapes_of(id).unwrap());
+}
+
 #[test]
 fn more_than_nine_slots_is_recorded_as_a_problem() {
     let (_d, mut s, o) = store();

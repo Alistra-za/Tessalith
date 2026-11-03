@@ -1658,96 +1658,15 @@ fn anim_tracks(
         .collect()
 }
 
-/// The shape cards of `bytes`, as the scan store would give them for these bytes (`modscan` `write_shapes` and
-/// `shapes_of`): the edit-mode cards then show the edited values (Note CZ1). Empty when the bytes do not scan.
+/// The shape cards of `bytes`, as the scan store would give them for these bytes (`modscan::store::shape_views`, the
+/// one row builder `write_shapes` shares): the edit-mode cards then show the edited values (Note CZ1). Empty when the
+/// bytes do not scan.
 pub fn shape_cards(bytes: &[u8]) -> Vec<ShapeView> {
-    use modscan::store::{RawSlot, MAX_SLOTS};
-    use nif::path::TexPath;
-    use nif::scan::Shader;
-    let Ok(scan) = nif::scan::scan(bytes) else {
-        // Silent on purpose (review Minor 4): the cards fall back to titles, and the same failure blocks Export NIF
-        // with its reason, since `read_back` scans the patched bytes too.
-        return vec![];
-    };
-    // modscan's `keep_raw`: the raw string says more than the canonical path.
-    let keep_raw = |p: &TexPath| {
-        let f = &p.flags;
-        f.rebased
-            || f.prefixed
-            || f.non_dds
-            || p.raw.replace('\\', "/").to_ascii_lowercase() != p.norm
-    };
-    let json = |v: serde_json::Result<String>| v.ok();
-    scan.shapes
-        .iter()
-        .map(|s| {
-            let (shader_kind, shader_type, slsf1, slsf2, slots, params): (
-                _,
-                _,
-                _,
-                _,
-                Vec<&TexPath>,
-                _,
-            ) = match &s.shader {
-                Shader::None => (0, None, None, None, vec![], None),
-                Shader::Lighting(l, ts) => (
-                    1,
-                    Some(l.shader_type),
-                    Some(l.slsf1),
-                    Some(l.slsf2),
-                    ts.iter().take(MAX_SLOTS).collect(),
-                    json(serde_json::to_string(&l.params)),
-                ),
-                Shader::Effect(e) => (
-                    2,
-                    None,
-                    Some(e.slsf1),
-                    Some(e.slsf2),
-                    vec![&e.source, &e.greyscale],
-                    json(serde_json::to_string(&e.params)),
-                ),
-                Shader::Other { kind } => (
-                    3,
-                    None,
-                    None,
-                    None,
-                    vec![],
-                    Some(serde_json::json!({ "shader": kind }).to_string()),
-                ),
-            };
-            let h = &s.head;
-            ShapeView {
-                block: s.block,
-                name: h.name.clone(),
-                kind: format!("{:?}", h.kind),
-                shader_kind,
-                shader_type,
-                slsf1,
-                slsf2,
-                textures: slots
-                    .iter()
-                    .map(|p| (!(p.flags.empty || p.norm.is_empty())).then(|| p.norm.clone()))
-                    .collect(),
-                raw: slots
-                    .iter()
-                    .map(|p| {
-                        keep_raw(p).then(|| RawSlot {
-                            raw: p.raw.clone(),
-                            flags: p.flags.clone(),
-                        })
-                    })
-                    .collect(),
-                alpha_flags: s.alpha.map(|a| a.flags),
-                alpha_threshold: s.alpha.map(|a| a.threshold),
-                params,
-                skinned: h.skinned,
-                vertex_desc: h.vertex_desc,
-                num_vertices: h.num_vertices,
-                num_triangles: h.num_triangles,
-                index3d: scan.index3d.get(&s.block).copied(),
-            }
-        })
-        .collect()
+    // Silent on purpose (review Minor 4): the cards fall back to titles, and the same failure blocks Export NIF with
+    // its reason, since `read_back` scans the patched bytes too.
+    nif::scan::scan(bytes)
+        .map(|s| modscan::store::shape_views(&s))
+        .unwrap_or_default()
 }
 
 /// Meshes UI T5b (Note CZ19): the heel height shape `shape` needs, Z = −(lowest bind-pose vertex Z) in root space,
