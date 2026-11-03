@@ -40,11 +40,6 @@ body:
     attributes:
       label: PGPatcher version
       description: Leave blank if not used.
-  - type: dropdown
-    id: nvtt
-    attributes:
-      label: Is NVTT installed and used?
-      options: ["No", "Installed, not used", "Installed and used (BC7/BC6H)"]
   - type: textarea
     id: what
     attributes:

@@ -314,7 +314,6 @@ fn a_non_unicode_path_does_not_stop_the_settings_saving() {
     let p = d.path().join("sdc/gui.toml");
     let mut s = GuiSettings {
         live_encode: true,
-        nvtt_path: Some(bad.clone()),
         ..Default::default()
     };
     s.meshes.folder = Some(bad.clone());
@@ -325,5 +324,5 @@ fn a_non_unicode_path_does_not_stop_the_settings_saving() {
     assert_eq!(err, None);
     assert!(back.live_encode);
     assert_eq!(back.recent, [std::path::PathBuf::from("C:/a")]);
-    assert!(back.nvtt_path.is_none() && back.meshes.folder.is_none());
+    assert!(back.meshes.folder.is_none());
 }

@@ -29,11 +29,10 @@ fn word<T: serde::Serialize>(v: &T) -> String {
 }
 
 pub fn summary_of(p: &Profile) -> String {
-    let encoder = word(&p.encoder.backend);
     format!(
         "{}, {} {} effort, alpha {}, mips {} {}",
         crate::model::fields::format_label(p.format, p.color.tag),
-        crate::model::texture_view::encoder_label(&encoder),
+        word(&p.encoder.backend),
         word(&p.encoder.effort),
         word(&p.alpha.policy),
         word(&p.mips.levels),

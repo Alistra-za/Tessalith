@@ -55,7 +55,7 @@ fn mixed(dir: &std::path::Path) -> AppModel {
         let (sub, fmt, be) = match n % 4 {
             0 => (Subtype::Diffuse, Format::Bc7, Backend::Bc7e),
             1 => (Subtype::Normal, Format::Bc5, Backend::Rgbcx),
-            2 => (Subtype::Diffuse, Format::Bc7, Backend::Nvtt),
+            2 => (Subtype::Diffuse, Format::Bc7, Backend::Bc7e),
             _ => (Subtype::Height, Format::R8, Backend::Uncompressed),
         };
         let p = &mut job(&mut m, n).profile;
@@ -91,9 +91,6 @@ fn each_new_filter_alone_and_combined_with_and() {
     m.filter.format = Some("bc5".into());
     assert_eq!(shown(&m), keys(&[1, 5]));
     m.filter.format = None;
-    m.filter.encoder = Some("nvtt".into());
-    assert_eq!(shown(&m), keys(&[2, 6]));
-    m.filter.encoder = None;
     m.filter.set = SetFilter::In;
     assert_eq!(shown(&m), keys(&[0, 1]), "a set of more than itself");
     m.filter.set = SetFilter::NotIn;
@@ -101,13 +98,12 @@ fn each_new_filter_alone_and_combined_with_and() {
     // AND with each other, with a toggle and with the search.
     m.filter.set = SetFilter::Any;
     m.filter.subtype = Some("diffuse".into());
-    m.filter.encoder = Some("nvtt".into());
-    assert_eq!(shown(&m), keys(&[2, 6]));
+    assert_eq!(shown(&m), keys(&[0, 2, 4, 6]));
     m.filter.format = Some("bc5".into());
     assert!(shown(&m).is_empty());
     m.filter.format = Some("bc7".into());
     m.filter.not_in_set = true;
-    assert_eq!(shown(&m), keys(&[2, 6]));
+    assert_eq!(shown(&m), keys(&[2, 4, 6]));
     m.search = "t00006".into();
     assert_eq!(shown(&m), keys(&[6]));
 }
@@ -145,13 +141,7 @@ fn the_combo_options_list_only_what_is_in_the_folder() {
     let o = m.filter_options();
     assert_eq!(o.subtypes, ["diffuse", "height", "normal"]);
     assert_eq!(o.formats, ["bc5", "bc7", "r8"]);
-    assert_eq!(
-        o.encoders,
-        ["bc7e", "rgbcx", "nvtt", "uncompressed"],
-        "in the order the filter lists them"
-    );
     for n in 0..8 {
-        job(&mut m, n).profile.encoder.backend = Backend::Bc7e;
         job(&mut m, n).profile.format = Format::Bc7;
         job(&mut m, n).profile.subtype = Subtype::Diffuse;
     }
@@ -159,7 +149,6 @@ fn the_combo_options_list_only_what_is_in_the_folder() {
     let o = m.filter_options();
     assert_eq!(o.subtypes, ["diffuse"]);
     assert_eq!(o.formats, ["bc7"]);
-    assert_eq!(o.encoders, ["bc7e"]);
 }
 
 #[test]
@@ -222,7 +211,7 @@ fn keys_and_ranges_follow_the_sorted_order() {
     assert_eq!(m.selected_items(), keys(&[1, 3, 4]));
     // A selection survives a filter and a sort change, and the hidden ones are counted.
     m.prefs.sort = SortKey::Name;
-    m.filter.encoder = Some("nvtt".into());
+    m.filter.subtype = Some("no-such-subtype".into());
     assert_eq!(m.selected_items(), keys(&[1, 3, 4]));
     assert_eq!(
         m.selection_summary(false).as_deref(),
@@ -327,13 +316,7 @@ fn filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a
 
 /// The filter combos drawn now: a combo's accessible text is its value ("Sub-type: Any").
 fn filter_combos(h: &Harness<'static, AppModel>) -> Vec<String> {
-    let names = [
-        "Sub-type",
-        "Output format",
-        "Encoder",
-        "Set membership",
-        "Sort",
-    ];
+    let names = ["Sub-type", "Output format", "Set membership", "Sort"];
     h.query_all_by_role(egui::accesskit::Role::ComboBox)
         .filter_map(|n| n.accesskit_node().value())
         .filter(|v| names.iter().any(|c| v.starts_with(c)))
@@ -388,13 +371,7 @@ fn the_filter_popup_holds_the_combos_and_the_tile_buttons_step_by_16() {
     h.run();
     h.run();
     let combos = filter_combos(&h);
-    for c in [
-        "Sub-type",
-        "Output format",
-        "Encoder",
-        "Set membership",
-        "Sort",
-    ] {
+    for c in ["Sub-type", "Output format", "Set membership", "Sort"] {
         assert!(combos.iter().any(|v| v.starts_with(c)), "{c} in {combos:?}");
     }
     h.get_by_label("Larger tiles").click();
@@ -501,7 +478,6 @@ fn filters_sort_and_tile_round_trip_through_gui_toml() {
     let mut s = GuiSettings::default();
     s.layout.filter_subtype = Some("normal".into());
     s.layout.filter_format = Some("bc5".into());
-    s.layout.filter_encoder = Some("rgbcx".into());
     s.layout.filter_set = "not-in".into();
     s.layout.sort = "status".into();
     s.layout.tile = 150.0;
@@ -532,7 +508,7 @@ fn filters_sort_and_tile_round_trip_through_gui_toml() {
         (&Default::default(), &Default::default()),
     );
     assert_eq!(cur.sort, "status");
-    assert_eq!(cur.filter_encoder.as_deref(), Some("rgbcx"));
+    assert_eq!(cur.filter_format.as_deref(), Some("bc5"));
     assert_eq!(cur.tile, 150.0);
 }
 
@@ -615,14 +591,14 @@ fn two_filters_are_picked_through_the_filter_popup_without_reopening_it() {
         !filter_combos(&h).is_empty(),
         "Filter ▾ stays open after a pick in one of its combos"
     );
-    combo(&h, "Encoder").click();
+    combo(&h, "Output format").click();
     h.run();
-    h.get_by_label("NVTT").click();
+    h.get_by_label("BC7").click();
     h.run();
     h.run();
-    assert_eq!(h.state().filter.encoder.as_deref(), Some("nvtt"));
+    assert_eq!(h.state().filter.format.as_deref(), Some("bc7"));
     assert_eq!(h.state().filter.subtype.as_deref(), Some("diffuse"));
-    assert_eq!(shown(h.state()), keys(&[2, 6]));
+    assert_eq!(shown(h.state()), keys(&[0, 2, 4, 6]));
     // A click outside still closes it, and the button opens it again.
     h.get_by_label("Larger tiles").click();
     h.run();

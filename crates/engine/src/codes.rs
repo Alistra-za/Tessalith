@@ -100,9 +100,6 @@ codes! {
     ValBc6hPeak = "VAL-BC6H-PEAK" => Warning,
     ValHeader = "VAL-HEADER" => Error,
     ValMipError = "VAL-MIP-ERROR" => Warning,
-    EncNvttMissing = "ENC-NVTT-MISSING" => Blocking,
-    EncNvttVersion = "ENC-NVTT-VERSION" => Blocking,
-    EncNvttFailed = "ENC-NVTT-FAILED" => Error,
     EncWeightsIgnored = "ENC-WEIGHTS-IGNORED" => Warning,
     InDuplicate = "IN-DUPLICATE" => Blocking,
     InDdsSkipped = "IN-DDS-SKIPPED" => Info,
@@ -255,7 +252,6 @@ mod tests {
         assert_eq!(Code::parse("VAL-PGPATCHER-50"), Some(Code::ValPgpatcher50));
         let names: BTreeSet<_> = Code::ALL.iter().map(|c| c.as_str()).collect();
         assert_eq!(names.len(), Code::ALL.len());
-        assert_eq!(Code::EncNvttFailed.severity(), Severity::Error);
         assert_eq!(Code::EncWeightsIgnored.severity(), Severity::Warning);
         assert_eq!(Code::GrassShape.severity(), Severity::Error);
         assert_eq!(Code::ValGrassDetect.severity(), Severity::Error);
@@ -279,7 +275,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 118);
+        assert_eq!(Code::ALL.len(), 115);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

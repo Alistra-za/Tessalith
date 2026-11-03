@@ -6,8 +6,6 @@ The centre column with one texture selected: its settings, the questions it stil
 
 The settings of the selected texture, in groups: Type, Colour, Alpha, Mipmaps, Compression. Each value shows where it came from: the preset, the config, the analysis, or your `[files]` entry (for example "from sdc.toml", "suggested", or "from the meshes that use this texture"). Selecting a set shows the set editor instead.
 
-![The settings of a fern texture.](../img/gui/GUI-Texture-Panel/texture-panel.png)
-
 | Row | Choices |
 |---|---|
 | Sub-type | Grouped as PBR (Community Shaders), Advanced skin (Community Shaders), Colour maps, Normal maps, Grayscale maps, Packed and data, HDR maps, Other. Only sub-types the current Mode allows are offered, plus the texture's current sub-type. The list opens under the field with a search box and the suggested type on top, the same picker as the Problems tab's **Set type…**. |
@@ -18,18 +16,13 @@ The settings of the selected texture, in groups: Type, Colour, Alpha, Mipmaps, C
 | Coverage, Exact opaque alpha | Auto / On / Off; on or off. |
 | Normal handling, Normal base level | Renormalise or Renormalise and bake; Renormalise to unit length or Keep as authored. |
 | Mipmaps: Levels, Filter, Edge | Full chain or None (base level only); Box, Tent, Mitchell, Kaiser; Wrap or Clamp. |
-| Format, Effort, Encoder, BC7 weighting | The block formats plus RGBA8, R8, RG8 and (under `cs`) RGBA16F; bc7e effort; Built-in or NVTT Production; Linear, Perceptual, Alpha ×2, ×8 or ×16. |
+| Format, Effort, BC7 weighting | The block formats plus RGBA8, R8, RG8 and (under `cs`) RGBA16F; bc7e effort; Linear, Perceptual, Alpha ×2, ×8 or ×16. |
 
 Options a texture cannot use are greyed out, with the reason on hover.
 
 **Output size.** The settings start with a line such as *Output: BC7 · 2048×2048 · 12 mips · 5.3 MiB ≈ VRAM*: the format, the size after any resize, the number of mip levels and the bytes of the whole chain (hover for the exact bytes, the header and the file size). The status line under the header and the bulk panel add *≈ VRAM: selection … · folder …*, the total over the selected textures and over every texture that is, or will be once decided, written. A compressed size is also what the texture takes in video memory. A source whose size cannot be read cheaply (a PSD) has no estimate and is counted as "unsized", as is a texture whose size is still being read in the background. A size read that fails is tried again once, at the next plan; after that the file stays unsized for the session, and the Messages log says so.
 
 **Compression.** For an emissive it shows the `FMT-HDR-SOURCE` reason (why it is BC6H or BC7 sRGB). Effort is locked for the uncompressed formats.
-
-**Encoder.** NVTT Production is a quality option for BC7 and BC6H only, 40 to 60 times slower ([NVTT backend](NVTT-Backend.md)).
-
-- When the row is locked or hidden, and what a format change does: [In the GUI](NVTT-Backend.md#in-the-gui).
-- A failed nvcompress fails that file (`ENC-NVTT-FAILED`); there is no silent fallback.
 
 **Mipmaps: Filter and Edge.** The default filter is *Box*. Tent, Mitchell and Kaiser are only for sRGB colour without alpha weighting (not cutout or blend); an HDR texture (BC6H or RGBA16F) may use Box or Tent only. *Edge* (*Wrap* by default) is locked while the filter is Box, because only Tent, Mitchell and Kaiser read past the edge.
 

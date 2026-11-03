@@ -143,7 +143,7 @@ fn zero_fix(p: &Profile) -> bool {
     p.subtype == Subtype::ComplexMaterial && p.alpha.parallax != Some(true)
 }
 
-/// The encoder-independent BC7 opaque fix-ups (DECISIONS Note NV6) on blocks `o` whose source texels `b` (16 per
+/// The BC7 opaque fix-ups on blocks `o` whose source texels `b` (16 per
 /// block) have alpha 255 throughout: the lossless rotated mode 4/5 fix always, and the S5b mode-6 byte patch when
 /// `mode6_patch` (bc7e without the native flag only). With `zero`, blocks whose source alpha is 0 throughout get the
 /// exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1).
@@ -160,16 +160,6 @@ fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], mode6_patch: bool, zero: bool) {
             // nor the mode-6 patch covers them. Lossless for RGB, so it runs with the flag off.
             force_opaque_rotated(blk);
         }
-    }
-}
-
-/// The BC7 post steps for a level another encoder wrote (DECISIONS Note NV6): the rotated opaque fix (no mode-6
-/// patch: NVTT constrains the p-bit, spec §5.6), then the complex-grass corner guard, as the bc7e path runs them.
-/// `blocks` is `gather_blocks` of the level's texels.
-pub(crate) fn bc7_post_fix(out: &mut [u8], blocks: &[[u8; 4]], w: u32, h: u32, p: &Profile) {
-    bc7_opaque_fix(out, blocks, false, zero_fix(p));
-    if p.subtype == Subtype::ComplexGrass {
-        guard_grass_corner(out, blocks, w, h, p);
     }
 }
 

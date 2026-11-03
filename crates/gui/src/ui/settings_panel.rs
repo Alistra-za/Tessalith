@@ -5,10 +5,9 @@ use super::status::code_hover;
 use super::type_picker::TypeKind;
 use crate::model::code_text::{code_line, shown_for, without_codes};
 use crate::model::fields::{
-    auto_subtype_reason, backend_lock, channel_text, edge_view, encoding_options, field_hidden,
-    field_views, filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on,
-    provenance_text, weighting_option_lock, FieldView, NOT_VALID, PARALLAX_HOVER, WEIGHTING,
-    WEIGHTING_OPTIONS,
+    auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
+    filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
+    weighting_option_lock, FieldView, NOT_VALID, PARALLAX_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -16,8 +15,8 @@ use eframe::egui;
 use encoders_sys::RGBCX_MAX_LEVEL;
 use engine::codes::{Code, Warning};
 use engine::config::{
-    AlphaPolicy, Backend, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention,
-    MipFilter, Profile, Subtype, Target, ALPHA_THRESHOLD,
+    AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
+    Profile, Subtype, Target, ALPHA_THRESHOLD,
 };
 use engine::policy::{offered, Provenance, ResolvedJob};
 use serde_json::{json, Value};
@@ -247,11 +246,6 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .iter()
             .map(|(m, l)| opt(json!(m), l))
             .collect(),
-        // `set_field` writes "Built-in" as each texture's own format default (DECISIONS Note NV).
-        "encoder.backend" => vec![
-            opt(json!(engine::policy::default_backend(p.format)), "Built-in"),
-            opt(json!(Backend::Nvtt), "NVTT Production"),
-        ],
         // Cubemap (Note DT7). Auto is the unset layout, "none" the unset style / ground fill.
         "cubemap.layout" => std::iter::once(opt(json!("auto"), "Auto"))
             // Faces is detected from a six-file set, never chosen.
@@ -597,8 +591,6 @@ pub struct Ctx<'a> {
     pub edit_off: Option<String>,
     /// The item's warnings (the Compression group shows the HDR reason).
     pub warnings: &'a [Warning],
-    /// The NVTT probe found nvcompress (the Encoder row offers NVTT only then).
-    pub nvtt_found: bool,
 }
 
 /// What a field row asks of the model.
@@ -828,16 +820,13 @@ fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Acti
                     let exr = (name == "Alpha")
                         .then(|| crate::model::fields::exr_straight_view(cx.target, cx.job))
                         .flatten();
-                    for mut f in field_views(cx.target, cx.job)
+                    for f in field_views(cx.target, cx.job)
                         .into_iter()
                         .filter(|f| {
                             group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
                         })
                         .chain(exr)
                     {
-                        if f.field == "encoder.backend" && f.lock.is_none() {
-                            f.lock = backend_lock(&cx.job.profile, cx.nvtt_found);
-                        }
                         match field_row(ui, cx, &f) {
                             Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
                             Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
@@ -1368,7 +1357,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 compact,
                 edit_off: edit_off.clone(),
                 warnings: &warnings,
-                nvtt_found: model.nvtt_found(),
             };
             match &status {
                 ItemStatus::Skipped(r) => {

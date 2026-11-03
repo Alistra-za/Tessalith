@@ -61,6 +61,15 @@ fn help_and_version_exit_0_bad_flag_exits_2() {
 }
 
 #[test]
+fn the_nvtt_flag_is_refused() {
+    let o = sdc()
+        .args(["convert", "--nvtt", "x", "in", "out"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 2);
+    assert!(text(&o.stderr).contains("--nvtt"), "{}", text(&o.stderr));
+}
+#[test]
 fn bad_mem_budget_is_a_usage_error() {
     for bad in ["8Q", "G", "-1", "99999999999999999999G"] {
         let o = sdc()

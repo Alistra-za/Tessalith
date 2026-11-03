@@ -90,7 +90,7 @@ Every texture's final settings (its profile) are built from layers. Later layers
 
 ### Format and encoder
 
-When a layer changes only `format`, the encoder follows it: BC1, BC3, BC4 and BC5 use `rgbcx`, BC6H uses `ispc_bc6h`, BC7 uses `bc7e`, and uncompressed formats use `uncompressed`. A backend that does not fit the new format is kept only if the same layer set both, or a pinning layer (a sub-type- or file-scoped `--set`, a rule, or `[files]`) set the backend at least as specifically as the format. Preset and config `[subtypes]` tables never pin. When the backend is kept, the profile is invalid (`CFG-INVALID`). So `defaults.encoder.backend = "nvtt"` applies to BC7 and BC6H textures and leaves BC4 and BC5 textures on rgbcx.
+When a layer changes only `format`, the encoder follows it: BC1, BC3, BC4 and BC5 use `rgbcx`, BC6H uses `ispc_bc6h`, BC7 uses `bc7e`, and uncompressed formats use `uncompressed`. A backend that does not fit the new format is kept only if the same layer set both, or a pinning layer (a sub-type- or file-scoped `--set`, a rule, or `[files]`) set the backend at least as specifically as the format. Preset and config `[subtypes]` tables never pin. When the backend is kept, the profile is invalid (`CFG-INVALID`).
 
 ## [defaults] and [subtypes]
 

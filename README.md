@@ -15,7 +15,7 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 ## Features
 
 **Encoding and checks**
-- BC1, BC3, BC4, BC5, BC6H and BC7 output, with the [best encoder for each format](#uses-the-best-encoder-available). Optional [NVTT backend](docs/wiki/NVTT-Backend.md) for BC7 / BC6H.
+- BC1, BC3, BC4, BC5, BC6H and BC7 output, with the [best encoder for each format](#uses-the-best-encoder-available).
 - [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) for data maps whose alpha matters.
 - Optional exact-opaque alpha 255 (forces BC7 mode 6's p-bit to 1; off by default).
 - Every encode is decoded and checked against Skyrim's rules. DDS files made by other tools can be validated too.
@@ -58,7 +58,7 @@ Each format uses the encoder that measured best. The numbers behind the charts a
 
 ### BC7
 
-![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.32 dB RGB and alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. NVTT Production, Compressonator and texconv CPU take 14 to 33 s and do not beat it. GPU encoders take 0.03 to 0.09 s and lose 1.4 to 2.8 dB.](docs/img/encoder-bc7.svg)
+![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.32 dB RGB and alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. Compressonator and texconv CPU take 16 to 33 s and do not beat it. texconv GPU takes 0.03 to 0.09 s and loses 1.8 dB RGB and 2.8 dB alpha.](docs/img/encoder-bc7.svg)
 
 `max` is opt-in and was measured on a separate sample ([Research](docs/wiki/Research.md#bc7-gpu-and-cpu-encoders-speed-and-quality)).
 
@@ -66,7 +66,7 @@ For BC7 data maps with alpha, see the [BC7 weighting](docs/wiki/GUI-Texture-Pane
 
 ### Other formats
 
-![Bar chart of PSNR in dB grouped by format (BC1, BC3, BC4, BC5, BC6H), one striped bar per encoder. rgbcx is best on BC1, BC4 and BC5 and within 0.09 dB of NVTT 3 on BC3. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
+![Bar chart of PSNR in dB grouped by format (BC1, BC3, BC4, BC5, BC6H), one striped bar per encoder. rgbcx is best on BC1, BC3, BC4 and BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
 
 Footnotes and per-image counts: [Research](docs/wiki/Research.md#other-formats-best-encoders-per-format).
 
@@ -107,9 +107,8 @@ See [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
 | [Home](docs/wiki/Home.md) | [GUI guide](docs/wiki/GUI-Guide.md) | [CLI reference](docs/wiki/CLI-Reference.md) |
 | [Installation](docs/wiki/Installation.md) | [Texture types](docs/wiki/Texture-Types.md) (packing, TruePBR, RNM, grass) | [Project config](docs/wiki/Project-Config.md) |
 | [Getting started](docs/wiki/Getting-Started.md) | [Mod scanning](docs/wiki/Mod-Scanning.md) | [Presets and targets](docs/wiki/Presets-and-Targets.md) |
-| [FAQ](docs/wiki/FAQ.md) | [NVTT backend](docs/wiki/NVTT-Backend.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
-| [Troubleshooting](docs/wiki/Troubleshooting.md) | [Research behind the defaults](docs/wiki/Research.md) | |
-| | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | |
+| [FAQ](docs/wiki/FAQ.md) | [Research behind the defaults](docs/wiki/Research.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
+| [Troubleshooting](docs/wiki/Troubleshooting.md) | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | |
 
 Optional plugins for Photoshop, GIMP 3, Paint.NET and chaiNNer are on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins), which gets bug fixes but is not kept in step with the engine.
 

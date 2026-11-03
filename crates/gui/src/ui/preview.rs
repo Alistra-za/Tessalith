@@ -80,8 +80,6 @@ struct Info {
     cube_item: bool,
     /// The item is a six-file cube: the source pane has a face selector.
     six_files: bool,
-    /// The texture exports with NVTT; its preview uses the built-in encoder (DECISIONS Note NV9).
-    nvtt: bool,
 }
 
 impl Info {
@@ -89,7 +87,6 @@ impl Info {
         let shown = model.preview.encoded.shown().cloned();
         let job = model.item(key).and_then(|i| i.job.as_ref());
         let job_format = job.map(|j| j.profile.format);
-        let nvtt = job.is_some_and(|j| j.profile.encoder.backend == engine::config::Backend::Nvtt);
         let has_source =
             matches!(&model.preview.source, SourceState::Ready(s) if !s.levels.is_empty());
         let (dims, first, end) = model.preview_mips();
@@ -105,7 +102,6 @@ impl Info {
                 .is_some_and(|c| c.sources.len() == 6),
             shown,
             has_source,
-            nvtt,
         }
     }
 
@@ -542,9 +538,6 @@ fn notes(
     });
     let mut lines: Vec<String> = vec![];
     lines.extend(skipped_note(&info.dims, info.first));
-    if info.nvtt {
-        lines.push("Preview uses the built-in encoder; the export uses NVTT.".into());
-    }
     if let Some(UploadPath::CpuDecoded(why) | UploadPath::Skipped(why)) = gpu.encoded {
         if !why.is_empty() {
             lines.push(why.to_string());

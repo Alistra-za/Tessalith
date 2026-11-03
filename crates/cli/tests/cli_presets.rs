@@ -108,7 +108,7 @@ fn presets_schema_prints_one_schema_or_writes_all() {
 }
 
 #[test]
-fn encoders_reports_versions_isa_model_and_nvtt() {
+fn encoders_reports_versions_isa_and_model() {
     let (code, out, err) = stdout_of(&["encoders"]);
     assert_eq!(code, 0);
     assert!(err.is_empty(), "result verbs print on stdout: {err}");
@@ -128,8 +128,8 @@ fn encoders_reports_versions_isa_model_and_nvtt() {
 }
 
 #[test]
-fn encoders_json_is_one_object_and_nvtt_comes_from_the_flag() {
-    let (code, out, _) = stdout_of(&["encoders", "--json", "--nvtt", "no/such/nvcompress.exe"]);
+fn encoders_json_is_one_object() {
+    let (code, out, _) = stdout_of(&["encoders", "--json"]);
     assert_eq!(code, 0);
     assert_eq!(out.lines().count(), 1, "{out}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -142,18 +142,6 @@ fn encoders_json_is_one_object_and_nvtt_comes_from_the_flag() {
         .unwrap()
         .starts_with("bc4-round-to-nearest+bc4-search@sha256:"));
     assert!(["sse2", "sse4", "avx", "avx2"].contains(&v["isa"].as_str().unwrap()));
-    assert_eq!(v["nvtt"]["found"], false);
-    assert_eq!(v["nvtt"]["source"], "--nvtt");
-    // M5 (DECISIONS Note NV3, AF3): an existing file that is sdc itself is refused, never run.
-    let exe = env!("CARGO_BIN_EXE_sdc");
-    let (_, out, _) = stdout_of(&["encoders", "--json", "--nvtt", exe]);
-    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["nvtt"]["found"], false);
-    assert!(v["nvtt"]["path"].as_str().unwrap().ends_with("sdc.exe"));
-    assert!(
-        v["nvtt"]["error"].as_str().unwrap().contains("sdc itself"),
-        "{v}"
-    );
 }
 
 fn sdc_in(appdata: &std::path::Path, args: &[&str]) -> (i32, String, String) {

@@ -31,7 +31,6 @@ pub mod load;
 pub mod manifest;
 pub(crate) mod migrate;
 pub mod mips;
-pub mod nvtt;
 pub mod ops;
 pub mod overrides;
 pub mod pack;

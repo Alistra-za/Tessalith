@@ -1,3 +1,31 @@
 id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
 FK1	FK		back	FL		partial	2026-11-02		goes: "each edit on such a project still blocks the panel for the length of a whole re-plan" (Note FL partial plans); stays: the cause and the reproduction
 FK2	FK		back	FL		partial	2026-11-02		goes: the controls wait for the whole plan; stays: the controls, the reason text and Ctx::edit_off, waiting for the edit's partial plan (Note FL6)
+Y9	Y		back	FM		archive-item	2026-11-02		whole: the NVTT flag is gone
+NV	NV		back	FM		archive-note	2026-11-02		whole: the NVTT backend is removed (FM14)
+AF3	AF		back	FM		archive-item	2026-11-02		whole: the NVTT probe is gone (FM14)
+AF¶- AF3: on a timeout (or a failed wait)	AF		back	FM		archive-item	2026-11-02		AF9 sub-bullet about the NVTT probe
+AF10	AF		back	FM		partial	2026-11-02		goes: the NVTT-probe example; stays: only a user edit cancels a queued Export
+AF11	AF		back	FM		partial	2026-11-02		goes: the NVTT-probe example; stays: undo and redo count as edits
+AG40	AG		back	FM		partial	2026-11-02		goes: the NvttPath picker purpose; stays: the other purposes
+AG42	AG		back	FM		partial	2026-11-02		goes: NvttPath in the app-wide list
+AG46	AG		back	FM		partial	2026-11-02		goes: the Encoder combo (the filter is removed); stays: Sub-type, Output format, Set membership
+AG111	AG		back	FM		partial	2026-11-02		goes: the NVTT probe sentence
+AH¶- **BC7 exactness:**	AH		back	FM		partial	2026-11-02		goes: "on both the bc7e and the NVTT paths"
+AM5	AM		back	FM		partial	2026-11-02		goes: NVTT as an encoder choice
+BC9	BC		back	FM		archive-item	2026-11-02		whole: nvcompress level timeout is gone
+BC12	BC		back	FM		archive-item	2026-11-02		whole: NVTT temp folders are gone
+BC13	BC		back	FM		partial	2026-11-02		goes: the nvtt::TempDir sentence; stays: decode_peak and the open list
+BQ3	BQ		back	FM		archive-item	2026-11-02		whole: the nvcompress working folder is gone
+BS3	BS		back	FM		partial	2026-11-02		goes: the AF3/NVTT probe comparison
+CN33	CN		back	FM		partial	2026-11-02		goes: NVTT version in the up-to-date check
+CP4	CP		back	FM		partial	2026-11-02		goes: NVTT in the backend list
+CV3	CV		back	FM		archive-item	2026-11-02		whole: NVTT timeout and cancel kill_tree
+CV15	CV		back	FM		archive-item	2026-11-02		whole: the bulk Encoder row NVTT lock
+CV21	CV		back	FM		partial	2026-11-02		goes: NVTT in the folder list; stays: a non-Unicode path is left out
+DM4	DM		back	FM		partial	2026-11-02		goes: NVTT outputs from the blind-spot list
+DT2	DT		back	FM		partial	2026-11-02		goes: the NV9 sentence
+FB8	FB		back	FM		partial	2026-11-02		goes: the Advanced drawer NVTT line
+FE7	FE		back	FM		partial	2026-11-02		goes: the NVTT comparison; stays: the RMSLE miss accepted
+FF6	FF		back	FM		partial	2026-11-02		goes: the NVTT-Backend.md page; stays: Project-Config and Troubleshooting
+FL2	FL		back	FM		partial	2026-11-02		goes: NVTT probe from the equality list

@@ -20,13 +20,10 @@ After the pills comes **Filter ▾**. It opens a popup with five combos, and sta
 |---|---|
 | *Sub-type* | *Any*, then the sub-types in the open folder. |
 | *Output format* | *Any*, then the formats in the open folder. |
-| *Encoder* | *Any*, bc7e, rgbcx, ispc for BC6H, NVTT, uncompressed (only those in use). |
 | *Set membership* | *Any*, *In a set*, *Not in a set*. |
 | *Sort* | See [Sort](#sort). |
 
-The button reads **Filter (k) ▾** while k of the four filter combos are set. Sort is not a filter and is not counted.
-
-![The Filter popup.](../img/gui/GUI-Textures-Column/filter-popup.png)
+The button reads **Filter (k) ▾** while k of the three filter combos are set. Sort is not a filter and is not counted.
 
 All filters and the search box combine: a texture shows only if it passes every one.
 

@@ -179,7 +179,7 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 - **No RDO.**
 - **Stray alpha is removed before mips and encoding** when the policy is `remove` (the default for maps whose alpha is not used).
 - **Tessalith writes its own DDS headers** ([`crates/engine/src/dds.rs`](../../crates/engine/src/dds.rs)): DX10 for BC6H, BC7 and every `_SRGB` format, legacy FourCC for BC1/BC3 UNORM under the `auto` header setting, and `ATI1`/`ATI2` never.
-- **NVTT 3 is an optional external program** that the user installs; see [Local encoder benchmark](encoder-benchmark.md#what-tessalith-does-because-of-this) and the [NVTT backend](../wiki/NVTT-Backend.md) page.
+- **NVTT 3 was an optional external program** that the user installed in 1.x, and 2.0 removed it; see [Local encoder benchmark](encoder-benchmark.md#what-tessalith-does-because-of-this).
 
 ## Sources
 

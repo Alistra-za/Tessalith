@@ -2,7 +2,6 @@
 //! of what it shows.
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::{counts_toward_badge, AppModel};
-use engine::config::Backend;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -44,10 +43,9 @@ pub struct Filter {
     pub warnings: bool,
     pub failed: bool,
     pub not_in_set: bool,
-    /// A sub-type id (`Subtype::id`), a format id (`Format::id`) or a backend id; `None` is Any.
+    /// A sub-type id (`Subtype::id`) or a format id (`Format::id`); `None` is Any.
     pub subtype: Option<String>,
     pub format: Option<String>,
-    pub encoder: Option<String>,
     pub set: SetFilter,
     /// Note FB12: the Helpers group is collapsed (default false: open). Not a filter: it hides no count and
     /// `filters_active` / `clear_filters` ignore it. It lives here because layout persistence already saves it.
@@ -116,37 +114,11 @@ impl Default for ColumnPrefs {
     }
 }
 
-/// The encoders the filter can name, in the order it lists them, by `Backend` id.
-const ENCODERS: [(&str, &str); 5] = [
-    ("bc7e", "bc7e"),
-    ("rgbcx", "rgbcx"),
-    ("ispc_bc6h", "ispc (BC6H)"),
-    ("nvtt", "NVTT"),
-    ("uncompressed", "uncompressed"),
-];
-
-/// The label of an encoder id.
-pub fn encoder_label(id: &str) -> &str {
-    ENCODERS.iter().find(|e| e.0 == id).map_or(id, |e| e.1)
-}
-
-/// Exhaustive on purpose: a new `Backend` fails to build here until it has an `ENCODERS` row.
-fn backend_id(b: Backend) -> &'static str {
-    match b {
-        Backend::Bc7e => ENCODERS[0].0,
-        Backend::Rgbcx => ENCODERS[1].0,
-        Backend::IspcBc6h => ENCODERS[2].0,
-        Backend::Nvtt => ENCODERS[3].0,
-        Backend::Uncompressed => ENCODERS[4].0,
-    }
-}
-
 /// The values the combos list: only those in the folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FilterOptions {
     pub subtypes: Vec<String>,
     pub formats: Vec<String>,
-    pub encoders: Vec<String>,
 }
 
 /// What each filter pill would show, over all items (A6).
@@ -212,7 +184,7 @@ impl AppModel {
             .collect()
     }
 
-    /// The sub-types, formats and encoders of the folder's textures, for the combos. Cached by the items revision.
+    /// The sub-types and formats of the folder's textures, for the combos. Cached by the items revision.
     pub fn filter_options(&self) -> Arc<FilterOptions> {
         let mut c = self.texture_cache.borrow_mut();
         if let Some((rev, o)) = &c.options {
@@ -222,7 +194,6 @@ impl AppModel {
         }
         let mut subtypes = std::collections::BTreeSet::new();
         let mut formats = std::collections::BTreeSet::new();
-        let mut backends = HashSet::new();
         for p in self
             .items
             .iter()
@@ -231,16 +202,10 @@ impl AppModel {
         {
             subtypes.insert(p.subtype.id());
             formats.insert(p.format.id());
-            backends.insert(backend_id(p.encoder.backend));
         }
         let o = Arc::new(FilterOptions {
             subtypes: subtypes.into_iter().collect(),
             formats: formats.into_iter().collect(),
-            encoders: ENCODERS
-                .iter()
-                .filter(|e| backends.contains(e.0))
-                .map(|e| e.0.to_string())
-                .collect(),
         });
         c.options = Some((self.items_rev(), o.clone()));
         o
@@ -342,9 +307,6 @@ impl AppModel {
                     && f.format
                         .as_ref()
                         .is_none_or(|s| profile.is_some_and(|p| p.format.id() == *s))
-                    && f.encoder.as_ref().is_none_or(|s| {
-                        profile.is_some_and(|p| backend_id(p.encoder.backend) == *s)
-                    })
             })
             .map(|(n, _)| n)
             .collect();

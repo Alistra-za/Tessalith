@@ -84,12 +84,6 @@ scenario = "tile_menu"
 used_by = ["GUI-Textures-Column.md"]
 
 [[shot]]
-id = "filter-popup"
-page = "GUI-Textures-Column"
-scenario = "filter_popup"
-used_by = ["GUI-Textures-Column.md"]
-
-[[shot]]
 id = "members-of-kind"
 page = "GUI-Bulk-and-Rename"
 scenario = "members_of_kind"
@@ -222,12 +216,6 @@ id = "pgp-material"
 page = "GUI-PGPatcher-JSON"
 scenario = "pgp_material"
 used_by = ["GUI-PGPatcher-JSON.md"]
-
-[[shot]]
-id = "texture-panel"
-page = "GUI-Texture-Panel"
-scenario = "texture_panel"
-used_by = ["GUI-Texture-Panel.md"]
 
 [[shot]]
 id = "rnm-panel"

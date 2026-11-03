@@ -174,8 +174,6 @@ pub struct LayoutSettings {
     pub filter_subtype: Option<String>,
     #[serde(deserialize_with = "lenient")]
     pub filter_format: Option<String>,
-    #[serde(deserialize_with = "lenient")]
-    pub filter_encoder: Option<String>,
     #[serde(deserialize_with = "lenient_any")]
     pub filter_set: String,
     /// The Textures sort (`name`, `size`, `status`) and tile size in points.
@@ -220,7 +218,6 @@ impl Default for LayoutSettings {
             filters: vec![],
             filter_subtype: None,
             filter_format: None,
-            filter_encoder: None,
             filter_set: "any".into(),
             sort: "name".into(),
             tile: 96.0,

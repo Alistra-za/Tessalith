@@ -20,7 +20,7 @@ This wiki covers version 1.0.0. Tessalith is licensed GPL-3.0-or-later. Its conv
 
 | Page | What it covers |
 |---|---|
-| [Installation](Installation.md) | The release zip, requirements, building from source, the encoder libraries, optional NVTT setup. |
+| [Installation](Installation.md) | The release zip, requirements, building from source, the encoder libraries. |
 | [Getting started](Getting-Started.md) | A first project from source folder to finished DDS files, in the CLI and in the GUI. |
 | [CLI reference](CLI-Reference.md) | Every `sdc` subcommand and flag, exit codes, the JSON event stream. |
 | [Project config](Project-Config.md) | Every `sdc.toml` key, its default, and how settings layer. |
@@ -29,7 +29,6 @@ This wiki covers version 1.0.0. Tessalith is licensed GPL-3.0-or-later. Its conv
 | [Texture types](Texture-Types.md) | Sub-types, file suffixes, naming, formats, packing and set shaders. |
 | [Mod scanning](Mod-Scanning.md) | Scanning meshes and plugins from an MO2 instance or a folder, and what the scan feeds back. |
 | [NIF editing](GUI-NIF-Edit.md) | Editing a mesh's shader, alpha, controllers and clips in the Meshes view, and exporting the edited NIF. |
-| [NVTT backend](NVTT-Backend.md) | Using NVIDIA Texture Tools as an optional BC7/BC6H encoder. |
 | [Validation and output](Validation-and-Output.md) | What gets checked after encoding, the output layout, the manifest, re-run behaviour. |
 | [Troubleshooting](Troubleshooting.md) | Every diagnostic code, common errors, and the in-game checklist. |
 | [FAQ](FAQ.md) | Short answers to common questions. |

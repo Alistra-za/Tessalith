@@ -13,7 +13,6 @@ eb3fc0e2bd01	GUI-Keyboard: Shift+Left and Shift+Down are separate shortcut rows 
 fcbde32bd80e	design overview (dated record) and the Home intro list the same input formats
 7f4f8c9bbfd4	Research chart-data table (adds the alpha column) and the study round-1 table it came from
 2430c812bad6	within one dated study: summary and its table note
-3516332c62f2	the study names the NVTT build it measured; NVTT-Backend states the tested version
 457d348cbcca	within one dated study: false match on a file path sentence
 d8ee38c56046	within one dated study: summary restates its own record
 4184c4aef876	Texture-Packing: the same R and G fill rows in three recipe tables (one row per recipe)

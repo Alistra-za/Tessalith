@@ -461,7 +461,7 @@ fn a_record_without_an_output_stamp_is_stale_once() {
     assert_eq!((s.converted, s.up_to_date), (0, 2));
 }
 
-/// Note FM: a 1.x record (no `encode_version`, NVTT version, older engine and schema) is a known, stale baseline. The
+/// Note FM: a 1.x record (no `encode_version`, older engine and schema) is a known, stale baseline. The
 /// output is re-encoded and replaced, not kept as an unknown file (`OUT-UNKNOWN-EXISTING`).
 #[test]
 fn a_1x_manifest_record_is_known_and_stale() {
@@ -481,7 +481,6 @@ fn a_1x_manifest_record_is_known_and_stale() {
                 assert!(o.remove("encode_version").is_some());
                 o.insert("schema".into(), schema.into());
                 o.insert("engine_version".into(), engine.into());
-                o["encoders"]["nvtt"] = "3.2.5".into();
                 o["bc1_model"] = "ideal".into();
                 o["profile"]["encoder"]["backend"] = "bc7e".into();
                 format!("{v}\n")
@@ -605,7 +604,6 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
     for extra in [
         "file:**/iron.png.encoder.perceptual=true",
         "file:**/iron.png.format=bc1",
-        "file:**/iron.png.encoder.backend=nvtt",
     ] {
         let j = iron(&plan(&["encoder.bc7_weights=alpha16", extra]));
         assert!(ignored(&j), "{extra}: {:?}", j.warnings);

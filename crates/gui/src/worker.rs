@@ -143,11 +143,6 @@ pub enum WorkerMsg {
     Scanned(Result<modscan::scan::Report, modscan::ScanError>),
     /// Meshes view 3D panel (plan B Task B8): a reply of the render thread or the CS locate worker.
     Viewport3d(crate::model::viewport3d::V3Reply),
-    /// The NVTT probe of generation `generation` ended (`AppModel::refresh_nvtt`; a stale one is dropped).
-    Nvtt {
-        generation: u64,
-        probe: engine::nvtt::NvttProbe,
-    },
     /// A Save report write ended (AG130): the path and the error, if any.
     ReportSaved {
         path: std::path::PathBuf,
@@ -229,7 +224,7 @@ pub fn spawn_guarded(
 }
 
 /// Run `f`; a panic first sends `failed(message)`, the job's own failure tagged with its id, so a stale job's
-/// panic never ends a newer job (as AF3 does for the NVTT probe), then unwinds on to `spawn_guarded`'s dialog.
+/// panic never ends a newer job then unwinds on to `spawn_guarded`'s dialog.
 pub(crate) fn or_send<T>(
     tx: &Sender<WorkerMsg>,
     f: impl FnOnce() -> T,

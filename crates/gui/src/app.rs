@@ -293,7 +293,6 @@ impl SdcApp {
     /// The window regained focus: the place to look for source files that changed meanwhile.
     fn focus_regained(&mut self) {
         self.model.check_sources();
-        self.model.refresh_nvtt_if_changed();
         self.meshes.relocate();
         self.state.set3d.relocate();
     }

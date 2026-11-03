@@ -32,7 +32,7 @@ pub enum Command {
     /// Inspect, compare, export and validate presets, and print schemas. User presets in %APPDATA%\sdc\presets\*.toml
     /// are always loaded.
     Presets(PresetsArgs),
-    /// Built-in encoder versions and NVTT detection.
+    /// Built-in encoder versions.
     Encoders(EncodersArgs),
     /// Fix DDS header faults that need no pixel change (mip count, flags, caps, legacy/DX10, an explicit tag).
     PatchHeader(PatchHeaderArgs),
@@ -155,19 +155,12 @@ pub struct ConvertArgs {
     /// Also write <name>.dds.json next to each output.
     #[arg(long)]
     pub sidecar: bool,
-    /// Path to nvcompress.exe for `encoder.backend = "nvtt"` (default: PATH, then the NVIDIA install folder).
-    /// NVTT is never bundled; it is looked for only when a texture uses it.
-    #[arg(long)]
-    pub nvtt: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "ideal")]
     pub bc1_decoder: Bc1Arg,
 }
 
 #[derive(Args)]
 pub struct EncodersArgs {
-    /// Path to nvcompress.exe (default: PATH, then the NVIDIA install folder; NVTT is never bundled).
-    #[arg(long)]
-    pub nvtt: Option<PathBuf>,
     /// BC1 decoder model to report as active (the batch-wide default is `ideal`).
     #[arg(long, value_enum, default_value = "ideal")]
     pub bc1_decoder: Bc1Arg,

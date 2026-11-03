@@ -49,9 +49,6 @@ pub struct ResolveCtx<'a> {
     /// M6 Track E (DECISIONS Note U5): `shader::colour_mesh_key` → the alpha property of each scanned shape that uses
     /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence.
     pub mesh_alpha: &'a BTreeMap<String, Vec<crate::shader::MeshAlpha>>,
-    /// M5 (DECISIONS Note NV3): the batch's NVTT probe, run on the first profile on `encoder.backend = "nvtt"`.
-    /// `None` = not probed (tests, `inspect`): such a profile reports ENC-NVTT-MISSING.
-    pub nvtt: Option<&'a crate::nvtt::NvttCell>,
 }
 
 /// For `ResolveCtx` literals made before the shaders are picked (pass 1, tests, `inspect`).
@@ -1238,12 +1235,11 @@ pub fn backend_fits(b: Backend, f: Format) -> bool {
         Backend::Bc7e => f == Format::Bc7,
         Backend::Rgbcx => matches!(f, Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5),
         Backend::IspcBc6h => f == Format::Bc6hUf16,
-        Backend::Nvtt => matches!(f, Format::Bc7 | Format::Bc6hUf16),
         Backend::Uncompressed => !f.is_block(),
     }
 }
 
-/// The built-in encoder for a format (spec §3.2 `encoder.backend` default "Format"); never NVTT.
+/// The built-in encoder for a format (spec §3.2 `encoder.backend` default "Format").
 pub fn default_backend(f: Format) -> Backend {
     match f {
         Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5 => Backend::Rgbcx,
@@ -1256,8 +1252,7 @@ pub fn default_backend(f: Format) -> Backend {
 /// A layer that changes only `format` takes the backend with it. A backend that does not fit the format is
 /// kept only when the patch that set the format also set it, or when it was pinned (sub-type- or file-scoped
 /// `--set`, or a rule) at least as specifically as the format; `check_profile` then reports CFG-INVALID.
-/// Otherwise it becomes the format's default backend, with the format's provenance. So a config or preset
-/// `defaults.encoder.backend = "nvtt"` applies where NVTT fits and leaves BC4/BC5 sub-types on rgbcx.
+/// Otherwise it becomes the format's default backend, with the format's provenance.
 fn backend_follows_format(
     p: &mut Profile,
     prov: &mut BTreeMap<String, Provenance>,
@@ -1782,12 +1777,7 @@ pub fn allowed_encodings_for(
 ///
 /// A sub-type unavailable under the target (spec §3.1, §4.2) reports CFG-UNAVAILABLE only: that profile is never
 /// written, so its format, tag, alpha and dimension checks would be a cascade of the one root cause.
-pub fn check_profile(
-    p: &Profile,
-    f: &FileFacts,
-    alpha_explicit: bool,
-    nvtt: Option<&crate::nvtt::NvttCell>,
-) -> Vec<Warning> {
+pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Warning> {
     use Code::*;
     let a = f.analysis;
     let st = p.subtype;
@@ -2312,29 +2302,6 @@ pub fn check_profile(
             format!("compressed DDS ({name}) re-encoded: its compression error is kept and a new one is added; convert the source image if you have it"),
         );
     }
-    // DECISIONS Note NV3.
-    if p.encoder.backend == Backend::Nvtt {
-        use crate::nvtt::{NvttProbe, NVTT_TESTED};
-        match nvtt.map(|c| c.get()) {
-            Some(NvttProbe::Found(t)) if t.tested() => {}
-            Some(NvttProbe::Found(t)) => add(
-                EncNvttVersion,
-                format!(
-                    "NVTT {} at {} is untested ({NVTT_TESTED} is); acknowledge to use it",
-                    t.version,
-                    t.path.display()
-                ),
-            ),
-            Some(NvttProbe::Missing(why)) => add(
-                EncNvttMissing,
-                format!("NVTT not found ({why}): install NVTT 3, set the NVTT path, or choose the built-in encoder"),
-            ),
-            None => add(
-                EncNvttMissing,
-                "NVTT was not probed for this batch".into(),
-            ),
-        }
-    }
     for c in contradictions(p, f) {
         add(SugContradiction, c);
     }
@@ -2721,7 +2688,6 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         &profile,
         f,
         alpha_policy_explicit(ctx, &provenance),
-        ctx.nvtt,
     ));
     warnings.extend(green_conflict(ctx, &profile, &provenance));
     if available && profile.subtype == Subtype::SkinWet {

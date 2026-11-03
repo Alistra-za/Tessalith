@@ -4,7 +4,6 @@ use engine::config::*;
 use engine::discover::{InputFile, InputKind};
 use engine::group::TextureSet;
 use engine::image::{Rgba32F, SourceInfo};
-use engine::nvtt::{NvttCell, NvttProbe, NvttTool};
 use engine::overrides::{parse_set, NO_FILE_SCOPES};
 use engine::policy::*;
 use engine::presets::*;
@@ -27,20 +26,6 @@ fn run(
     sets_cli: &[&str],
     allow: &[Code],
 ) -> ResolvedJob {
-    run_nvtt(target, game, suffix, sets, img, sets_cli, allow, None)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_nvtt(
-    target: Target,
-    game: &str,
-    suffix: Option<&str>,
-    sets: &[&str],
-    img: Rgba32F,
-    sets_cli: &[&str],
-    allow: &[Code],
-    nvtt: Option<&NvttCell>,
-) -> ResolvedJob {
     let reg = PresetRegistry::builtin().unwrap();
     let overrides: Vec<_> = sets_cli.iter().map(|s| parse_set(s).unwrap()).collect();
     let allow: BTreeSet<Code> = allow.iter().copied().collect();
@@ -56,7 +41,6 @@ fn run_nvtt(
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt,
     };
     let name = game.rsplit('/').next().unwrap();
     let f = InputFile {
@@ -365,7 +349,6 @@ fn run_with(
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let f = InputFile {
         path: rel.into(),
@@ -874,7 +857,6 @@ fn preset_alpha_policy_counts_as_explicit() {
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let j = resolve_file(&ctx("mine"), &facts);
     assert_eq!(
@@ -1132,7 +1114,6 @@ fn allow_cfg_unavailable_accepts_fallbacks_only() {
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let j = resolve_in(&ctx, "a/x_m.png", Some("m"), &m);
     assert_eq!(
@@ -1204,7 +1185,7 @@ fn allow_cfg_unavailable_accepts_fallbacks_only() {
 fn table_backends_follow_more_specific_formats() {
     let reg = PresetRegistry::builtin().unwrap();
     let user: ConfigFile =
-        toml::from_str("[defaults]\nencoder = { backend = \"nvtt\" }\n").unwrap();
+        toml::from_str("[defaults]\nencoder = { backend = \"bc7e\" }\n").unwrap();
     let allow = BTreeSet::new();
     let o_env = sets(&["subtype=envmask"]);
     let c = ResolveCtx {
@@ -1219,7 +1200,6 @@ fn table_backends_follow_more_specific_formats() {
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let j = resolve_in(&c, "a/x_m.png", Some("m"), &opaque());
     assert_eq!(
@@ -1228,7 +1208,7 @@ fn table_backends_follow_more_specific_formats() {
     );
     assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
     assert_eq!(j.provenance["encoder.backend"], Provenance::Builtin);
-    // the same config on a BC7 diffuse keeps NVTT
+    // the same config on a BC7 diffuse keeps bc7e
     let o_dif = sets(&["subtype=diffuse"]);
     let c = ResolveCtx {
         overrides: &o_dif,
@@ -1237,7 +1217,7 @@ fn table_backends_follow_more_specific_formats() {
     let j = resolve_in(&c, "a/x.png", None, &opaque());
     assert_eq!(
         (j.profile.format, j.profile.encoder.backend),
-        (Format::Bc7, Backend::Nvtt)
+        (Format::Bc7, Backend::Bc7e)
     );
     assert_eq!(j.provenance["encoder.backend"], Provenance::UserConfig);
     // a rule that sets format=bc1 and backend=bc7e is an explicit conflict
@@ -1297,7 +1277,6 @@ fn builtin_presets_never_confirm_mesh_alpha() {
                 files: &NO_FILE_SCOPES,
                 shaders: &NO_SHADERS,
                 mesh_alpha: &NO_MESH_ALPHA,
-                nvtt: None,
             };
             let j = resolve_in(&ctx, "a/x.png", None, &img);
             match &j.status {
@@ -1335,7 +1314,6 @@ fn builtin_presets_never_confirm_mesh_alpha() {
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let j = resolve_in(&ctx, "a/x.png", None, &img);
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
@@ -2588,85 +2566,6 @@ fn an_explicit_flip_green_against_the_convention_warns_and_wins() {
     );
 }
 
-/// M5 (DECISIONS Note NV3): the NVTT codes come from the batch's probe.
-#[test]
-fn nvtt_codes_follow_the_probe() {
-    let diffuse = |cell: Option<&NvttCell>, allow: &[Code]| {
-        run_nvtt(
-            Target::Cs,
-            "textures/a/x.png",
-            None,
-            &[],
-            opaque(),
-            &["subtype=diffuse", "encoder.backend=nvtt"],
-            allow,
-            cell,
-        )
-    };
-    let found = |v: &str| {
-        NvttCell::fixed(NvttProbe::Found(NvttTool {
-            path: "C:/nv/nvcompress.exe".into(),
-            version: v.into(),
-        }))
-    };
-    let j = diffuse(Some(&found("3.2.5")), &[]);
-    assert_eq!(j.profile.encoder.backend, Backend::Nvtt);
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-
-    let j = diffuse(Some(&found("3.3.0")), &[]);
-    assert_eq!(
-        j.status,
-        JobStatus::Blocked {
-            codes: vec![Code::EncNvttVersion]
-        }
-    );
-    let w = j
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::EncNvttVersion)
-        .unwrap();
-    assert!(
-        w.message.contains("NVTT 3.3.0") && w.message.contains("3.2.5 is"),
-        "{}",
-        w.message
-    );
-    let j = diffuse(Some(&found("3.3.0")), &[Code::EncNvttVersion]);
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-
-    let missing = NvttCell::fixed(NvttProbe::Missing("not on PATH and not at X".into()));
-    let j = diffuse(Some(&missing), &[]);
-    assert_eq!(
-        j.status,
-        JobStatus::Blocked {
-            codes: vec![Code::EncNvttMissing]
-        }
-    );
-    assert!(j
-        .warnings
-        .iter()
-        .any(|w| w.code == Code::EncNvttMissing && w.message.contains("not on PATH and not at X")));
-    let j = diffuse(None, &[]);
-    assert!(codes(&j).contains(&Code::EncNvttMissing));
-}
-
-/// A profile on a built-in backend never asks for the probe (no nvcompress process for such batches).
-#[test]
-fn builtin_backend_does_not_probe() {
-    let cell = NvttCell::new(Some("Z:/no/such/nvcompress.exe".into()));
-    let j = run_nvtt(
-        Target::Cs,
-        "textures/a/x.png",
-        None,
-        &[],
-        opaque(),
-        &["subtype=diffuse"],
-        &[],
-        Some(&cell),
-    );
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-    assert_eq!(cell.into_probed(), None);
-}
-
 /// An `_e` cubemap source (cubemap support v1), resolved with `sets_cli`.
 fn cube(sets_cli: &[&str]) -> ResolvedJob {
     run(
@@ -2799,7 +2698,6 @@ fn cube_src_named(
         files: &NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let f = InputFile {
         path: name.into(),

@@ -268,7 +268,7 @@ fn perceptual_keeps_its_lock_and_the_row_is_bc7e_only() {
     assert_eq!(hidden_reason(&n, WEIGHTING), None);
     assert_eq!(field_view(m.target, &job, WEIGHTING).unwrap().lock, None);
     let mut j = job.clone();
-    j.profile.encoder.backend = Backend::Nvtt;
+    j.profile.encoder.backend = Backend::Rgbcx;
     let why = Some("used only by the built-in BC7 encoder");
     assert_eq!(hidden_reason(&j.profile, WEIGHTING), why);
     assert_eq!(field_view(m.target, &j, WEIGHTING).unwrap().lock, why);

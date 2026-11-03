@@ -1012,6 +1012,25 @@ fn config_with_rfaos_is_refused_and_names_skin_rfaos() {
         .unwrap();
 }
 
+/// Note FM14: `encoder.backend = "nvtt"` and an allow list naming one of the three NVTT codes are refused by name.
+#[test]
+fn an_nvtt_backend_names_the_removed_value() {
+    let e = ConfigFile::parse("[defaults]\nencoder = { backend = \"nvtt\" }\n", "sdc.toml")
+        .unwrap_err();
+    assert!(
+        e.to_string().contains("encoder.backend") && e.to_string().contains("NVTT"),
+        "{e}"
+    );
+}
+
+#[test]
+fn an_allow_list_naming_an_nvtt_code_is_named() {
+    for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains(code), "{e}");
+    }
+}
+
 /// Trace-debug #15: a quoted dotted key under `[files."x"]` used to pass the field check and then read as null (the
 /// value silently dropped). It is refused with the way to write it; the unquoted form still works.
 #[test]

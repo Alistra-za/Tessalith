@@ -89,7 +89,6 @@ fn plan(dir: &Path, rough: &Path, normal: &Path, bake: bool, flip_green: bool) -
         peak_admitted_bytes: 0,
         cancelled: vec![],
         shaders: Default::default(),
-        nvtt: None,
         derive_own: Default::default(),
         fill_ends: Default::default(),
         helpers: vec![],

@@ -164,7 +164,6 @@ fn fills_and_reports_pin_first_match_order() {
         files: &engine::overrides::NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let plan: FillPlan = plan_fills(
         &ctx,

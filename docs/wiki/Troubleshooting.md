@@ -107,13 +107,9 @@ It needs the Windows system font Segoe UI (`segoeui.ttf`) and says so if it is m
 
 What the PGPatcher simulation needs is in [What it assumes](GUI-Set-Preview-3D.md#what-it-assumes). If "Community Shaders not found" shows, use **Shader folder…** to point at your Community Shaders mod folder.
 
-### NVTT problems
-
-See [NVTT backend](NVTT-Backend.md#codes).
-
 ### Leftover .sdc-*.tmp files
 
-A hard abort can leave temporary files in the output folders ([atomic writes](Validation-and-Output.md#atomic-writes)); they are safe to delete. Leftover `%TEMP%\sdc-nvtt-*` folders are also safe to delete.
+A hard abort can leave temporary files in the output folders ([atomic writes](Validation-and-Output.md#atomic-writes)); they are safe to delete.
 
 ## Error messages
 

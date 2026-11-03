@@ -48,9 +48,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         ValBc6hPeak => "Bright peaks lose accuracy in BC6H — check the highlights",
         ValHeader => "The written DDS header isn't valid — export again",
         ValMipError => "A mip level strays from its source — check the filter or the source",
-        EncNvttMissing => "NVTT isn't set up — set its path in Advanced or choose another encoder",
-        EncNvttVersion => "This NVTT version is untested — acknowledge to use it or install version 3.2.5",
-        EncNvttFailed => "NVTT failed on this file — check its setup or choose another encoder",
         EncWeightsIgnored => "The BC7 weighting is ignored here — clear it or change the encoder",
         InDuplicate => "Two files claim the same slot — remove or rename one",
         InPackingInput => "A packing input is missing or unusable — check the files of this set",
@@ -232,7 +229,7 @@ mod tests {
             "preset 'x': alias is bad"
         );
         assert_eq!(
-            without_codes("acknowledge ENC-NVTT-VERSION to use it"),
+            without_codes("acknowledge CHK-RANGE to use it"),
             "acknowledge to use it"
         );
         // No empty backticks, and no doubled space, where a quoted code goes.

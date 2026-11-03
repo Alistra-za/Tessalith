@@ -24,9 +24,9 @@ const SECTIONS = [
   { id: 'E3', name: 'Engine: pixel pipeline (load, ops, mips, coverage, memory)', lines: 6600, hot: true,
     paths: ['crates/engine/src/pipeline.rs', 'load.rs', 'decode.rs', 'psd.rs', 'archive.rs', 'zip.rs', 'image.rs', 'ops.rs', 'dilate.rs', 'resize.rs', 'filter.rs', 'mips.rs', 'coverage.rs', 'quantize.rs', 'sysmem.rs', 'memory.rs'],
     entry: 'one job: load a source (PNG/PSD/KRA/ORA/EXR/DDS, zip members) -> preprocess ops -> resize -> mip chain -> coverage preservation -> quantize; memory admission' },
-  { id: 'E4', name: 'Engine: encode, DDS write/patch, NVTT, validation, cubemaps; encoders-sys', lines: 6400, hot: true,
-    paths: ['crates/engine/src/encode.rs', 'dds.rs', 'dds_patch.rs', 'nvtt.rs', 'analyse.rs', 'crates/engine/src/validate/', 'crates/engine/src/bin/', 'crates/engine/src/cube/', 'crates/encoders-sys/src/'],
-    entry: 'mip chain -> BCn/encoder choice -> fixups -> DDS header + write_atomic; patch-header; NVTT subprocess; validation of written files; cube layouts/latlong sampling/filtering -> six-face DDS; FFI into the vendored encoders' },
+  { id: 'E4', name: 'Engine: encode, DDS write/patch, validation, cubemaps; encoders-sys', lines: 6400, hot: true,
+    paths: ['crates/engine/src/encode.rs', 'dds.rs', 'dds_patch.rs', 'analyse.rs', 'crates/engine/src/validate/', 'crates/engine/src/cube/', 'crates/encoders-sys/src/'],
+    entry: 'mip chain -> BCn/encoder choice -> fixups -> DDS header + write_atomic; patch-header; validation of written files; cube layouts/latlong sampling/filtering -> six-face DDS; FFI into the vendored encoders' },
   { id: 'E5', name: 'Engine: shaders, packing, helper fills, bake, RNM, grass', lines: 7300,
     paths: ['crates/engine/src/shader.rs', 'grass.rs', 'crates/engine/src/pack/', 'crates/engine/src/helper/', 'crates/engine/src/bake/', 'crates/engine/src/rnm/'],
     entry: 'set shader pick (explicit/auto rules/mesh votes) -> member re-typing -> helper roles and fills -> pack recipes (_rmaos/_rfaos/_m/_orm) -> bakes -> RNM layer composition -> complex grass stacking' },
@@ -133,7 +133,7 @@ const RUST = n => `rust-cli-skills:rust-${n}`
 const SECTION_SKILLS = {
   E1: [RUST('concurrency'), RUST('filesystem'), RUST('errors')],   // threads, manifest lock, atomic writes
   E3: [RUST('memory'), RUST('errors')],                             // memory admission, big buffers
-  E4: [RUST('filesystem'), RUST('processes'), RUST('errors')],      // write_atomic, NVTT subprocess
+  E4: [RUST('filesystem'), RUST('errors')],                         // write_atomic
   S1: [RUST('concurrency'), RUST('filesystem')],                    // SQLite store, parallel scan
   R1: [RUST('memory')],                                             // GPU buffers, texture uploads
   R2: [RUST('io'), RUST('errors'), RUST('cli-testing')],            // hostile NIF/ESP/BSA parsers, CLI exit codes and streams

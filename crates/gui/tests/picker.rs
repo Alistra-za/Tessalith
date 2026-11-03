@@ -78,7 +78,7 @@ fn a_second_picker_is_refused_while_one_is_open() {
     let (f, tx) = fake();
     m.picker.set_backend(f);
     let ctx = egui::Context::default();
-    assert!(m.pick(&ctx, PickerPurpose::NvttPath, PickerSpec::folder()));
+    assert!(m.pick(&ctx, PickerPurpose::ExportFolder, PickerSpec::folder()));
     assert!(m.picker.busy());
     // Any purpose, from any model that shares the picker, is refused.
     assert!(!m.pick(&ctx, PickerPurpose::OpenFolder, PickerSpec::folder()));
@@ -91,7 +91,7 @@ fn a_second_picker_is_refused_while_one_is_open() {
     // Free again.
     let (f, tx) = fake();
     m.picker.set_backend(f);
-    assert!(m.pick(&ctx, PickerPurpose::NvttPath, PickerSpec::folder()));
+    assert!(m.pick(&ctx, PickerPurpose::ExportFolder, PickerSpec::folder()));
     tx.send(None).unwrap();
     wait_closed(&m.picker);
 }
@@ -99,10 +99,10 @@ fn a_second_picker_is_refused_while_one_is_open() {
 #[test]
 fn cancel_does_nothing_and_clears_busy() {
     let mut m = model();
-    ask(&m.picker, PickerPurpose::NvttPath, None, None);
+    ask(&m.picker, PickerPurpose::ExportFolder, None, None);
     assert!(!m.picker.busy());
     assert!(m.poll(), "the landed result is drained");
-    assert_eq!(m.settings.nvtt_path, None);
+    assert_eq!(m.settings.export_folder, None);
     assert!(m.dialog.is_none());
 }
 
@@ -110,11 +110,6 @@ fn cancel_does_nothing_and_clears_busy() {
 fn each_purpose_reaches_its_own_handler() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model();
-    let nvc = d.path().join("nvcompress.exe");
-    ask(&m.picker, PickerPurpose::NvttPath, None, Some(nvc.clone()));
-    m.poll();
-    assert_eq!(m.settings.nvtt_path, Some(nvc));
-
     let out = d.path().join("elsewhere");
     ask(
         &m.picker,
@@ -156,7 +151,7 @@ fn each_purpose_reaches_its_own_handler() {
         None,
         Some(scan.clone()),
     );
-    assert!(!m.poll() || m.settings.nvtt_path.is_none());
+    assert!(!m.poll() || m.settings.export_folder.is_some());
     meshes.poll();
     assert!(matches!(&meshes.target, Some(ScanTarget::Folder(f)) if *f == scan));
     ask(
@@ -229,25 +224,6 @@ fn an_open_folder_pick_is_never_stale_but_an_export_folder_pick_is() {
 }
 
 #[test]
-fn app_wide_pickers_are_never_stale() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(&d.path().join("a"));
-    let (f, tx) = fake();
-    m.picker.set_backend(f);
-    assert!(m.pick(
-        &egui::Context::default(),
-        PickerPurpose::NvttPath,
-        PickerSpec::folder()
-    ));
-    m.open_folder(mod_folder(&d.path().join("b")));
-    let nvc = d.path().join("nvcompress.exe");
-    tx.send(Some(nvc.clone())).unwrap();
-    wait_closed(&m.picker);
-    m.poll();
-    assert_eq!(m.settings.nvtt_path, Some(nvc));
-}
-
-#[test]
 fn the_actions_and_buttons_are_disabled_while_a_dialog_is_open() {
     let m = model();
     let open = sdc_gui::ui::actions::actions()
@@ -259,7 +235,7 @@ fn the_actions_and_buttons_are_disabled_while_a_dialog_is_open() {
     m.picker.set_backend(f);
     assert!(m.pick(
         &egui::Context::default(),
-        PickerPurpose::NvttPath,
+        PickerPurpose::ExportFolder,
         PickerSpec::folder()
     ));
     assert!(

@@ -16,10 +16,6 @@ Sometimes the graphics device is lost, and the app has to close. The cause is no
 
 ## Speed
 
-**The NVTT encoder runs one file at a time**
-
-Batches that use NVTT do not use extra CPU cores for the encoding. It is slower than it could be, but the output is correct.
-
 **The Missing and Unused lists can freeze briefly the first time you open them**
 
 On a very large load-order scan, the first open reads the data on the main thread, so the window stops responding for a moment. It comes back by itself.

@@ -8,7 +8,7 @@
 //! function of its own texels, so the written bytes are identical for any `--jobs`.
 use crate::api::{BatchRequest, CancelToken, LowDetailMode};
 use crate::bake::NormalVariance;
-use crate::config::{Backend, Format, Profile, Subtype};
+use crate::config::{Format, Profile, Subtype};
 use crate::coverage::{coverage_fraction, preserve_coverage};
 use crate::dds::{dds_bytes, dds_bytes_cube, resolve_header, write_atomic, DdsDesc};
 use crate::encode::{encode_level, EncodeCtx};
@@ -21,7 +21,6 @@ use crate::manifest::{
     MANIFEST_SCHEMA,
 };
 use crate::mips::build_chain_with;
-use crate::nvtt::{encode_level_nvtt, NvttError, NvttTool, TempDir};
 use crate::ops::{preprocess_with, Domain, SourceTransfer};
 use crate::pack::assemble::assemble;
 use crate::pack::invert_of;
@@ -435,9 +434,7 @@ fn prepare_then<T>(
 }
 
 /// Encode `prep.inputs[i]` at `prep.dims[prep.first_level + i]`, emitting a `Compress` progress event per mip
-/// (`done` 1..=n, carrying `job_key`). A profile on `encoder.backend = "nvtt"` encodes each level with `nvtt`
-/// (DECISIONS Note NV); a failure there is `ENC-NVTT-FAILED`, with no fallback to the built-in encoder (NV8).
-#[allow(clippy::too_many_arguments)]
+/// (`done` 1..=n, carrying `job_key`).
 pub(crate) fn encode_levels(
     prep: &Prepared,
     p: &Profile,
@@ -446,21 +443,9 @@ pub(crate) fn encode_levels(
     job_key: &str,
     set: Option<&str>,
     path: Option<&Path>,
-    nvtt: Option<&NvttTool>,
 ) -> Result<Vec<Vec<u8>>, FileError> {
     let ectx = EncodeCtx {
         cancel: Some(cancel.flag()),
-    };
-    let nvtt_failed =
-        |m: String| FileError::Failed(Stage::Compress, format!("ENC-NVTT-FAILED: {m}"));
-    let nvtt = match (p.encoder.backend == Backend::Nvtt, nvtt) {
-        (false, _) => None,
-        // Planning blocks this with ENC-NVTT-MISSING; it gets here only when that code was allowed.
-        (true, None) => return Err(nvtt_failed("NVTT not found".into())),
-        (true, Some(t)) => Some((
-            t,
-            TempDir::new().map_err(|e| nvtt_failed(format!("temporary folder: {e}")))?,
-        )),
     };
     let total = prep.inputs.len() as u32;
     let mut levels = Vec::with_capacity(prep.inputs.len());
@@ -471,14 +456,7 @@ pub(crate) fn encode_levels(
         .zip(prep.dims[prep.first_level..].iter().cycle())
         .enumerate()
     {
-        let level = match &nvtt {
-            Some((t, tmp)) => encode_level_nvtt(t, inp, w, h, p, tmp, i, &|| cancel.is_cancelled())
-                .map_err(|e| match e {
-                    NvttError::Cancelled => FileError::Cancelled,
-                    NvttError::Failed(m) => nvtt_failed(m),
-                })?,
-            None => encode_level(inp, w, h, p, &ectx).map_err(|_| FileError::Cancelled)?,
-        };
+        let level = encode_level(inp, w, h, p, &ectx).map_err(|_| FileError::Cancelled)?;
         levels.push(level);
         rep.emit_job(
             Some(job_key),
@@ -515,7 +493,6 @@ pub fn process_file(
     rep: &Reporter,
     manifest: &Manifest,
     tracker: &FileTracker,
-    nvtt: Option<&NvttTool>,
 ) -> Result<Processed, FileError> {
     let enter = |st: Stage| tracker.stage.set(st);
     enter(Stage::Load);
@@ -647,7 +624,7 @@ pub fn process_file(
     let (width, height) = prep.dims[0];
 
     enter(Stage::Compress);
-    let levels = encode_levels(&prep, p, cancel, rep, &key, set, path, nvtt)?;
+    let levels = encode_levels(&prep, p, cancel, rep, &key, set, path)?;
     // Mips per face: the header's count.
     let total = (prep.inputs.len() / prep.faces) as u32;
 
@@ -700,12 +677,7 @@ pub fn process_file(
         engine_version: ENGINE_VERSION.into(),
         encode_version: Some(crate::manifest::encode_version(p.subtype).into()),
         engine_commit: engine_commit().into(),
-        encoders: EncoderVersions {
-            nvtt: nvtt
-                .filter(|_| p.encoder.backend == Backend::Nvtt)
-                .map(|t| t.version.clone()),
-            ..EncoderVersions::current()
-        },
+        encoders: EncoderVersions::current(),
         isa: dispatched_isa().into(),
         preset: preset.clone(),
         profile: p.clone(),

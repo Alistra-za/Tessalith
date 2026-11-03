@@ -27,13 +27,13 @@ The defaults come from a literature review of BCn encoders, mip filtering and Sk
 ## Alpha
 
 - Stray alpha in a source costs about 1 dB on real images and up to 17 dB on smooth ones. Drove: the `remove` policy drops the alpha channel before any mip or encode step.
-- Even with alpha removed, bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (ISPC 15%, texconv 2.4%, NVTT 0%), because its mode 6 picks the shared p-bit for RGB alone. Forcing 255 costs 0.5 to 1.0 dB RGB on average (spike S5). On 28 real `_m` files encoded without the fix, 7 had 40% or more of their alpha off 255 (spike S6). Drove: exact-opaque alpha is on by default only for `_m` and env masks, where CS, ENB and PGPatcher read the alpha, and turning it off on a BC7 `_m` needs an explicit acknowledgement.
+- Even with alpha removed, bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (ISPC 15%, texconv 2.4%), because its mode 6 picks the shared p-bit for RGB alone. Forcing 255 costs 0.5 to 1.0 dB RGB on average (spike S5). On 28 real `_m` files encoded without the fix, 7 had 40% or more of their alpha off 255 (spike S6). Drove: exact-opaque alpha is on by default only for `_m` and env masks, where CS, ENB and PGPatcher read the alpha, and turning it off on a BC7 `_m` needs an explicit acknowledgement.
 - A RenderDoc read of the Community Shaders lighting shader (spike S8) showed the complex-material gate exactly: the smallest mip's alpha must be below 251/255, with a separate rule for grey env masks. Drove: the `_m` margin check warns at 247 and applies the shader's own grey rule; near-opaque source alpha uses the same 251 cut-off.
 - Box-filtered alpha thins out alpha-tested foliage at distance. Coverage-preserving mips (Castaño's method, also the idea behind AlphaBloom's Auto Coverage) keep the share of texels that pass the alpha test the same at every level. Drove: Tessalith's own solver passes exactly mip 0's share at every level, splits ties in a Bayer order and keeps remapped texels two codes clear of the threshold so BC7 cannot flip them. Default threshold 127.
 
 ## Mips
 
-- Gamma-encoded averaging, overshoot and ringing decide the mip filter ([mipmaps and alpha](../research/mipmaps-and-alpha.md)). No published PSNR benchmark of mip filters for game textures exists. Drove: box stays the default for everything, colour is filtered in linear light, and Kaiser is fixed at width 3, α 4 (the NVTT wiki found larger radii ring).
+- Gamma-encoded averaging, overshoot and ringing decide the mip filter ([mipmaps and alpha](../research/mipmaps-and-alpha.md)). No published PSNR benchmark of mip filters for game textures exists. Drove: box stays the default for everything, colour is filtered in linear light, and Kaiser is fixed at width 3, α 4 (the NVIDIA Texture Tools wiki found larger radii ring).
 - Building every level from the previous one cost tent 1.1 to 2.7 dB and Mitchell 0.8 to 1.8 dB against a direct Lanczos-8 reference in local tests. Drove: tent, Mitchell and Kaiser build each level directly from mip 0; box stays recursive, where it is exact.
 
 ## Normal maps
@@ -44,14 +44,7 @@ The defaults come from a literature review of BCn encoders, mip filtering and Sk
 ## BC4/BC5 search radius
 
 - Upstream rgbcx modelled BC4 decoding with floored interpolants while the GPU and bcdec round to nearest, so a wider search could make results worse (BC5 at radius 10 scored 47.9 dB against 58.0 dB at radius 5). Patching rgbcx to round like the decoder fixed this, and after the patch a wider radius gained almost nothing. Drove: the default radius and the `fast` one. Full tables: [BC4/BC5 search radius](../research/encoder-benchmark.md#bc4bc5-search-radius).
-- rgbcx anchors its BC4 6-value mode on the block's minimum and maximum, which wastes the mode's fixed 0 and 255 entries; BC3 cutout alpha trailed NVTT `-highest` by about 2 dB. Drove: a wider block search in the vendored rgbcx for BC4, both BC5 channels and BC3 alpha, at every radius, never worse per block than the unpatched search, at about 2× the BC4 search time; BC3 alpha keeps the unpatched block where the search would flip more texels across 128. Cutout alpha gains 3.2 dB ([BC4-family encoding](../research/bc4-family.md)). <!-- D:FJ1,FJ2 -->
-
-## NVTT 3
-
-- NVTT Production led the built-in encoders on gradients (+3.9 dB) and linear data (+0.3 to +0.4 dB) and kept BC6H highlight peaks at 95% or more, where ISPC BC6H cut one sun's peak to 22%. It took 40 to 60× the time. `-production` and `-highest` gave byte-identical output. Drove: NVTT is [opt-in](../research/encoder-benchmark.md), at Production only.
-- NVTT's licence forbids use that would put it under an open-source licence. Drove: Tessalith never links or ships it and runs your installed `nvcompress.exe` as a separate process.
-- Spike S7: feeding each pre-built level to its own `nvcompress -nomips` process matched a direct encode exactly at mip 0. BC7 Production runs on the CPU even with CUDA available, and `-nocuda` gave byte-identical output while saving about 0.13 s of CUDA start-up per process. Drove: Tessalith builds the mips and runs nvcompress without CUDA ([how it runs](NVTT-Backend.md#how-it-runs)).
-- Spike S7b: nvcompress read an uncompressed DDS with a DX10 header as garbage (5.05 dB) but read the same pixels with a legacy header exactly, and BC6H encoded every level down to 1×1. Drove: levels are fed as legacy-header DDS (BGRA8 for BC7, RGBA16F for BC6H) and no fallback encoder is needed.
+- rgbcx anchors its BC4 6-value mode on the block's minimum and maximum, which wastes the mode's fixed 0 and 255 entries; BC3 cutout alpha trailed NVIDIA Texture Tools `-highest` by about 2 dB. Drove: a wider block search in the vendored rgbcx for BC4, both BC5 channels and BC3 alpha, at every radius, never worse per block than the unpatched search, at about 2× the BC4 search time; BC3 alpha keeps the unpatched block where the search would flip more texels across 128. Cutout alpha gains 3.2 dB ([BC4-family encoding](../research/bc4-family.md)). <!-- D:FJ1,FJ2 -->
 
 ## Encoder measurements
 
@@ -64,14 +57,13 @@ The full data behind the charts in the README. "—" means not measured. The cha
 
 | Encoder | Speed (s/Mpix) | Δ RGB (real) | Δ (real alpha) |
 |---|--:|--:|--:|
-| NVTT Normal (GPU) / texconv GPU | 0.03–0.09 | −1.4 / −1.8 | −0.75 / −2.8 |
+| texconv GPU | 0.03–0.09 | −1.8 | −2.8 |
 | ISPC basic | 0.11 | −0.75 | −0.69 |
 | bc7e u4 | 0.12 | −0.39 | −0.36 |
 | bc7e u5 | 0.22 | +0.01 | −0.03 |
 | bc7e u6 | 0.28 | 0 | 0 |
 | bc7e max‡ | ~0.6 | +0.32 | +0.32 |
 | ISPC slow | 0.30 | −0.59 | −0.67 |
-| NVTT Production/Highest | ~14 | −0.32 | −0.37 |
 | texconv CPU (-bc x) | ~16–20 | −1.6 | −2.4 |
 | Compressonator q1.0 | ~33 | −0.16 | −1.50 |
 
@@ -79,33 +71,33 @@ The full data behind the charts in the README. "—" means not measured. The cha
 
 ### BC7: bc7e u5 against the other CPU encoders at maximum settings
 
-| Measure | bc7e -u5 | NVTT 3 Production | Compressonator q1.0 | Intel ISPC slow | texconv -bc x |
-|---|--:|--:|--:|--:|--:|
-| Real colour textures (Δ dB) | +0.03 | −0.27 | −0.16† | −0.44 | −1.47 |
-| Smooth gradients, synthetic (Δ dB) | 0.00 | +3.86 | +3.21 | +0.73 | −6.89 |
-| Real decals, smooth alpha (Δ dB) | −0.02 | −0.06 | −1.50† | −0.58 | −2.04 |
-| Packed data maps (RGB PSNR, dB) | 41.22 | 41.58 | —† | 41.20 | 40.38 |
-| Normal maps (mean angle error) | 1.77° | 1.71° | —† | 1.79° | 2.19° |
-| Opaque input decoded with alpha 254 | 28%* | 0% | 1.1% | 15% | 2.4% |
-| Time per megapixel | 0.22 s | ~14 s | ~33 s | 0.30 s | ~20 s |
+| Measure | bc7e -u5 | Compressonator q1.0 | Intel ISPC slow | texconv -bc x |
+|---|--:|--:|--:|--:|
+| Real colour textures (Δ dB) | +0.03 | −0.16† | −0.44 | −1.47 |
+| Smooth gradients, synthetic (Δ dB) | 0.00 | +3.21 | +0.73 | −6.89 |
+| Real decals, smooth alpha (Δ dB) | −0.02 | −1.50† | −0.58 | −2.04 |
+| Packed data maps (RGB PSNR, dB) | 41.22 | —† | 41.20 | 40.38 |
+| Normal maps (mean angle error) | 1.77° | —† | 1.79° | 2.19° |
+| Opaque input decoded with alpha 254 | 28%* | 1.1% | 15% | 2.4% |
+| Time per megapixel | 0.22 s | ~33 s | 0.30 s | ~20 s |
 
 \* An optional patch (mode 6 p-bit override, exact opaque) is for when alpha 254 is not acceptable.
 
-† Compressonator q1.0 was not re-measured on the wider set; its values come from the original 4–7 images. On those images it was 0.15 dB behind NVTT on packed data and 0.27° behind on normals. The alpha-254 and timing rows are also from the original run.
+† Compressonator q1.0 was not re-measured on the wider set; its values come from the original 4–7 images. The alpha-254 and timing rows are also from the original run.
 
 ### Other formats: best encoders per format
 
-| Format and measure | rgbcx | NVTT 3 | Compressonator | Intel ISPC | texconv (CPU) |
-|---|--:|--:|--:|--:|--:|
-| BC1 colour (RGB PSNR, dB) | 39.85 | 39.74 | 39.05 | 38.11 | 37.41 |
-| BC3 colour + alpha (premultiplied PSNR, dB) | 49.20 | 49.29 | 48.75 | 48.02 | 48.07 |
-| BC4 masks (PSNR, dB) | 45.59 | 45.05 | 45.19 | 43.70 | 43.94 |
-| BC5 normals (RG PSNR, dB, n = 93) | 47.03 | 46.08 | 46.27 | 44.57 | 44.83 |
-| BC5 normals (mean angle error) | 0.41° | 0.47° | 0.45° | 0.55° | 0.56° |
-| BC6H HDR (multi-exposure PSNR, dB) | — | 48.00 | —† | 50.38 | 49.62 |
-| BC6H brightest highlight kept (worst image) | — | 94% | 29%† | 22% | 29% |
+| Format and measure | rgbcx | Compressonator | Intel ISPC | texconv (CPU) |
+|---|--:|--:|--:|--:|
+| BC1 colour (RGB PSNR, dB) | 39.85 | 39.05 | 38.11 | 37.41 |
+| BC3 colour + alpha (premultiplied PSNR, dB) | 49.20 | 48.75 | 48.02 | 48.07 |
+| BC4 masks (PSNR, dB) | 45.59 | 45.19 | 43.70 | 43.94 |
+| BC5 normals (RG PSNR, dB, n = 93) | 47.03 | 46.27 | 44.57 | 44.83 |
+| BC5 normals (mean angle error) | 0.41° | 0.45° | 0.55° | 0.56° |
+| BC6H HDR (multi-exposure PSNR, dB) | — | —† | 50.38 | 49.62 |
+| BC6H brightest highlight kept (worst image) | — | 29%† | 22% | 29% |
 
-rgbcx beats NVTT on BC1 on 96 of 100 images, and BC3 is a tie. On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 2.2 dB lower in mPSNR (4 HDR images).
+On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 2.2 dB lower in mPSNR (4 HDR images).
 
 † Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.
 

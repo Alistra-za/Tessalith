@@ -189,6 +189,9 @@ fn the_settings_panel_and_the_set_editor_say_it_in_words() {
     h.run();
     h.run();
     h.get_by_label_contains("LOSS-REENCODE");
+    // Move the pointer off the panel, or whatever sits under it after the select shows its own hover.
+    h.hover_at(egui::pos2(1.0, 1.0));
+    h.run();
 
     // A set's layer note (RNM-*).
     h.state_mut().rnm_notes.insert(

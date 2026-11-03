@@ -119,9 +119,6 @@ pub struct BatchRequest {
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
     pub mem_budget: u64,
     pub bc1_model: Bc1Model,
-    /// M5 (DECISIONS Note NV2): an explicit `nvcompress.exe` (`--nvtt`, the GUI's NVTT path). `None` looks on `PATH`,
-    /// then in the default install folder. Probed only when some profile uses `encoder.backend = "nvtt"`.
-    pub nvtt: Option<PathBuf>,
     /// Also write `<name>.dds.json` next to each output.
     pub sidecar: bool,
     pub dry_run: bool,
@@ -192,7 +189,6 @@ impl BatchRequest {
             jobs: 0,
             mem_budget: 0,
             bc1_model: Bc1Model::Ideal,
-            nvtt: None,
             sidecar: false,
             dry_run: false,
             plan_progress: None,
@@ -249,7 +245,6 @@ impl BatchRequest {
             jobs,
             mem_budget,
             bc1_model,
-            nvtt,
             sidecar,
             dry_run,
             plan_progress: _,
@@ -257,7 +252,7 @@ impl BatchRequest {
             derive,
             skip_root,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 34] = [
+        let fields: [&dyn std::fmt::Debug; 33] = [
             inputs,
             output_root,
             target,
@@ -286,7 +281,6 @@ impl BatchRequest {
             jobs,
             mem_budget,
             bc1_model,
-            nvtt,
             sidecar,
             dry_run,
             low_detail,
@@ -465,8 +459,6 @@ pub struct Plan {
     pub cancelled: Vec<PathBuf>,
     /// M6 (DECISIONS Note S): set key → the set's shader pick.
     pub shaders: BTreeMap<String, ShaderPick>,
-    /// The NVTT probe, if any profile on `encoder.backend = "nvtt"` asked for it while planning (DECISIONS Note NV3).
-    pub nvtt: Option<crate::nvtt::NvttProbe>,
     /// Note CN23: members of derived or dropped sets whose own output a job of this plan writes (no TA12 fold: a
     /// derived diffuse on its albedo's path, a kept landscape `_p`). That job's event ends them, so `run` emits no
     /// `packed_source` for them.
@@ -937,7 +929,6 @@ pub(crate) fn is_up_to_date(
     job: &ResolvedJob,
     encoders: &EncoderVersions,
     bc1_model: Bc1Model,
-    nvtt: Option<&str>,
 ) -> bool {
     let Some(rec) = e.encoders.as_ref() else {
         return false;
@@ -954,8 +945,6 @@ pub(crate) fn is_up_to_date(
                 &encoders.bc7e_patch,
             )
         || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
-        // NV10: an NVTT output follows the NVTT version found now; a built-in one ignores it.
-        || (job.profile.encoder.backend == Backend::Nvtt && rec.nvtt.as_deref() != nvtt)
     {
         return false;
     }
@@ -1058,7 +1047,6 @@ pub(crate) struct Prepared {
     /// Final membership, before the predicted packing suffixes.
     pub(crate) sets: Vec<TextureSet>,
     pub(crate) file_scopes: FileScopes,
-    pub(crate) nvtt: crate::nvtt::NvttCell,
     pub(crate) hand: Vec<Option<crate::helper::HelperRole>>,
     pub(crate) typed: BTreeSet<usize>,
     pub(crate) dup_idx: BTreeSet<usize>,
@@ -1077,7 +1065,6 @@ impl Prepared {
             self.user_config.as_ref(),
             self.project_config.as_ref(),
             &self.file_scopes,
-            &self.nvtt,
         )
     }
 }
@@ -1093,7 +1080,6 @@ fn base_ctx<'a>(
     user_config: Option<&'a ConfigFile>,
     project_config: Option<&'a ConfigFile>,
     file_scopes: &'a FileScopes,
-    nvtt: &'a crate::nvtt::NvttCell,
 ) -> ResolveCtx<'a> {
     ResolveCtx {
         target,
@@ -1107,7 +1093,6 @@ fn base_ctx<'a>(
         files: file_scopes,
         shaders: &NO_SHADERS,
         mesh_alpha: &req.mesh_alpha,
-        nvtt: Some(nvtt),
     }
 }
 
@@ -1496,7 +1481,6 @@ impl Engine {
             ..FileScopes::default()
         };
         file_scopes.index(&files);
-        let nvtt = crate::nvtt::NvttCell::new(req.nvtt.clone());
         let ctx = base_ctx(
             req,
             target,
@@ -1505,7 +1489,6 @@ impl Engine {
             user_config.as_ref(),
             project_config.as_ref(),
             &file_scopes,
-            &nvtt,
         );
         let hand: Vec<Option<crate::helper::HelperRole>> =
             files.iter().map(|f| hand_role(&ctx, f)).collect();
@@ -1629,7 +1612,6 @@ impl Engine {
             joined,
             sets,
             file_scopes,
-            nvtt,
             hand,
             typed,
             dup_idx,
@@ -1654,7 +1636,7 @@ impl Engine {
         let req = &p.req;
         let registry = &p.registry;
         let (target, target_src, preset_id) = (p.target, &p.target_src, &p.preset_id);
-        let (files, file_scopes, nvtt) = (&p.files, &p.file_scopes, &p.nvtt);
+        let (files, file_scopes) = (&p.files, &p.file_scopes);
         let (hand, typed, dup_idx) = (&p.hand, &p.typed, &p.dup_idx);
         // Mutated below (predicted suffixes, replaced generated members); the prepared sets stay as built.
         let mut sets: Vec<TextureSet> = p
@@ -1672,7 +1654,6 @@ impl Engine {
             p.user_config.as_ref(),
             p.project_config.as_ref(),
             file_scopes,
-            nvtt,
         );
 
         // On every set, so a choice for a set outside the scope is not taken for stale.
@@ -2718,7 +2699,6 @@ impl Engine {
             peak_admitted_bytes,
             cancelled,
             shaders: picks,
-            nvtt: nvtt.probed(),
             derive_own,
             fill_ends,
             helpers,
@@ -2737,7 +2717,6 @@ impl Engine {
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
         let req = &plan.request;
-        let nvtt = plan.nvtt.as_ref().and_then(|p| p.tool());
         let mut summary = BatchSummary {
             failed: plan.failed.len() as u32,
             cancelled: plan.cancelled.clone(),
@@ -3019,15 +2998,7 @@ impl Engine {
                             && job.output.exists()
                             && existing
                                 .get(&output_key(&req.output_root, &job.output))
-                                .is_some_and(|e| {
-                                    is_up_to_date(
-                                        e,
-                                        job,
-                                        &encoders,
-                                        req.bc1_model,
-                                        nvtt.map(|t| t.version.as_str()),
-                                    )
-                                })
+                                .is_some_and(|e| is_up_to_date(e, job, &encoders, req.bc1_model))
                     })
                     .collect()
             })
@@ -3168,17 +3139,7 @@ impl Engine {
                         lock(state).cancelled.push(job.input.clone());
                         return;
                     }
-                    run_one(
-                        job,
-                        req,
-                        preset,
-                        measure_only,
-                        cancel,
-                        rep,
-                        manifest,
-                        state,
-                        nvtt,
-                    );
+                    run_one(job, req, preset, measure_only, cancel, rep, manifest, state);
                 });
             }
         });
@@ -3202,7 +3163,6 @@ fn run_one(
     rep: &Reporter,
     manifest: &Manifest,
     state: &Mutex<BatchSummary>,
-    nvtt: Option<&crate::nvtt::NvttTool>,
 ) {
     let (set, path) = (Some(job.set_key.as_str()), Some(job.input.as_path()));
     let key = output_key(&req.output_root, &job.output);
@@ -3219,7 +3179,6 @@ fn run_one(
             rep,
             manifest,
             &tracker,
-            nvtt,
         )
     }));
     let (stage, error) = match r {
@@ -4006,9 +3965,7 @@ mod tests {
             copied_from: None,
             raw: serde_json::json!({ "validation": { "passed": true } }),
         };
-        let up = |e: &ManifestEntry, job: &ResolvedJob, m: Bc1Model| {
-            is_up_to_date(e, job, &enc, m, None)
-        };
+        let up = |e: &ManifestEntry, job: &ResolvedJob, m: Bc1Model| is_up_to_date(e, job, &enc, m);
         let good = entry_for(&job);
         assert_eq!(job.profile.format, Format::Bc7);
         assert!(up(&good, &job, Bc1Model::Ideal));
@@ -4138,58 +4095,6 @@ mod tests {
                 "{format:?} old-tag record"
             );
         }
-        // M5 (DECISIONS Note NV10): a record written before M5 has no `nvtt` key and stays current for built-in
-        // profiles, whatever NVTT is found now.
-        let pre_m5: EncoderVersions = serde_json::from_value(serde_json::json!({
-            "bc7enc_rdo": enc.bc7enc_rdo, "ispctc": enc.ispctc, "ispc": enc.ispc,
-            "bc7e_patch": enc.bc7e_patch, "rgbcx_patch": enc.rgbcx_patch,
-        }))
-        .unwrap();
-        assert_eq!(pre_m5.nvtt, None);
-        job.profile.format = Format::Bc7;
-        let built_in = with(&|e| e.encoders = Some(pre_m5.clone()));
-        assert!(is_up_to_date(
-            &built_in,
-            &job,
-            &enc,
-            Bc1Model::Ideal,
-            Some("3.3.0")
-        ));
-        // An NVTT output is current only while the NVTT found now is the version that encoded it.
-        job.profile.encoder.backend = Backend::Nvtt;
-        let nv = |v: Option<&str>| {
-            let mut e = entry_for(&job);
-            e.encoders.as_mut().unwrap().nvtt = v.map(String::from);
-            e
-        };
-        assert!(is_up_to_date(
-            &nv(Some("3.2.5")),
-            &job,
-            &enc,
-            Bc1Model::Ideal,
-            Some("3.2.5")
-        ));
-        assert!(!is_up_to_date(
-            &nv(Some("3.2.5")),
-            &job,
-            &enc,
-            Bc1Model::Ideal,
-            Some("3.3.0")
-        ));
-        assert!(!is_up_to_date(
-            &nv(Some("3.2.5")),
-            &job,
-            &enc,
-            Bc1Model::Ideal,
-            None
-        ));
-        assert!(!is_up_to_date(
-            &nv(None),
-            &job,
-            &enc,
-            Bc1Model::Ideal,
-            Some("3.2.5")
-        ));
     }
 
     #[test]
@@ -4277,7 +4182,7 @@ mod tests {
     }
 
     /// Fast re-plan Task 2: one `Prepared` planned twice gives the same plan and events, so `plan_sets` neither
-    /// consumes nor changes what it borrows (the cloned `sets`, the probed NVTT cell).
+    /// consumes nor changes what it borrows (the cloned `sets`).
     #[test]
     fn prepared_plans_twice_equal() {
         use crate::events::VecSink;
@@ -4305,10 +4210,6 @@ mod tests {
         let mut req =
             BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
         req.recursive = true;
-        // An NVTT profile with a missing tool: the cell is probed (Missing) without starting a process.
-        req.nvtt = Some(d.path().join("no-nvcompress.exe"));
-        req.overrides =
-            vec![crate::overrides::parse_set("file:**/iron.png.encoder.backend=nvtt").unwrap()];
         let engine = Engine::new().unwrap();
         let cache = AnalysisCache::default();
         let cancel = CancelToken::default();
@@ -4332,7 +4233,6 @@ mod tests {
                 format!("{:?}", plan.skipped),
                 format!("{:?}", plan.failed),
                 format!("{:?}", plan.helpers),
-                plan.nvtt,
                 events,
             )
         };
@@ -4344,9 +4244,8 @@ mod tests {
             "a packed job"
         );
         assert!(a.1.contains("InDdsSkipped"), "a DDS skip: {}", a.1);
-        assert!(a.4.is_some(), "the NVTT cell was probed");
         assert!(
-            a.5.iter()
+            a.4.iter()
                 .any(|e| e.to_string().contains("\"set_resolved\"")),
             "set_resolved events"
         );

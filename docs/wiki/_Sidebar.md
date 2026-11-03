@@ -50,7 +50,6 @@ Concepts
 - [Cubemap sources](Cubemap-Sources.md)
 - [XPMF profiles](XPMF-Profiles.md)
 - [Mod scanning](Mod-Scanning.md)
-- [NVTT backend](NVTT-Backend.md)
 - [Validation and output](Validation-and-Output.md)
 - [Research behind the defaults](Research.md)
 

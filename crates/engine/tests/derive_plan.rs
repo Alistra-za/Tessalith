@@ -723,7 +723,6 @@ fn a_grass_stack_on_an_opaque_albedo_keeps_its_spec_alpha() {
             files: &NO_FILE_SCOPES,
             shaders: &NO_SHADERS,
             mesh_alpha: &NO_MESH_ALPHA,
-            nvtt: None,
         };
         finish_derived(&ctx, &c, &set, &analysis, &asm.info, 0.5)
     };

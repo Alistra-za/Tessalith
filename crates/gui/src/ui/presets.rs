@@ -10,7 +10,7 @@ use crate::model::presets::{
 };
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::{Backend, MipFilter, Profile, Subtype, Target};
+use engine::config::{MipFilter, Profile, Subtype, Target};
 use serde_json::{json, Value};
 
 /// The view's heading and tab name.
@@ -523,11 +523,7 @@ fn tree(
     let st = row.subtype;
     sub(ui, st, scope, "Compression", |ui| {
         grid(ui, st, scope, "c", |ui| {
-            for (f, l) in [
-                ("format", "Format"),
-                ("encoder.backend", "Encoder"),
-                ("encoder.effort", "Effort"),
-            ] {
+            for (f, l) in [("format", "Format"), ("encoder.effort", "Effort")] {
                 field_row(ui, pm, row, p, scope, f, l, acts);
             }
         });
@@ -643,14 +639,6 @@ pub fn field_options(field: &str, t: Target, p: &Profile) -> Options {
             .filter(|(v, _)| {
                 serde_json::from_value::<MipFilter>(v.clone())
                     .is_ok_and(|f| f == p.mips.filter || filter_option_lock(p, f).is_none())
-            })
-            .collect(),
-        "encoder.backend" => options_of(field, t, p)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(v, _)| {
-                serde_json::from_value::<Backend>(v.clone())
-                    .is_ok_and(|b| engine::policy::backend_fits(b, p.format))
             })
             .collect(),
         _ => options_of(field, t, p).unwrap_or_default(),

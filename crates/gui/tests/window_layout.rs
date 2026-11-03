@@ -26,7 +26,6 @@ fn full() -> LayoutSettings {
         filters: vec!["warnings".into(), "not-in-set".into()],
         filter_subtype: Some("normal".into()),
         filter_format: None,
-        filter_encoder: Some("nvtt".into()),
         filter_set: "in".into(),
         sort: "size".into(),
         tile: 128.0,

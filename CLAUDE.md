@@ -39,7 +39,6 @@ Build folders fill the drive fast: one worktree's `target/` reaches 50–170 GB.
 - **Tests never touch the real user data folders**: `%LOCALAPPDATA%\sdc` (scan.db, logs) and `%APPDATA%\sdc` (gui.toml, presets). Use temp dirs.
 - **Tests that need the owner's game or mod data** stay `#[ignore]` or gated on an `SDC_*` environment variable.
 - **No game or mod assets in the repo**: no `.dds`, `.bsa`, `.esp` or real textures. Fixtures are generated in tests.
-- **NVTT is never bundled.** It is an optional external tool.
 - **Files the user edits are written with `engine::dds::write_atomic`**, which flushes before the rename. That covers `sdc.toml`, `sdc-project.toml`, `gui.toml`, presets and exported JSON. DDS outputs use it too (owner decision, Note BC10).
 - **Never overwrite a file Tessalith did not write.** This matters most next to PGPatcher's outputs. Exports check the recorded hash first, as the PGPatcher, CS PBR and complex-material JSON exports do.
 - **Version:** the workspace version is the engine version, and it is part of every output's identity. Bump it only on purpose. An engine change that alters a type's output bytes or validation verdict sets that type's arm in `engine::manifest::encode_version` to the new engine version (Note DM). New `Profile` fields are `#[serde(default, skip_serializing_if = ...)]`. A release commit sets `RELEASED_ENGINE_VERSION` to the released version. The version follows semantic versioning (Note DM8): MAJOR breaks existing use, MINOR adds a backward-compatible feature, PATCH fixes a bug.

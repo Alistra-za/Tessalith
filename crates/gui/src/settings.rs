@@ -84,8 +84,6 @@ pub struct GuiSettings {
     pub advanced_open: bool,
     /// Reduce motion (Note CF1): shorter fades, no sliding or scaling.
     pub reduce_motion: bool,
-    /// M5 (DECISIONS Note NV2): an explicit `nvcompress.exe`; `None` looks on PATH, then in the NVIDIA install folder.
-    pub nvtt_path: Option<PathBuf>,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.
     pub meshes: MeshesSettings,
     /// The Meshes view's 3D panel (plan B Task B8), `[render3d]` in the file.
@@ -166,7 +164,6 @@ impl Default for GuiSettings {
             set_settings_open: false,
             advanced_open: false,
             reduce_motion: false,
-            nvtt_path: None,
             meshes: MeshesSettings::default(),
             render3d: Render3dSettings::default(),
             layout: LayoutSettings::default(),
@@ -227,7 +224,6 @@ impl GuiSettings {
         s.recent.retain(ok);
         for p in [
             &mut s.export_folder,
-            &mut s.nvtt_path,
             &mut s.meshes.instance,
             &mut s.meshes.folder,
         ] {

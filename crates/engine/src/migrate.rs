@@ -49,6 +49,26 @@ pub const REMOVED: &[Removed] = &[
         value: Some("rfaos"),
         hint: "use skin_rfaos",
     },
+    Removed {
+        key: "encoder.backend",
+        value: Some("nvtt"),
+        hint: "NVTT was removed in 2.0; delete the key",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ENC-NVTT-MISSING"),
+        hint: "ENC-NVTT-MISSING was removed in 2.0 with NVTT; delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ENC-NVTT-VERSION"),
+        hint: "ENC-NVTT-VERSION was removed in 2.0 with NVTT; delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ENC-NVTT-FAILED"),
+        hint: "ENC-NVTT-FAILED was removed in 2.0 with NVTT; delete it from the list",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

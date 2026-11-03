@@ -293,7 +293,6 @@ pub fn capture(
         .collect();
     l.filter_subtype = filter.subtype.clone();
     l.filter_format = filter.format.clone();
-    l.filter_encoder = filter.encoder.clone();
     l.filter_set = filter.set.name().to_string();
     l.sort = prefs.sort.name().to_string();
     l.tile = prefs.tile;
@@ -449,7 +448,6 @@ pub fn restore_model(
         not_in_set: has("not-in-set"),
         subtype: l.filter_subtype.clone(),
         format: l.filter_format.clone(),
-        encoder: l.filter_encoder.clone(),
         set: SetFilter::from_name(&l.filter_set).unwrap_or_default(),
         hide_helpers: has("hide-helpers"),
     };

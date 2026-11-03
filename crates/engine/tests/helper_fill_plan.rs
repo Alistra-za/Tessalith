@@ -108,7 +108,6 @@ fn run(target: Target, sets: &[&str], fx: &mut Fx) -> FillPlan {
         files: &engine::overrides::NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     plan_fills(
         &ctx,

@@ -88,7 +88,7 @@ cfg_enum!(NormalBase, "lowercase" { Renormalize, Keep });
 cfg_enum!(CoverageMode, "lowercase" { Auto, On, Off });
 cfg_enum!(Format, "lowercase" { Bc1, Bc3, Bc4, Bc5, Bc6hUf16 = "bc6h_uf16", Bc7, Rgba8, R8, Rg8, Rgba16f });
 cfg_enum!(HeaderForm, "lowercase" { Auto, Dx10, Legacy });
-cfg_enum!(Backend, "snake_case" { Bc7e, Rgbcx, IspcBc6h, Nvtt, Uncompressed });
+cfg_enum!(Backend, "snake_case" { Bc7e, Rgbcx, IspcBc6h, Uncompressed });
 // bc7e quality level. `max` is sdc patch 0002 (veryslow's search plus a fully refined, wider partition ranking,
 // uber 4, two least-squares passes and a quantised endpoint search); it needs the patch-0002 bc7e objects and is
 // refused with `CFG-INVALID` without them (docs/research/bc7e-tuning.md).

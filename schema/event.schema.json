@@ -120,7 +120,6 @@
         "bc7e",
         "rgbcx",
         "ispc_bc6h",
-        "nvtt",
         "uncompressed"
       ],
       "type": "string"
@@ -435,9 +434,6 @@
         "VAL-BC6H-PEAK",
         "VAL-HEADER",
         "VAL-MIP-ERROR",
-        "ENC-NVTT-MISSING",
-        "ENC-NVTT-VERSION",
-        "ENC-NVTT-FAILED",
         "ENC-WEIGHTS-IGNORED",
         "IN-DUPLICATE",
         "IN-DDS-SKIPPED",

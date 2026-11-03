@@ -8,7 +8,7 @@
 | [`inspect`](#sdc-inspect) | Show the plan for images, or the header and alpha statistics of DDS files. Writes nothing. |
 | [`validate`](#sdc-validate) | Check existing DDS files against a target's rules. |
 | [`presets`](#sdc-presets) | List, show, compare, export and check presets; print JSON schemas. |
-| [`encoders`](#sdc-encoders) | Print the built-in encoder versions and look for NVTT. |
+| [`encoders`](#sdc-encoders) | Print the built-in encoder versions. |
 | [`patch-header`](#sdc-patch-header) | Fix DDS header faults that need no pixel change. |
 
 `sdc --version` prints the version. `sdc --help` and `sdc <subcommand> --help` print the built-in help. The help text calls the program "Skyrim SE/AE DDS converter (working name)"; that is Tessalith.
@@ -118,7 +118,6 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists. See below. |
 | `--dry-run` | off | Plan and report, write nothing. |
 | `--sidecar` | off | Also write `<name>.dds.json` next to each output with its record. |
-| `--nvtt <path>` | `PATH`, then the NVIDIA install folder | Path to `nvcompress.exe` for textures with `encoder.backend = "nvtt"`. NVTT is looked for only when a texture uses it. See [NVTT backend](NVTT-Backend.md). |
 | `--bc1-decoder ideal\|ideal-round4\|nvidia\|amd` | `ideal` | Which hardware decoder model is used when BC1/BC3 output is decoded for validation. |
 
 ### Also export as Vanilla / CM
@@ -134,7 +133,7 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 | Value | Behaviour |
 |---|---|
-| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, NVTT version (only for outputs encoded with NVTT), BC1 decoder model (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. With `--sidecar`, a missing sidecar on an up-to-date output is written from the manifest record; the file re-encodes only if that write fails. |
+| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 decoder model (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. With `--sidecar`, a missing sidecar on an up-to-date output is written from the manifest record; the file re-encodes only if that write fails. |
 | `skip` | Keep every existing output. Counted as skipped on purpose. |
 | `overwrite` | Always re-encode. |
 
@@ -308,10 +307,10 @@ sdc presets schema all --out schemas
 ## sdc encoders
 
 ```text
-sdc encoders [--nvtt <path>] [--bc1-decoder <model>] [--json]
+sdc encoders [--bc1-decoder <model>] [--json]
 ```
 
-Prints the versions of the linked encoders and whether NVTT is available:
+Prints the versions of the linked encoders:
 
 ```text
 bc7e (bc7enc_rdo <commit>) patch <patch id or none>
@@ -319,10 +318,9 @@ rgbcx (bc7enc_rdo <commit>) patch <patch id or none>
 ISPC Texture Compressor <version> (BC6H)
 ISPC <version> objects; dispatched ISA on this CPU: <isa>
 BC1 decoder model: ideal
-NVTT: 3.2.5 at C:\Program Files\NVIDIA Corporation\NVIDIA Texture Tools\nvcompress.exe (tested)
 ```
 
-The NVTT line is one of `(tested)`, `(untested: acknowledge with --allow ENC-NVTT-VERSION)` or `NVTT: not found (<reason>)`. `--json` prints one JSON object instead.
+`--json` prints one JSON object instead.
 
 ## sdc patch-header
 

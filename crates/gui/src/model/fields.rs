@@ -5,7 +5,7 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields in display order, with the label each row shows.
-pub const FIELDS: [(&str, &str); 15] = [
+pub const FIELDS: [(&str, &str); 14] = [
     ("subtype", "Sub-type"),
     ("color.content", "Content"),
     ("color.tag", "DDS tag"),
@@ -19,7 +19,6 @@ pub const FIELDS: [(&str, &str); 15] = [
     ("mips.normal_base", "Normal base level"),
     ("format", "Format"),
     ("encoder.effort", "Effort"),
-    ("encoder.backend", "Encoder"),
     (WEIGHTING, "BC7 weighting"),
 ];
 
@@ -243,9 +242,6 @@ pub fn field_hidden(p: &Profile, field: &str) -> bool {
 pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
     match field {
         "mips.coverage" if !is_cutout(p) => Some("used only by cutout and cutout + blend"),
-        "encoder.backend" if !p.format.is_block() => {
-            Some("no encoder runs for uncompressed formats")
-        }
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
         WEIGHTING if p.encoder.backend != Backend::Bc7e => {
@@ -258,15 +254,6 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         "alpha.parallax" if p.alpha.policy == AlphaPolicy::Remove => Some("alpha removed: 255"),
         _ => None,
     }
-}
-
-/// The Encoder row's lock when NVTT was not found (DECISIONS Note NV): a texture already on NVTT keeps the row open
-/// so it can go back to the built-in encoder.
-pub const NVTT_NOT_FOUND: &str = "NVTT not found: set its path in Advanced";
-
-/// Why the Encoder row cannot offer NVTT now, beyond `field_lock` (the format), or `None`.
-pub fn backend_lock(p: &Profile, nvtt_found: bool) -> Option<&'static str> {
-    (p.encoder.backend != Backend::Nvtt && !nvtt_found).then_some(NVTT_NOT_FOUND)
 }
 
 /// Why a field cannot be changed for this profile, or `None`.
@@ -307,9 +294,6 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "encoder.bc1_transparent_black" if p.format != Format::Bc1 => Some("BC1 only"),
         "encoder.bc45_search_radius" if !matches!(p.format, Format::Bc4 | Format::Bc5) => {
             Some("BC4 and BC5 only")
-        }
-        "encoder.backend" if !engine::policy::backend_fits(Backend::Nvtt, p.format) => {
-            Some("NVTT encodes BC7 and BC6H only")
         }
         "encoder.rgbcx_level" if p.encoder.backend != Backend::Rgbcx => {
             Some("used only by the rgbcx encoder (BC1, BC3, BC4, BC5)")

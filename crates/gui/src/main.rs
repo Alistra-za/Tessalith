@@ -44,7 +44,6 @@ fn build_model() -> AppModel {
             m
         }
     };
-    model.refresh_nvtt();
     if let Some(e) = err {
         model.keep_banner(format!("Settings were not read, defaults are used: {e}"));
     }

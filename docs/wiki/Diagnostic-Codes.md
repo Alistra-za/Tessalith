@@ -125,16 +125,13 @@ Every warning has a code and a severity:
 | `VAL-M-GRAYSCALE` | warning | A complex `_m`'s smallest mip is grey, so it reads as a plain env mask. | Check the channels. |
 | `VAL-M-HEIGHT-CLIP` | warning | Large `_m` alpha areas with no parallax ([limits](Validation-and-Output.md#validation)). | Remap the height. |
 | `VAL-PGPATCHER-50` | warning | A plain `_m` with alpha is 50% or more non-white; PGPatcher would treat it as complex. | Use BC4, or turn `exact_opaque` on. |
-| `VAL-BC6H-PEAK` | warning | A BC6H texture's peak ratio is below 0.8. | Set `encoder.effort = "slowest"` for that texture (BC6H's peak-preserving mode), or try NVTT Production. |
+| `VAL-BC6H-PEAK` | warning | A BC6H texture's peak ratio is below 0.8. | Set `encoder.effort = "slowest"` for that texture (BC6H's peak-preserving mode). |
 | `VAL-GRASS-DETECT` | error | The encoded complex-grass corner texel still fails detection after a slowest re-encode. The file is written. | Fix the source corner. |
 
 ### Encoders and output
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `ENC-NVTT-MISSING` | blocking | NVTT chosen but not found. | Install it, give the path, or use the built-in encoder. |
-| `ENC-NVTT-VERSION` | blocking | Untested NVTT version ([NVTT backend](NVTT-Backend.md#codes)). | Acknowledge. |
-| `ENC-NVTT-FAILED` | error | `nvcompress` failed; no fallback. | Check NVTT, or use the built-in encoder. |
 | `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format is not BC7, the backend is not bc7e, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
 | `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([`--on-existing`](CLI-Reference.md#--on-existing)). | `--on-existing overwrite`. |
 | `OUT-SIDECAR-KEPT` | warning | The `.dds.json` next to the output was not changed, and the new DDS was written. Either an old sidecar sdc wrote for the previous output could not be removed or replaced (locked or protected), or with `--sidecar` the file there is not one sdc wrote, so it was kept. | Unlock or delete the old `.dds.json` and run again (with `--sidecar` to write a new one). A file that is not sdc's is yours: move it away if you want the sidecar. |

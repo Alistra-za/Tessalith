@@ -38,7 +38,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("problems_tab", problems_tab),
     ("messages_tab", messages_tab),
     ("tile_menu", tile_menu),
-    ("filter_popup", filter_popup),
     ("members_of_kind", members_of_kind),
     ("set_card_menu", set_card_menu),
     ("member_menu", member_menu),
@@ -61,7 +60,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("assign_menu", assign_menu),
     ("slot_menu", slot_menu),
     ("pgp_material", pgp_material),
-    ("texture_panel", texture_panel),
     ("rnm_panel", rnm_panel),
     ("helper_panel", helper_panel),
     ("cube_panel", cube_panel),
@@ -366,13 +364,11 @@ fn marker(img: &mut RgbaImage, c: Pos2, n: u32) {
 
 const EXPORT: &str = "D:\\Mods\\StoneWork\\sdc-out";
 
-/// Settings that read the same on every machine: a fixed export folder and recent list, an NVTT path that does not
-/// exist (so the drawer never shows this machine's NVTT) and no motion.
+/// Settings that read the same on every machine: a fixed export folder and recent list and no motion.
 fn settings() -> GuiSettings {
     GuiSettings {
         export_folder: Some(EXPORT.into()),
         recent: recent(),
-        nvtt_path: Some("D:\\Tools\\NVTT\\nvcompress.exe".into()),
         reduce_motion: true,
         ..GuiSettings::default()
     }
@@ -597,14 +593,6 @@ fn tile_menu(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Textures-Column: the Filter ▾ popup.
-fn filter_popup(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| node(h, "Filter ▾").click());
-    let b = node(&h, "Filter ▾").rect();
-    shot(&mut h, r.union(b))
-}
-
 /// GUI-Bulk-and-Rename: two sets selected, their menu with Select members of kind open.
 fn members_of_kind(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| {
@@ -810,15 +798,6 @@ fn pgp_material(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
     let r = reveal(&mut h, |h| {
         select_set(&mut h.state_mut().model, "architecture/stone/cobble")
-    });
-    shot(&mut h, r)
-}
-
-/// GUI-Texture-Panel: the settings of a diffuse with cut-out alpha.
-fn texture_panel(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| {
-        h.state_mut().model.select_item("plants/fern.png")
     });
     shot(&mut h, r)
 }

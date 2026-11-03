@@ -203,10 +203,4 @@ fn hidden_rows_say_why() {
         hidden_reason(&diffuse, "mips.coverage"),
         Some("used only by cutout and cutout + blend")
     );
-    let mut raw = diffuse.clone();
-    raw.format = engine::config::Format::Rgba8;
-    assert_eq!(
-        hidden_reason(&raw, "encoder.backend"),
-        Some("no encoder runs for uncompressed formats")
-    );
 }

@@ -5,7 +5,6 @@ use super::columns::{strip_button, AMBER, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
 use super::settings_panel::{field_row, toml_read_only_reason, Ctx, RowEdit};
 use crate::model::fields::{advanced_field_views, levels_view, provenance_text};
 use crate::model::inspector::{inspector_rows, InspectorRow};
-use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
 use crate::model::{AppModel, Selection};
 use crate::settings::{Bc1Choice, ChecksSettings, PREVIEW_SIZES};
 use eframe::egui;
@@ -32,7 +31,6 @@ enum Action {
     Live(bool),
     Bc1(Bc1Choice),
     ReduceMotion(bool),
-    NvttPath(Option<std::path::PathBuf>),
     Checks(ChecksSettings),
     CheckAllUv,
     CancelCheckAllUv,
@@ -90,7 +88,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     let mut actions = vec![];
     inspector(ui, model, state);
     batch(ui, model, &mut actions);
-    nvtt(ui, model, &mut actions);
     legacy_fills(ui, model, &mut actions);
     preview_settings(ui, model, &mut actions);
     interface(ui, model, &mut actions);
@@ -110,7 +107,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::Live(on) => model.set_live(on),
             Action::Bc1(c) => model.set_bc1_choice(c),
             Action::ReduceMotion(on) => model.set_reduce_motion(on),
-            Action::NvttPath(p) => model.set_nvtt_path(p),
             Action::Checks(c) => model.set_checks(c),
             Action::CheckAllUv => model.check_all_uv(),
             Action::CancelCheckAllUv => model.cancel_check_all_uv(),
@@ -328,44 +324,6 @@ fn batch(ui: &mut egui::Ui, model: &mut AppModel, actions: &mut Vec<Action>) {
         if settled {
             model.save_settings();
         }
-    });
-}
-
-/// M5 (DECISIONS Note NV): where nvcompress is and what the probe found. NVTT is never bundled.
-fn nvtt(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "NVTT", |ui| {
-        ui.horizontal(|ui| {
-            ui.label("NVTT path");
-            let shown = model
-                .settings
-                .nvtt_path
-                .as_ref()
-                .map_or("automatic (PATH, then the NVIDIA folder)".into(), |p| {
-                    p.display().to_string()
-                });
-            ui.label(egui::RichText::new(shown).small());
-        });
-        ui.horizontal(|ui| {
-            if picker::button(
-                ui,
-                &model.picker,
-                egui::Button::new("Choose nvcompress.exe…"),
-            ) {
-                let kind = PickerKind::File {
-                    filter: ("nvcompress", &["exe"]),
-                };
-                let spec = PickerSpec {
-                    title: None,
-                    kind,
-                    start: None,
-                };
-                model.pick(ui.ctx(), PickerPurpose::NvttPath, spec);
-            }
-            if model.settings.nvtt_path.is_some() && ui.button("Automatic").clicked() {
-                actions.push(Action::NvttPath(None));
-            }
-        });
-        ui.label(egui::RichText::new(model.nvtt_status()).small());
     });
 }
 
@@ -731,7 +689,6 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
                         compact: false,
                         edit_off: why.clone(),
                         warnings: &[],
-                        nvtt_found: model.nvtt_found(),
                     };
                     match field_row(ui, &cx, &f) {
                         Some(RowEdit::Set(v)) => {
@@ -768,7 +725,6 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
                         compact: false,
                         edit_off: why.clone(),
                         warnings: &[],
-                        nvtt_found: model.nvtt_found(),
                     };
                     for f in advanced_field_views(model.target, &job) {
                         match field_row(ui, &cx, &f) {

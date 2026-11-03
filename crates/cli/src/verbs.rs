@@ -1033,34 +1033,12 @@ fn alias_list(aliases: &BTreeMap<String, String>) -> Option<String> {
     })
 }
 
-/// `sdc encoders`: the vendored encoder versions, the ISA the ISPC kernels dispatch to, the active BC1 model
-/// and whether NVTT can be found. Result verb: stdout (DECISIONS Note J); `--json` prints one object.
+/// `sdc encoders`: the vendored encoder versions, the ISA the ISPC kernels dispatch to, the active BC1
+/// model. Result verb: stdout (DECISIONS Note J); `--json` prints one object.
 pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
     let v = engine::manifest::EncoderVersions::current();
     let isa = engine::manifest::dispatched_isa();
     let model = engine::manifest::bc1_model_id(a.bc1_decoder.into());
-    let nvtt = engine::nvtt::locate(
-        a.nvtt.as_deref(),
-        std::env::var_os("PATH").as_deref(),
-        Path::new(engine::nvtt::NVTT_DEFAULT),
-    );
-    let source = match (&nvtt, a.nvtt.is_some()) {
-        (_, true) => "--nvtt",
-        (Ok((_, s)), false) => s,
-        (Err(_), false) => "PATH",
-    };
-    let nvtt_path = nvtt
-        .as_ref()
-        .ok()
-        .map(|(p, _)| p.to_string_lossy().replace('\\', "/"));
-    // The same probe a batch runs (DECISIONS Note NV3); `why` says where it looked or why the probe failed.
-    let (tool, why) = match &nvtt {
-        Ok((p, _)) => match engine::nvtt::probe_path(p) {
-            engine::nvtt::NvttProbe::Found(t) => (Some(t), None),
-            engine::nvtt::NvttProbe::Missing(why) => (None, Some(why)),
-        },
-        Err(why) => (None, Some(why.clone())),
-    };
     if a.json {
         out!(
             "{}",
@@ -1068,11 +1046,6 @@ pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
                 "kind": "encoders",
                 "bc7enc_rdo": v.bc7enc_rdo, "ispc_texture_compressor": v.ispctc, "ispc": v.ispc,
                 "bc7e_patch": v.bc7e_patch, "rgbcx_patch": v.rgbcx_patch, "isa": isa, "bc1_model": model,
-                "nvtt": {
-                    "found": tool.is_some(), "path": nvtt_path, "source": source,
-                    "version": tool.as_ref().map(|t| &t.version), "tested": tool.as_ref().map(|t| t.tested()),
-                    "error": why,
-                },
             })
         );
         return Ok(0);
@@ -1090,14 +1063,6 @@ pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
     out!("ISPC Texture Compressor {} (BC6H)", v.ispctc);
     out!("ISPC {} objects; dispatched ISA on this CPU: {isa}", v.ispc);
     out!("BC1 decoder model: {model}");
-    match (&tool, nvtt_path) {
-        (Some(t), Some(p)) if t.tested() => out!("NVTT: {} at {p} (tested)", t.version),
-        (Some(t), Some(p)) => out!(
-            "NVTT: {} at {p} (untested: acknowledge with --allow ENC-NVTT-VERSION)",
-            t.version
-        ),
-        _ => out!("NVTT: not found ({})", why.unwrap_or_default()),
-    }
     Ok(0)
 }
 

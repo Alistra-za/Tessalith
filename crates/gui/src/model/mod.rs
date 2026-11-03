@@ -73,8 +73,6 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-/// The file an NVTT probe ran on: path, size and modified time (`AppModel::refresh_nvtt_if_changed`).
-type NvttKey = (PathBuf, u64, Option<std::time::SystemTime>);
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -532,14 +530,6 @@ pub struct AppModel {
     pub gpu_available: bool,
     /// The BC1 decoder choice differs from the session's model, which is fixed at launch (M3a spec §4.6).
     pub restart_needed: bool,
-    /// M5 (DECISIONS Note NV3): the NVTT probe of `settings.nvtt_path`, run on start, on a path change and on window
-    /// focus; `None` until the first run.
-    pub nvtt: Option<engine::nvtt::NvttProbe>,
-    /// Generation of the latest NVTT probe, and whether it still runs (on a worker, DECISIONS AF3).
-    nvtt_gen: u64,
-    nvtt_pending: bool,
-    /// The file the last probe ran on (path, size, modified time; `None` inside: none found), `None` before any.
-    nvtt_key: Option<Option<NvttKey>>,
     /// The set editor "Used by plugins" reads (esp spec 4.1).
     pub plugin_refs: plugin_refs::SetPluginRefs,
     /// Design §5.1, §6: the CS PBR scan reads (statics, EDID checks, the material-object picker).
@@ -864,10 +854,6 @@ impl AppModel {
             replan_pushes: (0, None),
             close_ready: false,
             restart_needed: false,
-            nvtt: None,
-            nvtt_gen: 0,
-            nvtt_pending: false,
-            nvtt_key: None,
             plugin_refs: Default::default(),
             cs_pbr: Default::default(),
             nav: Default::default(),
@@ -1154,7 +1140,6 @@ impl AppModel {
         req.user_presets = self.user_presets.clone();
         req.jobs = self.settings.jobs;
         req.mem_budget = self.settings.mem_budget_mb * 1024 * 1024;
-        req.nvtt = self.settings.nvtt_path.clone();
         let (edits, paths) = sets::engine_inputs(self);
         req.set_edits = edits;
         req.output_paths = paths;
@@ -1563,9 +1548,9 @@ impl AppModel {
         self.full_plan_pending() || self.non_plan_busy()
     }
 
-    /// The work `busy()` and `edit_busy()` share besides the plan: an export, the preview, the NVTT probe.
+    /// The work `busy()` and `edit_busy()` share besides the plan: an export, the preview.
     fn non_plan_busy(&self) -> bool {
-        self.export.running.is_some() || self.preview.working() || self.nvtt_pending
+        self.export.running.is_some() || self.preview.working()
     }
 
     /// Note FL: a full plan runs behind a partial of the current edit, which the items show.
@@ -1692,7 +1677,6 @@ impl AppModel {
                 result,
             } => self.original_landed(generation, key, result),
             WorkerMsg::KnownPaths(result) => self.known_paths_landed(result),
-            WorkerMsg::Nvtt { generation, probe } => self.nvtt_landed(generation, probe),
             WorkerMsg::Panicked { what, message } => {
                 match what {
                     // Audit 08f-9: one error dialog. `export_ended` shows it unless the user was leaving (then the
@@ -3596,10 +3580,6 @@ impl AppModel {
         self.edit("Format", move |p| {
             p.set_file_value(&k, "format", &json!(f));
             p.set_file_value(&k, "color.tag", &json!(tag));
-            // NVTT encodes BC7 and BC6H only: a texture leaving them goes back to the built-in encoder.
-            if !engine::policy::backend_fits(engine::config::Backend::Nvtt, f) {
-                p.clear_file_value(&k, "encoder.backend");
-            }
             // Note CP: BC7 weights mean nothing on another format (the row hides there), so they go with it.
             if f != engine::config::Format::Bc7 {
                 p.clear_file_value(&k, fields::WEIGHTING);
@@ -3677,16 +3657,6 @@ impl AppModel {
         if field == "drop_top_mip" && locked(self) {
             return;
         }
-        // DECISIONS Note NV: "Built-in" is the texture's own format default, so one bulk value fits BC7 and BC6H.
-        let value = match field {
-            "encoder.backend" if value != serde_json::json!(engine::config::Backend::Nvtt) => self
-                .item(item_key)
-                .and_then(|i| i.job.as_ref())
-                .map_or(value, |j| {
-                    serde_json::json!(engine::policy::default_backend(j.profile.format))
-                }),
-            _ => value,
-        };
         let k = item_key.to_string();
         let f = field.to_string();
         self.edit(&format!("Change {f}"), move |p| {
@@ -3833,95 +3803,12 @@ impl AppModel {
         self.edit("Remove entry", move |p| p.remove_file_entry(&k));
     }
 
-    /// The BC1 decoder for the next launch. The session's model is fixed, so a difference needs a restart.
-    /// Probe NVTT again, on a worker (DECISIONS AF3: a wrong program can take up to the probe timeout); the result
-    /// lands in `nvtt_landed`. A newer probe supersedes an older one still running.
-    pub fn refresh_nvtt(&mut self) {
-        self.nvtt_gen += 1;
-        self.nvtt_pending = true;
-        self.nvtt_key = Some(self.nvtt_file());
-        let (generation, path) = (self.nvtt_gen, self.settings.nvtt_path.clone());
-        spawn_guarded(self.tx.clone(), "nvtt-probe", move |tx| {
-            // A panic is this generation's result, so a stale probe's panic never ends the current one's wait.
-            let probe = std::panic::catch_unwind(|| engine::nvtt::probe(path.as_deref()))
-                .unwrap_or_else(|p| {
-                    engine::nvtt::NvttProbe::Missing(format!(
-                        "the probe panicked: {}",
-                        crate::worker::panic_text(&*p)
-                    ))
-                });
-            let _ = tx.send(WorkerMsg::Nvtt { generation, probe });
-        });
-    }
-
-    /// Window focus (DECISIONS AF3): probe again only when the file NVTT resolves to changed (path, size or
-    /// modified time) since the last probe, so a wrong program that takes focus is not started over and over.
-    pub fn refresh_nvtt_if_changed(&mut self) {
-        if self.nvtt_key.as_ref() != Some(&self.nvtt_file()) {
-            self.refresh_nvtt();
-        }
-    }
-
-    /// The file a probe now would run: the configured or located path, with its size and modified time.
-    fn nvtt_file(&self) -> Option<NvttKey> {
-        let (p, _) = engine::nvtt::locate(
-            self.settings.nvtt_path.as_deref(),
-            std::env::var_os("PATH").as_deref(),
-            std::path::Path::new(engine::nvtt::NVTT_DEFAULT),
-        )
-        .ok()?;
-        let md = std::fs::metadata(&p).ok()?;
-        Some((p, md.len(), md.modified().ok()))
-    }
-
-    fn nvtt_landed(&mut self, generation: u64, probe: engine::nvtt::NvttProbe) {
-        if generation != self.nvtt_gen {
-            return;
-        }
-        self.nvtt_pending = false;
-        let now = Some(probe);
-        // A change since the last probe (NVTT installed or removed meanwhile) re-plans, so textures on NVTT see it.
-        let changed = self.nvtt.is_some() && self.nvtt != now;
-        self.nvtt = now;
-        if changed {
-            self.replan();
-        }
-    }
-
-    pub fn nvtt_found(&self) -> bool {
-        matches!(self.nvtt, Some(engine::nvtt::NvttProbe::Found(_)))
-    }
-
-    /// The Advanced drawer's NVTT status line.
-    pub fn nvtt_status(&self) -> String {
-        use engine::nvtt::NvttProbe;
-        match &self.nvtt {
-            Some(NvttProbe::Found(t)) if t.tested() => {
-                format!("NVTT {} at {} (tested)", t.version, t.path.display())
-            }
-            Some(NvttProbe::Found(t)) => format!(
-                "NVTT {} at {}: untested (3.2.5 is), acknowledge its version warning to use it",
-                t.version,
-                t.path.display()
-            ),
-            Some(NvttProbe::Missing(why)) => format!("NVTT not found ({why})"),
-            None => "NVTT not checked yet".into(),
-        }
-    }
-
-    /// A new NVTT path (or `None`: automatic). Saved, probed, and re-planned so the textures on NVTT see it.
-    pub fn set_nvtt_path(&mut self, p: Option<PathBuf>) {
-        self.settings.nvtt_path = p;
-        self.save_settings();
-        self.refresh_nvtt();
-        self.replan();
-    }
-
     pub fn set_reduce_motion(&mut self, on: bool) {
         self.settings.reduce_motion = on;
         self.save_settings();
     }
 
+    /// The BC1 decoder for the next launch. The session's model is fixed, so a difference needs a restart.
     pub fn set_bc1_choice(&mut self, c: crate::settings::Bc1Choice) {
         self.settings.bc1_decoder = c;
         self.save_settings();

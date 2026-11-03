@@ -16,8 +16,6 @@ pub enum PickerPurpose {
     ChooseMo2,
     /// Meshes page: a loose folder to scan.
     ScanFolder,
-    /// Advanced: nvcompress.exe.
-    NvttPath,
     /// Export drawer: where to write the report.
     SaveReport,
     /// 3D preview: the Community Shaders folder.
@@ -246,7 +244,7 @@ pub fn button(ui: &mut egui::Ui, picker: &Picker, b: egui::Button<'_>) -> bool {
 impl PickerPurpose {
     /// The purposes whose result belongs to the opened folder: it is dropped if the folder changed meanwhile.
     /// OpenFolder is not one: the folder picked is the user's latest choice whatever was open (AG129).
-    /// The others (a scan source, nvcompress, the shader folder) mean the same whatever folder is open.
+    /// The others (a scan source, the shader folder) mean the same whatever folder is open.
     fn folder_scoped(self) -> bool {
         matches!(
             self,
@@ -341,7 +339,6 @@ impl AppModel {
             PickerPurpose::ExportFolder => self.set_export_folder(path),
             // Refused (with the status line) while an export runs, as every Also edit is.
             PickerPurpose::AlsoLocation => self.set_also_location(&path),
-            PickerPurpose::NvttPath => self.set_nvtt_path(Some(path)),
             PickerPurpose::SaveReport => self.save_report(path),
             PickerPurpose::MakeMarker => self.marker_picked(&path),
             // The meshes and 3D models handle their own.

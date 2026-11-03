@@ -23,7 +23,6 @@ What you need:
 
 - Windows 10 or 11, x64.
 - A graphics card for the GUI's preview windows. The CLI needs none.
-- Optional: [NVIDIA Texture Tools](NVTT-Backend.md#installing), as another BC7 / BC6H encoder.
 
 The programs are not code-signed, so Windows SmartScreen may warn the first time. Click **More info**, then **Run anyway**.
 
@@ -41,7 +40,6 @@ To run `sdc` from any folder, add the unzipped folder to your `PATH`.
 | C++ compiler | Microsoft Visual C++ Build Tools (MSVC) with C++17 support. The `encoders-sys` crate compiles the rgbcx encoder, the ISPC Texture Compressor host code and a small C++ shim. |
 | Fonts (GUI only) | Segoe UI is required: `tessalith.exe` will not start without it. Segoe UI Symbol, Segoe UI Emoji and Consolas are used when present and skipped when missing. All four ship with Windows; Tessalith ships no fonts. |
 | ISPC | Not needed for a normal build. See [ISPC objects](#ispc-objects). |
-| NVTT | Optional. See [Optional: NVTT 3.2.5](NVTT-Backend.md#installing). |
 
 ### Build steps
 
@@ -137,7 +135,7 @@ It takes no parameters. It hashes every vendored file except `SHA256SUMS` itself
 |---|---|---|
 | `%APPDATA%\sdc\config.toml` | User config: default target, preset and overrides for every project. | You |
 | `%APPDATA%\sdc\presets\*.toml` | Your own presets. Loaded by the CLI and the GUI on every run; a file that fails to load is skipped. | You |
-| `%APPDATA%\sdc\gui.toml` | GUI settings: recent folders, the default export folder, preview limits, threads, NVTT path, window layout. | `tessalith.exe` |
+| `%APPDATA%\sdc\gui.toml` | GUI settings: recent folders, the default export folder, preview limits, threads, window layout. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\scan.db` | Mesh and plugin scan database. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\analysis-cache\` | What the GUI learned about each image, so a folder opened before reuses them instead of decoding again. Pruned to 200 MB when the GUI starts. Safe to delete. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\logs\` | GUI crash logs, `crash-<date>-<time>.log`. The CLI writes none. | `tessalith.exe` |

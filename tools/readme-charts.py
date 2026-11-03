@@ -111,11 +111,9 @@ def chart_bc7():
         ("bc7e u5 (Tessalith default)", (0.22, None), "0.22", 0.01, -0.03, BLUE, "+0.01", M + "0.03"),
         ("bc7e u6 (reference)", (0.28, None), "0.28", 0.0, 0.0, BLUE, "0", "0"),
         ("Compressonator q1.0", (33, None), "~33", -0.16, -1.50, VIOLET, M + "0.16", M + "1.50"),
-        ("NVTT Production/Highest", (14, None), "~14", -0.32, -0.37, AQUA, M + "0.32", M + "0.37"),
         ("bc7e u4", (0.12, None), "0.12", -0.39, -0.36, BLUE, M + "0.39", M + "0.36"),
         ("ISPC slow", (0.30, None), "0.30", -0.59, -0.67, ORANGE, M + "0.59", M + "0.67"),
         ("ISPC basic", (0.11, None), "0.11", -0.75, -0.69, ORANGE, M + "0.75", M + "0.69"),
-        ("NVTT Normal (GPU)", (0.03, 0.09), "0.03–0.09", -1.4, -0.75, AQUA, M + "1.4", M + "0.75"),
         ("texconv CPU (-bc x)", (16, 20), "~16–20", -1.6, -2.4, MAGENTA, M + "1.6", M + "2.4"),
         ("texconv GPU", (0.03, 0.09), "0.03–0.09", -1.8, -2.8, MAGENTA, M + "1.8", M + "2.8"),
     ]
@@ -173,29 +171,29 @@ def chart_bc7():
               "Measured later, on a 150-texture Skyrim sample; its Δ is against u6 on that sample.",
               "s")
     b += text(10, bot + 56, "~ means approximate. Speed bars start at 0.01 s. A pale tail marks a "
-              "range. The 0.03–0.09 s range is shared by NVTT Normal (GPU) and texconv GPU.", "s")
+              "range.", "s")
     desc = ("Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel "
             "on a log scale, shorter is faster. Right bars show quality in dB against bc7e u6. "
             "Tessalith's opt-in bc7e max is best at +0.32 dB RGB and alpha, about 0.6 s per "
-            "megapixel. The default, bc7e u5 (in bold), is level with u6 at 0.22 s. NVTT Production, "
-            "Compressonator and texconv CPU take 14 to 33 s and do not beat it. GPU encoders take "
-            "0.03 to 0.09 s and lose 1.4 to 2.8 dB.")
+            "megapixel. The default, bc7e u5 (in bold), is level with u6 at 0.22 s. "
+            "Compressonator and texconv CPU take 16 to 33 s and do not beat it. texconv GPU takes "
+            "0.03 to 0.09 s and loses 1.8 dB RGB and 2.8 dB alpha.")
     return svg(780, bot + 66, "BC7 encoders: speed against quality", desc, b)
 
 
 # ------------------------------------------------- chart 2: other formats, dB
 def chart_formats():
     """Groups = formats. One bar per encoder; the stripe pattern shows the encoder."""
-    ENC = ["rgbcx", "NVTT 3", "Compressonator", "Intel ISPC", "texconv (CPU)"]
-    PAT = [None, "pd", "ph", "px", "pv"]
+    ENC = ["rgbcx", "Compressonator", "Intel ISPC", "texconv (CPU)"]
+    PAT = [None, "ph", "px", "pv"]
     NM = "not measured"
     G = [  # format, values in ENC order (copied from the table)
-        ("BC1 colour (RGB PSNR)", [39.85, 39.74, 39.05, 38.11, 37.41]),
-        ("BC3 colour + alpha (premultiplied PSNR)", [49.20, 49.29, 48.75, 48.02, 48.07]),
-        ("BC4 masks (PSNR)", [45.59, 45.05, 45.19, 43.70, 43.94]),
+        ("BC1 colour (RGB PSNR)", [39.85, 39.05, 38.11, 37.41]),
+        ("BC3 colour + alpha (premultiplied PSNR)", [49.20, 48.75, 48.02, 48.07]),
+        ("BC4 masks (PSNR)", [45.59, 45.19, 43.70, 43.94]),
         # bench round 3, normal_real, n = 93, rg_psnr (PSNR of the stored R and G channels)
-        ("BC5 normals (RG PSNR, n = 93)", [47.03, 46.08, 46.27, 44.57, 44.83]),
-        ("BC6H HDR (multi-exposure PSNR)", [None, 48.00, None, 50.38, 49.62]),
+        ("BC5 normals (RG PSNR, n = 93)", [47.03, 46.27, 44.57, 44.83]),
+        ("BC6H HDR (multi-exposure PSNR)", [None, None, 50.38, 49.62]),
     ]
     x0, x1, vmin, vmax = 30, 660, 35, 51
     bh, step = 14, 18
@@ -246,7 +244,7 @@ def chart_formats():
             if PAT[k]:
                 b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" fill="url(#%s)"/>\n' % (
                     sx(vmin), by, w, bh, PAT[k])
-            dflt = (k == 0 and gi < 4) or (k == 3 and gi == 4)  # Tessalith defaults: rgbcx BC1-5, ISPC BC6H
+            dflt = (k == 0 and gi < 4) or (k == 2 and gi == 4)  # Tessalith defaults: rgbcx BC1-5, ISPC BC6H
             if dflt:
                 b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" class="df"/>\n' % (
                     sx(vmin), by, w, bh)
@@ -257,8 +255,7 @@ def chart_formats():
               "is in the wiki (Research).", "s")
     desc = ("Bar chart of PSNR in dB, grouped by format (BC1 RGB, BC3 premultiplied, BC4, BC5 RG, BC6H "
             "multi-exposure), one bar per encoder, with the encoder shown by a stripe pattern. "
-            "rgbcx is best on BC1 (39.85) and BC4 (45.59), and within 0.09 dB of NVTT 3 on BC3 "
-            "(49.20 against 49.29), and best on BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator "
+            "rgbcx is best on BC1 (39.85), BC3 (49.20), BC4 (45.59) and BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator "
             "BC6H values were not measured. texconv CPU is last or near last. The Tessalith default encoder per format "
             "(rgbcx for BC1 to BC5, Intel ISPC for BC6H) has an outline and a bold label.")
     return svg(780, bot + 58, "Encoders compared by format, PSNR", desc, defs + b)
@@ -348,11 +345,9 @@ def chart_ssim_vif():
         ("bc7e u6 perceptual", BLUE, 1.63, 3.10, "+1.63", "+3.10"),
         ("bc7e u5", BLUE, -0.058, -0.10, M + "0.058", M + "0.10"),
         ("Compressonator q1.0 (n = 7)", VIOLET, -0.12, -0.16, M + "0.12", M + "0.16"),
-        ("NVTT Production", AQUA, -0.180, -0.46, M + "0.180", M + "0.46"),
         ("ISPC slow", ORANGE, -0.28, -0.49, M + "0.28", M + "0.49"),
         ("bc7e u4", BLUE, -0.27, -0.54, M + "0.27", M + "0.54"),
         ("ISPC basic", ORANGE, -0.32, -0.62, M + "0.32", M + "0.62"),
-        ("NVTT Normal (GPU)", AQUA, -0.80, -1.74, M + "0.80", M + "1.74"),
         ("texconv -bc x", MAGENTA, -0.98, -2.05, M + "0.98", M + "2.05"),
         ("texconv GPU", MAGENTA, -1.23, -2.40, M + "1.23", M + "2.40"),
     ]
@@ -371,8 +366,8 @@ def chart_ssim_vif():
               "The full tables are in the wiki (Research).", "s")
     desc = ("Two bar charts of the mean SSIM and VIF difference against bc7e u6 on 99 real colour "
             "textures. bc7e perceptual is the only encoder above zero, at plus 1.63 SSIM and plus "
-            "3.10 VIF. bc7e u5, Compressonator, NVTT Production, ISPC and bc7e u4 are slightly "
-            "below u6, and the GPU encoders and texconv are furthest below, down to minus 2.40 "
+            "3.10 VIF. bc7e u5, Compressonator, ISPC and bc7e u4 are slightly "
+            "below u6, and texconv is furthest below, down to minus 2.40 "
             "VIF for texconv GPU.")
     return svg(780, bot + 50, "SSIM and VIF of BC7 encoders against bc7e u6", desc, b)
 

@@ -19,7 +19,7 @@ The picture shows a small made-up mod. The [2D preview](GUI-Preview.md) is not s
 9. **Sets filters** (top of the Sets column). Pills for *Not ready*, *Ready* and *No JSON*, a **Filter ▾** and a search box for sets. See [Sets column](GUI-Sets-Column.md#filter).
 10. **A set card** (Sets column). A set groups the textures of one material: its shader, a status dot, a warning count and a chip for each slot (D, N, P, RMAOS and so on). Drag a texture onto a card to move it there. See [Sets column](GUI-Sets-Column.md#set-cards).
 11. **Settings of the selected texture** (centre). Output summary, then the groups Type, Colour, Alpha, Mipmaps and Compression. A texture that needs an answer shows an *Undecided* box above them. Selecting a set shows its recipes instead. See [Texture settings panel](GUI-Texture-Panel.md#centre).
-12. **Advanced** (right edge). The drawer with tool paths, encoder and interface settings. Click the strip to open it. See [Advanced drawer](GUI-Advanced-Drawer.md).
+12. **Advanced** (right edge). The drawer with batch, preview and interface settings. Click the strip to open it. See [Advanced drawer](GUI-Advanced-Drawer.md).
 13. **Bottom panel tabs** (full width, bottom). **Problems** lists every warning with its fix, **Review** joins while an export is reviewed, **Messages** holds this session's notes and **Files** shows an export's progress. Click a tab to open or collapse the panel. See [The bottom panel](GUI-Bottom-Tabs.md), [Problems](GUI-Problems.md) and [Review](GUI-Review-and-Export.md#review).
 
 The line under the header is the [status line](GUI-Main-Window.md#status-line-and-banner).
@@ -34,7 +34,7 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Sets column](GUI-Sets-Column.md): set cards, the Sets filter, moving and reordering sets, slot menus.
 - [Bulk editing and renaming](GUI-Bulk-and-Rename.md): selecting several, editing them together, the rename dialog and the input name box.
 - [Texture settings panel](GUI-Texture-Panel.md): the settings of one texture, deciding, BC7 weighting, how edits are written.
-- [Advanced drawer](GUI-Advanced-Drawer.md): batch, NVTT, preview and interface settings.
+- [Advanced drawer](GUI-Advanced-Drawer.md): batch, preview and interface settings.
 - [Helpers, RNM layers and cubemaps](GUI-Helpers-RNM-and-Cubemaps.md): the Helpers group and panel, RNM layers, the cube controls.
 - [The 2D preview](GUI-Preview.md): source beside encode, readouts, pin and compare.
 - [Generate from normal map](GUI-Generate-From-Normal.md): height, AO and curvature from a normal.

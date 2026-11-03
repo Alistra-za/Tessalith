@@ -36,7 +36,7 @@ When the rejected value came from an edit in the GUI, the undo history stays: th
 
 ### File and folder dialogs
 
-The file and folder dialogs (Open folder, the export folder, MO2 instance, a folder to scan, nvcompress.exe, the shader folder, Save report) do not freeze the window while they are open. Only one is open at a time: the other dialog buttons and Open folder in the palette are greyed out ("A file dialog is already open") until you answer or cancel.
+The file and folder dialogs (Open folder, the export folder, MO2 instance, a folder to scan, the shader folder, Save report) do not freeze the window while they are open. Only one is open at a time: the other dialog buttons and Open folder in the palette are greyed out ("A file dialog is already open") until you answer or cancel.
 - If you open another folder while the export folder or Save report dialog is still up, its answer is ignored. A folder picked in Open folder… always opens, as the latest choice.
 - **Choose export folder…** in the **Export to ▾** menu is greyed out while an export runs ("An export is running: change the folder after it ends").
 

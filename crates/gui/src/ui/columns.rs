@@ -2,7 +2,7 @@
 use super::thumbs::ThumbCache;
 use crate::model::bulk::{MenuAction, MenuEntry};
 use crate::model::items::{ItemStatus, TextureItem};
-use crate::model::texture_view::{encoder_label, ColumnPrefs, FilterOptions, SetFilter, SortKey};
+use crate::model::texture_view::{ColumnPrefs, FilterOptions, SetFilter, SortKey};
 use crate::model::AppModel;
 use eframe::egui;
 use engine::events::RecipeStatus;
@@ -652,7 +652,7 @@ fn value_combo(
 }
 
 /// The combos of the filter row, by position.
-const COMBOS: usize = 5;
+const COMBOS: usize = 4;
 
 fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize) {
     match n {
@@ -672,15 +672,7 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
             &o.formats,
             str::to_uppercase,
         ),
-        2 => value_combo(
-            ui,
-            "Encoder",
-            "Only textures that this encoder will compress",
-            &mut model.filter.encoder,
-            &o.encoders,
-            |s| encoder_label(s).to_string(),
-        ),
-        3 => pick(
+        2 => pick(
             ui,
             "Set membership",
             "Only textures in a set of more than one texture, or only those that are not",
@@ -741,7 +733,6 @@ fn filter_row(ui: &mut egui::Ui, model: &mut AppModel) {
         let k = [
             f.subtype.is_some(),
             f.format.is_some(),
-            f.encoder.is_some(),
             f.set != SetFilter::Any,
         ]
         .iter()
@@ -828,7 +819,7 @@ const TILE_STEP: f32 = 16.0;
 /// Every combo in the popup is this wide.
 const POPUP_COMBO_WIDTH: f32 = 220.0;
 
-/// The sub-type, format, encoder and set-membership combos and the sort. A combo is a nested layout, so each gets an
+/// The sub-type, format and set-membership combos and the sort. A combo is a nested layout, so each gets an
 /// exact-width slot (AG124: `ComboBox::width` is only a minimum and a truncated combo takes all the room left).
 fn filter_popup(ui: &mut egui::Ui, model: &mut AppModel) {
     let o = model.filter_options();

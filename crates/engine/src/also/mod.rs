@@ -1066,11 +1066,6 @@ fn run_phases(
     s.sets = set_notes;
     *grass = sets.iter().any(|d| d.shader == Shader::PbrGrass);
     let pbr_jobs = pbr_plan.jobs.clone();
-    let nvtt = pbr_plan
-        .nvtt
-        .as_ref()
-        .and_then(|p| p.tool())
-        .map(|t| t.version.clone());
     // Batch-level events of the later phases go out unprefixed, under the PBR phase's batch.
     let warn = |code: Code, message: String| {
         rep.emit(None, None, EventKind::Warning(Warning::new(code, message)))
@@ -1163,7 +1158,7 @@ fn run_phases(
             .and_then(|t| {
                 let e = pbr_records.get(&output_key(pbr_root, &t.output))?;
                 // TA25: only a current twin is copied, so a failed or stale PBR output is encoded instead.
-                is_up_to_date(e, t, &encoders, vreq.bc1_model, nvtt.as_deref()).then(|| Copy {
+                is_up_to_date(e, t, &encoders, vreq.bc1_model).then(|| Copy {
                     job: j.clone(),
                     twin: e.clone(),
                     twin_output: t.output.clone(),

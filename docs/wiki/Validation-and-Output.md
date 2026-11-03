@@ -49,7 +49,7 @@ Every converted file is decoded again before it is written, and the decoded resu
 |---|---|---|---|
 | Header | Flags, caps, mip count, format and header form are correct. | `VAL-HEADER` | error |
 | Mip quality | Each mip's PSNR (one value, with the error pooled over the channels that matter) against the encoder input is at least `validation.min_mip_psnr_db` (30 dB). With `validation.mips = "smallest"`, only the smallest mip is checked. | `VAL-MIP-ERROR` | warning |
-| Opaque alpha | With `remove`, decoded alpha meets the guarantee: at least 254 for any BC7 file without `exact_opaque` (NVTT's included), exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
+| Opaque alpha | With `remove`, decoded alpha meets the guarantee: at least 254 for any BC7 file without `exact_opaque`, exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
 | Decoded 254 | Opaque alpha that decodes as 254 is reported for information. Community Shaders' complex-material gate is not affected by it. | `ALPHA-254` | info |
 | Cutout coverage | With `cutout` or `cutout_blend`, each mip's alpha coverage stays within `validation.coverage_tolerance_pts` (2 points) of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
 | Complex `_m` margin | The smallest mip's alpha is at or above `validation.complex_m_warn_alpha` (247), close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
@@ -97,7 +97,7 @@ A record holds:
 |---|---|
 | `schema`, `ts` | Record schema and time written. |
 | `engine_version`, `engine_commit` | The Tessalith version and build. |
-| `encoders`, `isa` | Encoder versions and patches, the NVTT version if used, and the CPU instruction set used. |
+| `encoders`, `isa` | Encoder versions and patches, and the CPU instruction set used. |
 | `preset` | The preset and its chain. |
 | `profile`, `profile_sha256`, `provenance` | The full resolved settings, their hash, and where each field came from. |
 | `source`, `source_sha256`, `sources` | The input file and its hash; for packed or baked outputs, every source. |
@@ -118,7 +118,6 @@ The JSON Schema is available with `sdc presets schema manifest`.
 `--on-existing if-changed` is the default. For each output that already exists, Tessalith looks up its manifest record. The output is up to date, and left alone, only if all of these match:
 
 - the encoder versions (and the rgbcx patch for BC3/BC4/BC5);
-- the NVTT version, for a texture encoded with NVTT;
 - the output file's size and modified time;
 - the BC1 decoder model, for BC1 and BC3;
 - the record passed validation;

@@ -113,10 +113,6 @@ pub struct EncoderVersions {
     /// `<patch name>@sha256:<hash of the patched rgbcx.h and rgbcx.cpp>`; `None` before the patch, so BC3/BC4/BC5 re-encode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rgbcx_patch: Option<String>,
-    /// M5 (DECISIONS Note NV10): the NVTT version that encoded this output; only on records of a profile on
-    /// `encoder.backend = "nvtt"`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nvtt: Option<String>,
 }
 
 impl EncoderVersions {
@@ -140,7 +136,6 @@ impl EncoderVersions {
             bc7e_patch: v
                 .bc7e_patch
                 .map(|name| format!("{name}@sha256:{}", hex::encode(Sha256::digest(BC7E_PATCH)))),
-            nvtt: None,
         }
     }
 }

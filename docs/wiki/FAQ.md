@@ -36,7 +36,7 @@ No, not by default ([why, and what to do](Troubleshooting.md#dds-files-in-the-fo
 
 ### Does it change my source files?
 
-No. Tessalith only writes to the output folder, `sdc.toml`, `sdc-project.toml` (GUI), the manifest under `<output>\_sdc\`, the scan database with its `scan.lock`, the 3D preview's shader cache under `%LOCALAPPDATA%\sdc\shader-cache`, temporary NVTT folders under `%TEMP%`, and its own settings (plus `gui.toml.bad`, a copy of a settings file it could not read). Renaming in the GUI writes aliases; files on disk are never renamed. The one exception: when you click **Generate** in the GUI's **Generate from normal map…** dialog, it writes new `*_generated.png` files next to the set's normal. It never overwrites a file Tessalith did not write, and **Delete generated file…** removes one only after you confirm.
+No. Tessalith only writes to the output folder, `sdc.toml`, `sdc-project.toml` (GUI), the manifest under `<output>\_sdc\`, the scan database with its `scan.lock`, the 3D preview's shader cache under `%LOCALAPPDATA%\sdc\shader-cache`, and its own settings (plus `gui.toml.bad`, a copy of a settings file it could not read). Renaming in the GUI writes aliases; files on disk are never renamed. The one exception: when you click **Generate** in the GUI's **Generate from normal map…** dialog, it writes new `*_generated.png` files next to the set's normal. It never overwrites a file Tessalith did not write, and **Delete generated file…** removes one only after you confirm.
 
 ### Why BC7 for almost everything?
 
@@ -75,10 +75,6 @@ No. The CLI reads `sdc.toml` but not `sdc-project.toml` or the scan database. Wh
 ### Does it write the PGPatcher JSON?
 
 The GUI does, for PBR sets under `cs`, to `<export folder>\PBRNIFPatcher\<name>.json` after a complete export. The CLI does not.
-
-### Does it need NVIDIA Texture Tools?
-
-No. NVTT is an optional encoder for BC7 and BC6H. See [NVTT backend](NVTT-Backend.md).
 
 ### Which source formats work?
 

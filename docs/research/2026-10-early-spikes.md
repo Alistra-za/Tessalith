@@ -67,7 +67,7 @@ Written 2026-10-31 (commit a48ed8cf): moved verbatim from DECISIONS.md (docs/DOC
 - CPU-only BC7 Production (observed with `-profile`): "NVTT Warning: BC7 Compressor: no slow-mode for bc7-gpu, using cpu instead" — `-production` runs `encode_bc7_cpu()` even with "CUDA acceleration ENABLED" (RTX 4090 present),
   and the output is byte-identical with `-nocuda` (SHA-256 equal). It is multi-threaded: 191 s CPU for 14.7 s wall on 1024x512 (about 13 cores busy), roughly 0.036–0.07 Mpix/s.
   The ~0.14 s fixed per-process cost is CUDA context creation (`nvtt::Context()` 0.110 s): with `-nocuda` a tiny level takes 0.015 s (5 runs, 0.015–0.018 s), so the backend should always pass `-nocuda` for BC7 Production.
-- Not tested: the BC6H half (`-bc6` on RGBA16F levels) is deferred to M5 where the NVTT backend is built; only the flag's presence is confirmed.
+- Not tested: the BC6H half (`-bc6` on RGBA16F levels) was deferred to the NVTT backend (removed in 2.0); only the flag's presence is confirmed.
 - Verdict for open item §14 #10: **one `-nomips` process per level** works and meets every pass criterion; the engine can build the chain itself and feed NVTT level by level (with `-nocuda`). Caveat: Production BC7 is slow (mip 0 dominates, about 14–27 s per 1 Mpix), so it is a quality option, not a default.
   Reproduce: `cargo run --release -p sdc-bench -- s7-nvtt` or `cargo test --release -p sdc-bench --test s7 -- --ignored --nocapture`.
 

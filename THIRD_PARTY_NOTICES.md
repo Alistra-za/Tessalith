@@ -22,8 +22,6 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
 
 Tessalith uses the Windows system fonts (Segoe UI, Segoe UI Symbol, Segoe UI Emoji, Consolas) at run time and ships no fonts (egui's bundled default fonts are disabled).
 
-NVIDIA Texture Tools (NVTT) is never bundled, redistributed or linked; Tessalith can call a user-installed `nvcompress.exe` as a separate process.
-
 ## Repository only (not in the executables)
 
 - `crates/nif/tests/fixtures/*.nif`: test NIF files from nifly (https://github.com/ousnius/nifly, `tests/expected`), GPL-3.0 per `crates/nif/tests/fixtures/README.md`. Only tests read them; no shipped code embeds them.

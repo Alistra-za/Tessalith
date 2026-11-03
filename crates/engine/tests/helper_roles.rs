@@ -292,7 +292,6 @@ fn hand_role_warning_points_to_none() {
         files: &engine::overrides::NO_FILE_SCOPES,
         shaders: &NO_SHADERS,
         mesh_alpha: &NO_MESH_ALPHA,
-        nvtt: None,
     };
     let f = engine::discover::InputFile {
         path: "x_mask.png".into(),

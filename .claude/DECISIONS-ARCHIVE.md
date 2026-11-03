@@ -132,6 +132,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note FC3, 2026-10-29)
 - **Y4 Discovery (audit 6).** An unreadable entry under an input folder is skipped with `IN-UNREADABLE` (warning, batch-level), and the batch continues. An unreadable input root itself is still an error. `inspect` skips the same entries silently. The GUI shows no notice for skipped entries yet (follow-up). Per-thread glob matcher cache: it is never evicted (shortcut: bounded by the distinct patterns of one run; evict if a long-lived process ever feeds it unbounded patterns). (superseded by FC3)
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **Y9 `--nvtt` (owner D3).** `sdc convert --nvtt` is a usage error (exit 2) until M5. `sdc encoders --nvtt` (detection only) is unchanged. Superseded by Note NV (M5): `--nvtt` selects nvcompress.
+
 ## Note Z — M6 Track F3a: multi-select and bulk settings (plan rulings, 2026-10-13)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC3, 2026-10-29)
@@ -228,6 +231,18 @@ ARCHIVED (wording before the edit; superseded in part by Note CD1, 2026-10-18)
 ARCHIVED (wording before the edit; superseded in part by Note FI16, 2026-11-01)
 - **AG126 The header wraps (owner, 2026-10-14: the header compresses and the JSON field overlaps).** Cause: the header was one `horizontal` row with a `right_to_left` group (Export, Save, Messages, Export folder, JSON name, Editor…) laid into whatever width the left group left. egui does not stop a group at its neighbour, so in a narrow window the two groups drew over each other and the JSON field was squeezed to a few pixels. Ruling: of the two options in the brief, `horizontal_wrapped` is the simpler correct one, so nothing is hidden behind a "⋯" menu. The row is one left-to-right wrapped line in this order: Open folder…, Recent, Undo, Redo, the view switch, Mode, the column checkboxes, JSON: [name] Editor…, Export folder, Messages, Save, Export. Groups egui cannot wrap by themselves (Recent's disabled scope, Mode and its combo, the JSON label + field + Editor…) start a new line when they would not fit (`header::fit`). The JSON field is always 120 points; the export folder button is at most 280 points, the path cut with "…" (the hover and the accessible name keep it whole). Export is at the end of the row, not pinned right. The Meshes header (the view switch) and the scan row were already wrapped and are covered by the same test: at 1440, 1024, 800 and 640 points no two header widgets intersect, none runs off the window, and every control is present. The header is one row; the Export to, Save and Export group is what wraps, below about 1340 pt (Notes CD1, CD2).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AG40 File pickers (Task 6, item 7).** Every picker goes through `model::picker`: `Picker::request` runs the dialog on a spawned thread and the result lands in an inbox tagged with a `PickerPurpose` (OpenFolder, ExportFolder, ChooseMo2, ScanFolder, NvttPath, SaveReport, ShaderFolder). No executor: `pollster` and `futures` are not direct dependencies (pollster is in the lock only through other crates), so the thread calls the plain blocking `rfd::FileDialog`, which is equivalent. There is no HDRI picker in the code, so there is no Hdri purpose. The inbox is not the `WorkerMsg` channel: the app model, the meshes model and each 3D viewport own separate channels and are built standalone in tests, so each drains its own purposes from the shared inbox in its `poll` (`AppModel` takes OpenFolder, ExportFolder, NvttPath, SaveReport; `MeshesModel` ChooseMo2 and ScanFolder; `Viewport3d` ShaderFolder).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AG42 Stale and cancelled results.** A cancel does nothing and clears the busy state. ExportFolder and SaveReport are tagged with the folder open when the dialog started and are dropped if another folder is open when the answer arrives (the export folder triggers a replan; the report is of that folder's export). OpenFolder was tagged too until AG129; it now always opens. ChooseMo2, ScanFolder, NvttPath and ShaderFolder are app-wide and never stale: they set a scan source or a tool, whatever folder is open.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AG46 Textures filters (Task 7, item 8).** The four toggles stay. Beside them are combo boxes: Sub-type, Output format, Encoder and Set membership (Any, In a set, Not in a set). Sub-type, format and encoder list Any and only the values present in the folder (the encoder list keeps the order bc7e, rgbcx, ispc (BC6H), NVTT, uncompressed; ispc is the BC6H backend, so it is there when a BC6H texture is). A saved value the folder lacks is still listed, so a restored filter is never invisible. A texture with no job (failed, skipped DDS) matches no combo value. Everything combines with AND, search included. "In a set" is the existing rule: a set of more than one member.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AG111 Process-list seam (Task 14 carry-over).** The "PGPatcher is running" check is `MeshesModel::procs`, a fn pointer that defaults to the real process list. `meshes::no_procs` is the fake that sees nothing; the meshes tests build their scan models with it, so the host's PGPatcher cannot pause them, and `a_running_pgpatcher_pauses_the_scan` uses a fake that lists `pgpatcher.exe`. Not seamed: the NVTT probe reads the host's `PATH` and install, but only when a test calls `refresh_nvtt`, and those tests set `nvtt_path`.
+
 ## Note AI — Meshes shape detail (2026-10-14)
 
 ARCHIVED (superseded by Note AU6, 2026-10-15)
@@ -248,6 +263,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC1, 2026-10-29)
 
 ARCHIVED (wording before the edit; superseded in part by Note FI16, 2026-11-01)
 - **AM12 The header's Preset menu (owner design §2 "appears in the Mode/preset picker").** The GUI had no preset picker (gui.md said so). A **Preset** combo after Mode lists "default (<the Mode's quality preset>)" and every selectable preset, built-in or from the presets folder, whose chain's target is the Mode's or unset; it reads the creator's registry, so a saved preset is listed at once. A pick writes `preset = "<id>"` to `sdc.toml` (default removes it) as one undo step and re-plans. A preset of another target is not offered; one already in `sdc.toml` still shows as the selection.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AM5 Rows and subheaders.** Groups: Colour (category colour), Normal (category normal), Data (grayscale and mixed/packed), Special (HDR and `complex_grass`), each in `Subtype::ALL` order. A row's title is the sub-type and its resolved format. Compression offers `fields::encoding_options` (the `allowed_encodings` pairs, format and tag together), the encoder (only backends that fit the format: Built-in, and NVTT for BC7 and BC6H) and effort; a format pick drops the preset's own backend for that sub-type when it cannot write the new format. Resize & mips: resize, levels, filter (only filters `filter_option_lock` accepts) and coverage, shown for the cutout policies only. Alpha (policy, and threshold for cutout) shows where the base's format keeps an alpha channel. Locks are `fields::field_lock`. Category, content and the sub-type's own rules are never offered.
 
 ## Note AN — PGPatcher match and lock (2026-10-15)
 
@@ -386,6 +404,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - **BQ5 rfaos and skin_rfaos together (#20).** A config or preset whose `[subtypes]` holds both `rfaos` (the old id) and `skin_rfaos` is refused (`MigrateError::DuplicateSubtypeAlias`), not merged: which table should win is the author's call.
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BQ3 NVTT working folder (#17).** nvcompress runs with the level's temp folder as its working folder and gets bare `l<N>.in.dds` / `l<N>.out.dds` names, because it reads argv in the ANSI code page. Its error text no longer names the folder. The test fake mangles non-Latin-1 argument characters to `?` like the real tool.
+
 ## Note BR — Trace-debug minor fixes: GUI model
 
 ARCHIVED (wording before the edit; superseded in part by Note BV7, 2026-10-17)
@@ -398,6 +419,9 @@ ARCHIVED (superseded by Note FC8, 2026-10-29)
 
 ARCHIVED (superseded by Note FC8, 2026-10-29)
 - **BS14 The header Export waits for a focused field (#54 follow-up).** Export saves first (`start_export`), so it follows BS7: a click while a text field has focus does nothing and says "Export: leave the text field first" in the status line and the log; the field commits on the focus loss and the next click exports. Save and Export share `header::field_focused`. The command-palette Export is not guarded: the palette's own search box has the focus when it runs, and a palette command never runs while another field is being edited. (superseded by FC8)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **BS3 Worker panics carry their job id (#26).** As AF3 does for the NVTT probe, the preview (source, encode, DDS), heatmap and RNM thumbnail workers catch their own panic, send their id-tagged failure (`worker::or_send`), then unwind on so `spawn_guarded` still raises the error dialog. A stale job's panic is dropped by the id check like any stale result; the per-kind `*_panicked` handlers are gone. The failure text is the panic message, as before.
 
 ## Note BV — Pre-v2 fix batch (owner rulings and audit fixes, 2026-10-17)
 
@@ -691,6 +715,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC3, 2026-10-29)
 ARCHIVED (superseded by Note CN85, 2026-10-20)
 - **CN75 Review shows the Also column only while a tick is on.** The brief said "when the target is cs or a tick is on"; the dispatch said the GUI must look exactly as before without a tick, apart from the menu items and the Advanced section. The column therefore needs a tick; Export to ▾ is where a first tick is set. Review opens on Export whenever a tick is on (CN61), so the column is there whenever it matters.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CN33 The copy rule (O4, TA25).** After the PBR run, each ready, non-derived, non-packed Vanilla job whose cs twin (a PBR-plan job with the same input) passes `also::same_identity` and is current is taken out of the Vanilla plan and copied from the PBR folder before the Vanilla run (Note CN42). `same_identity`: both `Ready`; equal inputs; equal `output_key`s relative to their roots, the cs key folded by `vanilla_rel` (O6's landscape `_p` copies); equal `pack`, `rnm` and `bake`; `van.derive` none; `Profile { target: Cs, ..van.profile } == cs.profile`. Current means the PBR folder's record passes `api::is_up_to_date` (now `pub(crate)`, not restated) for this run's twin, encoders, NVTT version and BC1 model, which also checks its file stamp. Any other twin is encoded, so a failed or stale PBR output is never copied and never leaves a gap. The copy record is the twin's record with `output` = the Vanilla key, `ts` = now, `output_stamp` after writing and `copied_from` = the twin's `output_stamp`. `ManifestRecord::copied_from` / `ManifestEntry::copied_from` is skipped when `None`, so no existing manifest line changes; only `manifest.schema.json` gains it. A copy is up to date when the Vanilla record's `sources` and `source_sha256` equal the twin's, its `copied_from` equals the twin file's stamp now, and its `output_stamp` matches the file (`FileSkipped UpToDate`); a changed BC1 model re-encodes the twin, its stamp moves, and the copy is redone. An existing file under `if-changed` goes through fix/pre-v2's `may_replace` with "the Vanilla record's `output_stamp` matches" as `ours`; `Kept` is `OUT-UNKNOWN-EXISTING` and the file is unchanged. `--on-existing skip` and `overwrite` act as for encodes. A copy ends with `FileDone` carrying the PBR record's validation. `shortcut:` a packed job is never copied (its raw sources' `packed_source` events belong to its encode), and a copy writes no `--sidecar`; upgrade if either matters. Copy outcomes count in the Vanilla phase's summary (up to date, skipped, failed, cancelled) and in `AlsoSummary::copied`, after that phase's `batch_done`, whose counts therefore leave them out. A dry run plans every phase and counts the copies, but writes and records nothing.
+
 ## Note CM — NIF v2 Phase B: animation clock, key editor, controllers, clips, In game preview (NIF team, 2026-10-21)
 
 ARCHIVED (wording before the edit; superseded in part by Note CM33, 2026-10-21)
@@ -709,6 +736,9 @@ ARCHIVED (wording before the edit; superseded in part by Note CP10, 2026-10-21)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC8, 2026-10-29)
 - **CP10 GUI writes (supersedes CP6's first sentence).** Perceptual: `perceptual = true`, weights cleared (unchanged). Linear: clears both when nothing is inherited; when an inherited perceptual or weighting is in effect, writes `perceptual = false` and `bc7_weights = "linear"` in the texture's own entry. A weighting: writes the weights, and `perceptual = false` when the inherited perceptual is true (else clears it). "Inherited" is read from the resolved profile when the texture has no own value, and from an own `false` / `"linear"` (an earlier override) when it has one. shortcut: an own weighting hand-written over a different inherited one is not seen through, so Linear clears it and the inherited value shows; a second Linear pick then overrides it. Likewise (re-review N1) an own `perceptual = true` over an inherited `true` reads as not inherited: Alpha ×8 → Perceptual → Linear clears it, the inherited Perceptual shows, and a second Linear pick overrides it. (superseded by FC8)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CP4 Backend/format rule.** The weights reach bc7e only. On a non-BC7 format or another backend (NVTT, rgbcx, ISPC BC6H) the field does nothing and the engine raises the same `ENC-WEIGHTS-IGNORED`; CLI and GUI both get it from the same resolve. The GUI also hides the row there ("BC7 only", "used only by the built-in BC7 encoder"), as the hidden-reason pattern does for other fields. The *Perceptual* option alone keeps the old row's lock (colour without data alpha, `FMT-PERCEPTUAL-DATA`); the weightings are open on any BC7 map, since data-alpha maps (`_n` with specular) are what they are for.
 
 ## Note CO — v2 Generate from normal map (owner, 2026-10-21)
 
@@ -760,6 +790,15 @@ ARCHIVED (wording before the edit; superseded in part by Note CU9, 2026-10-21)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
 - **CV8 An exact slot with no known path shows an empty pill in the JSON editor (trace 18; Note V, item V10).** "+ key > Match > exact slot N" wrote `matchN = ""` for a slot Tessalith has no path for, and the editor draws no pill for an empty match, so the click looked like it did nothing. It now adds a pending pill (nothing is stored until a path is typed or picked), as "path contains" already does; the set's Matching header keeps its own empty rows (V10). Slot 1 is unchanged. A `matchN = ""` row stored before this fix still shows no pill in the editor; remove it by hand (it matches nothing). (superseded by FC10)
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **CV3 NVTT timeout and cancel kill the whole process tree (trace 5; points at AF3).** The per-level timeout and cancel killed only the program `--nvtt` named. A launcher or wrapper left the real encoder running, the one-at-a-time slot (NV7) was freed while it still ran, and the temp folder could not be removed. The level loop now uses the same `kill_tree` as the probe. Stock `nvcompress` is unchanged.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **CV15 The bulk Encoder row honours the NVTT-not-found lock (trace 13; Note NV).** Choosing NVTT in the bulk panel wrote it to every selected texture when NVTT was missing, and Export was then blocked. Such textures are now skipped with "NVTT not found: set its path in Advanced"; a texture already on NVTT and a Built-in pick are unaffected.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CV21 A path that is not Unicode no longer stops `gui.toml` saving (trace 31).** One folder name with a lone surrogate in `recent` (or the export, NVTT or Meshes folder) made every settings save fail, losing the session's settings. That path is now left out of the file. Cost: it is not remembered after a restart.
 
 ## Note CZ — Meshes page redesign (owner, 2026-10-22)
 
@@ -987,6 +1026,9 @@ ARCHIVED (wording before the edit; superseded in part by Note DT33, 2026-10-28)
 ARCHIVED (superseded by Note FC3, 2026-10-29)
 - **DT35 A Review row whose only question is the cube layout says where to answer it (T4 review minor 1, controller ruling).** The row has no inline control (DT15), so after the name it shows the weak hint "Pick its cube layout in settings". A row with any other open question shows that question's controls as before. Test `a_review_row_for_the_layout_points_to_settings`. (superseded by FC3)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **DT2 A cube preview encodes all six faces.** `Session::preview` of a cube job returns `PreviewResult.faces = 6` and `levels` face-major (face 0's chain, then face 1's, ...), every face the same mip count, built with `dds_bytes_cube` so validation sees the cube. `max_size` caps the face edge, by the same `first_level_within` rule as a 2D preview. The source side (`SourcePreview`) still shows +X alone, and `preview_source*` are unchanged. A 2D preview has `faces = 1`. `encode_levels` zips the inputs with the dims cycled, so one face's dims serve all six. NVTT note NV9 still applies (a cube on NVTT previews with the built-in encoder). No encoder input, golden or pin moves; the export is unchanged. Tests `unclear_cube_needs_a_layout`, `cube_preview_has_six_faces`, `two_d_preview_has_one_face`.
+
 ## Note DV — Existing Advanced Skin sets use skin_albedo (owner, 2026-10-28)
 
 ARCHIVED (superseded by Note DW, 2026-10-28)
@@ -1021,6 +1063,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC4, 2026-10-29)
 
 ARCHIVED (wording before the edit; superseded in part by Note FI5, 2026-11-01)
 - **FB1 No inherited export folder; the header Export is neutral until the project is clean (review C2, amendment B; supersedes BV6's fallback clause and A12's dot-only state, owner, 2026-10-29).** `AppModel::export_folder_chosen()` is the folder the user chose for this project: with a usable project document (loaded and not read-only) its `[project] export_folder` and nothing else, so the `gui.toml` value from another mod is never inherited; without one (no folder open, or an `sdc-project.toml` that does not parse) the pick lives in `gui.toml` as BV6 says, and that counts as chosen, or the user could never export. `export_root()` is that folder, else `<root>/sdc-out`, which is now only a name: `review_gate` returns `No export folder chosen` right after the read-only check, Review's Blockers column draws it as a red row with a `Choose…` button, and a click on the header Export with no folder chosen opens Review instead of exporting a clean project into `sdc-out`. The header button reads `Review {n} files` in the plain button colour while `export_is_clean()` is false (the gate is not Ok, anything is undecided, planning or a vote is still running, or there are no files to write), and `Export {n} files`, accent-filled, once Review would write without skipping anything (`header_export_text`; an empty or still-planning project is never clean). The DDS header patch and the JSON editor's path need a chosen folder too: `patch_dds_header` returns `No export folder chosen` and writes nothing, the Patch buttons are off with that reason, and the JSON editor shows the same words instead of a `sdc-out` path. A12's green state dot is deleted; the hover now also says what Review still has open. A click still opens Review (CA1), which a clean project skips as before (C2). The `Export to: …` chip is drawn only when a folder is chosen; until then the same menu is a plain `More ▾` (it also holds the marker cube, the Also ticks and the JSON editor, so hiding it whole would have taken the marker cube out of reach); its `Open export folder` entry is off with the reason. NIF edits need a chosen export folder too (`nif_export_root` is `Some` only when `export_folder_chosen()` is `Some`, so they fall back to the MO2 `sdc NIF Edits` mod instead of `<root>\sdc-out`; the NIF team's GD5 builds on it). Every export-folder dialog (the menu and the Blockers row) opens in the app-wide folder saved in `gui.toml`, if there is one (`PickerSpec::start_in`): a pick in a normal project goes to its `[project] export_folder` and never updates that value, so this is not a last-pick memory. Tests: `tests/export_folder.rs`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FB8 No codes in the UI: rows and banners say what to do; the code is on the hover and in the Messages log (review C10, C12, amendment D; supersedes the code text of A1's Problems rows (owner, 2026-10-29)).** A Problems row shows `code_sentence(code)` (`model::code_text`, in the GUI crate; the engine's `codes.rs` and the schemas are untouched): one table with a sentence that names the action for every Warning, Blocking and Error code (a unit test fails for a new code without one; Info codes never get a row and have none). `LOSS-ALPHA-DATA` reads "This alpha channel carries data the format would drop — choose what it means". A code with no sentence shows the engine's message with any code taken out (`without_codes`: a leading `CODE: ` goes with its colon). The row's hover is the engine's own message and, under it, the code (`Problem::codes_text`); the small grey code at the row's right edge is gone. A failed texture's row (`Failed: …`) and a decision row (`Needs a decision: …`) name their codes in words, and the codes they stand for are kept in the new `Problem::also` for the hover. The same sentence replaces the bare code on Review's acknowledge row and in a texture's "Needs a decision" box (code on its hover), and in the settings panel's `Error:` line. Banners: `refresh_banner` shows `without_codes` of every line, and logs each line that names a code to the Messages tab as the engine wrote it, once per appearance (`banner_logged`). C12: the five alpha meanings share `settings_panel::alpha_hint` (Remove, Cutout, Blend, Cutout + Blend, Data; Data's says the alpha is kept as data, written as it is and not as see-through) as the hover of every alpha button: the Decide… menu in Problems, Review's inline buttons and the settings box. The Alpha field combo in the settings grid has no per-option hover and keeps none. Round 1 (review): no panel prints a code any more. The settings panel's "Warnings" list, the set editor's and the RNM section's warning lines show `shown_for(code, message)` (the sentence, else the engine's message without its code) with the message and the code on the hover (`status::code_hover`, the one place a code is printed in a panel); the two Info lines beside "Treat as OpenGL (flip green)" (`IN-GREEN-UNSTATED`, `CHK-GREEN-GUESS`) show their message and keep the code on the hover; the Advanced drawer's NVTT line says "acknowledge its version warning"; a texture that cannot be previewed gives the engine's reason without its code; the DDS header patch result line is shown without its code (hover and Messages log keep it, `patch_dds_header` now logs it). A banner line that leads with a code shows that code's sentence and then the engine's detail (`code_text::banner_line`); the log entry takes its severity from the code (Info, Warning for Warning and Blocking, Error). `without_codes` also drops the backticks around a code and the doubled space it leaves. The Alpha field combo (settings grid, preset editor) shows `alpha_hint` on each option (`combo_for`), so the five meanings have one source everywhere. What still prints a code, and why: the Files tab's warning hover, the sets column's and the tiles' tooltips, and the new hovers (hover-only); the Messages log (by design); the Troubleshooting wiki catalogue and docs (reference text); the Meshes view (NIF team). Tests: `tests/no_codes.rs` (`no_code_text_in_problems_rows`, `no_code_text_in_the_banner`, `a_failed_row_and_a_decide_row_say_it_in_words`, `every_decide_entry_has_a_hover`, `the_settings_panel_and_the_set_editor_say_it_in_words`, `the_alpha_combo_options_have_hovers`) and the `code_text` unit tests; `a_failed_item_is_a_red_row`, `the_checks_filter_shows_only_check_rows`, the OpenGL hint test in `checks.rs` and the header patch test in `ui_smoke.rs` now expect the words.
 
 ## Note GE — pgpsim simulates PGPatcher 2.3.1 (NIF team, 2026-10-29)
 
@@ -1067,6 +1112,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FI17, 2026-11-01)
 ARCHIVED (superseded by Note FF1, 2026-10-31)
 - **FE6 Not wired.** No effort, profile or GUI setting maps to `VeryslowPeak`. Mapping one, or changing what an existing effort maps to, changes output bytes and needs an owner ruling and an `encode_version` bump (Note DM). (superseded by FF1)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FE7 RMSLE miss accepted (owner, 2026-10-31).** Mean RMSLE is +0.6 % (not significant), against the brief's "not worse" bar. Accepted: NVTT, the other way to keep the peak, costs about 2 dB mPSNR, so this is the smaller loss. Merged unwired.
+
 ## Note FK — Every edit control on the texture panel waits for the plan (main team, 2026-11-01)
 
 ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
@@ -1074,6 +1122,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 - **FK2 Fix.** Every edit control on the texture panel (`settings_panel::draw`: the centre panel, the preview's compact copy and the set preview's settings window) waits for the plan. It is off while `AppModel::fix_off()` (CA12) gives a reason: a read-only `sdc.toml` first, else "Wait for the plan to finish" while a plan or the scan-database votes are in flight. That covers the Undecided box, the setting groups' rows, the RNM and Cubemap sections, "Treat as OpenGL (flip green)" / "Treat as DirectX", "Re-encode this file" / "Stop re-encoding", and the Helper role row with its Reset. The reason is the disabled controls' hover text, as on Problems' fix buttons, so nothing moves when a plan starts or lands. `Ctx::edit_off` (was `toml_read_only`) carries it.
+
+ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
+- **FK1 Cause (owner report 2026-11-01: "all of these buttons, and acknowledge do nothing ... changing alpha 'remove' reverts it back").** Reproduced on a copy of the owner's 10k-texture project (`B:\testdata\textures-10k`, 2920 sets, 9923 `[files]` entries) with the full `SdcApp` frame loop: a click on an alpha answer writes `alpha.policy` to the document at once, then the whole project re-plans for about 18 s. Until that plan lands, the texture panel draws the last plan's job, so the Undecided box, Acknowledge and the Alpha combo (back at `Remove`) look unchanged, and every further click starts a new plan that cancels the one in flight, so the wait starts over. The model, the engine's layering and the write were correct; nothing overwrote the value. Note FL cuts that wait to the edit's partial plan.
+
+ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
+- **FK2 Fix.** Every edit control on the texture panel (`settings_panel::draw`: the centre panel, the preview's compact copy and the set preview's settings window) waits for its partial plan. It is off while `AppModel::fix_off()` (CA12) gives a reason: a read-only `sdc.toml` first, else "Wait for the plan to finish" while the edit's partial plan, the full plan when no partial applies, or the scan-database votes are in flight (Note FL6). That covers the Undecided box, the setting groups' rows, the RNM and Cubemap sections, "Treat as OpenGL (flip green)" / "Treat as DirectX", "Re-encode this file" / "Stop re-encoding", and the Helper role row with its Reset. The reason is the disabled controls' hover text, as on Problems' fix buttons, so nothing moves when a plan starts or lands. `Ctx::edit_off` (was `toml_read_only`) carries it.
 
 ## Note FJ — BC4 block search: inner-anchored 6-value mode, least-squares refits, trimmed and local search; coverage guard on BC3 alpha (owner, 2026-11-01)
 
@@ -1087,3 +1141,94 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **DM1 The table.** `manifest::encode_version(Subtype)` is an exhaustive `match` keyed by `Subtype` only, so a new sub-type fails to compile until it has an arm. Its value is the engine version of that type's last output change. A record without `encode_version` (written by 1.0.0) counts as `LEGACY_ENCODE_VERSION`, 1.0.0. `if-changed` compares the record's `encode_version` with the current arm instead of the engine version.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **DM4 What the guard hashes, and its blind spots.** `cargo test -p engine --test encode_versions` (feature `test-hooks`) hashes the encoder input, not the encoded bytes: the DDS header, per mip level a u64 LE length plus the texels (Ldr bytes in order; Hdr as u16 LE), the SHA-256 of the resolved profile JSON, and the validation verdict (`passed`). It runs the fixture under both targets and pins 55 outputs: 35 under cs, covering all 29 sub-types (`UNGUARDED` is empty), and 20 under vanilla (keys prefixed `vanilla/`), covering the 16 sub-types vanilla allows. Vanilla refuses the 13 cs-only sub-types (CFG-UNAVAILABLE, `CS_ONLY` in the test), and the test asserts exactly those, plus the two `_rmaos` set members, are refused. A change to any of those must come with the type's arm moving to the new engine version, or the test fails. Blind spots, which a human must bump for: validation-verdict changes that do not show in `passed` on the fixtures; the engine's post-encode steps in `encode.rs` (`bc7_opaque_fix`, the grass corner guard, `pack_uncompressed`); the profile-to-encoder-parameter mapping in `encode.rs` (`bc7_level`, `radius`); paths without a fixture (NVTT outputs, derived jobs); and an output key renamed and changed in the same commit (check_pins pins the new key fresh). Stated risk: the hash assumes the engine's float path is deterministic for one source tree. `.cargo/config` sets no `target-cpu`, and the thread-count check (RAYON_NUM_THREADS 1, 8 and default) passed.
+
+## Note NV — M5: NVTT Production backend (plan rulings, 2026-10-13)
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+Spec `docs/superpowers/specs/2026-10-13-sdc-m5-nvtt-design.md` (owner-approved, §9 at its proposed defaults). Supersedes
+Note Y9: `sdc convert --nvtt` works.
+
+- **NV1 Scope.** BC7 and BC6H UF16 only, Production only, one `-nomips` process per engine-built level. NVTT is never a
+  default and never suggested.
+- **NV2 Locate.** Explicit path (`--nvtt`, GUI NVTT path; missing → not found, no fallback), else `nvcompress.exe` on
+  `PATH`, else `C:\Program Files\NVIDIA Corporation\NVIDIA Texture Tools\nvcompress.exe`. Under `cargo test` the target
+  folder, which holds the fake `nvcompress`, is on `PATH`, so the real-NVTT tests pass the default path explicitly.
+- **NV3 Version.** The probe runs `nvcompress` with no arguments (it exits 1; Spike S7b), parses the banner
+  `NVIDIA Texture Tools <x.y.z>` and requires the usage to list every flag NV4 passes. Tested = 3.2.5. Untested →
+  `ENC-NVTT-VERSION` (blocking, allowable). Not found or probe failed → `ENC-NVTT-MISSING` (blocking). The batch probes
+  lazily (`NvttCell`): a batch with no profile on NVTT never starts nvcompress.
+- **NV4 Flags.** `-silent -nomips -production`, then `-bc7` or `-bc6`; for BC7 `-noalpha` when `alpha.policy = remove`
+  and `-alpha` for every policy that keeps alpha (coordinator, pending the owner's card: nvcompress weights alpha 0
+  unless told the input has it); `-nocuda` always (S7, S7b: byte-identical, 0.13 s less per process). No colour flags;
+  the engine writes the header.
+- **NV5 Feed.** Each level as a DDS with a **legacy** header (S7b: NVTT reads uncompressed DX10 DDS as garbage): BC7 as
+  B8G8R8A8 via `dds_bytes(.., Legacy)`, BC6H as RGBA16F with FourCC 113, written by `nvtt.rs` (the engine's writer has
+  no legacy RGBA16F form). One temp folder per file, `%TEMP%\sdc-nvtt-<pid>-<n>`, removed on drop.
+- **NV6 Post.** `force_opaque_rotated` and the complex-grass corner guard run on NVTT BC7 output (`bc7_post_fix`); the
+  mode-6 byte patch does not.
+- **NV7 Slot.** One nvcompress process at a time per process (static mutex). Shortcut: fixed at 1; make it a setting if
+  cores idle.
+- **NV8 Failure.** `ENC-NVTT-FAILED` (error, Compress): the `file_failed` error starts `ENC-NVTT-FAILED:` and carries the
+  exit status and the last 5 output lines. No fallback to the built-in encoder. Cancel kills the child. No timeout
+  (shortcut: add one if a hung nvcompress is ever seen). No `ENC-NVTT-PARTIAL`: S7b encodes every BC6H level.
+- **NV9 Preview.** Previews of an NVTT texture encode with the format's built-in backend; the export uses NVTT. There is
+  no `PreviewResult` flag: the GUI reads `profile.encoder.backend` (its struct literals are in `crates/gui`).
+- **NV10 Records.** `EncoderVersions.nvtt` is set on NVTT records only; `if-changed` re-encodes an NVTT output when the
+  version found now differs or NVTT is missing. Built-in records ignore it, so pre-M5 records stay current. Engine
+  version stays 0.7.0.
+
+Real-NVTT checks (`cargo test --release -p engine --test nvtt_real -- --ignored --nocapture --test-threads 1`,
+2026-10-13, NVTT 3.2.5):
+- (a) `rgb_real/Bricks104`, `alpha.policy = remove`: engine mip 0 RGB PSNR 47.776810 dB = direct `nvtt_production`
+  47.776810 dB (Δ 0.000000); decoded alpha 255 on every level.
+- (b) `hdr_real/studio_small_08` as a float `_g` (BC6H): validation passed, peak ratio 0.9957.
+- (c) Engine run of that BC7 file 18.07 s vs direct per-level `-nocuda` processes 17.66 s (ratio 1.023, limit 1.10).
+- (d) `alpha_real/Fingerprints009`, `alpha.policy = blend`: mip 0 alpha PSNR 38.7786 dB on NVTT (`-alpha`), 38.9259 dB on
+  bc7e, bench direct `nvtt_production` 38.7883 dB. Not measured: the same file without `-alpha`.
+
+## Note AF — audit 2026-10-13b fixes (2026-10-14)
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **AF3 The NVTT probe has a timeout, never runs on the UI thread, and refuses two programs.** `probe_path` kills a program that has not exited after `PROBE_TIMEOUT` (5 s; nvcompress answers in about 30 ms) and reports it not found ("no answer within 5 s, not nvcompress"). It never runs `nvtt_export.exe` (NVIDIA's exporter app, a GUI) or the running program itself (same canonical path as `current_exe`, e.g. `sdc-gui.exe` picked as the NVTT path, which relaunched itself at every start). The GUI probes on a worker (start, focus regain, a path change); the result lands later, generation-tagged (a newer probe supersedes), and `busy()` holds while it runs. The CLI (`sdc encoders --nvtt`, the batch's `NvttCell`) gets the same timeout and refusals.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+  - AF3: on a timeout (or a failed wait) the probe kills the whole process tree (`taskkill /T /F`), so a launcher's grandchild does not survive. The program's output goes to files in a temporary folder instead of pipes, so no reader thread can be left waiting on a handle a grandchild holds. A `try_wait` error is reported as such ("waiting for it failed"), not as a timeout. Window focus re-probes only when the file NVTT resolves to (path, size or modified time) changed since the last probe; start-up and a path change always probe. A probe that panics reports `Missing("the probe panicked: …")` under its own generation, so a stale probe's panic cannot end the current probe's wait.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AF10 Fix round 2 (2026-10-14): only a user edit cancels an Export queued behind a scan-finished read (amends AF9/AF4).** The cancel runs in the edit path (`edit_docs`, `batch_edit` through `replan_after_edit`), not in `replan`. A re-plan that is no edit (an NVTT probe whose result changed, a changed source on focus) keeps the queued Export, and that plan carries it to its end. When an edit cancels it, the status line says "Export cancelled: the project changed while scan results were loading — click Export again." The note stays in front of the status line until the next Export click.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AF11 Fix round 3 (owner ruling via coordinator, 2026-10-14): undo and redo count as edits for the queued Export (amends AF10).** `apply_snapshot` re-plans through `replan_changed`, the same cancel-with-note rule as `edit_docs` and `batch_edit`, without the edit's type-follow bookkeeping: undo still resets it, per Z11. Re-plans that are no change to the project (an NVTT probe, a changed source on focus) keep the queued Export.
+
+## Note AH — Complex `_m` alpha and Enable parallax (2026-10-14)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+  - **BC7 exactness:** bc7e can encode a constant alpha-0 block as mode 6 with p-bit 1, which decodes alpha 1. So `encoders_sys::bc7_fixup::force_zero_alpha` runs after the encode, on both the bc7e and the NVTT paths. It applies to a `complex_material` with `alpha.parallax` not on, and only to blocks whose source alpha is 0 throughout.
+    - It clears the alpha endpoints and, in modes 6 and 7, the p-bits they share with RGB.
+    - RGB endpoints that had p-bit 1 move down, unoptimised, like the S5b mode-6 opaque patch: one LSB (1/255) in mode 6, one step of the 6-bit value (about 4/255) in mode 7. Modes 4 and 5 lose nothing.
+    - BC3's alpha block stores 0 exactly.
+    - Parallax on keeps a source that has alpha byte for byte. So the warned parallax-on-without-alpha state (AH2) may decode 1, which is still <= 4.
+
+## Note BC — Audit REPORT 2026-10-16 fixes, engine and CLI (owner, 2026-10-16)
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BC9 Hung nvcompress (#18).** The per-level wait has a ceiling of 2 minutes plus 1 s per 4 000 texels (`nvtt::level_timeout`): Spike S7 measured BC7 Production at 0.036–0.07 Mpix/s on ~13 cores (the slow end is 1 s per ~36 000 texels), so the limit is about 9x the slow end, for smaller CPUs or a busy pool (~70 min at 4096², ~4.7 h at 8192²). It catches a hung process, not a slow one. Past it the process is killed and the level fails, so the file is `ENC-NVTT-FAILED` (its `file_failed` names it) and the NVTT slot is freed for the next file. Tested with the fake's `sleep` mode and the test-only `SDC_NVTT_LEVEL_TIMEOUT_MS` (read only with `test-hooks`).
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BC12 NVTT temp folders (audit EP-7).** `nvtt::TempDir::new` creates its `sdc-nvtt-<pid>-<n>` folder with `create_dir` and moves to the next `n` when it exists, so a folder a crashed run left under a recycled pid is never reused; the level's output file is removed before nvcompress starts, so a stale one cannot pass for this run's. Tested in its own test binary.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **BC13 Review minors (2026-10-16).** `bake::decode_peak` returns 0 for a header over `MAX_DIM` (a forged size could overflow the product; the load refuses it anyway). `nvtt::TempDir::new` creates a missing system temp folder before `create_dir`. Open, not fixed here: non-finite values in `[defaults]`, sub-type tables and rule overrides (BC6); the complex-grass top half is not coverage-validated (BC3, accepted).
+
+## Note FF — BC6H Slowest and Max use the peak-preserving mode; engine 1.2.0 (owner, 2026-10-31)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FF6 Docs.** `docs/wiki/Project-Config.md` (`encoder.effort`), `Troubleshooting.md` and `NVTT-Backend.md` (`VAL-BC6H-PEAK`: try `slowest` first). The wiki is not published.
+
+## Note FL — Fast re-plan (controller, 2026-11-01)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FL2 `prepare` and `plan_sets`.** `Engine::plan_full` is `prepare` (setup, discovery, `[files]`, grouping, joins, typed roles, set edits, duplicates; it emits `batch_started`, CFG-PRESET-SKIPPED, the `[inputs]` read-as warnings, IN-UNREADABLE, SET-EDIT-STALE and `file_discovered`, in that order) followed by `plan_sets(&Prepared, scope)` (pass 1 onward). `plan_cached` and `Session::plan` both call it, so a full plan emits what it did before, in the same order. `prepare` and `plan_sets` share one base `ResolveCtx` (`base_ctx`). `api::tests::prepared_plans_twice_equal` plans one `Prepared` twice to equal jobs, skips, helpers, NVTT probe and events. Two costs taken with it: pass 1 stats each source once and hands the stamp and hints to `resolve_one`, and the GUI's plan request borrows the cached set views instead of building them three times (`model::tests::building_the_plan_request_clones_no_set_views`).

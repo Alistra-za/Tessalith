@@ -1,6 +1,6 @@
 # Advanced drawer
 
-The drawer at the right edge of the Textures view: settings that are not per texture, plus a few rarely used texture fields. For anyone setting up NVTT, threads or the interface, or reaching a texture field the panel does not show.
+The drawer at the right edge of the Textures view: settings that are not per texture, plus a few rarely used texture fields. For anyone setting up threads or the interface, or reaching a texture field the panel does not show.
 
 ## Advanced drawer
 
@@ -12,7 +12,6 @@ Click the strip at the right edge to open it. With a set selected in 2D, the sam
 |---|---|
 | Preset inspector | Headed *How {file}'s settings resolve* for the selected texture. Under it: the batch preset, and the user presets that loaded (with their files); with none loaded, a **Presets…** button opens the preset creator. Field names read in words (the key shows on hover); long values are cut to fit and show in full on hover. *Show only what differs from sdc-base* hides values equal to the base preset. Built-in presets are read-only. |
 | Batch | Worker threads, Memory budget (MiB), BC1 decoder (Ideal, Ideal (round 4), NVIDIA, AMD). The BC1 decoder is read at start, so a change shows "restart Tessalith to apply". |
-| NVTT | The NVTT path, **Choose nvcompress.exe…**, or **Automatic** (`PATH`, then the NVIDIA install folder). NVTT is never bundled. The status shows the version found and whether it is the tested 3.2.5, and is re-checked when the window regains focus. See [NVTT backend](NVTT-Backend.md). |
 | Project-wide fills (legacy) | One line, shown only while `sdc.toml` holds fills in `defaults.packing.fill.*`. **Clear** removes them; set fills on each packed output's card instead ([Fills and defaults](Texture-Packing.md#fills-and-defaults)). |
 | Preview | Largest previewed side, Allow 16384 previews, Live encode. |
 | Mipmaps | Levels for the selected texture. |

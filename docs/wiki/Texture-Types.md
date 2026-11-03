@@ -150,7 +150,7 @@ The full list of format, tag and target rules is on [Presets and targets](Preset
 | RG8 | `rg8` | Uncompressed, two channels | |
 | RGBA16F | `rgba16f` | Uncompressed half-float | `cs` only. |
 
-Which encoder each format uses is in [Format and encoder](Project-Config.md#format-and-encoder); see also [NVTT backend](NVTT-Backend.md).
+Which encoder each format uses is in [Format and encoder](Project-Config.md#format-and-encoder).
 
 ## Packing, helpers and shaders
 
