@@ -277,7 +277,8 @@ fn rnm_fixture(dir: &Path) {
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
 /// opaque BC1, a BC1 1-bit alpha cutout, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a
-/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, plus BC4 and BC5. Returns the `[files]` overrides.
+/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, plus BC4 and BC5. Returns the
+/// `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
     let mut add = |name: &str, img: DynamicImage, fields: &[&str]| {

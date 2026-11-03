@@ -160,16 +160,16 @@ pub fn axis_taps(n: u32, m: u32, f: MipFilter, edge: MipEdge) -> Vec<Vec<(u32, f
 /// Separable polyphase resample of RGB to `(w, h)` (RESULTS-2 B8, S-mips-4): horizontal then vertical, each tap
 /// row accumulated in f64. Alpha of the result is 0.0; there is no clamping here (the caller clamps overshoot).
 pub fn resample_rgb(src: &Rgba32F, to: (u32, u32), f: MipFilter, edge: MipEdge) -> Rgba32F {
-    resample_core(src, to, f, edge, false)
+    resample_core::<3>(src, to, f, edge)
 }
 
 /// Alpha-weighted tent (Note FM28): the taps of [`resample_rgb`] with `MipFilter::Tent`, each multiplied by the
 /// source alpha, RGB divided by the weighted sum. Where that sum is 0 (every tap transparent) the plain tent RGB is
 /// used. Alpha of the result is 0.0; the caller keeps the area-exact box alpha (S-mips-2).
 pub fn resample_rgb_weighted(src: &Rgba32F, to: (u32, u32), edge: MipEdge) -> Rgba32F {
-    let mut out = resample_core(src, to, MipFilter::Tent, edge, true);
+    let mut out = resample_core::<4>(src, to, MipFilter::Tent, edge);
     if out.px.iter().any(|p| p[3] < 0.0) {
-        let plain = resample_core(src, to, MipFilter::Tent, edge, false);
+        let plain = resample_core::<3>(src, to, MipFilter::Tent, edge);
         for (o, d) in out.px.iter_mut().zip(&plain.px) {
             if o[3] < 0.0 {
                 *o = *d;
@@ -179,33 +179,36 @@ pub fn resample_rgb_weighted(src: &Rgba32F, to: (u32, u32), edge: MipEdge) -> Rg
     out
 }
 
-/// The polyphase pass. `weighted` multiplies each tap by the source alpha and divides by the weight sum; a texel
-/// with no weight comes back with alpha -1.0 for [`resample_rgb_weighted`] to fill in. Unweighted taps are scaled by
-/// exactly 1.0, so that path's bytes are unchanged.
-fn resample_core(
+/// The polyphase pass over `N` accumulator channels: `N == 3` is the plain RGB resample, `N == 4` the alpha-weighted
+/// one, which multiplies each tap by the source alpha, keeps the weight sum in the fourth channel and divides by it.
+/// A weighted texel with no weight comes back with alpha -1.0 for [`resample_rgb_weighted`] to fill in. The plain
+/// path has a 3-channel intermediate and does the same arithmetic as before.
+fn resample_core<const N: usize>(
     src: &Rgba32F,
     (w, h): (u32, u32),
     f: MipFilter,
     edge: MipEdge,
-    weighted: bool,
 ) -> Rgba32F {
+    const { assert!(N == 3 || N == 4) };
+    let weighted = N == 4;
     debug_assert!(src.width >= 1 && src.height >= 1 && w >= 1 && h >= 1);
     let tx = axis_taps(src.width, w, f, edge);
     let ty = axis_taps(src.height, h, f, edge);
     let (sw, dw) = (src.width as usize, w as usize);
-    // Per texel: the three channel sums and the weight sum.
-    let mut mid = vec![[0f32; 4]; src.height as usize * dw];
+    let mut mid = vec![[0f32; N]; src.height as usize * dw];
     mid.par_chunks_mut(dw).enumerate().for_each(|(y, row)| {
         let line = &src.px[y * sw..(y + 1) * sw];
         for (o, taps) in row.iter_mut().zip(&tx) {
-            let mut acc = [0f64; 4];
+            let mut acc = [0f64; N];
             for &(k, wt) in taps {
                 let px = line[k as usize];
                 let wt = if weighted { wt * f64::from(px[3]) } else { wt };
                 for (a, v) in acc.iter_mut().zip(&px[..3]) {
                     *a += wt * f64::from(*v);
                 }
-                acc[3] += wt;
+                if let Some(sum) = acc.get_mut(3) {
+                    *sum += wt;
+                }
             }
             // Saturate: a huge finite source must not become Inf, then NaN in the vertical pass.
             *o = acc.map(|v| v.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32);
@@ -217,16 +220,17 @@ fn resample_core(
         .zip(ty.par_iter())
         .for_each(|(row, taps)| {
             for (x, o) in row.iter_mut().enumerate() {
-                let mut acc = [0f64; 4];
+                let mut acc = [0f64; N];
                 for &(k, wt) in taps {
                     for (a, v) in acc.iter_mut().zip(mid[k as usize * dw + x]) {
                         *a += wt * f64::from(v);
                     }
                 }
+                let wsum = acc.get(3).copied().unwrap_or(1.0);
                 *o = if !weighted {
                     [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0]
-                } else if acc[3] > 0.0 {
-                    let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / acc[3]) as f32);
+                } else if wsum > 0.0 {
+                    let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / wsum) as f32);
                     [r, g, b, 0.0]
                 } else {
                     [0.0, 0.0, 0.0, -1.0]
