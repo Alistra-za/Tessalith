@@ -517,7 +517,7 @@ impl Default for Look {
     }
 }
 
-/// The 3D panel's debug views (AG75, GUI suggestions item 1). Lit is always offered; the others
+/// The 3D panel's debug views (GJ8, GUI suggestions item 1). Lit is always offered; the others
 /// when render3d reports the CS anchor (`V3Reply::DebugSupport`) and a loaded shape has the term ([`Viewport3d::offered`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DebugView {
@@ -1407,7 +1407,7 @@ impl Viewport3d {
         self.debug
     }
 
-    /// The debug view selector (AG75). The render thread applies it without a new load of the content.
+    /// The debug view selector (GJ8). The render thread applies it without a new load of the content.
     pub fn set_debug(&mut self, d: DebugView) {
         if self.debug == d {
             return;

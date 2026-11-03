@@ -222,10 +222,22 @@ ARCHIVED (wording before the edit; superseded in part by Note CD1, 2026-10-18)
 ARCHIVED (wording before the edit; superseded in part by Note FI16, 2026-11-01)
 - **AG126 The header wraps (owner, 2026-10-14: the header compresses and the JSON field overlaps).** Cause: the header was one `horizontal` row with a `right_to_left` group (Export, Save, Messages, Export folder, JSON name, Editor…) laid into whatever width the left group left. egui does not stop a group at its neighbour, so in a narrow window the two groups drew over each other and the JSON field was squeezed to a few pixels. Ruling: of the two options in the brief, `horizontal_wrapped` is the simpler correct one, so nothing is hidden behind a "⋯" menu. The row is one left-to-right wrapped line in this order: Open folder…, Recent, Undo, Redo, the view switch, Mode, the column checkboxes, JSON: [name] Editor…, Export folder, Messages, Save, Export. Groups egui cannot wrap by themselves (Recent's disabled scope, Mode and its combo, the JSON label + field + Editor…) start a new line when they would not fit (`header::fit`). The JSON field is always 120 points; the export folder button is at most 280 points, the path cut with "…" (the hover and the accessible name keep it whole). Export is at the end of the row, not pinned right. The Meshes header (the view switch) and the scan row were already wrapped and are covered by the same test: at 1440, 1024, 800 and 640 points no two header widgets intersect, none runs off the window, and every control is present. The header is one row; the Export to, Save and Export group is what wraps, below about 1340 pt (Notes CD1, CD2).
 
+ARCHIVED (superseded by Note GJ8, 2026-11-02)
+- **AG75 Debug views.** The selector offers Lit and UV checker only. Lighting.hlsl (CS AIO 2026-10-03) has no debug-view define (only `LLFDEBUG`, a light-count view), and render3d's API has no output switch, so Albedo, Normals, Roughness, Metallic and AO are left out rather than faked; the NIF request lists the API they need. UV checker: a generated 256 px grey 8×8 checker goes over both variants of every shape's slot 0 with `Renderer::replace_texture` after each load, swap and edit (not through the load resolver: the A/B replay would swap the real texture back). Back to Lit reloads the content with its swaps and edits replayed. The view is not saved.
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+- **AG97 Open in Textures (item 9).** Every texture path the Meshes view lists (the shape cards' slots and the "Users of" title) gets "Open in Textures" when `item_for_game_path` finds it in the open folder. `SdcApp::route_3d` looks the paths up again only when they or the items change, and runs the click as the 3D panel's "Show in Textures" does (switch view, `palette_pick`: select and scroll into view). The 3D panel's missing-texture button uses the same name (it was "Show in Textures" until Task 13). The Plugin file references window is not covered: its Missing paths are in no mod by definition, and its Unused lines are listing text.
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ3 and Note GJ8, 2026-11-02)
+  - **Details** (collapsed by default): JSON_WINS, the preview size, the mesh line, the other maps' states and times, the compiling and plain shape lines, the emissive note, Timings, the Community Shaders features toggle, the P0 off list, the off line, coverage, frame stats, adapter and the renderer's notes. It scrolls past 220 points. Its open state is per panel, in egui memory, and saved as `[layout] details = ["set-3d-details", "meshes-3d-details"]`.
+
 ## Note AI — Meshes shape detail (2026-10-14)
 
 ARCHIVED (superseded by Note AU6, 2026-10-15)
 - **AI2 Shape numbers count shapes from 0 (owner).** The `#N` is the index in the shape list the GUI holds (the scan stores shapes only, ordered by NIF block), so bones and other non-shapes are skipped. The NIF block shows in the hover text. pgpsim has no shape index of its own (it matches by `nif_filter` on the path), so there was no order to match. Whether PGPatcher's texture-set order is block order or a tree walk is not confirmed; see `.superpowers/sdd/meshes/nif-request-shape-index.md`. **Superseded by AU6:** the card number is PGPatcher's 3D index.
+
+ARCHIVED (superseded by Note GJ8, 2026-11-02)
+- **AI4 SLSF1/SLSF2 expanders.** Collapsed headers "SLSF1 0x…" and "SLSF2 0x…"; open lists the set bits by name, lowest first, `Name (bit)`, and an unknown bit as `bit N`. The nif crate exposes only the few bits it uses, so the names are GUI-side tables (`SLSF1_NAMES`, `SLSF2_NAMES`, the nif.xml names). SLSF2 bit 23 reads "Unused01 (TruePBR)". Open state is egui memory, per shape.
 
 ## Note AJ — Coat settings under Multilayer (2026-10-14)
 
@@ -307,6 +319,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC11 and Note BV3,
 
 ARCHIVED (wording before the edit; superseded in part by Note GE8, 2026-10-29)
 - **AU2 pgpsim `alphaprop_*`.** The four PGPatcher 2.2.0 keys on top of the 1.2.0 simulator (owner D2; a full 2.2 audit is a later plan). Integers go through `uint_in` (2.2 `unsignedFromJSON`): an out-of-range, negative or fractional number is ignored with a range warning; a non-numeric value (a string or a bool) is ignored silently; neither is ever a Skip. Delete beats create; create starts from nifly's 4844/128.
+
+ARCHIVED (superseded by Note GJ8, 2026-11-02)
+- **AU5 UV checker by slot (amends AG75).** `Renderer::override_slot(0, …)`, kept across loads; Lit no longer reloads. The override coexists with the missing-texture fill (the override wins on screen; clearing it restores the fill, AU3). A swap or A/B flip under the override updates the entry and `Bound` but not the screen (R9); a kind mismatch warns "slot N override…" (G8).
 
 ## Note AV — Audit 2026-10-15 fixes
 
@@ -444,6 +459,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC9 and Note FB2, 
 
 ARCHIVED (superseded by Note CD4 and Note FB2, 2026-10-18)
 - **CC14 K14: the JSON-editor button left `pgp_fields::panel`.** The 3D settings window therefore has no "Open the TruePBR JSON editor…" button any more. The Material tab has a small **TruePBR JSON editor…** button right-aligned on its header row (the set label on the left); the header's "PG JSON Editor" button and the palette still open the editor in 3D. (superseded by CD4)
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+- **CC16 Used by plugins and Advanced move (C6, K12).** In the Material tab the order after the groups is the skin card, the complex-material card, CS PBR records (when not already drawn between Matching and Advanced TruePBR settings) and Used by plugins. CS PBR records now sit in the right panel, titled **CS PBR records** (was "Advanced: CS PBR records"), collapsed, header "1 record" or "{n} records". The Advanced drawer's content is the panel's last tab.
 
 ## Note CD — GUI layout v2, branch 3 (main team, 2026-10-18)
 
@@ -772,6 +790,9 @@ ARCHIVED (wording before the edit; superseded in part by Note CZ14 and Note CZ25
 ARCHIVED (wording before the edit; superseded in part by Note CZ20, 2026-10-22)
 - **CZ19 Heel height (T5b; T5b-heel-height.md "In-game results" and "Editor rules (revised)").** A Known entry "Heel height (RaceMenu)" (`KnownValue::Heel`, a row of its own: `heel_row`) on a shape only; on the root it is off with "The game ignores heel height here. Put it on a shape." (the editor has no shader extra list, so a shader is never offered). Set heel height is one undo step: HH_OFFSET (NiFloatExtraData) = Z, an EditExtra of the shape's first HH_OFFSET when it has one (a second is ignored in game), else an AddExtra; when the shape has an SDTA, its first SDTA's last "NPC" entry gets the same Z, other entries kept (`sdta_with_npc_z`; an SDTA that is not a JSON list is left as it is, a `shortcut:`); no second SDTA is ever added, and a new one only when "Also write SDTA (OStim and others read it)" is ticked (off by default). The field starts at HH_OFFSET, else the SDTA's last NPC Z, else 0. Warnings come from `validate` (nif crate) under the rows: heel data on the root or on a property (`HEEL_NOT_ON_SHAPE`), and heel data on a shape after the first shape that has some (`HEEL_EARLIER_WINS`; shape order = model order). The heel row repeats the second for a shape that has no heel data yet. `NifEdit::weight_sibling` (set when the session opens, when the scan has the other `_0`/`_1` file, `weight_sibling_of`) adds "Apply the same value to the other weight file (…)."; there is no cross-file write. Calculate: Z = −(lowest vertex Z) rounded to 0.1, `heel_z_of`: a skinned shape's vertices through the inverse of its NiSkinData skin transform (`nif::geom::skin_to_root`, new), an unskinned one through its node chain (`render3d::parse` world). Corpus check (`heel_height_calculation_against_the_corpus`, #[ignore], SDC_ACHERUS, read-only, loose NIFs under mods): 215 shapes with stored heel data; within 0.5: 146, within 1.0: 182, within 2.0: 202, median 0.40, max 8.70. The large misses are ground models (`_gnd`, `GND`, `_go`) and one BodySlide ShapeData source, where the stored value is not used in game; on the 140 worn models: within 0.5: 100, within 1.0: 130, all within 2.0 (max 1.60). Calculate ships, with the value shown and editable before Set. Tooltip from the brief. Tests: `heel_height_*` and `weight_sibling_names_the_other_weight_file` (nif_edit.rs), `heel_height.rs`, `heel_data_off_a_shape_or_on_a_later_shape_warns` (nif validate), `skin_to_root_inverts_the_skin_transform` (nif geom); builder scene `heel_scene`.
 
+ARCHIVED (wording before the edit; superseded in part by Note GJ8, 2026-11-02)
+- **CZ10 Visible rows and Details (T2).** Visible: the shader, the set texture slots (with "Open in Textures" and a red "→ missing"), one weak "(N empty slots)" line, the alpha line ("No NiAlphaProperty" when the shape has none), and "Controllers: N: title, title (clip)" or "none" (a shape whose shader is not a BSLightingShaderProperty lists its alpha controllers, CZ14; `NifEdit::card_ctrls`, from the shader's and the alpha's controller lists; outside Edit a worker reads the shown copy, CZ25). A closed "Details" section holds the block and 3D index, SLSF1/SLSF2, the geometry line, which mod each texture comes from and the raw slot strings. Each Details header is named "Details of NIF block N" (rule 8.4). The empty slots moved from "(empty)" per slot to one line.
+
 ## Note DB — Version 1.0.0, first official release (owner, 2026-10-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note DM7, 2026-10-26)
@@ -1005,6 +1026,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FB12, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note GC19, 2026-10-29)
 - **GC14 Review fix 1: a row read never lands across a scan start.** `start()` drops a row read still out, because it may read the origins the scan disables; the lists on screen stay until the scan ends. A NIF a reload was holding is never selected while a scan runs; a scan that ends without completing (cancelled, failed, busy) looks for it in the lists on screen, and the next reload keeps holding it (`selected_nif.or(reselect)`). Test `a_row_read_held_across_a_scan_start_is_dropped_and_an_unfinished_scan_keeps_the_lists` ends the scan with Busy (a held `scan.lock`), the deterministic way to end one unfinished; a real cancel raced a three-NIF scan to completion.
 
+ARCHIVED (wording before the edit; superseded in part by Note GJ8, 2026-11-02)
+- **GC5 Mod chips move onto the mesh rows.** **BSA**, **game Data** and **Generated by PGPatcher** follow the mod name in each row's chips; `DERIVED_HOVER` went with the tree. `mod_chips` scans `mods` per drawn row (a `shortcut:`; only on-screen rows are drawn).
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ6 and Note GJ8, 2026-11-02)
+- **GC16 Review fix 3: every chip of a row stays reachable.** A row draws its chips warnings first: Problem, the out-of-date patch, LE, the edit badge, then the status, PGPatcher and the mod's own chips (generated by PGPatcher, BSA, game Data). Three long chips show short in the row: "Patched by PGPatcher (in game)" as "In game", "PGPatcher patch out of date" as "Stale patch", "Generated by PGPatcher" as "Generated"; each keeps its full text as its AccessKit name (rule 8.1). The cell still clips what does not fit, so hovering anywhere on the chips lists every chip in full, plus the copies line ("Overridden by B · 3 copies") and the problem's text (rules 3.4, 9.3); that one hover replaces the status chip's and the Problem chip's own. Test `a_patched_stale_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip` checks that each warning's rect holds its whole shown text (a cut label is elided, so its rect shrinks), since egui keeps no clipped rect for a plain label.
+
 ## Note FB — GUI review C fixes and owner redesign (main team, 2026-10-29)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC4, 2026-10-29)
@@ -1065,3 +1092,45 @@ ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FL, 2026-11-02)
 - **FK2 Fix.** Every edit control on the texture panel (`settings_panel::draw`: the centre panel, the preview's compact copy and the set preview's settings window) waits for the plan. It is off while `AppModel::fix_off()` (CA12) gives a reason: a read-only `sdc.toml` first, else "Wait for the plan to finish" while a plan or the scan-database votes are in flight. That covers the Undecided box, the setting groups' rows, the RNM and Cubemap sections, "Treat as OpenGL (flip green)" / "Treat as DirectX", "Re-encode this file" / "Stop re-encoding", and the Helper role row with its Reset. The reason is the disabled controls' hover text, as on Problems' fix buttons, so nothing moves when a plan starts or lands. `Ctx::edit_off` (was `toml_read_only`) carries it.
+
+## Note BE — Audit REPORT 2026-10-16: scan fixes (modscan)
+
+ARCHIVED (superseded by Note GJ6, 2026-11-02)
+- **BE1 Scan after PGPatcher (#5).** A reused copy that is a derive-source candidate but has no stored CRC goes back to the parallel pass, which hashes loose and BSA entries alike. `crc_of` is a map lookup; the serial `fs::read` fallback, `new_crcs` and `Store::set_derived`'s `crcs` parameter are gone. A BSA source now verifies (`match`) on a warm store instead of staying `unverified`. A candidate whose read fails has no CRC, stays unverified and is re-read next scan (accepted).
+
+ARCHIVED (superseded by Note GJ7, 2026-11-02)
+- **BE2 `tex_copy` (#14, option b).** Nothing writes `tex_copy` any more (`set_textures` takes only the winners). The empty table stays in `SCHEMA` with a comment: no schema bump, no forced rescan; drop it at the next bump. Stores scanned earlier keep stale rows nobody reads. Tests count `tex_winner`; the `scan_dump` fixture was regenerated without the `tex_copy` section.
+
+## Note BT — Trace-debug minor fixes: render3d and modscan (2026-10-16)
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+- **BT3. #36 A tainted scan empties the winner tables.** Before `enable_run` in the tainted branch, `nif_winner`, `nif_winner_src` and `tex_winner` are cleared. Call: until a clean rescan, NIF lists show no winners ("Overridden" with no name) and missing/grass reads find nothing, instead of naming origins of the previous run. The banner and Retry already ask for that rescan.
+
+ARCHIVED (superseded by Note GJ7, 2026-11-02)
+- **BT4. #38 Tied separators follow modlist order.** A separator's `parent_origin` (unused for kind 3) holds its rank among the separators in modlist.txt, and `Store::mods` orders by it before `id`. Call: reuse a column rather than bump the schema. A store from before keeps the old order until its next scan.
+
+## Note BW — A tainted scan unloads plugin rows (NIF team, 2026-10-17)
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+* **BW1 The tainted early return calls `store.unload_plugins()`.** After `set_textures(&HashMap::new())` the tainted branch of `scan::run` now clears `rec_winner`/`rec_inert` and `plugin.lo_index`, as the Folder path does. Before, the old winning records stayed while `tex_winner`/`nif_winner` were empty, so Plugin file references > Missing listed every path a winning record names (trace-debug wave 2 finding 7; display only). The cancelled and failed paths were checked: they leave via `discard_pending`/`Err` before any winner change and already have a test. Test: `a_tainted_scan_leaves_missing_and_unused_empty`.
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+* **BW2 A plugin pass cancelled at its start also unloads plugin rows.** `scan_plugins` returns `Cancelled` before touching `rec_winner` while the asset winners were already replaced, so Missing listed the previous load order against the new tables (pre-existing; Codex review of BV1). The `Cancelled` arm in `scan::run` now calls `unload_plugins()`; parsed records and the cache are kept, so the next clean scan restores the lists. Test: `a_scan_cancelled_at_the_plugin_pass_leaves_missing_and_unused_empty`.
+
+## Note CX — Trace-debug 2026-10-22 fixes (NIF team, 2026-10-22)
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ8, 2026-11-02)
+- **CX2 A swap that fails on device loss keeps the `device removed` prefix.** `replace_texture` put the path in front of the error, so the GUI's replay check (`starts_with(DEVICE_REMOVED)`, Note BS1) missed it and the swap was not replayed after the rebuild. `replace_texture` and `override_slot` now add their context after the message on a lost device (`device removed: … [path]`); other errors read as before. The `default texture:` prefix in `bind_textures` is not changed: `set_material` puts a failed build in the shape status and returns `Ok`, so the edit is logged either way. Tested on the helper only, since device loss cannot be made in a test.
+
+ARCHIVED (superseded by Note GJ5, 2026-11-02)
+- **CX4 The Unused note says LOD textures are left out.** The note said LOD textures are listed, but `unused_textures` drops them. No DECISIONS note rules on LOD in Unused. The esp scanner plan (2026-10-12) said LOD textures are listed; commit 2a29162 the next day ("keep LOD textures in the walk, hide them from Unused only") and the `lod_skip.rs` test made hiding them the intended behaviour, and the note was not updated. The query is kept and the text is fixed: "textures\pbr\ (PGPatcher output) and LOD textures are left out. Interface and engine textures are listed too."
+
+## Note GH — GUI review D fixes and quick NIF export (NIF team, 2026-10-31)
+
+ARCHIVED (wording before the edit; superseded in part by Note GJ5, 2026-11-02)
+- **GH7 Slot numbers count from 1 and carry the NIF index on hover (N7, A14, A15; owner O12 (a), 2026-10-31).** Every visible and AccessKit slot number in the Meshes view is 1-based, as in the set editor, Slot commands and the JSON editor: the shape cards (`slot 1 (diffuse):`), the "Users of" list, the card's Details, the shader form (`Diffuse path (slot 1)`, `Browse for Diffuse (slot 1)`, `Fix slot 1: …`), the pending list (`Texture slot 1`) and the RMAOS warning (`nif::edit::validate::EMPTY_RMAOS` now reads `Slot 6 (RMAOS) is empty: …`; GD6's anchor `Target::Slot { slot: 5 }` is the 0-based index and is unchanged). Hovering a slot's name gives `NIF texture index {i}`. Names: the form shows the set editor's card name where a True PBR set has one that differs (`edit_slot_shown`: slot 3 `Emissive / Skin`, slot 7 `Coat normal / Fuzz`, with the form's own name added to the hover); every other slot keeps `edit_slot_label`'s NIF-specific name (`Rim / back-light`, `Env cube`, `Inner layer / tint`, …) because the set editor names only the True PBR slots, and the shape cards keep `slot_name`'s lower-case names. The plugin-reference lines are not covered: the set editor's "Used by plugins" list (`ui/plugin_refs.rs`, a main-team file outside N7) prints `TxstUse.slot`, the 0-based NIF `BSShaderTextureSet` index (`modscan/src/plugin_store.rs`), so a diffuse reads `slot 0` there (pinned in `tests/set_plugin_refs.rs`) while the set editor numbers from 1. Handed to the main team: show `slot + 1` there. The apply error in `nif::edit::structural` ("slot 3 is past the set's 2 slots") is 1-based too, and a pending texture row ("Texture slot 2") gives `NIF texture index 1` on hover.
+
+## Note FI — GUI review D fixes (main team, 2026-10-31)
+
+ARCHIVED (superseded by Note GJ5, 2026-11-02)
+  - **4. "Used by plugins" slots count from 1 (GH7, N1).** A TXST row reads `slot {index + 1}` (TX00 is "slot 1"). Tests: the `set_plugin_refs.rs` labels now read `slot 1`.

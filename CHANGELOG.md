@@ -9,7 +9,17 @@
 - The host plugins (chaiNNer, GIMP, Paint.NET, Photoshop) moved to branch `host-plugins` (bug fixes only, not kept in parity with the engine). `main` no longer builds them.
 - BC6H (HDR) at encoder effort `slowest` and `max` now uses a peak-preserving mode: small, very bright highlights such as a sun keep their brightness (venice_sunset's peak goes from 0.22 to 0.92 of the source). Other blocks encode as `veryslow`. Effort `veryslow` (the default) and below are unchanged. `--on-existing if-changed` re-encodes `pbr_emissive` and `hdr_sky`, the two types that are BC6H by default, once after upgrading. A texture of another type set to BC6H by hand is not re-encoded; to get the new mode for it, re-export it with `--on-existing overwrite`.
 - Meshes view: one flat list of NIF files titled **Meshes**, with a search over path or mod, an **Any mod** picker and chips (Wins, All, Overridden, Conflicted, Problems). Mod chips sit on the rows. **Show in Meshes** from a texture's Used by meshes adds a "Uses <texture>" chip.
-  - Upgrading from 1.1: the scan database is emptied once; scan again in the Meshes view. **Plugin overrides** lists every record that uses the mesh (no **Show inert**).
+  - Upgrading from 1.1: the scan database is emptied once; scan again in the Meshes view.
+- Removed from the Meshes view and the 3D preview (the scan no longer stores what they needed):
+  - **Plugin file references…** (the Missing and Unused window) and the set editor's **Used by plugins**.
+  - **Show inert**: **Plugin overrides** lists every winning record that uses the mesh.
+  - The **Stale patch** chip, the "PGPatcher output is out of date" banner with **Show list**, and the "PGPatcher check" line. Tessalith no longer compares PGPatcher's patched meshes with their sources.
+  - **Scan without PGPatcher output**. With PGPatcher running, the banner says to close it and press **Retry**.
+  - The mod-level **Generated** chip, and the shape card's Details lines other than which mod each texture comes from (NIF block, SLSF flags, geometry, raw slot strings).
+  - The **UV checker** debug view.
+  - The preview timing log (`SDC_PREVIEW_LOG`), the Details **Timings** section, the 3D frame-time footer line and the "CS settings: N fields unset" line. "Scanned in N s" stays.
+  - `set_preview_max` in `gui.toml` (ignored if present).
+- The 3D preview's studio HDRI is Poly Haven's 1k file (1024 × 512), 4.7 MB smaller than the 2k file.
 - NIF edits in the worklist: NIF warnings are worklist rows, **Export NIF** is a Review row with **Diff…** (a block diff), and NIF edits need an export folder you chose. An empty RMAOS slot is an amber row. Clip timing is editable. Cancelling Review writes no NIF edits.
   - Upgrading from 1.1: NIF edits made without an export folder are in `mods\sdc NIF Edits`. Choose that folder in **Export to ▾** to reopen them.
 - The 3D **In game** preview simulates PGPatcher 2.3.1: a stock-patcher line, a JSON that would crash the game stops the run, and `disabled` in a complex material JSON is honoured.
@@ -20,7 +30,7 @@
 - After an upgrade, a notice says which outputs re-encode and why. `sdc validate`'s cube check on a 2D file (`_e` or under `textures\cubemaps\`) warns instead of failing.
 - GUI review D: a DDS input can be re-encoded (**Re-encode this file**, or **Re-encode *n* DDS files** in the bulk panel), shows its stored image on its tile, and an all-DDS set is listed as a set.
 - Header: **Mode** moved to the **Presets** tab (This project); **Export to** reads "not chosen" until a folder is chosen (**More ▾** only with no project open); Review's button is **Choose the export folder…**; the header's Review/Export text counts NIF edits, also with no folder open.
-- Renamed: *Pin this slot (always use this file)*, *Keep the original texture* / *Let PGPatcher replace the texture*, the **PGPatcher JSON** editor (was TruePBR JSON) and its **+ Add a delete section**. "Used by plugins" numbers slots from 1.
+- Renamed: *Pin this slot (always use this file)*, *Keep the original texture* / *Let PGPatcher replace the texture*, the **PGPatcher JSON** editor (was TruePBR JSON) and its **+ Add a delete section**.
 - The input name box edits the whole path by segment (double-click, Ctrl+Left/Right, Ctrl+Up/Down lists); the path lock rail is gone.
 - The command palette's Enter acts only after you type or move the highlight. Automatic types alone no longer ask on close. In the Meshes view with a NIF selected the bottom panel leaves room for the 3D preview.
 - Fixes:

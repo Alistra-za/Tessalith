@@ -67,10 +67,6 @@ A file dropped on a slot row fills that slot, as one undo step, when it is a tex
 
 The set's **Shader** dropdown lists the shaders the current Mode offers. The pick reads "(auto)" when Tessalith chose it, and "(fallback)" when the shader you asked for does not exist under the current Mode and `default` stands in. **Auto** clears your choice. Warnings (a missing or unused map, an unavailable shader) show on the set card's **⚠ n** button. A scanned mod's meshes decide the auto pick unless a PBR or skin member, a complex `_m` or a `_p` does. How each shader is picked and what it changes is in [Set shaders](Set-Shaders.md#set-shaders).
 
-## Used by plugins
-
-**Used by plugins** lists the plugin texture sets (TXST) and alternate textures that use this set, from the last scan, with **Refresh**. Slots count from 1, as in the NIF edit panel.
-
 ## Path pickers
 
 The ▾ beside the input name box, and the ▾ beside a match path or a mesh path in the [JSON editor](GUI-PGPatcher-JSON.md#the-json-editor), open a list of known paths with a filter box. Clicking or typing inside it (the box, the list, its scroll bar) keeps it open; it closes on a pick, on Esc, or on a click outside.
