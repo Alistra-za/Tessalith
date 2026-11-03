@@ -151,9 +151,9 @@ pub fn prelude(ctx: &egui::Context, v: &mut Viewport3d) {
 /// The toolbar's 3D part, on the caller's line: View ▾ (debug views, background, lights, Reset view), Copy image,
 /// Shader folder…, and the render status.
 pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
-    // The View menu holds sliders and a hex box: it stays open while they are used (AG125's menu).
-    super::path_picker::menu(ui, VIEW_MENU, |ui| look_controls(ui, v))
-        .response
+    // The View menu holds sliders, a hex box and the colour popup: it keeps its own open state, so the popup does
+    // not close it (Note GK).
+    super::columns::combo_menu(ui, "viewport3d-view", VIEW_MENU, |ui| look_controls(ui, v))
         .on_hover_text("Debug view, background, lights, deferred and Reset view");
     let copy = ui
         .add_enabled(v.frame.is_some(), egui::Button::new("Copy image"))
@@ -322,32 +322,31 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                     }
                 }
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut l.sun, Look::SUN_RANGE.0..=Look::SUN_RANGE.1)
-                        .text("Sun brightness"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut l.point, Look::POINT_RANGE.0..=Look::POINT_RANGE.1)
-                        .text("Point light brightness"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut l.radius, Look::RADIUS_RANGE.0..=Look::RADIUS_RANGE.1)
-                        .logarithmic(true)
-                        .text("Point light radius (x model size)"),
-                );
-                if ui
-                    .small_button("Reset view")
-                    .on_hover_text("Lights, background and camera back to the defaults")
-                    .clicked()
-                {
-                    *l = Look {
-                        deferred: l.deferred,
-                        ..Look::default()
-                    };
-                    v.orbit.reset();
-                }
-            });
+            // One slider per row: wrapped on one line, a label could land beside the next slider (Note GK).
+            ui.add(
+                egui::Slider::new(&mut l.sun, Look::SUN_RANGE.0..=Look::SUN_RANGE.1)
+                    .text("Sun brightness"),
+            );
+            ui.add(
+                egui::Slider::new(&mut l.point, Look::POINT_RANGE.0..=Look::POINT_RANGE.1)
+                    .text("Point light brightness"),
+            );
+            ui.add(
+                egui::Slider::new(&mut l.radius, Look::RADIUS_RANGE.0..=Look::RADIUS_RANGE.1)
+                    .logarithmic(true)
+                    .text("Point light radius (x model size)"),
+            );
+            if ui
+                .small_button("Reset view")
+                .on_hover_text("Lights, background and camera back to the defaults")
+                .clicked()
+            {
+                *l = Look {
+                    deferred: l.deferred,
+                    ..Look::default()
+                };
+                v.orbit.reset();
+            }
             ui.weak("Drag: orbit · middle or Shift+drag: pan · Shift+right drag: turn the sun · wheel: zoom · double-click or Home: recentre");
             if v.look.hdri {
                 ui.weak("Studio HDRI by Poly Haven (CC0): background and ambient light. Shift+right drag turns the sun and the HDRI.");
