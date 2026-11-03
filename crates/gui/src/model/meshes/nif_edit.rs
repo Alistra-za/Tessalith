@@ -22,7 +22,7 @@ use nif::keys::KeyData;
 use nif::material::{MaterialState, SLSF2_TRUE_PBR};
 use nif::model::{read_model, NifModel, ShapeModel};
 use nif::props::LightingTrailer;
-use render3d::{ParsedNif, ShapeId};
+use render3d::{ParsedNif, ParsedShape, ShapeId};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -1839,9 +1839,9 @@ fn source_id(copy: &PathCopy, data_path: &str, source: &[u8]) -> SourceId {
 }
 
 /// Each shape's (shader type, slot paths) for [`texture_sources`].
-fn slot_paths(p: &ParsedNif) -> Vec<(u32, Vec<String>)> {
-    p.shapes
-        .iter()
+fn slot_paths<'a>(shapes: impl IntoIterator<Item = &'a ParsedShape>) -> Vec<(u32, Vec<String>)> {
+    shapes
+        .into_iter()
         .map(|s| {
             let m = &s.material;
             (
@@ -1966,7 +1966,7 @@ impl MeshesModel {
         }
         let mut nif = e.preview_nif();
         nif.head_part = store.is_head_part_mesh(&e.data_path).unwrap_or(false); // shading only, as mesh_spec
-        let textures = texture_sources(store, &slot_paths(&nif)).map_err(db_err)?;
+        let textures = texture_sources(store, &slot_paths(&nif.shapes)).map_err(db_err)?;
         Ok(Some(Content::Parsed {
             key: next_key(),
             nif: Arc::new(nif),
@@ -2606,19 +2606,34 @@ impl MeshesModel {
         let (head_part, textures) = (nif.head_part, textures.clone());
         let mut next = e.preview_nif();
         next.head_part = head_part;
-        let fresh = match texture_sources(store, &slot_paths(&next)) {
-            Ok(f) => f,
-            Err(err) => {
-                self.error = Some(db_err(err));
-                return;
+        let old = |s: &ParsedShape| before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m);
+        let changed = |s: &&ParsedShape| old(s) != Some(&s.material);
+        // The store is asked only for shapes whose shader type or slot paths changed (the only inputs of
+        // `texture_sources`): a drag tick on a float field changes a material but names no new texture.
+        let named = |s: &&ParsedShape| {
+            old(s).is_none_or(|m| {
+                let norms = |m: &MaterialState| -> Vec<String> {
+                    m.slots.iter().map(|t| t.norm.clone()).collect()
+                };
+                m.shader_type != s.material.shader_type || norms(m) != norms(&s.material)
+            })
+        };
+        let fresh = if next.shapes.iter().any(|s| named(&s)) {
+            match texture_sources(store, &slot_paths(next.shapes.iter().filter(named))) {
+                Ok(f) => f,
+                Err(err) => {
+                    self.error = Some(db_err(err));
+                    return;
+                }
             }
+        } else {
+            HashMap::new()
         };
         let mut reload = fresh.keys().any(|k| !textures.contains_key(k));
         if !reload {
             // The render thread keeps these edits and re-applies them on a reload it starts itself.
-            for s in &next.shapes {
-                let old = before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m);
-                if old != Some(&s.material) && !self.v3.set_material(s.id, s.material.clone()) {
+            for s in next.shapes.iter().filter(changed) {
+                if !self.v3.set_material(s.id, s.material.clone()) {
                     reload = true;
                     break;
                 }

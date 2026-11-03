@@ -1833,6 +1833,17 @@ fn mesh_spec(
     }))
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static TEXTURE_SOURCE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many `texture_sources` store lookups this thread made (Note GP9's test: none for a float edit).
+#[cfg(feature = "test-hooks")]
+pub fn texture_source_calls() -> usize {
+    TEXTURE_SOURCE_CALLS.with(std::cell::Cell::get)
+}
+
 /// Where the game's copy of each texture is, for shapes given as (shader type, slot paths; "" = empty): every slot
 /// path the store has, then the skin RFAOS candidates (render3d resolves only through this map), those optional: a
 /// failed read is quiet. The first entry for a path wins.
@@ -1840,6 +1851,8 @@ fn texture_sources(
     store: &Store,
     paths: &[(u32, Vec<String>)],
 ) -> Result<HashMap<String, FileSource>, ScanError> {
+    #[cfg(feature = "test-hooks")]
+    TEXTURE_SOURCE_CALLS.with(|n| n.set(n.get() + 1));
     let mut textures = HashMap::new();
     for t in paths.iter().flat_map(|(_, s)| s).filter(|t| !t.is_empty()) {
         if textures.contains_key(t) {

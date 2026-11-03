@@ -931,6 +931,42 @@ fn new_texture_path_reloads_the_same_view() {
     assert!(textures.contains_key("textures/new.dds"));
 }
 
+/// Note GP9: a drag tick on a float field names no texture, so it queries no store.
+#[test]
+fn a_float_edit_makes_no_store_query() {
+    let (_d, mut m) = session(false);
+    m.open_edit();
+    let n = sdc_gui::model::meshes::texture_source_calls();
+    gloss(&mut m, 12.5);
+    assert_eq!(m.error, None);
+    assert_eq!(sdc_gui::model::meshes::texture_source_calls() - n, 0);
+}
+
+/// Note GP9 (Review Focus 3): a slot path the store has and the loaded map lacks is still looked up and reloaded.
+#[test]
+fn a_new_slot_path_still_reloads_with_its_texture() {
+    let (_d, mut m) = session(false);
+    m.open_edit();
+    let e = m.edit.as_ref().unwrap();
+    let (shape, shader) = lit_shape(e);
+    let set = e.model.lighting[&shader].texture_set.unwrap();
+    let base = String::from_utf8_lossy(&e.model.texsets[&set].raw.slots[0]).into_owned();
+    let op = Op::SetTexturePath {
+        at: nif::edit::anchor_shape(&e.model, shape),
+        slot: 0,
+        path: r"textures\new.dds".into(),
+        base,
+    };
+    let n = sdc_gui::model::meshes::texture_source_calls();
+    m.edit_push(vec![op], None);
+    assert_eq!(m.error, None);
+    assert_eq!(sdc_gui::model::meshes::texture_source_calls() - n, 1);
+    let Some(Content::Parsed { textures, .. }) = m.v3.content() else {
+        panic!("a Parsed content")
+    };
+    assert!(textures.contains_key("textures/new.dds"));
+}
+
 #[test]
 fn le_file_opens_without_preview() {
     let (d, mut m) = session(true);
