@@ -775,8 +775,8 @@ fn scan_and_select(m: &mut MeshesModel, root: &Path) {
     m.activate_with(None);
     m.use_instance(root.to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     let t = Instant::now();
     m.poll();
     while m.scanning() || m.v3.locating() {
@@ -1597,14 +1597,16 @@ fn edit_cards_show_the_edited_values() {
         "{:?}",
         e.outcomes
     );
+    let f1_now = e.model.lighting[&shader].lighting.slsf1;
     let mut h = view(m);
     h.run_steps(4);
     h.get_by_label(&shader_type_name(new_ty));
-    h.get_by_label(&format!("Details of NIF block {shape}"))
-        .click();
-    h.run_steps(2);
     h.get_by_label("textures/edited/card.dds");
     h.get_by_label(&want_alpha);
+    // The flags are no longer on the card; the edit panel's Shader tab shows the edited word.
+    h.state_mut().select_edit(Selection::Shape(shape));
+    h.run_steps(3);
+    h.get_by_label(&format!("SLSF1 0x{f1_now:08X}"));
 }
 
 #[test]
@@ -9450,8 +9452,8 @@ fn cards_stay_when_the_controller_read_fails() {
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     let t = Instant::now();
     m.poll();
     while m.scanning() || m.v3.locating() {

@@ -208,7 +208,6 @@ fn scan_body(
             vec![],
         ),
     };
-
     store.begin_scan()?;
     let mut loose_ids = Vec::with_capacity(loose.len());
     // Whole-origin derived flag (Mod with a signature) and the parsed diff, per loose origin.
@@ -296,7 +295,6 @@ fn scan_body(
             OriginRef::Bsa(_) => false,
         })
         .collect();
-
     let origin_id = |o: OriginRef| match o {
         OriginRef::Loose(i) => loose_ids[i],
         OriginRef::Bsa(i) => bsa_ids[i],

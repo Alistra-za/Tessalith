@@ -107,10 +107,6 @@ impl Banner {
     }
 }
 
-/// A scan the UI asked for; `app.rs` drains it and starts it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ScanRequest;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NifFilter {
     #[default]
@@ -584,7 +580,8 @@ pub struct MeshesModel {
     /// The profiles of the chosen MO2 instance (Note AM), read when the instance is set.
     profiles: Vec<String>,
     store: Option<Store>,
-    request: Option<ScanRequest>,
+    /// A scan the UI asked for; `app.rs` drains it with `take_request` and starts it.
+    request: bool,
     cancel: Option<Arc<AtomicBool>>,
     tx: Sender<WorkerMsg>,
     rx: Receiver<WorkerMsg>,
@@ -684,7 +681,7 @@ impl MeshesModel {
             activated: false,
             profiles: vec![],
             store: None,
-            request: None,
+            request: false,
             cancel: None,
             tx,
             rx,
@@ -815,11 +812,11 @@ impl MeshesModel {
     }
 
     pub fn request_scan(&mut self) {
-        self.request = Some(ScanRequest);
+        self.request = true;
     }
 
-    pub fn take_request(&mut self) -> Option<ScanRequest> {
-        self.request.take()
+    pub fn take_request(&mut self) -> bool {
+        std::mem::take(&mut self.request)
     }
 
     pub fn scanning(&self) -> bool {
@@ -867,7 +864,7 @@ impl MeshesModel {
     }
 
     /// Start the scan on a worker. Nothing is read from the store until it ends (`begin_scan` disables every origin).
-    pub fn start(&mut self, _: ScanRequest) {
+    pub fn start(&mut self) {
         if self.scanning() {
             return;
         }

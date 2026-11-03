@@ -1104,7 +1104,8 @@ impl Renderer {
                     path.norm
                 )),
                 None => {
-                    // Another shape's edit may have evicted the entry; `evicted_missing` keeps it (as a load does).
+                    // Another shape's edit may have evicted the entry; `evicted_missing` keeps it. `rebind` applies the
+                    // same missing fill from its entry's `missing` flag.
                     let gone = entry.is_none() && self.evicted_missing.contains(&path.norm);
                     if gone || entry.is_some_and(|e| e.missing) {
                         missing.insert(reg);

@@ -2563,9 +2563,13 @@ fn the_debug_selector_lists_only_views_the_renderer_can_make() {
     for missing in ["Albedo", "Normals", "Roughness", "Metallic", "AO"] {
         assert!(h.query_by_label(missing).is_none(), "{missing} is offered");
     }
-    h.get_by_label("Lit").click();
-    h.run();
-    assert_eq!(h.state().debug(), DebugView::Lit);
+    // The menu lists exactly the offered views, and nothing else of the debug set.
+    let listed: Vec<DebugView> = DebugView::ALL
+        .into_iter()
+        .filter(|d| h.query_by_label(d.label()).is_some())
+        .collect();
+    assert_eq!(listed, h.state().offered());
+    assert_eq!(listed, [DebugView::Lit]);
 }
 
 #[test]

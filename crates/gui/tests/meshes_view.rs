@@ -71,10 +71,10 @@ fn no_scan_without_pgpatcher_output_button() {
         .query_all_by_label("Scan without PGPatcher output")
         .next()
         .is_none());
-    assert!(h.state_mut().take_request().is_none());
+    assert!(!h.state_mut().take_request());
     h.get_by_label("Retry").click();
     h.run();
-    assert!(h.state_mut().take_request().is_some());
+    assert!(h.state_mut().take_request());
 }
 
 #[test]
@@ -369,8 +369,8 @@ fn a_scan_through_the_worker_fills_mods_nifs_and_both_sides_of_a_patched_mesh() 
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     assert!(m.scanning());
     wait(&mut m);
     assert_eq!(m.error, None);
@@ -416,15 +416,15 @@ fn a_running_pgpatcher_is_a_banner_and_retry_scans_once_it_is_closed() {
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.banner, Some(Banner::PgpRunning));
     // PGPatcher closed: Retry is the same request, and the scan runs.
     m.procs = Vec::new;
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     assert_eq!(m.banner, None);
@@ -448,8 +448,8 @@ fn a_derived_row_has_no_stale_chip_or_banner() {
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.banner, None);
     // Any mod lists the PGPatcher copy, the game's winner for the path.
@@ -546,8 +546,8 @@ fn owner_meshes_view() {
     println!("target: {:?}", m.target);
     let t = Instant::now();
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait_for(&mut m, Duration::from_secs(900));
     println!("scan: {:.1} s wall", t.elapsed().as_secs_f64());
     println!("status: {}", m.status);
@@ -694,8 +694,8 @@ fn scanned_with(oak: Option<&[u8]>) -> (tempfile::TempDir, MeshesModel) {
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     (d, m)
@@ -728,8 +728,8 @@ fn hold_scan_lock(dir: &Path) -> std::fs::File {
 /// Starts a scan; the caller ends it (`wait`).
 fn start_scan(m: &mut MeshesModel) {
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     assert!(m.scanning());
 }
 
@@ -1658,6 +1658,21 @@ fn shape_details_keeps_only_the_winning_mod_line() {
     }
 }
 
+/// Note GJ8: a shape with no resolved texture has no Details header (it would open to nothing).
+#[test]
+fn a_shape_with_no_resolved_texture_has_no_details_header() {
+    let mut m = shapes_model(vec![shape(vec![Some("textures/a.dds"), None])]);
+    m.resolved
+        .insert("textures/a.dds".into(), TexResolution::Missing);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("Body");
+    assert!(h
+        .query_all_by_label_contains("Details of NIF block")
+        .next()
+        .is_none());
+}
+
 /// Meshes UI T2: a card is framed with a full-width header button ("Select shape #N name"); Shader, Textures and
 /// Alpha show, a shape without alpha says so, and a header click outside edit mode selects the card.
 #[test]
@@ -1676,7 +1691,15 @@ fn shape_cards_are_selectable_with_four_facts_and_closed_details() {
         alpha_threshold: Some(5),
         ..shape(vec![None])
     };
-    let mut h = harness(shapes_model(vec![a, b]));
+    let mut m = shapes_model(vec![a, b]);
+    m.resolved.insert(
+        "textures/a.dds".into(),
+        TexResolution::Found {
+            origin: "A".into(),
+            n_copies: 1,
+        },
+    );
+    let mut h = harness(m);
     h.run();
     let first = h.get_by_role_and_label(Role::Button, "Select shape #1 First");
     let second = h
@@ -1690,11 +1713,13 @@ fn shape_cards_are_selectable_with_four_facts_and_closed_details() {
     h.get_by_label("(2 empty slots)");
     // The scan has no controller data: no Controllers line outside edit mode (T2 review Minor 6).
     assert!(h.query_by_label("Controllers:").is_none());
+    // Only the first card has a resolved texture, so only it has a Details header, closed.
     assert_eq!(
         h.query_all_by_label_contains("Details of NIF block")
             .count(),
-        2
+        1
     );
+    assert!(h.query_by_label_contains("→ A").is_none(), "Details closed");
     h.get_by_role_and_label(Role::Button, "Select shape #1 First")
         .click();
     h.run();
@@ -1732,8 +1757,8 @@ fn a_running_pgpatcher_pauses_the_scan() {
     m.activate_with(None);
     m.use_instance(d.path().to_path_buf(), "Default".into());
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.status, "Scan paused: PGPatcher is running.");
     assert_eq!(m.banner, Some(Banner::PgpRunning));
@@ -1750,8 +1775,8 @@ fn reload_closes_a_mod_that_became_derived() {
     m.select_nif(copy);
     put(d.path(), "mods/B/PGPatcher.esp", Some(b"e"));
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.error, None);
     assert!(m.mods.iter().any(|r| r.id == b && r.derived));
@@ -1768,8 +1793,8 @@ fn cancelled_or_failed_scan_does_not_mark_a_completed_scan() {
     assert!(m.scan_completed);
     m.procs = || vec!["pgpatcher.exe".to_string()];
     m.request_scan();
-    let req = m.take_request().unwrap();
-    m.start(req);
+    assert!(m.take_request());
+    m.start();
     wait(&mut m);
     assert_eq!(m.banner, Some(Banner::PgpRunning));
     assert!(!m.scan_completed);
@@ -1787,8 +1812,8 @@ fn a_scan_that_stops_before_begin_scan_keeps_the_store_settled() {
     let (_d, mut m) = scanned();
     let run_scan = |app: &mut sdc_gui::model::AppModel, m: &mut MeshesModel| {
         m.request_scan();
-        let req = m.take_request().unwrap();
-        m.start(req);
+        assert!(m.take_request());
+        m.start();
         app.scan_started();
         wait(m);
         app.scan_finished(m.scan_completed, m.store_untouched);

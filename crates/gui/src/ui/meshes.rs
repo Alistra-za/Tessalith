@@ -1251,33 +1251,45 @@ fn shape(
             ui.label(c);
         });
     }
-    let details = egui::CollapsingHeader::new("Details")
-        // Final review Minor 1: per edit session (0 outside Edit), so another NIF's card never inherits it.
-        .id_salt((
-            "shape-details",
-            m.edit.as_ref().map_or(0, |e| e.session),
-            s.block,
-        ))
-        .show(ui, |ui| shape_details(ui, m, s));
-    // One "Details" per card: each is named after its shape (rule 8.4).
-    let label = format!("Details of NIF block {}", s.block);
-    details.header_response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, &label)
-    });
+    // No resolved texture, nothing to show: no empty header (Note GJ8).
+    let winners = winning_mods(m, s);
+    if !winners.is_empty() {
+        let details = egui::CollapsingHeader::new("Details")
+            // Final review Minor 1: per edit session (0 outside Edit), so another NIF's card never inherits it.
+            .id_salt((
+                "shape-details",
+                m.edit.as_ref().map_or(0, |e| e.session),
+                s.block,
+            ))
+            .show(ui, |ui| shape_details(ui, &winners));
+        // One "Details" per card: each is named after its shape (rule 8.4).
+        let label = format!("Details of NIF block {}", s.block);
+        details.header_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, &label)
+        });
+    }
     (clicked, picked)
+}
+
+/// Which mod wins each of the shape's textures: (slot index, "→ mod (N copies)") for every slot the scan resolved.
+fn winning_mods(m: &MeshesModel, s: &ShapeView) -> Vec<(usize, String)> {
+    let mut out = vec![];
+    for (i, t) in s.textures.iter().enumerate() {
+        match t.as_ref().and_then(|p| m.resolved.get(p)) {
+            Some(TexResolution::Found { origin, n_copies }) if *n_copies > 1 => {
+                out.push((i, format!("→ {origin} ({n_copies} copies)")));
+            }
+            Some(TexResolution::Found { origin, .. }) => out.push((i, format!("→ {origin}"))),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The closed part of a shape card: which mod wins each texture (the flag lists and geometry are in the NIF edit panel,
 /// Note GJ8).
-fn shape_details(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) {
-    for (i, t) in s.textures.iter().enumerate() {
-        let origin = match t.as_ref().and_then(|p| m.resolved.get(p)) {
-            Some(TexResolution::Found { origin, n_copies }) if *n_copies > 1 => {
-                format!("→ {origin} ({n_copies} copies)")
-            }
-            Some(TexResolution::Found { origin, .. }) => format!("→ {origin}"),
-            _ => continue,
-        };
+fn shape_details(ui: &mut egui::Ui, winners: &[(usize, String)]) {
+    for (i, origin) in winners {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("slot {}", i + 1))
                 .on_hover_text(format!("NIF texture index {i}"));

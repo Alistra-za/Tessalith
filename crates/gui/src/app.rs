@@ -411,8 +411,8 @@ impl eframe::App for SdcApp {
         self.state.set3d.poll(&self.model);
         // Both views offer the scan (the Textures view has its row under the header).
         self.meshes.activate();
-        if let Some(req) = self.meshes.take_request() {
-            self.meshes.start(req);
+        if self.meshes.take_request() {
+            self.meshes.start();
             // `begin_scan` disables every origin until the scan ends.
             if self.meshes.scanning() {
                 self.model.scan_started();

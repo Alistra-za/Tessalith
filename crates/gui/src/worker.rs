@@ -499,7 +499,8 @@ pub fn spawn_dds_thumbs(tx: Sender<WorkerMsg>, paths: Vec<(PathBuf, SourceStamp)
 }
 
 /// Meshes view (plan A Task 12): scan `source` into the store at `db` (opened on this thread; the UI keeps its own
-/// read connection). `procs` lists running process names for the PGPatcher gate. Progress and the result go to `tx`; a panic becomes `Panicked { what: "scan" }`.
+/// read connection). `procs` lists running process names for the PGPatcher gate. Progress and the result go to `tx`;
+/// a panic becomes `Panicked { what: "scan" }`.
 pub fn start_scan(
     source: modscan::scan::Source,
     db: PathBuf,
