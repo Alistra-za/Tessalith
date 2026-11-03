@@ -84,6 +84,15 @@ pub(crate) fn check_sizes_found(
     }
 }
 
+/// The source that sets the canvas: the first one whose own size is the common size.
+pub(crate) fn canvas_source(found: &SizesFound) -> &Path {
+    found
+        .1
+        .iter()
+        .find(|f| (f.1, f.2) == found.0)
+        .map_or(Path::new(""), |f| f.0.as_path())
+}
+
 /// [`check_sizes_found`] with sizes read from the file headers.
 pub(crate) fn check_file_sizes(sources: &[PathBuf]) -> Result<SizesFound, PackError> {
     check_sizes_found(sources, |p| Ok(image_size(p)?))
@@ -91,12 +100,12 @@ pub(crate) fn check_file_sizes(sources: &[PathBuf]) -> Result<SizesFound, PackEr
 
 /// `src` brought to `to` (Note FM30): a smaller source of the same aspect ratio is enlarged by linear interpolation
 /// (`weighted`: colour premultiplied by its alpha). Anything else, such as a file replaced since the headers were
-/// read, is a mismatch against `first`, the source the canvas was sized from.
+/// read, is a mismatch against `canvas`, the source whose size is `to`.
 pub(crate) fn fit_source(
     src: Rgba32F,
     to: (u32, u32),
     weighted: bool,
-    first: &Path,
+    canvas: &Path,
     path: &Path,
 ) -> Result<Rgba32F, PackError> {
     let d = (src.width, src.height);
@@ -105,7 +114,7 @@ pub(crate) fn fit_source(
     }
     if d.0 > to.0 || d.1 > to.1 || !same_aspect(d, to) {
         return Err(PackError::SizeMismatch(vec![
-            (first.to_path_buf(), to.0, to.1),
+            (canvas.to_path_buf(), to.0, to.1),
             (path.to_path_buf(), d.0, d.1),
         ]));
     }
@@ -160,21 +169,26 @@ pub fn assemble_channels_with(
     load: impl FnMut(&Path) -> Result<(Rgba32F, SourceInfo), PackError>,
 ) -> Result<Assembled, PackError> {
     let paths: Vec<PathBuf> = sources.iter().map(|s| s.path.clone()).collect();
-    let dims = check_sizes_with(&paths, size)?;
-    assemble_into(channels, sources, gray, dims, load)
+    let found = check_sizes_found(&paths, size)?;
+    assemble_into(
+        channels,
+        sources,
+        gray,
+        (found.0, canvas_source(&found)),
+        load,
+    )
 }
 
-/// [`assemble_channels_with`] on a canvas of `(w, h)`, which no source may exceed: each smaller one is enlarged to
-/// it (Note FM30; derive sizes its scalars to its colour map). Packed channels are data, so the sources are
-/// interpolated without an alpha weight.
+/// [`assemble_channels_with`] on a canvas of `(w, h)` set by the source `canvas`, which no source may exceed: each
+/// smaller one is enlarged to it (Note FM30; derive sizes its scalars to its colour map). Packed channels are data,
+/// so the sources are interpolated without an alpha weight.
 pub(crate) fn assemble_into(
     channels: &[ChannelSource; 4],
     sources: &[PackSource],
     gray: GraySource,
-    (w, h): (u32, u32),
+    ((w, h), canvas): ((u32, u32), &Path),
     mut load: impl FnMut(&Path) -> Result<(Rgba32F, SourceInfo), PackError>,
 ) -> Result<Assembled, PackError> {
-    let first = sources.first().map_or(Path::new(""), |s| s.path.as_path());
     let mut image = Rgba32F::new(w, h, [0.0, 0.0, 0.0, 1.0]);
     let mut info = SourceInfo {
         bit_depth: 8,
@@ -209,7 +223,7 @@ pub(crate) fn assemble_into(
         let multi = targets.iter().any(|t| t.2.is_some());
         let (src, si) = load(&s.path)?;
         // `check_sizes` read the headers; a file replaced since then is caught here.
-        let src = fit_source(src, (w, h), false, first, &s.path)?;
+        let src = fit_source(src, (w, h), false, canvas, &s.path)?;
         info.bit_depth = info.bit_depth.max(si.bit_depth);
         info.is_float |= si.is_float;
         let mut all_grey = true;

@@ -801,3 +801,33 @@ pub fn source_fill(pk: &PackJob, s: &PackSource) -> String {
         None => format!("ch:{c}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::common_size;
+
+    #[test]
+    fn common_size_is_the_largest_of_one_aspect() {
+        // Three sizes, in no order.
+        assert_eq!(
+            common_size(&[(64, 32), (256, 128), (128, 64)]),
+            Some((256, 128))
+        );
+        // The first is a multiple of the second but not the largest.
+        assert_eq!(
+            common_size(&[(128, 64), (64, 32), (512, 256)]),
+            Some((512, 256))
+        );
+        // A ratio that is not a power of two, and one size.
+        assert_eq!(common_size(&[(600, 400), (900, 600)]), Some((900, 600)));
+        assert_eq!(common_size(&[(48, 40)]), Some((48, 40)));
+    }
+
+    #[test]
+    fn common_size_is_none_for_mixed_aspects_or_no_sources() {
+        assert_eq!(common_size(&[(64, 64), (64, 32)]), None);
+        // The odd one out is not the first, and the sizes are otherwise multiples.
+        assert_eq!(common_size(&[(64, 32), (128, 64), (256, 255)]), None);
+        assert_eq!(common_size(&[]), None);
+    }
+}

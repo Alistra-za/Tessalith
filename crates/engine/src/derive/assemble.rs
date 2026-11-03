@@ -6,17 +6,17 @@ use super::{DeriveJob, DeriveKind};
 use crate::image::{Rgba32F, SourceInfo};
 use crate::load::{load_image, LoadError};
 use crate::pack::assemble::{
-    assemble_into, check_sizes, constant, fit_source, Assembled, PackError,
+    assemble_into, canvas_source, check_file_sizes, constant, fit_source, Assembled, PackError,
 };
 use crate::pack::{ChannelSource, PackSource};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The image whose R, G, B, A are `channels`, read from the files they name; a `w`×`h` image of constants when they
-/// name none; the files they name are enlarged to `w`×`h` (Note FM30).
+/// name none; the files they name are enlarged to `w`×`h`, the size of the source `canvas` (Note FM30).
 fn channels_image(
     channels: [ChannelSource; 4],
     gray: crate::config::GraySource,
-    (w, h): (u32, u32),
+    ((w, h), canvas): ((u32, u32), &Path),
 ) -> Result<Assembled, PackError> {
     let mut sources: Vec<PackSource> = vec![];
     for c in &channels {
@@ -47,7 +47,9 @@ fn channels_image(
             non_gray: vec![],
         });
     }
-    assemble_into(&channels, &sources, gray, (w, h), |p| Ok(load_image(p)?))
+    assemble_into(&channels, &sources, gray, ((w, h), canvas), |p| {
+        Ok(load_image(p)?)
+    })
 }
 
 /// Builds the image of `job`. Every source has one aspect ratio (`PackError::SizeMismatch`, as packing; TA22) and
@@ -66,7 +68,9 @@ pub fn assemble_derived_rough(job: &DeriveJob) -> Result<(Assembled, f64), PackE
         path: PathBuf::new(),
         msg: format!("a {} job has no sources", job.kind.id()),
     })?;
-    let (w, h) = check_sizes(&paths)?;
+    let found = check_file_sizes(&paths)?;
+    let (dims, canvas) = (found.0, canvas_source(&found));
+    let (w, h) = dims;
     let colour = |slot: &Option<PathBuf>, what: &str| {
         let p = slot.as_ref().ok_or_else(|| LoadError::Decode {
             path: first.clone(),
@@ -75,7 +79,7 @@ pub fn assemble_derived_rough(job: &DeriveJob) -> Result<(Assembled, f64), PackE
         let (img, info) = load_image(p)?;
         // `check_sizes` read the headers; a file replaced since then is caught here. The albedo's alpha is the
         // output's, so its colour is interpolated weighted by it.
-        Ok::<_, PackError>((fit_source(img, (w, h), true, &first, p)?, info))
+        Ok::<_, PackError>((fit_source(img, dims, true, canvas, p)?, info))
     };
     let k = job.kind;
     let albedo = matches!(k, VanillaDiffuse | CmDiffuse | GrassStack)
@@ -92,7 +96,7 @@ pub fn assemble_derived_rough(job: &DeriveJob) -> Result<(Assembled, f64), PackE
             job.height.clone().unwrap_or(ChannelSource::Opaque),
         ],
         job.gray,
-        (w, h),
+        (dims, canvas),
     )?;
     let detail = (job.curves.is_some() || job.cavity.is_some())
         .then(|| {
@@ -108,7 +112,7 @@ pub fn assemble_derived_rough(job: &DeriveJob) -> Result<(Assembled, f64), PackE
                     ChannelSource::Opaque,
                 ],
                 job.gray,
-                (w, h),
+                (dims, canvas),
             )
         })
         .transpose()?;

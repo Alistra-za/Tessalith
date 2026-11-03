@@ -607,9 +607,11 @@ impl Drop for Admitted<'_> {
 /// times for the loaded image, the chain and the encoder inputs, decoded validation levels and output bytes.
 /// A DDS input (`image` cannot read its size) also holds its file data while mip 0 decodes (`load::load_dds`).
 fn estimated_bytes(path: &Path) -> u64 {
-    let Some((w, h)) = input_dims(path) else {
-        return 0;
-    };
+    input_dims(path).map_or(0, |d| bytes_at(path, d))
+}
+
+/// [`estimated_bytes`] of `path` whose size `dims` is already read.
+fn bytes_at(path: &Path, (w, h): (u32, u32)) -> u64 {
     let file = if is_dds(path) {
         std::fs::metadata(path).map_or(0, |m| m.len())
     } else {
@@ -621,15 +623,14 @@ fn estimated_bytes(path: &Path) -> u64 {
 /// [`estimated_bytes`] of each of `paths` when all are brought to their common size (Note FM30): a smaller source is
 /// held enlarged, so it counts at the common size. Equal sizes give [`estimated_bytes`] unchanged.
 fn grown_bytes<'a>(paths: impl Iterator<Item = &'a Path>) -> Vec<u64> {
-    let paths: Vec<&Path> = paths.collect();
-    let dims: Vec<_> = paths.iter().filter_map(|p| input_dims(p)).collect();
+    let each: Vec<(&Path, Option<(u32, u32)>)> = paths.map(|p| (p, input_dims(p))).collect();
+    let dims: Vec<_> = each.iter().filter_map(|e| e.1).collect();
     let grown = match crate::pack::common_size(&dims) {
-        Some((w, h)) if dims.len() == paths.len() => input_bytes(w, h),
+        Some((w, h)) if dims.len() == each.len() => input_bytes(w, h),
         _ => 0,
     };
-    paths
-        .iter()
-        .map(|p| estimated_bytes(p).max(grown))
+    each.iter()
+        .map(|&(p, d)| d.map_or(0, |d| bytes_at(p, d)).max(grown))
         .collect()
 }
 
@@ -658,9 +659,8 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 }
 
 /// The size `job` holds its input at: its own, or for a pack, a derive or an alpha fill the common size its sources
-/// are enlarged to (Note FM30).
-fn job_dims(job: &ResolvedJob) -> Option<(u32, u32)> {
-    let own = input_dims(&job.input);
+/// are enlarged to (Note FM30). `own` is `job.input`'s size, read once by the caller.
+fn job_dims(job: &ResolvedJob, own: Option<(u32, u32)>) -> Option<(u32, u32)> {
     let mut paths: Vec<&Path> = vec![];
     paths.extend(
         job.pack
@@ -677,7 +677,10 @@ fn job_dims(job: &ResolvedJob) -> Option<(u32, u32)> {
     if let Some(f) = &job.fill {
         paths.extend([job.input.as_path(), f.source.path.as_path()]);
     }
-    let dims: Vec<_> = paths.iter().filter_map(|p| input_dims(p)).collect();
+    let dims: Vec<_> = paths
+        .iter()
+        .filter_map(|&p| if p == job.input { own } else { input_dims(p) })
+        .collect();
     crate::pack::common_size(&dims)
         .filter(|_| dims.len() == paths.len())
         .or(own)
@@ -690,7 +693,8 @@ fn job_dims(job: &ResolvedJob) -> Option<(u32, u32)> {
 /// chain (both half chains and the stacked chain are live together in `grass::build`).
 fn job_bytes(job: &ResolvedJob) -> u64 {
     let p = &job.profile;
-    let dims = job_dims(job);
+    let own = input_dims(&job.input);
+    let dims = job_dims(job, own);
     let extra = dims.map_or(0, |(w, h)| {
         let texels = u64::from(w) * u64::from(h);
         let filter = if p.mips.filter != MipFilter::Box {
@@ -738,18 +742,18 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             .skip(1)
             .map(|s| estimated_bytes(&s.path))
             .sum();
-        let dims = input_dims(&job.input);
-        let face = dims.map_or(0, |src| {
+        let face = own.map_or(0, |src| {
             u64::from(crate::cube::layout::face_size(p, c.layout, src))
         });
         // DS19: a single photo also holds its fake 2w x w float panorama (`import_dir::photo_panorama`).
-        let panorama = match (c.layout, dims) {
+        let panorama = match (c.layout, own) {
             (CubeLayout::Photo, Some((w, _))) => 2 * u64::from(w) * u64::from(w) * 16,
             _ => 0,
         };
         others + 6 * face * face * 16 * 3 + panorama
     });
-    estimated_bytes(&job.input).max(dims.map_or(0, |(w, h)| input_bytes(w, h)))
+    own.map_or(0, |d| bytes_at(&job.input, d))
+        .max(dims.map_or(0, |(w, h)| input_bytes(w, h)))
         + extra
         + cube
         // Note DY: `apply_fill` holds the helper's decoded image beside the target's.
@@ -2121,7 +2125,7 @@ impl Engine {
             cancel,
             &packed.candidates,
             |c| {
-                // One decoded source beside the output; a smaller one is held enlarged to the common size.
+                // One decoded source beside the output (the first, counted at the common size when it is enlarged).
                 grown_bytes(c.job.sources.iter().map(|s| s.path.as_path()))
                     .first()
                     .copied()
