@@ -2,7 +2,7 @@
 
 Written 2026-10-16 (commit 1bae037b).
 
-Tessalith started in October 2026 as a written plan for an open-source DDS converter for Skyrim SE/AE modding, with a GUI and a CLI on one engine. The plan drew on the [encoder survey](encoder-survey.md), the [local benchmark](encoder-benchmark.md), the [mipmap research](mipmaps-and-alpha.md) and a review of Skyrim's texture conventions. It listed open questions, and each was settled by a short test ("spike") or by the project owner. This page describes the design that resulted and how it differs from the first plan. The decision record is [DECISIONS.md](../../.claude/DECISIONS.md).
+Tessalith started in October 2026 as a written plan for an open-source DDS converter for Skyrim SE/AE modding, with a GUI and a CLI on one engine. The plan drew on the [encoder literature review and local benchmark](encoder-benchmark.md), the [mipmap research](mipmaps-and-alpha.md) and a review of Skyrim's texture conventions. It listed open questions, and each was settled by a short test ("spike") or by the project owner. This page describes the design that resulted and how it differs from the first plan. The decision record is [DECISIONS.md](../../.claude/DECISIONS.md).
 
 ## The main idea: correct Skyrim policy matters more than the encoder
 
@@ -55,7 +55,7 @@ The plan compared three shapes (one language for engine, CLI and GUI; a CLI engi
 | `encoders-sys` | Vendored bc7e, rgbcx and ISPC objects with a small C++ shim |
 | `cli` | `sdc`, the command-line tool |
 | `gui` | `tessalith.exe`, built on eframe/egui with wgpu |
-| `bench` | `sdc-bench`, the benchmark gates |
+| `bench` | `sdc-bench`, the benchmark gates (on branch `bench` since Note FM8) |
 | `nif`, `esp`, `vfs`, `modscan`, `pgpsim`, `render3d` | Added later: mod scanning (meshes, plugins, BSA archives) and the 3D preview |
 
 The engine reports progress as typed events. `sdc --json` prints the same events as JSON Lines, so the GUI and the CLI cannot drift apart.
@@ -66,11 +66,11 @@ The first plan listed mesh (NIF) parsing and BSA reading as non-goals. Both were
 
 | Component | Role | How it is used |
 |---|---|---|
-| bc7e (from bc7enc_rdo) | BC7 | Prebuilt ISPC objects, vendored with SHA-256 hashes, so building needs no ISPC compiler. One local patch adds exact-opaque alpha. |
-| rgbcx (from bc7enc_rdo) | BC1, BC3, BC4, BC5 | Plain C++. One local patch makes its BC4 palette round like the decoder. |
-| Intel ISPC TC | BC6H | Prebuilt ISPC objects. |
+| bc7e (from bc7enc_rdo) | BC7 | Prebuilt ISPC objects, vendored with SHA-256 hashes, so building needs no ISPC compiler. Local patches add exact-opaque alpha and the `max` level. |
+| rgbcx (from bc7enc_rdo) | BC1, BC3, BC4, BC5 | Plain C++. Local patches round its BC4 palette like the decoder, widen the BC4 block search and add the BC1 Dual mode. |
+| Intel ISPC TC | BC6H | Prebuilt ISPC objects. One local patch adds the peak-preserving mode. |
 | bcdec_rs | Decoding for validation and preview | Rust crate. |
-| NVTT 3 | Optional BC7 and BC6H at Production | The user's own `nvcompress.exe`, run as a separate process. Never linked or shipped, because its licence forbids use that would place it under an open-source licence. |
+| NVTT 3 | Optional BC7 and BC6H at Production in 1.x; removed in 2.0 (Note FM14) | The user's own `nvcompress.exe`, run as a separate process. Never linked or shipped, because its licence forbids use that would place it under an open-source licence. |
 | DirectXTex / texconv | Test oracle only | Not shipped. |
 | Compressonator, Oodle | Not used | |
 
@@ -105,14 +105,14 @@ Every output is written atomically, and a batch manifest records how each file w
 | Small BC7 textures crashing | 66 BC7 textures of 16 to 128 px with full chains ran in game with no crash; no fallback | Spike S2 |
 | Forcing alpha 255 | Remove the alpha channel by default; exact-opaque BC7 only for `_m` and environment masks, because it costs about 0.5 to 1 dB RGB | Notes A and D, Spikes S5 and S6 |
 | Coverage threshold | Default 127, set per texture; coverage on for cutout and cutout + blend | DECISIONS #10, Note E |
-| BC1 decoder model | One batch-wide setting, default Ideal | Note F |
-| BC1 transparent black | BC1 is opaque only; the 3-colour mode never writes transparent texels | Note F |
+| BC1 decoder model | rgbcx Dual, scored for NVIDIA and AMD together; no setting | Note FM17 |
+| BC1 transparent black | BC1 is opaque unless the user turns on `encoder.bc1_alpha` (1-bit alpha) | Notes F and FM20 |
 | Linux | Windows only | DECISIONS #12 |
 | Coverage implementation | Rebuild the coverage idea in the engine, with credits ([CREDITS](../CREDITS.md)) | DECISIONS #13 |
 | Rust or C++ | Rust | Phase 0 exit |
 | Hash in the DDS header | Not done; a batch manifest records provenance, per-file sidecars are optional | DECISIONS #15, Note F |
 | 16K previews | Default limit 8192, 16384 as a setting | DECISIONS #19 |
-| Driving NVTT per mip level | Works: one `-nomips -nocuda` process per level, fed as a legacy-header DDS | Spikes S7 and S7b, Note NV |
+| Driving NVTT per mip level | Works: one `-nomips -nocuda` process per level, fed as a legacy-header DDS (NVTT removed in 2.0) | Spikes S7 and S7b, Note NV |
 | CS complex-material gate | Exact at 251/255 on the smallest mip; Tessalith warns at 247 | Spike S8 |
 
 ## Other changes since the plan

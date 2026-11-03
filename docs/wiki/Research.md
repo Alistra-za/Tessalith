@@ -4,7 +4,7 @@ The defaults come from a literature review of BCn encoders, mip filtering and Sk
 
 ## What matters most
 
-- Picking the right format and colour space for a texture moves quality by 5 to 15 dB, and a Skyrim semantic mistake (wrong tag, lost alpha data) leaves the texture broken. The top BC7 encoders sit within 0.16 to 0.32 dB of each other. The priorities that follow are in the [encoder survey](../research/encoder-survey.md).
+- Picking the right format and colour space for a texture moves quality by 5 to 15 dB, and a Skyrim semantic mistake (wrong tag, lost alpha data) leaves the texture broken. The top BC7 encoders sit within 0.16 to 0.32 dB of each other. The priorities that follow are in the [encoder survey](../research/encoder-benchmark.md#the-format-matters-more-than-the-encoder).
 
 ## Encoders
 
@@ -104,5 +104,5 @@ On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 
 
 ## Studies
 
-- How the benchmark encodes score on SSIM and VIF, besides PSNR: [SSIM and VIF on the encoder benchmark](../research/encoder-ssim-vif.md).
-- Whether a weighted BC7 can replace BC3 for delicate alpha: [BC3 against BC7 alpha weights](../research/bc7-alpha-weights.md).
+- How the benchmark encodes score on SSIM and VIF, besides PSNR: [SSIM and VIF on the encoder benchmark](../research/encoder-benchmark.md#bc7-on-ssim-and-vif-2026-10-21).
+- Whether a weighted BC7 can replace BC3 for delicate alpha: [BC3 against BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21).

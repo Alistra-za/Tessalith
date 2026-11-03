@@ -1,8 +1,6 @@
 # Mipmap filters, normal maps and alpha coverage
 
-Written 2026-10-16 (commit 1bae037b).
-
-This page summarises the research into how mip levels should be built for each kind of texture, and how alpha-tested textures keep their shape at a distance. It was a review of published papers, engine documentation and tool source code, plus a few local tests made while building Tessalith.
+How mip levels should be built for each kind of texture, and how alpha-tested textures keep their shape at a distance: a review of published papers, engine documentation and tool source code, plus local tests made while building Tessalith. Written 2026-10-16 (commit 1bae037b); Result 6 is the 2026-11-03 alpha survey behind Note FM34.
 
 ## The questions
 
@@ -112,7 +110,7 @@ A survey of 708 colour textures that asked about their alpha, checked against th
 The mip chain is in [`crates/engine/src/mips.rs`](../../crates/engine/src/mips.rs), the kernels in [`filter.rs`](../../crates/engine/src/filter.rs), coverage in [`coverage.rs`](../../crates/engine/src/coverage.rs), dilation in [`dilate.rs`](../../crates/engine/src/dilate.rs) and the normal bake in [`bake/mod.rs`](../../crates/engine/src/bake/mod.rs).
 
 - **Box is the default filter for every texture type** ([DECISIONS](../../.claude/DECISIONS.md), S-mips-1).
-- **Tent, Mitchell and Kaiser are allowed only for sRGB colour whose alpha is not weighted.** Kaiser is fixed at width 3, α 4. These filters build each level directly from mip 0, with the kernel widened per level; box stays recursive, and alpha always uses the box (S-mips-2, S-mips-3, S-mips-4).
+- **Tent, Mitchell and Kaiser are allowed only for sRGB colour.** On colour whose alpha weights the mips (cutout and blend) only box and tent are allowed, because Mitchell's and Kaiser's negative lobes ring at cutout edges (Note FM28). Kaiser is fixed at width 3, α 4. These filters build each level directly from mip 0, with the kernel widened per level; box stays recursive, and alpha always uses the box (S-mips-2, S-mips-3, S-mips-4).
 - **Colour is filtered in linear light**, decoded with the exact sRGB curve (not a 2.2 power) in float32 ([`crates/engine/src/ops.rs`](../../crates/engine/src/ops.rs)). This depends on the content, not the DDS tag: a vanilla diffuse is filtered in linear light and still written UNORM.
 - **Edge mode defaults to wrap.** Only the non-box kernels read it.
 - **Every normal mip is renormalised.** In a TruePBR set, the `_n`'s variance goes into the `_rmaos` (or `_rfaos`) roughness with the vMF formula above, clamped at t = 0.25. A coat normal `_cnr` bakes into its own alpha. A footprint whose average length is 0.999 or more (about a 2° tilt) adds no variance, so quantisation noise adds no roughness ([DECISIONS](../../.claude/DECISIONS.md) #6, Note E, M4 rulings R1 to R14 and M4-final-2). Vanilla `_n`, landscape `_n` and `_msn` are renormalised but never baked.

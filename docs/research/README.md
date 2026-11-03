@@ -1,13 +1,16 @@
 # Research
 
-The research behind Tessalith's defaults, in these pages. Each page says what was asked, how it was measured, what came out and what Tessalith does because of it. For a one-page summary, see [Research behind the defaults](../wiki/Research.md). Individual decisions are recorded in [DECISIONS.md](../../.claude/DECISIONS.md).
+The measurements behind Tessalith's encoder, mip-filter and coverage choices, by format. Each section gives the date and build it measured. The one-page summary is [Research behind the defaults](../wiki/Research.md); rulings are in [DECISIONS.md](../../.claude/DECISIONS.md).
 
-| Page | What it covers |
+| Format or topic | Where |
 |---|---|
-| [How Tessalith came about](design-overview.md) | The design: why Skyrim policy comes before encoder choice, Skyrim's texture rules, the targets, the Rust workspace, the pipeline, and how each open question was settled. |
-| [BCn encoders: published evidence](encoder-survey.md) | A literature review of BC1 to BC7 encoders: published benchmarks, how BC7 works, alpha, perceptual weighting, RDO and maintenance status. |
-| [Local encoder benchmark](encoder-benchmark.md) | Three rounds of measurements (up to 100 images per set, with confidence intervals) for BC1, BC3, BC4, BC5, BC6H and BC7, plus the BC4/BC5 search-radius test. |
-| [Mipmaps, normal maps and alpha coverage](mipmaps-and-alpha.md) | Mip filters, linear-light filtering, normal renormalisation and the roughness bake, data maps, and coverage-preserving alpha mips. |
-| [bc7e tuning](bc7e-tuning.md) | Whether bc7e's settings above `veryslow` give more BC7 quality, and what `max` costs. |
-| [SSIM and VIF on the encoder benchmark](encoder-ssim-vif.md) | The benchmark's encodes rescored with Gaussian SSIM and multi-scale VIF. |
-| [BC3 against BC7 alpha weights](bc7-alpha-weights.md) | Whether BC7 with a higher alpha weight can replace BC3 for delicate alpha, per texture class. |
+| Method, corpora and metric limits | [Benchmark method](encoder-benchmark.md#method), including [why perceptual metrics don't fit linear data](encoder-benchmark.md#perceptual-metrics-on-linear-data) |
+| Format against encoder | [The format matters more than the encoder](encoder-benchmark.md#the-format-matters-more-than-the-encoder) |
+| BC7 | [Modes, published data, benchmark, `max`, SSIM/VIF](encoder-benchmark.md#bc7); [bc7e tuning and the `max` level](bc7e-tuning.md); [Windows re-check on Skyrim textures](bc7e-tuning.md#windows-re-check-on-skyrim-textures-2026-10-18); [alpha weights against BC3](bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21) |
+| BC1 and BC3 colour | [Published data, benchmark, decoder model, luma weighting, SSIM/VIF](encoder-benchmark.md#bc1-and-bc3) |
+| BC4 family (BC4, BC5, BC3 alpha) | [Benchmark, search radius, normals in BC5 against BC7, Tessalith against the others](encoder-benchmark.md#bc4-and-bc5); [BC4-family block search](bc4-family.md) |
+| BC6H | [Published data, benchmark, peak-preserving mode](encoder-benchmark.md#bc6h-hdr) |
+| Mips and alpha | [Mip filters, normal maps, data maps, alpha coverage, alpha noise](mipmaps-and-alpha.md); [exact opaque alpha in BC7](encoder-benchmark.md#opaque-bc7-is-not-always-alpha-255); [stray alpha](encoder-benchmark.md#stray-alpha-round-1) |
+| RDO, DDS headers, encoder upkeep | [Other findings](encoder-benchmark.md#other-findings) |
+| Design and Skyrim rules | [How Tessalith came about](design-overview.md) |
+| Spikes and phase records, 2026-10-08 to 13 | [Early spikes and phase records](2026-10-early-spikes.md), moved verbatim from DECISIONS.md |

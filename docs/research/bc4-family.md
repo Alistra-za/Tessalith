@@ -1,25 +1,24 @@
-# BC4-family encoding: BC3 alpha, BC4 and BC5 (2026-10-31)
+# BC4-family block search: BC3 alpha, BC4 and BC5 (2026-10-31)
 
-What was asked: why Tessalith's BC3 alpha trails NVTT and Compressonator by about 2 dB on cutouts, whether a better BC4 block search fixes that and also helps BC4 and BC5, and whether a luma-weighted error is worth adding to rgbcx BC1.
+Why Tessalith's BC3 alpha trailed NVTT and Compressonator by about 2 dB on cutouts, and whether a better BC4 block search fixes that and also helps BC4 and BC5. The cross-encoder rows for these formats are in [BCn encoders by format](encoder-benchmark.md#bc4-and-bc5); the luma-weighted BC1 experiment run alongside this study is in [Luma-weighted BC1 error](encoder-benchmark.md#luma-weighted-bc1-error-2026-10-31).
 
 Short answer:
 - The cause is in rgbcx's BC4 block search, not in the engine. rgbcx anchors both BC4 modes on the block's overall minimum and maximum. In the 6-value mode that pins the endpoints next to 0 and 255, so the mode's free 0 and 255 entries are wasted.
 - A search that also anchors the 6-value mode on the block's inner range, plus least-squares refits and a small local search, gains **+3.40 dB** on cutout alpha (NVTT −highest: +2.01 dB). It also gains **+0.99 dB** on smooth alpha, **+0.15 dB** on BC4 masks and **+0.10 dB** on BC5 normals. No block gets worse under the round-to-nearest decoder, and the BC4 search takes about **2×** as long.
 - A coverage guard on BC3 alpha costs 0.22 dB of that gain and **halves** the cutouts' alpha-test errors at 128.
-- A luma-weighted BC1 error trades colour accuracy for luma accuracy: luma PSNR +0.66 dB, RGB PSNR −0.28 dB, CIELAB ΔE worse. That is an option at most, off by default.
 
 ## Method
 
-- **Corpus and decoder.** These are the bench sets the BC3/BC4/BC5 rows use (F:\ai\dds\bench). Round 3 (n = 91 to 98 per set): `cutout_real`, `alpha_real`, `packed_real` and `stray_real` as BC3 alpha, `mask_real` as BC4 (R), and `normal_real` as BC5 (R, G). Rounds 1 and 2 (n = 2 to 7) are a cross-check. Every block is decoded with bcdec's round-to-nearest BC4 weights, which the vendored rgbcx searches with since DECISIONS T13. The metrics are the runners' own: `a_psnr`, `coverage_err_pct` (alpha ≥ 128 mismatch, in percent of texels), `c0_psnr`, `rg_psnr` and `ang_mean` (Z rebuilt from XY). For the upstream bytes and for NVTT and Compressonator, the probe reproduces `results_rounded_dec.csv`: for example cutout `a_psnr` 47.120 / 49.128 dB, and mask 48.947 / 49.021 dB.
-- **Upstream.** "Upstream" below is the unpatched upstream rgbcx search (pre-1.2.0, round-to-nearest only), the encoder Tessalith used before this change.
-- **Probe.** `crates/bench/examples/bc4_family.rs` reads each source PNG and the DDS files the bench already wrote (`sdc_*_rounded`, `*_nvtt_highest`, `bc3_cmp_q1` / `bc*_cmp`). It encodes every block with the upstream FFI encoder (`encoders_sys::bc4_encode_block`, radius 5) and with these variants. Each one starts from the upstream result and replaces it only on a strictly lower SSE, so ties keep the upstream bytes:
+- **Corpus and decoder.** The bench sets the BC3/BC4/BC5 rows use (F:\ai\dds\bench). Round 3 (n = 91 to 98 per set): `cutout_real`, `alpha_real`, `packed_real` and `stray_real` as BC3 alpha, `mask_real` as BC4 (R), and `normal_real` as BC5 (R, G). Rounds 1 and 2 (n = 2 to 7) are a cross-check. Every block is decoded with bcdec's round-to-nearest BC4 weights, which the vendored rgbcx searches with since DECISIONS T13. The metrics are the runners' own: `a_psnr`, `coverage_err_pct` (alpha ≥ 128 mismatch, in percent of texels), `c0_psnr`, `rg_psnr` and `ang_mean` (Z rebuilt from XY). For the upstream bytes and for NVTT and Compressonator, the probe reproduces `results_rounded_dec.csv`: for example cutout `a_psnr` 47.120 / 49.128 dB, and mask 48.947 / 49.021 dB.
+- **Upstream** below is the unpatched upstream rgbcx search (pre-1.2.0, round-to-nearest only), the encoder Tessalith used before this change.
+- **Probe.** `crates/bench/examples/bc4_family.rs` (on branch `bench` since Note FM8) reads each source PNG and the DDS files the bench already wrote (`sdc_*_rounded`, `*_nvtt_highest`, `bc3_cmp_q1` / `bc*_cmp`). It encodes every block with the upstream FFI encoder (`encoders_sys::bc4_encode_block`, radius 5) and with these variants. Each starts from the upstream result and replaces it only on a strictly lower SSE, so ties keep the upstream bytes:
   - `v0`: a Rust port of `rgbcx::encode_bc4_hq`. It is **byte-identical to the FFI encoder on all 43,206,656 block-channels** of the corpus.
   - `v1`: v0 plus a 6-value-mode search anchored on the inner range, for blocks that contain 0 or 255. The inner range is the values other than 0 and 255, ±5, and e0 = e1 is allowed.
-  - `v2`: v1 plus least-squares endpoint refits. They run on the best block of each mode, 3 rounds each, over a ±1 rounding neighbourhood.
+  - `v2`: v1 plus least-squares endpoint refits, on the best block of each mode, 3 rounds each, over a ±1 rounding neighbourhood.
   - `v4`: v2 plus a 6-value search on trimmed inner ranges, where texels within 2, 6, 12, 24 or 48 of 0 or 255 are left to the palette's fixed entries. That search is anchored ±2 and refitted. Last comes an exhaustive ±3 search around the best pair in its mode.
   - `v5`: v4, except that a block keeps v0's bytes when v4 would flip more of its texels across the alpha-test value 128.
   - `v3` (`--oracle`): v2 plus an exhaustive search over every pair in [min − 16, max + 16] in both modes. It is a near-ceiling for this bitstream, at 7 to 40× the time.
-- **Per block.** For each block the probe records the class (`const`; `bin` = only 0 and 255; `both+inner` = 0, 255 and other values; `one+inner` = exactly one of 0 or 255 plus others; `noext` = neither). It also records the mode (8-value when e0 > e1), whether a 6-value block's endpoints sit more than 5 away from the block's min and max (which rgbcx cannot produce), and the SSE. The attribution table replaces only one class of the upstream blocks with another encoder's blocks and reports the PSNR change.
+- **Per block** the probe records the class (`const`; `bin` = only 0 and 255; `both+inner` = 0, 255 and other values; `one+inner` = exactly one of 0 or 255 plus others; `noext` = neither), the mode (8-value when e0 > e1), whether a 6-value block's endpoints sit more than 5 away from the block's min and max (which rgbcx cannot produce), and the SSE. The attribution table replaces one class of the upstream blocks with another encoder's blocks and reports the PSNR change.
 - **Statistics.** Paired Δ per image, + = better (coverage and angle sign-flipped). The interval is a 95 % Student-t CI, and images at the 99 dB clamp are dropped. `F:\ai\dds\bench\scripts\analyze_bc4_family.py` does this; the CSVs and the generated summary are in `F:\ai\dds\bench\results\bc4_family\`.
 - **Timing.** One thread on an otherwise idle machine (`RAYON_NUM_THREADS=1`), rounds 1 and 2, BC4 block search only. For BC3 that excludes the BC1 colour half, which dominates the BC3 encode time.
 
@@ -55,7 +54,7 @@ Attribution: the mean PSNR change from replacing one class of the upstream block
 | v4 | +3.403 | +2.213 | +0.672 | +0.025 |
 | v3 (near-ceiling) | +3.656 | +2.348 | +0.717 | +0.039 |
 
-So about 71 % of NVTT's 2.0 dB lead comes from blocks that contain both 0 and 255 plus anti-aliased values, and about 18 % from blocks with one extreme. That is the 6-value mode with inner endpoints. The rest is endpoint refinement. The `bin` class (only 0 and 255) is empty on this set, and constant blocks are exact for every encoder.
+About 71 % of NVTT's 2.0 dB lead comes from blocks that contain both 0 and 255 plus anti-aliased values, and about 18 % from blocks with one extreme: that is the 6-value mode with inner endpoints. The rest is endpoint refinement. The `bin` class (only 0 and 255) is empty on this set, and constant blocks are exact for every encoder.
 
 ## Results (round 3, round-to-nearest decoder; Δ against the upstream encoder)
 
@@ -72,7 +71,7 @@ So about 71 % of NVTT's 2.0 dB lead comes from blocks that contain both 0 and 25
 
 `stray_real` alpha is exact for every variant (99 dB; coverage 0). Rounds 1 and 2 point the same way: cutout v4 +3.96 dB (n 4), alpha v4 +0.98 dB (n 4), mask v4 +0.38 dB (n 6, NVTT +0.39), and BC5 rg v4 +0.029 dB (n 6, NVTT −0.011).
 
-The same data in terms of NVTT: with v4, Tessalith's BC3 cutout alpha is about **1.4 dB ahead** of NVTT −highest instead of 2.0 dB behind. BC4 goes from 0.07 dB behind to about 0.08 dB ahead, and BC5 ties on `rg_psnr` and is slightly ahead on angle.
+In terms of NVTT: with v4, Tessalith's BC3 cutout alpha is about **1.4 dB ahead** of NVTT −highest instead of 2.0 dB behind. BC4 goes from 0.07 dB behind to about 0.08 dB ahead, and BC5 ties on `rg_psnr` and is slightly ahead on angle.
 
 ### Never-worse
 
@@ -87,39 +86,18 @@ Across every variant, round and set (43.2 M block-channels, rounds 1 to 3), **0 
 | mask_real (BC4) | 0.568 | 0.484 | 0.486 | 0.876 | 1.022 (1.80×) | 1.278 |
 | normal_real (BC5) | 1.253 | 1.039 | 1.036 | 1.874 | 2.153 (1.72×) | 2.713 |
 
-v4 roughly doubles the BC4 search time: 1.7 to 2.1× the upstream FFI and 2.1 to 3.4× the Rust port. The measured v5 re-runs v0 for its guard. A real guard reuses the upstream candidate, so it costs about the same as v4 plus a 16-texel comparison. For BC3 the alpha search is a small part of the encode, since BC1 at level 18 dominates, so the whole BC3 encode slows by much less than 2×; the end-to-end times are in "Shipped: end to end and bench re-run". The near-ceiling v3 costs 7 to 40×.
+v4 roughly doubles the BC4 search time: 1.7 to 2.1× the upstream FFI and 2.1 to 3.4× the Rust port. The measured v5 re-runs v0 for its guard; a real guard reuses the upstream candidate, so it costs about the same as v4 plus a 16-texel comparison. For BC3 the alpha search is a small part of the encode, since BC1 at level 18 dominates, so the whole BC3 encode slows by much less than 2× ([end to end](#shipped-end-to-end-and-bench-re-run-2026-11-01)). The near-ceiling v3 costs 7 to 40×.
 
-## BC1: luma-weighted error
+### Limits of the probe
 
-rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`). The experiment (`F:\ai\dds\bench\scripts\bc1w\`) weights only those sums, in a scratch copy of the vendored rgbcx built as a separate tool. The PCA axis, the least-squares fits and the cluster orderings stay unweighted. It encodes with the engine's call (level 18, Ideal model, 3-colour blocks allowed, no transparent black). Scoring uses the bench's decoder (`bcdecode.exe`) and `run_bench.metrics`. Besides the bench's luma metrics (`y_psnr`, and `ssim_y` = SSIM on Rec.709 luma, the bench's perceptual metric), it adds mean CIELAB ΔE76 (sRGB, D65) as an independent colour-perception metric.
-
-Round 3 `rgb_real` (93 images), Δ against unweighted. For ΔE, + = lower (better):
-
-| Weights | `rgb_psnr` | `y_psnr` | `ssim_y` | ΔE76 | time |
-|---|---|---|---|---|---|
-| Rec.709 (0.2126, 0.7152, 0.0722; ints 54/183/19) | −0.284 [±0.041] 1/92 | **+0.656 [±0.121] 93/0** | **+0.00354 [±0.00075] 93/0** | −0.062 [±0.013] 8/85 | same |
-| Rec.601 (0.299, 0.587, 0.114; 77/150/29) | −0.163 [±0.023] 1/92 | +0.488 [±0.095] 93/0 | +0.00275 [±0.00063] 93/0 | −0.038 [±0.010] 9/84 | same |
-
-Round 1 is the same picture: `rgb_real` (7) Rec.709 y +0.95 dB, ssim_y +0.0045 and ΔE −0.088; `rgb_grad` (7) y +0.98 dB.
-
-Reading: the weighting does what it says. It moves error out of luma into chroma, and both luma metrics are computed with the same Rec.709 weights it optimises. On those metrics weighted rgbcx BC1 beats every BC1 row in the bench, NVTT −highest included (y 41.65 vs 41.33 dB; ssim_y 0.9824 vs 0.9793). A metric that also sees chroma (ΔE76) gets worse on 85 of 93 images, and RGB PSNR drops on 92 of 93. So this is a preference, not a free win, like bc7e's `encoder.perceptual`. Is it worth it? Only as an opt-in option for colour textures where luma detail matters more than hue (diffuse at BC1 in the compact presets). It should not be a default. It costs no time.
-
-## What this means for Tessalith
-
-- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, v5 (v4 plus the coverage guard at 128) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `max` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals `sdc_bench::bc4ref::search` byte for byte. Existing BC3/BC4/BC5 outputs re-encode once through the manifest's `rgbcx_patch` tag. The engine end-to-end time and the re-run bench rows are in "Shipped: end to end and bench re-run" below.
-- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; no BC1 perceptual option; the fast presets take the new search; `max` stays the new search at radius 10, without the near-exhaustive pass ("no exhaustive", see "max: near-exhaustive").
-
-## Limitations
-
-- The coverage metric and v5's guard use a single alpha-test value, 128. Skyrim's per-mesh alpha threshold varies, so a guard at 128 protects the common value only.
+- The coverage metric and v5's guard use a single alpha-test value, 128. Skyrim's per-mesh alpha threshold varies; the shipped guard uses each texture's own cutoff (Note FM19).
 - The probe did not compute `premul_psnr` for alpha_real (only alpha changes, but premultiplied scores combine both halves). The bench re-run below does, under both decoders.
 - BC5 classes and attribution use channel 0's class for both channels.
-- The first time tables measure the BC4 search in Rust; the C++ in rgbcx is measured in "Search radius" (2.2 to 2.5× the bare search) and end to end in "Shipped: end to end and bench re-run" (1.7 to 1.9× for BC4 and BC5). Rounds 1 and 2 hold 2 to 7 images per set.
-- BC1 is scored under the bench decoder (`bcdecode.exe`), and the base run uses the Ideal model the engine encodes for. The weighted-vs-unweighted comparison shares that decoder, so the Δs stand. Absolute values are 0.01 dB from the bench's own `bc1_rgbcx_L18` row (39.413 vs 39.424 dB), since bc7enc's CLI flags differ slightly.
+- The time tables above measure the BC4 search in Rust. The C++ in rgbcx is measured in [Search radius](#search-radius-rounds-1-and-2) (2.2 to 2.5× the bare search) and end to end in [Shipped](#shipped-end-to-end-and-bench-re-run-2026-11-01) (1.7 to 1.9× for BC4 and BC5). Rounds 1 and 2 hold 2 to 7 images per set.
 
-## Search radius (Task 1 of the plan, rounds 1-2)
+## Search radius (rounds 1 and 2)
 
-The probe measured radius 5 only. `crates/bench/src/bc4ref.rs` now holds the reference (`upstream`, `search`); the example takes `--radius`. Mean over rounds 1-2 images, v4 against the upstream search at the same radius (images at 99 dB excluded, as in the summary; radius 5 reproduces the summary's v4/v5 means). No block is worse than upstream at any radius.
+The probe measured radius 5 only. `crates/encoders-sys/tests/support/bc4ref.rs` holds the reference (`upstream`, `search`); the example takes `--radius`. Mean over rounds 1-2 images, v4 against the upstream search at the same radius (images at 99 dB excluded, as in the summary; radius 5 reproduces the summary's v4/v5 means). No block is worse than upstream at any radius.
 
 | radius | set | upstream dB | v4 dB | v4 Δ | v5 Δ |
 |---|---|---|---|---|---|
@@ -147,29 +125,28 @@ Time per image (Rust v4 against the FFI upstream encoder, 29 images, single thre
 | 5 | 284 / 2689 | 457 / 4573 |
 | 10 | 1026 / 7887 | 1318 / 10685 |
 
-The fast presets (radius 4) gain as much as the default (+1.05 dB BC3 alpha, +0.43 dB BC4) at about 2.2× the upstream time (v4 at radius 4 costs about what upstream costs at radius 5 plus 20 percent). Radius 10 gains less, since the upstream search already covers more. The v4 times are the Rust reference, not the C++ port, so the C++ cost is measured in Task 2.
+The fast presets (radius 4) gain as much as the default (+1.05 dB BC3 alpha, +0.43 dB BC4) at about 2.2× the upstream time (v4 at radius 4 costs about what upstream costs at radius 5 plus 20 percent). Radius 10 gains less, since the upstream search already covers more.
 
-C++ time per image (Task 2: the vendored rgbcx with the search patch, `cxx` in the example, against today's upstream mode loop; 29 images, rounds 1-2, single thread, release build, ms; median / worst). The new C++ is byte-identical to v4 (v5 on BC3 alpha) on every block. This is the C++ cost the fast presets (radius 4) would pay with the new search:
+C++ time per image (the vendored rgbcx with the search patch, `cxx` in the example, against the unpatched mode loop; 29 images, rounds 1-2, single thread, release build, ms; median / worst). The new C++ is byte-identical to v4 (v5 on BC3 alpha) on every block. This is the C++ cost the fast presets (radius 4) pay with the new search:
 
-| radius | today (C++) | new (C++) | ratio of medians |
+| radius | unpatched (C++) | new (C++) | ratio of medians |
 |---|---|---|---|
 | 4 | 153 / 2008 | 380 / 3905 | 2.48× |
 | 5 | 223 / 2501 | 542 / 5455 | 2.43× |
 | 10 | 788 / 7557 | 1704 / 12207 | 2.16× |
 
-
 ## max: near-exhaustive
 
-`search_max(v, guard128)` (crates/bench/src/bc4ref.rs) is the radius-10 `search` without the guard, then the exhaustive pair search of v3 over [min-16, max+16] in both modes (strict `<`, so ties keep the earlier block), then the guard last: on BC3 alpha, if the result flips more texels at 128 than `upstream(v, 10)`, it returns `search(v, 10, true)`. Never worse than plain radius 10 by construction. Run: `bc4_family --radius 10 --rounds 1,2,3 --time` (the engine maps `bc45_search_radius` in `crates/engine/src/encode.rs`: `radius()` at line 55, called at lines 119, 123 and 126; that is where an `exhaustive` flag would be set).
+`search_max(v, guard128)` (crates/bench/src/bc4ref.rs, on branch `bench`) is the radius-10 `search` without the guard, then the exhaustive pair search of v3 over [min-16, max+16] in both modes (strict `<`, so ties keep the earlier block), then the guard last: on BC3 alpha, if the result flips more texels at 128 than `upstream(v, 10)`, it returns `search(v, 10, true)`. It is never worse than plain radius 10 by construction. Run: `bc4_family --radius 10 --rounds 1,2,3 --time` (the engine maps `bc45_search_radius` in `crates/engine/src/encode.rs`, in `radius()`; that is where an `exhaustive` flag would be set).
 
-Time per image. All times are the Rust reference; the earlier C++ port ran about 1.1-1.3x slower than the Rust reference, so expect roughly 1.1-1.3x these `max` times in C++. Single thread, release build, ms, median / worst:
+Time per image, Rust reference (the C++ port ran about 1.1-1.3x slower than the Rust reference, so expect roughly 1.1-1.3x these `max` times in C++). Single thread, release build, ms, median / worst:
 
 | set | upstream r10 | v4 r10 | max |
 |---|---|---|---|
 | rounds 1-2, 29 images, `--serial` | 918 / 6865 | 1743 / 11600 | 4233 / 41895 |
 | rounds 1-3, 600 images, 14 threads (contended, so slower per image) | 1330 / 10028 | 2603 / 16519 | 9154 / 100370 |
 
-`max` costs about 2.4x v4 and 4.6x upstream at the median on the uncontended run, and the worst image takes 42 s (Rust) on one thread. The serial machine run was about 1.3x slower than the 29-image table above (v4 r10 1743 against 1318 ms), so compare ratios, not absolute ms, across tables.
+`max` costs about 2.4x v4 and 4.6x upstream at the median on the uncontended run, and the worst image takes 42 s (Rust) on one thread. The serial run was about 1.3x slower than the 29-image table above (v4 r10 1743 against 1318 ms), so compare ratios, not absolute ms, across tables.
 
 Quality, rounds 1-3 at radius 10 (600 images; mean per-image dB; the BC3 columns are alpha PSNR):
 
@@ -188,11 +165,11 @@ Alpha-test flips at 128 (BC3, percent of texels that cross 128, mean per image):
 
 Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref.rs, 2000 synthetic blocks at radius 10): SSE(max, no guard) <= SSE(search r10, no guard) on all 2000, 103 strictly better; SSE(max, guard) <= SSE(search r10, guard) and flips(max, guard) <= flips(upstream r10) on all 2000; on 28 the exhaustive pass raised flips and the guard fell back to guarded v4.
 
-Reading: the extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Not shipped: the owner declined it after this timing (2026-11-01, "no exhaustive"), so `search_max` exists only in the Rust reference.
+The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Not shipped: the owner declined it after this timing (2026-11-01, "no exhaustive"), so `search_max` exists only in the Rust reference.
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
-Build: branch `research/bc4-family` a3785aef (engine 1.2.0, the C++ search in the vendored rgbcx), against main 0d9a8221 (the unpatched search). Both as `sdc-bench encode-one`, which calls `engine::encode::encode_level` with the default preset's profile; `--level max` (added on this branch) sets only `encoder.bc45_search_radius = "max"`. The 0d9a8221 build used here is that commit plus the same `--level max` arm; at `default` it writes the same bytes as the bench's `sdc-bench-0d9a8221.exe` (checked on 3 images per format).
+Build: branch `research/bc4-family` a3785aef (engine 1.2.0, the C++ search in the vendored rgbcx), against main 0d9a8221 (the unpatched search). Both run as `sdc-bench encode-one`, which calls `engine::encode::encode_level` with the default preset's profile; `--level max` (added on that branch) sets only `encoder.bc45_search_radius = "max"`. The 0d9a8221 build used here is that commit plus the same `--level max` arm; at `default` it writes the same bytes as the bench's `sdc-bench-0d9a8221.exe` (checked on 3 images per format).
 
 End-to-end time per texture, seconds, first 20 images (sorted) of round 3 `cutout_real` (BC3), `mask_real` (BC4) and `normal_real` (BC5), one process per image with start-up and PNG/DDS I/O included, the engine's own thread pool, old and new run alternately per image:
 
@@ -221,4 +198,9 @@ Bench re-run: the `sdc_bc3_rounded`, `sdc_bc4_rounded` and `sdc_bc5_rounded` row
 | normal_real BC5 `rg_psnr` | 91 | +0.105 [±0.037] 89/0 | +0.002 [±0.025] 17/74 |
 | normal_real BC5 `ang_mean` (°) | 93 | −0.001 [±0.003] 60/29 | +0.004 [±0.002] 77/14 |
 
-The deltas against the old rows equal the probe's v5 (BC3) and v4 (BC4, BC5) predictions above to the third decimal, so the C++ in the engine does what the reference measured. `stray_real` alpha is exact before and after. Under the bench's floor decoder the gains are close (cutout +3.16 dB, BC4 +0.13 dB, BC5 RG +0.09 dB). Rounds 1 and 2 agree (cutout +3.79 dB n = 4, BC4 `mask_real` +0.38 dB n = 6). `alpha_real` `premul_psnr` loses on 25 images: premultiplied error mixes the unchanged colour error with the alpha change. Full tables: `results/summary_bc4_rerun.md`; the per-encoder tables are in [the encoder benchmark](encoder-benchmark.md).
+The deltas against the old rows equal the probe's v5 (BC3) and v4 (BC4, BC5) predictions above to the third decimal, so the C++ in the engine does what the reference measured. `stray_real` alpha is exact before and after. Under the bench's floor decoder the gains are close (cutout +3.16 dB, BC4 +0.13 dB, BC5 RG +0.09 dB). Rounds 1 and 2 agree (cutout +3.79 dB n = 4, BC4 `mask_real` +0.38 dB n = 6). `alpha_real` `premul_psnr` loses on 25 images: premultiplied error mixes the unchanged colour error with the alpha change. Full tables: `results/summary_bc4_rerun.md`; the per-encoder rows are in [BC3, BC4 and BC5](encoder-benchmark.md#bc3-bc4-and-bc5-tessaliths-encoder-against-the-others).
+
+## What Tessalith does because of this
+
+- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, and v5 (v4 plus the coverage guard) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `max` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals the Rust reference `search` byte for byte. The guard tests each texture's own alpha-test cutoff, 128 at the default (Note FM19). Existing BC3/BC4/BC5 outputs re-encoded once through the manifest's `rgbcx_patch` tag.
+- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; the fast presets take the new search; `max` stays the new search at radius 10, without the near-exhaustive pass ("no exhaustive", see [max: near-exhaustive](#max-near-exhaustive)).
