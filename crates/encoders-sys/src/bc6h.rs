@@ -1,4 +1,4 @@
-use crate::{ensure_init, ffi};
+use crate::{ffi, init};
 
 /// ISPC TC BC6H effort levels. The discriminants index `g_bc6` in the shim, which has no range check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,7 +45,7 @@ pub fn bc6h_compress_rows(
     let stride = i32::try_from(w * 8).expect("row stride exceeds i32");
     let rows_i = i32::try_from(rows).expect("rows exceed i32");
     let width_i = i32::try_from(width).expect("width exceeds i32");
-    ensure_init();
+    init();
     // SAFETY: `rgba_f16` holds `width * rows` RGBA16F texels (8 bytes each) and `stride` is the
     // row pitch in bytes, so the shim reads only within the slice; `out` holds `(width/4)*(rows/4)`
     // 16-byte blocks, the number ISPC TC writes; `level` comes from the closed `Bc6hLevel` enum

@@ -2816,7 +2816,7 @@ impl AppModel {
                 _ => ask.push((item.input.clone(), stamp)),
             }
         }
-        if ask.is_empty() || self.session.is_none() {
+        if ask.is_empty() {
             return;
         }
         self.dds_thumb_requests += ask.len();

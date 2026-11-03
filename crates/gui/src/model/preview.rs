@@ -700,9 +700,6 @@ impl AppModel {
         if !self.gpu_available {
             return;
         }
-        if self.session.is_none() {
-            return;
-        }
         let max = self.preview_limit();
         let (token, cancel) = self.preview.fresh_token();
         self.preview.inflight_encode = Some((token, cancel));

@@ -284,7 +284,8 @@ fn load_dds(path: &Path) -> Result<(Rgba32F, SourceInfo, SourceMeta), LoadError>
         });
     }
     let decode = |w, h, r: std::ops::Range<usize>| {
-        crate::decode::decode_level_rgba(f.format, w, h, &f.data[r]).map_err(|e| bad(e.to_string()))
+        crate::decode::decode_input_level_rgba(f.format, w, h, &f.data[r])
+            .map_err(|e| bad(e.to_string()))
     };
     // A single cube (DECISIONS DS7) loads as a 6:1 strip of its mip-0 faces, face k at x = k * w.
     let (w, h, px) = if f.is_cubemap {

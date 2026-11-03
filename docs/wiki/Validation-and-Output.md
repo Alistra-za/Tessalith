@@ -78,7 +78,7 @@ The messages are quoted word for word under [Cubemaps](Cubemaps.md#checks). The 
 
 ### The BC1 encode target
 
-NVIDIA and AMD GPUs decode BC1 colour slightly differently. BC1 blocks, and the colour half of BC3, are encoded so that the error is lowest for both decoders together. The gain is in [Research](Research.md). Validation, previews and readouts decode BC1 as NVIDIA does. The record's `bc1_model` is `dual`; 1.x records name a decoder model, so each BC1 and BC3 output re-encodes once. <!-- D:FM17 -->
+NVIDIA and AMD GPUs decode BC1 colour slightly differently. BC1 blocks, and the colour half of BC3, are encoded so that the error is lowest for both decoders together. The gain is in [Research](Research.md). Validation, previews and readouts decode BC1 as NVIDIA does. A BC1 DDS read as an input keeps the exact decode, so a re-encode does not take on one vendor's error. The record's `bc1_model` is `dual`; 1.x records name a decoder model, so each BC1 and BC3 output re-encodes once. <!-- D:FM17 -->
 
 ## The manifest
 

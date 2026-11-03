@@ -1,4 +1,4 @@
-use crate::{ensure_init, ffi};
+use crate::{ffi, init};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bc7Level {
@@ -90,7 +90,7 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     if n == 0 {
         return;
     }
-    ensure_init();
+    init();
     // Copy into u32/u64 buffers so the ISPC code sees naturally aligned data.
     let src: Vec<u32> = pixels.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let mut dst = vec![0u64; n * 2];
@@ -145,7 +145,7 @@ pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Para
     if n == 0 {
         return;
     }
-    ensure_init();
+    init();
     let o = |v: Option<u32>| v.map_or(-1, |x| x as i32);
     let w = tune.weights;
     let m3 = tune.max_partitions_3subset;

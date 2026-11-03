@@ -34,10 +34,6 @@ pub fn init() {
     INIT.call_once(|| unsafe { ffi::sdc_init(BC1_DUAL) });
 }
 
-pub(crate) fn ensure_init() {
-    init();
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Versions {
     pub bc7enc_rdo: &'static str,

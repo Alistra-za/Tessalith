@@ -290,3 +290,57 @@ fn bc1_transparent_texels_below_mip_0_are_refused() {
     }
     assert!(refused(&bc1, &PatchRequest::default()).contains("BC1 with 1-bit alpha"));
 }
+/// Note FM17 (ruling T7-a): a BC1 DDS read as an input decodes model-less (`bcdec_rs`), not as NVIDIA. A 4-colour block
+/// the two decoders disagree on (found by search, so the test does not hard-code either one's rounding) loads as the
+/// exact decode; a 3-colour block with index 3 loads transparent and the patcher still refuses it.
+#[test]
+fn a_bc1_dds_input_decodes_exactly_and_its_transparent_texels_stay_refused() {
+    use engine::decode::{decode_input_level, decode_level, Decoded};
+    let fmt = DdsPixelFormat::Bc1 { srgb: false };
+    let ldr = |d: Decoded| match d {
+        Decoded::Ldr(v) => v,
+        _ => panic!("BC1 decodes to LDR"),
+    };
+    let mut s = 0x9e3779b9u32;
+    let mut next = || {
+        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+        (s >> 16) as u8
+    };
+    let diverging = (0..100_000)
+        .find_map(|_| {
+            let mut blk: [u8; 8] = std::array::from_fn(|_| next());
+            if u16::from_le_bytes([blk[0], blk[1]]) <= u16::from_le_bytes([blk[2], blk[3]]) {
+                blk.swap(0, 2);
+                blk.swap(1, 3);
+            }
+            let (a, b) = (
+                ldr(decode_level(fmt, 4, 4, &blk).unwrap()),
+                ldr(decode_input_level(fmt, 4, 4, &blk).unwrap()),
+            );
+            (a != b).then_some(blk)
+        })
+        .expect("no 4-colour block decodes differently: the input decode is the NVIDIA one");
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, block: [u8; 8]| {
+        let mut b = good(Format::Bc1, false, ResolvedHeader::Dx10);
+        for blk in b[148..148 + level_size(Format::Bc1, 64, 64)].chunks_mut(8) {
+            blk.copy_from_slice(&block);
+        }
+        let path = dir.path().join(name);
+        std::fs::write(&path, &b).unwrap();
+        (b, path)
+    };
+    let (_, path) = write("four.dds", diverging);
+    let (img, _) = engine::load::load_image(&path).unwrap();
+    let exact = ldr(decode_input_level(fmt, 4, 4, &diverging).unwrap());
+    let nvidia = ldr(decode_level(fmt, 4, 4, &diverging).unwrap());
+    let px = |q: [u8; 4]| [q[0], q[1], q[2]].map(|c| c as f32 / 255.0);
+    assert_eq!(&img.px[0][..3], &px(exact[0]), "exact decode");
+    assert_ne!(exact, nvidia);
+    // Only the pixels in the first 4x4 block are compared: every block is the same.
+
+    let (bc1, path) = write("three.dds", [0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    let (img, _) = engine::load::load_image(&path).unwrap();
+    assert!(img.px.iter().all(|p| *p == [0.0; 4]), "{:?}", &img.px[..2]);
+    assert!(refused(&bc1, &PatchRequest::default()).contains("BC1 with 1-bit alpha"));
+}

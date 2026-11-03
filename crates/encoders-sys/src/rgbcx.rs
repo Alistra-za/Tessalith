@@ -1,4 +1,4 @@
-use crate::{ensure_init, ffi, Bc1Model};
+use crate::{ffi, init, Bc1Model};
 
 /// Highest rgbcx encoder level (`rgbcx::MAX_LEVEL`).
 pub const RGBCX_MAX_LEVEL: u32 = 18;
@@ -24,7 +24,7 @@ pub fn bc1_encode_block(
     allow_3color: bool,
     transparent_black: bool,
 ) -> [u8; 8] {
-    ensure_init();
+    init();
     let src = bytes(px);
     let mut out = [0u8; 8];
     // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 8 bytes, the sizes
@@ -43,7 +43,7 @@ pub fn bc1_encode_block(
 
 /// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha).
 pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
-    ensure_init();
+    init();
     let src = bytes(px);
     let mut out = [0u8; 16];
     // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 16 bytes.
@@ -61,7 +61,7 @@ pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
 /// Encode one BC4 block from channel `channel` (0..=3) of the texels.
 pub fn bc4_encode_block(px: &[[u8; 4]; 16], channel: usize, search_radius: u32) -> [u8; 8] {
     assert!(channel < 4, "channel {channel} out of range");
-    ensure_init();
+    init();
     let src = bytes(px);
     let mut out = [0u8; 8];
     // SAFETY: with stride 4 the encoder reads bytes `channel + 4 * i` for i in 0..16, at most
@@ -96,7 +96,7 @@ pub fn bc4_encode_block_flags(
 ) -> [u8; 8] {
     assert!(channel < 4, "channel {channel} out of range");
     debug_assert!(flags & BC4_SDC_SEARCH == 0 || flags & BC4_USE_ALL_MODES == BC4_USE_ALL_MODES);
-    ensure_init();
+    init();
     let src = bytes(px);
     let mut out = [0u8; 8];
     // SAFETY: as in `bc4_encode_block`: stride 4 reads at most index 63 of `src`; `out` holds the 8 bytes written.
@@ -114,7 +114,7 @@ pub fn bc4_encode_block_flags(
 
 /// Encode one BC5 block from the red (channel 0) and green (channel 1) texels.
 pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
-    ensure_init();
+    init();
     let src = bytes(px);
     let mut out = [0u8; 16];
     // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 16 bytes (two BC4 blocks).
@@ -124,7 +124,7 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
 
 /// Decode one BC1 block with rgbcx under the given vendor decoder model (validation and previews).
 pub fn bc1_decode_block(block: &[u8; 8], model: Bc1Model) -> [[u8; 4]; 16] {
-    ensure_init();
+    init();
     let mut px = [0u8; 64];
     // SAFETY: `block` is 8 bytes and `px` 64 bytes (16 RGBA texels); `model` comes from the closed
     // `Bc1Model` enum (1 or 2), the values of `rgbcx::bc1_approx_mode`.

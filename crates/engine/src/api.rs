@@ -40,8 +40,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum OnExisting {
-    /// Re-encode when the manifest shows a different source, profile, engine, encoder or (BC1/BC3) BC1 decoder
-    /// model, or a failed validation; keep an output that has no manifest record (`OUT-UNKNOWN-EXISTING`).
+    /// Re-encode when the manifest shows a different source, profile, engine, encoder or (BC1/BC3) BC1 encode
+    /// mode, or a failed validation; keep an output that has no manifest record (`OUT-UNKNOWN-EXISTING`).
     #[default]
     IfChanged,
     Skip,
