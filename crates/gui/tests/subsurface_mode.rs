@@ -1,7 +1,7 @@
 //! DECISIONS AG101-AG104: the Subsurface Off / Standard / Foliage selector, its auto mode and its pitfalls.
 mod support;
 use sdc_gui::model::auto_flags::{auto_flags_for, resolved_for, SsHint};
-use sdc_gui::model::meshes::mesh_tree_anim;
+use sdc_gui::model::meshes::mesh_evidence;
 use sdc_gui::model::sets::{SlotFill, SlotKind};
 use sdc_gui::pgp::prefix::subsurface_pitfalls;
 use sdc_gui::pgp::settings::{sub_edits, sub_mode, subsurface_group_open, Settings, SubMode};
@@ -209,7 +209,7 @@ fn the_scan_reads_tree_anim_from_slsf2_bit_29() {
         .map(String::from)
         .into_iter()
         .collect();
-    let r = mesh_tree_anim(&db, &keys).unwrap();
+    let r = mesh_evidence(&db, &keys).unwrap().2;
     assert_eq!(r.get("textures/a/tree"), Some(&true));
     assert_eq!(r.get("textures/a/rock"), Some(&false));
     assert_eq!(r.get("textures/a/none"), None);

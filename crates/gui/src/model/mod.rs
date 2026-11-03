@@ -1214,10 +1214,11 @@ impl AppModel {
         };
         spawn_guarded(self.tx.clone(), "mesh-votes", move |tx| {
             let read = || -> Result<MeshEvidence, String> {
+                let (votes, alpha, tree_anim) = meshes::mesh_evidence(&db, &keys)?;
                 Ok(MeshEvidence {
-                    votes: meshes::mesh_votes(&db, &keys)?,
-                    alpha: meshes::mesh_alpha(&db, &keys)?,
-                    tree_anim: meshes::mesh_tree_anim(&db, &keys).unwrap_or_default(),
+                    votes,
+                    alpha,
+                    tree_anim,
                     gras: meshes::gras_diffuses(&db)?,
                     gras_all: meshes::gras_all_diffuses(&db)?,
                 })

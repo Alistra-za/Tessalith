@@ -74,12 +74,12 @@ pub fn read_users(db: &Path, item: &str, tex: &str, alpha: bool) -> UsedBy {
 }
 
 /// One shape row: NIF, mod, kind, priority, and whether it is a slot-0 source lighting shape with its alpha (the
-/// shapes `meshes::mesh_alpha` counts).
+/// shapes `meshes::mesh_evidence` counts).
 type ShapeRow = (String, String, i32, i32, Option<MeshAlpha>);
 
 fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
     let store = Store::open_read_only(db).map_err(|e| e.to_string())?;
-    // shortcut: raw SQL on `Store::conn()` against modscan's schema, as `meshes::mesh_alpha`; move it into
+    // shortcut: raw SQL on `Store::conn()` against modscan's schema, as `meshes::mesh_evidence`; move it into
     // `modscan::store` as a typed query when modscan is next edited.
     let mut st = store
         .conn()
