@@ -194,7 +194,7 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
                         b"STAT",
                         0x0200_0802,
                         &[
-                            edid("LTex"),
+                            edid("LSwap"),
                             sub(b"MODL", &zstr("lt.nif")),
                             sub(b"MODS", &alt(&[("LT", 0x0100_0800, 0)])),
                         ],
@@ -224,7 +224,7 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
                     b"STAT",
                     0x0200_0900,
                     &[
-                        edid("FTex"),
+                        edid("FSwap"),
                         sub(b"MODL", &zstr("ft.nif")),
                         sub(b"MODS", &alt(&[("FT", 0x0100_0801, 0)])),
                     ],
@@ -282,17 +282,17 @@ fn formids_follow_the_load_order_full_and_light() {
         0xFE00_1803,
         ".esl without the flag is light too"
     );
-    assert_eq!(formid(&s, "FTex"), 0x0200_0900);
+    assert_eq!(formid(&s, "FSwap"), 0x0200_0900);
     let txst_of = |e: &str| {
         one_i64(&s, "SELECT t.txst_formid FROM alt_tex t JOIN rec r ON r.plugin_id = t.plugin_id AND r.local = t.local WHERE r.edid = ?1", [e]) as u32
     };
     assert_eq!(
-        txst_of("LTex"),
+        txst_of("LSwap"),
         0x0100_0800,
         "a light plugin's reference into a full master"
     );
     assert_eq!(
-        txst_of("FTex"),
+        txst_of("FSwap"),
         0xFE00_0801,
         "Review Focus 1: a full plugin's reference into a light master"
     );

@@ -129,7 +129,7 @@ fn fixture() -> tempfile::TempDir {
             ],
         ),
     );
-    // Bar overrides Foo's TXST (master index 0) and adds an EFSH with a direct texture; Baz is a light plugin.
+    // Bar overrides Foo's TXST (master index 0); its EFSH (and Baz's, a light plugin) is a type the parser skips (Note GJ7).
     put(
         r,
         "mods/B/Bar.esp",

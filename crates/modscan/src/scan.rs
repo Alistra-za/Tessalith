@@ -450,7 +450,7 @@ fn scan_body(
         // clean rescan (begin_scan: reads never mix old winners in).
         store.set_winners(&HashMap::new(), &HashMap::new())?;
         store.set_textures(&HashMap::new())?;
-        // Old rec_winner rows would make Missing list every path a record names (the texture tables are empty).
+        // Old rec_winner rows would name winners of the previous run; record uses stay empty until a clean rescan.
         store.unload_plugins()?;
         // A tainted run still returns a (flagged) result: its origins are listed, as before.
         enable_run(store, &loose_ids, &enable_bsa_ids)?;
@@ -559,7 +559,7 @@ fn scan_body(
                     report.plugins = Some(p);
                 }
                 Err(ScanError::Cancelled) => {
-                    // Winners were replaced above; the old rec_winner rows would make Missing list the old load order.
+                    // Winners were replaced above; the old rec_winner rows would still name the old load order's winners.
                     store.unload_plugins()?;
                     report.notes.push(PLUGINS_CANCELLED.into());
                 }

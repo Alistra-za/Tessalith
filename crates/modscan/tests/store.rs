@@ -1210,7 +1210,11 @@ fn a_schema_8_store_opens_empty() {
         Err(modscan::ScanError::SchemaVersion { found: 8, want }) if want == modscan::store::SCHEMA_VERSION
     ));
     let s = Store::open(&p).unwrap();
-    assert!(s.mods().unwrap().is_empty(), "rebuilt: no origin left");
+    let origins: i64 = s
+        .conn()
+        .query_row("SELECT count(*) FROM origin", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(origins, 0, "rebuilt: no origin left");
     let gone: i64 = s
         .conn()
         .query_row(

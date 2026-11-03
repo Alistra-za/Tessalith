@@ -338,3 +338,46 @@ fn a_scan_cancelled_at_the_plugin_pass_leaves_plugin_rows_empty() {
     mo2(&d, &mut s);
     assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
 }
+
+/// Note BA (restored from plugin_inert.rs, Note GJ7): a mesh is a head part when it sits under facegendata or an HDPT names it as its model (MODL).
+#[test]
+fn head_part_meshes_are_facegen_paths_or_hdpt_models() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
+    let with_model = |sig: &[u8; 4], local, path: &str| esp::Rec {
+        local_formid: local,
+        sig: *sig,
+        edid: None,
+        payload: esp::Payload {
+            models: vec![esp::ModelRef {
+                slot: 0,
+                path: path.into(),
+                alt: vec![],
+            }],
+            ..Default::default()
+        },
+    };
+    let facts = esp::PluginFacts {
+        name: "A.esp".into(),
+        records: vec![
+            with_model(b"HDPT", 0x800, "meshes/actors/character/mouth.nif"),
+            with_model(b"STAT", 0x801, "meshes/clutter/rock.nif"),
+        ],
+        ..Default::default()
+    };
+    let f = modscan::plugin_store::PluginFile {
+        name: "A.esp",
+        path: "A.esp",
+        size: Some(1),
+        mtime: 0,
+    };
+    s.write_plugin(&f, &facts).unwrap();
+    assert!(s
+        .is_head_part_mesh("meshes/actors/character/mouth.nif")
+        .unwrap());
+    assert!(!s.is_head_part_mesh("meshes/clutter/rock.nif").unwrap());
+    assert!(!s.is_head_part_mesh("meshes/never/seen.nif").unwrap());
+    assert!(s
+        .is_head_part_mesh("meshes/actors/character/facegendata/facegeom/skyrim.esm/00013bbf.nif")
+        .unwrap());
+}
