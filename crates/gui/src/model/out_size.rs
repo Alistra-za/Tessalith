@@ -28,9 +28,7 @@ impl SizeEst {
     }
 }
 
-/// The DDS of a `src`-sized image under `p`. `drop_top_mip` removes level 0 from the chain the size would have
-/// (the engine's rule, Note CL23): half the size, and one level less, so `mips.levels = n` writes n − 1 levels while
-/// `full` stays a full chain of the half size.
+/// The DDS of a `src`-sized image under `p`.
 pub fn estimate(src: (u32, u32), p: &Profile) -> SizeEst {
     estimate_job(src, p, None)
 }
@@ -43,12 +41,10 @@ pub fn estimate_job(src: (u32, u32), p: &Profile, cube: Option<&engine::cube::Cu
             let f = engine::cube::layout::face_size(p, c.layout, src);
             (f, f)
         }
-        None => engine::resize::target_dims(src, p.resize),
+        None => engine::resize::target_dims(src, p),
     };
     let (w, h) = (w.max(1), h.max(1));
     let mips = engine::mips::level_count(w, h, &p.mips.levels);
-    let top = u32::from(p.drop_top_mip && mips > 1);
-    let (w, h, mips) = ((w >> top).max(1), (h >> top).max(1), mips - top);
     let pf = p.format.pixel_format(p.srgb_tag());
     let faces = if cube.is_some() { 6 } else { 1 };
     let chain_bytes = faces

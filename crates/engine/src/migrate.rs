@@ -247,6 +247,16 @@ pub const REMOVED: &[Removed] = &[
         value: Some("CHK-PLASTIC"),
         hint: "CHK-PLASTIC was removed in 2.0 (the Plastic look check is gone); delete it from the list",
     },
+    Removed {
+        key: "resize",
+        value: Some("pot-down"),
+        hint: "the power of two is automatic; delete the key",
+    },
+    Removed {
+        key: "drop_top_mip",
+        value: None,
+        hint: "use resize = \"half\"",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

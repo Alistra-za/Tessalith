@@ -27,7 +27,7 @@ fn folder(dir: &Path) -> std::path::PathBuf {
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
         .save(r.join("rock01_normal.png"))
         .unwrap();
-    ImageBuffer::from_fn(48, 48, |x, y| Rgb(grad(x, y)))
+    ImageBuffer::from_fn(3, 3, |x, y| Rgb(grad(x, y)))
         .save(r.join("odd.png"))
         .unwrap();
     for (n, v) in [("rock01_roughness.png", 120u8), ("rock01_ao.png", 200)] {
@@ -75,7 +75,7 @@ fn a_gui_export_and_sdc_convert_agree() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.decide("landscape/rock01.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
-    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
     m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(
@@ -114,7 +114,7 @@ fn a_gui_export_and_sdc_convert_agree() {
         outputs(&d.path().join("gui-out")),
         outputs(&d.path().join("cli-out")),
     );
-    // rock01, leaf, the normal, the 48 px texture and the packed _rmaos.
+    // rock01, leaf, the normal, the 3 px texture and the packed _rmaos.
     assert_eq!(
         gui.len(),
         5,

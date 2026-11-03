@@ -1,5 +1,5 @@
-//! v2 artist checks, check 3 (fake resolution) at convert time and the per-file `drop_top_mip` field
-//! (DECISIONS Note CL).
+//! v2 artist checks, check 3 (fake resolution) at convert time (DECISIONS Note CL), and the per-file `resize` it
+//! suggests (Note FM29).
 use engine::api::*;
 use engine::codes::Code;
 use engine::config::Target;
@@ -202,71 +202,31 @@ fn warn_and_off_write_identical_bytes_and_off_is_the_default() {
     assert_eq!(records(&off), records(&warn));
 }
 
+/// Note FM29: `resize = "half"` on one file writes it at half size; the other file is untouched.
 #[test]
-fn drop_top_mip_writes_mip_1_as_the_top_level() {
+fn resize_half_writes_the_texture_at_half_size() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path(), 2);
     run(req(d.path(), "full", LowDetailMode::Off));
     std::fs::write(
         d.path().join("in/sdc.toml"),
-        "[files.\"up.png\"]\ndrop_top_mip = true\n",
+        "[files.\"up.png\"]\nresize = \"half\"\n",
     )
     .unwrap();
     run(req(d.path(), "half", LowDetailMode::Off));
-    let (_, _, full) = dds(&d.path().join("full/up.dds"));
     let (w, h, half) = dds(&d.path().join("half/up.dds"));
     assert_eq!((w, h), (512, 512));
-    assert_eq!(half.len() + 1, full.len());
-    for (n, l) in half.iter().enumerate() {
-        assert!(l == &full[n + 1], "level {n}");
-    }
-    // The other file is untouched by the entry.
+    assert_eq!(half.len() + 1, dds(&d.path().join("full/up.dds")).2.len());
     assert_eq!(
         std::fs::read(d.path().join("full/noise.dds")).unwrap(),
         std::fs::read(d.path().join("half/noise.dds")).unwrap()
     );
-    // At its default the field is absent from the serialised profile, so the profile hash holds.
+    // At its default the floor is absent from the serialised profile, so the profile hash holds.
     let p = engine::presets::PresetRegistry::builtin()
         .unwrap()
         .profile("cs-quality", Target::Cs, engine::config::Subtype::Diffuse)
         .unwrap();
-    assert!(!p.drop_top_mip);
-    assert!(serde_json::to_value(&p).unwrap()["drop_top_mip"].is_null());
-}
-
-/// The variance a `_n` gives its set's `_rmaos` is measured on the full chain: dropping the `_n`'s top level leaves
-/// the bake unchanged.
-#[test]
-fn drop_top_mip_on_an_n_leaves_its_rmaos_bake_unchanged() {
-    let d = tempfile::tempdir().unwrap();
-    let i = d.path().join("in/pbr");
-    std::fs::create_dir_all(&i).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, _| {
-        Rgb([if x % 2 == 0 { 204u8 } else { 51 }, 128, 230])
-    })
-    .save(i.join("iron_n.png"))
-    .unwrap();
-    ImageBuffer::from_fn(64, 64, |x, _| image::Rgba([(x * 4) as u8, 0, 200, 255]))
-        .save(i.join("iron_rmaos.png"))
-        .unwrap();
-    let r = |out: &str, drop: bool| {
-        let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join(out), Target::Cs);
-        r.recursive = true;
-        r.accept = AcceptSuggestions::High;
-        if drop {
-            r.overrides = vec![parse_set("file:**/iron_n.png.drop_top_mip=true").unwrap()];
-        }
-        r
-    };
-    let (s, ev) = run(r("a", false));
-    assert_eq!(s.converted, 2, "{ev:?}");
-    run(r("b", true));
-    let n = |o: &str| dds(&d.path().join(o).join("pbr/iron_n.dds")).0;
-    assert_eq!((n("a"), n("b")), (64, 32));
-    assert_eq!(
-        std::fs::read(d.path().join("a/pbr/iron_rmaos.dds")).unwrap(),
-        std::fs::read(d.path().join("b/pbr/iron_rmaos.dds")).unwrap()
-    );
+    assert!(serde_json::to_value(&p).unwrap()["resize_floor"].is_null());
 }
 
 fn plan_of(r: BatchRequest) -> Plan {
@@ -293,9 +253,9 @@ fn plain(dir: &Path, out: &str, sets: &[&str]) -> BatchRequest {
     r
 }
 
-/// Review I1: the DIM checks read the size actually written, after the dropped top level.
+/// The DIM checks read the size actually written, after `resize` and its floor.
 #[test]
-fn the_dim_checks_see_the_size_after_drop_top_mip() {
+fn the_dim_checks_see_the_size_after_resize() {
     let d = tempfile::tempdir().unwrap();
     let i = d.path().join("in");
     std::fs::create_dir_all(&i).unwrap();
@@ -304,7 +264,7 @@ fn the_dim_checks_see_the_size_after_drop_top_mip() {
         .unwrap();
     std::fs::write(
         i.join("sdc.toml"),
-        "[files.\"strip.png\"]\nsubtype = \"diffuse\"\ndrop_top_mip = true\n",
+        "[files.\"strip.png\"]\nsubtype = \"diffuse\"\nresize = \"eighth\"\nresize_floor = 1\n",
     )
     .unwrap();
     let r = plain(d.path(), "out", &[]);
@@ -327,7 +287,7 @@ fn the_dim_checks_see_the_size_after_drop_top_mip() {
         .unwrap();
     std::fs::write(
         i.join("sdc.toml"),
-        "[files.\"water_flow.png\"]\nsubtype = \"flow\"\ndrop_top_mip = true\n",
+        "[files.\"water_flow.png\"]\nsubtype = \"flow\"\nresize = \"half\"\nresize_floor = 32\n",
     )
     .unwrap();
     let p = plan_of(plain(d.path(), "out", &[]));
@@ -339,7 +299,7 @@ fn the_dim_checks_see_the_size_after_drop_top_mip() {
     );
     std::fs::write(
         i.join("sdc.toml"),
-        "[files.\"water_flow.png\"]\nsubtype = \"flow\"\n",
+        "[files.\"water_flow.png\"]\nsubtype = \"flow\"\nresize = \"half\"\n",
     )
     .unwrap();
     let p = plan_of(plain(d.path(), "out", &[]));
@@ -348,12 +308,12 @@ fn the_dim_checks_see_the_size_after_drop_top_mip() {
         .iter()
         .any(|w| w.code == Code::DimFlowSmall));
 
-    // `resize = half` plus the field: DIM-RESIZED names the written size.
+    // DIM-RESIZED names the source size, the written size and the option.
     std::fs::remove_file(i.join("water_flow.png")).unwrap();
     noise(1024, 1).save(i.join("big.png")).unwrap();
     std::fs::write(
         i.join("sdc.toml"),
-        "[files.\"big.png\"]\nsubtype = \"diffuse\"\nresize = \"half\"\ndrop_top_mip = true\n",
+        "[files.\"big.png\"]\nsubtype = \"diffuse\"\nresize = \"quarter\"\nresize_floor = 256\n",
     )
     .unwrap();
     let r = plain(d.path(), "out2", &["encoder.effort=ultrafast"]);
@@ -365,52 +325,36 @@ fn the_dim_checks_see_the_size_after_drop_top_mip() {
         .cloned()
         .expect("DIM-RESIZED");
     assert_eq!(w.data["to"], serde_json::json!([256, 256]), "{}", w.message);
-    assert!(w.message.contains("to 256x256"), "{}", w.message);
+    assert_eq!(
+        w.message, "1024x1024 → 256x256 (resize = quarter)",
+        "{}",
+        w.message
+    );
     run(r);
     assert_eq!(dds(&d.path().join("out2/big.dds")).0, 256);
 }
 
-/// Review M2: an explicit `false` hashes as the absent key (still up to date); `true` re-encodes.
+/// An explicit default floor hashes as the absent key (still up to date); `resize = "half"` re-encodes.
 #[test]
-fn an_explicit_false_stays_up_to_date_and_true_re_encodes() {
+fn an_explicit_default_floor_stays_up_to_date_and_half_re_encodes() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path(), 2);
     run(req(d.path(), "out", LowDetailMode::Off));
     let up = d.path().join("out/up.dds");
     let t0 = mtime(&up);
-    let toml = |v: bool| {
+    let toml = |entry: &str| {
         std::fs::write(
             d.path().join("in/sdc.toml"),
-            format!("[files.\"up.png\"]\ndrop_top_mip = {v}\n"),
+            format!("[files.\"up.png\"]\n{entry}\n"),
         )
         .unwrap()
     };
-    toml(false);
+    toml("resize_floor = 512");
     let (s, _) = run(req(d.path(), "out", LowDetailMode::Off));
     assert_eq!((s.converted, s.up_to_date), (0, 2));
     assert_eq!(mtime(&up), t0);
-    toml(true);
+    toml("resize = \"half\"");
     let (s, _) = run(req(d.path(), "out", LowDetailMode::Off));
     assert_eq!((s.converted, s.up_to_date), (1, 1));
     assert_eq!(dds(&up).0, 512);
-}
-
-/// Review M3: on a single-level chain the field does nothing, so it is left out of the profile (and the hash).
-#[test]
-fn drop_top_mip_on_a_single_level_chain_is_ignored() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path(), 2);
-    let mut r = req(d.path(), "out", LowDetailMode::Off);
-    r.overrides
-        .push(parse_set("file:**/up.png.mips.levels=none").unwrap());
-    run(r.clone());
-    let up = d.path().join("out/up.dds");
-    let t0 = mtime(&up);
-    r.overrides
-        .push(parse_set("file:**/up.png.drop_top_mip=true").unwrap());
-    assert!(!job_of(&plan_of(r.clone()), "up.png").profile.drop_top_mip);
-    let (s, _) = run(r);
-    assert_eq!((s.converted, s.up_to_date), (0, 2));
-    assert_eq!(mtime(&up), t0);
-    assert_eq!(dds(&up).0, 1024);
 }

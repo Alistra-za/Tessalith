@@ -1156,29 +1156,31 @@ fn set_reencode_true_converts_a_dds_input() {
     assert_eq!(out.format, DdsPixelFormat::Bc7 { srgb: false });
 }
 
-/// S-mips-6/7: `resize = pot-down` set on one NPOT file converts it at 32x32; without it DIM-NPOT blocks (exit 1).
+/// Note FM29: an NPOT file converts at its power-of-two size (48x40 becomes 32x16, exit 0); the 1.x
+/// `resize = pot-down` is refused with a hint.
 #[test]
-fn set_resize_pot_down_converts_an_npot_file() {
+fn an_npot_file_converts_at_its_power_of_two_size() {
     let fx = Fx::new();
     ImageBuffer::from_fn(48, 40, |x, y| Rgb([x as u8 * 5, y as u8 * 6, 90]))
         .save(fx.p("in/textures/a/odd.png"))
         .unwrap();
     let o = fx.convert(&DIFFUSE);
-    assert_eq!(code(&o), 1, "{}", text(&o.stderr));
-    assert_eq!(
-        skips(&o),
-        vec![("odd.png".to_string(), Some("DIM-NPOT".to_string()))]
-    );
-    assert!(!fx.dds("textures/a/odd.dds").exists());
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(skips(&o).is_empty());
+    let f = read_dds(&std::fs::read(fx.dds("textures/a/odd.dds")).unwrap()).unwrap();
+    assert_eq!((f.width, f.height), (32, 16));
     let o = fx.convert(&[
         DIFFUSE[0],
         DIFFUSE[1],
         "--set",
         "file:odd.png.resize=pot-down",
     ]);
-    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    let f = read_dds(&std::fs::read(fx.dds("textures/a/odd.dds")).unwrap()).unwrap();
-    assert_eq!((f.width, f.height), (32, 32));
+    assert_ne!(code(&o), 0);
+    assert!(
+        text(&o.stderr).contains("power of two is automatic"),
+        "{}",
+        text(&o.stderr)
+    );
 }
 
 #[test]

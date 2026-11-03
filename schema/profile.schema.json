@@ -727,8 +727,9 @@
     "ResizeMode": {
       "enum": [
         "none",
-        "pot-down",
-        "half"
+        "half",
+        "quarter",
+        "eighth"
       ],
       "type": "string"
     },
@@ -857,10 +858,6 @@
       "$ref": "#/$defs/CubemapSpec",
       "description": "Cubemap settings; read only by `Subtype::Cubemap`, reset for every other sub-type."
     },
-    "drop_top_mip": {
-      "description": "Write the texture at half size, from its mip 1; every lower level is unchanged.",
-      "type": "boolean"
-    },
     "encoder": {
       "$ref": "#/$defs/EncoderSpec"
     },
@@ -878,7 +875,13 @@
     },
     "resize": {
       "$ref": "#/$defs/ResizeMode",
-      "description": "Preprocess step 6 (spec §5.4); `pot-down` = largest power of two ≤ each axis, `half` = both axes halved when the larger is above 512 (M6 Track D)."
+      "description": "Preprocess step 6 (spec §5.4): `half`, `quarter` and `eighth` halve both sides up to 1, 2 or 3 times, each time\nonly while the longer side stays at or above `resize_floor`. The power-of-two step before it is automatic."
+    },
+    "resize_floor": {
+      "description": "The longer side `resize` never halves below, in pixels (Note FM29).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "rnm": {
       "$ref": "#/$defs/RnmSpec",

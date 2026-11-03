@@ -2646,22 +2646,16 @@ fn reencode_through_a_junction_into_its_own_folder_fails() {
     assert_eq!(std::fs::read(real.join("rock.dds")).unwrap(), rgba8);
 }
 
-/// S-mips-6/7 (M6 exit): a 48x40 diffuse under `resize = pot-down` is written at 32x32 (6 mips) with no
-/// acknowledgement; DIM-RESIZED reports the size it was written at.
+/// Note FM29: a 48x40 diffuse is written at its power-of-two size, 32x16 (6 mips), with no acknowledgement;
+/// DIM-RESIZED reports the size it was written at.
 #[test]
-fn npot_diffuse_with_pot_down_converts_without_acknowledgement() {
+fn npot_diffuse_converts_at_its_power_of_two_size() {
     let d = tempfile::tempdir().unwrap();
-    put(
-        d.path(),
-        "d/odd.png",
-        DynamicImage::ImageRgb8(image::RgbImage::from_fn(48, 40, |x, y| {
-            Rgb([(x * 5) as u8, (y * 6) as u8, 90])
-        })),
-    );
+    put(d.path(), "d/odd.png", rgb_wh(48, 40));
     let o = convert(
         d.path(),
         Target::Cs,
-        &["resize=pot-down", "file:**/odd.png.subtype=diffuse"],
+        &["file:**/odd.png.subtype=diffuse"],
         &[],
     );
     assert_eq!(
@@ -2676,10 +2670,73 @@ fn npot_diffuse_with_pot_down_converts_without_acknowledgement() {
     );
     assert_eq!(
         warning_of(&o, "odd.png", Code::DimResized).data["to"],
-        serde_json::json!([32, 32])
+        serde_json::json!([32, 16])
     );
     let f = dds(d.path(), "d/odd.dds");
-    assert_eq!((f.width, f.height, f.mip_count), (32, 32, 6));
+    assert_eq!((f.width, f.height, f.mip_count), (32, 16, 6));
+}
+
+/// Note FM29: 1000x1000 rounds up to 1024x1024 (Tessalith's first upscale); no DIM-NPOT.
+#[test]
+fn a_1000_square_diffuse_writes_1024() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d/big.png", rgb_wh(1000, 1000));
+    let o = convert(
+        d.path(),
+        Target::Cs,
+        &["file:**/big.png.subtype=diffuse", "format=bc1"],
+        &[],
+    );
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
+    assert!(!warnings(&o).contains(&Code::DimNpot));
+    let w = warning_of(&o, "big.png", Code::DimResized);
+    assert_eq!(w.message, "1000x1000 → 1024x1024");
+    let f = dds(d.path(), "d/big.dds");
+    assert_eq!((f.width, f.height), (1024, 1024));
+}
+
+/// Note FM29: 3x5 becomes 2x4, which DIM-SMALL still blocks.
+#[test]
+fn three_by_five_becomes_two_by_four_and_is_dim_small() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d/tiny.png", rgb_wh(3, 5));
+    let o = convert(
+        d.path(),
+        Target::Cs,
+        &["file:**/tiny.png.subtype=diffuse"],
+        &[],
+    );
+    assert_eq!(o.summary.converted, 0);
+    assert_eq!(skip_code(&o, "tiny.png"), Some(Code::DimSmall));
+    assert_eq!(
+        warning_of(&o, "tiny.png", Code::DimResized).data["to"],
+        serde_json::json!([2, 4])
+    );
+    assert!(!warnings(&o).contains(&Code::DimNpot));
+}
+
+/// Note FM29: menu and sky art without mips (`mips.levels = "none"`) is written at its own size, with a DIM-NPOT
+/// warning that does not block.
+#[test]
+fn no_mip_textures_are_written_at_their_own_size() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d/ui_sky.png", rgb_wh(1000, 600));
+    let o = convert(
+        d.path(),
+        Target::Cs,
+        &[
+            "file:**/ui_sky.png.subtype=diffuse",
+            "mips.levels=none",
+            "format=bc1",
+        ],
+        &[],
+    );
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
+    let w = warning_of(&o, "ui_sky.png", Code::DimNpot);
+    assert_eq!(w.severity, engine::codes::Severity::Warning);
+    assert!(!warnings(&o).contains(&Code::DimResized));
+    let f = dds(d.path(), "d/ui_sky.dds");
+    assert_eq!((f.width, f.height, f.mip_count), (1000, 600, 1));
 }
 
 /// S-mips-3 (M6 exit): Kaiser changes the RGB of mips >= 1 of an sRGB colour map and leaves mip 0 and the

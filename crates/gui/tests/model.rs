@@ -66,7 +66,7 @@ fn decisions_re_resolve_before_saving_and_save_writes_them() {
     let mut m = opened(d.path());
     m.decide("landscape/rock01.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
-    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
     m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(
@@ -91,7 +91,7 @@ fn decisions_re_resolve_before_saving_and_save_writes_them() {
     assert!(m.project.as_ref().unwrap().is_dirty());
     m.save().unwrap();
     let text = std::fs::read_to_string(&toml_path).unwrap();
-    assert!(text.contains("landscape/odd.png") && text.contains("DIM-NPOT"));
+    assert!(text.contains("landscape/odd.png") && text.contains("DIM-SMALL"));
     assert!(text.contains("green_convention"));
 }
 
@@ -106,14 +106,14 @@ fn two_quick_answers_on_two_textures_both_stay() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
     assert!(m.wait_idle(Duration::from_secs(60)));
     let doc = m.project.as_ref().unwrap();
     assert_eq!(
         doc.file_value("landscape/leaf.png", "alpha.policy"),
         Some(serde_json::json!("cutout"))
     );
-    assert!(doc.allow("landscape/odd.png").contains(&Code::DimNpot));
+    assert!(doc.allow("landscape/odd.png").contains(&Code::DimSmall));
     for k in ["landscape/leaf.png", "landscape/odd.png"] {
         assert_eq!(status(&m, k), ItemStatus::Ready, "{k}");
     }
@@ -365,40 +365,39 @@ fn the_has_warnings_filter_ignores_info_like_the_badge() {
     assert_eq!(m.visible_items(), vec![1]);
 }
 
+/// Note FM29: an NPOT texture with mips is resized to its power of two and asks nothing; without mips it keeps its
+/// size and DIM-NPOT is a warning, so it stays ready either way.
 #[test]
-fn npot_resize_choice_clears_the_block() {
+fn an_npot_texture_is_resized_and_asks_no_question() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    // F9: odd.png is undecided in the fixture.
-    m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+    image::RgbImage::from_pixel(48, 40, image::Rgb([90, 90, 90]))
+        .save(d.path().join("textures/landscape/npot.png"))
+        .unwrap();
+    m.replan();
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let odd = m.item("landscape/odd.png").unwrap();
-    assert!(odd
-        .decisions
-        .contains(&Decision::Acknowledge(Code::DimNpot)));
-    m.set_field("landscape/odd.png", "resize", serde_json::json!("pot-down"));
+    let k = "landscape/npot.png";
+    m.decide(k, Answer::Subtype(Subtype::Diffuse));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let odd = m.item("landscape/odd.png").unwrap();
+    let it = m.item(k).unwrap();
+    assert_eq!(it.status, ItemStatus::Ready, "{:?}", it.decisions);
     assert!(
-        !odd.decisions
-            .contains(&Decision::Acknowledge(Code::DimNpot)),
+        it.warnings
+            .iter()
+            .any(|w| w.code == Code::DimResized && w.message == "48x40 → 32x16"),
         "{:?}",
-        odd.decisions
+        it.warnings
     );
+    m.set_field(k, "mips.levels", serde_json::json!("none"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let it = m.item(k).unwrap();
+    assert_eq!(it.status, ItemStatus::Ready, "{:?}", it.decisions);
     assert!(
-        odd.warnings.iter().any(|w| w.code == Code::DimResized),
+        it.warnings.iter().any(|w| w.code == Code::DimNpot),
         "{:?}",
-        odd.warnings
-    );
-    assert_eq!(
-        m.project
-            .as_ref()
-            .unwrap()
-            .file_value("landscape/odd.png", "resize"),
-        Some(serde_json::json!("pot-down"))
+        it.warnings
     );
 }
-
 /// M6 Track E spec §2, §6: the GUI accepts High suggestions. A PBR set's colour, `_n` and `_rmaos` members decide
 /// themselves (no sub-type question; "(auto)" with the reason), and a Medium `_i` still asks.
 /// Note FM25: the GUI sets no thread count and no memory budget, so the engine's defaults apply (jobs 0 is rayon's

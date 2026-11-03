@@ -43,9 +43,9 @@ The overlay and the check read your Meshes scan, so scan first: scan your MO2 in
 
 Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, add an `[inputs]` alias, or set `subtype = "normal"` in a `[files]` entry.
 
-### A texture is blocked with DIM-NPOT
+### A texture is written at a different size
 
-Its sides are not powers of two. Resize the source, set `resize = "pot-down"` on the file (the GUI's **Resize to a power of two** button does this), or acknowledge it with `allow = ["DIM-NPOT"]` or `--allow DIM-NPOT`.
+A texture with mips is written at the nearest power of two ([Format and size](Project-Config-Fields.md#format-and-size)), so a 1000x1000 source becomes 1024x1024 and gets `DIM-RESIZED`. To keep the exact size, set `mips.levels = "none"`; the texture then gets the `DIM-NPOT` warning.
 
 ### DDS files in the folder are skipped
 

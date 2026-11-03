@@ -1,31 +1,154 @@
-//! Resize (spec §5.4 step 6, S-mips-6; M6 Track D T4): `resize = pot-down` takes each axis to the largest power of two that fits, `resize = half` halves both axes when the larger is above 512,
-//! in the content's domain and with the mip filter. Alpha is always the area-exact box; RGB is the box too unless
-//! [`mips::effective_filter`] gives tent, Mitchell or Kaiser. Roughness is resized on r², alpha-weighted colour on
-//! area × alpha, exactly as the box chain does. Normals are not renormalised here (that is `base_level`'s job).
-use crate::config::{MipFilter, Profile, ResizeMode};
+//! Resize (spec §5.4 step 6, Note FM29): every texture with mips is written at a power-of-two size ([`pot_dims`]),
+//! then `resize = half | quarter | eighth` halves it down to `resize_floor` ([`shrink`]). A texture with
+//! `mips.levels = "none"` keeps its own size and still shrinks. A growing axis is first enlarged by linear
+//! interpolation ([`enlarge`]); a shrinking one uses the down path, in the content's domain and with the mip filter.
+//! Alpha is always the area-exact box; RGB is the box too unless [`mips::effective_filter`] gives tent, Mitchell or
+//! Kaiser. Roughness is resized on r², alpha-weighted colour on area × alpha, exactly as the box chain does. Normals
+//! are not renormalised here (that is `base_level`'s job).
+use crate::config::{MipFilter, MipKeyword, MipLevels, Profile, ResizeMode, Subtype};
+use crate::image::Rgba32F;
 use crate::mips;
 use crate::ops::Work;
 
-/// The larger side a `half` resize keeps (M6 Track D spec §2.2).
-pub const HALF_FLOOR: u32 = 512;
+/// The largest power of two ≤ `v` (`v` ≥ 1).
+fn floor_pow2(v: u64) -> u64 {
+    1 << v.ilog2()
+}
 
-/// The size `resize` makes of a `w`×`h` image: `pot-down` takes the largest power of two ≤ each axis; `half` halves
-/// both axes (integer division, never below 1) when the larger one is above [`HALF_FLOOR`], so the shape never changes
-/// and there is no power-of-two step (owner, 2026-10-12).
-pub fn target_dims((w, h): (u32, u32), mode: ResizeMode) -> (u32, u32) {
-    let prev_pow2 = |v: u32| 1u32 << (31 - v.max(1).leading_zeros());
-    match mode {
-        ResizeMode::None => (w, h),
-        ResizeMode::PotDown => (prev_pow2(w), prev_pow2(h)),
-        ResizeMode::Half if w.max(h) > HALF_FLOOR => ((w / 2).max(1), (h / 2).max(1)),
-        ResizeMode::Half => (w, h),
+/// The power-of-two size of a `w`×`h` image (spec B4). The longer side L rounds up to the next power of two when it
+/// is within 5 % of it, else down. The shorter side is first scaled with it (Ss = S × L' / L), then rounds up when
+/// within 15 % of the next power of two, else down (owner, 2026-11-02: 1024×768 becomes 1024×512, 2000×900 becomes
+/// 2048×1024); never below 1. Axes keep their orientation.
+pub fn pot_dims((w, h): (u32, u32)) -> (u32, u32) {
+    let (l, s) = (u64::from(w.max(h).max(1)), u64::from(w.min(h).max(1)));
+    let lp = if l.is_power_of_two() {
+        l
+    } else {
+        let down = floor_pow2(l);
+        if 100 * l >= 95 * 2 * down {
+            2 * down
+        } else {
+            down
+        }
+    };
+    // Ss = num / den, compared in integers.
+    let (num, den) = (s * lp, l);
+    let sp = if num < den {
+        1
+    } else {
+        let down = floor_pow2(num / den);
+        if down * den == num || 100 * num < 85 * 2 * down * den {
+            down
+        } else {
+            2 * down
+        }
+    };
+    let (lp, sp) = (lp as u32, sp as u32);
+    if w >= h {
+        (lp, sp)
+    } else {
+        (sp, lp)
     }
 }
 
-/// Resize `work.img` to [`target_dims`] (a no-op when the size already fits).
+/// `half`, `quarter` and `eighth` halve both sides (integer division, never below 1) up to 1, 2 or 3 times, each
+/// time only while the longer side / 2 stays at or above `floor`, so the shape never changes.
+pub fn shrink((mut w, mut h): (u32, u32), mode: ResizeMode, floor: u32) -> (u32, u32) {
+    let times = match mode {
+        ResizeMode::None => 0,
+        ResizeMode::Half => 1,
+        ResizeMode::Quarter => 2,
+        ResizeMode::Eighth => 3,
+    };
+    for _ in 0..times {
+        if w.max(h) / 2 < floor {
+            break;
+        }
+        (w, h) = ((w / 2).max(1), (h / 2).max(1));
+    }
+    (w, h)
+}
+
+/// A texture written at its own size: `mips.levels = "none"` (menu and sky art) skips [`pot_dims`].
+pub fn pot_exempt(p: &Profile) -> bool {
+    p.mips.levels == MipLevels::Keyword(MipKeyword::None)
+}
+
+/// The size Preprocess writes: [`pot_dims`] unless `mips.levels = "none"`, then [`shrink`]. A cube is sized by
+/// `cubemap.face_size` (`cube::layout::face_size`), so its source keeps its size here.
+pub fn target_dims(dims: (u32, u32), p: &Profile) -> (u32, u32) {
+    if p.subtype == Subtype::Cubemap {
+        return dims;
+    }
+    let base = if pot_exempt(p) { dims } else { pot_dims(dims) };
+    shrink(base, p.resize, p.resize_floor)
+}
+
+/// One axis resampled to `n` texels by linear interpolation, texel-centre aligned, edges clamped.
+fn lerp_axis(img: &Rgba32F, n: u32, along_x: bool) -> Rgba32F {
+    let (w, h) = (img.width, img.height);
+    let len = if along_x { w } else { h };
+    if n == len {
+        return img.clone();
+    }
+    let last = f64::from(len - 1);
+    let taps: Vec<(u32, u32, f32)> = (0..n)
+        .map(|i| {
+            let s = ((f64::from(i) + 0.5) * f64::from(len) / f64::from(n) - 0.5).clamp(0.0, last);
+            let i0 = s.floor() as u32;
+            (i0, (i0 + 1).min(len - 1), (s - f64::from(i0)) as f32)
+        })
+        .collect();
+    let (ow, oh) = if along_x { (n, h) } else { (w, n) };
+    let mut out = Rgba32F::new(ow, oh, [0.0; 4]);
+    for y in 0..oh {
+        for x in 0..ow {
+            let (a, b, t) = if along_x {
+                let (i0, i1, t) = taps[x as usize];
+                (img.at(i0, y), img.at(i1, y), t)
+            } else {
+                let (i0, i1, t) = taps[y as usize];
+                (img.at(x, i0), img.at(x, i1), t)
+            };
+            *out.at_mut(x, y) = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
+        }
+    }
+    out
+}
+
+/// `img` enlarged to `to` (each side ≥ the source's) by linear interpolation on all four channels; with `weighted`,
+/// RGB is interpolated premultiplied by alpha, and where the interpolated alpha is 0 the plain RGB is kept.
+pub(crate) fn enlarge(img: &Rgba32F, to: (u32, u32), weighted: bool) -> Rgba32F {
+    let lerp = |src: &Rgba32F| lerp_axis(&lerp_axis(src, to.0, true), to.1, false);
+    if !weighted {
+        return lerp(img);
+    }
+    let mut pm = img.clone();
+    for px in &mut pm.px {
+        for c in 0..3 {
+            px[c] *= px[3];
+        }
+    }
+    let mut out = lerp(&pm);
+    let plain = lerp(img);
+    for (o, q) in out.px.iter_mut().zip(&plain.px) {
+        if o[3] > 0.0 {
+            for c in 0..3 {
+                o[c] /= o[3];
+            }
+        } else {
+            o[..3].copy_from_slice(&q[..3]);
+        }
+    }
+    out
+}
+
+/// Resize `work.img` to [`target_dims`] (a no-op when the size already fits): growing axes are enlarged first,
+/// shrinking ones then take the down path.
 pub fn resize_work(work: &mut Work, p: &Profile) {
-    let to = target_dims((work.img.width, work.img.height), p.resize);
-    if to == (work.img.width, work.img.height) {
+    let (w, h) = (work.img.width, work.img.height);
+    let to = target_dims((w, h), p);
+    if to == (w, h) {
         return;
     }
     let weighted = mips::weighted_rgb(work, p);
@@ -35,25 +158,32 @@ pub fn resize_work(work: &mut Work, p: &Profile) {
             px[0] *= px[0];
         }
     }
-    // Alpha (and RGB for box) is the area-exact box; `filt` is tent or box while `weighted`.
-    let mut out = mips::area_resample(&work.img, to, weighted);
-    if filt != MipFilter::Box {
-        let direct = mips::resample_direct(&work.img, to, filt, weighted, p.mips.edge);
-        for (px, d) in out.px.iter_mut().zip(&direct.px) {
-            px[..3].copy_from_slice(&d[..3]);
-        }
+    let grown = (to.0.max(w), to.1.max(h));
+    if grown != (w, h) {
+        work.img = enlarge(&work.img, grown, weighted);
     }
-    for px in &mut out.px {
+    let down = grown != to;
+    if down {
+        // Alpha (and RGB for box) is the area-exact box; `filt` is tent or box while `weighted`.
+        let mut out = mips::area_resample(&work.img, to, weighted);
+        if filt != MipFilter::Box {
+            let direct = mips::resample_direct(&work.img, to, filt, weighted, p.mips.edge);
+            for (px, d) in out.px.iter_mut().zip(&direct.px) {
+                px[..3].copy_from_slice(&d[..3]);
+            }
+        }
+        work.img = out;
+    }
+    for px in &mut work.img.px {
         if work.roughness_r_squared {
             px[0] = px[0].max(0.0).sqrt();
         }
-        // Only the polyphase pass overshoots (M8): a box resize stays area-exact, so a float LDR source keeps any
-        // value > 1 until Quantise, as without resize.
-        if filt != MipFilter::Box {
+        // Only the polyphase pass overshoots (M8): a box resize and linear interpolation stay in range, so a float
+        // LDR source keeps any value > 1 until Quantise, as without resize.
+        if down && filt != MipFilter::Box {
             mips::clamp_rgb(px, work.domain);
         }
     }
-    work.img = out;
 }
 
 #[cfg(test)]
@@ -66,12 +196,10 @@ mod tests {
     use crate::presets::PresetRegistry;
 
     fn profile(st: Subtype) -> Profile {
-        let mut p = PresetRegistry::builtin()
+        PresetRegistry::builtin()
             .unwrap()
             .profile("cs-quality", Target::Cs, st)
-            .unwrap();
-        p.resize = ResizeMode::PotDown;
-        p
+            .unwrap()
     }
     fn work(img: Rgba32F, domain: Domain, alpha: bool) -> Work {
         Work {
@@ -98,29 +226,105 @@ mod tests {
         img
     }
 
-    /// M6 Track D (owner, 2026-10-12): both sides halve together when the larger is above 512; the shape never changes.
+    /// Note FM29 (spec B4): the long side rounds up within 5 %, the short side at its scale within 15 %.
     #[test]
-    fn half_halves_both_sides_when_the_larger_is_above_512() {
-        let t = |w, h| target_dims((w, h), ResizeMode::Half);
-        assert_eq!(t(2048, 2048), (1024, 1024));
-        assert_eq!(t(1024, 512), (512, 256));
-        assert_eq!(t(512, 256), (512, 256));
-        assert_eq!(t(512, 512), (512, 512));
-        assert_eq!(t(513, 100), (256, 50));
-        assert_eq!(t(1000, 600), (500, 300));
-        assert_eq!(t(1024, 1), (512, 1));
-        assert_eq!(t(64, 64), (64, 64));
+    fn pot_rule_examples() {
+        for ((w, h), out) in [
+            ((1000, 1000), (1024, 1024)),
+            ((2000, 1000), (2048, 1024)),
+            ((2000, 900), (2048, 1024)),
+            ((4096, 1000), (4096, 1024)),
+            ((900, 900), (512, 512)),
+            ((973, 973), (1024, 1024)),
+            ((972, 972), (512, 512)),
+            ((1024, 768), (1024, 512)),
+            ((768, 1024), (512, 1024)),
+            ((1024, 880), (1024, 1024)),
+            ((1024, 860), (1024, 512)),
+            ((3, 5), (2, 4)),
+            ((4096, 1), (4096, 1)),
+            ((1, 1), (1, 1)),
+            ((512, 256), (512, 256)),
+        ] {
+            assert_eq!(pot_dims((w, h)), out, "{w}x{h}");
+        }
+        // The short side scales below 1: it stays 1.
+        assert_eq!(pot_dims((4000, 1)), (4096, 1));
+        assert_eq!(pot_dims((900, 1)), (512, 1));
     }
 
     #[test]
-    fn pot_down_takes_the_largest_power_of_two_per_axis() {
-        let t = |w, h| target_dims((w, h), ResizeMode::PotDown);
-        assert_eq!(t(1000, 600), (512, 512));
-        assert_eq!(t(1536, 1024), (1024, 1024));
-        assert_eq!(t(48, 40), (32, 32));
-        assert_eq!(t(1024, 3), (1024, 2));
-        assert_eq!(t(1, 1), (1, 1));
-        assert_eq!(target_dims((1000, 600), ResizeMode::None), (1000, 600));
+    fn shrink_respects_the_floor() {
+        for (mode, out) in [
+            (ResizeMode::Half, 2048),
+            (ResizeMode::Quarter, 1024),
+            (ResizeMode::Eighth, 512),
+        ] {
+            assert_eq!(shrink((4096, 4096), mode, 512).0, out);
+            assert_eq!(shrink((1024, 1024), mode, 512).0, 512);
+        }
+        assert_eq!(shrink((512, 512), ResizeMode::Half, 256).0, 256);
+        assert_eq!(shrink((512, 256), ResizeMode::Eighth, 512), (512, 256));
+        assert_eq!(shrink((2048, 1), ResizeMode::Quarter, 512), (512, 1));
+        assert_eq!(shrink((4096, 4096), ResizeMode::None, 1), (4096, 4096));
+    }
+
+    /// Menu and sky art (`mips.levels = "none"`) keeps its own size, and still shrinks; a cube source is never resized
+    /// here (its face size decides).
+    #[test]
+    fn no_mip_textures_keep_their_size() {
+        let mut p = profile(Subtype::Diffuse);
+        p.mips.levels = MipLevels::Keyword(MipKeyword::None);
+        assert_eq!(target_dims((1000, 600), &p), (1000, 600));
+        p.resize = ResizeMode::Half;
+        p.resize_floor = 256;
+        assert_eq!(target_dims((1000, 600), &p), (500, 300));
+        assert_eq!(
+            target_dims((1000, 600), &profile(Subtype::Diffuse)),
+            (1024, 512)
+        );
+        assert_eq!(
+            target_dims((384, 64), &profile(Subtype::Cubemap)),
+            (384, 64)
+        );
+    }
+
+    #[test]
+    fn enlarge_keeps_a_constant_image_constant() {
+        let c = [0.25, 0.5, 0.75, 0.4];
+        let img = Rgba32F::new(5, 3, c);
+        assert!(enlarge(&img, (8, 4), false).px.iter().all(|p| *p == c));
+        for p in &enlarge(&img, (8, 4), true).px {
+            assert!(p.iter().zip(c).all(|(a, b)| (a - b).abs() < 1e-6), "{p:?}");
+        }
+        // One axis grows, the other shrinks: 31x20 is written 32x16, still constant.
+        let mut w = work(Rgba32F::new(31, 20, c), Domain::LinearLight, true);
+        let mut p = profile(Subtype::Diffuse);
+        p.alpha.policy = AlphaPolicy::Blend;
+        resize_work(&mut w, &p);
+        assert_eq!((w.img.width, w.img.height), (32, 16));
+        for px in &w.img.px {
+            assert!(
+                px.iter().zip(c).all(|(a, b)| (a - b).abs() < 1e-5),
+                "{px:?}"
+            );
+        }
+    }
+
+    /// Texel-centre aligned with clamped edges: 0, 1 becomes 0, 0.25, 0.75, 1. Weighted, a transparent texel's colour
+    /// does not bleed, and where every tap is transparent the plain colour is kept.
+    #[test]
+    fn enlarge_is_linear_and_weighted_by_alpha() {
+        let mut img = Rgba32F::new(2, 1, [0.0, 0.0, 0.0, 1.0]);
+        img.px[1] = [1.0, 1.0, 1.0, 1.0];
+        let out = enlarge(&img, (4, 1), false);
+        let r: Vec<f32> = out.px.iter().map(|p| p[0]).collect();
+        assert_eq!(r, [0.0, 0.25, 0.75, 1.0]);
+        img.px[1] = [1.0, 1.0, 1.0, 0.0];
+        let out = enlarge(&img, (4, 1), true);
+        assert!(out.px[..3].iter().all(|p| p[0] == 0.0), "{:?}", out.px);
+        assert_eq!(out.px[3], [1.0, 1.0, 1.0, 0.0]);
+        assert!(close(out.px[1][3], 0.75));
     }
 
     #[test]
@@ -142,9 +346,9 @@ mod tests {
     #[test]
     fn power_of_two_sources_are_untouched_bit_for_bit() {
         let img = rnd_image(8, 8, 11);
-        let p = profile(Subtype::Diffuse);
-        let mut none = p.clone();
-        none.resize = ResizeMode::None;
+        let none = profile(Subtype::Diffuse);
+        let mut p = none.clone();
+        p.resize = ResizeMode::Eighth;
         assert_eq!(preprocess(img.clone(), &p), preprocess(img, &none));
     }
 
@@ -190,21 +394,21 @@ mod tests {
     /// Task 4 review: an axis already a power of two is not filtered (one identity tap), so every output row is the
     /// 1-D Mitchell resample of its source row alone.
     #[test]
-    fn mitchell_pot_down_leaves_a_power_of_two_axis_unfiltered() {
-        let img = rnd_image(1000, 512, 7);
+    fn mitchell_resize_leaves_a_power_of_two_axis_unfiltered() {
+        let img = rnd_image(300, 512, 7);
         let mut p = profile(Subtype::Diffuse);
         p.alpha.policy = AlphaPolicy::Remove;
         p.mips.filter = MipFilter::Mitchell;
         let mut w = work(img.clone(), Domain::LinearLight, false);
         assert_eq!(mips::effective_filter(&w, &p), MipFilter::Mitchell);
         resize_work(&mut w, &p);
-        assert_eq!((w.img.width, w.img.height), (512, 512));
+        assert_eq!((w.img.width, w.img.height), (256, 512));
         for y in 0..512 {
-            let mut row = Rgba32F::new(1000, 1, [0.0; 4]);
-            row.px.copy_from_slice(&img.px[y * 1000..(y + 1) * 1000]);
+            let mut row = Rgba32F::new(300, 1, [0.0; 4]);
+            row.px.copy_from_slice(&img.px[y * 300..(y + 1) * 300]);
             let want =
-                crate::filter::resample_rgb(&row, (512, 1), MipFilter::Mitchell, p.mips.edge);
-            for (a, b) in w.img.px[y * 512..(y + 1) * 512].iter().zip(&want.px) {
+                crate::filter::resample_rgb(&row, (256, 1), MipFilter::Mitchell, p.mips.edge);
+            for (a, b) in w.img.px[y * 256..(y + 1) * 256].iter().zip(&want.px) {
                 for c in 0..3 {
                     assert_eq!(a[c], b[c].clamp(0.0, 1.0), "row {y}");
                 }

@@ -184,7 +184,7 @@ fn deciding_the_last_undecided_texture_never_exports_by_itself() {
     idle(&mut m);
     // Accept all leaves the questions that are not a sub-type.
     m.answer_undecided_row(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
-    m.answer_undecided_row(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.answer_undecided_row(ODD, Answer::Acknowledge(Code::DimSmall));
     m.answer_undecided_row(NORMAL, Answer::Green(GreenConvention::Directx));
     idle(&mut m);
     assert_eq!(m.undecided(), 0, "{:?}", m.undecided_keys());
@@ -285,7 +285,7 @@ fn closing_review_collapses_the_panel_it_showed() {
 /// Every non-sub-type question answered, so only the sub-types are still undecided.
 fn answer_all_but_subtypes(m: &mut AppModel) {
     m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
-    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.decide(ODD, Answer::Acknowledge(Code::DimSmall));
     m.decide(NORMAL, Answer::Green(GreenConvention::Directx));
     idle(m);
 }
@@ -367,7 +367,7 @@ fn clean_pbr_with_edited_json(dir: &std::path::Path) -> (AppModel, std::path::Pa
     m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
     m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(ODD, Answer::Subtype(Subtype::Diffuse));
-    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.decide(ODD, Answer::Acknowledge(Code::DimSmall));
     idle(&mut m);
     // C2: clean, so the first export starts without Review.
     m.export_clicked();
@@ -542,7 +542,7 @@ fn our_own_pgpatcher_json_does_not_open_review() {
     m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
     m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(ODD, Answer::Subtype(Subtype::Diffuse));
-    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.decide(ODD, Answer::Acknowledge(Code::DimSmall));
     idle(&mut m);
     m.export_clicked();
     idle(&mut m);
@@ -566,7 +566,7 @@ fn decided_pbr(dir: &std::path::Path) -> AppModel {
     m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
     m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(ODD, Answer::Subtype(Subtype::Diffuse));
-    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.decide(ODD, Answer::Acknowledge(Code::DimSmall));
     idle(&mut m);
     m
 }
@@ -720,7 +720,7 @@ fn review_has_no_half_size_or_stale_group() {
         "Recipe settings are in Advanced",
         "Review",
         "Skip these sets",
-        "This texture's size isn't a power of two — resize it or acknowledge",
+        "This texture is too small for its format — use a bigger image",
         "Undecided (4)",
         "Vanilla",
         "Vanilla folder name",

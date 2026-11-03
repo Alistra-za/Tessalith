@@ -150,9 +150,6 @@ pub(crate) fn prepare(
     };
     let levels = crate::mips::level_count(n, n, &p.mips.levels) as usize;
     let mut chain = sample::mip_chain(cube, levels);
-    if p.drop_top_mip && chain.len() > 1 {
-        chain.remove(0);
-    }
     if gamma {
         for px in chain
             .iter_mut()

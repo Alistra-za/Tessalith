@@ -152,13 +152,15 @@ fn reencode_is_a_boolean_file_or_batch_field_never_subtype_scoped() {
 
 #[test]
 fn resize_and_edge_are_settable_fields() {
-    let s = parse_set("resize=pot-down").unwrap();
+    let s = parse_set("resize=quarter").unwrap();
     assert_eq!(
         (s.field.as_str(), s.value.as_str()),
-        ("resize", Some("pot-down"))
+        ("resize", Some("quarter"))
     );
-    let s = parse_set("file:odd.png.resize=pot-down").unwrap();
+    let s = parse_set("file:odd.png.resize=eighth").unwrap();
     assert_eq!(s.field, "resize");
+    let s = parse_set("subtype:height.resize_floor=128").unwrap();
+    assert_eq!(s.field, "resize_floor");
     assert_eq!(
         parse_set("subtype:diffuse.mips.edge=clamp").unwrap().field,
         "mips.edge"

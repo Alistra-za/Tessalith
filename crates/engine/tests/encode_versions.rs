@@ -376,6 +376,14 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         rgb(64),
         &["subtype=generic_two_channel", "format=bc5"],
     );
+    // Note FM29: an NPOT source written at its power-of-two size (1000 enlarged to 1024), and a 512 height map that
+    // `resize = "half"` takes to its 256 floor.
+    add(
+        "npot_1000_bc1",
+        rgb(1000),
+        &["subtype=diffuse", "format=bc1", "mips.filter=box"],
+    );
+    add("height_half", rgb(512), &["subtype=height", "resize=half"]);
     sets
 }
 
@@ -561,6 +569,12 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "{events:#?}"
     );
     identity.extend(identity_entries(c.path(), "cov/", &cov));
+    let dims = |name: &str| {
+        let p = &identity[&format!("cov/textures/c/{name}.dds")];
+        (p["width"].as_u64(), p["height"].as_u64())
+    };
+    assert_eq!(dims("npot_1000_bc1"), (Some(1024), Some(1024)));
+    assert_eq!(dims("height_half"), (Some(256), Some(256)));
     t200_pins_the_cutoff(c.path());
     // The tent pin only means something if the weighted tent changes bytes against the box cutout.
     let sha =
@@ -588,6 +602,8 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "srgb_bc3",
         "wide_bc1",
         "wide_bc3",
+        "npot_1000_bc1",
+        "height_half",
     ] {
         assert!(covered(name), "identity pins miss the {name} fixture");
     }

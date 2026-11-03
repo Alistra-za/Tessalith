@@ -977,6 +977,80 @@ fn a_set_override_naming_nvtt_is_refused_with_the_hint() {
     }
 }
 
+/// Note FM29: `resize = "pot-down"` and `drop_top_mip` (any value, `false` included) are refused by name in a config,
+/// a preset and `--set`; `resize = "quarter"` and `resize_floor` load.
+#[test]
+fn pot_down_and_drop_top_mip_are_named() {
+    let pot = "power of two is automatic";
+    let half = "use resize = \"half\"";
+    for (text, hint) in [
+        ("[defaults]\nresize = \"pot-down\"\n", pot),
+        ("[files.\"a.png\"]\nresize = \"pot-down\"\n", pot),
+        ("[files.\"a.png\"]\ndrop_top_mip = true\n", half),
+        ("[subtypes.diffuse]\ndrop_top_mip = false\n", half),
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err().to_string();
+        assert!(
+            e.contains("removed in 2.0") && e.contains(hint),
+            "{text}: {e}"
+        );
+    }
+    let head = "schema_version = 1\nid = \"p\"\nversion = \"1\"\nbase = \"cs-quality\"\n";
+    let mut r = PresetRegistry::builtin().unwrap();
+    for (text, hint) in [
+        ("[subtypes.normal]\nresize = \"pot-down\"\n", pot),
+        ("[subtypes.normal]\ndrop_top_mip = true\n", half),
+    ] {
+        let e = r
+            .add_toml(&format!("{head}{text}"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(hint), "{text}: {e}");
+    }
+    for (set, hint) in [
+        ("resize=pot-down", pot),
+        ("file:a.png.resize=pot-down", pot),
+        ("drop_top_mip=true", half),
+    ] {
+        let e = engine::overrides::parse_set(set).unwrap_err();
+        assert!(
+            e.contains("removed in 2.0") && e.contains(hint),
+            "{set}: {e}"
+        );
+    }
+    let c = ConfigFile::parse(
+        "[subtypes.diffuse]\nresize = \"quarter\"\nresize_floor = 256\n",
+        "sdc.toml",
+    )
+    .unwrap();
+    assert!(c.subtypes.contains_key(&Subtype::Diffuse));
+    engine::overrides::parse_set("resize=eighth").unwrap();
+    engine::overrides::parse_set("resize_floor=128").unwrap();
+}
+
+/// Note FM29: height maps take `resize_floor = 256` from sdc-base, so a 512 height map under the compact presets'
+/// `resize = "half"` is written at 256; other maps keep the 512 floor.
+#[test]
+fn height_maps_shrink_to_a_256_floor() {
+    let reg = PresetRegistry::builtin().unwrap();
+    for preset in ["cs-compact", "vanilla-compact"] {
+        let target = if preset == "cs-compact" {
+            Target::Cs
+        } else {
+            Target::Vanilla
+        };
+        let h = reg.profile(preset, target, Subtype::Height).unwrap();
+        assert_eq!(
+            (h.resize, h.resize_floor),
+            (ResizeMode::Half, 256),
+            "{preset}"
+        );
+        assert_eq!(engine::resize::target_dims((512, 512), &h), (256, 256));
+        let n = reg.profile(preset, target, Subtype::Normal).unwrap();
+        assert_eq!(engine::resize::target_dims((512, 512), &n), (512, 512));
+    }
+}
+
 /// Note FM17: `bc1_model` (the 1.x BC1 decoder-model key) is refused by name.
 #[test]
 fn bc1_model_in_a_config_is_named() {

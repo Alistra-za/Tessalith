@@ -44,7 +44,7 @@ BC7 keeps the most quality at the same size as BC3. BC4 is used for single-chann
 
 ### How do I get smaller files?
 
-Use the `cs-compact` or `vanilla-compact` preset: BC1 for opaque colour, half size for other maps whose larger side is above 512. Or set `resize = "half"` and `format = "bc1"` yourself where you want them.
+Use the `cs-compact` or `vanilla-compact` preset: BC1 for opaque colour, half size for other maps whose larger side is above 512 (256 for height maps). Or set `resize = "half"` and `format = "bc1"` yourself where you want them.
 
 ```powershell
 sdc convert src --recursive --accept-suggestions high --preset cs-compact

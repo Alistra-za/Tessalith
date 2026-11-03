@@ -547,14 +547,19 @@ fn a_borrowed_n_from_a_set_without_one_is_set_missing_companion() {
     assert!(w.message.contains("borrowed"), "{}", w.message);
 }
 
-/// S-mips-7: the bake's size check reads the post-resize sizes, so an NPOT pair with `resize = pot-down` bakes.
+/// S-mips-7: the bake's size check reads the post-resize sizes, so an NPOT pair (written at its power-of-two size,
+/// Note FM29) bakes. A `_n` without mips keeps its 48 px and no longer pairs with the 32 px member.
 #[test]
 fn resized_npot_pair_bakes_on_post_resize_sizes() {
     for resize in [true, false] {
         let d = tempfile::tempdir().unwrap();
         normal(d.path(), "textures/pbr/iron_n.png", 48, 48);
         rough(d.path(), "textures/pbr/iron_rmaos.png", 48, 48);
-        let sets: &[&str] = if resize { &["resize=pot-down"] } else { &[] };
+        let sets: &[&str] = if resize {
+            &[]
+        } else {
+            &["file:**/iron_n.png.mips.levels=none"]
+        };
         let (p, _) = plan(req(d.path(), sets));
         let m = job(&p, "iron_rmaos.png");
         if resize {

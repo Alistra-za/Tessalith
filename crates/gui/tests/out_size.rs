@@ -53,10 +53,13 @@ fn bc1_bc5_and_rgba8_at_a_few_sizes_with_and_without_mips() {
 
 #[test]
 fn the_size_follows_a_resize() {
-    let mut p = profile(Format::Bc7, ColorTag::Srgb, NONE);
-    p.resize = ResizeMode::PotDown;
+    // Note FM29: with mips the power of two is automatic; without, the size is kept.
+    let mut p = profile(Format::Bc7, ColorTag::Srgb, FULL);
     let e = estimate((1000, 600), &p);
-    assert_eq!((e.width, e.height, e.chain_bytes), (512, 512, 512 * 512));
+    assert_eq!((e.width, e.height), (1024, 512));
+    p.mips.levels = NONE;
+    let e = estimate((1000, 600), &p);
+    assert_eq!((e.width, e.height, e.chain_bytes), (1000, 600, 1000 * 600));
     p.resize = ResizeMode::Half;
     let e = estimate((2048, 1024), &p);
     assert_eq!((e.width, e.height), (1024, 512));
@@ -221,41 +224,38 @@ fn a_psd_source_has_a_size() {
     assert_eq!(sdc_gui::model::out_size::source_dims(&p), Some((w, h)));
 }
 
-/// Final review M6: the four places that size a dropped top mip agree: the encode (`pipeline.rs`), the DIM checks
-/// and the clear on a single-level chain (`policy.rs`), and this estimate. Odd sizes, 1×N and the smallest chains
-/// are planned with `resize = half` (so DIM-RESIZED reports the size it checks); the sizes the DIM checks let through
-/// are also exported and their headers read.
+/// Note FM29: the three places that size a resized texture agree: the encode (`pipeline.rs`), the DIM checks
+/// (`policy.rs`) and this estimate. Odd sizes, 1×N, the floor and `mips.levels = "none"` (no power of two) are
+/// planned; the sizes the DIM checks let through are also exported and their headers read.
 #[test]
-fn the_dropped_top_mip_size_agrees_in_all_four_places() {
+fn the_resized_size_agrees_in_all_three_places() {
     use engine::api::*;
     use engine::codes::Code;
     use engine::events::*;
     use engine::resize::target_dims;
     use std::sync::Arc;
-    // (source size, mips.levels, exported)
-    let cases: &[((u32, u32), &str, bool)] = &[
-        ((2050, 6), "\"full\"", false),
-        ((2054, 2), "\"full\"", false),
-        ((2, 2049), "\"full\"", false),
-        ((1027, 1), "\"full\"", false),
-        ((1030, 514), "2", false),
-        ((1030, 514), "\"none\"", false),
-        ((1026, 2), "2", false),
-        ((2048, 8), "\"full\"", false),
-        ((2048, 16), "\"full\"", true),
-        ((1024, 1024), "2", true),
-        ((1024, 1024), "\"none\"", true),
+    // (source size, resize, resize_floor, mips.levels, exported)
+    type Case = ((u32, u32), &'static str, u32, &'static str, bool);
+    let cases: &[Case] = &[
+        ((2050, 6), "half", 512, "\"full\"", false),
+        ((1027, 1), "half", 1, "\"full\"", false),
+        ((2, 2049), "eighth", 1, "\"full\"", false),
+        ((1030, 514), "quarter", 256, "\"none\"", false),
+        ((1000, 1000), "none", 512, "\"full\"", true),
+        ((1024, 1024), "eighth", 64, "2", true),
+        ((2048, 16), "half", 512, "\"full\"", true),
+        ((1024, 1024), "half", 512, "\"none\"", true),
     ];
     let d = tempfile::tempdir().unwrap();
     let i = d.path().join("in");
     std::fs::create_dir_all(&i).unwrap();
     let mut toml = String::from("[defaults.encoder]\neffort = \"ultrafast\"\n");
-    for (n, ((w, h), levels, _)) in cases.iter().enumerate() {
+    for (n, ((w, h), resize, floor, levels, _)) in cases.iter().enumerate() {
         image::RgbImage::from_pixel(*w, *h, image::Rgb([120, 90, 60]))
             .save(i.join(format!("s{n}.png")))
             .unwrap();
         toml += &format!(
-            "\n[files.\"s{n}.png\"]\nsubtype = \"diffuse\"\nresize = \"half\"\ndrop_top_mip = true\nmips.levels = {levels}\n"
+            "\n[files.\"s{n}.png\"]\nsubtype = \"diffuse\"\nresize = \"{resize}\"\nresize_floor = {floor}\nmips.levels = {levels}\n"
         );
     }
     std::fs::write(i.join("sdc.toml"), toml).unwrap();
@@ -265,7 +265,7 @@ fn the_dropped_top_mip_size_agrees_in_all_four_places() {
     let e = Engine::new().unwrap();
     let plan = e.plan(r, &rep, &CancelToken::default()).unwrap();
     let mut written = vec![];
-    for (n, ((w, h), levels, exported)) in cases.iter().enumerate() {
+    for (n, ((w, h), _, _, levels, exported)) in cases.iter().enumerate() {
         let name = format!("s{n}.png");
         let j = plan
             .jobs
@@ -273,18 +273,15 @@ fn the_dropped_top_mip_size_agrees_in_all_four_places() {
             .find(|j| j.input.file_name().is_some_and(|f| f == name.as_str()))
             .unwrap_or_else(|| panic!("no job for {name}"));
         let p = &j.profile;
-        let (rw, rh) = target_dims((*w, *h), p.resize);
-        let chain = engine::mips::level_count(rw, rh, &p.mips.levels);
-        let want = if chain > 1 {
-            ((rw / 2).max(1), (rh / 2).max(1))
-        } else {
-            (rw, rh)
-        };
+        let want = target_dims((*w, *h), p);
         let case = format!("{w}x{h} levels {levels}");
-        assert_eq!(p.drop_top_mip, chain > 1, "the clear: {case}");
         let est = estimate((*w, *h), p);
         assert_eq!((est.width, est.height), want, "the estimate: {case}");
-        assert_eq!(est.mips, chain - u32::from(chain > 1), "{case}");
+        assert_eq!(
+            est.mips,
+            engine::mips::level_count(want.0, want.1, &p.mips.levels),
+            "{case}"
+        );
         let to = j
             .warnings
             .iter()

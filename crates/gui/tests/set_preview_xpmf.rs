@@ -240,9 +240,9 @@ fn re_encoding_the_own_member_refreshes_the_texture() {
     run(&mut s, &m);
     let before = source(&s, NOISE);
     assert!(matches!(before, Some(FileSource::Memory { .. })));
-    // drop_top_mip changes the noise map's output, so the member encodes again.
+    // Two mip levels change the noise map's output, so the member encodes again.
     let item = noise_item(&m);
-    m.set_field(&item, "drop_top_mip", json!(true));
+    m.set_field(&item, "mips.levels", json!(2));
     assert!(
         m.wait_idle(Duration::from_secs(60)),
         "planning did not finish"

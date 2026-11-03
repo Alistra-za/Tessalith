@@ -533,6 +533,7 @@ fn tree(
         grid(ui, st, scope, "m", |ui| {
             for (f, l) in [
                 ("resize", "Resize"),
+                ("resize_floor", "Size floor"),
                 ("mips.levels", "Mip levels"),
                 ("mips.filter", "Mip filter"),
             ] {
@@ -627,6 +628,7 @@ fn value_of(p: &Profile, field: &str) -> Value {
         .cloned()
         .unwrap_or_else(|| match field {
             "resize" => json!("none"),
+            "resize_floor" => json!(engine::config::DEFAULT_RESIZE_FLOOR),
             _ => Value::Null,
         })
 }

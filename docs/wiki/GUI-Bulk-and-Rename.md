@@ -36,7 +36,7 @@ With two or more sets selected, a row of chips picks which of their maps to edit
 Right-clicking a selected tile or set keeps the selection; right-clicking another one selects it alone. The menu offers:
 
 - *Edit settings for N selected*.
-- *Copy settings from <texture> to N selected…*: a checklist of the active (last clicked) texture's own settings, all ticked. Untick what you want to keep. A saved half size is one of the ticks (*Half size*). Textures only; to copy between sets, use *Select members of kind* first.
+- *Copy settings from <texture> to N selected…*: a checklist of the active (last clicked) texture's own settings, all ticked. Untick what you want to keep. Textures only; to copy between sets, use *Select members of kind* first.
 - *Reset all settings for N selected…*: removes their `sdc.toml` entries after asking. Acknowledged warnings are kept. A texture filling a pinned slot is skipped, and the report says so.
 - For sets, *Select members of kind*, which turns the selection into those textures.
 - *Show in Explorer* (one texture selected): opens Explorer with the source file selected. It is greyed out, with the reason, when the file is gone.

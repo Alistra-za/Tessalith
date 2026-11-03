@@ -1,5 +1,5 @@
-//! The remembered half size (`drop_top_mip`, Note CL) as a texture field, and check 3's Problems rows. Review no
-//! longer asks the question (Note FM). Task 18 removes the field, and this file with it.
+//! A texture's own `resize` and its Size floor (Note FM29), and check 3's Problems rows. Review never asks the
+//! half-size question (Note FM).
 mod support;
 use eframe::egui;
 use egui_kittest::kittest::Queryable;
@@ -81,12 +81,8 @@ fn dims(m: &AppModel, item: &str) -> (u32, u32) {
     (u(16), u(12))
 }
 
-fn toml(m: &AppModel) -> String {
-    std::fs::read_to_string(m.root.clone().unwrap().join("sdc.toml")).unwrap()
-}
-
-fn drop_top_mip(m: &AppModel, item: &str) -> Option<serde_json::Value> {
-    m.project.as_ref().unwrap().file_value(item, "drop_top_mip")
+fn own(m: &AppModel, item: &str, field: &str) -> Option<serde_json::Value> {
+    m.project.as_ref().unwrap().file_value(item, field)
 }
 
 /// The whole app, polled every frame as the real app does.
@@ -104,13 +100,13 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
     h
 }
 
-/// Note FC2 (supersedes CL26's dialog): Copy settings lists the half size as a tick like any other field.
+/// Copy settings lists `resize` and `resize_floor` as ticks like any other field.
 #[test]
-fn copy_settings_ticks_half_size() {
+fn copy_settings_ticks_resize_and_its_floor() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
-    m.set_field("up.png", "header", serde_json::json!("dx10"));
+    m.set_field("up.png", "resize", serde_json::json!("quarter"));
+    m.set_field("up.png", "resize_floor", serde_json::json!(256));
     assert!(m.wait_idle(WAIT));
     m.click_item("noise.png", false, false);
     m.click_item("up2.png", true, false);
@@ -120,34 +116,29 @@ fn copy_settings_ticks_half_size() {
         Some(Dialog::CopySettings { fields, .. }) => fields.clone(),
         d => panic!("{d:?}"),
     };
-    assert!(
-        fields.contains(&("drop_top_mip".to_string(), true)),
-        "{fields:?}"
+    for f in ["resize", "resize_floor"] {
+        assert!(fields.contains(&(f.to_string(), true)), "{fields:?}");
+    }
+    m.apply_copy_settings(
+        "up.png",
+        &["up2.png".to_string(), "noise.png".to_string()],
+        &["resize".to_string(), "resize_floor".to_string()],
     );
-    let mut h = harness(m);
-    h.run_steps(3);
-    h.get_by_label("Half size: true");
-    h.get_by_label("Apply").click();
-    h.run_steps(3);
-    assert!(h.query_by_label("Copy the half size too?").is_none());
-    let m = h.into_state();
     assert_eq!(m.dialog, None);
-    assert_eq!(drop_top_mip(&m, "up2.png"), Some(serde_json::json!(true)));
-    assert_eq!(drop_top_mip(&m, "noise.png"), Some(serde_json::json!(true)));
-    assert_eq!(
-        m.project.as_ref().unwrap().file_value("up2.png", "header"),
-        Some(serde_json::json!("dx10"))
-    );
+    for item in ["up2.png", "noise.png"] {
+        assert_eq!(own(&m, item, "resize"), Some(serde_json::json!("quarter")));
+        assert_eq!(own(&m, item, "resize_floor"), Some(serde_json::json!(256)));
+    }
     assert_eq!(m.undo_label(), Some("Copy settings from up.png"));
 }
 
-/// A half size set on the texture's own settings writes the smaller file; Undo removes the key in one step.
+/// `resize = "half"` on the texture's own settings writes the smaller file; Undo removes the key in one step.
 #[test]
-fn a_saved_half_size_writes_the_smaller_file_and_undo_removes_it_in_one_step() {
+fn a_saved_half_resize_writes_the_smaller_file_and_undo_removes_it_in_one_step() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
-    m.set_field("up2.png", "drop_top_mip", serde_json::json!(true));
+    m.set_field("up.png", "resize", serde_json::json!("half"));
+    m.set_field("up2.png", "resize", serde_json::json!("half"));
     assert!(m.wait_idle(WAIT));
     export(&mut m);
     assert_eq!(dims(&m, "up.png"), (512, 512));
@@ -155,16 +146,16 @@ fn a_saved_half_size_writes_the_smaller_file_and_undo_removes_it_in_one_step() {
     assert_eq!(dims(&m, "noise.png"), (1024, 1024));
     m.undo();
     assert!(m.wait_idle(WAIT));
-    assert_eq!(drop_top_mip(&m, "up2.png"), None);
+    assert_eq!(own(&m, "up2.png", "resize"), None);
 }
 
 #[test]
-fn the_cli_command_reproduces_the_half_size_output() {
+fn the_cli_command_reproduces_the_resized_output() {
     use engine::api::*;
     use engine::events::{new_batch_id, Reporter, VecSink};
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
+    m.set_field("up.png", "resize", serde_json::json!("half"));
     assert!(m.wait_idle(WAIT));
     export(&mut m);
     let root = m.root.clone().unwrap();
@@ -185,7 +176,7 @@ fn the_cli_command_reproduces_the_half_size_output() {
         .iter()
         .find(|j| j.input.ends_with("up.png"))
         .unwrap();
-    assert!(up.profile.drop_top_mip);
+    assert_eq!(up.profile.resize, engine::config::ResizeMode::Half);
     e.run(plan, &rep, &CancelToken::default()).unwrap();
     for item in ["up.png", "up2.png"] {
         let k = job(&m, item);
@@ -250,79 +241,54 @@ fn flagged_textures_export_full_and_are_listed() {
     assert_eq!(summary_count(&m) + 2, n_on, "the summary counts each once");
 }
 
+/// The size estimate follows the engine: the power of two first, then `resize` down to the floor.
 #[test]
-fn a_drop_top_mip_estimate_halves_the_size_and_writes_one_level_less() {
-    use engine::config::{MipLevels, Profile};
+fn the_estimate_follows_resize_and_its_floor() {
+    use engine::config::{Profile, ResizeMode};
     use sdc_gui::model::out_size::estimate;
     let d = tempfile::tempdir().unwrap();
     let m = opened(d.path());
     let mut p: Profile = m.item("up.png").unwrap().job.clone().unwrap().profile;
-    let full = estimate((1024, 1024), &p);
-    p.drop_top_mip = true;
-    let half = estimate((1024, 1024), &p);
-    assert_eq!((half.width, half.height), (512, 512));
-    assert_eq!(half.mips, full.mips - 1, "full stays full");
-    assert_eq!(
-        half.chain_bytes,
-        estimate((512, 512), &{
-            let mut q = p.clone();
-            q.drop_top_mip = false;
-            q
-        })
-        .chain_bytes
-    );
-    // M4: n levels with the top dropped writes n - 1.
-    p.mips.levels = MipLevels::Count(5);
-    assert_eq!(estimate((1024, 1024), &p).mips, 4);
+    let full = estimate((1000, 1000), &p);
+    assert_eq!((full.width, full.height), (1024, 1024));
+    p.resize = ResizeMode::Eighth;
+    let small = estimate((1024, 1024), &p);
+    assert_eq!((small.width, small.height), (512, 512), "the 512 floor");
+    assert_eq!(small.chain_bytes, estimate((512, 512), &p).chain_bytes);
+    p.resize_floor = 128;
+    assert_eq!(estimate((1024, 1024), &p).width, 128);
 }
 
-/// Owner ruling O1: a saved half size has a row in the texture's Advanced settings; Clear removes the key (M9: it
-/// never writes `false`).
+/// The Advanced drawer has a Size floor row showing the default, then the texture's own value; Clear removes the key.
 #[test]
-fn the_advanced_row_shows_a_saved_half_size_and_clear_removes_it() {
+fn the_size_floor_row_follows_resize_and_clear_removes_it() {
     use sdc_gui::model::fields::advanced_field_views;
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
+    let floor = |m: &AppModel| {
+        let j = m.item("up.png").unwrap().job.clone().unwrap();
+        advanced_field_views(m.target, &j)
+            .into_iter()
+            .find(|v| v.field == "resize_floor")
+            .unwrap()
+    };
+    let v = floor(&m);
+    assert_eq!(v.value, serde_json::json!(512));
+    assert_eq!(v.lock, None);
+    m.set_field("up.png", "resize", serde_json::json!("half"));
+    m.set_field("up.png", "resize_floor", serde_json::json!(256));
     assert!(m.wait_idle(WAIT));
-    let j = m.item("up.png").unwrap().job.clone().unwrap();
-    let v = advanced_field_views(m.target, &j)
-        .into_iter()
-        .find(|v| v.field == "drop_top_mip")
-        .unwrap();
-    assert_eq!(v.value, serde_json::json!(true));
+    let v = floor(&m);
+    assert_eq!((v.value.clone(), v.lock), (serde_json::json!(256), None));
     assert!(v.edited, "Clear (↺) shows for the texture's own value");
     m.settings.advanced_open = true;
     m.select_item("up.png");
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Half size");
+    h.get_by_label("Size floor");
     let mut m = h.into_state();
-    m.clear_field("up.png", "drop_top_mip");
+    m.clear_field("up.png", "resize_floor");
     assert!(m.wait_idle(WAIT));
-    assert_eq!(m.undo_label(), Some("Reset drop_top_mip"));
-    m.save().unwrap();
-    assert!(!toml(&m).contains("drop_top_mip"), "Clear removes the key");
-    // Unticking the row is a Clear too, never a `false`.
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(false));
-    assert_eq!(drop_top_mip(&m, "up.png"), None);
-}
-
-/// M6: one mip level has nothing to drop: the Advanced row is locked with the reason, and no write sets it.
-#[test]
-fn the_half_size_row_is_locked_without_mips() {
-    use sdc_gui::model::fields::advanced_field_views;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_field("up.png", "mips.levels", serde_json::json!("none"));
-    assert!(m.wait_idle(WAIT));
-    let j = m.item("up.png").unwrap().job.clone().unwrap();
-    let v = advanced_field_views(m.target, &j)
-        .into_iter()
-        .find(|v| v.field == "drop_top_mip")
-        .unwrap();
-    assert_eq!(v.lock, Some("No mips to drop"));
-    m.set_field("up.png", "drop_top_mip", serde_json::json!(true));
-    assert_eq!(drop_top_mip(&m, "up.png"), None);
+    assert_eq!(m.undo_label(), Some("Reset resize_floor"));
+    assert_eq!(own(&m, "up.png", "resize_floor"), None);
 }

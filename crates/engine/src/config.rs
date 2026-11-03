@@ -66,7 +66,7 @@ cfg_enum!(GraySource, "lowercase" { R, Luma });
 cfg_enum!(MipKeyword, "lowercase" { Full, None });
 cfg_enum!(MipFilter, "lowercase" { Box, Tent, Mitchell, Kaiser });
 cfg_enum!(#[derive(Default)] MipEdge, "lowercase" { #[default] Wrap, Clamp });
-cfg_enum!(#[derive(Default)] ResizeMode, "kebab-case" { #[default] None, PotDown, Half });
+cfg_enum!(#[derive(Default)] ResizeMode, "kebab-case" { #[default] None, Half, Quarter, Eighth });
 impl MipEdge {
     pub fn is_wrap(&self) -> bool {
         *self == MipEdge::Wrap
@@ -76,6 +76,14 @@ impl ResizeMode {
     pub fn is_none(&self) -> bool {
         *self == ResizeMode::None
     }
+}
+/// `resize_floor` when nothing sets it.
+pub const DEFAULT_RESIZE_FLOOR: u32 = 512;
+fn default_resize_floor() -> u32 {
+    DEFAULT_RESIZE_FLOOR
+}
+fn is_default_resize_floor(v: &u32) -> bool {
+    *v == DEFAULT_RESIZE_FLOOR
 }
 cfg_enum!(#[derive(Default)] ValidationMips, "lowercase" { #[default] All, Smallest });
 impl ValidationMips {
@@ -892,13 +900,16 @@ pub struct Profile {
     pub mips: MipSpec,
     pub format: Format,
     pub header: HeaderForm,
-    /// Preprocess step 6 (spec §5.4); `pot-down` = largest power of two ≤ each axis, `half` = both axes halved when the larger is above 512 (M6 Track D).
+    /// Preprocess step 6 (spec §5.4): `half`, `quarter` and `eighth` halve both sides up to 1, 2 or 3 times, each time
+    /// only while the longer side stays at or above `resize_floor`. The power-of-two step before it is automatic.
     #[serde(default, skip_serializing_if = "ResizeMode::is_none")]
     pub resize: ResizeMode,
-    /// Write the texture at half size, from its mip 1; every lower level is unchanged.
-    // Not serialised at its default, so existing profile hashes hold (v2 artist checks, DECISIONS Note CL21).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub drop_top_mip: bool,
+    /// The longer side `resize` never halves below, in pixels (Note FM29).
+    #[serde(
+        default = "default_resize_floor",
+        skip_serializing_if = "is_default_resize_floor"
+    )]
+    pub resize_floor: u32,
     pub encoder: EncoderSpec,
     #[serde(default)]
     pub validation: ValidationSpec,
@@ -1203,8 +1214,8 @@ mod tests {
         }
         assert_eq!(serde_json::to_value(MipEdge::Clamp).unwrap(), "clamp");
         assert_eq!(
-            serde_json::to_value(ResizeMode::PotDown).unwrap(),
-            "pot-down"
+            serde_json::to_value(ResizeMode::Quarter).unwrap(),
+            "quarter"
         );
         assert_eq!(serde_json::to_value(ResizeMode::None).unwrap(), "none");
     }
@@ -1219,16 +1230,23 @@ mod tests {
         assert_eq!((p.mips.edge, p.resize), (MipEdge::Wrap, ResizeMode::None));
         let v = serde_json::to_value(&p).unwrap();
         assert!(
-            v.get("resize").is_none() && v["mips"].get("edge").is_none(),
+            v.get("resize").is_none()
+                && v.get("resize_floor").is_none()
+                && v["mips"].get("edge").is_none(),
             "{v}"
         );
         let mut q = p.clone();
-        q.resize = ResizeMode::PotDown;
+        q.resize = ResizeMode::Eighth;
+        q.resize_floor = 256;
         q.mips.edge = MipEdge::Clamp;
         let v = serde_json::to_value(&q).unwrap();
         assert_eq!(
-            (v["resize"].as_str(), v["mips"]["edge"].as_str()),
-            (Some("pot-down"), Some("clamp"))
+            (
+                v["resize"].as_str(),
+                v["resize_floor"].as_u64(),
+                v["mips"]["edge"].as_str()
+            ),
+            (Some("eighth"), Some(256), Some("clamp"))
         );
         assert_eq!(serde_json::from_value::<Profile>(v).unwrap(), q);
     }

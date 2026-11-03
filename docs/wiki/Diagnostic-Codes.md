@@ -79,10 +79,10 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `DIM-NPOT` | blocking | A side is not a power of two (checked after resizing). | `resize = "pot-down"`, or acknowledge. |
+| `DIM-NPOT` | warning | A texture with `mips.levels = "none"` keeps a side that is not a power of two (textures with mips are [resized to one](Project-Config-Fields.md#format-and-size)). | |
 | `DIM-SMALL` | blocking | A side is under 4 pixels. A cube face under 4 is also `CFG-INVALID`, which can't be acknowledged. | Resize, or acknowledge (not for a cube). |
 | `DIM-FLOW-SMALL` | warning | A `_flow` map is 32 px or smaller; Community Shaders ignores it. | Use 64 px or more. |
-| `DIM-RESIZED` | info | The input was resized, with the old and new size. | |
+| `DIM-RESIZED` | info | The input was resized, for example `1000x600 → 1024x512`. | |
 | `DIM-TOO-LARGE` | error | A side is too large ([limit](Texture-Types.md#input-formats)). | Downscale the source. |
 
 ### Cubemaps
@@ -155,7 +155,7 @@ Every warning has a code and a severity:
 
 ### Artist checks
 
-These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert measures only when the GUI asks. They only warn: they never block an export or change "ready", and each has a switch in Advanced → Checks. The CLI raises none of them, but it honours a saved `drop_top_mip`.
+These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert measures only when the GUI asks. They only warn: they never block an export or change "ready", and each has a switch in Advanced → Checks. The CLI raises none of them.
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
@@ -163,7 +163,7 @@ These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert me
 | `CHK-Z-SIGN` | warning | A normal map's blue channel points the wrong way ([checks](Set-Shaders.md#height-maps-and-the-artist-checks)). | Check the source. |
 | `CHK-PARALLAX` | warning | A height map, judged against the set's neutral height (0.5, or 1.0 with a multilayer coat), uses little range, clips, is mostly white or is too steep. | Check the height map. |
 | `CHK-PARALLAX-SCALE` | warning | A landscape set's displacement scale is more than 2x from the others. | Make the scales match. |
-| `CHK-LOW-DETAIL` | warning | Full size adds little detail ([half size](GUI-Artist-Checks.md#half-size)). | Tick **Half size** in the texture's Advanced settings, or ignore. |
+| `CHK-LOW-DETAIL` | warning | Full size adds little detail ([Low detail](GUI-Artist-Checks.md#low-detail)). | Set `resize = "half"` on the texture, or ignore. |
 | `CHK-UV-GUTTER` | warning | UV islands closer than 8 texels for more than 2 % of used texels. | Space the islands out. |
 
 ### Generated maps

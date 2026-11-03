@@ -44,7 +44,7 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Set materials](GUI-Set-Materials.md): the skin, terrain and grass material cards.
 - [The bottom panel, Messages and toasts](GUI-Bottom-Tabs.md): the panel's tabs and the session log.
 - [Problems](GUI-Problems.md): every row and its fix button, deciding from the list.
-- [Artist checks](GUI-Artist-Checks.md): the four checks, the UV overlay, half size.
+- [Artist checks](GUI-Artist-Checks.md): the four checks, the UV overlay, low detail.
 - [Review and Export](GUI-Review-and-Export.md): Export, the Review panel, the Files tab.
 - [Also export as Vanilla and CM](GUI-Also-Export.md): the extra Vanilla and CM folders.
 - [Presets](GUI-Presets.md): the preset creator.

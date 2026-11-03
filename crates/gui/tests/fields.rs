@@ -307,6 +307,37 @@ fn filter_edge_and_resize_views_show_their_defaults() {
         .find(|v| v.field == "resize")
         .unwrap();
     assert_eq!(resize.value, serde_json::json!("none"));
+    // Note FM29: the floor shows its default 512 and stays editable while nothing halves, so Copy settings can
+    // carry it together with `resize`.
+    let floor = advanced_field_views(m.target, &job)
+        .into_iter()
+        .find(|v| v.field == "resize_floor")
+        .unwrap();
+    assert_eq!((floor.value, floor.lock), (serde_json::json!(512), None));
+}
+
+/// Note FM29: the Resize row offers None, Half, Quarter and Eighth (the power of two is automatic); the Size floor
+/// row offers powers of two.
+#[test]
+fn the_resize_row_offers_the_halving_steps() {
+    let p = PresetRegistry::builtin()
+        .unwrap()
+        .base_profile(Target::Cs, Subtype::Diffuse);
+    let values = |f: &str| -> Vec<serde_json::Value> {
+        sdc_gui::ui::presets::field_options(f, Target::Cs, &p)
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect()
+    };
+    assert_eq!(
+        values("resize"),
+        serde_json::json!(["none", "half", "quarter", "eighth"])
+            .as_array()
+            .unwrap()
+            .clone()
+    );
+    assert!(values("resize_floor").contains(&serde_json::json!(256)));
+    assert_eq!(field_lock(Target::Cs, &p, "resize_floor"), None);
 }
 
 /// Owner, 2026-10-13: the format pickers list only what the engine allows (`policy::allowed_encodings`).

@@ -307,7 +307,7 @@ fn prepare_then<T>(
     }
     let bake = match (lengths, &job.bake) {
         (Some(l), Some(b)) => {
-            let member = crate::resize::target_dims((img.width, img.height), p.resize);
+            let member = crate::resize::target_dims((img.width, img.height), p);
             let nv = NormalVariance::new(l, member, p.mips.bake_clamp).map_err(|e| {
                 fail(Stage::Load)(format!("variance bake with {}: {e}", b.normal.display()))
             })?;
@@ -360,16 +360,11 @@ fn prepare_then<T>(
     if base_coverage.is_some() {
         preserve_coverage(&mut chain, p.alpha.threshold, p.alpha.compare);
     }
-    // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the source size.
+    // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the power-of-two size.
     let detail_ratio = (detail
         && crate::checks::low_detail_eligible(p, (chain[0].width, chain[0].height)))
     .then(|| crate::checks::detail_ratio(&chain))
     .flatten();
-    // The half-size choice (Note CL20): written from mip 1, every lower level unchanged. Before `dims`, so the level
-    // list and `first_level` match the written chain.
-    if p.drop_top_mip && chain.len() > 1 {
-        chain.remove(0);
-    }
     let dims: Vec<(u32, u32)> = chain.iter().map(|l| (l.width, l.height)).collect();
     let first_level = match keep {
         Keep::Encode => 0,

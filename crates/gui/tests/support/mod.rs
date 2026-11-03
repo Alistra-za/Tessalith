@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 //! A folder like a small mod: a diffuse with varying alpha (needs an alpha decision), a normal with no stated green
-//! convention, a 48 px NPOT diffuse (blocked by DIM-NPOT), a plain diffuse, and roughness + AO that pack `_rmaos`.
+//! convention, a 3 px diffuse (blocked by DIM-SMALL), a plain diffuse, and roughness + AO that pack `_rmaos`.
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use image::{ImageBuffer, Luma, Rgb, Rgba};
@@ -26,7 +26,7 @@ pub fn mod_folder(dir: &Path) -> PathBuf {
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
         .save(r.join("rock01_normal.png"))
         .unwrap();
-    ImageBuffer::from_fn(48, 48, |x, y| Rgb(grad(x, y)))
+    ImageBuffer::from_fn(3, 3, |x, y| Rgb(grad(x, y)))
         .save(r.join("odd.png"))
         .unwrap();
     for (n, v) in [("rock01_roughness.png", 120u8), ("rock01_ao.png", 200)] {
@@ -173,7 +173,7 @@ pub fn complex_material(m: &mut AppModel, key_end: &str) {
 pub fn decide_all(m: &mut AppModel) {
     m.decide("landscape/rock01.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
-    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
     m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
     m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
     m.decide(

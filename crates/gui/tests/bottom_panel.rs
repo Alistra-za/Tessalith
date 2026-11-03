@@ -149,7 +149,7 @@ fn many_undecided(dir: &std::path::Path, n: usize) -> AppModel {
             i.key = format!("t/t{n:05}");
             i.name = format!("t{n:05}.png");
             i.status = ItemStatus::NeedsDecision;
-            i.decisions = vec![Decision::Acknowledge(Code::DimNpot)];
+            i.decisions = vec![Decision::Acknowledge(Code::DimSmall)];
             i.warnings = vec![];
             i.set_key = None;
             i
@@ -221,7 +221,7 @@ fn a_problems_row_selects_its_texture_and_decides_in_place() {
     let has = |h: &Harness<'static, AppModel>, k: &str, f: fn(&Decision) -> bool| {
         h.state().item(k).unwrap().decisions.iter().any(f)
     };
-    let ack = |d: &Decision| matches!(d, Decision::Acknowledge(Code::DimNpot));
+    let ack = |d: &Decision| matches!(d, Decision::Acknowledge(Code::DimSmall));
     assert!(!has(&h, "landscape/odd.png", ack), "odd lost its question");
     let alpha = |d: &Decision| matches!(d, Decision::AlphaMeaning);
     assert!(has(&h, "landscape/leaf.png", alpha));

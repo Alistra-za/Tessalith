@@ -1684,7 +1684,8 @@ fn an_rgba16f_preview_disables_the_srgb_unorm_toggle() {
 }
 
 #[test]
-fn the_dim_npot_box_offers_a_power_of_two_resize() {
+fn the_dim_box_offers_no_resize_button() {
+    // Note FM29: the power of two is automatic, so the box only acknowledges (odd.png is 3 px: DIM-SMALL).
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
     model.decide(
@@ -1696,16 +1697,8 @@ fn the_dim_npot_box_offers_a_power_of_two_resize() {
     let mut h = harness(model);
     h.run();
     h.get_by_label("Acknowledge for this texture");
-    press(&mut h, "Resize to a power of two");
-    settle(&mut h);
-    let job = h.state().item("landscape/odd.png").unwrap().job.clone();
-    assert_eq!(
-        job.unwrap().profile.resize,
-        engine::config::ResizeMode::PotDown
-    );
     assert!(h.query_by_label("Resize to a power of two").is_none());
 }
-
 /// M6 Track E spec §2, §6: a sub-type decided by an accepted High suggestion reads "(auto)" next to it, with the
 /// suggestion's reason as hover text.
 #[test]

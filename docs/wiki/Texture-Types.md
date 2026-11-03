@@ -12,7 +12,7 @@ Tessalith decides how to encode each file from its sub-type: what the texture is
 | `.kra`, `.ora` | Not read: `IN-DECODE` ("Krita and OpenRaster files are not read; export the image as PNG"). |
 | `.dds` | Skipped by default (`IN-DDS-SKIPPED`). Set `reencode = true` on the file to convert it anyway, at a quality cost (`LOSS-REENCODE`). |
 
-Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Embedded ICC profiles are ignored and the pixels are read as stored. NaN or infinite samples are replaced (`IN-NONFINITE`).
+Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Any size is accepted: a texture with mips is written at a power of two ([Format and size](Project-Config-Fields.md#format-and-size)). Embedded ICC profiles are ignored and the pixels are read as stored. NaN or infinite samples are replaced (`IN-NONFINITE`).
 
 ## Texture sets
 

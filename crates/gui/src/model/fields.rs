@@ -112,8 +112,7 @@ pub const ADVANCED_FIELDS: [(&str, &str); 5] = [
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
     ("header", "DDS header"),
     ("resize", "Resize"),
-    // Note FC2 (CL15): "Half size" is the one name; "mip 0" is hover text.
-    ("drop_top_mip", "Half size"),
+    ("resize_floor", "Size floor"),
 ];
 
 /// The cubemap section's fields in display order (Note DT7), in the groups `ui::cube_section` draws them in.
@@ -269,15 +268,6 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
             Some("no encoder runs for uncompressed formats")
         }
         "color.tag" if target != Target::Cs => Some("_SRGB is only written under cs"),
-        // M6: one level has no mip 1 to write from (the engine ignores the field there, Note CL23).
-        "drop_top_mip"
-            if matches!(
-                p.mips.levels,
-                MipLevels::Keyword(MipKeyword::None) | MipLevels::Count(0..=1)
-            ) =>
-        {
-            Some("No mips to drop")
-        }
         "encoder.perceptual"
             if !(p.subtype.category() == Category::Color
                 && p.alpha.policy != AlphaPolicy::Data
@@ -427,7 +417,8 @@ pub(crate) fn views_of(
                 .unwrap_or_else(|| match field {
                     "mips.edge" => Value::from("wrap"),
                     "resize" => Value::from("none"),
-                    "drop_top_mip" | "encoder.bc1_alpha" => Value::from(false),
+                    "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
+                    "encoder.bc1_alpha" => Value::from(false),
                     _ => Value::Null,
                 });
             let provenance = job

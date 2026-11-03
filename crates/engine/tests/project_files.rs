@@ -29,7 +29,7 @@ fn gray(dir: &Path, rel: &str, v: u8) {
         .unwrap();
 }
 
-/// `in/` with two `rock01_n.png` in two folders, a diffuse, two 48 px (NPOT) files, and roughness + AO so cs packs
+/// `in/` with two `rock01_n.png` in two folders, a diffuse, two 3 px files (DIM-SMALL at 2 px), and roughness + AO so cs packs
 /// `landscape/rock01_rmaos`. `toml` is written to `in/sdc.toml`.
 fn fixture(toml: &str) -> TempDir {
     let d = tempfile::tempdir().unwrap();
@@ -37,8 +37,8 @@ fn fixture(toml: &str) -> TempDir {
     rgb(&r, "landscape/rock01_n.png", 64, [128, 128, 255]);
     rgb(&r, "other/rock01_n.png", 64, [128, 128, 255]);
     rgb(&r, "landscape/rock01.png", 64, [90, 60, 30]);
-    rgb(&r, "landscape/odd.png", 48, [90, 60, 30]);
-    rgb(&r, "other/odd.png", 48, [90, 60, 30]);
+    rgb(&r, "landscape/odd.png", 3, [90, 60, 30]);
+    rgb(&r, "other/odd.png", 3, [90, 60, 30]);
     gray(&r, "landscape/rock01_roughness.png", 120);
     gray(&r, "landscape/rock01_ao.png", 200);
     std::fs::write(r.join("sdc.toml"), toml).unwrap();
@@ -108,14 +108,14 @@ fn a_files_subtype_decides_the_file() {
 #[test]
 fn files_allow_acknowledges_only_that_file() {
     let d = fixture(concat!(
-        "[files.\"landscape/odd.png\"]\nsubtype = \"diffuse\"\nallow = [\"DIM-NPOT\"]\n",
+        "[files.\"landscape/odd.png\"]\nsubtype = \"diffuse\"\nallow = [\"DIM-SMALL\"]\n",
         "[files.\"other/odd.png\"]\nsubtype = \"diffuse\"\n"
     ));
     let p = plan(req(&d));
     assert_eq!(job(&p, "landscape/odd.dds").status, JobStatus::Ready);
     assert!(matches!(
         &job(&p, "other/odd.dds").status,
-        JobStatus::Blocked { codes } if codes.contains(&Code::DimNpot)
+        JobStatus::Blocked { codes } if codes.contains(&Code::DimSmall)
     ));
 }
 

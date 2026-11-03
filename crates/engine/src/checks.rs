@@ -225,19 +225,20 @@ pub fn detail_ratio(chain: &[Rgba32F]) -> Option<f64> {
     (e12 >= 1e-6).then(|| up_error(m0, m1) / e12)
 }
 
-/// Whether check 3 measures a texture of `dims` under `p`: colour or normal (never complex grass), no resize or
-/// dropped top level already, at least 3 mips, and above the half floor (the T4 `HALF_FLOOR`), so a texture that
+/// Whether check 3 measures a texture of `dims` under `p`: colour or normal (never complex grass), no resize yet, at
+/// least 3 mips, and `resize = "half"` would halve its power-of-two size above `resize_floor`, so a texture that
 /// could not be halved is never flagged.
 pub fn low_detail_eligible(p: &Profile, dims: (u32, u32)) -> bool {
+    use crate::resize::{pot_dims, shrink};
+    let pot = pot_dims(dims);
     low_detail_profile_eligible(p)
-        && crate::resize::target_dims(dims, ResizeMode::Half) != dims
+        && shrink(pot, ResizeMode::Half, p.resize_floor) != pot
         && crate::mips::level_count(dims.0, dims.1, &p.mips.levels) >= 3
 }
 
 /// The half of [`low_detail_eligible`] known before Load: everything but the size.
 pub fn low_detail_profile_eligible(p: &Profile) -> bool {
     p.resize == ResizeMode::None
-        && !p.drop_top_mip
         && matches!(p.category, Category::Color | Category::Normal)
         && !matches!(p.subtype, Subtype::ComplexGrass | Subtype::Cubemap)
         && !matches!(
@@ -553,9 +554,10 @@ mod tests {
         let mut half = d.clone();
         half.resize = ResizeMode::Half;
         assert!(!low_detail_eligible(&half, (1024, 1024)));
-        let mut dropped = d.clone();
-        dropped.drop_top_mip = true;
-        assert!(!low_detail_eligible(&dropped, (1024, 1024)));
+        // The floor counts: a height map's 256 lets a 512 square be halved.
+        let mut floor = d.clone();
+        floor.resize_floor = 256;
+        assert!(low_detail_eligible(&floor, (512, 512)));
         let mut none = d.clone();
         none.mips.levels = MipLevels::Keyword(MipKeyword::None);
         assert!(!low_detail_eligible(&none, (1024, 1024)));

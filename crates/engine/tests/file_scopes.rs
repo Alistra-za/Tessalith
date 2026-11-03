@@ -32,22 +32,22 @@ fn job<'a>(p: &'a Plan, rel: &str) -> &'a ResolvedJob {
         .unwrap_or_else(|| panic!("no job for {rel}"))
 }
 
-/// DIM-NPOT is blocking; acknowledging it for `a/x.png` must leave `b/x.png` blocked.
+/// DIM-SMALL is blocking; acknowledging it for `a/x.png` must leave `b/x.png` blocked.
 #[test]
 fn a_per_file_allow_acknowledges_one_file_only() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("in");
-    png(&root, "a/x.png", 48);
-    png(&root, "b/x.png", 48);
+    png(&root, "a/x.png", 3);
+    png(&root, "b/x.png", 3);
     let mut req = BatchRequest::new(vec![root.clone()], d.path().join("out"), Target::Cs);
     req.recursive = true;
     req.overrides = vec![parse_set("file:**/x.png.subtype=diffuse").unwrap()];
     req.file_allow
-        .insert("a/x.png".into(), [Code::DimNpot].into_iter().collect());
+        .insert("a/x.png".into(), [Code::DimSmall].into_iter().collect());
     let p = plan(req);
     assert_eq!(job(&p, "a/x.png").status, JobStatus::Ready);
     assert!(matches!(
         &job(&p, "b/x.png").status,
-        JobStatus::Blocked { codes } if codes.contains(&Code::DimNpot)
+        JobStatus::Blocked { codes } if codes.contains(&Code::DimSmall)
     ));
 }

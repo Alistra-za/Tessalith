@@ -717,7 +717,7 @@ fn enter_in_unsaved_dialog_cancels() {
 fn the_unsaved_dialog_names_only_dirty_files() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field("landscape/odd.png", "resize", json!("pot-down"));
+    m.set_field("landscape/odd.png", "resize", json!("half"));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(!m.sets_doc.as_ref().unwrap().is_dirty());
     assert!(!m.request_close());

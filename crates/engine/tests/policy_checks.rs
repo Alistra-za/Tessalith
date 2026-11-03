@@ -224,14 +224,14 @@ fn threshold_range_and_npot() {
         "textures/a/x_n.png",
         Some("n"),
         &["n"],
-        Rgba32F::new(60, 64, [0.5, 0.5, 1.0, 1.0]),
+        Rgba32F::new(64, 2, [0.5, 0.5, 1.0, 1.0]),
         &[],
         &[],
     );
     assert_eq!(
         j.status,
         JobStatus::Blocked {
-            codes: vec![Code::DimNpot]
+            codes: vec![Code::DimSmall]
         }
     );
 }
@@ -512,7 +512,7 @@ fn srgb_and_bc6h_are_gated_by_target() {
 /// tag, alpha, dimensions, alpha meaning) would be a cascade, so none of them fire and the job is blocked.
 #[test]
 fn unavailable_subtype_reports_cfg_unavailable_only() {
-    // varying alpha, non-power-of-two: LOSS-ALPHA-DATA, DIM-NPOT and the unconfirmed alpha meaning of
+    // varying alpha, non-power-of-two: LOSS-ALPHA-DATA, DIM-RESIZED and the unconfirmed alpha meaning of
     // pbr_albedo would all fire on an available profile
     let mut img = Rgba32F::new(60, 64, [0.5, 0.4, 0.3, 1.0]);
     for (i, p) in img.px.iter_mut().enumerate() {
@@ -578,7 +578,7 @@ fn unavailable_subtype_reports_cfg_unavailable_only() {
     assert_eq!(j.profile.subtype, Subtype::Diffuse);
     let c = codes(&j);
     assert!(
-        c.contains(&Code::DimNpot) && c.contains(&Code::SugLowConfidence),
+        c.contains(&Code::DimResized) && c.contains(&Code::SugLowConfidence),
         "{c:?}"
     );
     assert!(
@@ -2214,35 +2214,38 @@ fn filter_scope_is_per_field() {
     );
 }
 
-/// S-mips-7: `resize = pot-down` turns DIM-NPOT into DIM-RESIZED (Info) with the sizes in its data.
+/// Note FM29: an NPOT texture with mips is written at its power-of-two size: DIM-RESIZED (Info) with the sizes in its
+/// data, no DIM-NPOT. With `mips.levels = "none"` it keeps its size and DIM-NPOT is a warning.
 #[test]
-fn pot_down_turns_dim_npot_into_dim_resized() {
+fn npot_with_mips_is_resized_and_without_mips_is_a_dim_npot_warning() {
     let img = || Rgba32F::new(48, 40, [0.5, 0.5, 0.5, 1.0]);
     let diffuse = |sets: &[&str]| run(Target::Cs, "textures/a/x.png", None, &[], img(), sets, &[]);
-    let j = diffuse(&["subtype=diffuse", "resize=pot-down"]);
+    let j = diffuse(&["subtype=diffuse"]);
     assert!(!codes(&j).contains(&Code::DimNpot), "{:?}", j.warnings);
     let w = warning(&j, Code::DimResized);
     assert_eq!(w.severity, engine::codes::Severity::Info);
     assert_eq!(w.data["from"], serde_json::json!([48, 40]));
-    assert_eq!(w.data["to"], serde_json::json!([32, 32]));
-    let j = diffuse(&["subtype=diffuse"]);
+    assert_eq!(w.data["to"], serde_json::json!([32, 16]));
+    assert_eq!(w.message, "48x40 → 32x16");
+    let j = diffuse(&["subtype=diffuse", "mips.levels=none"]);
     assert_eq!(
         warning(&j, Code::DimNpot).severity,
-        engine::codes::Severity::Blocking
+        engine::codes::Severity::Warning
     );
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
     assert!(!codes(&j).contains(&Code::DimResized), "{:?}", j.warnings);
 }
 
-/// S-mips-7: a power-of-two input is not resized, so pot-down reports nothing.
+/// S-mips-7: a power-of-two input is not resized, so it reports nothing.
 #[test]
-fn pot_down_on_a_power_of_two_input_reports_no_resize() {
+fn a_power_of_two_input_reports_no_resize() {
     let j = run(
         Target::Cs,
         "textures/a/x.png",
         None,
         &[],
         Rgba32F::new(64, 32, [0.5, 0.5, 0.5, 1.0]),
-        &["subtype=diffuse", "resize=pot-down"],
+        &["subtype=diffuse", "resize=half"],
         &[],
     );
     assert!(!codes(&j).contains(&Code::DimResized), "{:?}", j.warnings);
@@ -2257,7 +2260,7 @@ fn flow_small_tests_the_resized_size() {
         Some("flow"),
         &["flow"],
         Rgba32F::new(40, 40, [0.5, 0.5, 0.5, 1.0]),
-        &["resize=pot-down"],
+        &[],
         &[],
     );
     assert!(codes(&j).contains(&Code::DimFlowSmall), "{:?}", j.warnings);
@@ -2549,8 +2552,6 @@ fn tiny_cube_is_dim_small() {
     let j = cube_dims((48, 8), &["cubemap.face_size=2"]);
     assert!(codes(&j).contains(&Code::DimSmall), "{:?}", j.warnings);
     assert!(codes(&j).contains(&Code::CfgInvalid));
-    let j = cube_dims((24, 4), &["drop_top_mip=true"]);
-    assert!(codes(&j).contains(&Code::DimSmall), "{:?}", j.warnings);
     let j = cube_dims((24, 4), &[]);
     assert!(!codes(&j).contains(&Code::DimSmall), "{:?}", j.warnings);
 }

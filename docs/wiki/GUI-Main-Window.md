@@ -117,8 +117,7 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Pin.** *Pin this slot (always use this file)* keeps a set slot's file as it is in Tessalith (saved in `sdc-project.toml`, never in the PGPatcher JSON).
 - **PGPatcher lock.** PGPatcher keeps the mesh's own texture in a slot ([Slot menus](GUI-Sets-Column.md#slot-menus)).
 - **Field lock.** A field that the target or the sub-type fixes, so it is greyed with the reason (for example the format of a type that allows only one). Not the PGPatcher lock and not a pin.
-- **Half size.** The Advanced tick for a texture whose full size adds almost nothing: the texture is written without its top mip, half the width and height (`drop_top_mip`). The check that flags it is *Low detail*.
-- **Halve if larger than 512.** The Resize option that halves a texture only when its larger side is above 512. A setting for a sub-type, not an answer to a question.
+- **Half, Quarter, Eighth.** The Resize options. Each halving stops at the *Size floor*. A setting for a texture or a sub-type, not an answer to a question.
 - **Set.** The textures that belong to one material: they share a name stem (and a PGPatcher JSON entry under Community Shaders).
 - **Helper.** A source file that is not a texture of its own: it fills a channel of another output, or blends into the normal. It is never written as a DDS.
 - **PGPatcher JSON.** The editor for the JSON PGPatcher reads is *PGPatcher JSON* everywhere: the *PGPatcher JSON editor…* menu item and set button, and the tab or window title. Its *+ Add a delete section* button adds a PGPatcher "delete" section.

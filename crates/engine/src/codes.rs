@@ -6,7 +6,7 @@
 //! set that no longer exists, M3b), PACK-RECIPE-CONFLICT and PACK-RECIPE-UNBUILDABLE (a `packing.recipe` the set
 //! could not follow, packing-fills Task 1) and
 //! FMT-HDR-SOURCE (why `pbr_emissive` is or is not BC6H, O2) and
-//! DIM-RESIZED (`resize = pot-down` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
+//! DIM-RESIZED (the power of two or `resize` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
 //! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
 //! CFG-PRESET-SKIPPED (a user preset folder file that failed to load, skipped) and CFG-GREEN-CONFLICT (an explicit
 //! `flip_green` that contradicts `green_convention`) (M6 Track D) and the five `RNM-*` codes of RNM normal layers (M6 Track F2).
@@ -83,7 +83,8 @@ codes! {
     CfgFilterIgnored = "CFG-FILTER-IGNORED" => Info,
     CfgPresetSkipped = "CFG-PRESET-SKIPPED" => Warning,
     CfgGreenConflict = "CFG-GREEN-CONFLICT" => Warning,
-    DimNpot = "DIM-NPOT" => Blocking,
+    // Note FM29: only a `mips.levels = "none"` texture keeps an odd size, and it may.
+    DimNpot = "DIM-NPOT" => Warning,
     DimSmall = "DIM-SMALL" => Blocking,
     DimFlowSmall = "DIM-FLOW-SMALL" => Warning,
     DimResized = "DIM-RESIZED" => Info,

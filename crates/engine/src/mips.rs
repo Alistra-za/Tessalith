@@ -12,8 +12,7 @@
 //! - **Box-only contents:** normal renormalisation, the `_cnr` self-bake, `LengthPyramid` and roughness r² are box
 //!   only (S-mips-2); `effective_filter` returns box for them, and for Mitchell or Kaiser on alpha-weighted RGB,
 //!   even if a blocked profile reached the chain.
-//! - **Odd sizes** (an acknowledged `DIM-NPOT` without resize): the level size is the box chain's, and the resample
-//!   takes any n -> m.
+//! - **Odd sizes**: the level size is the box chain's, and the resample takes any n -> m.
 //!
 //! An *accumulation* chain is built by repeated box filtering of the unnormalised base; every output
 //! level is a *finalised* copy (√ back from squared roughness, renormalised vectors, clamps). Mip 0 is the base as

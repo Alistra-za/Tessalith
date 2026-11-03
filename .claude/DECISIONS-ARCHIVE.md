@@ -122,6 +122,24 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 - **Deferred:** the Kaiser width/alpha/stretch syntax; alpha-weighted tent for foliage; `resize` upscaling (`pot-up`, `pot-nearest`) and a size cap; matching the resized mip 0's coverage to the source (S-mips-8); resizing pack sources of different sizes to a common size (`PACK-SIZE-MISMATCH` still errors); the 16K box peak and the single-threaded `powf` (S-mips-11).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-6 `resize` = `none` (default) or `pot-down`**, a top-level profile field (`--set resize=pot-down`). `pot-down` maps each axis independently to the largest power of two ≤ its size (1000×600 → 512×512; a power-of-two axis is kept). The aspect may change; UVs are normalised, so meshes map the same. The resize runs in Preprocess step 6 (after sRGB decode), in the Work's domain, with the **effective mip filter** and edge: box is area-exact (the generalised `downsample_area`), tent/Mitchell/Kaiser are polyphase on RGB. Alpha is always area box; alpha-weighted colour is weighted by area × alpha; a roughness member is resized on r²; normals, `_msn` and `_flow` are box-resized as vectors and mip 0 is then renormalised unless `mips.normal_base = keep`. Upscaling and a size cap are out of scope. **Owner question 3 closed** (2026-10-11): no preset defaults to `pot-down`; `DIM-NPOT` blocks until the user opts in.
+  - **Resize runs at the end of `preprocess_with`** (pre-flight F1): after the Hdr clamp, in the function the pipeline and `BakeJob::load_lengths` call (`preprocess` is only a wrapper), so the written DDS and the bake both see the resized image.
+  - **A box resize never clamps** (pre-flight M8): only a non-box resize clamps LinearLight RGB to [0, 1] (polyphase overshoot), mirroring `finalize`; a float LDR value > 1 survives a box resize until Quantise.
+  - **`axis_taps` returns identity taps when n == m**, so an axis that is already a power of two is copied unchanged under `pot-down` with any filter (no blur at scale 1).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-7 Resize in planning:** `DIM-NPOT`, `DIM-SMALL` and `DIM-FLOW-SMALL` test the **post-resize** size. A resized job gets the new **`DIM-RESIZED`** (Info) code: "1000x600 resized to 512x512 (resize = pot-down)", data `{"from":[w,h],"to":[w',h']}`; a power-of-two input with `pot-down` gets none. The bake plans its shift on the post-resize sizes and `BakeJob::load_lengths` builds the pyramid from the resized, renormalised `_n`; the bake's `NormalVariance` is built on `target_dims`, so the shift check holds on an NPOT `pot-down` pair. `BakeJob::identity_sha256` adds the `_n`'s `resize` only when it is not `none`, so existing identities are unchanged. `PACK-SIZE-MISMATCH` still compares source sizes before assembly; the packed image is resized after assembly.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-10 GUI:** the basic Mipmaps group's "Filter" row is a live combo (Box / Tent / Mitchell / Kaiser); disallowed options are greyed out with the S-mips-2 reason. It stays in the basic panel (owner, 2026-10-11). An "Edge" row (Wrap / Clamp) sits under it, locked "only tent, Mitchell and Kaiser read the edge" while the filter is box; a default edge or resize the profile does not serialise shows as Wrap / None. "Resize" (None / Down to a power of two) is the last Advanced texture field. The `DIM-NPOT` decision box gains "Resize to a power of two" next to "Acknowledge for this texture"; it writes `resize = "pot-down"` on that file's `[files]` entry.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **Deferred:** the Kaiser width/alpha/stretch syntax; `resize` upscaling (`pot-up`, `pot-nearest`) and a size cap; matching the resized mip 0's coverage to the source (S-mips-8); resizing pack sources of different sizes to a common size (`PACK-SIZE-MISMATCH` still errors); the 16K box peak and the single-threaded `powf` (S-mips-11).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **S-mips-11 Memory and speed:** the new kernels are separable and row-parallel on the shared rayon pool. Admission (`api::job_bytes`) adds `8·w·h` bytes for a non-box filter and `32·w·h` for a resize, with `(w, h)` from one shared `input_dims` helper (also used by `estimated_bytes`: a DDS by its header, else `load::image_size`), so a re-encoded DDS is admitted on its real size. The 13 GiB box peak at 16K and the single-threaded per-channel `powf` in Preprocess stay deferred to the scheduler revisit.
+
 ## Note T — M6 Track D: presets (plan rulings, 2026-10-12)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
@@ -161,6 +179,9 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
   - `export --out` refuses to overwrite the source file of any loaded preset (final review Minor 10).
   - `diff` help and its human output footer say "rules are not compared" (final review Minor 13).
   - `validate` reports the first problem per file, and validates a folder file in place of itself.
+
+ARCHIVED (superseded by Note FM, 2026-11-03)
+- **T4 `resize = half` (owner, 2026-10-12).** Both sides halve together when the larger is above 512 (`HALF_FLOOR`); the aspect ratio is kept and the larger side floors (1024×512 becomes 512×256); there is no POT step; each side is at least 1 px; `DIM-RESIZED` names the mode; admission counts it like `pot-down`.
 
 ## Note U — M6 Track E: NIF-aware alpha and fewer confirmations (plan rulings, 2026-10-12)
 
@@ -1103,6 +1124,32 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - Scope: once the export has rows, the line counts only the textures whose job has a row and the sets with such a member, not the whole project (an "Export selected" of one texture, Task 6, counts that texture). With no rows it covers the project.
   - A texture counts once, whether its check rows are keyed by item (`At::Texture`) or by job (`At::File`, a Warn-mode CHK-LOW-DETAIL in Task 4): File keys are mapped back to their item.
 
+ARCHIVED (superseded by Note FM, 2026-11-03)
+- **CL21 The `drop_top_mip` field (Task 4).** The spec's "half-size choice is remembered" field (owner ruling, 2026-10-17, Pending answer 1 accepted as written): `resize.drop_top_mip` cannot exist because `resize` is already a string, so it is a top-level `Profile::drop_top_mip: bool`. The GUI saves it per file (`[files."up.png"] drop_top_mip = true`, `--set file:<glob>.drop_top_mip=true`), but like any profile field it is accepted at every scope (`[defaults]`, `[subtypes]`, presets, `--set`).
+  - It is in `FIELD_PATHS`, so the `[files]` schema (from `PartialProfile`) and the GUI's field machinery read it (the Advanced row with Clear is Task 5, owner O1, 2026-10-20). Schemas regenerated: `config`, `event`, `manifest`, `preset` and `profile` gain the optional field; `event` gains `low_detail` in `SkipKind` and the code; `dds-validation` the code.
+  - `#[serde(default, skip_serializing_if = "Not::not")]`: absent from the serialised profile at its default, so `profile_sha256` and every existing manifest hold, and the goldens stay byte-identical (95/95). When true it changes the hash, so `if-changed` re-encodes.
+  - It drops mip 0 of the finished chain after the measurement and before `dims` (`chain.remove(0)` when the chain has more than one level): the top level is the full chain's mip 1 and every lower level is the same, byte for byte (test `drop_top_mip_writes_mip_1_as_the_top_level`). The CLI honours a saved field.
+  - `bake::plan::post_resize_dims` ignores it on purpose: a `_n`'s variance for its set's `_rmaos` is measured on the full chain, so the bake is unchanged (test `drop_top_mip_on_an_n_leaves_its_rmaos_bake_unchanged`).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CL22 Code and tests (Task 4).** `CHK-LOW-DETAIL` (Warning) is the one CHK code the engine emits; `Code::ALL` is 100 with `ChkLowDetail` last (K20). The GUI's `check_of(ChkLowDetail)` arrives with Task 5 (task-5 brief), so until then a Warn-mode row is listed at `Level::Warning`, not `Level::Check` (K2). Tests: `checks::tests` (ratio for noise, nearest and bilinear upscales and an odd NPOT chain; flat and 2-level chains; the eligibility table), `tests/low_detail.rs` (7: hold, previous output kept on the stale path, hold re-flags an up-to-date output without rewriting it, warn, warn = off bytes and records, `drop_top_mip` levels, the `_rmaos` bake), `tests/low_detail_corpus.rs` (`#[ignore]`, `SDC_TEXTURES_10K`).
+
+ARCHIVED (superseded by Note FM, 2026-11-03)
+- **CL23 Task 4 fix round 1 (review of aeae1ce).**
+  - **DIM checks after a dropped mip (I1).** `check_profile`'s DIM block (S-mips-7) reads the size actually written: the `resize` target, halved once more (the mips' `(w / 2).max(1)` rule) when `drop_top_mip` is set and the chain has more than one level. So a 256x4 source with the field gets the Blocking `DIM-SMALL` and is not written, a 64² `_flow` gets `DIM-FLOW-SMALL`, and `DIM-RESIZED` (still raised only when `resize` changes the size) names the written size, with ", drop_top_mip" after the mode. Test `the_dim_checks_see_the_size_after_drop_top_mip`.
+  - **Single-level chains (M3).** When the chain after `resize` has one level (`mips.levels = "none"`, `Count(1)`, or a 1x1 source), `resolve_decided` clears `drop_top_mip` (and its provenance key): it would change nothing, so it stays out of the profile hash and never re-encodes identical bytes. Test `drop_top_mip_on_a_single_level_chain_is_ignored`.
+  - **Tests:** `checks::is_low_detail` holds the strict `<` (pinned at exactly the threshold); a soft texture with some native detail measures in [0.25, 0.6) and is not flagged (M1); an explicit `false` stays up to date and `true` re-encodes in the same output folder (M2).
+  - The schema description of `drop_top_mip` is now user-facing only; the hash note moved to a `//` comment (M8).
+  - Carried to Task 5: `out_size` writes n−1 levels for `Count(n)` (M4); Clear removes the key rather than writing `false` (M9); `check_of(ChkLowDetail)`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CL25 Export rows and the size estimate (Task 5).** `check_of(CHK-LOW-DETAIL) = LowDetail`, so a Warn-mode export row is a `Level::Check` Problems row: hidden by the "Fake resolution" switch, counted by the Checks filter and the end summary, and never in the Export dot's `ready_rows` (K2). `out_size::estimate` drops level 0 for `drop_top_mip` on a chain of more than one level: half the size and one level less (`Count(n)` writes n − 1; `full` is a full chain of the half size).
+
+ARCHIVED (superseded by Note FM, 2026-11-03)
+- **CL26 The half size in Advanced and in Copy settings (owner rulings O1 and 2026-10-20).**
+  - **Advanced.** `drop_top_mip` is an `ADVANCED_FIELDS` row, "Half size" (Note FC2): a tick box with ↺, like `resize`. ↺ removes the key in one undo step, and unticking also removes it (`set_field` routes `false` to `clear_field`), because a written `false` would stay as a provenance entry (Task 4 M9). On a single-level chain (`mips.levels = "none"` or a count of 0 or 1), `field_lock` disables the row with "No mips to drop", and `set_field` refuses `true` there, so bulk edits and Copy settings never write it either (fix round 1, M6).
+  - **Copy settings.** A saved half size is a tick like any other field (`Half size: true`); there is no dialog (Note FC2).
+
 ## Note CI — NIF editing v2 Phase A (NIF team, 2026-10-20)
 
 ARCHIVED (superseded by Note GD5, 2026-10-29)
@@ -1303,6 +1350,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 - **CN66 Progress and low detail (P8, P10, TA24).** One `drawer_epoch` per Also export; progress stays rows counted model-side, and the bar may step back as each phase plans its rows. `shortcut:` the first phase's `BatchDone` stops the pace clock (an ETA across phases; upgrade if users ask). `start_export_pass` turns Hold into Warn for an Also export (Off stays Off); `run_also` runs the Vanilla and CM phases with `LowDetailMode::Off`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Track C (Note CL):** `_flow` → Hair never reaches a PBR set. Check stats skip a derived job (CN22), and `drop_top_mip`/low detail act on the derived chain (CN11).
 
 ## Note CM — NIF v2 Phase B: animation clock, key editor, controllers, clips, In game preview (NIF team, 2026-10-21)
 
@@ -1888,6 +1938,15 @@ ARCHIVED (superseded by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Tests.** `sets_filter.rs` (`a_selected_set_the_filter_hides_is_named_with_a_clear_filter_button`, `a_set_made_under_a_filter_stays_shown_until_the_filter_changes`), `rnm_preview.rs` (`a_failed_preview_says_why`), `pgp_drag.rs` (`a_rounded_value_shows_its_stored_value_on_hover`), `uv_coverage.rs` (`uv_is_not_offered_while_a_meshes_scan_is_unsettled`: running and stopped), `overlay.rs` (`the_range_button_is_drawn_for_every_texture_and_enabled_only_with_a_range_warning`), `ui_smoke.rs` (`TOOLBAR_ORDER` holds "Range overlay"), `textures_filter.rs` (the tile buttons stop at the cap), `input_name_edit.rs` (`the_all_slots_tick_is_per_project`), `subtype_hints.rs` (`a_files_subtype_on_a_suffixless_file_measures_it_again`). Fix round 1 added `the_column_never_draws_two_clear_filter_buttons`, `a_greyed_range_toggle_says_why` and `the_card_shows_the_rounded_value_and_hovers_the_stored_one`.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **FC2 Half size is an Advanced tick, not a Review question (theme 2; supersedes CL24, CL27 M2, CL43 and CL26's dialog; amends CL20: no Hold mode; CL15's names collapse to "Half size"; owner, 2026-10-29; Review's question and the Hold pieces went in Note FM24).**
+  - **Engine.** `LowDetailMode` is `Off` or `Warn`: a flagged texture is written at full size either way, and `Warn` adds the `CHK-LOW-DETAIL` warning (test `warn_measures_but_writes_the_full_chain`). `SkipKind::LowDetail` stays in the event schema so older logs parse, but it is no longer emitted. The CLI has no low-detail flag, so CLI output does not change.
+  - **Copy settings (CL26).** A saved half size is a tick like any other field (`Half size: true`); there is no dialog (test `copy_settings_ticks_half_size`).
+  - **Names (CL15).** "Half size" is the one name. The Advanced row is *Half size* (was *Half size (drop mip 0)*). `CHK-LOW-DETAIL` and "mip 0" are hover text. The clash with the Resize option "Half size (larger side above 512)" goes to Task 9's vocabulary work (controller ruling).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Half size has one meaning.** FC2 left the Resize option `Half size (larger side above 512)` beside the Advanced tick `Half size` (which drops the top mip). The option now reads `Halve if larger than 512` (value `half` unchanged), so the words "Half size" mean the Advanced tick only. The check is `Low detail` (was `Fake resolution`, FC2's last stray name; code `CHK-LOW-DETAIL`, key `low_detail` unchanged); "mip 0" is out of the Advanced hover. No test pinned the old Resize wording.
+
 ## Note FE — BC6H peak-preserving mode (agent, 2026-10-31)
 
 ARCHIVED (superseded by Note FF1, 2026-10-31)
@@ -2136,6 +2195,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
   - **Patch header.** It still refuses BC1 with transparent texels (S7); the reason now names `encoder.bc1_alpha`.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Half size.** There is no Review question, no `Review.half_size`, no `Measure whether full size adds anything` switch (an old `[checks] drop_top_mip` key in `gui.toml` is ignored on load) and no `LowDetailMode::Hold`, `Keep::Measure` or `Processed::UpToDate`: the engine writes a flagged texture at full size and `Warn` only adds the warning. `drop_top_mip` stays a texture field (the Advanced tick, Copy settings, the size estimate); its pins live in `gui/tests/drop_top_mip_field.rs`. Encoded bytes and `identity.json` are unchanged.
 
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 

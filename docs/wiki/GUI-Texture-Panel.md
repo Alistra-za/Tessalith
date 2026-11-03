@@ -75,7 +75,7 @@ A texture that still needs an answer has an **amber border**: a Medium or Low su
 | What kind of texture is this? | A sub-type dropdown and **Confirm**. |
 | What does the alpha channel mean? | *Remove*, *Cutout*, *Blend*, *Cutout + Blend*, *Data*. |
 | An info line "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press *Treat as OpenGL (flip green)* if it is an OpenGL map; an OpenGL file then shows *Green: OpenGL (flipped)* with a *Treat as DirectX* button that undoes it. |
-| A blocking warning | **Acknowledge for this texture**. For `DIM-NPOT` (a size that is not a power of two) there is also **Resize to a power of two**, which writes `resize = "pot-down"` and clears the block. |
+| A blocking warning | **Acknowledge for this texture**. |
 
 Each answer is written to `sdc.toml`, as a field value or as an `allow` code on the file's `[files]` entry, so it stays in your project file. A choice you make always wins over a suggestion.
 
@@ -106,4 +106,4 @@ Unsaved edits put a dot in the window title until you save with **Save** or **Ct
 
 **Encoding follows type.** When a texture's sub-type changes (a set shader, a slot command, a drag, or a sub-type edit), a format and tag you set on it that the new type does not allow are reset, so the new type's default applies. An info row in Problems says which, with **Undo this change**. Settings that are still valid are kept, and a texture in a pinned slot is left alone and named in that row. One undo restores both the change and the reset.
 
-**Resize** is in the Advanced drawer ([Advanced texture fields](GUI-Advanced-Drawer.md#advanced-drawer)). A resized texture shows a `DIM-RESIZED` note.
+**Resize** and **Size floor** are in the Advanced drawer ([Advanced texture fields](GUI-Advanced-Drawer.md#advanced-drawer)). How a size is chosen, including the automatic power of two: [Format and size](Project-Config-Fields.md#format-and-size). A resized texture shows a `DIM-RESIZED` note.

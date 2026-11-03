@@ -375,9 +375,9 @@ fn the_n_stays_up_to_date_when_its_bake_turns_on_or_off() {
     );
 }
 
-/// S-mips-7 (ruling F7): an NPOT pair with `resize = pot-down` bakes from the resized, renormalised `_n`. The
-/// expectation is built through the public API: Preprocess (which resizes), the `_n`'s written mip 0, its length
-/// pyramid and the member's chain with that bake.
+/// S-mips-7 (ruling F7): an NPOT pair, written at its power-of-two size (Note FM29), bakes from the resized,
+/// renormalised `_n`. The expectation is built through the public API: Preprocess (which resizes), the `_n`'s written
+/// mip 0, its length pyramid and the member's chain with that bake.
 #[test]
 fn a_resized_pair_bakes_from_the_resized_normal() {
     use engine::bake::{LengthPyramid, NormalVariance};
@@ -386,10 +386,8 @@ fn a_resized_pair_bakes_from_the_resized_normal() {
     let d = tempfile::tempdir().unwrap();
     let n = bumpy_n(d.path(), 48, 0.0);
     let r = rmaos(d.path(), 48);
-    let mut p = plan(d.path(), &r, &n, true, false);
-    let job = &mut p.jobs[0];
-    job.profile.resize = ResizeMode::PotDown;
-    job.bake.as_mut().unwrap().normal_profile.resize = ResizeMode::PotDown;
+    let p = plan(d.path(), &r, &n, true, false);
+    let job = &p.jobs[0];
     let (member_p, normal_p) = (
         job.profile.clone(),
         job.bake.as_ref().unwrap().normal_profile.clone(),

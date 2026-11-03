@@ -186,10 +186,11 @@ pub fn source_cell(layout: CubeLayout, src: (u32, u32)) -> u32 {
     }
 }
 
-/// The face edge written: `cubemap.face_size`, else the largest power of two within [`source_cell`], at most 4096
-/// (the top of the explicit key's range, DS21).
+/// The face edge written: `cubemap.face_size`, else [`source_cell`] taken to a power of two by
+/// [`crate::resize::pot_dims`], at most 4096 (the top of the explicit key's range, DS21).
 pub fn face_size(p: &Profile, layout: CubeLayout, src: (u32, u32)) -> u32 {
-    p.cubemap
-        .face_size
-        .unwrap_or_else(|| (1u32 << source_cell(layout, src).max(1).ilog2()).min(4096))
+    p.cubemap.face_size.unwrap_or_else(|| {
+        let cell = source_cell(layout, src);
+        crate::resize::pot_dims((cell, cell)).0.min(4096)
+    })
 }

@@ -189,15 +189,21 @@ impl BakeJob {
     /// What the member's output depends on besides the `_n`'s bytes: the decode settings, how mip 0 is written, and
     /// the level shift (DECISIONS R12). Recorded in the manifest so `if-changed` re-encodes when any changes; the
     /// `_n`'s path and its own output settings (format, effort) are not part of it.
-    /// The `_n`'s `resize` is part of it; its RNM settings join only when layers apply (Note W18).
+    /// The `_n`'s `resize` is part of it, with its `resize_floor` when that is not the default (so existing
+    /// identities hold, Note FM29); its RNM settings join only when layers apply (Note W18).
     pub fn identity_sha256(&self) -> String {
         let np = &self.normal_profile;
+        let resize = if np.resize_floor == crate::config::DEFAULT_RESIZE_FLOOR {
+            serde_json::json!(np.resize)
+        } else {
+            serde_json::json!([np.resize, np.resize_floor])
+        };
         crate::manifest::sha256_json(&(
             &np.channels,
             np.alpha.policy,
             np.mips.normal_base,
             self.shift,
-            np.resize,
+            resize,
             self.rnm.as_ref().map(|_| &np.rnm),
         ))
         .expect("a tuple of plain config values serialises")
@@ -225,7 +231,7 @@ impl BakeJob {
             let r = self.rnm.as_ref()?;
             let dims = crate::load::image_size(&self.normal).ok()?;
             let np = &self.normal_profile;
-            Some(r.admission_bytes(&np.rnm, crate::resize::target_dims(dims, np.resize)))
+            Some(r.admission_bytes(&np.rnm, crate::resize::target_dims(dims, np)))
         };
         decode_peak(&self.normal) + layers().unwrap_or(0)
     }
@@ -643,7 +649,7 @@ mod tests {
             rnm: None,
         };
         let mut resized = b.clone();
-        resized.normal_profile.resize = crate::config::ResizeMode::PotDown;
+        resized.normal_profile.resize = crate::config::ResizeMode::Half;
         assert_ne!(resized.identity_sha256(), b.identity_sha256());
     }
 }

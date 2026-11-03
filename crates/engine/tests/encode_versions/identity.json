@@ -55,6 +55,20 @@
     "subtype": "height",
     "width": 64
   },
+  "cov/textures/c/height_half.dds": {
+    "format": "Bc4",
+    "height": 256,
+    "payload_sha256": "770b0c04113432d48213137fa568357424eb53814c86d588b5719b4e6078dbed",
+    "subtype": "height",
+    "width": 256
+  },
+  "cov/textures/c/npot_1000_bc1.dds": {
+    "format": "Bc1 { srgb: false }",
+    "height": 1024,
+    "payload_sha256": "05ccd4b3843360b68218dddf9c27566e0fc695d56c33c78ace04e6f31ec8549c",
+    "subtype": "diffuse",
+    "width": 1024
+  },
   "cov/textures/c/opaque_bc1.dds": {
     "format": "Bc1 { srgb: false }",
     "height": 64,

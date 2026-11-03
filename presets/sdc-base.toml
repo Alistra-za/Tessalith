@@ -63,6 +63,7 @@ alpha = { policy = "data" }
 format = "bc5"
 [subtypes.height]
 format = "bc4"
+resize_floor = 256
 [subtypes.projected_noise]
 format = "bc4"
 [subtypes.detail_normal]

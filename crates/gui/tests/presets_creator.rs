@@ -56,7 +56,7 @@ fn a_duplicated_builtin_edits_saves_and_reloads_equal() {
     assert_eq!(pm.id(), "my-cs");
     assert!(!pm.dirty() && pm.deletable());
     // A second save of the same preset rewrites its own file.
-    pm.set_field(Subtype::Normal, "resize", json!("pot-down"));
+    pm.set_field(Subtype::Normal, "resize", json!("half"));
     assert_eq!(pm.save().unwrap(), path);
     assert_eq!(files(d.path()), ["my-cs.toml"]);
 }

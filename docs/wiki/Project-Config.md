@@ -46,8 +46,7 @@ alpha.policy = "blend"
 packing.fill.metallic = 255
 
 [files."textures/armor/iron/iron_d.png"]
-resize = "pot-down"
-allow = ["DIM-NPOT"]
+resize = "half"
 
 # Read a misnamed file under another name; the file on disk is not renamed
 [inputs."textures/armor/iron/iron_normalmap.png"]
@@ -169,7 +168,7 @@ An entry takes any field from the [field reference](#field-reference), including
 
 | Key | Meaning |
 |---|---|
-| `allow` | List of blocking codes to acknowledge for this file only, for example `allow = ["DIM-NPOT", "TAG-UNORM-PBR"]`. An unknown code is an error. |
+| `allow` | List of blocking codes to acknowledge for this file only, for example `allow = ["DIM-SMALL", "TAG-UNORM-PBR"]`. An unknown code is an error. |
 | `reencode` | `true` to convert a DDS input instead of skipping it (`IN-DDS-SKIPPED`). Re-encoding a DDS loses quality (`LOSS-REENCODE`). |
 | `rnm.target` | For an RNM layer file: which base normal it feeds, `"n"`, `"cnr"` or `"both"`. |
 | `helper.role` | For an image: what it is as a [helper texture](Texture-Packing.md#helper-textures). `"none"` (not a helper: convert it on its own); `"roughness"`, `"metallic"`, `"ao"`, `"specular"`, `"glossiness"`, `"height"`, `"opacity"`, `"fuzz"` (skin fuzz mask), `"orm"`, `"curves"`, `"cavity"`, `"fuzzweight"` (PBR `_f` weight), `"subsurfaceweight"` (PBR `_s` weight); or an RNM layer: `"bump"`, `"bump2"`, `"bumpmask"`, `"bumpmask2"`, `"detailnorm"`, `"detailnorm2"`, `"detailnormmask"`, `"detailnormmask2"`, `"bent"`, `"bentmask"`. Overrides the name and any `subtype`. Ignored on a DDS. |

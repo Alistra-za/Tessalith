@@ -29,7 +29,7 @@ fn listed(m: &AppModel) -> Vec<String> {
 /// Every non-sub-type question answered, so only the sub-types are still undecided.
 fn answer_all_but_subtypes(m: &mut AppModel) {
     m.decide(LEAF, Answer::Alpha(AlphaPolicy::Cutout));
-    m.decide(ODD, Answer::Acknowledge(Code::DimNpot));
+    m.decide(ODD, Answer::Acknowledge(Code::DimSmall));
     m.decide(NORMAL, Answer::Green(GreenConvention::Directx));
     idle(m);
 }

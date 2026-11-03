@@ -233,9 +233,9 @@ fn a_size_mismatch_reports_set_bake_ratio_and_does_not_bake() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     for d in [a.path(), b.path()] {
         put(d, "wall_n.png", normal(1024, 1024, |_| true));
-        put(d, "wall_m.png", material(768, 768));
+        put(d, "wall_m.png", material(1024, 512));
     }
-    let allow = [Code::DimNpot];
+    let allow: [Code; 0] = [];
     let p = plan(request(
         b.path(),
         Target::Vanilla,
@@ -251,7 +251,7 @@ fn a_size_mismatch_reports_set_bake_ratio_and_does_not_bake() {
         .unwrap_or_else(|| panic!("{:?}", m.warnings));
     // Review M1: the message names the member, not a roughness map.
     assert!(
-        w.message.contains("member 768x768") && !w.message.contains("roughness"),
+        w.message.contains("member 1024x512") && !w.message.contains("roughness"),
         "{}",
         w.message
     );

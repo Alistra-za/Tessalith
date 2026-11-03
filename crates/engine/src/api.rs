@@ -644,7 +644,7 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 
 /// [`estimated_bytes`] of the job's input, plus what its variance bake holds (DECISIONS R4; the M4 carry "the
 /// summed-area table counts against `--mem-budget`", a length pyramid since R5), plus (S-mips-11) 8 B/texel for a
-/// non-box filter's intermediate and 32 B/texel for a resize, both on the input's size, plus (Note BB) the active
+/// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus (Note BB) the active
 /// RNM layers' [`crate::rnm::RnmJob::admission_bytes`] at the resized size and, for complex grass, one more float
 /// chain (both half chains and the stacked chain are live together in `grass::build`).
 fn job_bytes(job: &ResolvedJob) -> u64 {
@@ -656,19 +656,23 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         } else {
             0
         };
-        let resize = if crate::resize::target_dims((w, h), p.resize) != (w, h) {
-            32
-        } else {
+        let to = crate::resize::target_dims((w, h), p);
+        // An enlarge holds its premultiplied copy and two grown images (up to ~1.3x the input) on top.
+        let resize = if to == (w, h) {
             0
+        } else if to.0 > w || to.1 > h {
+            64
+        } else {
+            32
         };
         let grass = if p.subtype == Subtype::ComplexGrass {
             texels * 16 * 134 / 100
         } else {
             0
         };
-        let layers = job.active_rnm().map_or(0, |r| {
-            r.admission_bytes(&p.rnm, crate::resize::target_dims((w, h), p.resize))
-        });
+        let layers = job
+            .active_rnm()
+            .map_or(0, |r| r.admission_bytes(&p.rnm, to));
         // Note CN13: a derived job also holds the colour maps it reads, its scalars (and `_curves`/cavity) image and
         // the recipe's output, twice the input for the grass stack.
         let derived = job.derive.as_ref().map_or(0, |dj| {
@@ -3820,11 +3824,17 @@ mod tests {
             fill: None,
         };
         let texels = 48 * 40;
+        // `mips.levels = "none"` keeps the 48x40 size (Note FM29).
+        let full = std::mem::replace(
+            &mut job.profile.mips.levels,
+            crate::config::MipLevels::Keyword(crate::config::MipKeyword::None),
+        );
         assert_eq!(job_bytes(&job), input_bytes(48, 40));
         job.profile.mips.filter = MipFilter::Kaiser;
         assert_eq!(job_bytes(&job), input_bytes(48, 40) + texels * 8);
         job.profile.mips.filter = MipFilter::Box;
-        job.profile.resize = ResizeMode::PotDown;
+        // With mips, 48x40 is written 32x16 (it only shrinks).
+        job.profile.mips.levels = full;
         assert_eq!(job_bytes(&job), input_bytes(48, 40) + texels * 32);
 
         use crate::dds::*;

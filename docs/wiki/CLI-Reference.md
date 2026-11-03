@@ -191,8 +191,8 @@ sdc convert src --recursive --accept-suggestions high --preset fast-preview -o p
 # Rebuild everything, 8 threads, 6 GiB budget
 sdc convert src --recursive --accept-suggestions high --on-existing overwrite --jobs 8 --mem-budget 6G
 
-# Acknowledge a non-power-of-two texture
-sdc convert src --recursive --accept-suggestions high --allow DIM-NPOT
+# Acknowledge a texture under 4 pixels
+sdc convert src --recursive --accept-suggestions high --allow DIM-SMALL
 ```
 
 ## sdc inspect

@@ -191,10 +191,12 @@ fn face_size_rule() {
         .unwrap();
     assert_eq!(layout::face_size(&p, CubeLayout::Hcross, (600, 450)), 128);
     assert_eq!(layout::face_size(&p, CubeLayout::Equirect, (512, 256)), 128);
+    // Note FM29: the cell goes through `pot_dims`, so a 250 cell (within 5 % of 256) rounds up.
     assert_eq!(
         layout::face_size(&p, CubeLayout::Equirect, (1000, 500)),
-        128
+        256
     );
+    assert_eq!(layout::face_size(&p, CubeLayout::Equirect, (960, 480)), 128);
     // DS21 (final review M4): the auto size stops at 4096, the top of the documented range.
     assert_eq!(
         layout::face_size(&p, CubeLayout::Hstrip, (6 * 16384, 16384)),
@@ -467,7 +469,8 @@ fn default_panorama_is_not_resized() {
         .iter()
         .find(|w| w.code == Code::DimResized)
         .expect("DIM-RESIZED");
-    assert_eq!(w.message, "face 250 → 128");
+    // Note FM29: the cell takes `pot_dims`, so 250 rounds up.
+    assert_eq!(w.message, "face 250 → 256");
 }
 
 #[test]

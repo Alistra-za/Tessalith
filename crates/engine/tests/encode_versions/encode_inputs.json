@@ -52,7 +52,7 @@
     "subtype": "hdr_sky"
   },
   "textures/h/height.dds": {
-    "sha256": "0f8c6bd5d69bdf123ab909607240759f4da01cbc14773aaaf0c4f604710d951a",
+    "sha256": "204fe8b71577e82c653e8fbd4d2e55892b9e8af97e40ff84452e44c41ac552d3",
     "subtype": "height"
   },
   "textures/h/landscape.dds": {
@@ -192,7 +192,7 @@
     "subtype": "glow"
   },
   "vanilla/textures/h/height.dds": {
-    "sha256": "25419bcf57b2122589e85790ebeb18f8b14d90c3c129b11f36a87a18be75c86c",
+    "sha256": "817470ea5fe3396125a9ac039da3b83d3a11291c03035cd077b5a8fd96759f8f",
     "subtype": "height"
   },
   "vanilla/textures/h/landscape.dds": {

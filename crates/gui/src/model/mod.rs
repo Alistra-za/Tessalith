@@ -3528,20 +3528,6 @@ impl AppModel {
             self.weighting_follow = hides.then(|| (item_key.to_string(), w.to_string(), merge));
             return;
         }
-        // Note CL (M9): an unticked half size removes the key; a written `false` would stay as a provenance entry.
-        if field == "drop_top_mip" && value == json!(false) {
-            return self.clear_field(item_key, field);
-        }
-        // M6: never a half size where there is no mip to drop (the row is disabled there).
-        let locked = |m: &Self| {
-            m.item(item_key)
-                .and_then(|i| i.job.as_ref())
-                .and_then(|j| fields::field_lock(m.target, &j.profile, field))
-                .is_some()
-        };
-        if field == "drop_top_mip" && locked(self) {
-            return;
-        }
         let k = item_key.to_string();
         let f = field.to_string();
         self.edit(&format!("Change {f}"), move |p| {

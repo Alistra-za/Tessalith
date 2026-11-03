@@ -240,7 +240,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
 fn post_resize_dims(j: &ResolvedJob) -> Option<(u32, u32)> {
     crate::load::image_size(&j.input)
         .ok()
-        .map(|d| target_dims(d, j.profile.resize))
+        .map(|d| target_dims(d, &j.profile))
 }
 
 /// Bake every member from the `_n` at `n`. Returns whether any member bakes.

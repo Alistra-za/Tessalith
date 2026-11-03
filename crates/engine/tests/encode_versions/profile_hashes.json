@@ -52,7 +52,7 @@
     "subtype": "hdr_sky"
   },
   "cs-compact/cs/height": {
-    "sha256": "43efa99b617b0c4474c4e5fffa51b5ee739997f22cf6276a14b20b29fbc08761",
+    "sha256": "f2f7350769c805104f964f2db5b89fbb6f0bbd3ee6b3a27abd9795ec70fbffe1",
     "subtype": "height"
   },
   "cs-compact/cs/landscape_diffuse": {
@@ -180,7 +180,7 @@
     "subtype": "hdr_sky"
   },
   "cs-compact/vanilla/height": {
-    "sha256": "1862676aa5db8de21fdb4e4ec68b6fc73629dd1d623a076db49ad293cd2f3823",
+    "sha256": "addf73f8ae9ba1b32171c35c2767b486ce12f61fdc46a0a6fa0d1bb9f1977b97",
     "subtype": "height"
   },
   "cs-compact/vanilla/landscape_diffuse": {
@@ -308,7 +308,7 @@
     "subtype": "hdr_sky"
   },
   "cs-quality/cs/height": {
-    "sha256": "a20756fea7405e626378dc2e3a10e6fd9533fb7046e1dcd3138b29eb170f65be",
+    "sha256": "cdd83f101c7cfb6b0a32dc731abbd05fdf063cb525be4127e0dac041a0b0a4a2",
     "subtype": "height"
   },
   "cs-quality/cs/landscape_diffuse": {
@@ -436,7 +436,7 @@
     "subtype": "hdr_sky"
   },
   "cs-quality/vanilla/height": {
-    "sha256": "8a346382371bd223727452e95b26e567f2f28ddcd8ea4ad8aab348b6fde623a0",
+    "sha256": "ae0ddf9eba87162858af4f3691da8533692d7fa06d383662ec67bfc02e05af26",
     "subtype": "height"
   },
   "cs-quality/vanilla/landscape_diffuse": {
@@ -564,7 +564,7 @@
     "subtype": "hdr_sky"
   },
   "fast-preview/cs/height": {
-    "sha256": "6dd7c294167cd1788eb2560a9e4a8c1f8c923b1a69f3cc0ea0576bd17eb224ea",
+    "sha256": "0ea1f6359fab79c7f7490bf2db825914387259d26c76d2ae56702782058d08b3",
     "subtype": "height"
   },
   "fast-preview/cs/landscape_diffuse": {
@@ -692,7 +692,7 @@
     "subtype": "hdr_sky"
   },
   "fast-preview/vanilla/height": {
-    "sha256": "f72ef74bae634e7eea3299e93b884d79592e4ce31a0078d0e6c801b7cdf39822",
+    "sha256": "fd44b7234685376924c5e98b9fe7186fa99d3a7c65a0d944016e47d004f63b15",
     "subtype": "height"
   },
   "fast-preview/vanilla/landscape_diffuse": {
@@ -820,7 +820,7 @@
     "subtype": "hdr_sky"
   },
   "sdc-base/cs/height": {
-    "sha256": "a20756fea7405e626378dc2e3a10e6fd9533fb7046e1dcd3138b29eb170f65be",
+    "sha256": "cdd83f101c7cfb6b0a32dc731abbd05fdf063cb525be4127e0dac041a0b0a4a2",
     "subtype": "height"
   },
   "sdc-base/cs/landscape_diffuse": {
@@ -948,7 +948,7 @@
     "subtype": "hdr_sky"
   },
   "sdc-base/vanilla/height": {
-    "sha256": "8a346382371bd223727452e95b26e567f2f28ddcd8ea4ad8aab348b6fde623a0",
+    "sha256": "ae0ddf9eba87162858af4f3691da8533692d7fa06d383662ec67bfc02e05af26",
     "subtype": "height"
   },
   "sdc-base/vanilla/landscape_diffuse": {
@@ -1076,7 +1076,7 @@
     "subtype": "hdr_sky"
   },
   "vanilla-compact/cs/height": {
-    "sha256": "43efa99b617b0c4474c4e5fffa51b5ee739997f22cf6276a14b20b29fbc08761",
+    "sha256": "f2f7350769c805104f964f2db5b89fbb6f0bbd3ee6b3a27abd9795ec70fbffe1",
     "subtype": "height"
   },
   "vanilla-compact/cs/landscape_diffuse": {
@@ -1204,7 +1204,7 @@
     "subtype": "hdr_sky"
   },
   "vanilla-compact/vanilla/height": {
-    "sha256": "1862676aa5db8de21fdb4e4ec68b6fc73629dd1d623a076db49ad293cd2f3823",
+    "sha256": "addf73f8ae9ba1b32171c35c2767b486ce12f61fdc46a0a6fa0d1bb9f1977b97",
     "subtype": "height"
   },
   "vanilla-compact/vanilla/landscape_diffuse": {
@@ -1332,7 +1332,7 @@
     "subtype": "hdr_sky"
   },
   "vanilla-quality/cs/height": {
-    "sha256": "a20756fea7405e626378dc2e3a10e6fd9533fb7046e1dcd3138b29eb170f65be",
+    "sha256": "cdd83f101c7cfb6b0a32dc731abbd05fdf063cb525be4127e0dac041a0b0a4a2",
     "subtype": "height"
   },
   "vanilla-quality/cs/landscape_diffuse": {
@@ -1460,7 +1460,7 @@
     "subtype": "hdr_sky"
   },
   "vanilla-quality/vanilla/height": {
-    "sha256": "8a346382371bd223727452e95b26e567f2f28ddcd8ea4ad8aab348b6fde623a0",
+    "sha256": "ae0ddf9eba87162858af4f3691da8533692d7fa06d383662ec67bfc02e05af26",
     "subtype": "height"
   },
   "vanilla-quality/vanilla/landscape_diffuse": {

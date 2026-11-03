@@ -62,10 +62,10 @@ fn a_decided_folder_exports_and_the_report_groups_warnings() {
     );
     let codes = m.export.by_code();
     assert!(codes
-        .get(&Code::DimNpot)
+        .get(&Code::DimSmall)
         .is_some_and(|keys| keys.contains(&"landscape/odd.dds".to_string())));
     let md = m.export.to_markdown();
-    assert!(md.contains("DIM-NPOT") && md.contains("landscape/odd.dds"));
+    assert!(md.contains("DIM-SMALL") && md.contains("landscape/odd.dds"));
     assert_eq!(m.export.to_jsonl().lines().count(), m.export.events.len());
     m.select_job("landscape/odd.dds");
     assert_eq!(m.selection, Selection::Item("landscape/odd.png".into()));

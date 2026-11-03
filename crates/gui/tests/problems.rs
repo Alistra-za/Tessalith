@@ -64,7 +64,7 @@ fn undecided_textures_are_decide_rows_and_a_decision_removes_its_row() {
         .all(|p| matches!(&p.at, At::Texture(k) if m.undecided_keys().contains(k))));
     let odd = At::Texture("landscape/odd.png".into());
     m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
-    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimNpot));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
     assert!(m.wait_idle(Duration::from_secs(60)));
     // K8: the acknowledged code stays as a Warning row; only the Decide row goes.
     assert!(!problems(&m)

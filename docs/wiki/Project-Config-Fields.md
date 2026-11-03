@@ -50,7 +50,10 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 |---|---|---|---|
 | `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgba8` is written as B8G8R8A8. |
 | `header` | `auto`, `dx10`, `legacy` | `auto` | DDS header form. `auto` writes a legacy header for BC1, BC3 and RGBA8 without the `_SRGB` tag, and the DX10 header for everything else. `legacy` is valid only for formats that have a legacy form (such as BC1, BC3, BC4, BC5) and no `_SRGB` tag; otherwise it is `CFG-INVALID`. |
-| `resize` | `none`, `pot-down`, `half` | `none` | `pot-down` shrinks each side to the largest power of two that fits (1000x600 becomes 512x512). `half` halves both sides when the larger side is above 512 (1024x512 becomes 512x256). A resized texture gets `DIM-RESIZED`. |
+| `resize` | `none`, `half`, `quarter`, `eighth` | `none` | Halves both sides once, twice or three times. Each halving happens only while the longer side stays at or above `resize_floor`: with the 512 floor, 2048x1024 under `quarter` becomes 512x256, and 1024x1024 under `eighth` stops at 512x512. <!-- D:FM29 --> |
+| `resize_floor` | pixels, 1 or more | 512; 256 for `height` | The longer side `resize` never halves below. <!-- D:FM29 --> |
+
+Every texture with mips is written at a power-of-two size, before `resize` applies. The longer side rounds up to the next power of two when it is at least 95 % of it, otherwise down: 1000 becomes 1024, 900 becomes 512. The shorter side is first scaled by the same factor, then rounds up when it is at least 85 % of the next power of two, so 1024x768 becomes 1024x512 and 1000x600 becomes 1024x512. A side that grows is enlarged with linear interpolation. A texture with `mips.levels = "none"` keeps its own size, gets the `DIM-NPOT` warning, and still takes `resize`. A changed size is noted as `DIM-RESIZED`, with the source and output sizes. <!-- D:FM29 -->
 
 ## Encoder
 
@@ -104,7 +107,7 @@ These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` f
 |---|---|---|---|
 | `cubemap.style` | `vanilla_metal`, `room`, `eye`, `hd` | unset | Fills the keys below that nothing else set: `vanilla_metal` 32 px, BC1, blur 0.6, saturation 0.8; `room` 128 px, BC1, blur 0.35; `eye` 256 px, BC7, blur 0.35; `hd` 512 px, BC7, blur 0.1. |
 | `cubemap.layout` | `faces`, `hcross`, `vcross`, `hstrip`, `vstrip`, `equirect`, `mirror_ball`, `angular`, `photo` | from the image shape | How each layout is detected: [Cubemap sources](Cubemap-Sources.md#ways-to-make-one). `faces` is six separate files. A cube DDS must leave it unset. |
-| `cubemap.face_size` | a power of two, 4 to 4096 | the largest power of two inside one source cell, at most 4096 | Face edge in pixels ([source cell per layout](Cubemap-Sources.md#face-size)). |
+| `cubemap.face_size` | a power of two, 4 to 4096 | one source cell rounded to a power of two, at most 4096 | Face edge in pixels ([source cell per layout](Cubemap-Sources.md#face-size)). |
 | `cubemap.yaw` | −360 to 360 | 0 | Turns the cube about world up, in degrees. Positive is clockwise seen from above, the way Skyrim headings turn: 90 moves east to south. |
 | `cubemap.mirror` | `true`, `false` | `false` | Swaps world east and west. |
 | `cubemap.face_rotate` | six of 0, 90, 180, 270 | `[0, 0, 0, 0, 0, 0]` | Clockwise turn per face, in the order +X, −X, +Y, −Y, +Z, −Z. Applied before the flip. Works on every layout. |

@@ -199,9 +199,14 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         "mips.edge" => vec![opt(json!("wrap"), "Wrap"), opt(json!("clamp"), "Clamp")],
         "resize" => vec![
             opt(json!("none"), "None"),
-            opt(json!("pot-down"), "Down to a power of two"),
-            opt(json!("half"), "Halve if larger than 512"),
+            opt(json!("half"), "Half"),
+            opt(json!("quarter"), "Quarter"),
+            opt(json!("eighth"), "Eighth"),
         ],
+        "resize_floor" => [64, 128, 256, 512, 1024, 2048]
+            .into_iter()
+            .map(|n| (json!(n), format!("{n} px")))
+            .collect(),
         "mips.coverage" => vec![
             opt(json!("auto"), "Auto"),
             opt(json!("on"), "On"),
@@ -536,7 +541,7 @@ pub(super) fn editor(
                 .on_hover_text(BC1_ALPHA_HOVER);
             (r.changed().then(|| json!(b)), r)
         }
-        "alpha.exact_opaque" | "drop_top_mip" => {
+        "alpha.exact_opaque" => {
             let mut b = f.value.as_bool().unwrap_or(false);
             let r = ui.add(egui::Checkbox::new(&mut b, "").indeterminate(mixed));
             (r.changed().then(|| json!(b)), r)
@@ -915,25 +920,13 @@ fn decision_box(
                         if let Some(m) = message_of(warnings, *code) {
                             ui.label(m);
                         }
-                        ui.horizontal(|ui| {
-                            if ui
-                                .button(crate::model::code_text::ack_label_for_texture(*code))
-                                .on_hover_text(code_line(*code))
-                                .clicked()
-                            {
-                                actions.push(Action::Decide(Answer::Acknowledge(*code)));
-                            }
-                            if *code == Code::DimNpot
-                                && ui
-                                    .button("Resize to a power of two")
-                                    .on_hover_text(
-                                        "writes resize = pot-down for this texture; DIM-RESIZED reports the new size",
-                                    )
-                                    .clicked()
-                            {
-                                actions.push(Action::Set("resize", json!("pot-down")));
-                            }
-                        });
+                        if ui
+                            .button(crate::model::code_text::ack_label_for_texture(*code))
+                            .on_hover_text(code_line(*code))
+                            .clicked()
+                        {
+                            actions.push(Action::Decide(Answer::Acknowledge(*code)));
+                        }
                     }
                 }
                 ui.add_space(4.0);

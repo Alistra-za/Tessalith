@@ -728,7 +728,6 @@ impl AppModel {
         let Some(p) = self.project.as_ref() else {
             return;
         };
-        // Note FC2 (supersedes CL26's dialog): a saved half size is a tick like any other field.
         let fields: Vec<(String, bool)> = all_fields()
             .into_iter()
             .filter(|(f, _)| own_value(p, &from, f).is_some())

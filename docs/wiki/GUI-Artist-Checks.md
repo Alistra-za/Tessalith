@@ -8,7 +8,7 @@ The checks only warn. No check blocks or cancels an export, none asks you anythi
 
 | Check (switch) | What it flags |
 |---|---|
-| **Low detail** | A texture whose top mip adds almost nothing over mip 1 (an upscale, or a 2K made from a 1K). Measured during Export. Code `CHK-LOW-DETAIL`. See [Half size](#half-size). |
+| **Low detail** | A texture whose top mip adds almost nothing over mip 1 (an upscale, or a 2K made from a 1K). Measured during Export. Code `CHK-LOW-DETAIL`. See [below](#low-detail). |
 | **Green direction** | A normal map that looks like OpenGL when it is read as DirectX (`CHK-GREEN-GUESS`, an Info result, never an auto-flip) and a normal whose blue channel points the wrong way (`CHK-Z-SIGN`). |
 | **Parallax** | A height map (`_p`) or a complex `_m` alpha that uses too little range, clips, is mostly white, or is steep enough to tear; landscape sets whose displacement scales differ by more than 2×. Codes `CHK-PARALLAX` and `CHK-PARALLAX-SCALE`. |
 | **UV coverage** | UV islands that sit closer than 8 texels to each other for more than 2 % of the used texels, so colours bleed across them at a distance (mip 3 and up). Code `CHK-UV-GUTTER`. Needs a Meshes scan; see [below](#check-all-uv-coverage). |
@@ -39,11 +39,9 @@ It reads the Meshes scan: scan your MO2 instance in the [Meshes view](Mod-Scanni
 
 Landscape diffuses are left out, because terrain does not use NIF shapes. Results are kept for the session and cleared when a scan finishes.
 
-## Half size
+## Low detail
 
-With **Low detail** on, Export measures each texture it writes and always writes it at full size. A texture whose top mip adds little detail gets the `CHK-LOW-DETAIL` warning in [Problems](GUI-Problems.md) (hover: mip 0 adds little detail over mip 1). Nothing is asked and nothing is held back.
-
-- **Advanced → Half size** sets or clears the same per-file field by hand (a tick box with ↺; greyed with "No mips to drop" when the texture has no mip chain). The CLI honours the saved field ([`drop_top_mip`](Set-Shaders.md#height-maps-and-the-artist-checks)), so both write the same bytes. A half size saved on the source texture is a tick in the *Copy settings* list (*Half size: true*), like any other field.
+With **Low detail** on, Export measures each texture it writes and writes it at its planned size. A texture whose top mip adds little detail gets the `CHK-LOW-DETAIL` warning in [Problems](GUI-Problems.md) (hover: mip 0 adds little detail over mip 1). Nothing is asked and nothing is held back. To write it at half size, set **Advanced → Resize** to *Half* ([`resize`](Project-Config-Fields.md#format-and-size)). Only textures that *Half* would shrink, with no resize set yet, are measured. <!-- D:FM29 -->
 
 ## Gloss bake for a complex `_m`
 

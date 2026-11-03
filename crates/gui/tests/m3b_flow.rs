@@ -46,7 +46,7 @@ fn build_sets_export_and_reexport_unchanged() {
         .key
         .clone();
     m.decide(&odd, Answer::Subtype(Subtype::PbrAlbedo));
-    m.decide(&odd, Answer::Acknowledge(Code::DimNpot));
+    m.decide(&odd, Answer::Acknowledge(Code::DimSmall));
     idle(&mut m);
     let second = m.drop_new_set(&odd).unwrap();
     idle(&mut m);

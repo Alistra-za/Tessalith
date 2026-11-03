@@ -254,3 +254,21 @@ GC11	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of row_bu
 GC2	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of hold_rows_read; stays: the two full reads and the worker thread
 S-mips-2	S		back	FM		partial	2026-11-03		goes: tent barred for colour with cutout, blend or cutout_blend; the owner-question-2 line "no alpha-weighted tent (revisit later)"; stays: Mitchell and Kaiser barred there, the rest of the rule
 S¶- **Deferred:**	S		back	FM		partial	2026-11-03		goes: "alpha-weighted tent for foliage" as deferred; stays: the other deferred items
+T4	T		back	FM		archive-item	2026-11-03		FM29: resize_floor replaces HALF_FLOOR and the power of two is automatic
+CL21	CL		back	FM		archive-item	2026-11-03		FM29: drop_top_mip is removed
+CL23	CL		back	FM		archive-item	2026-11-03		FM29: the drop_top_mip DIM, single-level and test bullets
+CL26	CL		back	FM		archive-item	2026-11-03		FM29: the Advanced Half size row and its Copy settings tick are gone
+S-mips-6	S		back	FM		partial	2026-11-03		goes: pot-down, upscaling out of scope, owner question 3; stays: where the resize runs and how it filters
+S-mips-7	S		back	FM		partial	2026-11-03		goes: DIM-NPOT on the resized size and the pot-down message; stays: the post-resize DIM checks, DIM-RESIZED data, the bake
+S-mips-10	S		back	FM		partial	2026-11-03		goes: the Resize options and the DIM-NPOT resize button; stays: the Filter and Edge rows
+S¶- **Deferred:**	S		back	FM		partial	2026-11-03		goes: resize upscaling (pot-up, pot-nearest); stays: the other deferred items
+CL¶- **Eligibility** (`checks::low_detail_eligible`)	CL		back	FM		partial	2026-11-03		goes: drop_top_mip off and HALF_FLOOR; stays: the eligibility rule, now with resize_floor
+CL22	CL		back	FM		partial	2026-11-03		goes: the drop_top_mip levels test; stays: the code and the other tests
+CL25	CL		back	FM		partial	2026-11-03		goes: the dropped level in out_size::estimate; stays: the Check rows
+CL¶- **The written size is part of the cache key (I1).**	CL		back	FM		partial	2026-11-03		goes: drop_top_mip as a size change; stays: the cache key
+CN¶- **Track C (Note CL):**	CN		back	FM		partial	2026-11-03		goes: drop_top_mip on the derived chain; stays: the rest
+FC2	FC		back	FM		partial	2026-11-03		goes: the Half size title, the Copy settings and Names bullets; stays: the Engine bullet
+FC¶- **Half size has one meaning.**	FC		back	FM		partial	2026-11-03		goes: the Resize option wording and the Half size tick; stays: the Low detail name
+FC¶- **The glossary.**	FC		back	FM		partial	2026-11-03		goes: half size and the Resize wording; stays: the other words
+FM¶- **Half size.** There is no Review question	FM		back	FM		partial	2026-11-03		goes: drop_top_mip stays a texture field; stays: the rest
+S-mips-11	S		back	FM		partial	2026-11-03		goes: 32 B/texel for every resize; stays: the rest (FM29: 64 when an axis grows)
