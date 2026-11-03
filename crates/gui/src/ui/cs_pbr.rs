@@ -3,6 +3,7 @@
 //! and (texture sets) the statics line or the PGPatcher box. Drawing only: every change is a model call made after
 //! drawing.
 use super::columns::{AMBER, RED};
+use crate::model::cs_pbr::set_key;
 use crate::model::cs_pbr::{
     check_edid, check_text, field_label, fields, pgp_box_text, single_pass_text, statics_text,
     templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics, StaticsStatus,
@@ -10,7 +11,6 @@ use crate::model::cs_pbr::{
 };
 use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
-use crate::model::plugin_refs::set_key;
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
 use crate::model::AppModel;
 use eframe::egui;

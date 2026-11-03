@@ -2,11 +2,11 @@
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use modscan::plugin_store::{MeshUse, MissingRef, ShapeSwap};
+use modscan::plugin_store::{MeshUse, ShapeSwap};
 use modscan::plugins::PluginStats;
 use modscan::scan::Report;
 use modscan::store::{ModRow, NifRow, ShapeView, TexResolution};
-use sdc_gui::model::meshes::{Banner, FileRefs, MeshesDialog, MeshesModel, NifFilter, ScanTarget};
+use sdc_gui::model::meshes::{Banner, MeshesDialog, MeshesModel, NifFilter, ScanTarget};
 use sdc_gui::settings::MeshesSettings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1373,73 +1373,18 @@ fn plugin_overrides_say_when_no_record_uses_the_mesh() {
     h.get_by_label("No plugin record of the latest scan uses this mesh.");
 }
 
-/// esp spec §4.4: counts, filter, copy; no actions.
+/// 2.0 debloat (Note GJ5): the Plugin file references window is gone; a scanned store shows no button for it.
 #[test]
-fn plugin_file_references_list_missing_and_unused_with_a_filter() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/missing/nothere.dds".into(),
-            n_records: 6,
-            records: vec!["GhostTXST [00000AB0] TXST — Skyrim.esm".into()],
-        }],
-        unused: vec![
-            "textures/unused/lonely.dds".into(),
-            "textures/other/x.dds".into(),
-        ],
-    });
+fn the_meshes_header_has_no_plugin_file_references_button() {
+    let (_d, m) = scanned();
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label(
-        "textures/missing/nothere.dds ← GhostTXST [00000AB0] TXST — Skyrim.esm; … 5 more",
-    );
-    h.get_by_label("Copy");
-    h.get_by_label("Unused (2)").click();
-    h.run();
-    h.get_by_label("textures/unused/lonely.dds");
-    h.state_mut().refs_filter = "LONELY".into();
-    h.run();
-    h.get_by_label("textures/unused/lonely.dds");
-    assert!(h.query_by_label("textures/other/x.dds").is_none());
     assert!(
-        h.query_by_label_contains("Delete").is_none()
-            && h.query_by_label_contains("Move").is_none()
+        h.query_all_by_label_contains("Plugin file references")
+            .next()
+            .is_none(),
+        "the button is gone"
     );
-}
-
-#[test]
-fn plugin_file_references_when_nothing_is_listed() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs::default());
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("Missing (0)");
-    h.get_by_label("Nothing listed.");
-}
-
-/// Review I1: no read while a scan runs; a started scan drops the cached lists.
-#[test]
-fn file_references_are_not_read_during_a_scan_and_a_started_scan_drops_them() {
-    let (_d, mut m) = scanned();
-    m.load_file_refs();
-    assert!(m.file_refs.is_some());
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
-    assert!(m.scanning());
-    assert!(
-        m.file_refs.is_none(),
-        "the old lists are dropped when a scan starts"
-    );
-    m.load_file_refs();
-    assert!(m.file_refs.is_none(), "no read while the scan runs");
-    wait(&mut m);
-    m.load_file_refs();
-    assert!(m.file_refs.is_some());
 }
 
 /// Review M1: a failed shape read leaves no stale plugin list.
@@ -1468,37 +1413,6 @@ fn a_failed_shape_read_clears_the_plugin_overrides() {
     assert!(m.plugin_uses.is_empty());
 }
 
-/// Review M4: after a Folder scan (plugins not read) Unused says so instead of implying plugins were checked.
-#[test]
-fn unused_says_plugins_were_not_read_after_a_folder_scan() {
-    let note = sdc_gui::model::meshes::PLUGINS_NOT_READ_NOTE;
-    let run = |plugins: Option<PluginStats>| {
-        let mut m = model_with(None);
-        m.file_refs = Some(FileRefs::default());
-        m.report = Some(Report {
-            plugins,
-            ..Default::default()
-        });
-        m.refs_unused = true;
-        let mut h = harness(m);
-        h.run();
-        h.get_by_label("Plugin file references…").click();
-        h.run();
-        h.query_by_label(note).is_some()
-    };
-    assert!(run(None));
-    assert!(!run(Some(stats(1, 1, 1, 1, &[]))));
-}
-
-/// Trace 2026-10-22 #6: `unused_textures` leaves LOD textures out (modscan lod_skip.rs); the note must not say they
-/// are listed.
-#[test]
-fn unused_note_says_lod_textures_are_left_out() {
-    let note = sdc_gui::model::meshes::UNUSED_NOTE;
-    assert!(note.contains("LOD textures are left out"), "{note}");
-    assert!(!note.contains("LOD, interface"), "{note}");
-}
-
 /// Review M5: the list is cut at 200; the rest is counted.
 #[test]
 fn plugin_overrides_say_how_many_more_are_cut() {
@@ -1521,69 +1435,6 @@ fn plugin_overrides_say_how_many_more_are_cut() {
     h.get_by_label("Plugin overrides (205)").click();
     h.run();
     h.get_by_label("… and 5 more");
-}
-
-/// Long plugin-reference rows wrap inside their column instead of widening the panels.
-fn long_line() -> String {
-    format!(
-        "textures/clutter/{}.dds",
-        "journalralis19to23_n ".repeat(20).trim().replace(' ', "_")
-    )
-}
-
-fn x_of(h: &Harness<'static, MeshesModel>, label: &str) -> f32 {
-    h.get_by_label(label).rect().min.x
-}
-
-#[test]
-fn long_file_ref_rows_do_not_widen_the_layout() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    let mut h = harness(m);
-    h.run();
-    let mod_x =
-        |h: &Harness<'static, MeshesModel>| h.get_by_role_and_label(Role::Label, "A").rect().min.x;
-    let (mods_x, nifs_x) = (mod_x(&h), x_of(&h, "meshes/x.nif"));
-    let long = long_line();
-    h.state_mut().file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: long.clone(),
-            n_records: 3,
-            records: vec!["BCS_JournalRalis19 [2F056C6B] TXST — Book Covers Skyrim.esp".repeat(4)],
-        }],
-        unused: vec![],
-    });
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    assert_eq!((mod_x(&h), x_of(&h, "meshes/x.nif")), (mods_x, nifs_x));
-    let row = h.get_by_label_contains(&long);
-    assert!(
-        row.rect().max.x <= 1400.0,
-        "row runs off screen: {:?}",
-        row.rect()
-    );
-    assert!(
-        row.rect().height() > 30.0,
-        "row did not wrap: {:?}",
-        row.rect()
-    );
-}
-
-#[test]
-fn file_ref_rows_are_capped_and_overrides_wrap() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![],
-        unused: (0..1500).map(|i| format!("textures/u/{i}.dds")).collect(),
-    });
-    m.refs_unused = true;
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("… and 500 more — narrow with the filter");
 }
 
 #[test]
@@ -1612,55 +1463,6 @@ fn long_override_labels_wrap_inside_the_column() {
     h.run();
     let r = h.get_by_label_contains("SSSSSSSSSS").rect();
     assert!(r.max.x <= 1400.0 && r.height() > 30.0, "{r:?}");
-}
-
-fn refs_model() -> MeshesModel {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/a.dds".into(),
-            n_records: 1,
-            records: vec!["R [00000001] TXST — A.esp".into()],
-        }],
-        unused: vec![],
-    });
-    m
-}
-
-#[test]
-fn opening_plugin_file_references_does_not_move_the_panels() {
-    let mut h = harness(refs_model());
-    h.run();
-    let before = (
-        h.get_by_role_and_label(Role::Label, "A").rect(),
-        h.get_by_label("meshes/x.nif").rect(),
-    );
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    assert_eq!(
-        (
-            h.get_by_role_and_label(Role::Label, "A").rect(),
-            h.get_by_label("meshes/x.nif").rect()
-        ),
-        before
-    );
-}
-
-#[test]
-fn a_long_file_ref_row_wraps_inside_the_window() {
-    let mut m = refs_model();
-    m.file_refs.as_mut().unwrap().missing[0].path = format!("textures/{}.dds", "q".repeat(400));
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.run();
-    let win = h.get_by_label("Plugin file references").rect();
-    let row = h.get_by_label_contains("qqqqqqqqqq").rect();
-    assert!(row.height() > 30.0, "row did not wrap: {row:?}");
-    assert!(row.max.x <= 1400.0, "{row:?} {win:?}");
 }
 
 /// Filtering spec §3 / ruling R12: inert records are left out of "Plugin overrides" and its count, shown dimmed with
@@ -1692,97 +1494,6 @@ fn plugin_overrides_hide_inert_records_until_asked() {
     h.get_by_label("Lonely [00000002] STAT — Skyrim.esm · not placed");
 }
 
-/// Ruling R12: Missing lists live paths; paths only inert records name come dimmed behind "Show inert (N)".
-#[test]
-fn missing_files_of_inert_records_show_on_request() {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: vec![MissingRef {
-            path: "textures/live.dds".into(),
-            n_records: 1,
-            records: vec!["A [00000001] TXST — S.esm".into()],
-        }],
-        unused: vec![],
-    });
-    m.missing_inert = vec![MissingRef {
-        path: "meshes/lonely.nif".into(),
-        n_records: 1,
-        records: vec!["Lonely [00000002] STAT — S.esm (not placed)".into()],
-    }];
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label("Missing (1)");
-    assert!(h.query_by_label_contains("lonely.nif").is_none());
-    h.get_by_label("Show inert (1)").click();
-    h.run();
-    h.get_by_label("meshes/lonely.nif ← Lonely [00000002] STAT — S.esm (not placed)");
-}
-
-fn missing_ref(path: String) -> MissingRef {
-    MissingRef {
-        path,
-        n_records: 1,
-        records: vec!["R [00000001] STAT — S.esm".into()],
-    }
-}
-
-fn budget_model(live: usize, inert: usize) -> MeshesModel {
-    let mut m = model_with(None);
-    m.file_refs = Some(FileRefs {
-        missing: (0..live)
-            .map(|i| missing_ref(format!("textures/live{i:04}.dds")))
-            .collect(),
-        unused: vec!["textures/unused/u.dds".into()],
-    });
-    m.missing_inert = (0..inert)
-        .map(|i| missing_ref(format!("meshes/inert{i:04}.nif")))
-        .collect();
-    m.show_inert_refs = true;
-    m
-}
-
-fn rows_with(h: &Harness<'static, MeshesModel>, needle: &str) -> usize {
-    h.query_all_by_label_contains(needle).count()
-}
-
-/// Review I2: one 1000-row budget over live then inert rows; the remainder is reported.
-#[test]
-fn missing_rows_share_one_budget_and_report_the_remainder() {
-    let mut h = harness(budget_model(900, 300));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    assert_eq!(rows_with(&h, "textures/live"), 900);
-    assert_eq!(rows_with(&h, "meshes/inert"), 100);
-    h.get_by_label("… and 200 more — narrow with the filter");
-}
-
-#[test]
-fn inert_only_overflow_is_reported() {
-    let mut h = harness(budget_model(0, 1200));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    assert_eq!(rows_with(&h, "meshes/inert"), 1000);
-    h.get_by_label("… and 200 more — narrow with the filter");
-}
-
-/// Review M3: switching tab shows the new tab's rows at once, with no stale inert rows.
-#[test]
-fn switching_to_unused_drops_the_inert_rows_in_the_same_frame() {
-    let mut h = harness(budget_model(1, 1));
-    h.run();
-    h.get_by_label("Plugin file references…").click();
-    h.run();
-    h.get_by_label_contains("meshes/inert0000.nif");
-    h.get_by_label("Unused (1)").click();
-    h.step();
-    assert!(h.query_by_label_contains("meshes/inert").is_none());
-    h.get_by_label("textures/unused/u.dds");
-}
-
 /// Review I1: Show inert does not follow the selection to another NIF, nor survive a rescan.
 #[test]
 fn show_inert_resets_on_nif_change_and_on_scan() {
@@ -1794,37 +1505,14 @@ fn show_inert_resets_on_nif_change_and_on_scan() {
     assert!(!m.show_inert_uses);
 
     let (_d, mut m) = scanned();
-    (m.show_inert_uses, m.show_inert_refs) = (true, true);
+    m.show_inert_uses = true;
     m.request_scan(false);
     let req = m.take_request().unwrap();
     m.start(req);
-    assert!(!m.show_inert_uses && !m.show_inert_refs, "scan start");
-    (m.show_inert_uses, m.show_inert_refs) = (true, true);
+    assert!(!m.show_inert_uses, "scan start");
+    m.show_inert_uses = true;
     wait(&mut m);
-    assert!(!m.show_inert_uses && !m.show_inert_refs, "scan end");
-}
-
-/// Final review M4: the inert Missing lines are built once per filter, not per frame.
-#[test]
-fn inert_ref_lines_are_cached_until_the_filter_changes() {
-    let mut m = budget_model(0, 3);
-    let a = m.refs_inert_lines();
-    assert!(std::sync::Arc::ptr_eq(&a, &m.refs_inert_lines()));
-    m.refs_filter = "inert0001".into();
-    let c = m.refs_inert_lines();
-    assert!(!std::sync::Arc::ptr_eq(&a, &c));
-    assert_eq!(c.len(), 1);
-}
-
-/// Re-review (M4): a reload that replaces the inert paths shows the new lines although the filter is unchanged.
-#[test]
-fn reloading_file_references_replaces_the_cached_inert_lines() {
-    let (_d, mut m) = scanned();
-    m.missing_inert = vec![missing_ref("meshes/old.nif".into())];
-    assert_eq!(m.refs_inert_lines().len(), 1);
-    m.load_file_refs(); // the store has no inert paths
-    assert!(m.missing_inert.is_empty());
-    assert!(m.refs_inert_lines().is_empty(), "stale cached lines");
+    assert!(!m.show_inert_uses, "scan end");
 }
 
 fn shapes_model(shapes: Vec<ShapeView>) -> MeshesModel {

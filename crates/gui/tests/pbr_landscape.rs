@@ -4,8 +4,8 @@ mod support;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
 use engine::shader::{AutoRule, Shader, ShaderOrigin};
+use sdc_gui::model::cs_pbr::set_key;
 use sdc_gui::model::cs_pbr::{Kind, SetFacts, Statics, PGP_BOX, PGP_BOX_UNAVAILABLE};
-use sdc_gui::model::plugin_refs::set_key;
 use sdc_gui::model::sets::{
     badge_text, set_views, SetView, BADGE_PBR_LANDSCAPE, BADGE_PBR_LANDSCAPE_NONE,
     BADGE_PBR_LANDSCAPE_PGP, BADGE_PBR_LANDSCAPE_PGP_ONLY,

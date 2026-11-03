@@ -1,5 +1,4 @@
-//! LOD content (PGPatcher's blocklist) is skipped entirely: no LOD NIF copies, no LOD paths from plugin records, no
-//! LOD textures in Unused.
+//! LOD content (PGPatcher's blocklist) is skipped entirely: no LOD NIF copies, no LOD paths from plugin records.
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
 mod common;
@@ -78,12 +77,20 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
     let rep = run(&src, &mut s, &AtomicBool::new(false), &|_| {}, &|| vec![]).unwrap();
     assert_eq!(rep.nifs, 2);
     assert_eq!(s.copy_ids().unwrap().len(), 2);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
+    // The plugin records named only LOD paths, which the scan drops: no model or texture-set rows remain.
+    let n: i64 = s
+        .conn()
+        .query_row(
+            "SELECT (SELECT count(*) FROM model_ref) + (SELECT count(*) FROM txst_slot)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
     // LOD textures stay in tex_winner: a normal NIF may reference one.
     let n: i64 = s
         .conn()
         .query_row("SELECT count(*) FROM tex_winner", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 2);
-    assert_eq!(s.unused_textures().unwrap(), ["textures/t/lonely.dds"]);
 }

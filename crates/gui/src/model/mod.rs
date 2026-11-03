@@ -34,7 +34,6 @@ pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
 pub mod pin;
-pub mod plugin_refs;
 pub mod presets;
 pub mod preview;
 pub mod readout;
@@ -540,8 +539,6 @@ pub struct AppModel {
     nvtt_pending: bool,
     /// The file the last probe ran on (path, size, modified time; `None` inside: none found), `None` before any.
     nvtt_key: Option<Option<NvttKey>>,
-    /// The set editor "Used by plugins" reads (esp spec 4.1).
-    pub plugin_refs: plugin_refs::SetPluginRefs,
     /// Design §5.1, §6: the CS PBR scan reads (statics, EDID checks, the material-object picker).
     pub cs_pbr: cs_pbr::CsPbrScan,
     /// Keyboard navigation, the shortcut sheet and the command palette (items 5 and 19).
@@ -868,7 +865,6 @@ impl AppModel {
             nvtt_gen: 0,
             nvtt_pending: false,
             nvtt_key: None,
-            plugin_refs: Default::default(),
             cs_pbr: Default::default(),
             nav: Default::default(),
             shell: Vec::new(),

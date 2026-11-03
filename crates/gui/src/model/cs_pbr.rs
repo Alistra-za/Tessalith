@@ -535,7 +535,6 @@ impl AppModel {
     }
 }
 
-use super::plugin_refs::{set_key, LIMIT, NO_SCAN};
 use super::sets::SetView;
 use modscan::plugin_store::WinRec;
 use modscan::store::{MatchRow, Store, TexKey};
@@ -544,6 +543,32 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+/// TXSTs read for a set's suggestions.
+pub const LIMIT: usize = 200;
+pub const NO_SCAN: &str = "No scan yet: scan the MO2 instance in the Meshes view.";
+
+/// The set's match key as PGPatcher reads it: the set's settings, `match_diffuse` defaulting to the derived match.
+pub fn set_key(v: &SetView) -> Option<TexKey> {
+    let mut entry: Map<String, Json> = v
+        .settings
+        .iter()
+        .map(|(k, x)| (k.clone(), x.clone()))
+        .collect();
+    if let Some(d) = &v.derived_match {
+        entry
+            .entry("match_diffuse")
+            .or_insert_with(|| Json::String(d.clone()));
+        // AN1: a renamed entry is written with its `match_diffuse` only.
+        if let Some((md, _)) = crate::pgp::prefix::json_rename(&v.settings, d) {
+            entry.retain(|k, _| {
+                k == "match_diffuse" || !(k.starts_with("match") || k == "path_contains")
+            });
+            entry.insert("match_diffuse".into(), Json::String(md));
+        }
+    }
+    crate::model::set_preview::tex_key(&Json::Object(entry), &Json::Null).map(|(k, _)| k)
+}
 
 /// Shape rows read for the statics count; more only lowers a count that is already far above 0.
 pub const STATICS_ROWS: usize = 20_000;
@@ -582,7 +607,7 @@ pub(crate) fn stamp(db: Option<&Path>) -> Stamp {
 }
 
 /// The scan reads of the CS PBR section, the statics rule and the badges, for the session. shortcut: read on the UI
-/// thread on demand (card open, a badge, export start) like "Used by plugins"; move to a worker if a modlist makes
+/// thread on demand (card open, a badge, export start); move to a worker if a modlist makes
 /// them slow. Errors are cached like answers (an old-schema database is not re-opened every frame); everything is
 /// forgotten when the per-frame database stamp (`AppModel::poll`, Note BI4) changes (a new scan, or a running scan's
 /// checkpoint) and on "Refresh scan". Reads in one frame share one open database (Note BM, review M2).

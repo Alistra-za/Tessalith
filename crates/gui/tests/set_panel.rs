@@ -83,7 +83,22 @@ fn a_vanilla_set_has_a_set_tab_and_an_advanced_tab_and_no_window_edge_drawer() {
     h.get_by_role_and_label(Role::Button, "Set");
     h.get_by_role_and_label(Role::Button, "Advanced");
     assert!(!drawer_drawn(&h), "no strip at the window edge");
-    h.get_by_label("Used by plugins");
+}
+
+/// 2.0 debloat (Note GJ5): the set editor has no "Used by plugins" section.
+#[test]
+fn the_set_editor_has_no_used_by_plugins_section() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    rock_selected(&mut m);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Set");
+    assert!(h
+        .query_all_by_label_contains("Used by plugins")
+        .next()
+        .is_none());
 }
 
 #[test]

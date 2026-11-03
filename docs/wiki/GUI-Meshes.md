@@ -29,8 +29,6 @@ Select a mesh to see:
 
 **Plugin file references…** opens a window listing files that plugins reference: *Missing* (referenced but not found, with **Show inert**) and *Unused*, with **Copy**. The button is there whenever a scan database is open. After a folder scan, which reads no plugins, the window says "Plugins were not read in the last scan".
 
-![The Plugin file references window.](../img/gui/GUI-Meshes/plugin-refs.png)
-
 ## Shapes
 
 The column is titled **NIFs** (**Meshes** is the view tab), and next to the title is a **Shapes of <file>** button (plain **Shapes**, greyed out, "Select a mesh first", until a mesh is selected). Switched on, it replaces the mesh list with the shape cards of the selected mesh; switched off, or when the selection clears, the list is back. While **Edit** is open the column stays on the shapes and the button is greyed ("Close Edit to see the mesh list"): the cards are where you pick the shape to edit. The right-hand pane always shows the 3D view; the title, warnings and In game / Source toggle above its frame scroll when the window is short, so the frame keeps at least 160 px. The column starts at 420 px and is at most 40% of the window, narrowing further as needed so the 3D view keeps at least 240 px (with the edit panel open too); its lists have thin scroll bars that stay visible. Closing Edit puts the column back on what it showed before (Edit keeps it on Shapes).

@@ -5,7 +5,6 @@ mod common;
 use b::{alt, edid, form, grup, plugin, rec, sub, top, zstr};
 use common::{instance_fixture, put};
 use modscan::mo2::{loose_origins, Instance};
-use modscan::plugin_store::MissingRef;
 use modscan::plugins::{scan_plugins, PluginStats};
 use modscan::store::Store;
 use std::sync::atomic::AtomicBool;
@@ -491,79 +490,11 @@ fn unresolved_copies_do_not_lend_their_edges_to_the_winner() {
     }
 }
 
-/// Registers `path` as a winning texture of a fresh enabled origin.
-fn provide(s: &Store, path: &str) {
-    let c = s.conn();
-    let n: i64 = c
-        .query_row("SELECT count(*) FROM origin", [], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO origin(kind, name, root, priority, enabled) VALUES (9, 'x', ?1, 0, 1)",
-        [format!("fake{n}")],
-    )
-    .unwrap();
-    let o = c.last_insert_rowid();
-    c.execute("INSERT OR IGNORE INTO path(p) VALUES (?1)", [path])
-        .unwrap();
-    let p: i64 = c
-        .query_row("SELECT id FROM path WHERE p = ?1", [path], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO tex_winner(path_id, origin_id, n_copies) VALUES (?1, ?2, 1)",
-        [p, o],
-    )
-    .unwrap();
-}
-
-/// Spec §3 (ruling R12): inert records name no Missing path and use no texture; paths only they name are listed apart,
-/// labels ending in the reason.
+/// `inert_of` gives the reason text of each inert record among the ids asked about.
 #[test]
-fn missing_and_unused_ignore_inert_records() {
+fn inert_of_gives_the_reason_text_of_inert_records() {
     let d = fixture(ORDER);
     let (s, _) = scan(&d);
-    provide(&s, "textures/zzz/other.dds"); // a completed scan has an enabled origin
-    let (live, inert) = s.plugin_missing_with_inert().unwrap();
-    let paths = |v: &[MissingRef]| v.iter().map(|m| m.path.clone()).collect::<Vec<_>>();
-    assert!(
-        paths(&live).contains(&"textures/live/p_d.dds".to_string()),
-        "{live:?}"
-    );
-    assert!(
-        paths(&live).contains(&"meshes/placed.nif".to_string()),
-        "{live:?}"
-    );
-    assert!(
-        !paths(&live).contains(&"meshes/lonely.nif".to_string()),
-        "{live:?}"
-    );
-    let lonely = inert
-        .iter()
-        .find(|m| m.path == "meshes/lonely.nif")
-        .unwrap();
-    assert_eq!(
-        lonely.records,
-        ["LonelyStat [00000B02] STAT — Skyrim.esm (not placed)"]
-    );
-    let u = inert
-        .iter()
-        .find(|m| m.path == "textures/inert/u_d.dds")
-        .unwrap();
-    assert_eq!(
-        u.records,
-        ["UsedByUnplaced [00000A02] TXST — Skyrim.esm (no reference)"]
-    );
-    assert_eq!(s.plugin_missing_files().unwrap(), live);
-    provide(&s, "textures/inert/u_d.dds");
-    provide(&s, "textures/live/p_d.dds");
-    let unused = s.unused_textures().unwrap();
-    assert!(
-        unused.contains(&"textures/inert/u_d.dds".to_string()),
-        "{unused:?}"
-    );
-    assert!(
-        !unused.contains(&"textures/live/p_d.dds".to_string()),
-        "{unused:?}"
-    );
     let r = s.inert_of(&[0xB01, 0xB02, 0xC03]).unwrap();
     assert_eq!(r.get(&0xB02), Some(&"not placed"));
     assert_eq!(r.get(&0xC03), Some(&"head part not playable"));
@@ -666,42 +597,6 @@ fn writing_a_plugin_clears_the_inert_verdicts() {
     };
     s.write_plugin(&f, &esp::PluginFacts::default()).unwrap();
     assert_eq!(one_i64(&s, "SELECT count(*) FROM rec_inert"), 0);
-}
-
-/// Final review M6 (PT13-1): a path named by a live and an inert record is listed once, under live, with only the live
-/// label; the inert list drops it and `n_records` counts live records only.
-#[test]
-fn a_path_named_by_a_live_and_an_inert_record_is_listed_once_as_live() {
-    let d = instance_fixture("+A\n");
-    let stat = |id, name| {
-        rec(
-            b"STAT",
-            id,
-            &[edid(name), sub(b"MODL", &zstr("Shared.nif"))],
-        )
-    };
-    put(
-        d.path(),
-        "Game/Data/Skyrim.esm",
-        &plugin(
-            esp::FLAG_ESM,
-            &[],
-            &[
-                top(b"STAT", &[stat(0xB01, "Placed"), stat(0xB02, "Lonely")]),
-                cell(0x800, &[(0x801, 0xB01, false)]),
-            ],
-        ),
-    );
-    put(d.path(), "profiles/Default/plugins.txt", b"# none\n");
-    let (s, _) = scan(&d);
-    assert_eq!(inert(&s), [("Lonely".to_string(), 2)]);
-    provide(&s, "textures/zzz/other.dds");
-    let (live, inert_refs) = s.plugin_missing_with_inert().unwrap();
-    assert_eq!(live.len(), 1, "{live:?}");
-    assert_eq!(live[0].path, "meshes/shared.nif");
-    assert_eq!(live[0].n_records, 1);
-    assert_eq!(live[0].records, ["Placed [00000B01] STAT — Skyrim.esm"]);
-    assert!(inert_refs.is_empty(), "{inert_refs:?}");
 }
 
 /// Re-review: a TXST named only by a worldspace's cloud-model alternate textures is reached, not inert.

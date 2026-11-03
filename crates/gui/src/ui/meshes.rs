@@ -7,8 +7,8 @@ use crate::model::meshes::pg_entries::{
 };
 use crate::model::meshes::{
     alpha_line, display_path, flag_bits, overridden_text, plugins_line, shader_type_name,
-    slot_name, Banner, MeshesModel, ScanTarget, DERIVED_CHIP, LE_WARNING, MISSING_NOTE,
-    PLUGINS_NOT_READ_NOTE, SLSF1_NAMES, SLSF2_NAMES, STALE_CHIP, UNUSED_NOTE,
+    slot_name, Banner, MeshesModel, ScanTarget, DERIVED_CHIP, LE_WARNING, SLSF1_NAMES, SLSF2_NAMES,
+    STALE_CHIP,
 };
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use eframe::egui;
@@ -283,13 +283,7 @@ fn bar_has_content(m: &MeshesModel) -> bool {
             || !r.problems.is_empty()
             || r.plugins.is_some()
     });
-    m.scanning()
-        || !m.status.is_empty()
-        || details
-        || m.has_store()
-        || m.file_refs.is_some()
-        || m.error.is_some()
-        || m.banner.is_some()
+    m.scanning() || !m.status.is_empty() || details || m.error.is_some() || m.banner.is_some()
 }
 
 fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
@@ -338,10 +332,6 @@ fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
                         });
                 });
         }
-    }
-    if (m.has_store() || m.file_refs.is_some()) && ui.button("Plugin file references…").clicked()
-    {
-        m.refs_open = true;
     }
     if let Some(e) = m.error.clone() {
         ui.horizontal_wrapped(|ui| {
@@ -1213,110 +1203,6 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
         });
 }
 
-/// A window, not part of the top bar: opening it must not resize the panels.
-fn refs_window(ctx: &egui::Context, m: &mut MeshesModel) {
-    let mut open = m.refs_open;
-    egui::Window::new("Plugin file references")
-        .id(egui::Id::new("meshes-plugin-file-refs-window"))
-        .open(&mut open)
-        .default_size([900.0, 500.0])
-        .resizable(true)
-        .vscroll(false)
-        .show(ctx, |ui| {
-            if m.scanning() {
-                ui.label("Available after the scan finishes.");
-                return;
-            }
-            if m.file_refs.is_none() {
-                m.load_file_refs();
-            }
-            file_refs(ui, m);
-        });
-    m.refs_open = open;
-}
-
-/// Most rows drawn in the file-reference list.
-const MAX_REF_ROWS: usize = 1000;
-
-/// "Plugin file references" (esp spec §4.4): counts, filter, copy; no actions.
-fn file_refs(ui: &mut egui::Ui, m: &mut MeshesModel) {
-    let (missing, unused) = m
-        .file_refs
-        .as_ref()
-        .map_or((0, 0), |r| (r.missing.len(), r.unused.len()));
-    let mut copy = false;
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(!m.refs_unused, format!("Missing ({missing})"))
-            .clicked()
-        {
-            m.refs_unused = false;
-        }
-        if ui
-            .selectable_label(m.refs_unused, format!("Unused ({unused})"))
-            .clicked()
-        {
-            m.refs_unused = true;
-        }
-        ui.add(
-            egui::TextEdit::singleline(&mut m.refs_filter)
-                .hint_text("filter")
-                .desired_width(200.0),
-        );
-        copy = ui.button("Copy").clicked();
-    });
-    ui.weak(if m.refs_unused {
-        UNUSED_NOTE
-    } else {
-        MISSING_NOTE
-    });
-    if m.refs_unused && m.report.as_ref().is_some_and(|r| r.plugins.is_none()) {
-        ui.weak(PLUGINS_NOT_READ_NOTE);
-    }
-    if !m.refs_unused && !m.missing_inert.is_empty() {
-        let n = m.missing_inert.len();
-        ui.checkbox(&mut m.show_inert_refs, format!("Show inert ({n})"));
-    }
-    // Rows are chosen after the controls above, so a tab or filter change shows this frame, not the next.
-    let inert: std::sync::Arc<Vec<String>> = if !m.refs_unused && m.show_inert_refs {
-        m.refs_inert_lines()
-    } else {
-        Default::default()
-    };
-    if copy {
-        let mut text = m.refs_lines().join("\n");
-        if !inert.is_empty() {
-            text.push('\n');
-            text.push_str(&inert.join("\n"));
-        }
-        ui.ctx().copy_text(text);
-    }
-    let n = m.refs_lines().len();
-    if n == 0 && inert.is_empty() {
-        ui.label("Nothing listed.");
-        return;
-    }
-    ui.set_max_width(ui.available_width());
-    // Wrapping rows bounded to the window; rendering is capped so 68k Unused rows stay fast (Copy still takes all).
-    egui::ScrollArea::vertical()
-        .id_salt("meshes-file-refs-scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // One budget over live then inert rows.
-            for l in m.refs_lines().iter().take(MAX_REF_ROWS) {
-                ui.add(egui::Label::new(l.as_str()).wrap());
-            }
-            let left = MAX_REF_ROWS.saturating_sub(n);
-            for l in inert.iter().take(left) {
-                ui.add(egui::Label::new(egui::RichText::new(l.as_str()).weak()).wrap());
-            }
-            let more = (n + inert.len()).saturating_sub(MAX_REF_ROWS);
-            if more > 0 {
-                ui.weak(format!("… and {more} more — narrow with the filter"));
-            }
-        });
-}
-
 /// One shape card, numbered by PGPatcher's 3D index (Meshes UI T2): the header button, then Shader, Textures, Alpha
 /// and (in edit mode, `ctrls`) Controllers; the rest in a closed Details section. Returns the texture path that was
 /// clicked, and whether the header was clicked.
@@ -1499,7 +1385,6 @@ fn shape_details(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) {
 }
 
 fn dialogs(ctx: &egui::Context, m: &mut MeshesModel) {
-    refs_window(ctx, m);
     if let Some(d) = m.dialog.clone() {
         let (mut use_it, mut choose, mut folder) = (false, false, false);
         egui::Modal::new(egui::Id::new("meshes-mo2")).show(ctx, |ui| {

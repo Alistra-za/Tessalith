@@ -363,7 +363,6 @@ fn tabs(
     if !split {
         super::cs_pbr::section(ui, model, v);
     }
-    super::plugin_refs::set_section(ui, model, v);
 }
 
 /// C2 (owner answer 6): the "Also export" group of a PBR set while a tick is on: "converted" or "skipped", and the

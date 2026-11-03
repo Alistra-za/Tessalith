@@ -187,17 +187,6 @@ fn txst_users_and_mesh_overrides() {
         txst_edid: Some("DirtTXST".into()),
         index: 0,
     };
-    let users = s.alt_users_of(&[DIRT]).unwrap();
-    assert_eq!(users.len(), 1);
-    assert_eq!(
-        (
-            users[0].edid.as_deref(),
-            users[0].sig.as_str(),
-            users[0].plugin.as_str()
-        ),
-        (Some("RockStat"), "STAT", "Skyrim.esm")
-    );
-    assert_eq!(users[0].swap, swap);
     let uses = s.plugin_uses_of_mesh("meshes/x.nif").unwrap();
     assert_eq!(uses.len(), 1);
     assert_eq!(
@@ -209,41 +198,6 @@ fn txst_users_and_mesh_overrides() {
         .plugin_uses_of_mesh("meshes/other.nif")
         .unwrap()
         .is_empty());
-}
-
-/// Review Focus 5: a path only an overridden copy names is not missing; PGPatcher output is not unused.
-#[test]
-fn missing_and_unused_lists() {
-    let d = fixture();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    let missing = s.plugin_missing_files().unwrap();
-    let paths: Vec<&str> = missing.iter().map(|m| m.path.as_str()).collect();
-    assert_eq!(
-        paths,
-        ["meshes/missing/ghost.nif", "textures/missing/nothere.dds"]
-    );
-    assert_eq!(
-        missing[1].records,
-        ["GhostTXST [00000AB0] TXST — Skyrim.esm"]
-    );
-    assert_eq!(missing[1].n_records, 1);
-    let unused = s.unused_textures().unwrap();
-    assert!(
-        unused.contains(&"textures/unused/lonely.dds".to_string()),
-        "{unused:?}"
-    );
-    for used in [
-        "textures/landscape/dirt02.dds",
-        "textures/landscape/dirt02_n.dds",
-        "textures/effects/fire.dds",
-        "textures/pbr/landscape/dirt02.dds",
-    ] {
-        assert!(
-            !unused.contains(&used.to_string()),
-            "{used} listed: {unused:?}"
-        );
-    }
 }
 
 /// Review Focus 4.
@@ -263,7 +217,6 @@ fn a_folder_scan_hides_plugin_rows_and_the_next_mo2_scan_restores_them() {
     )
     .unwrap();
     assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
-    assert!(s.plugin_missing_files().unwrap().is_empty());
     let r = mo2(&d, &mut s);
     let p = r.plugins.unwrap();
     assert_eq!(p.cached, p.n, "nothing re-parsed");
@@ -333,54 +286,6 @@ fn fixture2() -> tempfile::TempDir {
     d
 }
 
-/// Registers `path` as a winning texture of a fresh origin (a BSA-like one when `enabled`, an inactive one otherwise).
-fn provide(s: &Store, path: &str, enabled: bool) {
-    let c = s.conn();
-    let n: i64 = c
-        .query_row("SELECT count(*) FROM origin", [], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO origin(kind, name, root, priority, enabled) VALUES (9, 'x', ?1, 0, ?2)",
-        rusqlite::params![format!("fake{n}"), enabled],
-    )
-    .unwrap();
-    let o = c.last_insert_rowid();
-    c.execute("INSERT OR IGNORE INTO path(p) VALUES (?1)", [path])
-        .unwrap();
-    let p: i64 = c
-        .query_row("SELECT id FROM path WHERE p = ?1", [path], |r| r.get(0))
-        .unwrap();
-    c.execute(
-        "INSERT INTO tex_winner(path_id, origin_id, n_copies) VALUES (?1, ?2, 1)",
-        [p, o],
-    )
-    .unwrap();
-}
-
-#[test]
-fn missing_respects_archives_inactive_origins_facegen_and_caps_records() {
-    let d = fixture2();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    provide(&s, "textures/bsa/onlybsa.dds", true);
-    provide(&s, "textures/off/inactive.dds", false);
-    let missing = s.plugin_missing_files().unwrap();
-    let paths: Vec<&str> = missing.iter().map(|m| m.path.as_str()).collect();
-    assert_eq!(
-        paths,
-        [
-            "meshes/real.nif",
-            "textures/many/lots.dds",
-            "textures/nifonly/used.dds",
-            "textures/off/inactive.dds"
-        ]
-    );
-    let lots = &missing[1];
-    assert_eq!(lots.n_records, 7);
-    assert_eq!(lots.records.len(), 5);
-    assert_eq!(lots.records[0], "Lot0 [00000200] TXST — Skyrim.esm");
-}
-
 /// An unresolved record (owner_ok = 0) keeps a raw FormID that can equal a resolved winner's.
 #[test]
 fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
@@ -396,13 +301,6 @@ fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
         )
         .unwrap();
     assert_eq!(ok, 1, "fixture: Orphan is unresolved");
-    let missing = s.plugin_missing_files().unwrap();
-    assert!(
-        missing
-            .iter()
-            .all(|m| m.path != "meshes/missing/orphan.nif"),
-        "{missing:?}"
-    );
     assert!(s
         .plugin_uses_of_mesh("meshes/missing/orphan.nif")
         .unwrap()
@@ -413,29 +311,6 @@ fn an_unresolved_record_colliding_with_a_winner_is_ignored() {
 }
 
 #[test]
-fn a_texture_only_a_nif_uses_is_not_unused() {
-    let d = fixture();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    let used: String = s
-        .conn()
-        .query_row(
-            "SELECT p.p FROM tex_use u JOIN path p ON p.id = u.tex_path_id WHERE p.p NOT IN
-               (SELECT p2.p FROM txst_slot t JOIN path p2 ON p2.id = t.path_id) LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    provide(&s, &used, true);
-    assert!(!s.unused_textures().unwrap().contains(&used), "{used}");
-    provide(&s, "textures/zzz/orphan.dds", true);
-    assert!(s
-        .unused_textures()
-        .unwrap()
-        .contains(&"textures/zzz/orphan.dds".to_string()));
-}
-
-#[test]
 fn zero_limit_matches_nothing() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
@@ -443,44 +318,14 @@ fn zero_limit_matches_nothing() {
     assert!(s.txsts_matching(&dirt_key(), 0).unwrap().is_empty());
 }
 
-/// Final review I1: a scan cancelled mid-parse leaves every origin disabled; Missing and Unused are then empty, not
-/// "every referenced file is missing".
+/// Trace-debug wave 2 #7: a tainted scan (PGPatcher started mid-scan) empties the winners; the plugin rows are
+/// then empty, not stale.
 #[test]
-fn a_cancelled_scan_leaves_missing_and_unused_empty() {
+fn a_tainted_scan_leaves_plugin_rows_empty() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
-    for i in 0..600 {
-        put(d.path(), &format!("mods/A/meshes/c{i}.nif"), b"x");
-    }
-    let cancel = AtomicBool::new(false);
-    let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
-    let r = run(
-        &src,
-        &mut s,
-        &cancel,
-        &|p| {
-            if p.phase == "parse" {
-                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        },
-        &|| vec![],
-    );
-    assert!(matches!(r, Err(modscan::ScanError::Cancelled)), "{r:?}");
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
-}
-
-/// Trace-debug wave 2 #7: a tainted scan (PGPatcher started mid-scan) empties the winners; Missing and Unused are
-/// then empty, not "every path a winning record names".
-#[test]
-fn a_tainted_scan_leaves_missing_and_unused_empty() {
-    let d = fixture();
-    let mut s = Store::open(&d.path().join("scan.db")).unwrap();
-    mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     let calls = std::sync::atomic::AtomicUsize::new(0);
     let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
     let r = run(&src, &mut s, &AtomicBool::new(false), &|_| {}, &|| {
@@ -492,19 +337,17 @@ fn a_tainted_scan_leaves_missing_and_unused_empty() {
     })
     .unwrap();
     assert!(r.tainted);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
+    assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
 }
 
 /// Codex review of BW: a scan cancelled at the start of the plugin pass has already replaced the asset winners;
 /// the old record winners must not survive, and the next clean scan restores them.
 #[test]
-fn a_scan_cancelled_at_the_plugin_pass_leaves_missing_and_unused_empty() {
+fn a_scan_cancelled_at_the_plugin_pass_leaves_plugin_rows_empty() {
     let d = fixture();
     let mut s = Store::open(&d.path().join("scan.db")).unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     std::fs::write(d.path().join("profiles/Default/modlist.txt"), "-B\n-A\n").unwrap();
     let cancel = AtomicBool::new(false);
     let src = Source::Mo2(Instance::load(d.path(), None).unwrap());
@@ -521,10 +364,8 @@ fn a_scan_cancelled_at_the_plugin_pass_leaves_missing_and_unused_empty() {
     )
     .unwrap();
     assert!(r.plugins.is_none(), "{:?}", r.notes);
-    assert!(s.plugin_missing_files().unwrap().is_empty());
-    assert!(s.plugin_missing_with_inert().unwrap().1.is_empty());
-    assert!(s.unused_textures().unwrap().is_empty());
+    assert!(s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
     std::fs::write(d.path().join("profiles/Default/modlist.txt"), "+B\n+A\n").unwrap();
     mo2(&d, &mut s);
-    assert!(!s.plugin_missing_files().unwrap().is_empty());
+    assert!(!s.txsts_matching(&dirt_key(), 50).unwrap().is_empty());
 }

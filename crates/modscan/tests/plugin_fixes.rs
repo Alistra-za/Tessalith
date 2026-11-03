@@ -66,7 +66,6 @@ fn open() -> (tempfile::TempDir, Store) {
 #[test]
 fn an_alt_texture_with_a_missing_txst_master_joins_no_winner() {
     let (_d, s) = open();
-    assert!(s.alt_users_of(&[TXST]).unwrap().is_empty());
     let uses = s.plugin_uses_of_mesh("meshes/x.nif").unwrap();
     assert_eq!(uses.len(), 1, "fixture: the STAT is resolved");
     assert_eq!(uses[0].swaps[0].txst_edid, None, "no TXST winner joined");

@@ -11408,11 +11408,9 @@ fn the_preview_keeps_160_px_with_review_open() {
         }
         tops.push(frame.min.y);
     }
-    // The lines above give way first: the frame's top stops at the head's least once the room runs short.
-    assert!(
-        tops[0] > tops[4] + 20.0,
-        "the head did not give way: {tops:?}"
-    );
+    // The lines above give way first: the frame's top stops at the head's least once the room runs short. Note GJ5:
+    // the Meshes bar's Plugin file references row is gone, so the head has about 2 px to give where it had 24.
+    assert!(tops[0] > tops[4], "the head did not give way: {tops:?}");
     assert_eq!(tops[3], tops[4], "the head is at its least: {tops:?}");
 }
 
