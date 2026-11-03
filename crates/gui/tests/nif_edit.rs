@@ -3036,6 +3036,23 @@ fn exported(d: &tempfile::TempDir) -> std::path::PathBuf {
         .join("x.nif")
 }
 
+/// Review's Export of the NIF rows: the only export path (Note GP10).
+fn export(m: &mut MeshesModel) -> Result<usize, String> {
+    m.export_nif_edits()
+}
+
+/// The export skips, naming `why`.
+fn export_fails(m: &mut MeshesModel, why: &str) {
+    let e = export(m).unwrap_err();
+    assert!(e.contains(why), "{e}");
+}
+
+/// Answers the one Review row's foreign file with `choice`, for the bytes on disk now.
+fn answer(m: &mut MeshesModel, choice: GuardChoice) {
+    let r = m.nif_review_rows().remove(0);
+    m.set_nif_answer(&r.path, choice, r.foreign.unwrap());
+}
+
 /// Sets the first lit shape's glossiness to `v` (one op).
 fn gloss(m: &mut MeshesModel, v: f32) {
     let e = m.edit.as_ref().unwrap();
@@ -3061,13 +3078,13 @@ fn export_writes_the_patched_nif_and_records_its_hash() {
         "the edit mod sits between A and PGP"
     );
     gloss(&mut m, 12.5);
-    assert_eq!(
-        m.export_edit(None),
-        ExportOutcome::Written {
-            rerun_pgpatcher: true
-        }
-    );
+    assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        e.export_note,
+        Some((RERUN_PGPATCHER.into(), false)),
+        "PGP is a derived copy"
+    );
     let want = nif::edit::apply(&e.source, &e.doc.ops()).unwrap().bytes;
     assert_ne!(want, *e.source);
     assert_eq!(std::fs::read(exported(&d)).unwrap(), want);
@@ -3134,7 +3151,7 @@ fn export_drops_orphan_blocks_and_records_the_written_hash() {
     m.open_edit();
     add_then_remove_ctrl(&mut m, true);
     assert_eq!(m.edit.as_ref().unwrap().blocked, None);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
     let n = nif::header::Header::parse(&e.source).unwrap().sizes.len();
     let blocks = |b: &[u8]| nif::header::Header::parse(b).unwrap().sizes.len();
@@ -3157,7 +3174,7 @@ fn export_drops_orphan_blocks_and_records_the_written_hash() {
     // the recorded hash is the file's: the next export replaces it without asking (and clears an old cleanup line)
     add_then_remove_ctrl(&mut m, false);
     m.edit.as_mut().unwrap().cleanup_note = Some("Exported without cleanup: x.".into());
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert_eq!(m.edit.as_ref().unwrap().cleanup_note, None);
     let e = m.edit.as_ref().unwrap();
     let written = std::fs::read(exported(&d)).unwrap();
@@ -3200,7 +3217,7 @@ fn export_without_cleanup_writes_the_patch_and_says_why() {
         .collect();
     assert_eq!(info, [(NO_CLEANUP.to_string(), NifTab::Controllers)]);
     assert_eq!(review_row(&m).compaction, None);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
     let why = nif::edit::compact(&e.patched, 5).unwrap_err();
     assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.patched);
@@ -3221,35 +3238,42 @@ fn hand_edited_export_asks_before_overwrite() {
     let (d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let p = exported(&d);
     std::fs::write(&p, b"junk").unwrap();
-    // Overwrite without having been asked is asked first.
-    let ExportOutcome::Guard { diff } = m.export_edit(Some(GuardChoice::Overwrite)) else {
-        panic!("a hand-edited file asks first")
-    };
+    assert_eq!(export(&mut m), Ok(0), "nothing pending: no row");
+    assert_eq!(std::fs::read(&p).unwrap(), b"junk");
+    gloss(&mut m, 13.5);
+    // Unanswered, a hand-edited file is not written; its row has the block diff.
+    export_fails(&mut m, NIF_UNANSWERED);
+    let diff = m
+        .nif_diff("meshes/x.nif")
+        .expect("a foreign file has a diff");
     assert!(!diff.is_empty());
     assert_eq!(std::fs::read(&p).unwrap(), b"junk");
-    assert!(matches!(m.export_edit(None), ExportOutcome::Guard { .. }));
-    assert_eq!(
-        m.export_edit(Some(GuardChoice::KeepTheirs)),
-        ExportOutcome::KeptTheirs
-    );
+    answer(&mut m, GuardChoice::KeepTheirs);
+    export_fails(&mut m, NIF_KEPT);
     assert_eq!(std::fs::read(&p).unwrap(), b"junk");
-    assert!(matches!(m.export_edit(None), ExportOutcome::Guard { .. }));
-    assert!(matches!(
-        m.export_edit(Some(GuardChoice::Overwrite)),
-        ExportOutcome::Written { .. }
-    ));
+    export_fails(&mut m, NIF_UNANSWERED);
+    answer(&mut m, GuardChoice::Overwrite);
+    assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
     assert_eq!(std::fs::read(&p).unwrap(), *e.patched);
-    // Keep theirs never writes, even when the file is gone by the time it is answered.
-    std::fs::remove_file(&p).unwrap();
-    assert_eq!(
-        m.export_edit(Some(GuardChoice::KeepTheirs)),
-        ExportOutcome::KeptTheirs
-    );
-    assert!(!p.exists());
+}
+
+/// Review Focus 1: an Overwrite answered for bytes that changed on disk since is not applied.
+#[test]
+fn an_overwrite_answer_for_older_bytes_does_not_write() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let p = exported(&d);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, b"junk").unwrap();
+    answer(&mut m, GuardChoice::Overwrite);
+    std::fs::write(&p, b"changed").unwrap();
+    export_fails(&mut m, NIF_CHANGED_SINCE);
+    assert_eq!(std::fs::read(&p).unwrap(), b"changed");
 }
 
 #[test]
@@ -3276,10 +3300,7 @@ fn conflicting_doc_blocks_export() {
     .bytes;
     assert_ne!(theirs, *e.source);
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &theirs).unwrap();
-    assert_eq!(
-        m.export_edit(None),
-        ExportOutcome::Blocked("Resolve the conflicts first.".into())
-    );
+    export_fails(&mut m, "Resolve the conflicts first.");
     assert!(!exported(&d).exists());
     let e = m.edit.as_ref().unwrap();
     assert_eq!(*e.source, theirs);
@@ -3305,15 +3326,9 @@ fn a_refused_edit_blocks_export() {
         m.edit.as_ref().unwrap().outcomes[0],
         nif::edit::Outcome::Refused(_)
     ));
-    assert_eq!(
-        m.export_edit(None),
-        ExportOutcome::Blocked("1 edit cannot be applied.".into())
-    );
+    export_fails(&mut m, "1 edit cannot be applied.");
     m.edit_push(vec![op], None);
-    assert_eq!(
-        m.export_edit(None),
-        ExportOutcome::Blocked("2 edits cannot be applied.".into())
-    );
+    export_fails(&mut m, "2 edits cannot be applied.");
     assert!(!exported(&d).exists());
 }
 
@@ -3375,11 +3390,7 @@ fn turning_the_file_check_off_drops_its_rows() {
 fn export_refuses_bytes_that_do_not_read_back() {
     let (d, mut m) = export_session();
     unreadable_patch(&mut m);
-    let out = m.export_edit(None);
-    assert!(
-        matches!(&out, ExportOutcome::Blocked(s) if s.starts_with("The written file would not read back: ")),
-        "{out:?}"
-    );
+    export_fails(&mut m, ": The written file would not read back: ");
     assert!(!exported(&d).exists());
 }
 
@@ -3389,13 +3400,10 @@ fn an_unreadable_export_file_blocks_and_writes_nothing() {
     m.open_edit();
     gloss(&mut m, 12.5);
     std::fs::create_dir_all(exported(&d)).unwrap();
-    for choice in [None, Some(GuardChoice::Overwrite)] {
-        let out = m.export_edit(choice);
-        assert!(
-            matches!(&out, ExportOutcome::Blocked(s) if s.starts_with("Cannot read ")),
-            "{out:?}"
-        );
-    }
+    export_fails(&mut m, ": Cannot read ");
+    // an Overwrite answer does not get past it either
+    m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, [0; 32]);
+    export_fails(&mut m, ": Cannot read ");
     assert!(exported(&d).is_dir());
     let doc = load(&m.edit.as_ref().unwrap().doc_path).unwrap().unwrap();
     assert!(doc.export.sha256.is_none());
@@ -3419,7 +3427,7 @@ fn pending_list_and_chips() {
     m.select_nif(x.copy_id);
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
     assert_eq!(badge_of(&m, "y.nif"), Some(DocBadge::Pending));
     // A new session on the same store reads the chips from the edit documents, without a scan or an open edit.
@@ -3458,7 +3466,7 @@ fn undo_after_export_makes_it_pending_again() {
     let (d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
     assert!(m.undo_edit());
     let e = m.edit.as_ref().unwrap();
@@ -3469,7 +3477,7 @@ fn undo_after_export_makes_it_pending_again() {
     );
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
     // Our own file is replaced without asking.
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
     assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.source);
 }
@@ -3600,8 +3608,8 @@ fn a_read_only_session_shows_the_no_export_folder_reason() {
 
 // ---- v2 A19 review ----
 
-/// Note GD2: the guard dialog is gone; a foreign file is answered on its Review row. Even with the model's `guard`
-/// set (the direct `export_edit` path), the panel draws no dialog, and Enter writes nothing.
+/// Note GD2: the guard dialog is gone; a foreign file is answered on its Review row. After an unanswered export the
+/// panel draws no dialog, and Enter writes nothing.
 #[test]
 fn a_foreign_file_opens_no_guard_dialog() {
     let (d, mut m) = export_session();
@@ -3610,7 +3618,7 @@ fn a_foreign_file_opens_no_guard_dialog() {
     let p = exported(&d);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, b"theirs").unwrap();
-    assert!(matches!(m.export_edit(None), ExportOutcome::Guard { .. }));
+    export_fails(&mut m, NIF_UNANSWERED);
     let mut h = view(m);
     h.run_steps(3);
     assert!(h
@@ -4043,7 +4051,7 @@ fn export_goes_to_the_textures_export_folder_and_checks_that_mod() {
     assert_eq!(m.error, None);
     assert_eq!(m.edit.as_ref().unwrap().placement, Some(Placement::Ok));
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert!(out.join(r"meshes\x.nif").is_file());
     assert!(nif_doc(&out).is_file());
     assert!(!d.path().join("mods").join(EDIT_MOD).exists());
@@ -4093,10 +4101,7 @@ fn no_export_folder_blocks_the_nif_row() {
         !nif_doc(&d.path().join("mods").join(EDIT_MOD)).exists(),
         "no default mod"
     );
-    assert_eq!(
-        m.export_edit(None),
-        ExportOutcome::Blocked(NO_EXPORT_FOLDER.into())
-    );
+    export_fails(&mut m, NO_EXPORT_FOLDER);
     // a crash: the next session finds the autosave
     m.close_edit();
     m.open_edit();
@@ -4110,7 +4115,7 @@ fn no_export_folder_blocks_the_nif_row() {
     assert_eq!(load(&nif_doc(&out)).unwrap().unwrap().ops.len(), 2);
     assert!(!autosave(&d).exists());
     assert_eq!(m.edit.as_ref().unwrap().blocked, None);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
 }
 
 /// Note GD11: an autosave this session never loaded is never deleted. Edit without a folder, close, choose a
@@ -4456,7 +4461,7 @@ fn an_export_folder_outside_the_instance_is_not_checked_and_still_exports() {
         "The export folder is not an MO2 mod here: load order not checked."
     );
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert!(out.join(r"meshes\x.nif").is_file());
     assert!(nif_doc(&out).is_file());
 }
@@ -4550,7 +4555,7 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
         before,
         "no write to the old folder"
     );
-    assert!(matches!(m.export_edit(None), ExportOutcome::Blocked(_)));
+    export_fails(&mut m, &head);
     assert!(!old.join(r"meshes\x.nif").exists());
     assert_eq!(
         load(&autosave(&d)).unwrap().unwrap().ops.len(),
@@ -4600,7 +4605,7 @@ fn idle_frames_after_an_export_hash_nothing() {
     let (_d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let root = m.nif_export_root.clone();
     let mut h = view(m);
     h.run_steps(2);
@@ -4631,7 +4636,7 @@ fn an_undone_session_keeps_its_live_document_on_a_folder_change() {
     m.set_nif_export_root(Some(old.clone()));
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     assert!(m.undo_edit());
     assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
     m.messages.clear();
@@ -9460,7 +9465,7 @@ fn repeated_fix_and_conflict_buttons_have_unique_names() {
     .unwrap()
     .bytes;
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &theirs).unwrap();
-    let _ = m.export_edit(None);
+    let _ = export(&mut m);
     assert!(m.edit.as_ref().unwrap().doc.has_conflicts());
     let mut h = view(m);
     h.run_steps(3);
@@ -10162,7 +10167,7 @@ fn set_sequence_timing_round_trips() {
         "the Preview stays on the clip"
     );
     assert_eq!(e.blocked, None);
-    assert!(matches!(m.export_edit(None), ExportOutcome::Written { .. }));
+    assert_eq!(export(&mut m), Ok(1));
     let file = std::fs::read(exported(&d)).unwrap();
     assert_eq!(clip_timing(&file), (1, 2.0, 0.25, 0.75));
     let saved = load(&m.edit.as_ref().unwrap().doc_path).unwrap().unwrap();
@@ -10323,7 +10328,7 @@ fn sha(b: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(b).into()
 }
 
-/// Note GD17: SHA-256 of `meshes\x.nif` as the footer's Export NIF (`export_edit`) wrote it at c42c2454, for
+/// Note GD17: SHA-256 of `meshes\x.nif` as the footer's Export NIF wrote it at c42c2454, for
 /// `export_session` plus `add_then_remove_ctrl(.., true)` (log: `r1-golden-capture-c42c2454.txt` in the ledger).
 const EXPORT_GOLDEN_SHA256: &str =
     "30da078ae7184525c8427204a3e0bd133f86409533e1645329680a91032b89ac";
@@ -10354,25 +10359,12 @@ fn nif_review_rows_list_the_pending_edit() {
     );
     assert_eq!(m.export_nif_edits(), Ok(1));
     assert_eq!(std::fs::read(exported(&d)).unwrap(), out);
-    // Note GD17: the fixed baseline, captured from the footer's export (`export_edit`) at c42c2454; a change in the
-    // shared writer or the compaction changes it, which the twin check below cannot see
+    // Note GD17: the fixed baseline, captured from the footer's export at c42c2454; a change in the shared writer or
+    // the compaction changes it
     assert_eq!(
         sha256_hex(&std::fs::read(exported(&d)).unwrap()),
         EXPORT_GOLDEN_SHA256,
         "the Review export writes the footer's bytes"
-    );
-    // the NIF-side twin: the footer's path (export_edit) writes the same bytes for the same edits
-    let (d2, mut m2) = export_session();
-    m2.open_edit();
-    add_then_remove_ctrl(&mut m2, true);
-    assert!(matches!(
-        m2.export_edit(None),
-        ExportOutcome::Written { .. }
-    ));
-    assert_eq!(
-        std::fs::read(exported(&d2)).unwrap(),
-        out,
-        "the bytes the footer's export wrote"
     );
     assert!(m.nif_review_rows().is_empty(), "exported: nothing pending");
     // after the write: Re-run PGPatcher is a worklist row
@@ -10439,21 +10431,6 @@ fn a_failed_folder_change_is_a_row_beside_a_refused_op() {
     assert_eq!((rows.len(), refused(&rows)), (1, 1), "{rows:?}");
 }
 
-/// Note GD30 (final review M5): a folder change closes an open guard dialog (its diff was the old folder's file).
-#[test]
-fn a_folder_change_closes_the_guard_dialog() {
-    let (d, mut m) = export_session();
-    m.open_edit();
-    gloss(&mut m, 12.5);
-    let p = exported(&d);
-    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    std::fs::write(&p, b"theirs").unwrap();
-    assert!(matches!(m.export_edit(None), ExportOutcome::Guard { .. }));
-    assert!(m.edit.as_ref().unwrap().guard.is_some());
-    m.set_nif_export_root(Some(d.path().join(r"mods\Good")));
-    assert_eq!(m.edit.as_ref().unwrap().guard, None);
-}
-
 /// Note GD29: a Review answer does not outlive its Review: a folder change, closing the edit or `clear_nif_answers`
 /// (Review closed, project changed) drops it, and the row asks again, even for the same bytes.
 #[test]
@@ -10515,7 +10492,6 @@ fn a_foreign_nif_waits_for_an_answer_on_its_row() {
     assert_eq!(m.export_nif_edits(), Ok(1));
     let e = m.edit.as_ref().unwrap();
     assert_eq!(std::fs::read(&p).unwrap(), *e.patched);
-    assert_eq!(e.guard, None, "the Review path never opens the dialog");
 }
 
 /// Note GD2: the block diff the guard dialog showed is the model's `nif_diff`, for the Review row's Diff…; only a row

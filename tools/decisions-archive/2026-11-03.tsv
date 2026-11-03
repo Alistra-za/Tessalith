@@ -1,0 +1,2 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+GD2	GD	3161	back	GP10	(superseded in part by GP10)	partial	2026-11-03		goes: `GuardAsk` stays while `export_edit` sets it, and the test comparing the footer's and Review's bytes (GP10 deleted `export_edit` and `GuardAsk`); stays: the rest of GD2

@@ -1,5 +1,6 @@
-//! Export of a NIF edit into the export folder (spec §8, plan A19, Note CI29): the MO2 placement check, the guard outcomes and
-//! the per-NIF badges read from the edit documents. No egui types. The export routine is `MeshesModel::export_edit`.
+//! Export of a NIF edit into the export folder (spec §8, plan A19, Note CI29): the MO2 placement check, the export outcomes
+//! and the per-NIF badges read from the edit documents. No egui types. The export routine is Review's
+//! `MeshesModel::export_nif_edits`.
 use super::edit_doc::{self, EditDoc};
 use modscan::store::{ModRow, PathCopy, KIND_BSA, KIND_MOD};
 use std::path::Path;
@@ -72,7 +73,7 @@ pub fn placement(copies: &[PathCopy], mods: &[ModRow], edit_mod_name: &str) -> P
     Placement::Ok
 }
 
-/// The answer to the guard dialog.
+/// A Review row's answer for a file Tessalith did not write (Note GD2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardChoice {
     Overwrite,
@@ -84,12 +85,9 @@ pub enum ExportOutcome {
     Written {
         rerun_pgpatcher: bool,
     },
-    /// The file on disk is not the one sdc last wrote: ask (the block-level diff, on disk → ours).
-    Guard {
-        diff: Vec<String>,
-    },
     Blocked(String),
-    KeptTheirs,
+    /// The file on disk is not one Tessalith wrote, and no Overwrite answer is for its bytes now: nothing written.
+    Foreign,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

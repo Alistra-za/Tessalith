@@ -139,8 +139,6 @@ pub struct NifEdit {
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
     pub notice: Option<String>,
-    /// The guard dialog's question, while it is open.
-    pub guard: Option<GuardAsk>,
     /// The last export's result line, and whether it is an error.
     pub export_note: Option<(String, bool)>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
@@ -211,17 +209,6 @@ struct SimCache {
 
 /// Under the toggle when `show_edit_preview` failed and a plain copy shows (fix F8).
 pub const EDIT_HIDDEN: &str = "Your edit could not be shown. Switch to In game or Source to retry.";
-
-/// The open guard dialog: the block diff, whether Diff is showing it, and the hash of the file it was asked about
-/// (Overwrite applies only while the file still has it).
-#[derive(Debug, Clone, PartialEq)]
-pub struct GuardAsk {
-    pub diff: Vec<String>,
-    pub show_diff: bool,
-    pub sha256: String,
-    /// sdc never exported to this path: the file there is not one it wrote and then saw changed.
-    pub never_exported: bool,
-}
 
 /// The idle reason Export NIF is off: drawn neutral, not as a block (review Minor 5).
 pub const NO_EDITS: &str = "No edits to export.";
@@ -711,7 +698,6 @@ impl NifEdit {
             blocked_rev: 0,
             problems: Arc::default(),
             notice: None,
-            guard: None,
             export_note: None,
             cleanup_note: None,
             retarget_error: None,
@@ -868,23 +854,10 @@ impl NifEdit {
         }
     }
 
-    /// Export steps 1-6 (spec §8.3). Nothing is written when a check fails; a file sdc did not write is replaced
-    /// only by an Overwrite answered for exactly the bytes on disk now.
-    pub fn export(&mut self, choice: Option<GuardChoice>) -> ExportOutcome {
-        let asked = self.guard.take();
-        if choice == Some(GuardChoice::KeepTheirs) {
-            return ExportOutcome::KeptTheirs; // whatever is on disk now stays
-        }
-        let overwrite = match choice {
-            Some(GuardChoice::Overwrite) => asked.map(|a| a.sha256),
-            _ => None,
-        };
-        self.write_out(overwrite)
-    }
-
-    /// [`Self::export`]'s steps with the answer already given (Note GD2's Review path too): `overwrite` is the hash
-    /// (hex) of the file on disk the user answered Overwrite for; a foreign file with another hash is not written.
-    pub(super) fn write_out(&mut self, overwrite: Option<String>) -> ExportOutcome {
+    /// Export steps 1-6 (spec §8.3) for Review's Export (Note GD2). Nothing is written when a check fails; a file
+    /// Tessalith did not write is replaced only when `overwrite`, the SHA-256 its Overwrite answer was given for, is
+    /// the hash of the bytes on disk now.
+    pub(super) fn write_out(&mut self, overwrite: Option<[u8; 32]>) -> ExportOutcome {
         if self.edit_mod.as_os_str().is_empty() {
             return ExportOutcome::Blocked(NO_EXPORT_FOLDER.into());
         }
@@ -906,36 +879,10 @@ impl NifEdit {
         // (`reapply` made both, Note GD2)
         let (out, skipped) = (self.out.to_vec(), self.cleanup_skip.clone());
         let path = self.export_path.clone();
-        let cannot_read = |e: std::io::Error| {
-            ExportOutcome::Blocked(format!("Cannot read {}: {e}", path.display()))
-        };
-        let last = self.doc.export.sha256.clone();
-        let ours = |b: &[u8]| last.as_deref() == Some(edit_doc::sha256_hex(b).as_str());
-        match engine::dds::may_replace(&path, &out, ours) {
-            Ok(()) => {}
-            Err(Kept::Unreadable(e)) => return cannot_read(e),
-            Err(Kept::Foreign) => {
-                let on_disk = match std::fs::read(&path) {
-                    Ok(b) => b,
-                    Err(e) => return cannot_read(e),
-                };
-                let sha256 = edit_doc::sha256_hex(&on_disk);
-                match overwrite {
-                    Some(h) if h == sha256 => {}
-                    _ => {
-                        let diff = nif::write::block_diff(&on_disk, &out).unwrap_or_else(|e| {
-                            vec![format!("The file on disk does not read as a NIF: {e}")]
-                        });
-                        self.guard = Some(GuardAsk {
-                            diff: diff.clone(),
-                            show_diff: false,
-                            sha256,
-                            never_exported: last.is_none(),
-                        });
-                        return ExportOutcome::Guard { diff };
-                    }
-                }
-            }
+        match foreign_hash(&path, &out, self.doc.export.sha256.as_deref()) {
+            Err(e) => return ExportOutcome::Blocked(e),
+            Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
+            Ok(_) => {}
         }
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
             return ExportOutcome::Blocked(format!("Cannot write {}: {e}", path.display()));
@@ -1250,7 +1197,6 @@ impl NifEdit {
         // first save there (Note GD19), not claimed here
         (self.edit_mod, self.doc_path, self.export_path) = (edit_mod, doc_path, export_path);
         self.drag = None;
-        self.guard = None; // Note GD30: its question was about the old folder's file
         self.history.break_merge();
         self.unsaved = true;
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
@@ -1870,9 +1816,18 @@ pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// Lowercase hex of a SHA-256, as `edit_doc::sha256_hex` writes it.
-fn hex(h: [u8; 32]) -> String {
-    h.iter().map(|b| format!("{b:02x}")).collect()
+/// Note GP10: the file at `path` as an export of `out` finds it: None when absent or Tessalith's own (its hash is
+/// `last`, the last export's), Some(SHA-256) when Tessalith did not write it, Err when it cannot be read.
+fn foreign_hash(path: &Path, out: &[u8], last: Option<&str>) -> Result<Option<[u8; 32]>, String> {
+    let cannot = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
+    let ours = |b: &[u8]| last == Some(edit_doc::sha256_hex(b).as_str());
+    match engine::dds::may_replace(path, out, ours) {
+        Ok(()) => Ok(None),
+        Err(Kept::Unreadable(e)) => Err(cannot(e)),
+        Err(Kept::Foreign) => std::fs::read(path)
+            .map(|b| Some(Sha256::digest(&b).into()))
+            .map_err(cannot),
+    }
 }
 
 /// The header's block count; 0 when it does not parse.
@@ -2205,17 +2160,6 @@ impl MeshesModel {
         }
     }
 
-    /// Export steps 1-7 for the open session (spec §8): the outcome also sets the session's guard and result line.
-    pub fn export_edit(&mut self, choice: Option<GuardChoice>) -> ExportOutcome {
-        let Some(e) = &mut self.edit else {
-            return ExportOutcome::Blocked("No NIF is being edited.".into());
-        };
-        let before = e.materials();
-        let out = e.export(choice);
-        self.after_export(before, &out);
-        out
-    }
-
     /// The open session's result line after an export, and the preview (a changed source re-applied the ops).
     fn after_export(&mut self, before: Vec<(ShapeId, MaterialState)>, out: &ExportOutcome) {
         self.foreign_cache.take();
@@ -2229,10 +2173,7 @@ impl MeshesModel {
                 false,
             )),
             ExportOutcome::Blocked(s) => Some((s.clone(), true)),
-            ExportOutcome::KeptTheirs => {
-                Some(("Not exported: the file on disk was kept.".into(), false))
-            }
-            ExportOutcome::Guard { .. } => None,
+            ExportOutcome::Foreign => None,
         };
         // the re-run row follows `export_note`, which has no `rev` of its own (Note GP8)
         e.refresh_blocked();
@@ -2294,17 +2235,7 @@ impl MeshesModel {
                 return v.clone();
             }
         }
-        let cannot =
-            |err: std::io::Error| format!("Cannot read {}: {err}", e.export_path.display());
-        let last = e.doc.export.sha256.clone();
-        let ours = |b: &[u8]| last.as_deref() == Some(edit_doc::sha256_hex(b).as_str());
-        let v = match engine::dds::may_replace(&e.export_path, &e.out, ours) {
-            Ok(()) => Ok(None),
-            Err(Kept::Unreadable(err)) => Err(cannot(err)),
-            Err(Kept::Foreign) => std::fs::read(&e.export_path)
-                .map(|b| Some(Sha256::digest(&b).into()))
-                .map_err(cannot),
-        };
+        let v = foreign_hash(&e.export_path, &e.out, e.doc.export.sha256.as_deref());
         *self.foreign_cache.borrow_mut() = Some((key, v.clone()));
         v
     }
@@ -2359,7 +2290,7 @@ impl MeshesModel {
         self.nif_answers.clear();
     }
 
-    /// Note GD2: the block diff the guard dialog showed, for the Review row's Diff…: the file on disk against what the
+    /// Note GD2: the block diff for the Review row's Diff…: the file on disk against what the
     /// export writes. None unless `path`'s row has a foreign file. Reads the disk: call it on a click, not per frame.
     pub fn nif_diff(&self, path: &str) -> Option<Vec<String>> {
         let row = self
@@ -2405,8 +2336,7 @@ impl MeshesModel {
                 continue;
             };
             let before = e.materials();
-            let out = e.write_out(r.foreign.map(hex));
-            e.guard = None; // the Review answers on its row: no dialog
+            let out = e.write_out(r.foreign);
             let placement = e.placement.clone();
             self.after_export(before, &out);
             match out {
@@ -2419,9 +2349,7 @@ impl MeshesModel {
                     }
                 }
                 ExportOutcome::Blocked(why) => skipped.push(format!("{}: {why}", r.path)),
-                ExportOutcome::Guard { .. } | ExportOutcome::KeptTheirs => {
-                    skipped.push(format!("{}: {NIF_CHANGED_SINCE}", r.path))
-                }
+                ExportOutcome::Foreign => skipped.push(format!("{}: {NIF_CHANGED_SINCE}", r.path)),
             }
         }
         match skipped.is_empty() {
