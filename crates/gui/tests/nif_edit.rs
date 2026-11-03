@@ -691,7 +691,7 @@ fn shape_cards_share_one_name_across_many_shapes() {
     b.extend(0u32.to_le_bytes()); // groups
     b.extend(30u32.to_le_bytes()); // footer: 30 roots, read as name index 30
     b.extend([0u8; 4 * 30]);
-    let cards = sdc_gui::model::meshes::nif_edit::shape_cards(&b);
+    let cards = modscan::store::shape_views(&nif::scan::scan(&b).unwrap());
     assert_eq!(cards.len(), 2000);
     let ptrs: std::collections::BTreeSet<_> = cards
         .iter()
@@ -3301,6 +3301,16 @@ fn one_push_scans_the_patched_bytes_once() {
     let n = scan_count();
     gloss(&mut m, 12.5);
     assert_eq!(scan_count() - n, 1);
+}
+
+#[test]
+fn one_push_checks_the_export_block_once() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    assert!(!m.edit.as_ref().unwrap().check_exists);
+    let n = block_check_count();
+    gloss(&mut m, 12.5);
+    assert_eq!(block_check_count() - n, 1);
 }
 
 /// Note GP8: turning "Check that files exist" off changes the warnings without a new `rev`: its rows still go.

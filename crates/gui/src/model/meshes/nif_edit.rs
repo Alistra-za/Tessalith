@@ -82,6 +82,8 @@ pub struct NifEdit {
     pub source: Arc<Vec<u8>>,
     pub source_copy: PathCopy,
     pub data_path: String,
+    /// The source with the ops applied. Written only by `reapply` (and the test seam `set_patched`), which keep
+    /// `read_err` and `cards` in step with it (Note GP8): never assign it elsewhere.
     pub patched: Arc<Vec<u8>>,
     /// Note GD2 (CQ1-CQ4): what the export writes, `patched` without its orphan blocks; rebuilt by `reapply`.
     pub out: Arc<Vec<u8>>,
@@ -851,6 +853,8 @@ impl NifEdit {
 
     /// Recomputes `blocked` after the ops or the warnings changed.
     pub fn refresh_blocked(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        CHECKS.with(|n| n.set(n.get() + 1));
         self.blocked_rev = self.rev;
         self.blocked = self.export_block();
         self.refresh_problems();
@@ -1054,10 +1058,10 @@ impl NifEdit {
         self.refresh_blocked();
     }
 
-    /// Note GP8: the one scan of `patched`: its shape cards and whether it reads back.
+    /// Note GP8: the one scan of `patched`: its shape cards, as the scan store would give them for these bytes
+    /// (`modscan::store::shape_views`, Note CZ1), and whether it reads back.
     fn scan_patched(&mut self) {
-        #[cfg(feature = "test-hooks")]
-        SCANS.with(|n| n.set(n.get() + 1));
+        // Silent cards on purpose (review Minor 4): they fall back to titles, and `read_err` blocks Export NIF
         (self.cards, self.read_err) = match read_back(&self.patched) {
             Ok(s) => (modscan::store::shape_views(&s), None),
             Err(e) => (vec![], Some(e)),
@@ -1681,17 +1685,6 @@ fn anim_tracks(
         .collect()
 }
 
-/// The shape cards of `bytes`, as the scan store would give them for these bytes (`modscan::store::shape_views`, the
-/// one row builder `write_shapes` shares): the edit-mode cards then show the edited values (Note CZ1). Empty when the
-/// bytes do not scan.
-pub fn shape_cards(bytes: &[u8]) -> Vec<ShapeView> {
-    // Silent on purpose (review Minor 4): the cards fall back to titles; an edit's same failure blocks Export NIF with
-    // its reason (`NifEdit::scan_patched`).
-    nif::scan::scan(bytes)
-        .map(|s| modscan::store::shape_views(&s))
-        .unwrap_or_default()
-}
-
 /// Meshes UI T5b (Note CZ19): the heel height shape `shape` needs, Z = −(lowest bind-pose vertex Z) in root space,
 /// rounded to 0.1. A skinned shape's vertices go through the inverse of its NiSkinData skin transform; an unskinned
 /// one through its node chain. None when the shape has no drawable geometry (a non-lighting shape, an LE file).
@@ -1886,13 +1879,13 @@ fn next_key() -> u64 {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
-    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// How many scans of the patched bytes this thread made (Note GP8's test: one per change).
+/// How many `refresh_blocked` calls this thread made (Note GP8's test: one per change).
 #[cfg(feature = "test-hooks")]
-pub fn scan_count() -> usize {
-    SCANS.with(std::cell::Cell::get)
+pub fn block_check_count() -> usize {
+    CHECKS.with(std::cell::Cell::get)
 }
 
 impl MeshesModel {
@@ -2181,6 +2174,19 @@ impl MeshesModel {
         // without a new `rev` refreshes it itself (`after_export`, `set_edit_check_exists`, the folder change)
         if validated || e.blocked_rev != e.rev {
             e.refresh_blocked();
+        } else {
+            debug_assert_eq!(
+                e.blocked,
+                e.export_block(),
+                "stale export block at rev {}",
+                e.rev
+            );
+            debug_assert_eq!(
+                *e.problems,
+                super::worklist::problems(e),
+                "stale worklist rows at rev {}",
+                e.rev
+            );
         }
         if !e.edit_mod.as_os_str().is_empty() {
             match DocBadge::of(&e.doc) {

@@ -149,7 +149,21 @@ pub fn pending_docs(edit_mod: &Path) -> Vec<(String, DocBadge)> {
     out
 }
 
-/// `bytes` read back as a NIF (`scan` checks the file length too); the scan is the edit's shape cards (Note GP8).
+/// `bytes` read back as a NIF (`scan` checks the file length too). Returns the scan, which `scan_patched` turns into
+/// the edit's shape cards (Note GP8).
 pub fn read_back(bytes: &[u8]) -> Result<nif::scan::NifScan, String> {
+    #[cfg(feature = "test-hooks")]
+    SCANS.with(|n| n.set(n.get() + 1));
     nif::scan::scan(bytes).map_err(|e| format!("The written file would not read back: {e}"))
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many `read_back` scans this thread made (Note GP8's test: one per change of the patched bytes).
+#[cfg(feature = "test-hooks")]
+pub fn scan_count() -> usize {
+    SCANS.with(std::cell::Cell::get)
 }
