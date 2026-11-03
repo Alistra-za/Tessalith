@@ -122,7 +122,8 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 - It needs the `cs` target: "Also export needs the cs mode: the PBR folder is the cs export" (exit 2).
 - A bad `[export.legacy]` value or folder name is an error (exit 2) on this path only; a plain run does not check them.
-- The CLI reads no Meshes scan, so it writes no vanilla env `_m`, and the report says "no: no scan".
+- The CLI reads no Meshes scan, so it writes no vanilla env `_m`.
+- After the passes it prints, on stderr, one line per file in the three folders that this export did not write ("not written by this export") and one per PBR set left out of Vanilla and CM, with the reason.
 - The GUI's **Copy CLI command** passes the Also export location as `-o`.
 
 ### --on-existing

@@ -123,8 +123,6 @@ pub enum Fix {
     Reload,
     /// Note FC10 (item 27): clear the read-only flag of this project file.
     ClearReadOnly(PathBuf),
-    /// Note FC10 (CN43): delete the unreadable `<PBR folder>/_sdc/also.json`.
-    ResetAlsoJson(PathBuf),
     /// Note FC10 (X10, X3): write `subtype = "complex_grass"` for this item.
     TagAsGrass(String),
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
@@ -559,19 +557,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             )
         });
     }
-    // Note FC10 (CN43): the Also export's record cannot be read; it is left as it is.
-    if let Some(p) = &m.also_unreadable {
-        out.push(Problem {
-            fix: Some(Fix::ResetAlsoJson(p.clone())),
-            detail: Some(RESET_ALSO_HOVER.into()),
-            ..row(
-                Level::Warning,
-                At::Project,
-                format!("{} cannot be read", p.display()),
-                Some(Code::AlsoOwnedUnreadable),
-            )
-        });
-    }
     // Note FC10 (T8): a user preset skipped because another preset already declares its suffix aliases. Note FC14:
     // the skipped one is whichever loads second, the original or its copy, so the row names both.
     for (file, reason) in &m.skipped_user_presets {
@@ -764,10 +749,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out
 }
 
-/// The hover of `Reset also.json` (Note FC10, CN43, CN39).
-pub const RESET_ALSO_HOVER: &str = "Reset also.json deletes this record of the report, zips and sums file that an earlier \
-     Tessalith wrote beside an Also export. 2.0 writes none of them and reads nothing from the record; the next Also \
-     export starts a new one. The files themselves are never deleted.";
 /// The hover of a `Tag as grass` row (Note FC10).
 pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal map, as complex grass is. No grass record \
      (GRAS) of a scan names it, so it is converted as a diffuse until it is tagged. Tag as grass writes subtype = \

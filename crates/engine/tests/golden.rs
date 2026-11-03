@@ -2304,6 +2304,43 @@ fn broken_new_format_files_fail_with_in_decode_and_the_batch_continues() {
     );
 }
 
+/// Note FM23: a Krita or OpenRaster file in the folder is discovered and fails alone with IN-DECODE through plan and run
+/// (the message tells the user to export a PNG); the batch goes on.
+#[test]
+fn kra_and_ora_files_fail_with_in_decode_end_to_end() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/good.png", rgb(64));
+    for n in ["paint.kra", "sketch.ora"] {
+        std::fs::write(
+            d.path().join("in/textures/a").join(n),
+            b"PK\x03\x04anything",
+        )
+        .unwrap();
+    }
+    let o = convert(d.path(), Target::Vanilla, &["subtype=diffuse"], &[]);
+    assert_eq!(
+        (o.summary.converted, o.summary.failed),
+        (1, 2),
+        "{:?}",
+        warnings(&o)
+    );
+    assert_eq!(o.summary.exit_code(), 1);
+    assert_eq!(
+        warnings(&o)
+            .iter()
+            .filter(|c| **c == Code::InDecode)
+            .count(),
+        2
+    );
+    let w = warning_of(&o, "paint.kra", Code::InDecode);
+    assert!(
+        w.message
+            .contains("Krita and OpenRaster files are not read; export the image as PNG"),
+        "{}",
+        w.message
+    );
+}
+
 /// DECISIONS S4: `rgba8` UNORM is a legacy B8G8R8A8 file, lossless (mip 0 equals the source), full chain, 99 dB.
 #[test]
 fn rgba8_output_is_legacy_b8g8r8a8_and_lossless() {

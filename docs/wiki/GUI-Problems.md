@@ -57,14 +57,13 @@ A row you must act on never just reports; its fix is its button:
 | A stale generated map (`GEN-STALE`) | **Regenerate…**, which opens the generate dialog with that map ticked and writes nothing until you press Generate there. |
 | A short normal (`CHAN-NORMAL-LENGTH`) | **Rebuild Z**, which sets the file's `channels.reconstruct_z`; greyed with "Rebuild Z is on for this file: export again to rewrite it" once it is set. |
 | A folder that could not be read | A Project row with **Open folder**. |
-| The Vanilla/CM derive results ("no envmap", "NIF suggests …") | **Open report**, or **Show in Messages** when no report was written. |
+| The Vanilla/CM derive results ("NIF suggests …") | No button: hover the row for the values. |
 | An unclear cubemap layout | **Set layout ▾**. |
 | A PGPatcher feature clash | **Turn {feature} off**. |
 | A PGPatcher path error | **Fix path**, which selects the set and puts the keyboard in that field (a `rename` or match path). A slot path error has **Go to set** instead, because slot paths are edited in the JSON editor. |
 | A NIF problem from the Meshes view | **Open the {tab} tab**, with the edit panel's own tab name (*Shader*, *Alpha*, *Controllers*, *Extra data*). |
 | *sdc-project.toml cannot be read: TOML parse error at line n…* | A red Project row (the parser's whole message on hover) with **Open in editor**, which opens the file with Windows' default program for it, and **Reload**, which reads both files again (it asks first when something is unsaved). Sets and the JSON stay read-only until the file is fixed, and the banner says why. |
 | *sdc.toml is read-only: changes cannot be saved* (or `sdc-project.toml`), when a save is refused because the file has Windows' read-only flag | **Clear read-only flag**, on that file only. With nothing unsaved the files are then reloaded; with unsaved edits they are kept, and the status line says to Save. <!-- D:FC10 --> |
-| *also.json cannot be read* (the Also export's record, `<PBR folder>\_sdc\also.json`) | **Reset also.json**, outlined in red: it deletes that file only. The manifests do not list it, so nothing rebuilds the record: the next Also export starts an empty one. <!-- D:FC10 --> |
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}** ([below](#skipped-presets)). |
 | *Looks like complex grass, but is not tagged as grass* (Info: a diffuse with the 1:2 complex-grass shape and a normal-map bottom half that no grass record of a scan names) | **Tag as grass**, which writes `subtype = "complex_grass"`. <!-- D:FC10 --> |
 | *Colour divided by alpha on load (premultiplied EXR)* (Info: an OpenEXR source with partial alpha) | **Straight alpha**, which writes `alpha.exr_straight = true`. An OpenEXR source's settings have the same **Straight alpha** in the Alpha group. <!-- D:FC10 --> |

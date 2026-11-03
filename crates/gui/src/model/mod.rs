@@ -335,8 +335,6 @@ pub struct AppModel {
     pub stale: Vec<engine::manifest::StaleOutput>,
     /// FC11 (fix round 1): the JSON rows of `stale`, each with the SHA-256 its hash record holds (their baseline).
     pub stale_json: std::collections::BTreeMap<PathBuf, String>,
-    /// Note FC10 (CN43): the PBR folder's `_sdc/also.json` that the last Also export could not read.
-    pub also_unreadable: Option<PathBuf>,
     /// Note FC10 (item 27): the project files with the read-only flag, as of the last open, reload or save.
     pub read_only_flags: Vec<PathBuf>,
     /// Note FC3: the NIF edit's problems, handed over by `app.rs` each frame (`set_nif_problems`).
@@ -713,7 +711,6 @@ impl AppModel {
             unreadable: vec![],
             stale: vec![],
             stale_json: Default::default(),
-            also_unreadable: None,
             read_only_flags: vec![],
             nif_problems: Default::default(),
             scan_db: None,
@@ -966,7 +963,6 @@ impl AppModel {
         self.sets.clear();
         self.sets_root = None;
         self.also_written = None;
-        self.also_unreadable = None;
         // FC11: the previous folder's stale files never get a Delete here.
         self.stale.clear();
         self.stale_json.clear();

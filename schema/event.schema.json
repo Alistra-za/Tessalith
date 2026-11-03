@@ -462,7 +462,6 @@
         "DERIVE-NOT-CONVERTED",
         "DERIVE-NIF-SUGGEST",
         "ALSO-PHASE-FAILED",
-        "ALSO-OWNED-UNREADABLE",
         "GEN-REPLACED",
         "GEN-STALE",
         "GEN-AO",

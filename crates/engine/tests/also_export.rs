@@ -9,7 +9,7 @@ use engine::also::*;
 use engine::api::*;
 use engine::config::Target;
 use engine::events::*;
-use engine::manifest::{sha256_file, Manifest, ManifestRecord};
+use engine::manifest::{Manifest, ManifestRecord};
 use engine::overrides::parse_set;
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::collections::BTreeSet;
@@ -367,85 +367,38 @@ fn vanilla_alone_writes_two_folders() {
     assert_eq!(s.phases.len(), 2);
 }
 
+/// Note FM23: an Also export keeps no `also.json`. A fresh export creates none, and a record a 1.x export left (readable
+/// or not) is neither read, rewritten nor deleted, and raises no warning.
 #[test]
-fn the_owned_file_record_is_in_the_pbr_folder() {
+fn a_1x_also_json_is_left_untouched() {
     let (_d, m, loc) = project(cup);
-    also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]))
+    let s = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]))
         .0
         .unwrap();
-    let pbr = loc.join("Mod PBR");
-    assert!(pbr.join("_sdc/also.json").exists());
-    assert!(!loc.join("_sdc").exists());
+    assert_eq!(s.exit_code(), 0, "{:?}", s.notes);
+    assert!(!loc.join("Mod PBR/_sdc/also.json").exists());
 
-    // A crash between the rename and the save leaves the new SHA pending: the file is still Tessalith's.
-    let sums = loc.join("Mod SHA256SUMS.txt");
-    std::fs::write(&sums, b"old").unwrap();
-    let key = std::path::absolute(&sums)
-        .unwrap()
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_lowercase();
-    let pending = sha256_file(&sums).unwrap();
-    std::fs::write(
-        pbr.join("_sdc/also.json"),
-        serde_json::to_vec(&serde_json::json!({ key.clone(): { "pending": pending } })).unwrap(),
-    )
-    .unwrap();
-    let mut owned = OwnedFiles::load(&pbr).unwrap();
-    owned.write(&sums, b"new").unwrap();
-    assert_eq!(std::fs::read(&sums).unwrap(), b"new");
-    let saved: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(pbr.join("_sdc/also.json")).unwrap()).unwrap();
-    assert_eq!(saved[&key]["sha256"], sha256_file(&sums).unwrap());
-    assert!(saved[&key].get("pending").is_none());
-
-    // A file nobody recorded is kept.
-    let foreign = loc.join("Mod notes.md");
-    std::fs::write(&foreign, b"mine").unwrap();
-    assert!(matches!(
-        OwnedFiles::load(&pbr).unwrap().write(&foreign, b"ours"),
-        Err(OwnedWriteError::Kept(engine::dds::Kept::Foreign))
-    ));
-    assert_eq!(std::fs::read(&foreign).unwrap(), b"mine");
-}
-
-/// Review M5: a write that fails says so ("could not be written"), not "could not be read".
-#[test]
-fn an_owned_write_that_fails_says_could_not_be_written() {
-    let d = tempfile::tempdir().unwrap();
-    let pbr = d.path().join("Mod PBR");
-    std::fs::write(d.path().join("blocker"), b"a file, not a folder").unwrap();
-    let target = d.path().join("blocker/sums.txt");
-    let e = OwnedFiles::load(&pbr)
-        .unwrap()
-        .write(&target, b"x")
-        .unwrap_err();
-    assert!(matches!(e, OwnedWriteError::Io(_)), "{e:?}");
-    let note = e.note(&target);
-    assert!(note.contains("could not be written"), "{note}");
-}
-
-/// Review M4: a corrupt `also.json` is left as it is (never saved back as `{}`), with a warning and a note.
-#[test]
-fn a_corrupt_owned_record_is_kept_and_reported() {
-    let (_d, m, loc) = project(cup);
-    let rec = loc.join("Mod PBR/_sdc/also.json");
-    std::fs::create_dir_all(rec.parent().unwrap()).unwrap();
-    std::fs::write(&rec, b"{\"c:/x/mod sha256sums.txt\": {\"sha256\": \"ab").unwrap();
-    assert!(OwnedFiles::load(&loc.join("Mod PBR")).is_err());
-    let (s, ev) = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]));
-    let s = s.unwrap();
-    assert_eq!(
-        std::fs::read(&rec).unwrap(),
-        b"{\"c:/x/mod sha256sums.txt\": {\"sha256\": \"ab"
-    );
-    assert!(
-        s.notes.iter().any(|n| n.contains("also.json")),
-        "{:?}",
-        s.notes
-    );
-    assert!(ev.iter().any(|e| matches!(&e.kind,
-        EventKind::Warning(w) if w.code == engine::codes::Code::AlsoOwnedUnreadable)));
+    for old in [
+        &b"{\"c:/x/mod sha256sums.txt\": {\"sha256\": \"ab\"}}"[..],
+        &b"{ not json"[..],
+    ] {
+        let rec = loc.join("Mod PBR/_sdc/also.json");
+        std::fs::write(&rec, old).unwrap();
+        let (s, ev) = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]));
+        let s = s.unwrap();
+        assert_eq!(s.exit_code(), 0, "{:?}", s.notes);
+        assert_eq!(std::fs::read(&rec).unwrap(), old);
+        assert!(
+            !s.notes.iter().any(|n| n.contains("also.json")),
+            "{:?}",
+            s.notes
+        );
+        assert!(
+            !ev.iter().any(|e| matches!(&e.kind,
+                EventKind::Warning(w) if w.message.contains("also.json"))),
+            "a warning names also.json"
+        );
+    }
 }
 
 /// Review M1: an error of a later phase keeps its class: recorded with its phase, its exit code wins, it is not a
@@ -1041,26 +994,6 @@ fn the_cm_text_names_the_grass_stacks() {
         cm_lines(&c, false),
         vec!["Install the CM folder on top of the Vanilla folder."]
     );
-}
-
-/// Review M5: a corrupt record found at the start is warned about once.
-#[test]
-fn a_corrupt_owned_record_is_warned_once() {
-    let (_d, m, loc) = project(cup);
-    let rec = loc.join("Mod PBR/_sdc/also.json");
-    std::fs::create_dir_all(rec.parent().unwrap()).unwrap();
-    std::fs::write(&rec, b"{ not json").unwrap();
-    let (s, ev) = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]));
-    s.unwrap();
-    let warned = ev
-        .iter()
-        .filter(|e| {
-            matches!(&e.kind,
-            EventKind::Warning(w) if w.code == engine::codes::Code::AlsoOwnedUnreadable)
-        })
-        .count();
-    assert_eq!(warned, 1);
-    assert_eq!(std::fs::read(&rec).unwrap(), b"{ not json");
 }
 
 fn fake_dds(path: &Path) {

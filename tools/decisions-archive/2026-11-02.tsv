@@ -125,8 +125,8 @@ AF2	AF		back	FM		archive-item	2026-11-02		whole: no mergedimage.png inflation
 AF¶- AF2: loading a	AF		back	FM		archive-item	2026-11-02		AF9 sub-bullet about the .kra/.ora IHDR read
 FC¶- **Zip limits are a Blockers row	FC		back	FM		archive-item	2026-11-02		whole: no zip, so no Zip limits row
 CN28	CN		back	FM		partial	2026-11-02		goes: the `zip` (bool) key; stays: the other [export] keys (FM23)
-CN39	CN		back	FM		partial	2026-11-02		goes: report, zips, sums as the owned files, and inner_layer_sets; stays: the OwnedFiles record
-CN43	CN		back	FM		partial	2026-11-02		goes: the report, zips and sums that were not written; stays: a corrupt also.json is left alone
+CN39	CN		back	FM		archive-item	2026-11-02		goes: report, zips, sums as the owned files, and inner_layer_sets; stays: the OwnedFiles record
+CN43	CN		back	FM		archive-item	2026-11-02		goes: the report, zips and sums that were not written; stays: a corrupt also.json is left alone
 CN54	CN		back	FM		partial	2026-11-02		goes: the report printing the install line; stays: cm_lines and the GUI Review
 CN55	CN		back	FM		partial	2026-11-02		goes: report::derive_error; stays: the CM-only derived error runs (also::derive_error)
 CN56	CN		back	FM		partial	2026-11-02		goes: the report written after a failed PBR run; stays: the failed PBR run is recorded and run_also returns Ok
@@ -144,8 +144,12 @@ CN101	CN		back	FM		partial	2026-11-02		goes: the zip step; stays: the overwrite 
 AC¶Owner ask (2026-10-14)	AC		back	FM		partial	2026-11-02		goes: Krita and OpenRaster as formats sdc reads; stays: PSD and WebP
 DZ4	DZ		back	FM		partial	2026-11-02		goes: Krita/ORA decoding; stays: the rest of what the pin covers
 FA14	FA		back	FM		partial	2026-11-02		goes: the zip module in the list; stays: the other pub(crate) modules
-FC¶- **CN43.** `also_finished`	FC		back	FM		partial	2026-11-02		goes: the report, zip or sums files in the also.json record; stays: the Reset also.json row
+FC¶- **CN43.** `also_finished`	FC		back	FM		archive-item	2026-11-02		goes: the report, zip or sums files in the also.json record; stays: the Reset also.json row
 FC¶- **Tests.** `gui/tests/open_cancel.rs`	FC		back	FM		partial	2026-11-02		goes: the zip limit tests; stays: the others
 GF8	GF		back	FM		partial	2026-11-02		goes: the zip and report phase; stays: a cancel during the walk writes no NIF edits
 GF9	GF		back	FM		partial	2026-11-02		goes: the zip phase name; stays: a cancelled run drops its Review answers
 GI27	GI		back	FM		partial	2026-11-02		goes: the Vanilla zip holds the copy; stays: the Vanilla folder keeps the noise, detail and profile
+CN44	CN		back	FM		partial	2026-11-02		goes: ALSO-OWNED-UNREADABLE as a code added; stays: ALSO-PHASE-FAILED and the once-only batch-level warnings (FM23)
+CN67	CN		back	FM		partial	2026-11-02		goes: Open report and Show in Messages; stays: Files rows and the DERIVE-NIF-SUGGEST Warning row (values on hover)
+CN73	CN		back	FM		partial	2026-11-02		goes: the unreadable _sdc/also.json refusal; stays: the Task 11 review fixes
+FC¶- **T8.** In the GUI	FC		back	FM		partial	2026-11-02		goes: the Reset also.json comparison; stays: the Remove aliases row

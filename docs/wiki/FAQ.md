@@ -90,7 +90,7 @@ Do nothing special: `--on-existing if-changed` is the default. It compares each 
 
 ### How do I start an Also export (Vanilla / CM) from scratch?
 
-Delete the `<project> PBR`, `<project> Vanilla` and `<project> CM` folders together. If `_sdc/also.json` in the PBR folder cannot be read, the GUI's Problems row *also.json cannot be read* has **Reset also.json**, which deletes that record.
+Delete the `<project> PBR`, `<project> Vanilla` and `<project> CM` folders together.
 
 ### Where are my settings stored?
 

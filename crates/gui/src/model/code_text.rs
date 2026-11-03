@@ -85,8 +85,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         DeriveNoAlbedo => "This set has no albedo so it can't be converted — add the albedo",
         DerivePathConflict => "A converted file lands on another file's output — rename one of them",
         AlsoPhaseFailed => "An extra export step stopped with an error — see Messages and export again",
-        // Note FC10: the row's `Reset also.json` is the remedy.
-        AlsoOwnedUnreadable => "also.json cannot be read — Reset also.json starts a new record",
         CubeFaces => "A cubemap's faces are missing or differ in size — fix the six faces",
         CubeNoMips => "A cubemap without mips sparkles on curved surfaces — turn mips on",
         // Note FC3: the Info results that are rows, since the user acts on them.

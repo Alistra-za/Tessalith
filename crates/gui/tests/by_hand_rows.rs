@@ -176,49 +176,31 @@ fn also_project(d: &Path) -> AppModel {
     opened_as_the_app(d.join("mods/Mod"), d.join("out"))
 }
 
-/// CN43: an unreadable `also.json` is a row; `Reset also.json` deletes only the record under the PBR folder's `_sdc`,
-/// and the next export writes a new record.
+/// Note FM23: an Also export keeps no `also.json`. A record a 1.x export left, readable or not, is no Problems row and
+/// no hindrance to the export, and stays on disk untouched.
 #[test]
-fn reset_also_json_only_under_sdc_and_writes_a_new_record() {
+fn a_1x_also_json_is_no_row_and_survives_an_export() {
     let d = tempfile::tempdir().unwrap();
     let mut m = also_project(d.path());
     m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
     idle(&mut m);
-    export_through(&mut m);
-    idle(&mut m);
     let rec = m.also_folders()[0].join("_sdc").join("also.json");
-    assert!(rec.is_file(), "the first export wrote the record");
-    assert!(row(&m, |f| matches!(f, Fix::ResetAlsoJson(_))).is_none());
+    std::fs::create_dir_all(rec.parent().unwrap()).unwrap();
     std::fs::write(&rec, "{").unwrap();
     export_through(&mut m);
     idle(&mut m);
-    let r = row(&m, |f| matches!(f, Fix::ResetAlsoJson(_))).expect("an also.json row");
-    assert_eq!(r.fix, Some(Fix::ResetAlsoJson(rec.clone())));
     assert!(
-        r.shown().starts_with("also.json cannot be read"),
-        "{}",
-        r.shown()
+        m.also_folders()[1].exists(),
+        "the export wrote the Vanilla folder"
     );
-    // A path that is not this project's record is refused and left alone.
-    let other = d.path().join("also.json");
-    std::fs::write(&other, "{").unwrap();
-    assert!(m.reset_also_json(&other).is_err());
-    assert!(other.is_file());
-    let mut h = harness(m);
-    h.run();
-    h.run();
-    assert!(rec.is_file(), "drawing the row deletes nothing");
-    click(&mut h, "Reset also.json");
-    assert!(!rec.exists(), "the click deleted the record");
-    assert!(row(h.state(), |f| matches!(f, Fix::ResetAlsoJson(_))).is_none());
-    let m = h.state_mut();
-    export_through(m);
-    idle(m);
-    let text = std::fs::read_to_string(&rec).expect("the next export wrote a record");
-    serde_json::from_str::<serde_json::Value>(&text).expect("a readable record");
-    assert!(row(m, |f| matches!(f, Fix::ResetAlsoJson(_))).is_none());
+    assert_eq!(std::fs::read(&rec).unwrap(), b"{");
+    assert!(
+        problems(&m)
+            .iter()
+            .all(|p| !p.shown().contains("also.json")),
+        "no row names also.json"
+    );
 }
-
 /// A 1:2 complex grass image (design §5): top half a cut-out diffuse, bottom half flat unit normals.
 fn grass_png(path: &Path) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

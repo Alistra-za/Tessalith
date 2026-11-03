@@ -6,7 +6,7 @@ use crate::api::{
 };
 use crate::codes::{Code, Warning};
 use crate::config::{GraySource, Profile, RawMap, Target};
-use crate::dds::{may_replace, write_atomic, Kept};
+use crate::dds::{may_replace, write_atomic};
 use crate::derive::{vanilla_rel, DeriveKind, DeriveMode, DeriveRequest, DeriveSet};
 use crate::events::{
     new_batch_id, EngineEvent, EventKind, EventSink, PrefixSink, Reporter, SkipKind, Stage,
@@ -17,8 +17,6 @@ use crate::policy::{JobStatus, Provenance, ResolvedJob, SourceStamp};
 use crate::presets::{AlsoTarget, ExportConfig};
 use crate::session::AnalysisCache;
 use crate::shader::{assign, MemberMap};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -430,91 +428,6 @@ pub fn same_identity(cs: &ResolvedJob, cs_root: &Path, van: &ResolvedJob, van_ro
         } == cs.profile
 }
 
-/// One owned-file record (TA21).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Owned {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sha256: Option<String>,
-    /// Written before the rename, so a crash between the rename and the final save still owns the file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pending: Option<String>,
-}
-
-/// TA21: the record of the files an Also export wrote outside the manifests before 2.0 (the report, the zips, the sums
-/// file), as hash records in `<PBR folder>/_sdc/also.json`, keyed by absolute, lower-cased, `/`-separated paths.
-pub struct OwnedFiles {
-    path: PathBuf,
-    records: BTreeMap<String, Owned>,
-}
-
-fn sha256_hex(b: &[u8]) -> String {
-    hex::encode(Sha256::digest(b))
-}
-
-/// Why [`OwnedFiles::write`] wrote nothing (or, after the rename, left the new file recorded as pending).
-#[derive(Debug)]
-pub enum OwnedWriteError {
-    /// fix/pre-v2's `may_replace` kept the existing file.
-    Kept(Kept),
-    /// Writing the record or the file failed.
-    Io(std::io::Error),
-}
-
-impl OwnedWriteError {
-    /// The note a writer shows for the file.
-    pub fn note(&self, path: &Path) -> String {
-        match self {
-            OwnedWriteError::Kept(k) => k.note(path),
-            OwnedWriteError::Io(e) => format!("{} could not be written ({e})", path.display()),
-        }
-    }
-}
-
-impl OwnedFiles {
-    /// The record of `pbr_folder`; empty when there is none yet. A record that exists but cannot be read or parsed
-    /// is an error, never read as empty: the caller leaves it as it is and writes no owned file (review M4).
-    pub fn load(pbr_folder: &Path) -> std::io::Result<OwnedFiles> {
-        let path = pbr_folder.join("_sdc").join("also.json");
-        let records = match std::fs::read(&path) {
-            Ok(b) => serde_json::from_slice(&b).map_err(std::io::Error::other)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-            Err(e) => return Err(e),
-        };
-        Ok(OwnedFiles { path, records })
-    }
-
-    /// Where the record lives.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Write `bytes` to `path` unless fix/pre-v2's `may_replace` keeps the file there (its record or pending SHA
-    /// must match). An I/O error is `OwnedWriteError::Io` (the file is unchanged or, after the rename, still
-    /// recorded as pending).
-    pub fn write(&mut self, path: &Path, bytes: &[u8]) -> Result<(), OwnedWriteError> {
-        let key = norm(path);
-        let rec = self.records.get(&key).cloned().unwrap_or_default();
-        may_replace(path, bytes, |old| {
-            let h = Some(sha256_hex(old));
-            rec.sha256 == h || rec.pending == h
-        })
-        .map_err(OwnedWriteError::Kept)?;
-        self.records.entry(key.clone()).or_default().pending = Some(sha256_hex(bytes));
-        self.save().map_err(OwnedWriteError::Io)?;
-        write_atomic(path, bytes).map_err(OwnedWriteError::Io)?;
-        let r = self.records.entry(key).or_default();
-        r.sha256 = r.pending.take();
-        // A failed save leaves the pending SHA on disk, which still matches the file: it stays ours.
-        let _ = self.save();
-        Ok(())
-    }
-
-    pub fn save(&self) -> std::io::Result<()> {
-        let bytes = serde_json::to_vec_pretty(&self.records).map_err(std::io::Error::other)?;
-        write_atomic(&self.path, &bytes)
-    }
-}
-
 /// Drops batch-level warnings (no job key) of the Vanilla and CM phases: each re-plans the same inputs, and the PBR
 /// phase already reported them (review M7).
 struct NoBatchWarnings(Arc<dyn EventSink>);
@@ -603,6 +516,7 @@ fn note_unwritten_files(s: &mut AlsoSummary, keys: &[BTreeSet<String>; 3]) {
         }
     }
 }
+
 /// Buffers a phase's planning events until the plan is filtered, then forwards the kept ones and everything after.
 struct Gate {
     inner: Arc<dyn EventSink>,
@@ -770,9 +684,7 @@ fn do_copies(
 /// One Also export (Note CN): check the location and the `[export]` table, then run the PBR, Vanilla and CM phases
 /// in order. Errors before the PBR phase writes anything are returned. A cancel stops the remaining phases and is
 /// recorded in `cancelled_after`; an engine error of the PBR run (CN56) or of the Vanilla or CM phase stops them too
-/// and is recorded in `error` with its exit code, plus an `ALSO-PHASE-FAILED` event. With `zip` on, an export that
-/// finished (no cancel, no phase error) and whose owned record is readable is zipped (Task 8); file-level failures
-/// don't block it. The report (Task 9) is written last, unless it is a dry run or the owned record is unreadable.
+/// and is recorded in `error` with its exit code, plus an `ALSO-PHASE-FAILED` event.
 /// `start_also` then `finish_also` with no extra file: the CLI, which writes no JSON into the PBR folder.
 pub fn run_also(
     engine: &Engine,
@@ -850,9 +762,6 @@ pub fn finish_also(run: AlsoRun, extra: &[PathBuf], cancel: &CancelToken) -> Als
     s
 }
 
-/// CN43: the tail of the note for an unreadable `also.json`, pointing at the GUI row's button (Note FC10).
-const OWNED_UNREADABLE: &str =
-    "it is left as it is: use Reset also.json on its row in Problems (or delete the file)";
 /// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
 #[allow(clippy::too_many_arguments)]
 fn run_phases(
@@ -941,23 +850,6 @@ fn run_phases(
         Err(e) => {
             failed(&mut s, Phase::Pbr, e);
             return Ok(s);
-        }
-    }
-    if !pbr_req.dry_run {
-        // TA21: the owned-file record lives in the PBR folder (2.0 writes no file through it any more). It is created
-        // when missing and never rewritten here; one that cannot be read is left as it is (review M4).
-        let rec = folders[0].join("_sdc").join("also.json");
-        let made = OwnedFiles::load(&folders[0]).and_then(|o| match o.path().exists() {
-            true => Ok(()),
-            false => o.save(),
-        });
-        if let Err(e) = made {
-            let m = format!(
-                "{} cannot be read or written ({e}): {OWNED_UNREADABLE}; the files it lists are not touched",
-                rec.display()
-            );
-            warn(Code::AlsoOwnedUnreadable, m.clone());
-            s.notes.push(m);
         }
     }
     if want_cm && !cfg.also.contains(&AlsoTarget::Vanilla) {

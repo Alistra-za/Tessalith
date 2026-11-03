@@ -95,7 +95,20 @@ fn derive_results_are_rows_with_the_values_on_hover() {
         .any(|p| p.code == Some(Code::DeriveNotConverted)));
     let mut h = harness(m);
     h.run();
-    h.get_by_label(code_sentence(Code::DeriveNifSuggest));
+    let detail = "suggested NIF values: glossiness 30.0, specular strength 1.0";
+    assert_eq!(
+        h.query_all_by_label(detail).count(),
+        0,
+        "not shown until hovered"
+    );
+    h.get_by_label(code_sentence(Code::DeriveNifSuggest))
+        .hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_all_by_label(detail).count() >= 1,
+        "the hover shows the suggested values"
+    );
 }
 
 /// The fixture with only the plastic check on and one plain warning row: a Warning row and a Check row.

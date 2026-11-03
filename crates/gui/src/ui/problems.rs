@@ -3,9 +3,7 @@
 //! is the row's button (`Problem::fix`).
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
-use crate::model::bottom::{
-    filtered, flagged, problems, At, Fix, Level, Problem, ProblemsFilter, RESET_ALSO_HOVER,
-};
+use crate::model::bottom::{filtered, flagged, problems, At, Fix, Level, Problem, ProblemsFilter};
 use crate::model::meshes::NifTab;
 use crate::model::sets::Missing;
 use crate::model::shell::ShellRequest;
@@ -263,16 +261,6 @@ fn fix_button(
             None,
             &format!("Clear the read-only flag of {}", path.display()),
             None,
-        ),
-        Fix::ResetAlsoJson(_) => destructive_button(
-            ui,
-            "Reset also.json",
-            None,
-            RESET_ALSO_HOVER,
-            m.export
-                .running
-                .is_some()
-                .then_some(crate::model::also::EXPORT_RUNNING),
         ),
         Fix::TagAsGrass(_) => button(
             ui,
@@ -623,11 +611,6 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::Reload => model.request_reload(),
         Fix::ClearReadOnly(p) => {
             if let Err(why) = model.clear_read_only_flag(&p) {
-                model.status_line = why;
-            }
-        }
-        Fix::ResetAlsoJson(p) => {
-            if let Err(why) = model.reset_also_json(&p) {
                 model.status_line = why;
             }
         }

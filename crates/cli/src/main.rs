@@ -80,6 +80,13 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             tee_sink(a.batch.json),
             &cancel,
         )?;
+        // Plain lines on stderr (stdout carries the JSON lines): the files this export did not write, and the sets left out.
+        for n in &sum.notes {
+            err!("{n}");
+        }
+        for n in &sum.sets {
+            err!("{}: {}", n.id, n.why);
+        }
         return Ok(sum.exit_code());
     }
     let rep = reporter(a.batch.json);

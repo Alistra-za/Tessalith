@@ -1509,6 +1509,41 @@ fn the_default_flow_with_undecided_sets() {
     assert!(!fx.dds("in Vanilla/textures/arm/steel_n.dds").exists());
     assert!(!fx.dds("in Vanilla/textures/clutter/cup.dds").exists());
     assert!(!fx.dds("in CM/textures/arm/steel_m.dds").exists());
+    // Note FM23: the sets left out are lines on stderr, one per set.
+    let err = text(&o.stderr);
+    assert!(
+        err.lines()
+            .any(|l| l.contains("steel") && l.contains("maps undecided in the PBR export")),
+        "{err}"
+    );
+}
+
+/// Note FM23: a file in an output folder that the export did not write is kept and named on stderr, one line each.
+#[test]
+fn a_file_the_export_did_not_write_is_named_on_stderr() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.project_config(ALSO_ALL);
+    let o = fx.convert(&HI);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(
+        !text(&o.stderr).contains("not written by this export"),
+        "{}",
+        text(&o.stderr)
+    );
+    let stray = fx.dds("in Vanilla/textures/stray.dds");
+    std::fs::write(&stray, b"mine").unwrap();
+    let o = fx.convert(&HI);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    let lines: Vec<&str> = err
+        .lines()
+        .filter(|l| l.contains("stray.dds: not written by this export"))
+        .collect();
+    assert_eq!(lines.len(), 1, "{err}");
+    assert_eq!(std::fs::read(&stray).unwrap(), b"mine");
+    // The notes go to stderr: stdout is still JSON lines only.
+    assert!(!events(&o).is_empty());
 }
 
 /// Task 10 M3: `[export]` is read on every convert, but without `also` a valid table changes nothing, and a

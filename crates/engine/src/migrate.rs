@@ -232,6 +232,11 @@ pub const REMOVED: &[Removed] = &[
         value: Some("ALSO-REPORT-FAILED"),
         hint: "ALSO-REPORT-FAILED was removed in 2.0 (an Also export writes no conversion report); delete it from the list",
     },
+    Removed {
+        key: "allow",
+        value: Some("ALSO-OWNED-UNREADABLE"),
+        hint: "ALSO-OWNED-UNREADABLE was removed in 2.0 (an Also export keeps no also.json record); delete it from the list",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

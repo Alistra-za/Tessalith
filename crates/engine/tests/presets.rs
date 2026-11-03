@@ -1162,9 +1162,9 @@ fn removed_output_codes_in_allow_lists_are_named() {
     }
 }
 
-/// Note FM: the `[export] zip` key and the two codes of the zip and the conversion report are gone. A 1.x config names
-/// them (never a bare "unknown field"), and `ALSO-ZIP-FAILED` / `ALSO-REPORT-FAILED` in an `allow` list, in `--set
-/// allow=` and in `--allow` get the removal message.
+/// Note FM: the `[export] zip` key and the codes of the zip, the conversion report and the `also.json` record are
+/// gone. A 1.x config names them (never a bare "unknown field"), and `ALSO-ZIP-FAILED`, `ALSO-REPORT-FAILED` and
+/// `ALSO-OWNED-UNREADABLE` in an `allow` list, in `--set allow=` and in `--allow` get the removal message.
 #[test]
 fn the_export_zip_key_is_named() {
     for text in [
@@ -1193,7 +1193,11 @@ fn the_export_zip_key_is_named() {
         "{e}"
     );
 
-    for code in ["ALSO-ZIP-FAILED", "ALSO-REPORT-FAILED"] {
+    for code in [
+        "ALSO-ZIP-FAILED",
+        "ALSO-REPORT-FAILED",
+        "ALSO-OWNED-UNREADABLE",
+    ] {
         assert!(Code::parse(code).is_none(), "{code} is still a code");
         let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
         assert!(e.to_string().contains(code), "{e}");
