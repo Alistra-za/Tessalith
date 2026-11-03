@@ -3272,15 +3272,54 @@ fn a_refused_edit_blocks_export() {
     assert!(!exported(&d).exists());
 }
 
-#[test]
-fn export_refuses_bytes_that_do_not_read_back() {
-    let (d, mut m) = export_session();
+/// An edited session whose patched bytes do not scan. No edit makes such bytes (`apply` refuses a source that does
+/// not add up, and the scan fails on nothing else), so the test seam sets them as `reapply` would (Note GP8).
+fn unreadable_patch(m: &mut MeshesModel) {
     m.open_edit();
-    gloss(&mut m, 12.5);
+    gloss(m, 12.5);
     let e = m.edit.as_mut().unwrap();
     let mut bad = (*e.patched).clone();
     bad.truncate(bad.len() - 3);
-    e.patched = std::sync::Arc::new(bad);
+    e.set_patched(bad);
+}
+
+#[test]
+fn export_block_still_names_bytes_that_do_not_read_back() {
+    let (_d, mut m) = export_session();
+    unreadable_patch(&mut m);
+    let why = m.edit.as_ref().unwrap().export_block().unwrap_or_default();
+    assert!(
+        why.starts_with("The written file would not read back: "),
+        "{why}"
+    );
+}
+
+#[test]
+fn one_push_scans_the_patched_bytes_once() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let n = scan_count();
+    gloss(&mut m, 12.5);
+    assert_eq!(scan_count() - n, 1);
+}
+
+/// Note GP8: turning "Check that files exist" off changes the warnings without a new `rev`: its rows still go.
+#[test]
+fn turning_the_file_check_off_drops_its_rows() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let rows = |m: &MeshesModel| m.edit.as_ref().unwrap().problems.len();
+    let n = rows(&m);
+    m.set_edit_check_exists(true);
+    assert!(rows(&m) > n, "a missing file is a row");
+    m.set_edit_check_exists(false);
+    assert_eq!(rows(&m), n);
+}
+
+#[test]
+fn export_refuses_bytes_that_do_not_read_back() {
+    let (d, mut m) = export_session();
+    unreadable_patch(&mut m);
     let out = m.export_edit(None);
     assert!(
         matches!(&out, ExportOutcome::Blocked(s) if s.starts_with("The written file would not read back: ")),

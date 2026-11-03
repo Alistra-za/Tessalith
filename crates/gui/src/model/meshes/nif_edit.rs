@@ -119,9 +119,11 @@ pub struct NifEdit {
     pub error: Option<String>,
     /// Every enabled copy of the NIF (the store's order), for the placement check and the PGPatcher re-run note.
     pub copies: Vec<PathCopy>,
-    /// The shape cards of the edited bytes (`shape_cards`), rebuilt by every `reapply` (Note CZ1; was the scan's
-    /// cards of `source_copy`, final review I1).
+    /// The shape cards of the edited bytes (`shape_views` of `reapply`'s one scan of `patched`, Note GP8), rebuilt by
+    /// every `reapply` (Note CZ1; was the scan's cards of `source_copy`, final review I1).
     pub cards: Vec<ShapeView>,
+    /// Note GP8: `read_back`'s text for `patched` from the same scan; `export_block` reads it, never scans.
+    read_err: Option<String>,
     /// Meshes UI T2: each shape's controllers line ("2: Emissive multiple, Alpha (clip)"), by shape block; rebuilt with
     /// `cards`.
     pub card_ctrls: HashMap<u32, String>,
@@ -129,6 +131,8 @@ pub struct NifEdit {
     pub placement: Option<Placement>,
     /// Why "Export NIF" is disabled, from the in-memory state (`export_block`), kept current by every change.
     pub blocked: Option<String>,
+    /// Note GP8: the `rev` `refresh_blocked` last ran for; `edit_checks` skips a check it already made.
+    blocked_rev: u64,
     /// Note GD1: this edit's worklist rows, rebuilt with `blocked` (a new `Arc` only when they change, rule 9.1).
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
@@ -698,9 +702,11 @@ impl NifEdit {
             error: None,
             copies: vec![],
             cards: vec![],
+            read_err: None,
             card_ctrls: HashMap::new(),
             placement: None,
             blocked: None,
+            blocked_rev: 0,
             problems: Arc::default(),
             notice: None,
             guard: None,
@@ -830,25 +836,22 @@ impl NifEdit {
         if let Some(w) = self.op_warnings.iter().find(|w| w.level == Level::Error) {
             return Some(w.text.clone());
         }
-        read_back(&self.patched).err()
+        self.read_err.clone()
     }
 
     /// Note GD33: a reason the export is blocked that no worklist row says: a failed folder change, an apply error, or
     /// bytes that do not read back. Refused ops, conflicts and errors have their own rows, so `export_block`'s
-    /// summaries of them are never a row. Unblocked, the bytes read back (`export_block` checked), so no second scan.
+    /// summaries of them are never a row.
     pub fn uncovered_block(&self) -> Option<String> {
         self.retarget_error
             .clone()
             .or_else(|| self.apply_err.clone())
-            .or_else(|| {
-                self.blocked
-                    .as_ref()
-                    .and_then(|_| read_back(&self.patched).err())
-            })
+            .or_else(|| self.read_err.clone())
     }
 
     /// Recomputes `blocked` after the ops or the warnings changed.
     pub fn refresh_blocked(&mut self) {
+        self.blocked_rev = self.rev;
         self.blocked = self.export_block();
         self.refresh_problems();
     }
@@ -959,6 +962,7 @@ impl NifEdit {
             Err(e) => {
                 self.error = Some(e.to_string());
                 self.apply_err = Some(e.to_string());
+                self.read_err = None; // `apply_err` says why
                 self.up_to_date = false; // review Minor 3: the stale bytes are not what the last export wrote
                 self.refresh_blocked();
                 return;
@@ -997,13 +1001,14 @@ impl NifEdit {
             Ok(m) => self.model = m,
             Err(e) => self.error = Some(e.to_string()),
         }
-        self.trailer_types = trailer_types(&self.doc.ops(), &self.outcomes, &self.model);
-        self.cards = shape_cards(&self.patched); // once per change, never per frame (rule 9.1)
+        // After the ReAnchored write-back: each op's `at.block` is the block its warning targets.
+        let ops = self.doc.ops();
+        self.trailer_types = trailer_types(&ops, &self.outcomes, &self.model);
+        self.scan_patched(); // once per change, never per frame (rule 9.1)
         self.card_ctrls = card_ctrls(&self.model);
         self.warnings = validate(&self.model, None);
         demote_source(&self.source_warnings, &mut self.warnings);
-        // After the ReAnchored write-back: each op's `at.block` is the block its warning targets.
-        self.op_warnings = validate_ops(&self.doc.ops());
+        self.op_warnings = validate_ops(&ops);
         // B-P41: one header parse per change; one per controller cost 266 ms a drag tick on a 608-controller NIF.
         let header = nif::header::Header::parse(&self.patched).map_err(|e| e.to_string());
         self.keys =
@@ -1046,6 +1051,24 @@ impl NifEdit {
         self.anim = anim_tracks(&self.model, &self.patched, &self.parsed, self.playing);
         self.anim_shown = None;
         self.refresh_pg_warnings();
+        self.refresh_blocked();
+    }
+
+    /// Note GP8: the one scan of `patched`: its shape cards and whether it reads back.
+    fn scan_patched(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        SCANS.with(|n| n.set(n.get() + 1));
+        (self.cards, self.read_err) = match read_back(&self.patched) {
+            Ok(s) => (modscan::store::shape_views(&s), None),
+            Err(e) => (vec![], Some(e)),
+        };
+    }
+
+    /// Test seam: `patched` replaced as `reapply` would leave it, for bytes no edit can make (Note GP8).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_patched(&mut self, bytes: Vec<u8>) {
+        self.patched = Arc::new(bytes);
+        self.scan_patched();
         self.refresh_blocked();
     }
 
@@ -1662,8 +1685,8 @@ fn anim_tracks(
 /// one row builder `write_shapes` shares): the edit-mode cards then show the edited values (Note CZ1). Empty when the
 /// bytes do not scan.
 pub fn shape_cards(bytes: &[u8]) -> Vec<ShapeView> {
-    // Silent on purpose (review Minor 4): the cards fall back to titles, and the same failure blocks Export NIF with
-    // its reason, since `read_back` scans the patched bytes too.
+    // Silent on purpose (review Minor 4): the cards fall back to titles; an edit's same failure blocks Export NIF with
+    // its reason (`NifEdit::scan_patched`).
     nif::scan::scan(bytes)
         .map(|s| modscan::store::shape_views(&s))
         .unwrap_or_default()
@@ -1859,6 +1882,17 @@ fn block_count(b: &[u8]) -> u32 {
 fn next_key() -> u64 {
     static KEY: AtomicU64 = AtomicU64::new(1);
     KEY.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many scans of the patched bytes this thread made (Note GP8's test: one per change).
+#[cfg(feature = "test-hooks")]
+pub fn scan_count() -> usize {
+    SCANS.with(std::cell::Cell::get)
 }
 
 impl MeshesModel {
@@ -2116,6 +2150,9 @@ impl MeshesModel {
         e.check_exists = on;
         e.warnings = validate(&e.model, None);
         demote_source(&e.source_warnings, &mut e.warnings);
+        if !on || self.store.is_none() {
+            e.refresh_blocked(); // the warnings changed without a new `rev`, and `edit_checks` does not validate (GP8)
+        }
         self.edit_checks();
     }
 
@@ -2133,12 +2170,18 @@ impl MeshesModel {
         if let Some(err) = e.error.take() {
             self.error = Some(err);
         }
+        let mut validated = false;
         if let (true, Some(store)) = (e.check_exists, &self.store) {
             let exists = |n: &str| matches!(store.texture_location(n), Ok(Some(_)));
             e.warnings = validate(&e.model, Some(&exists));
             demote_source(&e.source_warnings, &mut e.warnings);
+            validated = true;
         }
-        e.refresh_blocked();
+        // Note GP8: a change already checked in `reapply` is not checked again; what changes the block's inputs
+        // without a new `rev` refreshes it itself (`after_export`, `set_edit_check_exists`, the folder change)
+        if validated || e.blocked_rev != e.rev {
+            e.refresh_blocked();
+        }
         if !e.edit_mod.as_os_str().is_empty() {
             match DocBadge::of(&e.doc) {
                 Some(b) => self.doc_badges.insert(e.data_path.clone(), b),
@@ -2176,6 +2219,8 @@ impl MeshesModel {
             }
             ExportOutcome::Guard { .. } => None,
         };
+        // the re-run row follows `export_note`, which has no `rev` of its own (Note GP8)
+        e.refresh_blocked();
         // A changed source re-applied the ops: the preview follows.
         self.edit_changed(before);
     }

@@ -149,9 +149,7 @@ pub fn pending_docs(edit_mod: &Path) -> Vec<(String, DocBadge)> {
     out
 }
 
-/// `bytes` read back as a NIF (`scan` checks the file length too).
-pub fn read_back(bytes: &[u8]) -> Result<(), String> {
-    nif::scan::scan(bytes)
-        .map(|_| ())
-        .map_err(|e| format!("The written file would not read back: {e}"))
+/// `bytes` read back as a NIF (`scan` checks the file length too); the scan is the edit's shape cards (Note GP8).
+pub fn read_back(bytes: &[u8]) -> Result<nif::scan::NifScan, String> {
+    nif::scan::scan(bytes).map_err(|e| format!("The written file would not read back: {e}"))
 }
