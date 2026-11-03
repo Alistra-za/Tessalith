@@ -356,6 +356,10 @@ pub struct Renderer {
     load_epoch: Arc<AtomicU64>,
     /// Hosts that drive a pool turn this on; the default settles every load and edit before returning.
     async_compile: bool,
+    /// The missing-cbuffer-field check ran for this load (it waits until no shape is Pending).
+    fields_checked: bool,
+    /// Warnings found after the load returned (async compiles landed); drained by [Renderer::take_late_warnings].
+    late_warnings: Vec<String>,
     /// The loaded NIF is a head part (Note BA; [`ParsedNif::head_part`]), set by every load.
     head_part: bool,
     defaults: HashMap<(SrvKind, [u8; 4]), ID3D11ShaderResourceView>,
@@ -562,6 +566,8 @@ impl Renderer {
             jobs: vec![],
             load_epoch: Arc::new(AtomicU64::new(0)),
             async_compile: false,
+            fields_checked: false,
+            late_warnings: vec![],
             head_part: false,
             defaults: HashMap::new(),
             shapes: BTreeMap::new(),
@@ -1447,7 +1453,24 @@ impl Renderer {
         if !waiting.is_empty() {
             self.sort_draw_order();
         }
+        if !self.fields_checked && !self.any_pending() {
+            let mut rep = LoadReport::default();
+            self.warn_missing_fields(&mut rep);
+            self.late_warnings.extend(rep.warnings);
+            self.fields_checked = true;
+        }
         !waiting.is_empty()
+    }
+
+    /// Warnings the load report could not carry: the missing-field check runs once the load's last program lands.
+    pub fn take_late_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.late_warnings)
+    }
+
+    fn any_pending(&self) -> bool {
+        self.shapes
+            .values()
+            .any(|s| matches!(s.status, ShapeStatus::Pending { .. }))
     }
 
     /// Runs every queued job on this thread and applies it: the synchronous mode (tests, the Meshes view's
@@ -1559,6 +1582,8 @@ impl Renderer {
         self.tex_cache.clear();
         self.evicted_missing.clear();
         self.bounds = None;
+        self.fields_checked = false;
+        self.late_warnings.clear();
         self.fixed_pipeline = fixed;
         self.head_part = parsed.head_part;
         let mut rep = LoadReport {
@@ -1609,7 +1634,12 @@ impl Renderer {
             }
         }
         self.bounds = self.compute_bounds();
-        self.warn_missing_fields(&mut rep);
+        if !self.any_pending() {
+            // settle may have run the check through pply_compiled: the report carries it, not the late list.
+            self.late_warnings.clear();
+            self.warn_missing_fields(&mut rep);
+            self.fields_checked = true;
+        }
         self.sort_draw_order();
         rep.pending = self
             .shapes

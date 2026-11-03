@@ -678,6 +678,8 @@ pub enum V3Reply {
         report: LoadReport,
         bounds: Option<([f32; 3], f32)>,
     },
+    /// Warnings found after the load's report went out (the last async compile landed); appended to its notes.
+    LateWarnings(Vec<String>),
     Frame {
         frame: Arc<Frame>,
         #[cfg(feature = "test-hooks")]
@@ -1685,6 +1687,11 @@ impl Viewport3d {
                     self.bounds = bounds;
                 }
             }
+            V3Reply::LateWarnings(w) => {
+                if let Some(rep) = &mut self.report {
+                    rep.warnings.extend(w);
+                }
+            }
             V3Reply::Frame {
                 frame,
                 #[cfg(feature = "test-hooks")]
@@ -2429,6 +2436,10 @@ fn render_loop(
                     loaded(&r, *id, report);
                 }
             }
+        }
+        let late = r.take_late_warnings();
+        if !late.is_empty() {
+            send(V3Reply::LateWarnings(late));
         }
         let pending_was_empty = pending.is_empty();
         if !pending.is_empty() {

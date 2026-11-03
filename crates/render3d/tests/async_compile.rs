@@ -1,7 +1,7 @@
 //! 03 T-E3..T-E7 and the load-time behaviour of the background compile. The test is the pool: no threads, it
 //! takes the jobs, runs them with `run_job`, and can withhold or reorder the results.
 mod common;
-use common::{cache_files, channel, covered, fixture, renderer, FLAT};
+use common::{cache_files, channel, covered, fixture, renderer, renderer_at, standin_root, FLAT};
 use nif::material::MaterialState;
 use nif::props::Alpha;
 use render3d::device::Gpu;
@@ -60,6 +60,73 @@ fn furniture(cache: &Path) -> Renderer {
     r
 }
 
+/// A copy of the stand-in whose `Lighting.hlsl` lacks the `DirectionalAmbient` cbuffer field (renamed).
+fn standin_without_ambient() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for e in std::fs::read_dir(standin_root()).unwrap() {
+        let e = e.unwrap();
+        std::fs::copy(e.path(), dir.path().join(e.file_name())).unwrap();
+    }
+    let p = dir.path().join("Lighting.hlsl");
+    let src = std::fs::read_to_string(&p).unwrap();
+    assert!(src.contains("DirectionalAmbient"));
+    std::fs::write(&p, src.replace("DirectionalAmbient", "DirectionalAmbientX")).unwrap();
+    dir
+}
+
+/// The missing-field warnings of the unmodified stand-in (async: the late ones, else the load report's).
+fn baseline_warnings(async_compile: bool) -> Vec<String> {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), LIT);
+    r.set_async_compile(async_compile);
+    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    drain(&mut r);
+    let mut w = rep.warnings;
+    w.extend(r.take_late_warnings());
+    w
+}
+
+/// The lit path of the stand-in (no STANDIN_FLAT): the only one whose pixel shader reads DirectionalAmbient.
+const LIT: &[&str] = &["STANDIN_OPAQUE_OK"];
+
+const NO_AMBIENT: &str = "this CS build has no cbuffer field \"DirectionalAmbient\"";
+
+/// L28: the load returns before any program exists, so the missing-field check waits for the last one to land.
+#[test]
+fn a_missing_cbuffer_field_is_reported_once_after_the_async_compiles_land() {
+    let shaders = standin_without_ambient();
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer_at(shaders.path(), cache.path(), LIT);
+    r.set_async_compile(true);
+    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    assert_eq!(rep.pending, 2, "{rep:?}");
+    assert!(rep.warnings.is_empty(), "no draws yet: {:?}", rep.warnings);
+    assert!(drain(&mut r) >= 1);
+    let w = r.take_late_warnings();
+    assert_eq!(w.iter().filter(|s| *s == NO_AMBIENT).count(), 1, "{w:?}");
+    assert_eq!(w.len(), baseline_warnings(true).len() + 1, "{w:?}");
+    // once per load: more landings add nothing
+    let m = pbr_subsurface(material(&r, CYL1));
+    assert_eq!(r.set_material(CYL1, m, &none), Ok(EditKind::Permutation));
+    assert_eq!(drain(&mut r), 1);
+    assert!(r.take_late_warnings().is_empty());
+}
+
+#[test]
+fn a_missing_cbuffer_field_stays_in_the_load_report_when_compiles_settle_at_load() {
+    let shaders = standin_without_ambient();
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer_at(shaders.path(), cache.path(), LIT);
+    r.set_async_compile(false);
+    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    assert!(
+        rep.warnings.contains(&NO_AMBIENT.to_string()),
+        "{:?}",
+        rep.warnings
+    );
+    assert_eq!(rep.warnings.len(), baseline_warnings(false).len() + 1);
+    assert!(r.take_late_warnings().is_empty());
+}
 /// Vanilla → TruePBR with Rim (Subsurface): a permutation edit whose pixels differ (the stand-in writes 0.5
 /// green when PBRFlags ≠ 0).
 fn pbr_subsurface(mut m: MaterialState) -> MaterialState {
