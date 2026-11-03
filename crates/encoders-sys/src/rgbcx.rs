@@ -42,7 +42,7 @@ pub fn bc1_encode_block(
 }
 
 /// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha). The alpha search keeps texels on their side of
-/// the alpha test: a texel passes when its alpha is at least `cut` (2..=255; 128 is the default test, Note FM).
+/// the alpha test: a texel passes when its alpha is at least `cut` (1..=255; 128 is the default test, Note FM).
 pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32, cut: u8) -> [u8; 16] {
     init();
     let src = bytes(px);

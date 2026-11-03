@@ -40,7 +40,7 @@ pub struct Versions {
     pub ispctc: &'static str,
     pub ispc: &'static str,
     pub bc7e_patch: Option<&'static str>,
-    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search; BC1 dual); README-VENDOR.md.
+    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search; BC1 dual; BC3 alpha guard cutoff in `mode_flag` bits 8..15); README-VENDOR.md.
     pub rgbcx_patch: Option<&'static str>,
 }
 

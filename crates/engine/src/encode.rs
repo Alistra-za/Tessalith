@@ -53,13 +53,16 @@ pub fn bc6h_level(e: Effort) -> Bc6hLevel {
 }
 
 /// The least alpha that passes the texture's alpha test, the cutoff the BC3 alpha guard keeps texels on the right side
-/// of (Note FM): `gt` t passes alpha >= t + 1, `ge` t passes alpha >= t. `threshold` is 1..=254 (checked in policy), so
-/// the result is 2..=255 and never 0, which the encoder reads as "128". The default (127, `gt`) gives 128.
+/// of (Note FM): `gt` t passes alpha >= t + 1, `ge` t passes alpha >= t. `threshold` is 1..=254 (policy refuses any other
+/// value with CFG-INVALID, and a mesh threshold is clamped), so the result is 1..=255. The default (127, `gt`) gives 128.
 pub fn alpha_cut(a: &AlphaSpec) -> u8 {
-    match a.compare {
+    let cut = match a.compare {
         AlphaCompare::Gt => a.threshold.saturating_add(1),
         AlphaCompare::Ge => a.threshold,
-    }
+    };
+    // The encoder reads cutoff 0 as "use 128", so a 0 here would silently guard the wrong test.
+    debug_assert!(cut >= 1, "alpha threshold {} gives cutoff 0", a.threshold);
+    cut
 }
 
 pub fn radius(r: SearchRadius) -> u32 {
@@ -344,6 +347,27 @@ fn grass_corner_ok(blk: &[u8], t: usize) -> bool {
 mod tests {
     use super::*;
     use crate::presets::PresetRegistry;
+
+    #[test]
+    fn alpha_cut_is_the_least_passing_alpha() {
+        let spec = |threshold, compare| AlphaSpec {
+            policy: AlphaPolicy::Cutout,
+            threshold,
+            compare,
+            exact_opaque: false,
+            parallax: None,
+            exr_straight: false,
+        };
+        for (t, c, want) in [
+            (127, AlphaCompare::Gt, 128),
+            (200, AlphaCompare::Gt, 201),
+            (254, AlphaCompare::Gt, 255),
+            (1, AlphaCompare::Ge, 1),
+            (200, AlphaCompare::Ge, 200),
+        ] {
+            assert_eq!(alpha_cut(&spec(t, c)), want, "{t} {c:?}");
+        }
+    }
 
     fn bc7_exact_profile() -> Profile {
         let mut p = PresetRegistry::builtin()

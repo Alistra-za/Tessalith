@@ -138,6 +138,28 @@ fn identity_entries(
         .collect()
 }
 
+/// The `cutout_bc3_t200` pin only means something if the cutoff changes bytes: its mip 0 alpha blocks equal the BC3
+/// encode with cutoff 201 (`gt` 200), and at least one of them differs from the default-cutoff (128) encode.
+fn t200_pins_the_cutoff(d: &Path) {
+    let bytes = std::fs::read(out_dir(d, "cov/").join("textures/c/cutout_bc3_t200.dds")).unwrap();
+    let dds = engine::dds::read_dds(&bytes).unwrap();
+    let px: Vec<[u8; 4]> = rgba_near_cut().to_rgba8().pixels().map(|p| p.0).collect();
+    let mut differs = 0;
+    for (b, blk) in encoders_sys::gather_blocks(&px, 64, 64)
+        .chunks(16)
+        .enumerate()
+    {
+        let blk: &[[u8; 4]; 16] = blk.try_into().unwrap();
+        let alpha = |cut| encoders_sys::bc3_encode_block(blk, 5, cut)[..8].to_vec();
+        assert_eq!(dds.data[b * 16..b * 16 + 8], alpha(201), "block {b}");
+        differs += (alpha(201) != alpha(128)) as u32;
+    }
+    assert!(
+        differs > 0,
+        "cutout_bc3_t200 is the same under the default cutoff"
+    );
+}
+
 fn out_dir(d: &Path, prefix: &str) -> std::path::PathBuf {
     d.join(format!("out-{}", prefix.trim_end_matches('/')))
 }
@@ -153,6 +175,16 @@ fn put(dir: &Path, rel: &str, img: DynamicImage) {
 }
 
 /// 64×64 RGBA gradient with varying alpha.
+/// Alpha hashed over 0..=255, so blocks hold texels on both sides of a `gt` 200 test and the BC3 alpha guard has
+/// something to protect (a smooth ramp or a narrow band gives the same bytes under any cutoff).
+fn rgba_near_cut() -> DynamicImage {
+    DynamicImage::ImageRgba8(ImageBuffer::from_fn(64, 64, |x, y| {
+        let h =
+            (x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)).wrapping_mul(2_654_435_761);
+        Rgba([(x * 4) as u8, (y * 4) as u8, 90, (h >> 24) as u8])
+    }))
+}
+
 fn rgba64() -> DynamicImage {
     DynamicImage::ImageRgba8(ImageBuffer::from_fn(64, 64, |x, y| {
         Rgba([(x * 4) as u8, (y * 4) as u8, 90, ((x + y) * 2) as u8])
@@ -282,10 +314,10 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
             &["subtype=diffuse", &fmt, "alpha.policy=blend"],
         );
     }
-    // A smooth alpha cutout at threshold 200: the BC3 alpha guard keeps texels across 201, not 128 (Note FM).
+    // An alpha cutout scattered around threshold 200: the BC3 alpha guard keeps texels across 201, not 128 (Note FM).
     add(
         "cutout_bc3_t200",
-        rgba64(),
+        rgba_near_cut(),
         &[
             "subtype=diffuse",
             "format=bc3",
@@ -507,6 +539,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "{events:#?}"
     );
     identity.extend(identity_entries(c.path(), "cov/", &cov));
+    t200_pins_the_cutoff(c.path());
     let formats: BTreeSet<&str> = identity
         .values()
         .map(|p| p["format"].as_str().unwrap())
