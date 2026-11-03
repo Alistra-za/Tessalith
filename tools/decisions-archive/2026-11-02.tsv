@@ -283,3 +283,5 @@ CE21	CE		back	FM		partial	2026-11-03		goes: "Not fixed here: a saved W×H opens 
 FC¶- **FC8 egui-limit rulings become fixes	FC		back	FM		partial	2026-11-03		goes: CE21 as a kept shortcut (the 3-point creep per start; FM31); stays: every other FC8 ruling and shortcut
 DY¶- shortcut: the filled analysis is not cached	DY		back	FM		archive-item	2026-11-03
 DY¶- shortcut: helper rows are mouse-only	DY		back	FM		archive-item	2026-11-03
+CF7	CF		back	FM		partial	2026-11-03		goes: the Tab and screen-reader limit, the stale off-screen heights, the scroll shift after a jump, the least-scroll jump; stays: the clip-rect skip, card_h, CARD_EST, REVEAL_TRIES, the drop on the target card (Note FM32)
+FC¶- **FC8 egui-limit rulings	FC		back	FM		partial	2026-11-03		goes: CF7 stands as a shortcut; stays: CG2 and CE20 as shortcuts (Note FM32)

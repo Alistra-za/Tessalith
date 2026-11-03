@@ -61,6 +61,7 @@
   - Renaming a large selection no longer slows down quadratically.
   - Dragging the Alpha threshold slider on a shared alpha property no longer loses the split.
   - An edit on a large project no longer blocks the texture panel for a whole re-plan: a quick plan of the sets it touches shows it first. On a 10,000-texture project the panel takes the next edit 0.13 s after one (was 10.4 s on an idle machine, about 18 s under load), and the whole plan lands after 3.3 s with a 0.24 s pause as it lands (was 0.55 s); the scan-database read after it no longer greys the panel.
+  - The Sets column: Tab and screen readers reach a card scrolled out of view (Tab scrolls it in), a new column width re-estimates the off-screen cards' heights at once, and the first card in view stays put while the heights above it are learned. A far Go to set lands the set at the top of the view.
   - The 3D settings window keeps its saved size: it opened 3 points larger at every start and saved that back.
   - The tile of a stored HDR DDS (BC6H, RGBA16F, RGBA32F) is tone-mapped like the preview instead of clamped, and the preview no longer turns a negative value bright.
   - Up and Down move through the helper rows under the tiles (Enter opens the active one), and a re-plan of unchanged files no longer reloads each target that an alpha helper fills.

@@ -666,3 +666,200 @@ fn a_still_drag_asks_for_no_frames_and_the_ghost_goes_one_frame_after_release() 
         "no tile is dimmed"
     );
 }
+
+// Task 21 (Note FM32): the virtualised Sets list keeps keyboard reach, card heights and the scroll anchor.
+
+type SetsHarness = Harness<'static, (AppModel, sdc_gui::ui::State)>;
+
+fn many(m: AppModel) -> SetsHarness {
+    many_at(m, 1500.0)
+}
+
+fn many_at(m: AppModel, width: f32) -> SetsHarness {
+    let h = Harness::builder()
+        .with_size(egui::vec2(width, 900.0))
+        .with_max_steps(16)
+        .build_ui_state(
+            |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
+            (m, sdc_gui::ui::State::default()),
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+fn pos_rect(h: &SetsHarness, n: usize, total: usize) -> Option<egui::Rect> {
+    h.query_all_by_label(&format!("Position {n} of {total}"))
+        .map(|n| n.rect())
+        .find(|r| in_sets_column(h, *r))
+}
+
+fn set_ids(m: &AppModel) -> Vec<String> {
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect()
+}
+
+#[test]
+fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let m = many_sets(d.path(), 60);
+    let ids = set_ids(&m);
+    let mut h = many(m);
+    h.run();
+    let off: Vec<usize> = (1..=60)
+        .filter(|&n| pos_rect(&h, n, 60).is_none())
+        .collect();
+    assert!(off.len() > 30, "most cards are off screen: {}", off.len());
+    for &n in &off {
+        let name = format!("Set {}", ids[n - 1]);
+        assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}'s node");
+    }
+    // Tab from the Sets filter walks the cards: it reaches an off-screen card's stand-in, which scrolls its card in.
+    h.query_all_by_role_and_label(Role::Button, "Filter ▾")
+        .find(|n| in_sets_column(&h, n.rect()))
+        .expect("the Sets filter button")
+        .focus();
+    h.step();
+    // The first card past the screen is the next stop after the last drawn one.
+    let next = off[0];
+    let mut presses = 0;
+    while pos_rect(&h, next, 60).is_none() && presses < 600 {
+        h.key_press(egui::Key::Tab);
+        h.step();
+        presses += 1;
+    }
+    assert!(
+        pos_rect(&h, next, 60).is_some(),
+        "Tab never scrolled card {next} in"
+    );
+    // The focus survived the swap from the stand-in to the drawn card.
+    assert!(
+        h.ctx.memory(|m| m.focused()).is_some(),
+        "the focus follows the stand-in into the drawn card"
+    );
+}
+
+/// Card `n` (1-based) of `total`, measured by scrolling to it, then scrolled away from again.
+fn measure_far_card(h: &mut SetsHarness, n: usize) -> String {
+    let views = sdc_gui::model::sets::views(&h.state().0);
+    let (far, first) = (views[n - 1].clone(), views[0].key.clone());
+    h.state_mut()
+        .0
+        .palette_pick(&sdc_gui::model::nav::Pick::Set(far.key.clone()));
+    h.run();
+    assert!(pos_rect(h, n, views.len()).is_some(), "card {n} was drawn");
+    h.state_mut()
+        .0
+        .palette_pick(&sdc_gui::model::nav::Pick::Set(first));
+    h.run();
+    assert!(
+        pos_rect(h, n, views.len()).is_none(),
+        "card {n} is far again"
+    );
+    far.id
+}
+
+#[test]
+fn card_heights_refresh_after_a_resize() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = many_sets(d.path(), 60);
+    let all: Vec<String> = m.items.iter().map(|i| i.key.clone()).collect();
+    // Repeats stand in for more files: enough chips to wrap in a narrow column.
+    m.sets
+        .iter_mut()
+        .for_each(|s| s.members = all.iter().cycle().take(all.len() * 4).cloned().collect());
+    m.invalidate_views();
+    let mut h = many_at(m, 2600.0);
+    let chosen = egui::Id::new("sets").with("chosen");
+    h.ctx.data_mut(|d| d.insert_persisted(chosen, 520.0_f32));
+    h.run();
+    let far = measure_far_card(&mut h, 50);
+    let wide = h.state().1.drops.card_h[&far];
+    // Narrow the column: the far card is not drawn, yet its remembered height follows the width.
+    h.ctx
+        .data_mut(|d| d.insert_persisted(chosen, sdc_gui::ui::columns::SETS_MIN));
+    h.run();
+    assert!(pos_rect(&h, 50, 60).is_none(), "the far card stays undrawn");
+    let narrow = h.state().1.drops.card_h[&far];
+    assert!(
+        narrow > wide + 1.0,
+        "{wide} at 520 wide, {narrow} at the minimum"
+    );
+}
+
+#[test]
+fn a_far_jump_does_not_shift_the_scroll() {
+    // Short cards first, tall ones after: the mean of the measured heights climbs as the jump lands.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = many_sets(d.path(), 500);
+    let all: Vec<String> = m.items.iter().map(|i| i.key.clone()).collect();
+    for (i, s) in m.sets.iter_mut().enumerate() {
+        s.members = if i < 20 { vec![] } else { all.clone() };
+    }
+    m.invalidate_views();
+    let key = sdc_gui::model::sets::views(&m)[199].key.clone();
+    let mut h = many(m);
+    h.run();
+    h.state_mut()
+        .0
+        .palette_pick(&sdc_gui::model::nav::Pick::Set(key));
+    // Once card 200 is laid out, its place on screen does not move over the next frames.
+    let mut ys = vec![];
+    for _ in 0..12 {
+        h.step();
+        ys.extend(pos_rect(&h, 200, 500).map(|r| r.top()));
+    }
+    assert!(ys.len() >= 6, "card 200 is on screen: {ys:?}");
+    // egui snaps each allocation, so the sum of 200 of them is a pixel off the sum of the heights: the first frames
+    // may differ by that, never by a card's worth.
+    assert!(
+        ys.windows(2).all(|w| (w[0] - w[1]).abs() < 1.5),
+        "card 200 moved between frames: {ys:?}"
+    );
+}
+
+/// Frame cost of a 300-set project at the top of the list, with AccessKit off (a window without a screen reader) and
+/// on, and the widgets a frame registers.
+/// `cargo test -p sdc-gui --test set_cards frame_cost -- --ignored --nocapture`
+#[test]
+#[ignore = "measurement: prints the frame time and widget count"]
+fn frame_cost_of_300_sets() {
+    let d = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    sdc_gui::fonts::install_system_fonts(&ctx).expect("system fonts");
+    let (mut m, mut st) = (many_sets(d.path(), 300), sdc_gui::ui::State::default());
+    let frame = |m: &mut AppModel, st: &mut sdc_gui::ui::State| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1500.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| sdc_gui::ui::draw_with(ui, m, st));
+        out.drop_without_applying_deltas();
+    };
+    for accesskit in [false, true] {
+        if accesskit {
+            ctx.enable_accesskit();
+        }
+        for _ in 0..10 {
+            frame(&mut m, &mut st);
+        }
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..7 {
+            let t = std::time::Instant::now();
+            for _ in 0..60 {
+                frame(&mut m, &mut st);
+            }
+            best = best.min(t.elapsed() / 60);
+        }
+        let widgets: usize = ctx.viewport(|v| {
+            let w = &v.this_pass.widgets;
+            w.layer_ids().map(|l| w.get_layer(l).count()).sum()
+        });
+        println!("FRAME_COST accesskit={accesskit} per frame {best:?}; widgets {widgets}");
+    }
+}

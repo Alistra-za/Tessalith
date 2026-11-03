@@ -86,6 +86,17 @@ pub struct DropState {
     pub reveal_tries: u8,
     /// The Sets scroll offset and view height last frame, for a reveal's jump (review I1).
     pub view: Option<(f32, f32)>,
+    /// Note FM32: the column width `card_h` is for. A change re-flows every remembered height (`reflow_heights`).
+    pub card_w: f32,
+    /// Note FM32: the first card in view last frame and where its top sat in the content. The next frame keeps it
+    /// there while the heights of the cards above it change (estimates become measured).
+    pub anchor: Option<(String, f32)>,
+    /// Note FM32: the reveal's target was laid out last frame, so this frame scrolls to its measured rect instead of
+    /// jumping to the offset the heights give (the mean moves as cards are measured, and would re-aim each frame).
+    pub reveal_seen: bool,
+    /// Note FM32: the widget with the keyboard focus when the last frame's list ended. A stand-in that holds the focus
+    /// and was not the holder then took it this frame (Tab), as opposed to a focused card the wheel scrolled away.
+    pub focus: Option<egui::Id>,
 }
 
 /// Review I1: a reveal re-aims at most this many frames, so a key that names no visible card cannot loop.
@@ -93,6 +104,42 @@ const REVEAL_TRIES: u8 = 8;
 
 /// R4: the height of a card never laid out, until any card has been measured (then their mean).
 const CARD_EST: f32 = 110.0;
+
+/// Note FM32: the rows `v`'s chips wrap into at column width `width` (`frame_x` is the card's side margins, `gap` the
+/// chip spacing). A count from the set's slot row, its missing entries and its extra members, not a layout.
+fn chip_rows(v: &SetView, width: f32, frame_x: f32, gap: f32) -> usize {
+    let chips = slot_row(v.shader.as_ref(), &v.slots).len()
+        + v.missing.len()
+        + v.members.len().saturating_sub(v.slots.len());
+    let per_row = ((width - frame_x + gap) / (CHIP + gap)).floor().max(1.0) as usize;
+    chips.div_ceil(per_row)
+}
+
+/// Note FM32: a new column width moves every remembered card height by the chip rows it adds or removes, so a card off
+/// screen is no longer the height of the old width (the scroll bar length stays right without drawing it). A card not
+/// in `views` any more is forgotten. The estimate leaves out the name row, which wraps below the pill when narrow;
+/// drawing the card measures it exactly.
+fn reflow_heights(
+    st: &mut DropState,
+    views: &[SetView],
+    width: f32,
+    gap: egui::Vec2,
+    frame_x: f32,
+) {
+    let old = std::mem::replace(&mut st.card_w, width);
+    if old <= 0.0 || (old - width).abs() < 0.5 {
+        return;
+    }
+    let by_id: HashMap<&str, &SetView> = views.iter().map(|v| (v.id.as_str(), v)).collect();
+    st.card_h.retain(|id, h| {
+        let Some(v) = by_id.get(id.as_str()) else {
+            return false;
+        };
+        let rows = |w: f32| chip_rows(v, w, frame_x, gap.x) as f32;
+        *h = (*h + (rows(width) - rows(old)) * (CHIP + gap.y)).max(0.0);
+        true
+    });
+}
 
 /// The warning tooltip shows this many lines, then "… and K more".
 const TIP_LINES: usize = 10;
@@ -554,6 +601,9 @@ pub fn draw(
         .and_then(|d| views.iter().position(|v| v.id == d));
     // Laid-out cards by full index, for the insertion line.
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
+    let gap = ui.spacing().item_spacing;
+    let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x;
+    reflow_heights(st, &views, ui.available_width(), gap, frame_x);
     let est = if st.card_h.is_empty() {
         CARD_EST
     } else {
@@ -567,50 +617,59 @@ pub fn draw(
             .iter()
             .position(|&i| !views[i].key.is_empty() && views[i].key == k)
     });
-    // Review I1: a target outside last frame's view jumps to the offset the known heights give, the least scroll
-    // that shows it. `scroll_to_rect` on an estimated rect glided to the wrong card, and its relative target
-    // double-counted when aimed again.
-    let jump = reveal_at.and_then(|n| {
+    // Review I1: a target outside last frame's view jumps to the offset the known heights give. `scroll_to_rect` on
+    // an estimated rect glided to the wrong card, and its relative target double-counted when aimed again. Note FM32:
+    // the target lands at the top of the view, a little below it (the sum of the rounded allocations above it is not
+    // quite the sum of the heights), so it is whole on screen whatever its true height; bottom-aligning an estimated
+    // height left it cut off, and a second scroll moved it.
+    let jump = reveal_at.filter(|_| !st.reveal_seen).and_then(|n| {
         let (off, view_h) = st.view?;
-        let sp = ui.spacing().item_spacing.y;
         let top: f32 = visible[..n]
             .iter()
-            .map(|&i| card_h(&views[i].id) + sp)
+            .map(|&i| card_h(&views[i].id) + gap.y)
             .sum();
         let h = card_h(&views[visible[n]].id);
         let outside = top + h <= off || top >= off + view_h;
-        outside.then(|| {
-            if top < off {
-                top
-            } else {
-                (top + h - view_h).max(0.0)
-            }
-        })
+        outside.then(|| (top - 2.0 * gap.y).max(0.0))
     });
+    // Note FM32: the first card in view last frame keeps its place: when the heights above it changed since (the
+    // mean of the measured ones moves, a resize re-flowed them), the offset moves by the same amount.
+    let anchored = || {
+        let ((id, was), (off, _)) = st.anchor.as_ref().zip(st.view)?;
+        let n = visible.iter().position(|&i| views[i].id == *id)?;
+        let now: f32 = visible[..n]
+            .iter()
+            .map(|&i| card_h(&views[i].id) + gap.y)
+            .sum();
+        ((now - was).abs() > 0.5).then(|| (off + now - was).max(0.0))
+    };
+    let target = jump.or_else(anchored);
     let mut resized = false;
     let mut reveal_drawn = false;
+    // The first card in view (id, top in the content) and the off-screen card that took the focus, if any.
+    let (mut anchor, mut focused) = (None::<(String, f32)>, None::<String>);
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-    if let Some(y) = jump {
+    if let Some(y) = target {
         area = area.vertical_scroll_offset(y);
     }
     let out = area.show(ui, |ui| {
+        let view_top = ui.clip_rect().top();
+        // `top` runs on the remembered heights, not on the laid-out rects: egui rounds each allocation, and the sum of
+        // those roundings drifts from the heights over hundreds of cards.
+        let mut top = 0.0;
         // `index` is the set's place among all sets: the reorder and Move up / Move down use it (K19).
         for (pos, &index) in visible.iter().enumerate() {
             let v = &views[index];
-            // R4: a card outside the clip rect allocates its last height instead of being laid out.
-            // shortcut: a skipped card has no AccessKit node and no Tab stop, so screen readers and Tab reach only the
-            // cards on screen (CF7; Ctrl+K Go to set reaches all); give off-screen rows a node when egui offers a way
-            // to (Note FC8).
-            // shortcut: heights of off-screen cards go stale when the column width changes (the scroll bar length is off until they are drawn); measure on resize if it shows.
-            // shortcut: after a jump, cards above the view are estimates, so scrolling up shifts the visible cards as each is measured; anchor the top visible card (add the height deltas above it to the scroll offset) if users notice.
             let h = st.card_h.get(&v.id).copied().unwrap_or(est);
             let probe =
                 egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
-            let rect = if ui.is_rect_visible(probe) {
+            let id = ui.id().with(("set-card", &v.key, &v.id));
+            let (rect, used) = if ui.is_rect_visible(probe) {
                 let look = PillLook {
                     dragging: dragged.as_deref() == Some(v.id.as_str()),
                     selected: !v.key.is_empty() && sel_sets.contains(&v.key),
                     bulk: sel_sets.len() >= 2,
+                    id,
                 };
                 let out = pill(
                     ui,
@@ -639,11 +698,46 @@ pub fn draw(
                     hovered = Some(index);
                 }
                 rects.insert(index, out.rect);
-                out.rect
+                (out.rect, out.rect.height())
             } else {
-                // K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep their ids.
-                ui.allocate_space(probe.size()).1
+                // R4: a card outside the clip rect allocates its last height instead of being laid out, and stands in
+                // with its widget id: a Tab stop and an AccessKit node named for the set. The focus scrolls the real
+                // card into view (Note FM32). K9: `allocate_space` takes one auto id, as the card's scope does, so later
+                // cards keep their ids.
+                let rect = ui.allocate_space(probe.size()).1;
+                // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
+                let gained = ctx.memory_mut(|m| {
+                    m.interested_in_focus(id, ui.layer_id());
+                    m.focused() == Some(id) && st.focus != Some(id)
+                });
+                ctx.accesskit_node_builder(id, |n| {
+                    n.set_role(egui::accesskit::Role::Button);
+                    n.set_label(format!("Set {}", v.id));
+                    n.add_action(egui::accesskit::Action::Focus);
+                    n.set_bounds(egui::accesskit::Rect {
+                        x0: rect.min.x.into(),
+                        y0: rect.min.y.into(),
+                        x1: rect.max.x.into(),
+                        y1: rect.max.y.into(),
+                    });
+                });
+                if gained {
+                    if v.key.is_empty() {
+                        ui.scroll_to_rect_animation(
+                            rect,
+                            None,
+                            egui::style::ScrollAnimation::none(),
+                        );
+                    } else {
+                        focused = Some(v.key.clone());
+                    }
+                }
+                (rect, h)
             };
+            if anchor.is_none() && rect.bottom() > view_top {
+                anchor = Some((v.id.clone(), top));
+            }
+            top += used + gap.y;
             if reveal_at == Some(pos) {
                 reveal_drawn = rects.contains_key(&index);
                 // A target in or across last frame's view lands at once (Note FM25).
@@ -669,6 +763,9 @@ pub fn draw(
         }
     });
     st.view = Some((out.state.offset.y, out.inner_rect.height()));
+    st.anchor = anchor;
+    st.reveal_seen = reveal_at.is_some() && reveal_drawn;
+    st.focus = ctx.memory(|m| m.focused());
     // Review I1: aim again next frame until the target is laid out with every height around it measured.
     if reveal_at.is_some() && !(reveal_drawn && !resized) && st.reveal_tries < REVEAL_TRIES {
         st.reveal_tries += 1;
@@ -676,6 +773,12 @@ pub fn draw(
         ctx.request_repaint();
     } else if reveal.is_some() {
         st.reveal_tries = 0;
+    }
+    // Note FM32: Tab reached an off-screen card: the next frame scrolls it in and draws it, keeping the focus.
+    if let Some(k) = focused {
+        st.reveal_tries = 0;
+        model.nav.reveal_set = Some(k);
+        ctx.request_repaint();
     }
     // A measured height moved the cards below it: one more frame lays them out where they now are (settles).
     if resized {
@@ -908,6 +1011,8 @@ struct PillLook {
     selected: bool,
     /// Two or more sets are selected: the pills of selected ones show the bulk menu.
     bulk: bool,
+    /// The card's widget id: the stand-in drawn while it is off screen has the same one, so focus survives the swap.
+    id: egui::Id,
 }
 
 /// The y of the insertion line (None over the dragged pill itself, where nothing moves) when set `from` is dragged over the pill at `to` (whose rect is `r`): moving
@@ -957,7 +1062,10 @@ fn pill(
         .corner_radius(12.0)
         .stroke(stroke)
         .fill(fill);
-    let scoped = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
+    let builder = egui::UiBuilder::new()
+        .id(look.id)
+        .sense(egui::Sense::click());
+    let scoped = ui.scope_builder(builder, |ui| {
         if look.dragging {
             ui.set_opacity(0.5);
         }
