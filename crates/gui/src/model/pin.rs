@@ -15,7 +15,7 @@ pub struct Pin {
     /// Never reused within a session: the heatmap job is keyed on it.
     pub id: u64,
     pub out: Arc<PreviewOut>,
-    /// Format, tag, encoder and effort, alpha policy and mips options of the settings that made `out`.
+    /// Format, tag, effort, alpha policy and mips options of the settings that made `out`.
     pub summary: String,
 }
 
@@ -29,14 +29,9 @@ fn word<T: serde::Serialize>(v: &T) -> String {
 }
 
 pub fn summary_of(p: &Profile) -> String {
-    let encoder = match p.encoder.backend {
-        engine::config::Backend::IspcBc6h => "ispc (BC6H)".to_string(),
-        b => word(&b),
-    };
     format!(
-        "{}, {} {} effort, alpha {}, mips {} {}",
+        "{}, {} effort, alpha {}, mips {} {}",
         crate::model::fields::format_label(p.format, p.color.tag),
-        encoder,
         word(&p.encoder.effort),
         word(&p.alpha.policy),
         word(&p.mips.levels),

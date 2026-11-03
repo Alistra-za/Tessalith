@@ -54,6 +54,17 @@ pub const REMOVED: &[Removed] = &[
         value: Some("nvtt"),
         hint: "NVTT was removed in 2.0; delete the key",
     },
+    // After the `nvtt` row: the first match names the value.
+    Removed {
+        key: "encoder.backend",
+        value: None,
+        hint: "the texture format picks the encoder; delete the key",
+    },
+    Removed {
+        key: "encoder.rgbcx_level",
+        value: None,
+        hint: "the BC1/BC3 level is fixed at 18; delete the key",
+    },
     Removed {
         key: "allow",
         value: Some("ENC-NVTT-MISSING"),
@@ -68,6 +79,11 @@ pub const REMOVED: &[Removed] = &[
         key: "allow",
         value: Some("ENC-NVTT-FAILED"),
         hint: "ENC-NVTT-FAILED was removed in 2.0 with NVTT; delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("IN-FLOAT-LDR"),
+        hint: "IN-FLOAT-LDR was removed in 2.0 (a float source is linear light; nothing reports it); delete it from the list",
     },
 ];
 

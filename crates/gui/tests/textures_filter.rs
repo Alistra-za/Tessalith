@@ -4,7 +4,7 @@ use eframe::egui::{self, Key, Modifiers};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Code;
-use engine::config::{Backend, Format, Subtype};
+use engine::config::{Format, Subtype};
 use engine::policy::SourceStamp;
 use sdc_gui::model::items::{ItemStatus, SetItem};
 use sdc_gui::model::texture_view::{ColumnPrefs, SetFilter, SortKey};
@@ -48,20 +48,18 @@ fn keys(v: &[usize]) -> Vec<String> {
     v.iter().map(|n| format!("t/t{n:05}")).collect()
 }
 
-/// Eight textures: subtypes, formats, backends and set membership spread over them.
+/// Eight textures: subtypes, formats and set membership spread over them.
 fn mixed(dir: &std::path::Path) -> AppModel {
     let mut m = many(dir, 8);
     for n in 0..8 {
-        let (sub, fmt, be) = match n % 4 {
-            0 => (Subtype::Diffuse, Format::Bc7, Backend::Bc7e),
-            1 => (Subtype::Normal, Format::Bc5, Backend::Rgbcx),
-            2 => (Subtype::Diffuse, Format::Bc7, Backend::Rgbcx),
-            _ => (Subtype::Height, Format::R8, Backend::Uncompressed),
+        let (sub, fmt) = match n % 4 {
+            0 | 2 => (Subtype::Diffuse, Format::Bc7),
+            1 => (Subtype::Normal, Format::Bc5),
+            _ => (Subtype::Height, Format::R8),
         };
         let p = &mut job(&mut m, n).profile;
         p.subtype = sub;
         p.format = fmt;
-        p.encoder.backend = be;
     }
     // t0 and t1 share a set; t2 is alone in its own.
     m.items[0].set_key = Some("s0".into());

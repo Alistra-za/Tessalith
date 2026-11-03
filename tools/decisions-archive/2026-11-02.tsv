@@ -19,7 +19,7 @@ BC13	BC		back	FM		partial	2026-11-02		goes: the nvtt::TempDir sentence; stays: d
 BQ3	BQ		back	FM		archive-item	2026-11-02		whole: the nvcompress working folder is gone
 BS3	BS		back	FM		partial	2026-11-02		goes: the AF3/NVTT probe comparison
 CN33	CN		back	FM		partial	2026-11-02		goes: NVTT version in the up-to-date check
-CP4	CP		back	FM		partial	2026-11-02		goes: NVTT in the backend list
+CP4	CP		back	FM		partial	2026-11-02		goes: NVTT in the backend list; then (FM15) another backend and the encoder hidden reason
 CV3	CV		back	FM		archive-item	2026-11-02		whole: NVTT timeout and cancel kill_tree
 CV15	CV		back	FM		archive-item	2026-11-02		whole: the bulk Encoder row NVTT lock
 CV21	CV		back	FM		partial	2026-11-02		goes: NVTT in the folder list; stays: a non-Unicode path is left out
@@ -29,3 +29,12 @@ FB8	FB		back	FM		partial	2026-11-02		goes: the Advanced drawer NVTT line
 FE7	FE		back	FM		partial	2026-11-02		goes: the NVTT comparison; stays: the RMSLE miss accepted
 FF6	FF		back	FM		partial	2026-11-02		goes: the NVTT-Backend.md page; stays: Project-Config and Troubleshooting
 FL2	FL		back	FM		partial	2026-11-02		goes: NVTT probe from the equality list
+Owner checks pending¶8. **Interim	Owner checks pending		back	FM		archive-item	2026-11-02		whole: IN-FLOAT-LDR is removed (FM15)
+S2	S		back	FM		archive-item	2026-11-02		whole: IN-FLOAT-LDR is removed (FM15)
+BY1	BY		back	FM		archive-item	2026-11-02		whole: the backend and its pin rule are gone (FM15)
+D¶The flag controls only the mode-6 p-bit constraint	D		back	FM		partial	2026-11-02		goes: the byte fallback; stays: the flag controls mode 6 only, the rotated fix runs always
+S4	S		back	FM		partial	2026-11-02		goes: Backend uncompressed; stays: the formats, headers and interop check
+BZ5	BZ		back	FM		partial	2026-11-02		goes: build.rs detecting the patch and the CFG-INVALID refusal of max; stays: the Windows rebuild
+CB1	CB		back	FM		partial	2026-11-02		goes: BC7E_MAX_NATIVE is now true and the renamed test; stays: the rebuilt objects
+CP11	CP		back	FM		partial	2026-11-02		goes: non-bc7e backends; stays: the other items
+FF1	FF		back	FM		partial	2026-11-02		goes: the max refusal sentence; stays: the mapping

@@ -171,7 +171,7 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
             encoders_sys::bc7e_compress_blocks(b, o, raw_params);
         }
         for (f, r) in out.chunks(16).zip(raw.chunks(16)) {
-            // Mode-6 blocks differ only on a build without the native patch (byte-patch fallback).
+            // Mode-6 blocks are the native flag's (never post-fixed).
             if f == r || r[0] & 0x7f == 0x40 {
                 continue;
             }

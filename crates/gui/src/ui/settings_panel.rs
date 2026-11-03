@@ -12,7 +12,6 @@ use crate::model::fields::{
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
 use eframe::egui;
-use encoders_sys::RGBCX_MAX_LEVEL;
 use engine::codes::{Code, Warning};
 use engine::config::{
     AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
@@ -548,17 +547,6 @@ pub(super) fn editor(
                     "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour",
                 );
             (r.changed().then(|| json!(b)), r)
-        }
-        "encoder.rgbcx_level" => {
-            let cur = f
-                .value
-                .as_u64()
-                .unwrap_or(0)
-                .min(u64::from(RGBCX_MAX_LEVEL)) as u32;
-            let id = egui::Id::new(("rgbcx-level", key));
-            let (out, r) =
-                commit_slider(ui, busy, id, cur, 0..=RGBCX_MAX_LEVEL, "rgbcx level", mixed);
-            (out.map(|v| json!(v)), r)
         }
         field => {
             let options = options_of(field, target, &job.profile).unwrap_or_default();

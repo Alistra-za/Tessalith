@@ -120,9 +120,8 @@ fn reset_drops_the_override_so_the_base_shows_through() {
     let before = pm.toml_text();
     pm.set_field(Subtype::Envmask, "format", json!(["bc7", "unorm"]));
     assert_eq!(pm.field(Subtype::Envmask, "format"), Some(json!("bc7")));
-    // The base's rgbcx cannot write BC7: the row shows the engine's follow-up, bc7e.
     let p = pm.row(Subtype::Envmask).unwrap().profile.clone().unwrap();
-    assert_eq!(p.encoder.backend, engine::config::Backend::Bc7e);
+    assert_eq!(p.format, engine::config::Format::Bc7);
     pm.clear_field(Subtype::Envmask, "format");
     assert_eq!(pm.field(Subtype::Envmask, "format"), None);
     assert_eq!(pm.field(Subtype::Envmask, "color.tag"), None);

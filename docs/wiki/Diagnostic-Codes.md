@@ -27,7 +27,6 @@ Every warning has a code and a severity:
 | `IN-ICC-IGNORED` | info | An embedded ICC profile was ignored; pixels are read as stored. | Convert the source to sRGB or linear first if the profile matters. |
 | `IN-ALIAS-INVALID` | warning | An `[inputs]` alias that breaks the [rules](Project-Config.md#inputs) is ignored. | Fix the `as` path. |
 | `IN-ALIAS-STALE` | info | An `[inputs]` key matches no file ([inputs](Project-Config.md#inputs)). | Remove the entry. |
-| `IN-FLOAT-LDR` | info | Retired; never emitted. Still accepted by `--allow`. | |
 
 ### Loss
 
@@ -78,7 +77,7 @@ Every warning has a code and a severity:
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CFG-UNAVAILABLE` | blocking | The sub-type or format is not available under the target. | Accept the fallback with `--allow CFG-UNAVAILABLE`, or change the sub-type or target. |
-| `CFG-INVALID` | error | A value outside its range, or a combination that cannot be honoured (a backend that cannot write the format, `legacy` header on BC7 or `_SRGB`, a bad swizzle, `bc1_transparent_black` with BC1, a bad filter scope, and so on). In a config, preset, rule or `--set`, the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
+| `CFG-INVALID` | error | A value outside its range, or a combination that cannot be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, `bc1_transparent_black` with BC1, a bad filter scope, and so on). In a config, preset, rule or `--set`, the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config-Fields.md#mipmaps) this texture cannot use; it uses box. | Scope the filter to colour maps, or ignore. |
 | `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file (`sdc presets validate`). When another preset already declares its suffix aliases, the GUI's Problems row has **Remove aliases from {id}**. |
@@ -132,7 +131,7 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format is not BC7, the backend is not bc7e, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
+| `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format is not BC7, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
 | `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([`--on-existing`](CLI-Reference.md#--on-existing)). | `--on-existing overwrite`. |
 | `OUT-SIDECAR-KEPT` | warning | The `.dds.json` next to the output was not changed, and the new DDS was written. Either an old sidecar sdc wrote for the previous output could not be removed or replaced (locked or protected), or with `--sidecar` the file there is not one sdc wrote, so it was kept. | Unlock or delete the old `.dds.json` and run again (with `--sidecar` to write a new one). A file that is not sdc's is yours: move it away if you want the sidecar. |
 | `DDS-HEADER-PATCHED` | info | `patch-header` (or the GUI) rewrote a header; the payload is byte-identical. | |

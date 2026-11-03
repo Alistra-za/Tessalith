@@ -49,11 +49,10 @@ fn reason(j: &ResolvedJob) -> String {
         .clone()
 }
 
-fn shape(j: &ResolvedJob) -> (Format, ColorTag, Backend, String) {
+fn shape(j: &ResolvedJob) -> (Format, ColorTag, String) {
     (
         j.profile.format,
         j.profile.color.tag,
-        j.profile.encoder.backend,
         j.provenance["format"].to_string(),
     )
 }
@@ -64,12 +63,7 @@ fn an_8_bit_emissive_is_bc7_srgb_as_an_analysis_fact() {
     let j = plan_one(d.path(), "lamp_g.png", eight_bit_g(), &[]);
     assert_eq!(
         shape(&j),
-        (
-            Format::Bc7,
-            ColorTag::Srgb,
-            Backend::Bc7e,
-            "analysis:hdr-source".into()
-        )
+        (Format::Bc7, ColorTag::Srgb, "analysis:hdr-source".into())
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
     assert!(
@@ -87,7 +81,6 @@ fn a_float_emissive_above_one_is_bc6h() {
         (j.profile.format, j.profile.color.tag),
         (Format::Bc6hUf16, ColorTag::NotApplicable)
     );
-    assert_eq!(j.profile.encoder.backend, Backend::IspcBc6h);
     assert!(
         reason(&j).contains("peak 4.00 > 1.0: HDR → BC6H"),
         "{}",
@@ -124,12 +117,7 @@ fn an_explicit_format_wins_in_both_directions_and_the_tag_follows() {
     );
     assert_eq!(
         shape(&j),
-        (
-            Format::Bc6hUf16,
-            ColorTag::NotApplicable,
-            Backend::IspcBc6h,
-            "user".into()
-        )
+        (Format::Bc6hUf16, ColorTag::NotApplicable, "user".into())
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
     assert!(
@@ -182,48 +170,8 @@ fn an_explicit_rgba16f_emissive_gets_tag_na() {
         &["file:**/lamp_g.png.format=rgba16f"],
     );
     assert_eq!(
-        (
-            j.profile.format,
-            j.profile.color.tag,
-            j.profile.encoder.backend
-        ),
-        (
-            Format::Rgba16f,
-            ColorTag::NotApplicable,
-            Backend::Uncompressed
-        )
+        (j.profile.format, j.profile.color.tag),
+        (Format::Rgba16f, ColorTag::NotApplicable)
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-}
-
-/// Trace-debug wave 2 #1: preset and config tables never pin a backend, so a `pbr_emissive` table that names the
-/// BC6H-only encoder follows the BC7 switch instead of failing CFG-INVALID. A file-scoped `--set` still pins it.
-#[test]
-fn a_preset_or_config_subtype_backend_that_cannot_write_bc7_follows_the_fact() {
-    let d = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(d.path().join("in")).unwrap();
-    std::fs::write(
-        d.path().join("in/sdc.toml"),
-        "[subtypes.pbr_emissive]\nencoder = { backend = \"ispc_bc6h\" }\n",
-    )
-    .unwrap();
-    let j = plan_one(d.path(), "lamp_g.png", eight_bit_g(), &[]);
-    assert_eq!(
-        shape(&j),
-        (
-            Format::Bc7,
-            ColorTag::Srgb,
-            Backend::Bc7e,
-            "analysis:hdr-source".into()
-        )
-    );
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-    let d = tempfile::tempdir().unwrap();
-    let j = plan_one(
-        d.path(),
-        "lamp_g.png",
-        eight_bit_g(),
-        &["file:**/lamp_g.png.encoder.backend=ispc_bc6h"],
-    );
-    assert!(j.warnings.iter().any(|w| w.code == Code::CfgInvalid));
 }

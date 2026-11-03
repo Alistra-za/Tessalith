@@ -23,7 +23,7 @@ fn bc1_with_transparent_black_off_always_decodes_opaque() {
     for p in b.iter_mut().take(6) {
         *p = [0, 0, 0, 255];
     }
-    let enc = bc1_encode_block(&b, RGBCX_MAX_LEVEL, true, false);
+    let enc = bc1_encode_block(&b, true, false);
     for model in [
         Bc1Model::Ideal,
         Bc1Model::Nvidia,
@@ -67,7 +67,7 @@ fn bc5_encodes_red_and_green() {
 #[test]
 fn bc3_keeps_alpha() {
     let b = ramp_block();
-    let enc = bc3_encode_block(&b, RGBCX_MAX_LEVEL, BC45_RADIUS_MAX);
+    let enc = bc3_encode_block(&b, BC45_RADIUS_MAX);
     let mut dec = [0u8; 64];
     bcdec_rs::bc3(&enc, &mut dec, 16);
     for i in 0..16 {

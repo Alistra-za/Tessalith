@@ -105,11 +105,10 @@ pub fn weighting_value(p: &Profile) -> Value {
 }
 
 /// The rarely changed fields the Advanced drawer edits (M3a spec §2.5).
-pub const ADVANCED_FIELDS: [(&str, &str); 7] = [
+pub const ADVANCED_FIELDS: [(&str, &str); 6] = [
     (WEIGHTING, "BC7 weighting"),
     ("encoder.bc1_transparent_black", "BC1 transparent black"),
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
-    ("encoder.rgbcx_level", "rgbcx level"),
     ("header", "DDS header"),
     ("resize", "Resize"),
     // Note FC2 (CL15): "Half size" is the one name; "mip 0" is hover text.
@@ -244,9 +243,6 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         "mips.coverage" if !is_cutout(p) => Some("used only by cutout and cutout + blend"),
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
-        WEIGHTING if p.encoder.backend != Backend::Bc7e => {
-            Some("used only by the built-in BC7 encoder")
-        }
         "alpha.parallax" if p.subtype != Subtype::ComplexMaterial => {
             Some("complex material _m only")
         }
@@ -294,9 +290,6 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "encoder.bc1_transparent_black" if p.format != Format::Bc1 => Some("BC1 only"),
         "encoder.bc45_search_radius" if !matches!(p.format, Format::Bc4 | Format::Bc5) => {
             Some("BC4 and BC5 only")
-        }
-        "encoder.rgbcx_level" if p.encoder.backend != Backend::Rgbcx => {
-            Some("used only by the rgbcx encoder (BC1, BC3, BC4, BC5)")
         }
         // Note CP (fix round 1, I2): the Advanced drawer shows the row everywhere; lock it where it does nothing.
         WEIGHTING => hidden_reason(p, WEIGHTING),

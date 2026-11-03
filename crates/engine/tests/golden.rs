@@ -783,10 +783,7 @@ fn normal_maps_are_bc7_under_cs_and_bc5_only_for_flow() {
 fn bc5_on_a_normal_map_blocks_until_allowed() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/a/iron_n.png", rgb(64));
-    let sets = [
-        "subtype:normal.format=bc5",
-        "subtype:normal.encoder.backend=rgbcx",
-    ];
+    let sets = ["subtype:normal.format=bc5"];
     let o = convert(d.path(), Target::Cs, &sets, &[]);
     assert_eq!((o.summary.converted, o.summary.skipped), (0, 1));
     assert_eq!(
@@ -854,7 +851,6 @@ fn exact_opaque_m_decodes_alpha_255_at_every_mip() {
         "file:**/iron_m.png.alpha.parallax=true",
         "file:**/rock_m.png.subtype=envmask",
         "subtype:envmask.format=bc7",
-        "subtype:envmask.encoder.backend=bc7e",
     ];
     let o = convert(d.path(), Target::Cs, &sets, &[]);
     assert_eq!(o.summary.converted, 2, "{:?}", warnings(&o));
@@ -1310,7 +1306,6 @@ fn float_source_to_bc7_is_linear_light_encoded_as_srgb() {
         "{:?}",
         warnings(&o)
     );
-    assert!(!warnings(&o).contains(&Code::InFloatLdr));
     assert_eq!(
         warning_of(&o, "lamp.tif", Code::LossClampHdr).severity,
         Severity::Warning
@@ -1334,7 +1329,6 @@ fn in_range_float_source_has_no_clamp_warning() {
     let o = convert(d.path(), Target::Cs, &["subtype=diffuse"], &[]);
     assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
     assert!(!warnings(&o).contains(&Code::LossClampHdr));
-    assert!(!warnings(&o).contains(&Code::InFloatLdr));
     let b = mean_code(&dds(d.path(), "textures/a/plate.dds"), 2);
     assert!((b - 188.0).abs() <= 3.0, "blue {b}");
 }
@@ -1517,7 +1511,6 @@ fn bc1_compact_is_legacy_dxt1_and_bc4_legacy_header_is_bc4u() {
         &[
             "file:**/wall.png.subtype=diffuse",
             "subtype:diffuse.format=bc1",
-            "subtype:diffuse.encoder.backend=rgbcx",
             "subtype:height.header=legacy",
         ],
         &[],
@@ -1563,7 +1556,6 @@ fn bc3_is_legacy_dxt5() {
             "file:**/blood.png.subtype=diffuse",
             "file:**/blood.png.alpha.policy=blend",
             "file:**/blood.png.format=bc3",
-            "file:**/blood.png.encoder.backend=rgbcx",
         ],
         &[],
     );
@@ -2357,10 +2349,6 @@ fn rgba8_output_is_legacy_b8g8r8a8_and_lossless() {
         assert_eq!(&p[..3], &s[..], "texel {i}");
     }
     assert_eq!(validation_of(&o, "rock.png").min_mip_psnr_db, Some(99.0));
-    assert_eq!(
-        planned(&o, "rock.png")["profile"]["encoder"]["backend"],
-        "uncompressed"
-    );
 }
 
 /// A cs PBR albedo as rgba8 is DX10 B8G8R8A8_UNORM_SRGB (91).

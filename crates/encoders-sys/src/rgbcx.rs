@@ -18,24 +18,22 @@ fn bytes(px: &[[u8; 4]; 16]) -> [u8; 64] {
     b
 }
 
-/// Encode one BC1 block from 16 RGBA texels (alpha is ignored).
+/// Encode one BC1 block from 16 RGBA texels (alpha is ignored) at the top rgbcx level (DECISIONS Note FM).
 pub fn bc1_encode_block(
     px: &[[u8; 4]; 16],
-    level: u32,
     allow_3color: bool,
     transparent_black: bool,
 ) -> [u8; 8] {
-    assert!(level <= RGBCX_MAX_LEVEL, "rgbcx level {level} out of range");
     ensure_init();
     let src = bytes(px);
     let mut out = [0u8; 8];
     // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 8 bytes, the sizes
-    // rgbcx::encode_bc1 reads and writes; `level` is range-checked above.
+    // rgbcx::encode_bc1 reads and writes.
     unsafe {
         ffi::sdc_bc1_encode(
             out.as_mut_ptr(),
             src.as_ptr(),
-            level,
+            RGBCX_MAX_LEVEL,
             allow_3color as i32,
             transparent_black as i32,
         )
@@ -43,14 +41,20 @@ pub fn bc1_encode_block(
     out
 }
 
-/// Encode one BC3 block (BC1 colour at `level` plus HQ BC4 alpha).
-pub fn bc3_encode_block(px: &[[u8; 4]; 16], level: u32, search_radius: u32) -> [u8; 16] {
-    assert!(level <= RGBCX_MAX_LEVEL, "rgbcx level {level} out of range");
+/// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha).
+pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
     ensure_init();
     let src = bytes(px);
     let mut out = [0u8; 16];
-    // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 16 bytes; `level` is range-checked above.
-    unsafe { ffi::sdc_bc3_encode(out.as_mut_ptr(), src.as_ptr(), level, search_radius) };
+    // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 16 bytes.
+    unsafe {
+        ffi::sdc_bc3_encode(
+            out.as_mut_ptr(),
+            src.as_ptr(),
+            RGBCX_MAX_LEVEL,
+            search_radius,
+        )
+    };
     out
 }
 

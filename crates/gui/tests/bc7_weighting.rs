@@ -5,7 +5,7 @@ use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Code;
-use engine::config::{Backend, Bc7Weights, ColorTag, Format};
+use engine::config::{Bc7Weights, ColorTag, Format};
 use sdc_gui::model::bulk::BulkOp;
 use sdc_gui::model::fields::{
     field_view, hidden_reason, weighting_option_lock, WEIGHTING, WEIGHTING_OPTIONS,
@@ -121,7 +121,7 @@ fn picking_each_option_sets_the_two_fields() {
     let d = tempfile::tempdir().unwrap();
     let mut m = ready(d.path());
     let p = m.item(ROCK).unwrap().job.clone().unwrap().profile;
-    assert_eq!((p.format, p.encoder.backend), (Format::Bc7, Backend::Bc7e));
+    assert_eq!(p.format, Format::Bc7);
     m.select_item(ROCK);
     let mut h = harness(m);
     h.run();
@@ -255,9 +255,9 @@ fn the_reset_clears_both_fields() {
 }
 
 /// Perceptual keeps the old row's lock (colour without data alpha); the weightings stay open on a normal map. The row
-/// shows only for BC7 with bc7e, and (I2) the Advanced drawer's view of it is locked elsewhere, with the same reason.
+/// shows only for BC7, and (I2) the Advanced drawer's view of it is locked elsewhere, with the same reason.
 #[test]
-fn perceptual_keeps_its_lock_and_the_row_is_bc7e_only() {
+fn perceptual_keeps_its_lock_and_the_row_is_bc7_only() {
     let d = tempfile::tempdir().unwrap();
     let m = ready(d.path());
     let job = m.item(NORMAL).unwrap().job.clone().unwrap();
@@ -268,10 +268,6 @@ fn perceptual_keeps_its_lock_and_the_row_is_bc7e_only() {
     assert_eq!(hidden_reason(&n, WEIGHTING), None);
     assert_eq!(field_view(m.target, &job, WEIGHTING).unwrap().lock, None);
     let mut j = job.clone();
-    j.profile.encoder.backend = Backend::Rgbcx;
-    let why = Some("used only by the built-in BC7 encoder");
-    assert_eq!(hidden_reason(&j.profile, WEIGHTING), why);
-    assert_eq!(field_view(m.target, &j, WEIGHTING).unwrap().lock, why);
     j.profile.format = Format::Bc3;
     assert_eq!(hidden_reason(&j.profile, WEIGHTING), Some("BC7 only"));
     assert_eq!(

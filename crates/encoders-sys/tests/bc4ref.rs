@@ -1,7 +1,7 @@
 //! Pins the BC4 reference search (docs/research/bc4-family.md): `upstream` to the upstream rgbcx path, `search` to its
 //! never-worse rule and to the patched C++ (BC3/BC4/BC5 entry points). The engine's end-to-end check is in
 //! `crates/engine/tests/encode.rs`.
-use encoders_sys::{bc3_encode_block, bc4_encode_block, bc5_encode_block, RGBCX_MAX_LEVEL};
+use encoders_sys::{bc3_encode_block, bc4_encode_block, bc5_encode_block};
 use support::bc4ref::{blocks, search, upstream};
 
 mod support {
@@ -105,7 +105,7 @@ fn ffi_equals_reference() {
                 );
             }
             assert_eq!(
-                bc3_encode_block(&px(v, 3), RGBCX_MAX_LEVEL, r)[..8],
+                bc3_encode_block(&px(v, 3), r)[..8],
                 search(v, r, true),
                 "{v:?} bc3 r {r}"
             );
@@ -170,5 +170,5 @@ fn guard_only_on_bc3() {
     assert_ne!(v4, v5);
     assert_eq!(bc4_encode_block(&px(&v, 0), 0, 5), v4);
     assert_eq!(bc5_encode_block(&px(&v, 0), 5)[..8], v4);
-    assert_eq!(bc3_encode_block(&px(&v, 3), RGBCX_MAX_LEVEL, 5)[..8], v5);
+    assert_eq!(bc3_encode_block(&px(&v, 3), 5)[..8], v5);
 }

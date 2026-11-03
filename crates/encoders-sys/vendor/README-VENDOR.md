@@ -44,8 +44,8 @@ Measurements: docs/research/bc7e-tuning.md.
 
 **Objects.** The vendored `ispc-objs/bc7e/*.obj` and `bc7e_ispc.h` were rebuilt from the patch-0002 source on Windows
 (2026-10-18) with `tools/regen-ispc.ps1 -Update -Bc7eOnly` and `tools/hash-vendor.ps1`; a second `regen-ispc.ps1` run
-matches 12/12. `build.rs` finds `m_endpoint_search` in the header, so `encoders_sys::BC7E_MAX_NATIVE` is true and
-`effort = "max"` works. Levels 0 to 6 encode byte-identically to the patch-0001 objects on each of the four ISPC
+matches 12/12. `build.rs` requires both `m_exact_opaque_alpha` (patch 0001) and `m_endpoint_search` in the header and stops the
+build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encode byte-identically to the patch-0001 objects on each of the four ISPC
 targets (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2/sse4/avx paths and its avx2
 path encode differently; engine goldens 95/95).
 

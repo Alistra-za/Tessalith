@@ -1,8 +1,7 @@
 //! Warning and error codes (spec §10). Codes added by this plan beyond the spec's original catalogue: VAL-MIP-ERROR
 //! (§5.8 per-mip error warning), CFG-INVALID (a field value outside its allowed range or an encoder/format
 //! mismatch), IN-NONFINITE (NaN or infinite source samples replaced in Preprocess), IN-UNREADABLE (a folder entry
-//! discovery could not read; skipped, audit 6) and IN-FLOAT-LDR (retired in M6:
-//! never emitted) and the four `PACK-*` codes of channel packing (spec §6.4, plan M2.5), and CFG-FILE-UNMATCHED (a
+//! discovery could not read; skipped, audit 6) and the four `PACK-*` codes of channel packing (spec §6.4, plan M2.5), and CFG-FILE-UNMATCHED (a
 //! `[files]` key of `sdc.toml` that matches no file, M3a) and SET-EDIT-STALE (a GUI set edit that names a file or
 //! set that no longer exists, M3b), PACK-RECIPE-CONFLICT and PACK-RECIPE-UNBUILDABLE (a `packing.recipe` the set
 //! could not follow, packing-fills Task 1) and SKIN-WET-FORM (which form `skin_wet` was read as, Task 1b) and
@@ -17,7 +16,7 @@
 //! and ALPHA-PARALLAX-NO-ALPHA (`alpha.parallax` on for a complex `_m` whose source has no alpha, DECISIONS AH2).
 //! and PBR-GRASS-DETECT (a PBR grass albedo CS would read as complex grass) (PBR grass design 2026-10-14 §4.4).
 //! and the six `CHK-*` codes of the GUI's artist checks, and CHK-LOW-DETAIL of check 3 at convert time (v2 artist checks, DECISIONS Note CL).
-//! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual, the format or the backend overrides, DECISIONS Note CP).
+//! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
 //! and the three `GEN-*` codes of generated maps: GEN-REPLACED, GEN-STALE (GUI only) and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
 use schemars::JsonSchema;
@@ -119,8 +118,6 @@ codes! {
     InDecode = "IN-DECODE" => Error,
     InNonfinite = "IN-NONFINITE" => Warning,
     InUnreadable = "IN-UNREADABLE" => Warning,
-    // Retired in M6 (DECISIONS S2): never emitted; kept so --allow and [files] allow lists still load.
-    InFloatLdr = "IN-FLOAT-LDR" => Info,
     InIccIgnored = "IN-ICC-IGNORED" => Info,
     InAliasInvalid = "IN-ALIAS-INVALID" => Warning,
     InAliasStale = "IN-ALIAS-STALE" => Info,
@@ -230,7 +227,6 @@ mod tests {
 
     #[test]
     fn severities_follow_spec_section_10() {
-        assert_eq!(Code::InFloatLdr.severity(), Severity::Info);
         assert_eq!(Code::FmtBc5Normal.severity(), Severity::Blocking);
         assert_eq!(Code::ChanNormalShort.severity(), Severity::Info);
         assert_eq!(Code::TagSrgbVanilla.severity(), Severity::Error);
@@ -286,7 +282,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 115);
+        assert_eq!(Code::ALL.len(), 114);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

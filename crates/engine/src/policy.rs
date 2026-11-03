@@ -535,39 +535,20 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
     }
 }
 
-/// How specifically a layer patch addresses this file, for `backend_follows_format`.
+/// How specifically a layer patch addresses this file, for `unscoped_filter_falls_back`.
 #[derive(Debug, Clone, Copy)]
 struct Reach {
     /// 0 = every sub-type (`defaults` tables, unscoped `--set`), 1 = this sub-type, 2 = this file.
     level: u8,
-    /// Whether a backend set here is kept against the format: only sub-type- or file-scoped `--set` and rules.
-    /// Preset and config tables never pin a backend unless the same table also sets the format.
-    pins: bool,
 }
 
-const GENERIC: Reach = Reach {
-    level: 0,
-    pins: false,
-};
-const SUBTYPE_TABLE: Reach = Reach {
-    level: 1,
-    pins: false,
-};
-const SUBTYPE_SET: Reach = Reach {
-    level: 1,
-    pins: true,
-};
-const FILE: Reach = Reach {
-    level: 2,
-    pins: true,
-};
+const GENERIC: Reach = Reach { level: 0 };
+const SUBTYPE_TABLE: Reach = Reach { level: 1 };
+const FILE: Reach = Reach { level: 2 };
 
-/// Which patch last set `format` and `encoder.backend`, and how specifically; how specifically `mips.filter` was set.
+/// How specifically `mips.filter` was last set.
 #[derive(Debug, Default)]
 struct FormatSources {
-    patches: usize,
-    format: Option<(Reach, usize)>,
-    backend: Option<(Reach, usize)>,
     filter: Option<Reach>,
 }
 
@@ -582,14 +563,9 @@ fn apply(
     let mut paths = vec![];
     leaf_paths(patch, "", &mut paths);
     merge_json(doc, patch);
-    let id = sources.patches;
-    sources.patches += 1;
     for p in paths {
-        match p.as_str() {
-            "format" => sources.format = Some((reach, id)),
-            "encoder.backend" => sources.backend = Some((reach, id)),
-            "mips.filter" => sources.filter = Some(reach),
-            _ => {}
+        if p == "mips.filter" {
+            sources.filter = Some(reach);
         }
         prov.insert(p, source.clone());
     }
@@ -825,7 +801,7 @@ fn layered_profile_with(
         if override_applies(ctx, o, Some(st), f, &forms) {
             let reach = match o.scope {
                 Scope::All => GENERIC,
-                Scope::Subtype(_) => SUBTYPE_SET,
+                Scope::Subtype(_) => SUBTYPE_TABLE,
                 Scope::File(_) | Scope::Path(_) => FILE,
                 Scope::Set(_) => unreachable!("set scopes never apply to a file"),
             };
@@ -845,8 +821,7 @@ fn layered_profile_with(
     let mut profile = finish_profile(doc, ctx.target, st)?;
     // The skin_wet height form is a grayscale map: R is taken and copied to RGB in Preprocess.
     profile.category = category_of(st, profile.format, f.analysis.grayscale);
-    backend_follows_format(&mut profile, &mut prov, &sources);
-    emissive_hdr_choice(ctx, &mut profile, &mut prov, &sources, f);
+    emissive_hdr_choice(ctx, &mut profile, &mut prov, f);
     float_source_is_linear(&mut profile, &mut prov, f);
     // Spec §3.2, §5.4: a stated OpenGL convention is flipped to DirectX in Preprocess (Task 28 reads flip_green). An
     // explicit `flip_green` wins; `resolve_decided` reports a contradiction as CFG-GREEN-CONFLICT (carried fix 4).
@@ -900,8 +875,7 @@ fn layered_profile_with(
 
 /// DECISIONS DS4: a cubemap's `cubemap.style` fills `face_size`, `format`, `blur` (and `saturation`) where no
 /// explicit layer set them, and the tag is UNORM unless set explicitly (an explicit sRGB is refused by
-/// `encoding_warnings`). At sub-type-table reach without a pin, so `backend_follows_format` moves the backend with
-/// the style's format.
+/// `encoding_warnings`).
 fn cube_style_layer(
     ctx: &ResolveCtx,
     doc: &mut Value,
@@ -1129,14 +1103,11 @@ fn hdr_name(f: Format) -> String {
 /// DECISIONS O2/S3, the fact `analysis:hdr-source`: a `pbr_emissive` whose BC6H format no layer chose explicitly
 /// becomes BC7 unless the source is HDR; then, on every `pbr_emissive`, `color.tag` follows the final format
 /// (`n/a` for BC6H, else `srgb`) unless a layer set it. Runs after every layer, so an explicit `format` or tag from
-/// a user/project preset, config, rule, `[files]` or `--set` is kept. On the switch to BC7 an explicit backend is
-/// kept when it can write BC7 or was pinned (`backend_follows_format`'s rule; trace-debug wave 2 #1): a preset or
-/// config table's `ispc_bc6h` follows the fact to bc7e, a file-scoped `--set` still reports CFG-INVALID.
+/// a user/project preset, config, rule, `[files]` or `--set` is kept.
 fn emissive_hdr_choice(
     ctx: &ResolveCtx,
     p: &mut Profile,
     prov: &mut BTreeMap<String, Provenance>,
-    sources: &FormatSources,
     f: &FileFacts,
 ) {
     if p.subtype != Subtype::PbrEmissive {
@@ -1146,13 +1117,6 @@ fn emissive_hdr_choice(
     if p.format == Format::Bc6hUf16 && !field_explicit(ctx, prov, "format") && !is_hdr_source(f) {
         p.format = Format::Bc7;
         prov.insert("format".into(), fact());
-        let keep = field_explicit(ctx, prov, "encoder.backend")
-            && (backend_fits(p.encoder.backend, p.format)
-                || sources.backend.is_some_and(|(r, _)| r.pins));
-        if !keep {
-            p.encoder.backend = default_backend(p.format);
-            prov.insert("encoder.backend".into(), fact());
-        }
     }
     if !field_explicit(ctx, prov, "color.tag") {
         let tag = if p.format.is_hdr() {
@@ -1226,51 +1190,6 @@ fn float_source_is_linear(p: &mut Profile, prov: &mut BTreeMap<String, Provenanc
             FIELD.into(),
             Provenance::AnalysisFact("float-source".into()),
         );
-    }
-}
-
-/// Whether `b` can write format `f`.
-pub fn backend_fits(b: Backend, f: Format) -> bool {
-    match b {
-        Backend::Bc7e => f == Format::Bc7,
-        Backend::Rgbcx => matches!(f, Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5),
-        Backend::IspcBc6h => f == Format::Bc6hUf16,
-        Backend::Uncompressed => !f.is_block(),
-    }
-}
-
-/// The built-in encoder for a format (spec §3.2 `encoder.backend` default "Format").
-pub fn default_backend(f: Format) -> Backend {
-    match f {
-        Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5 => Backend::Rgbcx,
-        Format::Bc6hUf16 => Backend::IspcBc6h,
-        Format::Bc7 => Backend::Bc7e,
-        Format::Rgba8 | Format::R8 | Format::Rg8 | Format::Rgba16f => Backend::Uncompressed,
-    }
-}
-
-/// A layer that changes only `format` takes the backend with it. A backend that does not fit the format is
-/// kept only when the patch that set the format also set it, or when it was pinned (sub-type- or file-scoped
-/// `--set`, or a rule) at least as specifically as the format; `check_profile` then reports CFG-INVALID.
-/// Otherwise it becomes the format's default backend, with the format's provenance.
-fn backend_follows_format(
-    p: &mut Profile,
-    prov: &mut BTreeMap<String, Provenance>,
-    sources: &FormatSources,
-) {
-    if backend_fits(p.encoder.backend, p.format) {
-        return;
-    }
-    let keep = match (sources.format, sources.backend) {
-        (Some((fr, fp)), Some((br, bp))) => bp == fp || (br.pins && br.level >= fr.level),
-        _ => false,
-    };
-    if keep {
-        return;
-    }
-    p.encoder.backend = default_backend(p.format);
-    if let Some(fmt) = prov.get("format").cloned() {
-        prov.insert("encoder.backend".into(), fmt);
     }
 }
 
@@ -1866,39 +1785,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             );
         }
     }
-    // Only where rgbcx is the resolved backend (BC1/BC3/BC4/BC5): an out-of-range level would trip rgbcx's
-    // assert inside an encode task, and no other backend reads the field.
-    if p.encoder.backend == Backend::Rgbcx && p.encoder.rgbcx_level > encoders_sys::RGBCX_MAX_LEVEL
-    {
-        add(
-            CfgInvalid,
-            format!(
-                "encoder.rgbcx_level {} outside 0..={}",
-                p.encoder.rgbcx_level,
-                encoders_sys::RGBCX_MAX_LEVEL
-            ),
-        );
-    }
-    if !backend_fits(p.encoder.backend, p.format) {
-        add(
-            CfgInvalid,
-            format!(
-                "encoder {:?} cannot write {:?}",
-                p.encoder.backend, p.format
-            ),
-        );
-    }
-    // The `max` level is bc7e patch 0002 (docs/research/bc7e-tuning.md): without the patch-0002 objects the level
-    // does not exist in the encoder, so refuse it here rather than inside an encode task.
-    if p.encoder.backend == Backend::Bc7e
-        && p.encoder.effort == Effort::Max
-        && !encoders_sys::BC7E_MAX_NATIVE
-    {
-        add(
-            CfgInvalid,
-            "encoder.effort max needs the bc7e patch-0002 objects (tools/regen-ispc.ps1); use slowest".to_string(),
-        );
-    }
+
     // An explicit `legacy` header needs a legacy FourCC: BC1/BC3/BC4/BC5 UNORM only. `auto` falls back to DX10.
     if p.header == HeaderForm::Legacy
         && resolve_header(p.format, p.srgb_tag(), HeaderForm::Legacy) != ResolvedHeader::Legacy
@@ -1982,8 +1869,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     if let Some(w) = p.encoder.bc7_weights.filter(|w| *w != Bc7Weights::Linear) {
         let why = if p.format != Format::Bc7 {
             Some("the format is not BC7")
-        } else if p.encoder.backend != Backend::Bc7e {
-            Some("only the built-in BC7 encoder (bc7e) reads them")
         } else if p.encoder.perceptual {
             Some("encoder.perceptual is on, and bc7e then uses its own weights")
         } else {
@@ -2029,7 +1914,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
         );
     }
     // DECISIONS S1: a float source is linear light; Quantise clamps it to [0, 1] and encodes it per color.content.
-    // Values outside that range are lost: a warning, never a block. (IN-FLOAT-LDR is retired, DECISIONS S2.)
+    // Values outside that range are lost: a warning, never a block.
     if st == Subtype::Cubemap {
         // A cube's own check (DECISIONS DS7): `cubemap.highlight_clamp` is the way to keep or tame highlights.
         if f.info.is_float && a.peak_luminance > 1.0 && p.cubemap.highlight_clamp.is_none() {

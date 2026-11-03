@@ -438,13 +438,7 @@ fn a_blocked_bc5_n_still_bakes_from_its_source() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
     rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
-    let (p, _) = plan(req(
-        d.path(),
-        &[
-            "file:**/iron_n.png.format=bc5",
-            "file:**/iron_n.png.encoder.backend=rgbcx",
-        ],
-    ));
+    let (p, _) = plan(req(d.path(), &["file:**/iron_n.png.format=bc5"]));
     assert!(codes(job(&p, "iron_n.png")).contains(&Code::FmtBc5Normal));
     assert!(job(&p, "iron_rmaos.png").bake.is_some());
 }

@@ -3,7 +3,7 @@
 //! edited as its own TOML table, so whatever the creator does not show (defaults, other rules, a description) is
 //! kept, and it is loaded through the engine's preset loader (`PresetRegistry::add_toml` + `check_preset`, the path
 //! the presets folder takes) before any file is written.
-use engine::config::{Backend, Category, Format, Profile, Subtype, Target};
+use engine::config::{Category, Profile, Subtype, Target};
 use engine::presets::{finish_profile, merge_json, PresetFile, PresetRegistry};
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -507,8 +507,7 @@ impl PresetsModel {
         }
     }
 
-    /// Set `field` for `st`. A format pick takes its tag (`value` is `[format, tag]`) and drops an own backend the
-    /// new format cannot use.
+    /// Set `field` for `st`. A format pick takes its tag (`value` is `[format, tag]`).
     pub fn set_field(&mut self, st: Subtype, field: &str, value: Value) {
         self.edit_scope(st, None, |sub| put_field(sub, field, &value));
     }
@@ -850,11 +849,8 @@ impl PresetsModel {
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e.clone()),
                 };
-                let finish = |doc: Value| {
-                    finish_profile(doc, target, st)
-                        .map(follow_backend)
-                        .map_err(|e| e.to_string())
-                };
+                let finish =
+                    |doc: Value| finish_profile(doc, target, st).map_err(|e| e.to_string());
                 let branches = self
                     .suffixes(st)
                     .into_iter()
@@ -895,8 +891,7 @@ impl PresetsModel {
                     .collect();
                 let base = (!base.is_empty())
                     .then(|| self.registry.profile(&base, target, st).ok())
-                    .flatten()
-                    .map(follow_backend);
+                    .flatten();
                 Row {
                     subtype: st,
                     profile: doc.and_then(finish),
@@ -1031,17 +1026,7 @@ fn json_target(t: Target) -> String {
         .unwrap_or_default()
 }
 
-/// The engine's resolve moves a backend that cannot write the format to the format's own (`backend_follows_format`);
-/// the rows show the same.
-fn follow_backend(mut p: Profile) -> Profile {
-    if !engine::policy::backend_fits(p.encoder.backend, p.format) {
-        p.encoder.backend = engine::policy::default_backend(p.format);
-    }
-    p
-}
-
-/// Write `field` into a scope table. A format pick (`[format, tag]`) writes both and drops an own backend the new
-/// format cannot use.
+/// Write `field` into a scope table. A format pick (`[format, tag]`) writes both.
 fn put_field(sub: &mut toml::Table, field: &str, value: &Value) {
     let put = |sub: &mut toml::Table, path: &str, v: &Value| {
         let parts: Vec<&str> = path.split('.').collect();
@@ -1057,14 +1042,6 @@ fn put_field(sub: &mut toml::Table, field: &str, value: &Value) {
     };
     put(sub, "format", &pair[0]);
     put(sub, "color.tag", &pair[1]);
-    let own_backend = get_at(sub, &["encoder", "backend"])
-        .and_then(|b| serde_json::from_value::<Backend>(json_of(b)).ok());
-    let format = serde_json::from_value::<Format>(pair[0].clone()).ok();
-    if let (Some(b), Some(f)) = (own_backend, format) {
-        if !engine::policy::backend_fits(b, f) {
-            remove_at(sub, &["encoder", "backend"]);
-        }
-    }
 }
 
 /// Remove `field` from a scope table (a format takes its tag with it) and the tables it leaves empty.

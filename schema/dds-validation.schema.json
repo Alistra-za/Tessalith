@@ -111,7 +111,6 @@
         "IN-DECODE",
         "IN-NONFINITE",
         "IN-UNREADABLE",
-        "IN-FLOAT-LDR",
         "IN-ICC-IGNORED",
         "IN-ALIAS-INVALID",
         "IN-ALIAS-STALE",

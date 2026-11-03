@@ -16,7 +16,7 @@
 
 use encoders_sys::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned, gather_blocks,
-    Bc7Level, Bc7Params, Bc7Target, Bc7Tune, BC7E_EXACT_OPAQUE_NATIVE, BC7E_MAX_NATIVE,
+    Bc7Level, Bc7Params, Bc7Target, Bc7Tune,
 };
 use sha2::{Digest, Sha256};
 
@@ -456,12 +456,6 @@ fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
         for (li, level) in LEVELS.iter().enumerate() {
             for perceptual in [false, true] {
                 for exact in [false, true] {
-                    if exact && !BC7E_EXACT_OPAQUE_NATIVE {
-                        continue;
-                    }
-                    if *level == Bc7Level::Max && !BC7E_MAX_NATIVE {
-                        continue;
-                    }
                     let got = hash(*level, perceptual, exact, target);
                     if record {
                         println!("{} {li} {perceptual} {exact} {got}", target as usize);

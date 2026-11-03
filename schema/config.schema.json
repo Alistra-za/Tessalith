@@ -72,15 +72,6 @@
       ],
       "type": "string"
     },
-    "Backend": {
-      "enum": [
-        "bc7e",
-        "rgbcx",
-        "ispc_bc6h",
-        "uncompressed"
-      ],
-      "type": "string"
-    },
     "Bc7Weights": {
       "enum": [
         "linear",
@@ -396,9 +387,6 @@
     "EncoderSpec": {
       "additionalProperties": false,
       "properties": {
-        "backend": {
-          "$ref": "#/$defs/Backend"
-        },
         "bc1_transparent_black": {
           "type": "boolean"
         },
@@ -421,17 +409,10 @@
         },
         "perceptual": {
           "type": "boolean"
-        },
-        "rgbcx_level": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
-        "backend",
         "effort",
-        "rgbcx_level",
         "perceptual",
         "bc1_transparent_black",
         "bc45_search_radius"
@@ -1343,9 +1324,6 @@
     "PartialEncoderSpec": {
       "additionalProperties": false,
       "properties": {
-        "backend": {
-          "$ref": "#/$defs/Backend"
-        },
         "bc1_transparent_black": {
           "type": "boolean"
         },
@@ -1368,11 +1346,6 @@
         },
         "perceptual": {
           "type": "boolean"
-        },
-        "rgbcx_level": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "type": "object"

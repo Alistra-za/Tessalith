@@ -168,7 +168,7 @@ pub struct LayoutSettings {
     /// The Textures filters that are on, by [`FILTER_NAMES`] name.
     #[serde(deserialize_with = "lenient_strings")]
     pub filters: Vec<String>,
-    /// The Textures combo filters: a sub-type id, a format id, a backend id (none: Any), and the set membership one
+    /// The Textures combo filters: a sub-type id, a format id (none: Any), and the set membership one
     /// (`any`, `in`, `not-in`).
     #[serde(deserialize_with = "lenient")]
     pub filter_subtype: Option<String>,

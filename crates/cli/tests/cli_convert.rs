@@ -194,8 +194,8 @@ fn user_config_then_project_config_then_set_decide_the_format() {
     let fx = Fx::new();
     fx.rgb("wall.png");
     fx.rgb("floor.png");
-    // User config: every diffuse is BC1 (rgbcx). Project config: a rule decides the sub-type of every file.
-    fx.user_config("[subtypes.diffuse]\nformat = \"bc1\"\nencoder = { backend = \"rgbcx\" }\n");
+    // User config: every diffuse is BC1. Project config: a rule decides the sub-type of every file.
+    fx.user_config("[subtypes.diffuse]\nformat = \"bc1\"\n");
     fx.project_config("[[rules]]\nmatch = { glob = \"**/*.png\" }\nsubtype = \"diffuse\"\n");
     let o = fx.convert(&["--target", "vanilla"]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
@@ -210,11 +210,6 @@ fn user_config_then_project_config_then_set_decide_the_format() {
     let jobs = planned(&o);
     for name in ["wall.png", "floor.png"] {
         assert_eq!(prov(&jobs[name], "format"), "user_config", "{name}");
-        assert_eq!(
-            prov(&jobs[name], "encoder.backend"),
-            "user_config",
-            "{name}"
-        );
         assert_eq!(prov(&jobs[name], "subtype"), "rule:project#0", "{name}");
     }
 
@@ -226,8 +221,6 @@ fn user_config_then_project_config_then_set_decide_the_format() {
         "overwrite",
         "--set",
         "file:**/floor.png.format=bc7",
-        "--set",
-        "file:**/floor.png.encoder.backend=bc7e",
     ]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert_eq!(
@@ -240,7 +233,6 @@ fn user_config_then_project_config_then_set_decide_the_format() {
     );
     let jobs = planned(&o);
     assert_eq!(prov(&jobs["floor.png"], "format"), "user");
-    assert_eq!(prov(&jobs["floor.png"], "encoder.backend"), "user");
     assert_eq!(prov(&jobs["wall.png"], "format"), "user_config");
 }
 
@@ -1133,8 +1125,6 @@ fn bc1_transparent_black_is_a_file_error_not_a_validation_failure() {
         "subtype=diffuse",
         "--set",
         "format=bc1",
-        "--set",
-        "encoder.backend=rgbcx",
         "--set",
         "encoder.bc1_transparent_black=true",
     ]);

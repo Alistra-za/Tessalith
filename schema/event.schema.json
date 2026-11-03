@@ -115,15 +115,6 @@
       ],
       "type": "object"
     },
-    "Backend": {
-      "enum": [
-        "bc7e",
-        "rgbcx",
-        "ispc_bc6h",
-        "uncompressed"
-      ],
-      "type": "string"
-    },
     "BakeJob": {
       "description": "How a roughness member bakes its set's `_n` (`ResolvedJob::bake`, spec §6.2). Set by `plan::plan_bakes`.",
       "properties": {
@@ -442,7 +433,6 @@
         "IN-DECODE",
         "IN-NONFINITE",
         "IN-UNREADABLE",
-        "IN-FLOAT-LDR",
         "IN-ICC-IGNORED",
         "IN-ALIAS-INVALID",
         "IN-ALIAS-STALE",
@@ -894,9 +884,6 @@
     "EncoderSpec": {
       "additionalProperties": false,
       "properties": {
-        "backend": {
-          "$ref": "#/$defs/Backend"
-        },
         "bc1_transparent_black": {
           "type": "boolean"
         },
@@ -919,17 +906,10 @@
         },
         "perceptual": {
           "type": "boolean"
-        },
-        "rgbcx_level": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
-        "backend",
         "effort",
-        "rgbcx_level",
         "perceptual",
         "bc1_transparent_black",
         "bc45_search_radius"

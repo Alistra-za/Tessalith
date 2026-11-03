@@ -1,246 +1,246 @@
 {
   "textures/h/backlight_tint.dds": {
-    "sha256": "f7cc4897fde368e8517fca6640d31df4477c2462ed714b20d96fa8ddb691ba86",
+    "sha256": "53817968ff57a5b6c8116c339f42e74e8ed7f363ef2fa39d7a7f31ddf51c6f3d",
     "subtype": "backlight_tint"
   },
   "textures/h/coat_n.dds": {
-    "sha256": "4be06a1cbfdaa3ef0b29738520a227c1a743dc74f711cef946b665ad2bcbfb67",
+    "sha256": "28d9bbc25b95f7a70eda61413fd76b469b92784638896cf51fb296452bd382a6",
     "subtype": "coat_normal"
   },
   "textures/h/complex_grass.dds": {
-    "sha256": "98e50045f8d8eb3aae60001e736be6aa19f9b66a6daea80fe64bcf1fe7482d51",
+    "sha256": "fec4e1601553d31c299ca60257af328a5840e15c0fed28f2f755ba3716702e2b",
     "subtype": "complex_grass"
   },
   "textures/h/complex_material.dds": {
-    "sha256": "45ce1e80dae2e9ee625982b7293c092257def7ffbfcd15a3453d9d894941b560",
+    "sha256": "cf308e8c7e416177a8c46728d7d73ef7d8dfdab02d388328fcbd70771ca74098",
     "subtype": "complex_material"
   },
   "textures/h/cubemap.dds": {
-    "sha256": "e18b17801e6c9a01d1e29dc85eb4269d202d4a84fce23c8eb6870839937618c4",
+    "sha256": "d658eb5b13d06990810186b0e4236e6e0693311ac88811c72c9636f00de22c41",
     "subtype": "cubemap"
   },
   "textures/h/detail_n.dds": {
-    "sha256": "40d2e58090d7c07b2fb0349ad0f1bf3cd78b5ed67a7e65b1713e02d699d80f69",
+    "sha256": "de48bd1b184ef314a20218be7700987452a5facd30eeb5eabe8ca72c33c5ffee",
     "subtype": "detail_normal"
   },
   "textures/h/diffuse.dds": {
-    "sha256": "0f6858894c807932a6342c39a5a18504335255f2cc5893eb177e88cf63e56ea6",
+    "sha256": "7ced6e8440c4a130034d84afa66dd0578d248be0dd86d73332cfd3caabaded26",
     "subtype": "diffuse"
   },
   "textures/h/envmask.dds": {
-    "sha256": "bc1d198b9a32a38ecc4173d0928e7610a30568115ebf5c6fc93aa20b325271eb",
+    "sha256": "143b4dcd385c62f13dd520a9c4b623d7fee0755981e99ba5e45164dbc15c98c0",
     "subtype": "envmask"
   },
   "textures/h/flow.dds": {
-    "sha256": "7741d2d75729002a1f42406389e8a4da42feb8658fa77a2655692a94089f050f",
+    "sha256": "ecd1453f5f8d46889bf02aebb8be7aaec5759b17abb33d7a2445153a2314ef84",
     "subtype": "flow"
   },
   "textures/h/generic_data.dds": {
-    "sha256": "c102adcc1d6d4abff99d2c0e2373eb65b822952f67171e41d3dd9973d176c43e",
+    "sha256": "5fffcf90bf332c2ccaeb6aaf32ae22d7771302be72221298ad079110a0c02457",
     "subtype": "generic_data"
   },
   "textures/h/generic_two_channel.dds": {
-    "sha256": "6b811ff963861c8fc15c60e7ac7285a7636668a9d8587d3eb4f3ac3cf7edda6a",
+    "sha256": "66cc4b7a256696eb15749f419edeac148aff2f9ebf6d79132111ae5dd6859197",
     "subtype": "generic_two_channel"
   },
   "textures/h/glow.dds": {
-    "sha256": "eed20b1c571c253e421b0ff344bb978912787163610bb109666f79b242e6541b",
+    "sha256": "4cb4aebb3f2149ad02b6457e0ebed690045c4e21f43100c580f6ca04f6ecc06e",
     "subtype": "glow"
   },
   "textures/h/hdr_sky.dds": {
-    "sha256": "88962b16e94677edb4e6b8a1e27d2e6f48360111982a2a29b4a156ce1950e6b0",
+    "sha256": "1f63e1ed43ab6c1d8f83c008ab274cb852133ccd4fcfb66ae24d63c6e7770c99",
     "subtype": "hdr_sky"
   },
   "textures/h/height.dds": {
-    "sha256": "7997974722943cea81206fcdf077f2cd7e3fc195862172525e114ec1350f1741",
+    "sha256": "86e408f3149fbb7edabd42ee72a9522a4e008540311eca787e1cf91ef629b2a3",
     "subtype": "height"
   },
   "textures/h/landscape.dds": {
-    "sha256": "ccdfc604acecfb6ef32517ef93b1391b059288ff04dd8267347949ac2501f1e1",
+    "sha256": "50c7bd91135fdec2406d97b14356824a5c481a4e0dee178861c97cc955f0c1fd",
     "subtype": "landscape_diffuse"
   },
   "textures/h/landscape_n.dds": {
-    "sha256": "887ae1f76c07266516897d0ab2ca45501e1410ae68e35014fe081c64d20b0a52",
+    "sha256": "1db9c8a77698e617c74754b164dfb0d84b312c8e56074cd6c308daa22ff55d2e",
     "subtype": "landscape_normal"
   },
   "textures/h/msn.dds": {
-    "sha256": "fa6e10597f4804b95ad8792eccd97628cc441092849fede6a67c888dbe03b031",
+    "sha256": "f5e15f9b894c00e06aab3c3f7ccd57e2c95275e9cb48d083de91b3cb9394a5f6",
     "subtype": "msn"
   },
   "textures/h/msn_specular.dds": {
-    "sha256": "ef2dc5dd438d3055ba97194c0b39c1364958e76d9106b201d58cde4b17f599ee",
+    "sha256": "12bbcc33ae7d8ee7ce5e4634e3ace54457c2fa20023dbcb7b081025440012943",
     "subtype": "msn_specular"
   },
   "textures/h/normal.dds": {
-    "sha256": "82abafa4c48a444751c196b5823f1b7877f2a097d83302bc885e3c82fce6f853",
+    "sha256": "f0179b9a95a21575f59952e06c5de2d25b74c20c674735bae2f017ee954bf141",
     "subtype": "normal"
   },
   "textures/h/pbr.dds": {
-    "sha256": "52a5d6671c5a08bf7387cbfceec79ef99a29c7266fefca198645ff2588cfd984",
+    "sha256": "794401c5ae0388281be259f9b7410ffb197add1c4b5c24697d203031812b0889",
     "subtype": "pbr_albedo"
   },
   "textures/h/pbr_fuzz.dds": {
-    "sha256": "d7399f1fd6baa473e529494c446aa8a2032e97c4c0835dca65f77ee524085520",
+    "sha256": "3f49aab03e990da8a95a56456183712d834655649c63d04e13bada22a2f80a37",
     "subtype": "pbr_fuzz"
   },
   "textures/h/pbr_g.dds": {
-    "sha256": "1b9ba78b9afa0f0046db30c3894421d0fd0b110e84501e9a7419a48d5d930a66",
+    "sha256": "add7c8417bc6cff6d09dcb56777b4072a6a68fbf16561fd014808fbfe76b2487",
     "subtype": "pbr_emissive"
   },
   "textures/h/pbr_n.dds": {
-    "sha256": "a470932c11744ce70f5c9fe06d85e40fe5c666dff0f272b503e7f8f208cd2585",
+    "sha256": "39eb94a8a8f5d3fb62f40be47ad85602b3a43519f8076ac45c1a6ced8b5cab59",
     "subtype": "pbr_normal"
   },
   "textures/h/pbr_subsurface.dds": {
-    "sha256": "5b4b48f19ce1c173377d84f1f7e76804d07d43296cfe248ba37182b1674d8a41",
+    "sha256": "25740e710218bb22360d5918702426a66a997c8632141eeb751cf210d653496a",
     "subtype": "pbr_subsurface"
   },
   "textures/h/projected_noise.dds": {
-    "sha256": "7e4f10558d2483a8728deddf28b62f5ac770b4c10dda97289a599bb238009e36",
+    "sha256": "6877719c5f8edce2b1b0d52c2da16f86de709fba6d5e80d169919b21c60bf8c7",
     "subtype": "projected_noise"
   },
   "textures/h/rmaos.dds": {
-    "sha256": "c67536c1171c58d1dc84dc8f61a22c63afd7686743d1a60120aed9f9f9067cd4",
+    "sha256": "b29ea7ff253a2e0ecad5a468d9024d63ed28a87ec5ea095792966453ae49129a",
     "subtype": "rmaos"
   },
   "textures/h/skin.dds": {
-    "sha256": "fc3d0716d9cdcdef55915654f66731f8ed828eb968d579d9222ca032f6c3e987",
+    "sha256": "666f71a0aad26f33eca8a33c2a8768c9ef0e5fedbcf342d25d6478884e0c81a0",
     "subtype": "skin_albedo"
   },
   "textures/h/skin_rfaos.dds": {
-    "sha256": "c6f3337660d99a97a74ef43559406fc9a2fa31dbbc9b97d172b09356f7284281",
+    "sha256": "3b7860c700618594c533922af3d4bdedd17a7b49bd2c76887abffc26d1d39901",
     "subtype": "skin_rfaos"
   },
   "textures/h/skin_sk.dds": {
-    "sha256": "5e2957144669b5cb4f347613405eecb594dc89e026cb674b63277e76a5d07208",
+    "sha256": "f1f904c84c8a926bd98e644bdc74188fd584d28e46f3872637264899f1b90be4",
     "subtype": "skin_sk"
   },
   "textures/h/skin_wet.dds": {
-    "sha256": "82f9c509547392eb10570d4cde65d9945eddb283f8a09de09c13b6f64a35d3b5",
+    "sha256": "0d7bad7584c74cfdb559b6ff2cbdec8e2c4d6bfbee52b7bf786f5ff0b8e2e00e",
     "subtype": "skin_wet"
   },
   "textures/h/subsurface_tint.dds": {
-    "sha256": "cacfbd6a6cbd95f64e7182e9c573199e469d81286bea3802181bafcd5b2dd95a",
+    "sha256": "5c03597940e84fb6f7a4af554117b7a207bc904030071db4a5f5d4ea4a683a5b",
     "subtype": "subsurface_tint"
   },
   "textures/h/ui_sky.dds": {
-    "sha256": "5df2a844372c1be96f590da4d74c884c52e22740441736d91996491c8c5ece71",
+    "sha256": "7421c2005bf03a9710fc91fefb5e9912b2d0a9178173cd06520e54ade85661c3",
     "subtype": "ui_sky"
   },
   "textures/pbr/rock.dds": {
-    "sha256": "4b94681ad739f322e41b4ebfa10475e0b35c73bffdf7c7d8645202fc929acfbe",
+    "sha256": "285622765a7d095df48b9b664ad8087618e78128ecc830c01212be70608f0d15",
     "subtype": "pbr_albedo"
   },
   "textures/pbr/rock_n.dds": {
-    "sha256": "babb28af26250eb597e833b20ea25733724ecf9c5eb667de9750474f9c222d22",
+    "sha256": "72667ffc90471c8e66f32142d97e560489ccd4ac5c20912bd2cd453bfcf356dc",
     "subtype": "pbr_normal"
   },
   "textures/pbr/rock_rmaos.dds": {
-    "sha256": "64da1fbb69c863de9b1edd96c2ad512ff7a0c4e7f459bd0a61c11b7555c37d0a",
+    "sha256": "37c49d4b85877e297d2952aa24a822e25898a35505221eb998d9a9214edb3a60",
     "subtype": "rmaos"
   },
   "textures/rnm/iron.dds": {
-    "sha256": "c400998ca6a26e7cf8dfab84f7d0d741775a42f7b48e054cd8d44b6d94008e2d",
+    "sha256": "91f38b73462b1b22a45989f79e837b35165f280bc2147316f8f0a6fe6d14110d",
     "subtype": "pbr_albedo"
   },
   "textures/rnm/iron_n.dds": {
-    "sha256": "7692472b0340ba278755af746da4aca8460370c0da426afea25b8f3de23d50f2",
+    "sha256": "200b908282c49f8c7c899166707eb21e516c88d684c8947d999e8cb94df46533",
     "subtype": "pbr_normal"
   },
   "textures/rnm/iron_rmaos.dds": {
-    "sha256": "0358ba55acfe0521c8e873be6a0e9f20fa33cd1af58c7e453c9cb65232531205",
+    "sha256": "72fb34b53ece20a193a1c579267ccc41d4d4e7acfdb7a453a94bcaeca924143f",
     "subtype": "rmaos"
   },
   "vanilla/textures/h/backlight_tint.dds": {
-    "sha256": "4e483b174dd8b6459f201b3a9f825836ca8451a795f5f6ee0a0e515a7e611261",
+    "sha256": "4a3411f6e9f29142582a9d4aac1bb3b06f441c6ad949bc4b36ea2482b76b2b60",
     "subtype": "backlight_tint"
   },
   "vanilla/textures/h/complex_grass.dds": {
-    "sha256": "f876862603cd976f18ee07e3c7fce5e24b9164c2bdfd9967f845f04e6d774c84",
+    "sha256": "3195750b25a075cd4aa54af1b6cad6c71212966f7459ce5aebf26989f1483e10",
     "subtype": "complex_grass"
   },
   "vanilla/textures/h/complex_material.dds": {
-    "sha256": "77d6306acf5ba7e12c75d5cd63c95b7ad134729765ab539284ab012790e63826",
+    "sha256": "bcfc830b296ff9727281090311d8f231fb3c2037144b7499c5d23fd6773fea5b",
     "subtype": "complex_material"
   },
   "vanilla/textures/h/cubemap.dds": {
-    "sha256": "96ea6fa940411c06efda373afa1c4789afb6f2c37b2e34b1b9f1fd4d5d397aea",
+    "sha256": "db2d91fdfba88f4763f4bf88a37d10b4575d88302210b4a98ccbe6d0098f49c9",
     "subtype": "cubemap"
   },
   "vanilla/textures/h/detail_n.dds": {
-    "sha256": "e98dc6991be4f213cd510be1eac96f332899e625fa435aeaddc2098f29e5b07e",
+    "sha256": "bfad7c0383bb921dd86fe12afb62dd7a89e2e83cb109841085a4c2b5f15e3a67",
     "subtype": "detail_normal"
   },
   "vanilla/textures/h/diffuse.dds": {
-    "sha256": "03df9bf27a4903ef2853f6618394c76398a3dd3ac4c3ce2a007ac138fecd2554",
+    "sha256": "35cf36b479cbc996c37d6b696f1f15cc02eb104f9d49c2ee6d93703e36e104dc",
     "subtype": "diffuse"
   },
   "vanilla/textures/h/envmask.dds": {
-    "sha256": "ea2172731dd13c7914cef461eba1939eb46af322c61c48a36f4f8f187feeb419",
+    "sha256": "c421931d8b40daa1856f25f666bdb64b0e6023121b68bc004b351f977e0b0e15",
     "subtype": "envmask"
   },
   "vanilla/textures/h/generic_data.dds": {
-    "sha256": "165779f0f347298bda510681f6bf77b3e06bd2c825bfe9f986e3e9f4bc505328",
+    "sha256": "7063e58bac1f894a689879c5d069f0e4fd5058caefe46ad11b9f5eb21b4aeb0e",
     "subtype": "generic_data"
   },
   "vanilla/textures/h/generic_two_channel.dds": {
-    "sha256": "ef37138097cf5968f3fadc10b1f9203eac935a6895aa7ff334ad44ce0775e991",
+    "sha256": "d070e20b3879ccbb5e921cc1032e112d3b09ae1183b2c54080e6ff0f2fd8c9f4",
     "subtype": "generic_two_channel"
   },
   "vanilla/textures/h/glow.dds": {
-    "sha256": "4d9e32b4ecab88d289356fa44c5f839dab8322cb93c3becd546ab3b6df672f5d",
+    "sha256": "d19af4216c0595fae4bbf7ac162f728913dd1b6cfcf0d3a9aaf2d389337e2e51",
     "subtype": "glow"
   },
   "vanilla/textures/h/height.dds": {
-    "sha256": "572848f1ec6101a4f0c722349c7361bf01f8f50811aeecd8f3af3258877ca8bb",
+    "sha256": "25c24dc17b04854d0537518567172f93167a78f516df3befba437c3ce743b709",
     "subtype": "height"
   },
   "vanilla/textures/h/landscape.dds": {
-    "sha256": "d49ecaaffa1973ae81be40a0855a6fca9ea29dfc9795415888f381a824ed32ad",
+    "sha256": "34705b55fb43ada25733fc717b9c8493ca17fed74203ec25dccbd03cc251853e",
     "subtype": "landscape_diffuse"
   },
   "vanilla/textures/h/landscape_n.dds": {
-    "sha256": "f725fe40ce1d7f8a035cf42b4a4efded5ecc0a12ba7dd1db343f98d0fa513de3",
+    "sha256": "5801c40e4ea54d04c7db96cfd942b6944e6d4743adad4d52447b0f21ae39a47d",
     "subtype": "landscape_normal"
   },
   "vanilla/textures/h/msn.dds": {
-    "sha256": "d81f656e3d89700725432c1b5cdc9e942bcd6c3cff8634a07e01ec11445df308",
+    "sha256": "43ede044c718a7754b7a0ee60a766a9bbf36b9f3da18b111579f0eddb94c06f4",
     "subtype": "msn"
   },
   "vanilla/textures/h/msn_specular.dds": {
-    "sha256": "4b9401057a705ab63a633a3c8dabf376d19696ae64c88cf9b6c1cca93304831f",
+    "sha256": "7b55e3792fd6bdd75b20ef8ce6e60fd660400ba721901ad284b452ad8dbab30c",
     "subtype": "msn_specular"
   },
   "vanilla/textures/h/normal.dds": {
-    "sha256": "42d35a11072af9b146a7b2096da4434760fd8c91dac23eccc3b5b3d24962228f",
+    "sha256": "c251430a3196a9cb188405708f4a0cc09db0948309e39a2e420de300ae9e25f2",
     "subtype": "normal"
   },
   "vanilla/textures/h/projected_noise.dds": {
-    "sha256": "4ad8991698aefaabbca6d5c49c5aaab7f7aed3c69bf7df9e25d708a4fcf224b8",
+    "sha256": "f383831320875a88f188833e093df8c0cc7a8c214e28599394551acf8aa2f218",
     "subtype": "projected_noise"
   },
   "vanilla/textures/h/subsurface_tint.dds": {
-    "sha256": "16afe393b42fd4fe135a476e6bf505b6aca71e04d619c4b1ca95f42cd4685c69",
+    "sha256": "ce5048052a6e7106bde3433501c9c8f1873d5b700bebb006750e535bc66227b1",
     "subtype": "subsurface_tint"
   },
   "vanilla/textures/h/ui_sky.dds": {
-    "sha256": "1a40401fa230c41de5e526f9089b720ea391d3b508777af44306c6b672077bb4",
+    "sha256": "3606c4253ae79cb3490df0620caeb73f93701fecfa7f28f0574473d253aaf0b5",
     "subtype": "ui_sky"
   },
   "vanilla/textures/pbr/rock.dds": {
-    "sha256": "662838bd7fd978cdeaaf0b920088997812bc18f2a38109092a64f1546136551d",
+    "sha256": "2356a8986825a0a7cc340d4bab87d71a7a92a29f24f34d24757c75dc300364cb",
     "subtype": "diffuse"
   },
   "vanilla/textures/pbr/rock_n.dds": {
-    "sha256": "02164c638fa33c273cbae216a1e2559716fb57bbe5ed496b9a492eb1939837b8",
+    "sha256": "0b5b663cb3f39308bf43aa9fe3d9a278854c5d06776fcda283e2f8881f61b6d8",
     "subtype": "normal"
   },
   "vanilla/textures/rnm/iron.dds": {
-    "sha256": "b8fa6b408efe4cd9106fc32ddff8fe72f1316343ef5f7fc1332df121ef1fe327",
+    "sha256": "790bc8e2b790e9a5f860846f883ec16377bbd012cfb8feb965265ae088e3d93d",
     "subtype": "diffuse"
   },
   "vanilla/textures/rnm/iron_n.dds": {
-    "sha256": "a6bdda8940d86f117325b8cc16aad0b8672f1e4bfc4868e0292d5c560ab8315b",
+    "sha256": "7229a9ea62b25123986d1dc566fdd5070a424fc0a0a71b4d6fbf0bbdab5e845c",
     "subtype": "normal"
   }
 }

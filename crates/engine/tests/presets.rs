@@ -45,7 +45,7 @@ fn builtin_defaults_match_spec_table_4_2() {
         .unwrap();
     assert_eq!((p.format, p.color.tag), (Format::Bc7, ColorTag::Unorm));
     let p = r.profile("cs-quality", Target::Cs, Subtype::Flow).unwrap();
-    assert_eq!((p.format, p.encoder.backend), (Format::Bc5, Backend::Rgbcx));
+    assert_eq!(p.format, Format::Bc5);
     let p = r
         .profile("cs-quality", Target::Cs, Subtype::Envmask)
         .unwrap();
@@ -64,8 +64,8 @@ fn builtin_defaults_match_spec_table_4_2() {
         .profile("cs-quality", Target::Cs, Subtype::PbrEmissive)
         .unwrap();
     assert_eq!(
-        (p.format, p.color.tag, p.encoder.backend),
-        (Format::Bc6hUf16, ColorTag::NotApplicable, Backend::IspcBc6h)
+        (p.format, p.color.tag),
+        (Format::Bc6hUf16, ColorTag::NotApplicable)
     );
     let p = r
         .profile("cs-quality", Target::Cs, Subtype::Normal)
@@ -1033,7 +1033,35 @@ fn a_set_override_naming_nvtt_is_refused_with_the_hint() {
             "{e}"
         );
     }
-    assert!(engine::overrides::parse_set("encoder.backend=rgbcx").is_ok());
+}
+
+/// Note FM15: the format alone picks the encoder, so `encoder.backend` and `encoder.rgbcx_level` are refused by name
+/// whatever the value and wherever they sit (config, preset, `--set`); `IN-FLOAT-LDR` is refused in an allow list.
+#[test]
+fn removed_encoder_keys_and_codes_are_named() {
+    for (key, text) in [
+        ("encoder.backend", "encoder = { backend = \"bc7e\" }"),
+        ("encoder.rgbcx_level", "encoder = { rgbcx_level = 10 }"),
+    ] {
+        for head in ["[defaults]", "[subtypes.diffuse]", "[files.\"a.png\"]"] {
+            let e = ConfigFile::parse(&format!("{head}\n{text}\n"), "sdc.toml").unwrap_err();
+            assert!(e.to_string().contains(key), "{head}: {e}");
+        }
+        let e = engine::overrides::parse_set(&format!("{key}=1")).unwrap_err();
+        assert!(e.contains(key) && e.contains("removed in 2.0"), "{e}");
+    }
+    // The `nvtt` row comes first, so that value still names NVTT.
+    let e = ConfigFile::parse("[defaults]\nencoder = { backend = \"nvtt\" }\n", "sdc.toml")
+        .unwrap_err();
+    assert!(e.to_string().contains("NVTT"), "{e}");
+
+    let e = ConfigFile::parse("allow = [\"IN-FLOAT-LDR\"]\n", "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("IN-FLOAT-LDR"), "{e}");
+    let e = engine::codes::Code::parse_allow("IN-FLOAT-LDR").unwrap_err();
+    assert!(
+        e.contains("IN-FLOAT-LDR") && e.contains("removed in 2.0"),
+        "{e}"
+    );
 }
 
 #[test]

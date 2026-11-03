@@ -90,7 +90,7 @@ Every texture's final settings (its profile) are built from layers. Later layers
 
 ### Format and encoder
 
-When a layer changes only `format`, the encoder follows it: BC1, BC3, BC4 and BC5 use `rgbcx`, BC6H uses `ispc_bc6h`, BC7 uses `bc7e`, and uncompressed formats use `uncompressed`. A backend that does not fit the new format is kept only if the same layer set both, or a pinning layer (a sub-type- or file-scoped `--set`, a rule, or `[files]`) set the backend at least as specifically as the format. Preset and config `[subtypes]` tables never pin. When the backend is kept, the profile is invalid (`CFG-INVALID`).
+The format alone picks the encoder, so a layer that changes only `format` needs no other setting: BC1, BC3, BC4 and BC5 use rgbcx (BC1 and BC3 colour at its top level, 18), BC6H uses ISPC and BC7 uses bc7e. Uncompressed formats run no encoder. There is no key to choose the encoder or the rgbcx level. <!-- D:FM15 -->
 
 ## [defaults] and [subtypes]
 

@@ -94,7 +94,7 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     assert_eq!(out.len(), n * 16, "out must hold 16 bytes per block");
     assert!(
         !p.exact_opaque || BC7E_EXACT_OPAQUE_NATIVE,
-        "exact_opaque needs the patched bc7e objects; use bc7_fixup::force_opaque_mode6 instead"
+        "exact_opaque needs the patched bc7e objects"
     );
     assert!(
         p.level != Bc7Level::Max || BC7E_MAX_NATIVE,

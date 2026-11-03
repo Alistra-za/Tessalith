@@ -5,12 +5,16 @@
 use crate::config::*;
 use crate::grass::{unit_err, CS_GRASS_THRESHOLD, GRASS_GUARD_MARGIN};
 use crate::quantize::EncoderInput;
-use encoders_sys::bc7_fixup::{force_opaque_mode6, force_opaque_rotated, force_zero_alpha};
+use encoders_sys::bc7_fixup::{force_opaque_rotated, force_zero_alpha};
 use encoders_sys::*;
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+// The vendored bc7e objects always carry patch 0001 (build.rs refuses a tree without it), so `alpha.exact_opaque`
+// is bc7e's native flag and there is no mode-6 byte patch (DECISIONS Note FM).
+const _: () = assert!(BC7E_EXACT_OPAQUE_NATIVE);
 
 /// Blocks per bc7e call (what the bench used).
 const BC7_BLOCKS_PER_CALL: usize = 64;
@@ -67,16 +71,16 @@ pub fn radius(r: SearchRadius) -> u32 {
 /// - Rotated mode 4/5 blocks always get the lossless rotated-slot fix, whatever `alpha.exact_opaque`
 ///   and the alpha policy (fix batch 41). Without it bc7e can decode such a block's alpha well below
 ///   254 (239 on white noise), which would break the `remove` guarantee.
-/// - `alpha.exact_opaque` controls only mode 6, the part that costs RGB: `native` selects the bc7e
-///   flag (else the mode-6 byte patch). With the flag off, mode 6 is the only source of alpha 254.
-fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile, native: bool) {
+/// - `alpha.exact_opaque` controls only mode 6, the part that costs RGB: it is bc7e's native flag. With the flag
+///   off, mode 6 is the only source of alpha 254.
+fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     let e = &p.encoder;
     match p.format {
         Format::Bc7 => {
             let params = Bc7Params {
                 level: bc7_level(e.effort),
                 perceptual: e.perceptual,
-                exact_opaque: p.alpha.exact_opaque && native,
+                exact_opaque: p.alpha.exact_opaque,
             };
             for (oc, bc) in o
                 .chunks_mut(BC7_BLOCKS_PER_CALL * BC7_BLOCK_BYTES)
@@ -99,7 +103,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile, native: bool) {
                     None => bc7e_compress_blocks(bc, oc, params),
                 }
             }
-            bc7_opaque_fix(o, b, p.alpha.exact_opaque && !native, zero_fix(p));
+            bc7_opaque_fix(o, b, zero_fix(p));
         }
         f => {
             let bs = f.block_bytes().expect("block format");
@@ -107,17 +111,12 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile, native: bool) {
                 let src: &[[u8; 4]; 16] = src.try_into().unwrap();
                 match f {
                     // BC1 is opaque-only in v1 (DECISIONS Note F): alpha is ignored by rgbcx.
-                    Format::Bc1 => blk.copy_from_slice(&bc1_encode_block(
-                        src,
-                        e.rgbcx_level,
-                        true,
-                        e.bc1_transparent_black,
-                    )),
-                    Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
-                        src,
-                        e.rgbcx_level,
-                        radius(e.bc45_search_radius),
-                    )),
+                    Format::Bc1 => {
+                        blk.copy_from_slice(&bc1_encode_block(src, true, e.bc1_transparent_black))
+                    }
+                    Format::Bc3 => {
+                        blk.copy_from_slice(&bc3_encode_block(src, radius(e.bc45_search_radius)))
+                    }
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
                     Format::Bc4 => {
                         blk.copy_from_slice(&bc4_encode_block(src, 0, radius(e.bc45_search_radius)))
@@ -144,20 +143,16 @@ fn zero_fix(p: &Profile) -> bool {
 }
 
 /// The BC7 opaque fix-ups on blocks `o` whose source texels `b` (16 per
-/// block) have alpha 255 throughout: the lossless rotated mode 4/5 fix always, and the S5b mode-6 byte patch when
-/// `mode6_patch` (bc7e without the native flag only). With `zero`, blocks whose source alpha is 0 throughout get the
-/// exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1).
-fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], mode6_patch: bool, zero: bool) {
+/// block) have alpha 255 throughout: the lossless rotated mode 4/5 fix. With `zero`, blocks whose source alpha is 0
+/// throughout get the exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1).
+fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], zero: bool) {
     for (blk, src) in o.chunks_mut(BC7_BLOCK_BYTES).zip(b.chunks(BLOCK_TEXELS)) {
         if zero && src.iter().all(|t| t[3] == 0) {
             force_zero_alpha(blk.try_into().unwrap());
         } else if src.iter().all(|t| t[3] == 255) {
             let blk: &mut [u8; 16] = blk.try_into().unwrap();
-            if mode6_patch {
-                force_opaque_mode6(blk);
-            }
-            // Rotated mode 4/5 carry alpha in a colour endpoint pair; neither the native flag
-            // nor the mode-6 patch covers them. Lossless for RGB, so it runs with the flag off.
+            // Rotated mode 4/5 carry alpha in a colour endpoint pair, which the native flag does not cover.
+            // Lossless for RGB, so it runs with the flag off.
             force_opaque_rotated(blk);
         }
     }
@@ -278,7 +273,7 @@ fn encode_level_with(
                 .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
                 .for_each(|(o, b)| {
                     if go() {
-                        encode_band(b, o, p, BC7E_EXACT_OPAQUE_NATIVE);
+                        encode_band(b, o, p);
                     }
                 });
             if p.subtype == Subtype::ComplexGrass
@@ -326,7 +321,6 @@ fn guard_grass_corner(out: &mut [u8], blocks: &[[u8; 4]], w: u32, h: u32, p: &Pr
         &blocks[i * BLOCK_TEXELS..(i + 1) * BLOCK_TEXELS],
         blk,
         &best,
-        BC7E_EXACT_OPAQUE_NATIVE,
     );
 }
 
@@ -351,41 +345,6 @@ mod tests {
         p.format = Format::Bc7;
         p.alpha.exact_opaque = true;
         p
-    }
-
-    /// 64x64 tiling of the dark opaque block that upstream bc7e u5 encodes as mode 6 with a p-bit-0
-    /// endpoint (alpha 254); see `encoders-sys/tests/bc7.rs`.
-    fn dark_ramp(w: u32, h: u32) -> Vec<[u8; 4]> {
-        (0..w * h)
-            .map(|i| {
-                let t = ((i / w % 4) * 4 + i % 4) as u8;
-                [t, t / 2, 100 + t, 255]
-            })
-            .collect()
-    }
-
-    fn alpha_bad(block: &[u8]) -> usize {
-        let mut d = [0u8; 64];
-        bcdec_rs::bc7(block, &mut d, 16);
-        d.chunks(4).filter(|t| t[3] != 255).count()
-    }
-
-    #[test]
-    fn byte_patch_fallback_forces_opaque_alpha_on_mode6_blocks() {
-        let p = bc7_exact_profile();
-        let blocks = gather_blocks(&dark_ramp(16, 16), 16, 16);
-        let mut plain = vec![0u8; blocks.len()];
-        let mut fixed = vec![0u8; blocks.len()];
-        let mut off = p.clone();
-        off.alpha.exact_opaque = false;
-        encode_band(&blocks, &mut plain, &off, false);
-        encode_band(&blocks, &mut fixed, &p, false);
-        assert!(
-            plain.chunks(16).all(|b| b[0] & 0x7f == 0x40),
-            "test image should be mode 6"
-        );
-        assert!(plain.chunks(16).map(alpha_bad).sum::<usize>() > 0);
-        assert_eq!(fixed.chunks(16).map(alpha_bad).sum::<usize>(), 0);
     }
 
     /// A band skipped by cancellation must fail the level even if the probe reads false again
@@ -428,20 +387,6 @@ mod tests {
     }
 
     #[test]
-    fn byte_patch_skips_blocks_with_non_opaque_input() {
-        let p = bc7_exact_profile();
-        let mut px = dark_ramp(4, 4);
-        px[5][3] = 10;
-        let blocks = gather_blocks(&px, 4, 4);
-        let mut off = p.clone();
-        off.alpha.exact_opaque = false;
-        let (mut plain, mut fixed) = ([0u8; 16], [0u8; 16]);
-        encode_band(&blocks, &mut plain, &off, false);
-        encode_band(&blocks, &mut fixed, &p, false);
-        assert_eq!(plain, fixed);
-    }
-
-    #[test]
     fn uncompressed_levels_are_packed_as_their_dxgi_layout() {
         let mut p = bc7_exact_profile();
         let px = vec![[10u8, 20, 30, 40], [50, 60, 70, 80]];
@@ -451,7 +396,6 @@ mod tests {
             (Format::Rg8, vec![10, 20, 50, 60]),
         ] {
             p.format = f;
-            p.encoder.backend = Backend::Uncompressed;
             assert_eq!(
                 encode_level(
                     &EncoderInput::Ldr(px.clone()),
@@ -494,7 +438,7 @@ mod tests {
             .collect();
         let blocks = gather_blocks(&px, 4, 8);
         let mut out = vec![0u8; 32];
-        encode_band(&blocks, &mut out, &p, BC7E_EXACT_OPAQUE_NATIVE);
+        encode_band(&blocks, &mut out, &p);
         let top = out[..16].to_vec();
         assert!(
             grass_corner_ok(&out[16..], 12),
@@ -502,7 +446,7 @@ mod tests {
         );
         // A red block in the corner's place decodes to (1, -1, -1): far from unit length.
         let red = gather_blocks(&[[255, 0, 0, 12]; 16], 4, 4);
-        encode_band(&red, &mut out[16..], &p, BC7E_EXACT_OPAQUE_NATIVE);
+        encode_band(&red, &mut out[16..], &p);
         assert!(!grass_corner_ok(&out[16..], 12));
         guard_grass_corner(&mut out, &blocks, 4, 8, &p);
         assert!(grass_corner_ok(&out[16..], 12));

@@ -101,10 +101,7 @@ fn bc5_on_normal_blocks_unless_allowed() {
         Some("n"),
         &["n"],
         opaque(),
-        &[
-            "subtype:normal.format=bc5",
-            "subtype:normal.encoder.backend=rgbcx",
-        ],
+        &["subtype:normal.format=bc5"],
         &[],
     );
     assert_eq!(
@@ -119,10 +116,7 @@ fn bc5_on_normal_blocks_unless_allowed() {
         Some("n"),
         &["n"],
         opaque(),
-        &[
-            "subtype:normal.format=bc5",
-            "subtype:normal.encoder.backend=rgbcx",
-        ],
+        &["subtype:normal.format=bc5"],
         &[Code::FmtBc5Normal],
     );
     assert_eq!(j.status, JobStatus::Ready);
@@ -242,37 +236,10 @@ fn threshold_range_and_npot() {
     );
 }
 
+/// DECISIONS Note BZ: `encoder.effort = "max"` is bc7e patch 0002, which the vendored objects always carry (build.rs
+/// refuses a tree without it), so it plans cleanly.
 #[test]
-fn rgbcx_level_above_max_is_cfg_invalid() {
-    let job = |level: u32| {
-        run(
-            Target::Cs,
-            "textures/a/x.png",
-            None,
-            &[],
-            opaque(),
-            &[
-                "subtype=diffuse",
-                "format=bc1",
-                &format!("encoder.rgbcx_level={level}"),
-            ],
-            &[],
-        )
-    };
-    let j = job(encoders_sys::RGBCX_MAX_LEVEL + 1);
-    assert!(codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
-    assert!(j
-        .warnings
-        .iter()
-        .any(|w| w.message.contains("encoder.rgbcx_level")));
-    let j = job(encoders_sys::RGBCX_MAX_LEVEL);
-    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
-}
-
-/// DECISIONS Note BZ: `encoder.effort = "max"` is bc7e patch 0002. It plans cleanly when the vendored objects
-/// carry the patch and is refused with CFG-INVALID (naming the level) when they do not.
-#[test]
-fn effort_max_needs_the_patch_0002_objects() {
+fn effort_max_plans_cleanly() {
     let j = run(
         Target::Cs,
         "textures/a/x.png",
@@ -283,11 +250,7 @@ fn effort_max_needs_the_patch_0002_objects() {
         &[],
     );
     assert_eq!(j.profile.encoder.effort, Effort::Max);
-    let refused = j
-        .warnings
-        .iter()
-        .any(|w| w.code == Code::CfgInvalid && w.message.contains("encoder.effort max"));
-    assert_eq!(refused, !encoders_sys::BC7E_MAX_NATIVE, "{:?}", j.warnings);
+    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
     // The level maps to bc7e's level 7 and puts BC6H on ISPC's peak-preserving mode, as `slowest` does (Note FF).
     assert_eq!(
         engine::encode::bc7_level(Effort::Max),
@@ -430,7 +393,6 @@ fn bc6h_and_tag_na_must_agree() {
         &["format=bc6h_uf16"],
         &[],
     );
-    assert_eq!(j.profile.encoder.backend, Backend::IspcBc6h);
     assert!(
         warning(&j, Code::CfgInvalid)
             .message
@@ -676,10 +638,9 @@ fn bc1_blocks_every_alpha_policy_but_remove() {
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 }
 
-/// Carry 6 (+ fix round 1): the backend follows the format unless the format's own patch set it, or it was
-/// pinned (sub-type- or file-scoped --set, rule) at least as specifically as the format.
+/// Carry 6: the format alone picks the encoder (Note FM), so a format change needs no other setting.
 #[test]
-fn backend_follows_format() {
+fn a_format_change_needs_no_encoder_setting() {
     let j = run(
         Target::Cs,
         "textures/a/x_n.png",
@@ -689,43 +650,11 @@ fn backend_follows_format() {
         &["subtype:normal.format=bc5"],
         &[],
     );
-    assert_eq!(j.profile.encoder.backend, Backend::Rgbcx);
-    assert_eq!(j.provenance["encoder.backend"], Provenance::User);
+    assert_eq!(j.profile.format, Format::Bc5);
     assert_eq!(
         j.status,
         JobStatus::Blocked {
             codes: vec![Code::FmtBc5Normal]
-        },
-        "{:?}",
-        j.warnings
-    );
-    // an unscoped --set backend applies only where it fits
-    let j = run(
-        Target::Cs,
-        "textures/a/x_n.png",
-        Some("n"),
-        &["n"],
-        opaque(),
-        &["encoder.backend=rgbcx"],
-        &[],
-    );
-    assert_eq!(j.profile.encoder.backend, Backend::Bc7e);
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-    // a sub-type-scoped, mismatched backend is pinned, kept and reported
-    let j = run(
-        Target::Cs,
-        "textures/a/x_n.png",
-        Some("n"),
-        &["n"],
-        opaque(),
-        &["subtype:normal.encoder.backend=rgbcx"],
-        &[],
-    );
-    assert_eq!(j.profile.encoder.backend, Backend::Rgbcx);
-    assert_eq!(
-        j.status,
-        JobStatus::Error {
-            codes: vec![Code::CfgInvalid]
         },
         "{:?}",
         j.warnings
@@ -741,14 +670,7 @@ fn backend_follows_format() {
         Some("rmaos"),
         &["alpha.policy=remove"],
     );
-    assert_eq!(
-        (j.profile.format, j.profile.encoder.backend),
-        (Format::Bc1, Backend::Rgbcx)
-    );
-    assert_eq!(
-        j.provenance["encoder.backend"],
-        Provenance::Preset("compact".into())
-    );
+    assert_eq!(j.profile.format, Format::Bc1);
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 }
 
@@ -925,7 +847,6 @@ fn slashless_globs_match_the_file_name() {
         (j.profile.format, j.profile.mips.levels),
         (Format::Bc3, MipLevels::Count(1))
     );
-    assert_eq!(j.profile.encoder.backend, Backend::Rgbcx);
     let j = run_with(
         &reg,
         "cs-quality",
@@ -1180,77 +1101,6 @@ fn allow_cfg_unavailable_accepts_fallbacks_only() {
         .contains("--allow CFG-UNAVAILABLE"));
 }
 
-/// IMPORTANT 2: config and preset tables never pin a backend against a more specific format.
-#[test]
-fn table_backends_follow_more_specific_formats() {
-    let reg = PresetRegistry::builtin().unwrap();
-    let user: ConfigFile =
-        toml::from_str("[defaults]\nencoder = { backend = \"bc7e\" }\n").unwrap();
-    let allow = BTreeSet::new();
-    let o_env = sets(&["subtype=envmask"]);
-    let c = ResolveCtx {
-        target: Target::Cs,
-        registry: &reg,
-        preset: "cs-quality",
-        user_config: Some(&user),
-        project_config: None,
-        overrides: &o_env,
-        accept: AcceptSuggestions::High,
-        allow: &allow,
-        files: &NO_FILE_SCOPES,
-        shaders: &NO_SHADERS,
-        mesh_alpha: &NO_MESH_ALPHA,
-    };
-    let j = resolve_in(&c, "a/x_m.png", Some("m"), &opaque());
-    assert_eq!(
-        (j.profile.format, j.profile.encoder.backend),
-        (Format::Bc4, Backend::Rgbcx)
-    );
-    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
-    assert_eq!(j.provenance["encoder.backend"], Provenance::Builtin);
-    // the same config on a BC7 diffuse keeps bc7e
-    let o_dif = sets(&["subtype=diffuse"]);
-    let c = ResolveCtx {
-        overrides: &o_dif,
-        ..c
-    };
-    let j = resolve_in(&c, "a/x.png", None, &opaque());
-    assert_eq!(
-        (j.profile.format, j.profile.encoder.backend),
-        (Format::Bc7, Backend::Bc7e)
-    );
-    assert_eq!(j.provenance["encoder.backend"], Provenance::UserConfig);
-    // a rule that sets format=bc1 and backend=bc7e is an explicit conflict
-    let project: ConfigFile = toml::from_str("[[rules]]\nmatch = { glob = \"*.png\" }\noverrides = { format = \"bc1\", encoder = { backend = \"bc7e\" } }\n").unwrap();
-    let c = ResolveCtx {
-        user_config: None,
-        project_config: Some(&project),
-        ..c
-    };
-    let j = resolve_in(&c, "a/x.png", None, &opaque());
-    assert_eq!(
-        (j.profile.format, j.profile.encoder.backend),
-        (Format::Bc1, Backend::Bc7e)
-    );
-    assert!(
-        matches!(&j.status, JobStatus::Error { codes } if codes.contains(&Code::CfgInvalid)),
-        "{:?}",
-        j.status
-    );
-    // ... while a rule setting only format=bc1 takes rgbcx
-    let project: ConfigFile = toml::from_str(
-        "[[rules]]\nmatch = { glob = \"*.png\" }\noverrides = { format = \"bc1\" }\n",
-    )
-    .unwrap();
-    let c = ResolveCtx {
-        project_config: Some(&project),
-        ..c
-    };
-    let j = resolve_in(&c, "a/x.png", None, &opaque());
-    assert_eq!(j.profile.encoder.backend, Backend::Rgbcx);
-    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-}
-
 /// M1: a built-in preset's alpha policy is a default, not a choice.
 #[test]
 fn builtin_presets_never_confirm_mesh_alpha() {
@@ -1468,7 +1318,7 @@ fn alpha_exact_off_warns_for_bc7_envmask_even_when_alpha_is_removed() {
             &[],
         )
     };
-    let j = envmask(&["format=bc7", "encoder.backend=bc7e"]);
+    let j = envmask(&["format=bc7"]);
     assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
     assert!(
         codes(&j).contains(&Code::AlphaExactOffM),
@@ -1476,7 +1326,7 @@ fn alpha_exact_off_warns_for_bc7_envmask_even_when_alpha_is_removed() {
         j.warnings
     );
     // BC3 stores 255 exactly: no 254 risk
-    let j = envmask(&["format=bc3", "encoder.backend=rgbcx"]);
+    let j = envmask(&["format=bc3"]);
     assert_eq!(j.profile.format, Format::Bc3);
     assert!(
         !codes(&j).contains(&Code::AlphaExactOffM),
@@ -1493,7 +1343,7 @@ fn alpha_exact_off_warns_for_bc7_envmask_even_when_alpha_is_removed() {
     );
 }
 
-// ---- Fix batch 33: explicit legacy header, rgbcx_level scope ----
+// ---- Fix batch 33: explicit legacy header ----
 
 /// The "no legacy FourCC" CFG-INVALID messages for a diffuse resolved with `sets_cli`.
 fn legacy_header_errors(sets_cli: &[&str]) -> Vec<String> {
@@ -1581,41 +1431,6 @@ fn legacy_header_is_accepted_where_a_legacy_form_exists_and_auto_never_errors() 
     }
 }
 
-#[test]
-fn rgbcx_level_check_applies_only_to_the_rgbcx_backend() {
-    let level_error = |fmt: &str, level: u32| {
-        let j = run(
-            Target::Cs,
-            "textures/a/x.png",
-            None,
-            &[],
-            opaque(),
-            &[
-                "subtype=diffuse",
-                &format!("format={fmt}"),
-                "color.tag=unorm",
-                "alpha.policy=remove",
-                &format!("encoder.rgbcx_level={level}"),
-            ],
-            &[],
-        );
-        j.warnings
-            .iter()
-            .any(|w| w.code == Code::CfgInvalid && w.message.contains("encoder.rgbcx_level"))
-    };
-    let too_high = encoders_sys::RGBCX_MAX_LEVEL + 1;
-    assert!(level_error("bc1", too_high), "BC1 uses rgbcx");
-    for fmt in ["bc3", "bc4", "bc5"] {
-        assert!(level_error(fmt, too_high), "{fmt} uses rgbcx");
-    }
-    assert!(!level_error("bc1", encoders_sys::RGBCX_MAX_LEVEL));
-    assert!(
-        !level_error("bc7", too_high),
-        "BC7 does not read rgbcx_level"
-    );
-    assert!(!level_error("bc6h_uf16", too_high), "BC6H does not read it");
-}
-
 /// DECISIONS Note F: BC1 is opaque-only in v1, so `encoder.bc1_transparent_black = true` with a BC1 output is
 /// CFG-INVALID (an error, not acknowledgeable); the setting is inert for every other format.
 #[test]
@@ -1629,7 +1444,6 @@ fn bc1_transparent_black_is_cfg_invalid_with_bc1_only() {
         &[
             "subtype=diffuse",
             "format=bc1",
-            "encoder.backend=rgbcx",
             "encoder.bc1_transparent_black=true",
         ],
         &[Code::CfgInvalid],
@@ -2609,13 +2423,11 @@ fn styles_fill_unset_keys_only() {
     assert_eq!(j.profile.subtype, Subtype::Cubemap);
     assert_eq!(j.profile.cubemap.face_size, Some(128));
     assert_eq!(j.profile.format, Format::Bc1);
-    assert_eq!(j.profile.encoder.backend, Backend::Rgbcx);
     assert_eq!(j.profile.cubemap.blur, Some(0.35));
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 
     let j = cube(&["cubemap.style=room", "format=bc7"]);
     assert_eq!(j.profile.format, Format::Bc7);
-    assert_eq!(j.profile.encoder.backend, Backend::Bc7e);
     assert_eq!(j.profile.cubemap.face_size, Some(128));
 
     let j = cube(&["cubemap.style=vanilla_metal", "cubemap.face_size=64"]);

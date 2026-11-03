@@ -8,17 +8,21 @@ fn main() {
 
     let header = std::fs::read_to_string(bc7e.join("bc7e_ispc.h"))
         .expect("vendor/ispc-objs/bc7e/bc7e_ispc.h");
-    let patched = header.contains("m_exact_opaque_alpha");
+    // Both bc7e patches are required (DECISIONS Note FM): 0001 adds `m_exact_opaque_alpha`, 0002 (the sdc_max level)
+    // adds `m_endpoint_search`. A tree whose objects lack either marker does not build; regenerate with tools/regen-ispc.ps1.
+    for (marker, patch) in [
+        ("m_exact_opaque_alpha", "0001-exact-opaque-alpha"),
+        ("m_endpoint_search", "0002-sdc-max-level"),
+    ] {
+        assert!(
+            header.contains(marker),
+            "vendor/ispc-objs/bc7e/bc7e_ispc.h lacks `{marker}`: the bc7e objects are missing patch {patch} (tools/regen-ispc.ps1)"
+        );
+    }
     println!("cargo::rustc-check-cfg=cfg(sdc_bc7e_patched)");
-    if patched {
-        println!("cargo::rustc-cfg=sdc_bc7e_patched");
-    }
-    // Patch 0002 (the sdc_max level): the header grows two trailing fields and an init function.
-    let patch2 = header.contains("m_endpoint_search");
+    println!("cargo::rustc-cfg=sdc_bc7e_patched");
     println!("cargo::rustc-check-cfg=cfg(sdc_bc7e_patch2)");
-    if patch2 {
-        println!("cargo::rustc-cfg=sdc_bc7e_patch2");
-    }
+    println!("cargo::rustc-cfg=sdc_bc7e_patch2");
 
     let mut b = cc::Build::new();
     b.cpp(true)
@@ -28,8 +32,8 @@ fn main() {
         .flag("/fp:precise")
         .define("NOMINMAX", None)
         .define("NDEBUG", None)
-        .define("SDC_BC7E_PATCHED", if patched { "1" } else { "0" })
-        .define("SDC_BC7E_PATCH2", if patch2 { "1" } else { "0" })
+        .define("SDC_BC7E_PATCHED", "1")
+        .define("SDC_BC7E_PATCH2", "1")
         .include(v.join("bc7enc_rdo"))
         .include(v.join("ispctc"))
         .include(&bc7e)

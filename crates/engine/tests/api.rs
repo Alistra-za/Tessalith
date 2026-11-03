@@ -572,7 +572,7 @@ fn a_resolve_error_fails_the_file_at_resolve() {
 }
 
 /// Note CP: `--set encoder.bc7_weights=…` reaches the profile; ENC-WEIGHTS-IGNORED when perceptual wins, on a
-/// non-BC7 format, or on another backend; never when the field is unset.
+/// non-BC7 format; never when the field is unset.
 #[test]
 fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
     use engine::config::{Bc7Weights, Format};

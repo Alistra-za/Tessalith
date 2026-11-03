@@ -54,22 +54,6 @@ fn rejects_mismatched_output_length() {
 }
 
 #[test]
-#[cfg(not(sdc_bc7e_patched))]
-#[should_panic(expected = "exact_opaque needs the patched bc7e objects")]
-fn exact_opaque_without_native_support_panics() {
-    let px = vec![[0u8, 0, 0, 255]; 16];
-    let mut out = [0u8; 16];
-    bc7e_compress_blocks(
-        &px,
-        &mut out,
-        Bc7Params {
-            exact_opaque: true,
-            ..U5
-        },
-    );
-}
-
-#[test]
 #[allow(clippy::assertions_on_constants)] // the constant is what this test checks (build.rs cfg)
 fn patched_objects_are_vendored() {
     assert!(encoders_sys::BC7E_EXACT_OPAQUE_NATIVE);
@@ -133,17 +117,9 @@ fn tuned_with_unit_weights_matches_the_plain_call() {
         Bc7Level::Slowest,
         Bc7Level::Max,
     ];
-    let exacts: &[bool] = if encoders_sys::BC7E_EXACT_OPAQUE_NATIVE {
-        &[false, true]
-    } else {
-        &[false]
-    };
     let mut checked = 0;
     for level in levels {
-        if level == Bc7Level::Max && !encoders_sys::BC7E_MAX_NATIVE {
-            continue;
-        }
-        for &exact_opaque in exacts {
+        for exact_opaque in [false, true] {
             let p = Bc7Params {
                 level,
                 exact_opaque,
