@@ -1200,7 +1200,10 @@ fn a_schema_8_store_opens_empty() {
             derived_state: None,
         })
         .unwrap();
-        s.conn().execute_batch("PRAGMA user_version = 8;").unwrap();
+        // A 1.x table, as a real schema-8 file has it.
+        s.conn()
+            .execute_batch("CREATE TABLE tex_ref (x INTEGER); PRAGMA user_version = 8;")
+            .unwrap();
     }
     assert!(matches!(
         Store::open_read_only(&p),
