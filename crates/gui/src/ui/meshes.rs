@@ -47,6 +47,9 @@ mod edit_ctrl;
 mod edit_extra;
 mod edit_fields;
 mod edit_panel;
+mod skin_preview;
+use crate::model::meshes::skin_preview::has_skin_card;
+use skin_preview::SkinAct;
 /// Problems listed under "Scan details"; the count is always shown.
 const MAX_LISTED: usize = 200;
 
@@ -957,6 +960,7 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
     }
     let scan_ctrls = m.shown_copy().and_then(|c| m.scan_ctrls.get(&c).cloned());
     let (mut clicked, mut open, mut pick, mut pick_root) = (None, None, None, None);
+    let mut skin_act = None;
     egui::ScrollArea::vertical()
         .id_salt("meshes-shapes-scroll")
         .auto_shrink([false, false])
@@ -1063,8 +1067,26 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
                     }
                 });
                 ui.add_space(CARD_GAP);
+                // Note GN: the Advanced Skin card under a FaceGen / FaceGen RGB tint shape's card.
+                if let Some(s) = view.filter(|s| has_skin_card(s.shader_kind, s.shader_type)) {
+                    card(ui, false, |ui| {
+                        if let Some(a) = skin_preview::body(ui, m, s) {
+                            skin_act = Some((s.block, a));
+                        }
+                    });
+                    ui.add_space(CARD_GAP);
+                }
             }
         });
+    match skin_act {
+        Some((block, SkinAct::Pick(map, p))) => {
+            if let Err(e) = m.set_skin_map(block, map, p) {
+                m.error = Some(e);
+            }
+        }
+        Some((block, SkinAct::Wet(w))) => m.set_skin_wet(block, w),
+        None => {}
+    }
     if let Some(p) = clicked {
         m.show_users(&p);
     }

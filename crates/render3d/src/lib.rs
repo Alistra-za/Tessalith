@@ -43,7 +43,7 @@ use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
 use locate::Fingerprint;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
-use nif::material::MaterialState;
+use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
 pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
@@ -304,10 +304,26 @@ fn is_head(m: &MaterialState, head_part: bool) -> bool {
     head_part || m.shader_type == 4
 }
 
-/// [`textures::rfaos_candidates`] of a material (slot 1 normal, slot 7 specular).
+/// [`textures::rfaos_candidates`] of a material (slot 1 normal, slot 7 specular), or only the skin card's pick
+/// (Note GN).
 fn rfaos_candidates(m: &MaterialState) -> Vec<String> {
     let norm = |i: usize| m.slots.get(i).map_or("", |p| p.norm.as_str());
-    textures::rfaos_candidates(m.shader_type, norm(1), norm(7))
+    match &m.skin().rfaos {
+        Some(p) if matches!(m.shader_type, 4 | 5) => vec![p.clone()],
+        _ => textures::rfaos_candidates(m.shader_type, norm(1), norm(7)),
+    }
+}
+
+/// The t74 wetness map candidates (Note GN): none unless the card's wetness is on (a dry shape draws as loaded),
+/// then the card's pick, else [`textures::wet_candidates`].
+fn wet_candidates(m: &MaterialState) -> Vec<String> {
+    let norm = |i: usize| m.slots.get(i).map_or("", |p| p.norm.as_str());
+    let p = m.skin();
+    match &p.wet_map {
+        _ if !p.wet_on() || !matches!(m.shader_type, 4 | 5) => vec![],
+        Some(w) => vec![w.clone()],
+        None => textures::wet_candidates(m.shader_type, norm(1), norm(7)),
+    }
 }
 
 /// The 3D preview renderer: message-shaped (load bytes → report, render scene → pixels) so it can later move
@@ -1120,15 +1136,18 @@ impl Renderer {
         }
         // CS_SKIN's t71: the first RFAOS candidate in `tex_cache` with a texture (resolve_textures asked for them,
         // linear). A hot-swap does not rebind it: sdc never encodes or swaps an RFAOS file (not a set member), and
-        // a reload picks up an external edit.
-        if let Some(kind) = draw::srv_kind_at(&program.ps.reflection, 71) {
-            let found = rfaos_candidates(m)
+        // a reload picks up an external edit. t74 (the skin card's wetness map, Note GN) the same way.
+        for (reg, candidates) in [(71, rfaos_candidates(m)), (74, wet_candidates(m))] {
+            let Some(kind) = draw::srv_kind_at(&program.ps.reflection, reg) else {
+                continue;
+            };
+            let found = candidates
                 .iter()
                 .find_map(|c| self.tex_cache.get(c).and_then(TexEntry::current))
                 .filter(|t| t.kind == kind)
                 .map(|t| t.srv.clone());
             if let Some(srv) = found {
-                real.insert(71, srv);
+                real.insert(reg, srv);
             }
         }
         let mut srvs = vec![];
@@ -1181,17 +1200,22 @@ impl Renderer {
                 self.texture(&path.norm, false, true, textures, rep);
             }
         }
-        // Derived guesses: a candidate the resolver lacks is not a missing texture (decode errors still count).
-        let mut quiet = LoadReport::default();
-        for c in rfaos_candidates(m) {
-            if self
-                .texture(&c, true, false, textures, &mut quiet)
-                .is_some()
-            {
-                break;
+        // Derived guesses: a candidate the resolver lacks is not a missing texture (decode errors still count). A
+        // skin card pick (Note GN) is asked for by name, so a pick the resolver lacks is missing.
+        let p = m.skin();
+        for (picked, candidates) in [
+            (p.rfaos.is_some(), rfaos_candidates(m)),
+            (p.wet_map.is_some(), wet_candidates(m)),
+        ] {
+            let mut quiet = LoadReport::default();
+            for c in candidates {
+                let r = if picked { &mut *rep } else { &mut quiet };
+                if self.texture(&c, true, picked, textures, r).is_some() {
+                    break;
+                }
             }
+            rep.errors.append(&mut quiet.errors);
         }
-        rep.errors.append(&mut quiet.errors);
     }
 
     /// Builds one shape's draw for material `m` on `program`: textures (already in `tex_cache`), vertex streams
@@ -1651,7 +1675,41 @@ impl Renderer {
     /// previous draw stays on screen and the status is `Failed { showing_previous: true }`; the result is still
     /// `Ok(kind)`. A hidden material stops drawing the shape and keeps its draw for later. Slot paths the
     /// resolver did not return before are asked for again (bytes that did not decode are not). `Err` only for an id that is not loaded.
+    ///
+    /// `m.skin_preview` is ignored: the shape keeps the one [`Renderer::set_skin_preview`] set (Note GN).
     pub fn set_material(
+        &mut self,
+        id: ShapeId,
+        mut m: MaterialState,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<EditKind, String> {
+        if let Some(s) = self.shapes.get(&id) {
+            m.skin_preview.clone_from(&s.material.skin_preview);
+        }
+        self.apply_material(id, m, textures)
+    }
+
+    /// The Meshes view's Advanced Skin card (Note GN): shape `id`'s preview-only RFAOS / wetness picks and wetness,
+    /// applied like a [`Renderer::set_material`] edit (a pick → `Textures`, wetness on/off → `Permutation`, a slider
+    /// move → `Cbuffer`). It lasts until the next load. A non-skin shape ignores it. Picks are resolved through
+    /// `textures`; one it lacks is a missing texture.
+    pub fn set_skin_preview(
+        &mut self,
+        id: ShapeId,
+        p: SkinPreview,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<EditKind, String> {
+        let mut m = self
+            .shapes
+            .get(&id)
+            .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?
+            .material
+            .clone();
+        m.set_skin(p);
+        self.apply_material(id, m, textures)
+    }
+
+    fn apply_material(
         &mut self,
         id: ShapeId,
         m: MaterialState,

@@ -40,4 +40,11 @@ Each shape is a framed card. It shows, from the top:
 - **Controllers**: how many, and their names, with "(clip)" for one a clip drives, for example "2: Emissive multiple, Alpha (clip)", or "none". A shape with an effect shader lists only its alpha controllers (the editor does not read the effect shader's), and has no line when it has none. Outside Edit the line is read from the NIF file once per scanned copy (it appears a moment after the cards; a file that no longer reads simply shows no line); inside Edit it follows the edited file, unsaved edits included.
 - **Details**, closed: which mod each texture comes from ("→ A (2 copies)"). A card with no texture the scan resolved has no Details header.
 
+A Face Tint (4) or Skin Tint (5) shape has a second card under its own, **Advanced Skin preview**, for trying Community Shaders' extra skin textures in the 3D view without changing the NIF: <!-- D:GN1 -->
+
+- **RFAOS** and **Wetness map**: **Auto** uses the texture named after the shape's `_s` or `_n` map (`…_rfaos.dds`, `…_wet.dds`) when the mod list has one. **Browse** picks any texture of the mod list or a DDS in the Textures export folder; **×** goes back to Auto. Hover a row for the path in use.
+- **Wet amount**, 0 (dry) to 1 (soaked): Community Shaders' skin wetness, the droplets rain or sweat give in game. The wetness map shapes where it shows.
+
+Nothing is saved: the picks reset when another mesh is shown and when **Edit** opens or closes. <!-- D:GN4 -->
+
 A texture path that is a texture of the open folder has an **Open in Textures** button, on the shape card and on the "Users of" list's title. It switches to the Textures view, selects that texture and scrolls it into view.

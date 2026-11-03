@@ -125,6 +125,20 @@ pub fn projected_default(reg: u32) -> [u8; 4] {
 /// slot 1 `…_n.dds` / `…_msn.dds`, each with that suffix replaced by `_rfaos.dds`. The first one the resolver
 /// returns wins. Canonical paths are lower case, so the end-anchored match is case-insensitive.
 pub fn rfaos_candidates(shader_type: u32, normal: &str, specular: &str) -> Vec<String> {
+    skin_map_candidates(shader_type, normal, specular, "_rfaos.dds")
+}
+
+/// The skin wetness map's (t74) Auto guess (Note GN): [`rfaos_candidates`]' rule with `_wet.dds`.
+pub fn wet_candidates(shader_type: u32, normal: &str, specular: &str) -> Vec<String> {
+    skin_map_candidates(shader_type, normal, specular, "_wet.dds")
+}
+
+fn skin_map_candidates(
+    shader_type: u32,
+    normal: &str,
+    specular: &str,
+    suffix: &str,
+) -> Vec<String> {
     if !matches!(shader_type, 4 | 5) {
         return vec![];
     }
@@ -135,7 +149,7 @@ pub fn rfaos_candidates(shader_type: u32, normal: &str, specular: &str) -> Vec<S
     [s, n]
         .into_iter()
         .flatten()
-        .map(|stem| format!("{stem}_rfaos.dds"))
+        .map(|stem| format!("{stem}{suffix}"))
         .collect()
 }
 
@@ -705,6 +719,15 @@ mod tests {
         // not a skin technique
         assert!(rfaos_candidates(0, &n, &s).is_empty());
         assert!(rfaos_candidates(6, &n, &s).is_empty());
+        // Note GN: the wetness guess follows the same rule.
+        assert_eq!(
+            wet_candidates(5, &n, &s),
+            [
+                "textures/arch/skin/light/head_wet.dds",
+                "textures/arch/skin/head_wet.dds"
+            ]
+        );
+        assert!(wet_candidates(0, &n, &s).is_empty());
     }
 
     #[test]

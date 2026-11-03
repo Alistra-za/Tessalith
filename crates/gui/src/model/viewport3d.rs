@@ -7,7 +7,7 @@
 //! uploads a frame when its id changes.
 use crate::model::meshes::ScanTarget;
 use crate::worker::{spawn_guarded, WorkerMsg};
-use nif::material::MaterialState;
+use nif::material::{MaterialState, SkinPreview};
 use render3d::builtin::Builtin;
 use render3d::cs_settings::{self, CsSettings};
 use render3d::device::Gpu;
@@ -175,6 +175,17 @@ pub struct MeshSpec {
     /// A head part (Note BA: facegendata or an HDPT model): every shape is CS "head" ([`ParsedNif::head_part`]).
     pub head_part: bool,
 }
+
+/// One shape's Advanced Skin card picks (Note GN): the renderer's preview and where each picked key is read (added
+/// to the content's texture map when the preview is applied).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkinEntry {
+    pub preview: SkinPreview,
+    pub sources: Vec<(String, FileSource)>,
+}
+
+/// Every shape's skin card picks, by shape (= NIF block).
+pub type SkinPreviews = BTreeMap<ShapeId, SkinEntry>;
 
 /// What the panel draws: a NIF read through a [`MeshSpec`] (the Meshes view), a parsed NIF whose shape materials
 /// the caller set (the set preview's simulated PGPatcher patch, P1-A), or a built-in shape.
@@ -628,6 +639,9 @@ pub enum V3Cmd {
     /// The material-object layer (`Renderer::set_projected_layer`, Note GG); sticky. Applied once content is loaded,
     /// with that content's texture map, before a load in the same batch; answered with `ProjectedMissing`.
     SetProjectedLayer(Option<ProjectedLayer>),
+    /// The skin card's picks for every shape (Note GN); sticky: applied to the loaded content now and after every
+    /// load. The model sends an empty map when the content becomes another model.
+    SetSkinPreviews(Arc<SkinPreviews>),
     /// The debug view (sticky, answered with `Reconfigured`).
     SetDebug(DebugView),
     Render {
@@ -783,6 +797,8 @@ pub struct Viewport3d {
     projected: Option<ProjectedLayer>,
     /// The layer's canonical texture paths the content's texture map could not give (`V3Reply::ProjectedMissing`).
     pub projected_missing: Vec<String>,
+    /// The Advanced Skin card's picks (Note GN), as last set; replayed to a new render thread.
+    skins: Arc<SkinPreviews>,
     content: Option<Content>,
     need_load: bool,
     /// The pending load is a reload of the same model (`set_content(.., true)`): a compile failure keeps the frame.
@@ -866,6 +882,7 @@ impl Viewport3d {
             load_variant_sent: Variant::Source,
             projected: None,
             projected_missing: vec![],
+            skins: Arc::default(),
             edits_sent: 0,
             edits_done: 0,
             reconf_sent: 0,
@@ -1239,6 +1256,8 @@ impl Viewport3d {
         if self.kept_view {
             return;
         }
+        // Another model: the skin card's picks were for the old one's shapes (Note GN).
+        self.set_skin_previews(SkinPreviews::new());
         self.report = le.then(|| LoadReport {
             le_mesh: true,
             ..Default::default()
@@ -1246,6 +1265,34 @@ impl Viewport3d {
         self.bounds = None;
         self.frame = None;
         self.orbit.reset();
+    }
+
+    /// The Advanced Skin card's picks for shape `id` (Note GN), if any.
+    pub fn skin_preview(&self, id: ShapeId) -> Option<&SkinEntry> {
+        self.skins.get(&id)
+    }
+
+    /// Shape `id`'s skin card picks (`None` = the shape as loaded). The render thread applies them to the loaded
+    /// content, and again after every reload of it; a new model clears them ([`Viewport3d::set_content`]).
+    pub fn set_skin_preview(&mut self, id: ShapeId, e: Option<SkinEntry>) {
+        let mut all = (*self.skins).clone();
+        match e {
+            Some(e) => all.insert(id, e),
+            None => all.remove(&id),
+        };
+        self.set_skin_previews(all);
+    }
+
+    fn set_skin_previews(&mut self, all: SkinPreviews) {
+        if *self.skins == all {
+            return;
+        }
+        self.skins = Arc::new(all);
+        if let Some(t) = &self.thread {
+            if t.send(V3Cmd::SetSkinPreviews(self.skins.clone())).is_ok() {
+                self.last_sent = None;
+            }
+        }
     }
 
     /// A JSON-only edit (spec §2.3): one shape's material on the current `Parsed`/`Builtin` content, applied by the
@@ -1374,6 +1421,9 @@ impl Viewport3d {
         }
         if self.projected.is_some() {
             let _ = ctx.send(V3Cmd::SetProjectedLayer(self.projected.clone()));
+        }
+        if !self.skins.is_empty() {
+            let _ = ctx.send(V3Cmd::SetSkinPreviews(self.skins.clone()));
         }
         self.thread = Some(ctx);
         true
@@ -2011,17 +2061,37 @@ enum TexCmd {
     },
 }
 
-/// [`load`] with the texture state: the load variant first, the logged swaps and flips after.
+/// [`load`] with the texture state and the skin card's picks: the load variant first, the picks and the logged swaps
+/// and flips after.
 fn load_all(
     r: &mut Renderer,
     c: &Content,
     edits: &BTreeMap<ShapeId, MaterialState>,
     tex: &TexState,
+    skins: &SkinPreviews,
 ) -> LoadReport {
     r.set_load_variant(tex.load);
-    let rep = load(r, c, edits);
+    let mut rep = load(r, c, edits);
+    for (id, e) in skins {
+        rep.errors.extend(apply_skin(r, c, *id, Some(e)));
+    }
     tex.replay(r);
     rep
+}
+
+/// One shape's skin card picks on the loaded content (`None`: back to the shape as loaded), resolved through the
+/// content's texture map plus the picks' own sources. Returns the read errors; a shape this content lacks (picks
+/// made for another model) is skipped.
+fn apply_skin(r: &mut Renderer, c: &Content, id: ShapeId, e: Option<&SkinEntry>) -> Vec<String> {
+    let mut map = c.textures().clone();
+    if let Some(e) = e {
+        map.extend(e.sources.iter().cloned());
+    }
+    let bsas = RefCell::new(HashMap::new());
+    let errors = RefCell::new(vec![]);
+    let preview = e.map(|e| e.preview.clone()).unwrap_or_default();
+    let _ = r.set_skin_preview(id, preview, &resolver(&map, &bsas, &errors));
+    errors.into_inner()
 }
 
 /// Whether a swap or material edit goes in the replay log: on success, and on a lost device, since the rebuild
@@ -2111,7 +2181,8 @@ fn render_loop(
     let rebuild = |r: &mut Renderer,
                    last: &Option<(u64, Content)>,
                    edits: &BTreeMap<ShapeId, MaterialState>,
-                   tex: &TexState|
+                   tex: &TexState,
+                   skins: &SkinPreviews|
      -> Result<(), String> {
         r.rebuild_device_on(Gpu::new()?)?;
         send(V3Reply::Ready {
@@ -2119,7 +2190,7 @@ fn render_loop(
             warp: r.gpu().warp,
         });
         if let Some((id, c)) = last {
-            let report = load_all(r, c, edits, tex);
+            let report = load_all(r, c, edits, tex, skins);
             loaded(r, *id, report);
         }
         Ok(())
@@ -2139,7 +2210,10 @@ fn render_loop(
     let mut want_deferred = false;
     // A material-object layer not applied yet: it waits for content, whose texture map resolves its textures.
     let mut layer_due: Vec<Option<ProjectedLayer>> = vec![];
+    // The skin card's picks (Note GN): applied after every load of `last`.
+    let mut skins: Arc<SkinPreviews> = Arc::default();
     while let Ok(first) = rx.recv() {
+        let mut skins_due: Option<Arc<SkinPreviews>> = None;
         // Dropped at the end of the batch, after every other reply: answers each features/settings command.
         let mut ack = ReconfAck(0, &send);
         let mut reload = false;
@@ -2244,6 +2318,10 @@ fn render_loop(
                     }
                     None
                 }
+                V3Cmd::SetSkinPreviews(s) => {
+                    skins_due = Some(s);
+                    None
+                }
                 V3Cmd::SetDebug(d) => {
                     if r.debug_output() != d.output() {
                         match r.set_debug_output(d.output()) {
@@ -2307,13 +2385,31 @@ fn render_loop(
             // Shapes re-permuted or rewritten: report them and redraw from the last camera (a load does both itself).
             compiled_changed |= !reload;
         }
+        // A load in this batch applies the whole map; otherwise only the shapes whose picks changed.
+        if let Some(new) = skins_due {
+            let changed: std::collections::BTreeSet<ShapeId> = skins
+                .keys()
+                .chain(new.keys())
+                .filter(|id| skins.get(id) != new.get(id))
+                .copied()
+                .collect();
+            skins = new;
+            if let (false, Some((_, c))) = (reload, &last) {
+                for id in changed {
+                    for e in apply_skin(&mut r, c, id, skins.get(&id)) {
+                        send(V3Reply::Notice(e));
+                    }
+                    compiled_changed = true;
+                }
+            }
+        }
         if reload {
             if let Some((id, c)) = &last {
-                let report = load_all(&mut r, c, &edits, &tex);
+                let report = load_all(&mut r, c, &edits, &tex, &skins);
                 if r.gpu().is_removed() {
                     // Lost during the load: rebuild and load again now; with no shapes no Render would follow to
                     // trigger the rebuild.
-                    if let Err(e) = rebuild(&mut r, &last, &edits, &tex) {
+                    if let Err(e) = rebuild(&mut r, &last, &edits, &tex, &skins) {
                         return send(V3Reply::Failed(e));
                     }
                 } else {
@@ -2397,7 +2493,7 @@ fn render_loop(
         if let Err(e) = &result {
             if e.starts_with(render3d::device::DEVICE_REMOVED) {
                 // Device lost (TDR, driver update): a new device (maybe WARP), the content again, one retry.
-                if let Err(e) = rebuild(&mut r, &last, &edits, &tex) {
+                if let Err(e) = rebuild(&mut r, &last, &edits, &tex, &skins) {
                     return send(V3Reply::Failed(e));
                 }
                 backdrop_told = false;

@@ -17,6 +17,10 @@ pub struct Material {
     pub projected: bool,
     /// With `projected`: the layer has projected glint, so a PBR pixel shader compiles `GLINT` (capture 18019).
     pub projected_glint: bool,
+    /// The skin card's wetness is on for a skin shape (Note GN, `SkinPreview::wet_on`): the pixel shader compiles
+    /// `WETNESS_EFFECTS` when CS_SKIN is a feature. Only these shapes: on every other shape CS's rain and puddle
+    /// code would change pixels the card never touched.
+    pub wetness: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -111,6 +115,10 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
         if bit(m.slsf2, 27) {
             out.push("BACK_LIGHTING");
         }
+    }
+    // Every CS skin wetness line is under it (Lighting.hlsl:1658, 1695, 2169), all in the PS.
+    if ps && m.wetness && features.contains(&"CS_SKIN") {
+        out.push("WETNESS_EFFECTS");
     }
     if deferred {
         out.push("DEFERRED");

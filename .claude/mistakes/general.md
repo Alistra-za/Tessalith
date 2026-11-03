@@ -12,3 +12,4 @@ Format and rules: [README.md](README.md).
 - 2026-11-01 `cargo clean` missed the real build folder → pass `--target x86_64-pc-windows-msvc` too (`cargo clean`)
 - 2026-11-01 `tools/decisions-archive.py` crashed with UnicodeEncodeError (cp1252) printing a failure, and `PYTHONIOENCODING` is ignored under `-I` → run it as `py -3.13 -I -B -X utf8 tools/decisions-archive.py ...` (decisions-archive.py --check)
 - 2026-11-01 A `///` doc-comment change on a `JsonSchema` field left `schema/*.json` stale and failed `committed_schemas_match_the_types` in the full gate → after editing such a comment run `sdc presets schema all --out schema` and commit the diff (`crates/engine/tests/schemas.rs`)
+- 2026-11-03 Write to a new test file name that already existed (crates/gui/tests/skin_card.rs) overwrote a tracked test suite → run `git ls-files <path>` before creating a file, and pick a name no module or test uses yet (Write tool)

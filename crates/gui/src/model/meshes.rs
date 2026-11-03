@@ -28,6 +28,7 @@ pub mod edit_doc;
 pub mod export;
 pub mod nif_edit;
 pub mod pg_entries;
+pub mod skin_preview;
 pub mod worklist;
 pub use nif_edit::NifReviewRow;
 pub use worklist::{NifLevel, NifProblem, NifTab};
