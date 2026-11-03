@@ -151,6 +151,9 @@ fn an_rmaos_card_without_an_ao_source_has_an_ao_row_and_a_set_value_becomes_the_
         Some(json!(200)),
         "the fill is the packed output's own key"
     );
+    // The card never writes a project-wide fill: `[defaults]` stays out of the file text.
+    let text = m.project.as_ref().unwrap().text();
+    assert!(!text.contains("[defaults"), "{text}");
     assert_eq!(channel(m, RMAOS, "pack.b"), "fill:200");
     // The reset removes the key again (bring it into view: the set editor scrolls).
     h.get_by_label("Reset").scroll_to_me();

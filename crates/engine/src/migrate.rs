@@ -26,7 +26,9 @@ pub enum MigrateError {
 /// each key's path, so `encoder.backend` matches under `[defaults]`, `[subtypes.X]`, `[files."k"]` and `[[rules]]`
 /// tables alike (array indices are not segments; a file key that contains dots is one segment). A table key matches
 /// too (`subtypes.rfaos`). `value: None` matches any value; `Some(v)` matches a string equal to `v` or an array
-/// holding the string `v`. The error names the key even when its value is harmless.
+/// holding the string `v`. The error names the key even when its value is harmless. A key that starts with `^` is
+/// anchored: it matches the whole path from the root, so `^defaults.packing.fill` is the top-level `[defaults]` table
+/// only, not `[files."defaults"]`.
 pub struct Removed {
     pub key: &'static str,
     pub value: Option<&'static str>,
@@ -111,15 +113,23 @@ pub const REMOVED: &[Removed] = &[
         hint: "the value is fixed at 0.5; delete the key",
     },
     Removed {
-        key: "defaults.packing.fill",
+        key: "^defaults.packing.fill",
         value: None,
         hint: "fills are set per set; delete the [defaults] packing.fill line by hand, then set each fill on its packed output's card",
     },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {
-    let want: Vec<&str> = r.key.split('.').collect();
-    segs.ends_with(&want)
+    let (anchored, key) = match r.key.strip_prefix('^') {
+        Some(k) => (true, k),
+        None => (false, r.key),
+    };
+    let want: Vec<&str> = key.split('.').collect();
+    if anchored {
+        segs == want
+    } else {
+        segs.ends_with(&want)
+    }
 }
 
 /// A key shown the way a TOML header writes it: quoted when it is not a bare key.
@@ -353,6 +363,10 @@ mod tests {
         );
         assert!(removed_in(&t("[defaults]\nvalidation = { mips = \"smallest\" }")).is_none());
         assert!(removed_in(&t("[files.\"a_rmaos.png\".packing.fill]\nao = 10")).is_none());
+        // Anchored at the root: a file or sub-type that is merely named `defaults` is not the `[defaults]` table.
+        assert!(removed_in(&t("[files.\"defaults\".packing.fill]\nao = 10")).is_none());
+        assert!(removed_in(&t("[subtypes.defaults.packing.fill]\nao = 10")).is_none());
+        assert!(removed_in(&t("[defaults.packing.fill]\nao = 10")).is_some());
         let m = removed_set("validation.bc6h_min_peak_ratio", "0.5").unwrap();
         assert!(m.contains("fixed at 0.8"), "{m}");
         assert_eq!(removed_set("packing.fill.ao", "10"), None);
