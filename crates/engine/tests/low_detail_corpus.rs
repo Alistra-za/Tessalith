@@ -40,7 +40,8 @@ fn low_detail_ratios_on_textures_10k() {
             let p = &job.profile;
             let (img, info) = engine::load::load_image_as(&job.input, p.alpha.exr_straight).ok()?;
             let dims = (img.width, img.height);
-            if !low_detail_eligible(p, dims) {
+            // Judged on the written size, as `pipeline.rs` judges it on `chain[0]` (Note FM29).
+            if !low_detail_eligible(p, engine::resize::target_dims(dims, p)) {
                 return None;
             }
             let work = engine::ops::preprocess_with(img, p, engine::ops::SourceTransfer::of(&info));

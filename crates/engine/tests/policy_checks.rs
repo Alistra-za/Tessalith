@@ -2236,6 +2236,33 @@ fn npot_with_mips_is_resized_and_without_mips_is_a_dim_npot_warning() {
     assert!(!codes(&j).contains(&Code::DimResized), "{:?}", j.warnings);
 }
 
+/// Note FM29: a `resize_floor` of 0 or above 16384 is CFG-INVALID, naming the key; 1 and 300 are accepted.
+#[test]
+fn a_resize_floor_out_of_range_is_cfg_invalid() {
+    let job = |floor: &str| {
+        let set = format!("resize_floor={floor}");
+        run(
+            Target::Cs,
+            "textures/a/x.png",
+            None,
+            &[],
+            Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 1.0]),
+            &["subtype=diffuse", "resize=half", &set],
+            &[],
+        )
+    };
+    for bad in ["0", "16385"] {
+        let j = job(bad);
+        assert_eq!(
+            warning(&j, Code::CfgInvalid).message,
+            format!("resize_floor {bad} outside 1..=16384")
+        );
+    }
+    for ok in ["1", "300"] {
+        assert!(!codes(&job(ok)).contains(&Code::CfgInvalid), "{ok}");
+    }
+}
+
 /// S-mips-7: a power-of-two input is not resized, so it reports nothing.
 #[test]
 fn a_power_of_two_input_reports_no_resize() {

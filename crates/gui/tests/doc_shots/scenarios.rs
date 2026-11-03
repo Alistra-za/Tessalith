@@ -35,6 +35,7 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("command_palette", command_palette),
     ("shortcut_sheet", shortcut_sheet),
     ("advanced_drawer", advanced_drawer),
+    ("advanced_texture_fields", advanced_texture_fields),
     ("problems_tab", problems_tab),
     ("messages_tab", messages_tab),
     ("tile_menu", tile_menu),
@@ -558,6 +559,26 @@ fn advanced_drawer(dir: &Path) -> Frame {
     let r = reveal(&mut h, |h| {
         h.state_mut().model.settings.advanced_open = true;
     });
+    shot(&mut h, r)
+}
+
+/// GUI-Advanced-Drawer: the Advanced texture fields (Resize, Size floor) of a texture set to Half with a 128 floor;
+/// the sections above them are collapsed so the rows are in view.
+fn advanced_texture_fields(dir: &Path) -> Frame {
+    let key = "architecture/stone/stonewall.png";
+    let mut h = opened_with(dir, |m| {
+        m.set_field(key, "resize", serde_json::json!("half"));
+        m.set_field(key, "resize_floor", serde_json::json!(128));
+        m.select_item(key);
+    });
+    let r = reveal(&mut h, |h| {
+        h.state_mut().model.settings.advanced_open = true;
+    });
+    for name in ["Preset inspector", "Preview", "Checks", "Mipmaps"] {
+        node(&h, name).click();
+        settle(&mut h, 4);
+    }
+    node(&h, "Size floor");
     shot(&mut h, r)
 }
 

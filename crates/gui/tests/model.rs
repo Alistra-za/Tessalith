@@ -398,6 +398,7 @@ fn an_npot_texture_is_resized_and_asks_no_question() {
         it.warnings
     );
 }
+
 /// M6 Track E spec §2, §6: the GUI accepts High suggestions. A PBR set's colour, `_n` and `_rmaos` members decide
 /// themselves (no sub-type question; "(auto)" with the reason), and a Medium `_i` still asks.
 /// Note FM25: the GUI sets no thread count and no memory budget, so the engine's defaults apply (jobs 0 is rayon's

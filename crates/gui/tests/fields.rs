@@ -338,6 +338,13 @@ fn the_resize_row_offers_the_halving_steps() {
     );
     assert!(values("resize_floor").contains(&serde_json::json!(256)));
     assert_eq!(field_lock(Target::Cs, &p, "resize_floor"), None);
+    // A hand-written 300 is listed in order and reads "300 px".
+    let mut q = p.clone();
+    q.resize_floor = 300;
+    let opts = sdc_gui::ui::presets::field_options("resize_floor", Target::Cs, &q);
+    let at = opts.iter().position(|(v, _)| *v == serde_json::json!(300));
+    assert_eq!(at, Some(3), "{opts:?}");
+    assert_eq!(opts[3].1, "300 px");
 }
 
 /// Owner, 2026-10-13: the format pickers list only what the engine allows (`policy::allowed_encodings`).

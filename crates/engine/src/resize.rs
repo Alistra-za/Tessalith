@@ -9,6 +9,7 @@ use crate::config::{MipFilter, MipKeyword, MipLevels, Profile, ResizeMode, Subty
 use crate::image::Rgba32F;
 use crate::mips;
 use crate::ops::Work;
+use rayon::prelude::*;
 
 /// The largest power of two ≤ `v` (`v` ≥ 1).
 fn floor_pow2(v: u64) -> u64 {
@@ -101,18 +102,22 @@ fn lerp_axis(img: &Rgba32F, n: u32, along_x: bool) -> Rgba32F {
         .collect();
     let (ow, oh) = if along_x { (n, h) } else { (w, n) };
     let mut out = Rgba32F::new(ow, oh, [0.0; 4]);
-    for y in 0..oh {
-        for x in 0..ow {
-            let (a, b, t) = if along_x {
-                let (i0, i1, t) = taps[x as usize];
-                (img.at(i0, y), img.at(i1, y), t)
-            } else {
-                let (i0, i1, t) = taps[y as usize];
-                (img.at(x, i0), img.at(x, i1), t)
-            };
-            *out.at_mut(x, y) = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
-        }
-    }
+    out.px
+        .par_chunks_mut(ow as usize)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let y = y as u32;
+            for (x, o) in (0..ow).zip(row) {
+                let (a, b, t) = if along_x {
+                    let (i0, i1, t) = taps[x as usize];
+                    (img.at(i0, y), img.at(i1, y), t)
+                } else {
+                    let (i0, i1, t) = taps[y as usize];
+                    (img.at(x, i0), img.at(x, i1), t)
+                };
+                *o = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
+            }
+        });
     out
 }
 
@@ -343,13 +348,24 @@ mod tests {
         }
     }
 
+    /// A power-of-two source keeps every bit: with no `resize`, and when the floor stops the halving (8 / 2 < 8).
+    /// With floor 1 the same `eighth` does act, so the second case is the floor's doing.
     #[test]
     fn power_of_two_sources_are_untouched_bit_for_bit() {
         let img = rnd_image(8, 8, 11);
-        let none = profile(Subtype::Diffuse);
-        let mut p = none.clone();
-        p.resize = ResizeMode::Eighth;
-        assert_eq!(preprocess(img.clone(), &p), preprocess(img, &none));
+        let p = profile(Subtype::Diffuse);
+        for (mode, floor) in [(ResizeMode::None, 1), (ResizeMode::Eighth, 8)] {
+            let mut q = p.clone();
+            (q.resize, q.resize_floor) = (mode, floor);
+            let mut w = work(img.clone(), Domain::LinearLight, true);
+            resize_work(&mut w, &q);
+            assert_eq!(w.img, img, "{mode:?} floor {floor}");
+        }
+        let mut q = p.clone();
+        (q.resize, q.resize_floor) = (ResizeMode::Eighth, 1);
+        let mut w = work(img, Domain::LinearLight, true);
+        resize_work(&mut w, &q);
+        assert_eq!((w.img.width, w.img.height), (1, 1));
     }
 
     #[test]

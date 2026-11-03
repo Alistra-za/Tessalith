@@ -1725,6 +1725,14 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             format!("mips.bake_clamp {} outside (0, 1]", p.mips.bake_clamp),
         );
     }
+    // Note FM29: the size `resize` never halves below; 0 has no meaning of its own, and above the input limit it can
+    // never be reached.
+    if !(1..=16384).contains(&p.resize_floor) {
+        add(
+            CfgInvalid,
+            format!("resize_floor {} outside 1..=16384", p.resize_floor),
+        );
+    }
     // M6 Track F2 (DECISIONS Note W7): layer strengths and the AO power, on a base normal.
     if st.rnm_base().is_some() {
         for id in crate::config::LayerId::ORDER {

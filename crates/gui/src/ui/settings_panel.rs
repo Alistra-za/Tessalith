@@ -203,10 +203,17 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             opt(json!("quarter"), "Quarter"),
             opt(json!("eighth"), "Eighth"),
         ],
-        "resize_floor" => [64, 128, 256, 512, 1024, 2048]
-            .into_iter()
-            .map(|n| (json!(n), format!("{n} px")))
-            .collect(),
+        // A hand-written floor outside the list (300) is listed too, so the combo reads "300 px".
+        "resize_floor" => {
+            let mut v = vec![64, 128, 256, 512, 1024, 2048];
+            if !v.contains(&p.resize_floor) {
+                v.push(p.resize_floor);
+                v.sort_unstable();
+            }
+            v.into_iter()
+                .map(|n| (json!(n), format!("{n} px")))
+                .collect()
+        }
         "mips.coverage" => vec![
             opt(json!("auto"), "Auto"),
             opt(json!("on"), "On"),

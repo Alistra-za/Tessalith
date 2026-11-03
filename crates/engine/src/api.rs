@@ -3853,6 +3853,11 @@ mod tests {
             job_bytes(&job),
             input_bytes(48, 40) + b.len() as u64 + texels * 32
         );
+        // 31x20 is written 32x16: the width grows, so the enlarge's 64 B/texel is charged.
+        let grow = d.path().join("g.png");
+        image::GrayImage::new(31, 20).save(&grow).unwrap();
+        job.input = grow;
+        assert_eq!(job_bytes(&job), input_bytes(31, 20) + 31 * 20 * 64);
     }
 
     /// Carry 13, review M2/I2 and ruling O2: only a comparable, matching, passing record is up to date.

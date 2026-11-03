@@ -22,4 +22,6 @@ The drawer edits one texture at a time, also with several selected.
 
 **Resize** offers *None*, *Half*, *Quarter* and *Eighth*, and **Size floor** the longer side it never halves below, 64 to 2048 px ([`resize`](Project-Config-Fields.md#format-and-size)).
 
+![The Advanced texture fields of a texture set to Half with a 128 px size floor.](../img/gui/GUI-Advanced-Drawer/advanced-texture-fields.png)
+
 Results Tessalith reads in the background (output sizes, the *Used by meshes* list, the report save) can appear up to a quarter of a second after a foreground result.

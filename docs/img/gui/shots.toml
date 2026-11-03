@@ -66,6 +66,12 @@ scenario = "advanced_drawer"
 used_by = ["GUI-Advanced-Drawer.md"]
 
 [[shot]]
+id = "advanced-texture-fields"
+page = "GUI-Advanced-Drawer"
+scenario = "advanced_texture_fields"
+used_by = ["GUI-Advanced-Drawer.md"]
+
+[[shot]]
 id = "problems-tab"
 page = "GUI-Problems"
 scenario = "problems_tab"

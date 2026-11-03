@@ -1699,6 +1699,7 @@ fn the_dim_box_offers_no_resize_button() {
     h.get_by_label("Acknowledge for this texture");
     assert!(h.query_by_label("Resize to a power of two").is_none());
 }
+
 /// M6 Track E spec §2, §6: a sub-type decided by an accepted High suggestion reads "(auto)" next to it, with the
 /// suggestion's reason as hover text.
 #[test]
