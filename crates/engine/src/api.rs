@@ -927,8 +927,12 @@ pub(crate) fn is_up_to_date(
     let Some(rec) = e.encoders.as_ref() else {
         return false;
     };
-    // The rgbcx patch only changes BC4 blocks (BC3 alpha, BC4, BC5), so other formats ignore it.
-    let rgbcx = matches!(job.profile.format, Format::Bc3 | Format::Bc4 | Format::Bc5);
+    // The rgbcx patches change the BC1 colour block (BC1, BC3) and the BC4 blocks (BC3 alpha, BC4, BC5), so other
+    // formats ignore the tag.
+    let rgbcx = matches!(
+        job.profile.format,
+        Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
+    );
     if e.is_newer_schema()
         || e.preset.is_none()
         || (&rec.bc7enc_rdo, &rec.ispctc, &rec.ispc, &rec.bc7e_patch)
@@ -4054,7 +4058,7 @@ mod tests {
             old.bc1_model = None;
             assert!(!up(&old, &job), "{format:?} unrecorded target");
         }
-        // The rgbcx BC4 patch only changes BC3/BC4/BC5 output; a record from before it stays current for the rest.
+        // The rgbcx patches only change BC1/BC3/BC4/BC5 output; a record from before them stays current for the rest.
         for format in [
             Format::Bc1,
             Format::Bc3,
@@ -4067,7 +4071,10 @@ mod tests {
             job.profile.format = format;
             let mut old = entry_for(&job);
             old.encoders.as_mut().unwrap().rgbcx_patch = None;
-            let stale = matches!(format, Format::Bc3 | Format::Bc4 | Format::Bc5);
+            let stale = matches!(
+                format,
+                Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
+            );
             assert_eq!(up(&old, &job), !stale, "{format:?} pre-patch record");
             // The tag from before the BC4 search (round-to-nearest only) is stale the same way. The fake hash only
             // proves that any other tag string is stale, not the real old value format.
