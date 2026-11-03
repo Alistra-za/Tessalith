@@ -495,7 +495,7 @@ use engine::config::AlphaPolicy;
 
 /// The smallest-mip alpha of `key`'s latest export, from its `VAL-M-COMPLEX-MARGIN` data, rounded (an averaged
 /// non-square smallest mip can be fractional). `None` before an export, or when the engine raised no margin warning
-/// (alpha below `validation.complex_m_warn_alpha`, 247 by default) (D17).
+/// (alpha below `engine::validate::COMPLEX_M_WARN_ALPHA`, 247) (D17).
 pub fn smallest_alpha(m: &AppModel, key: &str) -> Option<u8> {
     let jk = &m.item(key)?.job_key;
     let a = m

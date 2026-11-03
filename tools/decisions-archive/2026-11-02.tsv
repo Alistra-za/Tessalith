@@ -39,3 +39,4 @@ CB1	CB		back	FM		partial	2026-11-02		goes: BC7E_MAX_NATIVE is now true and the r
 CP11	CP		back	FM		partial	2026-11-02		goes: non-bc7e backends; stays: the other items
 FF1	FF		back	FM		partial	2026-11-02		goes: the max refusal sentence; stays: the mapping
 FM15	FM		back	FM		partial	2026-11-02		goes: the constants and the shim #if branches stay; stays: the rest of the item
+R-fills-2	R		back	FM		partial	2026-11-02		goes: old project-wide defaults.packing.fill keys still load and apply, and the legacy line with Clear; stays: per-output fills on the card

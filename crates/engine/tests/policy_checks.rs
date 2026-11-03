@@ -2272,11 +2272,11 @@ fn project_rules(rules: &str) -> ConfigFile {
 fn a_set_subtype_drops_the_overrides_of_a_rule_that_named_another_subtype() {
     let reg = PresetRegistry::builtin().unwrap();
     let project = project_rules(
-        "[[rules]]\nmatch = { glob = \"**/r/*.png\" }\nsubtype = \"height\"\noverrides = { validation = { min_mip_psnr_db = 31.0 } }\n",
+        "[[rules]]\nmatch = { glob = \"**/r/*.png\" }\nsubtype = \"height\"\noverrides = { alpha = { threshold = 31 } }\n",
     );
     let j = run_with(&reg, "cs-quality", Some(&project), "r/x.png", None, &[]);
     assert_eq!(j.profile.subtype, Subtype::Height);
-    assert_eq!(j.profile.validation.min_mip_psnr_db, 31.0);
+    assert_eq!(j.profile.alpha.threshold, 31);
     let j = run_with(
         &reg,
         "cs-quality",
@@ -2286,9 +2286,9 @@ fn a_set_subtype_drops_the_overrides_of_a_rule_that_named_another_subtype() {
         &["subtype=diffuse"],
     );
     assert_eq!(j.profile.subtype, Subtype::Diffuse);
-    assert_eq!(j.profile.validation.min_mip_psnr_db, 30.0);
+    assert_eq!(j.profile.alpha.threshold, 127);
     assert!(!matches!(
-        j.provenance.get("validation.min_mip_psnr_db"),
+        j.provenance.get("alpha.threshold"),
         Some(Provenance::Rule(_))
     ));
 }
@@ -2299,8 +2299,8 @@ fn a_set_subtype_drops_the_overrides_of_a_rule_that_named_another_subtype() {
 fn a_rule_for_the_new_subtype_applies_after_a_set_subtype() {
     let reg = PresetRegistry::builtin().unwrap();
     let project = project_rules(concat!(
-        "[[rules]]\nmatch = { glob = \"**/r/*.png\" }\nsubtype = \"height\"\noverrides = { validation = { min_mip_psnr_db = 31.0 } }\n",
-        "[[rules]]\nmatch = { glob = \"**/r/*.png\", subtypes = [\"diffuse\"] }\noverrides = { validation = { min_mip_psnr_db = 32.0 } }\n",
+        "[[rules]]\nmatch = { glob = \"**/r/*.png\" }\nsubtype = \"height\"\noverrides = { alpha = { threshold = 31 } }\n",
+        "[[rules]]\nmatch = { glob = \"**/r/*.png\", subtypes = [\"diffuse\"] }\noverrides = { alpha = { threshold = 32 } }\n",
     ));
     let j = run_with(
         &reg,
@@ -2310,9 +2310,9 @@ fn a_rule_for_the_new_subtype_applies_after_a_set_subtype() {
         None,
         &["subtype=diffuse"],
     );
-    assert_eq!(j.profile.validation.min_mip_psnr_db, 32.0);
+    assert_eq!(j.profile.alpha.threshold, 32);
     assert_eq!(
-        j.provenance["validation.min_mip_psnr_db"].to_string(),
+        j.provenance["alpha.threshold"].to_string(),
         "rule:project#1"
     );
     // A rule that names sub-types in `match` never decides one.

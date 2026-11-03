@@ -25,6 +25,17 @@ const COVERAGE_MIN_TEXELS: u32 = 256;
 /// `(0.52 - 0.5) * 100.0` is 2.0000000000000018.
 const COVERAGE_EPS: f64 = 1e-9;
 
+/// A mip whose PSNR against the encoder input is below this warns (VAL-MIP-ERROR).
+pub const MIN_MIP_PSNR_DB: f64 = 30.0;
+/// Coverage may drift this many percentage points from mip 0 before VAL-COVERAGE.
+pub const COVERAGE_TOLERANCE_PTS: f64 = 2.0;
+/// A complex _m whose smallest-mip alpha is at or above this code warns (VAL-M-COMPLEX-MARGIN): 4 codes of
+/// headroom below the gate at 251.
+pub const COMPLEX_M_WARN_ALPHA: u8 = 247;
+/// A decoded BC6H peak below this share of the source peak warns (VAL-BC6H-PEAK).
+pub const BC6H_MIN_PEAK_RATIO: f64 = 0.8;
+/// A plain _m whose alpha is not 255 over at least this share of blocks warns (VAL-PGPATCHER-50).
+pub const PGPATCHER_NON_WHITE_SHARE: f64 = 0.5;
 /// CS's complex-material gate, in 8-bit codes: smallest-mip alpha below 251/255 (spike S8).
 const CS_COMPLEX_GATE: f64 = CS_COMPLEX_GATE_CODE as f64;
 
@@ -263,11 +274,11 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
             if !smallest_only || (l + 1) % per_face == 0 {
                 let q = psnr(e, d, &ch);
                 s.min_mip_psnr_db = Some(s.min_mip_psnr_db.map_or(q, |m| m.min(q)));
-                if q < v.min_mip_psnr_db {
+                if q < MIN_MIP_PSNR_DB {
                     w.push(
                         Warning::new(
                             Code::ValMipError,
-                            format!("{}: {q:.2} dB < {:.1} dB", mip(l), v.min_mip_psnr_db),
+                            format!("{}: {q:.2} dB < {:.1} dB", mip(l), MIN_MIP_PSNR_DB),
                         )
                         .with_data(level_data(l, json!({"psnr": q}))),
                     );
@@ -373,7 +384,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
                     );
                     s.coverage.push(c);
                     if u64::from(*lw) * u64::from(*lh) >= u64::from(COVERAGE_MIN_TEXELS)
-                        && (c - base).abs() * 100.0 > v.coverage_tolerance_pts + COVERAGE_EPS
+                        && (c - base).abs() * 100.0 > COVERAGE_TOLERANCE_PTS + COVERAGE_EPS
                     {
                         w.push(
                             Warning::new(
@@ -408,7 +419,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
                         .with_data(json!({"smallest_rgb": gate.rgb})),
                     );
                 }
-                if alpha_present && gate.alpha >= f64::from(v.complex_m_warn_alpha) {
+                if alpha_present && gate.alpha >= f64::from(COMPLEX_M_WARN_ALPHA) {
                     // An averaged non-square smallest mip can be fractional: keep one decimal there.
                     let a = if gate.alpha.fract() == 0.0 {
                         format!("{}", gate.alpha)
@@ -453,7 +464,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
 
         if p.subtype == Subtype::Envmask && alpha_present {
             if let Some(a0) = s.alpha.first() {
-                if a0.share_not_255() >= v.pgpatcher_non_white_share {
+                if a0.share_not_255() >= PGPATCHER_NON_WHITE_SHARE {
                     w.push(Warning::new(
                         Code::ValPgpatcher50,
                         format!(
@@ -475,7 +486,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
             if peak > 0.0 {
                 let r = (dec_peak / peak) as f64;
                 s.bc6h_peak_ratio = Some(r);
-                if r < v.bc6h_min_peak_ratio {
+                if r < BC6H_MIN_PEAK_RATIO {
                     w.push(Warning::new(
                         Code::ValBc6hPeak,
                         format!("BC6H keeps {:.0}% of the source peak", r * 100.0),

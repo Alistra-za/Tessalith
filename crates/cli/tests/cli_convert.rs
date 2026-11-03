@@ -241,10 +241,10 @@ fn user_config_then_project_config_then_set_decide_the_format() {
 /// `file_planned` job. Every layer also sets one field nobody above it touches.
 #[test]
 fn every_layer_overrides_the_one_below_with_provenance() {
-    const F: &str = "validation.min_mip_psnr_db";
+    const F: &str = "alpha.threshold";
     // (levels in use, wall value, wall provenance, floor value, floor provenance)
     let steps: [(u8, f64, &str, f64, &str); 8] = [
-        (0, 30.0, "builtin", 30.0, "builtin"),
+        (0, 127.0, "builtin", 127.0, "builtin"),
         (1, 31.0, "preset:chainp", 31.0, "preset:chainp"),
         (2, 32.0, "user_config", 32.0, "user_config"),
         (3, 33.0, "project_config", 33.0, "project_config"),
@@ -260,21 +260,19 @@ fn every_layer_overrides_the_one_below_with_provenance() {
         let preset = fx.write(
             "chainp.toml",
             "schema_version = 1\nid = \"chainp\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n\
-             [subtypes.diffuse]\nvalidation = { min_mip_psnr_db = 31.0, bc6h_min_peak_ratio = 0.7 }\n",
+             [subtypes.diffuse]\nalpha = { threshold = 31 }\nmips = { bake_clamp = 0.5 }\n",
         );
         if level >= 2 {
             fx.user_config(
-                "[subtypes.diffuse]\nvalidation = { min_mip_psnr_db = 32.0, coverage_tolerance_pts = 3.0 }\n",
+                "[subtypes.diffuse]\nalpha = { threshold = 32 }\npacking = { roughness_default = 0.6 }\n",
             );
         }
         if level >= 3 {
-            let mut cfg = String::from(
-                "[subtypes.diffuse]\nvalidation = { min_mip_psnr_db = 33.0, pgpatcher_non_white_share = 0.6 }\n",
-            );
+            let mut cfg = String::from("[subtypes.diffuse]\nalpha = { threshold = 33 }\n");
             if level >= 4 {
                 cfg.push_str(
                     "[[rules]]\nmatch = { glob = \"**/*.png\" }\n\
-                     overrides = { validation = { min_mip_psnr_db = 34.0, complex_m_warn_alpha = 240 } }\n",
+                     overrides = { alpha = { threshold = 34 } }\n",
                 );
             }
             fx.project_config(&cfg);
@@ -284,9 +282,9 @@ fn every_layer_overrides_the_one_below_with_provenance() {
         if level >= 1 {
             args.extend(["--preset", &preset]);
         }
-        let unscoped = format!("{F}=35.0");
-        let typed = format!("subtype:diffuse.{F}=36.0");
-        let file = format!("file:**/wall.png.{F}=37.0");
+        let unscoped = format!("{F}=35");
+        let typed = format!("subtype:diffuse.{F}=36");
+        let file = format!("file:**/wall.png.{F}=37");
         for (min, set) in [(5, &unscoped), (6, &typed), (7, &file)] {
             if level >= min {
                 args.extend(["--set", set]);
@@ -308,28 +306,15 @@ fn every_layer_overrides_the_one_below_with_provenance() {
         );
 
         // The distinct fields: each layer's own value survives where nothing above it sets the field.
-        let distinct: [(u8, &str, f64, &str); 4] = [
-            (1, "validation.bc6h_min_peak_ratio", 0.7, "preset:chainp"),
-            (2, "validation.coverage_tolerance_pts", 3.0, "user_config"),
-            (
-                3,
-                "validation.pgpatcher_non_white_share",
-                0.6,
-                "project_config",
-            ),
-            (
-                4,
-                "validation.complex_m_warn_alpha",
-                240.0,
-                "rule:project#0",
-            ),
+        let distinct: [(u8, &str, f64, &str, f64); 2] = [
+            (1, "mips.bake_clamp", 0.5, "preset:chainp", 0.25),
+            (2, "packing.roughness_default", 0.6, "user_config", 0.5),
         ];
-        let builtin = [0.8, 2.0, 0.5, 247.0];
-        for (i, (min, field, value, source)) in distinct.into_iter().enumerate() {
+        for (min, field, value, source, builtin) in distinct {
             let (want, want_prov) = if level >= min {
                 (value, source)
             } else {
-                (builtin[i], "builtin")
+                (builtin, "builtin")
             };
             assert_eq!(
                 (num(w, field), prov(w, field)),
@@ -350,17 +335,17 @@ fn every_layer_overrides_the_one_below_with_provenance() {
 /// within one scope the later flag wins.
 #[test]
 fn set_scopes_rank_by_specificity_not_command_line_order() {
-    const F: &str = "validation.min_mip_psnr_db";
+    const F: &str = "alpha.threshold";
     let fx = Fx::new();
     fx.rgb("wall.png");
     fx.rgb("floor.png");
-    let file_wall = format!("file:**/wall.png.{F}=47.0");
-    let file_all_first = "file:**/*.png.alpha.threshold=60";
-    let file_floor_later = "file:**/floor.png.alpha.threshold=80";
-    let typed = format!("subtype:diffuse.{F}=46.0");
-    let other_type = format!("subtype:normal.{F}=99.0");
-    let unscoped_a = format!("{F}=44.0");
-    let unscoped_b = format!("{F}=45.0");
+    let file_wall = format!("file:**/wall.png.{F}=47");
+    let file_all_first = "file:**/*.png.mips.bake_clamp=0.3";
+    let file_floor_later = "file:**/floor.png.mips.bake_clamp=0.4";
+    let typed = format!("subtype:diffuse.{F}=46");
+    let other_type = format!("subtype:normal.{F}=99");
+    let unscoped_a = format!("{F}=44");
+    let unscoped_b = format!("{F}=45");
     let o = fx.convert(&[
         "--dry-run",
         "--set",
@@ -388,8 +373,8 @@ fn set_scopes_rank_by_specificity_not_command_line_order() {
     assert_eq!(prov(w, F), "user");
     assert_eq!(prov(f, F), "user");
     // Two file-scoped values on the same field: command-line order decides where both match.
-    assert_eq!(num(w, "alpha.threshold"), 60.0);
-    assert_eq!(num(f, "alpha.threshold"), 80.0);
+    assert_eq!(num(w, "mips.bake_clamp"), 0.3);
+    assert_eq!(num(f, "mips.bake_clamp"), 0.4);
 
     // Same scope, opposite order: the later unscoped flag wins.
     let o = fx.convert(&[
@@ -447,7 +432,7 @@ fn accepted_suggestion_loses_to_rules_which_lose_to_set() {
     // A user-config rule is below the project config's rules, both for the sub-type and for field overrides.
     fx.user_config(
         "[[rules]]\nmatch = { glob = \"**/wall_n.png\" }\nsubtype = \"glow\"\n\
-         overrides = { alpha = { threshold = 60 }, validation = { complex_m_warn_alpha = 200 } }\n",
+         overrides = { alpha = { threshold = 60 }, mips = { bake_clamp = 0.5 } }\n",
     );
     fx.project_config(
         "[[rules]]\nmatch = { glob = \"**/wall_n.png\" }\nsubtype = \"height\"\n\
@@ -460,8 +445,8 @@ fn accepted_suggestion_loses_to_rules_which_lose_to_set() {
     assert_eq!(num(wall, "alpha.threshold"), 70.0);
     assert_eq!(prov(wall, "alpha.threshold"), "rule:project#0");
     // Carried fix 3: the user rule names another sub-type (glow), so none of its overrides apply to a height file.
-    assert_ne!(num(wall, "validation.complex_m_warn_alpha"), 200.0);
-    assert_ne!(prov(wall, "validation.complex_m_warn_alpha"), "rule:user#0");
+    assert_ne!(num(wall, "mips.bake_clamp"), 0.5);
+    assert_ne!(prov(wall, "mips.bake_clamp"), "rule:user#0");
 
     // `--set` beats the rules, scoped to one file or for everything.
     let o = fx.convert(&[
@@ -1014,10 +999,10 @@ fn noise(fx: &Fx, name: &str) {
         .unwrap();
 }
 
-/// A layered value is not only reported: the engine acts on it. A noisy source misses the default 30 dB mip
-/// threshold (`VAL-MIP-ERROR`), and each layer can move that threshold.
+/// A layered value is not only reported: the engine acts on it. A noisy source misses the fixed 30 dB mip
+/// threshold (`VAL-MIP-ERROR`) on several mips, and each layer can move `validation.mips`.
 #[test]
-fn a_layered_validation_threshold_changes_what_validation_reports() {
+fn a_layered_validation_mips_changes_what_validation_reports() {
     let fx = Fx::new();
     noise(&fx, "noise.png");
     let mip_errors = |o: &Output| -> Vec<String> {
@@ -1038,24 +1023,22 @@ fn a_layered_validation_threshold_changes_what_validation_reports() {
         mip_errors(&o)
     );
 
+    let all = mip_errors(&o).len();
+
     fx.user_config(
         "[subtypes.diffuse]
-validation = { min_mip_psnr_db = 1.0 }
+validation = { mips = \"smallest\" }
 ",
     );
     let o = fx.convert_to("out2", &base);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    assert!(mip_errors(&o).is_empty());
+    assert!(mip_errors(&o).len() < all, "{:?}", mip_errors(&o));
 
     let mut args = base.to_vec();
-    args.extend(["--set", "validation.min_mip_psnr_db=99.0"]);
+    args.extend(["--set", "validation.mips=all"]);
     let o = fx.convert_to("out3", &args);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    assert!(
-        mip_errors(&o).iter().any(|m| m.contains("< 99.0 dB")),
-        "{:?}",
-        mip_errors(&o)
-    );
+    assert_eq!(mip_errors(&o).len(), all, "{:?}", mip_errors(&o));
 }
 
 /// No setting reaches an error-severity `VAL-*` code (`encoder.bc1_transparent_black=true` with BC1 is

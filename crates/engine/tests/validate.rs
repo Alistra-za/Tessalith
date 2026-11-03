@@ -131,7 +131,7 @@ fn clean_bc7_passes_and_header_matches() {
     assert!(r.summary.passed, "{:?}", r.warnings);
     assert_eq!(r.summary.levels, 4);
     assert_eq!(r.summary.alpha.len(), 4);
-    assert!(r.summary.min_mip_psnr_db.unwrap() > p.validation.min_mip_psnr_db);
+    assert!(r.summary.min_mip_psnr_db.unwrap() > MIN_MIP_PSNR_DB);
     assert!(r.summary.coverage.is_empty());
 }
 
@@ -280,7 +280,7 @@ fn coverage_drift_and_complex_m_margin() {
 fn coverage_drift_of_exactly_the_tolerance_is_not_flagged() {
     let mut p = profile(Subtype::Diffuse);
     p.alpha.policy = AlphaPolicy::Cutout;
-    assert_eq!(p.validation.coverage_tolerance_pts, 2.0);
+    assert_eq!(COVERAGE_TOLERANCE_PTS, 2.0);
     // 20x20 = 400 texels; `on` of them opaque.
     let level = |on: usize| {
         let px: Vec<[u8; 4]> = (0..400)
@@ -339,7 +339,7 @@ fn per_mip_error_is_a_warning_not_a_failure() {
         .unwrap();
     assert_eq!(w.severity, Severity::Warning);
     assert!(r.summary.passed);
-    assert!(r.summary.min_mip_psnr_db.unwrap() < p.validation.min_mip_psnr_db);
+    assert!(r.summary.min_mip_psnr_db.unwrap() < MIN_MIP_PSNR_DB);
 }
 
 /// An encoder input that does not match the file is a caller bug: a `debug_assert!` in debug builds, a
@@ -573,7 +573,7 @@ fn complex_m_grayscale_still_fires_when_alpha_is_removed() {
 #[test]
 fn complex_m_margin_boundary() {
     let p = profile(Subtype::ComplexMaterial);
-    assert_eq!(p.validation.complex_m_warn_alpha, 247);
+    assert_eq!(COMPLEX_M_WARN_ALPHA, 247);
     let r = run(&one_block_file(&p, 246), &p, None, None, Some(1));
     assert!(
         !codes(&r).contains(&Code::ValMComplexMargin),
@@ -618,7 +618,7 @@ fn pgpatcher_share_boundary() {
     let mut p = profile(Subtype::Envmask);
     p.format = Format::Bc7;
     p.alpha.policy = AlphaPolicy::Data;
-    assert_eq!(p.validation.pgpatcher_non_white_share, 0.5);
+    assert_eq!(PGPATCHER_NON_WHITE_SHARE, 0.5);
     let file = |non_white_blocks: usize| {
         let mip0: Vec<u8> = (0..16)
             .flat_map(|i| mode6_block(if i < non_white_blocks { 100 } else { 255 }))

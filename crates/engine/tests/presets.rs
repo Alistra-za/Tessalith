@@ -1035,6 +1035,62 @@ fn a_set_override_naming_nvtt_is_refused_with_the_hint() {
     }
 }
 
+/// Note FM16: the five `validation.*` thresholds are constants and the project-wide `[defaults]` fill is gone, so
+/// each is refused by name in a config (inline or dotted, any table), a preset and `--set`; `validation.mips` and a
+/// per-file fill still load.
+#[test]
+fn removed_validation_and_fill_keys_are_named() {
+    for key in [
+        "min_mip_psnr_db",
+        "coverage_tolerance_pts",
+        "complex_m_warn_alpha",
+        "bc6h_min_peak_ratio",
+        "pgpatcher_non_white_share",
+    ] {
+        let full = format!("validation.{key}");
+        for head in ["[defaults]", "[subtypes.diffuse]", "[files.\"a.png\"]"] {
+            let e = ConfigFile::parse(
+                &format!("{head}\nvalidation = {{ {key} = 1 }}\n"),
+                "sdc.toml",
+            )
+            .unwrap_err();
+            assert!(e.to_string().contains(&full), "{head}: {e}");
+        }
+        let e = engine::overrides::parse_set(&format!("{full}=1")).unwrap_err();
+        assert!(e.contains(&full) && e.contains("removed in 2.0"), "{e}");
+        let e = engine::overrides::parse_set(&format!("file:a.png.{full}=1")).unwrap_err();
+        assert!(e.contains(&full), "{e}");
+    }
+    for text in [
+        "[defaults]\npacking = { fill = { ao = 1.0 } }\n",
+        "[defaults.packing.fill]\nao = 10\n",
+        "[defaults]\npacking.fill.ao = 10\n",
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err().to_string();
+        assert!(
+            e.contains("defaults.packing.fill") && e.contains("per set"),
+            "{text}: {e}"
+        );
+    }
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    let mut r = PresetRegistry::builtin().unwrap();
+    let e = r
+        .add_toml(&format!(
+            "{head}[defaults]\nvalidation = {{ min_mip_psnr_db = 20 }}\n"
+        ))
+        .unwrap_err();
+    assert!(e.to_string().contains("validation.min_mip_psnr_db"), "{e}");
+    // Still legal: `validation.mips`, fills per file and per sub-type, and `--set packing.fill.*`.
+    ConfigFile::parse(
+        "[defaults]\nvalidation = { mips = \"smallest\" }\n\
+         [files.\"a_rmaos.png\".packing.fill]\nao = 10\n\
+         [subtypes.rmaos]\npacking = { fill = { ao = 10 } }\n",
+        "sdc.toml",
+    )
+    .unwrap();
+    engine::overrides::parse_set("packing.fill.ao=10").unwrap();
+}
+
 /// Note FM15: the format alone picks the encoder, so `encoder.backend` and `encoder.rgbcx_level` are refused by name
 /// whatever the value and wherever they sit (config, preset, `--set`); `IN-FLOAT-LDR` is refused in an allow list.
 #[test]

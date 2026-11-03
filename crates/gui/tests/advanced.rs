@@ -2,7 +2,6 @@ mod support;
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
-use engine::config::RawMap;
 use sdc_gui::model::inspector::*;
 use sdc_gui::model::preview::{EncodedState, SourceState};
 use sdc_gui::model::AppModel;
@@ -29,29 +28,6 @@ fn the_inspector_shows_provenance_and_differences_from_the_base() {
     assert_eq!(t.provenance, "project_file");
     assert!(t.differs_from_base);
     assert!(rows.iter().any(|r| !r.differs_from_base));
-}
-
-#[test]
-fn a_project_wide_fill_still_applies_as_a_fallback() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.project
-        .as_mut()
-        .unwrap()
-        .set_fill(RawMap::Metallic, Some(255));
-    m.replan();
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let job = m
-        .item("landscape/rock01_rmaos")
-        .unwrap()
-        .job
-        .clone()
-        .unwrap();
-    assert_eq!(job.provenance["pack.g"].to_string(), "fill:255");
-    assert_eq!(
-        m.project.as_ref().unwrap().fill(RawMap::Metallic),
-        Some(255)
-    );
 }
 
 #[test]

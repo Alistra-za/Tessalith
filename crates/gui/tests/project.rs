@@ -1,5 +1,5 @@
 use engine::codes::Code;
-use engine::config::{RawMap, Target};
+use engine::config::Target;
 use sdc_gui::project::*;
 use serde_json::json;
 
@@ -35,7 +35,6 @@ fn edits_keep_every_hand_written_byte() {
         "landscape/rock01_n.png",
         &[Code::FmtBc5Normal].into_iter().collect(),
     );
-    doc.set_fill(RawMap::Metallic, Some(255));
     assert!(doc.is_dirty());
     doc.save(false).unwrap();
     assert!(!doc.is_dirty());
@@ -62,7 +61,6 @@ fn edits_keep_every_hand_written_byte() {
         cfg.files["landscape/rock01_d.png"]["alpha"]["policy"],
         "blend"
     );
-    assert_eq!(cfg.defaults["packing"]["fill"]["metallic"], 255);
     assert_eq!(cfg.rules.len(), 1);
 }
 
@@ -121,9 +119,6 @@ fn clearing_removes_empty_tables_and_entries() {
         .contains_key("alpha"));
     doc.clear_file_value("a.png", "format");
     assert!(doc.file_keys().is_empty());
-    doc.set_fill(RawMap::Ao, Some(10));
-    doc.set_fill(RawMap::Ao, None);
-    assert_eq!(doc.fill(RawMap::Ao), None);
 }
 
 #[test]
@@ -165,6 +160,18 @@ fn a_removed_key_opens_read_only_and_keeps_the_file() {
     );
 }
 
+/// Note FM16: a project-wide `[defaults]` fill makes the file read-only; the hint says to delete the line by hand.
+#[test]
+fn a_project_wide_fill_opens_read_only_with_the_hint() {
+    let (_d, doc) = doc_with("[defaults.packing.fill]\nao = 10\n");
+    assert!(doc.read_only());
+    let e = doc.error().unwrap();
+    assert!(
+        e.contains("defaults.packing.fill") && e.contains("per set"),
+        "{e}"
+    );
+}
+
 #[test]
 fn a_missing_file_is_created_on_save() {
     let d = tempfile::tempdir().unwrap();
@@ -173,21 +180,6 @@ fn a_missing_file_is_created_on_save() {
     doc.set_file_value("a.png", "subtype", &json!("diffuse"));
     doc.save(false).unwrap();
     assert!(d.path().join("sdc.toml").exists());
-}
-
-#[test]
-fn clearing_a_fill_leaves_no_empty_defaults_header() {
-    let (d, mut doc) = doc_with("preset = \"x\"\n");
-    doc.set_fill(RawMap::Ao, None);
-    assert!(
-        !doc.is_dirty(),
-        "clearing a fill that is not there changes nothing"
-    );
-    doc.set_fill(RawMap::Ao, Some(10));
-    doc.set_fill(RawMap::Ao, None);
-    doc.save(false).unwrap();
-    let text = std::fs::read_to_string(d.path().join("sdc.toml")).unwrap();
-    assert!(!text.contains("[defaults]"), "{text}");
 }
 
 #[test]
@@ -243,22 +235,6 @@ fn an_inline_sub_table_is_edited_in_place() {
     assert_eq!(*alpha, json!({"threshold": 90}));
     doc.clear_file_value("a.png", "alpha.threshold");
     assert!(doc.file_keys().is_empty());
-}
-
-#[test]
-fn an_inline_defaults_packing_is_edited_in_place() {
-    let (_d, mut doc) = doc_with("[defaults]\npacking = { fill = { ao = 10 } }\n");
-    assert_eq!(doc.fill(RawMap::Ao), Some(10));
-    doc.set_fill(RawMap::Metallic, Some(255));
-    assert_eq!(doc.fill(RawMap::Metallic), Some(255));
-    assert_eq!(
-        doc.config().unwrap().defaults["packing"]["fill"]["metallic"],
-        255
-    );
-    doc.set_fill(RawMap::Ao, None);
-    assert_eq!(doc.fill(RawMap::Ao), None);
-    let fill = &doc.config().unwrap().defaults["packing"]["fill"];
-    assert_eq!(*fill, json!({"metallic": 255}));
 }
 
 #[test]

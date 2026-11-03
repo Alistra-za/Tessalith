@@ -45,18 +45,20 @@ Tessalith writes its own DDS headers:
 
 Every converted file is decoded again before it is written, and the decoded result is checked. `sdc validate` runs the checks that need no source on DDS files that already exist: `VAL-HEADER`, `VAL-ALPHA-GUARANTEE`, `ALPHA-254`, the `VAL-M-*` checks, `VAL-PGPATCHER-50` and `VAL-GRASS-DETECT`. Mip quality, cutout coverage and the BC6H peak need the encoder input, so `validate` cannot run them.
 
+The thresholds are fixed; only `validation.mips` is a setting.
+
 | Check | Rule | Code | Severity |
 |---|---|---|---|
 | Header | Flags, caps, mip count, format and header form are correct. | `VAL-HEADER` | error |
-| Mip quality | Each mip's PSNR (one value, with the error pooled over the channels that matter) against the encoder input is at least `validation.min_mip_psnr_db` (30 dB). With `validation.mips = "smallest"`, only the smallest mip is checked. | `VAL-MIP-ERROR` | warning |
+| Mip quality | Each mip's PSNR (one value, with the error pooled over the channels that matter) against the encoder input is at least 30 dB. With `validation.mips = "smallest"`, only the smallest mip is checked. | `VAL-MIP-ERROR` | warning |
 | Opaque alpha | With `remove`, decoded alpha meets the guarantee: at least 254 for any BC7 file without `exact_opaque`, exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
 | Decoded 254 | Opaque alpha that decodes as 254 is reported for information. Community Shaders' complex-material gate is not affected by it. | `ALPHA-254` | info |
-| Cutout coverage | With `cutout` or `cutout_blend`, each mip's alpha coverage stays within `validation.coverage_tolerance_pts` (2 points) of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
-| Complex `_m` margin | The smallest mip's alpha is at or above `validation.complex_m_warn_alpha` (247), close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
+| Cutout coverage | With `cutout` or `cutout_blend`, each mip's alpha coverage stays within 2 points of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
+| Complex `_m` margin | The smallest mip's alpha is at or above 247, close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
 | Complex `_m` grey | The smallest mip is grey and not black-with-height, so Community Shaders reads it as a plain env mask. | `VAL-M-GRAYSCALE` | warning |
 | Complex `_m` height | Large alpha areas at or below 4/255 or at or above 251/255 give no parallax. | `VAL-M-HEIGHT-CLIP` | warning |
-| PGPatcher 50% rule | A plain `_m` that stores alpha has a share of non-255 alpha at or above `validation.pgpatcher_non_white_share` (50%), so PGPatcher would treat it as complex. | `VAL-PGPATCHER-50` | warning |
-| BC6H peak | The decoded peak divided by the source peak is at least `validation.bc6h_min_peak_ratio` (0.8). | `VAL-BC6H-PEAK` | warning |
+| PGPatcher 50% rule | A plain `_m` that stores alpha has a share of non-255 alpha at or above 50%, so PGPatcher would treat it as complex. | `VAL-PGPATCHER-50` | warning |
+| BC6H peak | The decoded peak divided by the source peak is at least 0.8. | `VAL-BC6H-PEAK` | warning |
 | Complex grass corner | The encoded bottom-left texel still passes Community Shaders' detection test. | `VAL-GRASS-DETECT` | error |
 
 A file with an error from validation is still written. It is reported as `ok ... [VALIDATION FAILED]`, counted under "failed validation", and makes `sdc convert` exit with 4 if nothing worse happened. The next `if-changed` run re-encodes it instead of calling it up to date.

@@ -1638,7 +1638,8 @@
           "$ref": "#/$defs/Target"
         },
         "validation": {
-          "$ref": "#/$defs/ValidationSpec"
+          "$ref": "#/$defs/ValidationSpec",
+          "default": {}
         }
       },
       "required": [
@@ -1652,7 +1653,6 @@
         "format",
         "header",
         "encoder",
-        "validation",
         "packing"
       ],
       "type": "object"
@@ -2311,40 +2311,11 @@
     "ValidationSpec": {
       "additionalProperties": false,
       "properties": {
-        "bc6h_min_peak_ratio": {
-          "format": "double",
-          "type": "number"
-        },
-        "complex_m_warn_alpha": {
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "coverage_tolerance_pts": {
-          "format": "double",
-          "type": "number"
-        },
-        "min_mip_psnr_db": {
-          "format": "double",
-          "type": "number"
-        },
         "mips": {
           "$ref": "#/$defs/ValidationMips",
-          "description": "M6 Track D (DECISIONS Notes T5, Y6): `smallest` runs the per-mip PSNR check on the smallest mip only and the\ncoverage check on every level (`fast-preview`). Not serialised at its default, so existing profile hashes hold."
-        },
-        "pgpatcher_non_white_share": {
-          "format": "double",
-          "type": "number"
+          "description": "M6 Track D (DECISIONS Notes T5, Y6): `smallest` runs the per-mip PSNR check on the smallest mip only and the\ncoverage check on every level (`fast-preview`). Not serialised at its default."
         }
       },
-      "required": [
-        "min_mip_psnr_db",
-        "coverage_tolerance_pts",
-        "complex_m_warn_alpha",
-        "bc6h_min_peak_ratio",
-        "pgpatcher_non_white_share"
-      ],
       "type": "object"
     },
     "ValidationSummary": {

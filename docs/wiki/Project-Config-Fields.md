@@ -66,11 +66,6 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `validation.min_mip_psnr_db` | number | 30.0 | Minimum PSNR per mip before `VAL-MIP-ERROR`. |
-| `validation.coverage_tolerance_pts` | number | 2.0 | Allowed alpha-coverage drift per mip, in percentage points, before `VAL-COVERAGE`. |
-| `validation.complex_m_warn_alpha` | 0 to 255 | 247 | Complex-material alpha above which `VAL-M-COMPLEX-MARGIN` warns. |
-| `validation.bc6h_min_peak_ratio` | number | 0.8 | BC6H peak-brightness ratio below which `VAL-BC6H-PEAK` warns. |
-| `validation.pgpatcher_non_white_share` | number | 0.5 | Share of non-white texels in a plain `_m` above which `VAL-PGPATCHER-50` warns. |
 | `validation.mips` | `all`, `smallest` | `all` | `smallest` runs the PSNR check on the smallest mip only (used by `fast-preview`). Coverage is always checked on every level. |
 
 ## Packing
@@ -81,7 +76,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 | `packing.roughness_default` | 0 to 1 | 0.5 | Roughness used when there is no roughness or glossiness source. |
 | `packing.prefer` | `prepacked`, `raw` | `prepacked` | When a set has both a packed file (such as `_rmaos.png`) and raw maps: keep the packed file, or build from the raw maps (`PACK-CONFLICT`). |
 | `packing.recipe` | `auto`, `rmaos`, `rfaos` | `auto` | Which `cs` recipe a set packs. `auto` builds `_rfaos` when a fuzz source exists, otherwise `_rmaos`. |
-| `packing.fill.<role>` | 0 to 255 | unset | Value for a channel with no source map. Roles: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`. Unset means the neutral default (AO 1, metallic 0, specular 1, roughness `roughness_default`, height 0). |
+| `packing.fill.<role>` | 0 to 255 | unset | Value for a channel with no source map. Roles: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`. Unset means the neutral default (AO 1, metallic 0, specular 1, roughness `roughness_default`, height 0). Set it per file or sub-type; `[defaults]` takes no fills. |
 
 Packing fields belong on the packed output's key, for example `[files."textures/armor/iron/iron_rmaos"]`.
 

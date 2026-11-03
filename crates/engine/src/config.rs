@@ -713,16 +713,11 @@ pub struct EncoderSpec {
     pub bc45_search_radius: SearchRadius,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ValidationSpec {
-    pub min_mip_psnr_db: f64,
-    pub coverage_tolerance_pts: f64,
-    pub complex_m_warn_alpha: u8,
-    pub bc6h_min_peak_ratio: f64,
-    pub pgpatcher_non_white_share: f64,
     /// M6 Track D (DECISIONS Notes T5, Y6): `smallest` runs the per-mip PSNR check on the smallest mip only and the
-    /// coverage check on every level (`fast-preview`). Not serialised at its default, so existing profile hashes hold.
+    /// coverage check on every level (`fast-preview`). Not serialised at its default.
     #[serde(default, skip_serializing_if = "ValidationMips::is_all")]
     pub mips: ValidationMips,
 }
@@ -899,6 +894,7 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub drop_top_mip: bool,
     pub encoder: EncoderSpec,
+    #[serde(default)]
     pub validation: ValidationSpec,
     pub packing: PackingSpec,
     /// RNM normal layers (M6 Track F2); read only by base normals (`Subtype::rnm_base`).

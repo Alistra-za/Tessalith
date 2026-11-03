@@ -1,7 +1,7 @@
 //! `sdc.toml` as the GUI edits it (M3a spec §5.3–5.4): format-preserving (`toml_edit`), so comments, ordering and
-//! hand-written tables survive. The GUI owns only `target`, `[files.*]` and `defaults.packing.fill.*`.
+//! hand-written tables survive. The GUI owns only `target`, `preset`, `[files.*]` and `[inputs]`.
 use engine::codes::Code;
-use engine::config::{RawMap, Target};
+use engine::config::Target;
 use engine::policy::SourceStamp;
 use engine::presets::{ConfigFile, ExportConfig};
 use serde_json::Value as Json;
@@ -589,62 +589,6 @@ impl ProjectDoc {
             let list: Vec<Json> = codes.iter().map(|c| Json::from(c.as_str())).collect();
             self.set_file_value(key, "allow", &Json::Array(list));
         }
-    }
-
-    pub fn fill(&self, role: RawMap) -> Option<u8> {
-        let v = self
-            .f
-            .doc
-            .get("defaults")?
-            .get("packing")?
-            .get("fill")?
-            .get(role.id())?;
-        toml_to_json(v)?.as_u64().and_then(|n| u8::try_from(n).ok())
-    }
-
-    pub fn set_fill(&mut self, role: RawMap, value: Option<u8>) {
-        if self.read_only() {
-            return;
-        }
-        let id = role.id();
-        let changed = match value {
-            Some(v) => self.write_fill(&id, v).is_some(),
-            None => self.remove_fill(&id).is_some(),
-        };
-        if changed {
-            self.touch();
-        }
-    }
-
-    /// `defaults.packing.fill.<id> = v`, creating missing tables (dotted keys inside an existing `[defaults]`);
-    /// works through inline tables. `None` when a table on the path is not a table.
-    fn write_fill(&mut self, id: &str, v: u8) -> Option<()> {
-        let defaults = sub_table(self.f.doc.as_table_mut(), "defaults", || {
-            Item::Table(Table::new())
-        })?;
-        let packing = sub_table(defaults, "packing", dotted_table)?;
-        let fill = sub_table(packing, "fill", dotted_table)?;
-        set_value(fill, id, Value::from(i64::from(v)));
-        Some(())
-    }
-
-    /// Remove `defaults.packing.fill.<id>`, and the tables that leaves empty (no bare `[defaults]` header is left
-    /// behind). `None` when there was nothing to remove.
-    fn remove_fill(&mut self, id: &str) -> Option<()> {
-        let defaults = self.f.doc.get_mut("defaults")?.as_table_like_mut()?;
-        let packing = defaults.get_mut("packing")?.as_table_like_mut()?;
-        let fill = packing.get_mut("fill")?.as_table_like_mut()?;
-        fill.remove(id)?;
-        if fill.is_empty() {
-            packing.remove("fill");
-        }
-        if packing.is_empty() {
-            defaults.remove("packing");
-        }
-        if defaults.is_empty() {
-            self.f.doc.remove("defaults");
-        }
-        Some(())
     }
 
     /// The spelling of file `key`'s entry in `[inputs]`: `key` in any case, or without its extension.

@@ -151,7 +151,6 @@ fn an_rmaos_card_without_an_ao_source_has_an_ao_row_and_a_set_value_becomes_the_
         Some(json!(200)),
         "the fill is the packed output's own key"
     );
-    assert_eq!(m.project.as_ref().unwrap().fill(RawMap::Ao), None);
     assert_eq!(channel(m, RMAOS, "pack.b"), "fill:200");
     // The reset removes the key again (bring it into view: the set editor scrolls).
     h.get_by_label("Reset").scroll_to_me();
@@ -376,35 +375,6 @@ fn two_sets_with_different_ao_fills_pack_different_channels() {
     idle(&mut m);
     assert_eq!(channel(&m, RMAOS, "pack.b"), "fill:10");
     assert_eq!(channel(&m, "m/rock02_rmaos", "pack.b"), "fill:200");
-}
-
-#[test]
-fn a_legacy_project_wide_fill_is_listed_applies_and_clears() {
-    let d = tempfile::tempdir().unwrap();
-    let m = fixture_with(d.path(), "[defaults.packing.fill]\nao = 10\n", false);
-    assert_eq!(channel(&m, RMAOS, "pack.b"), "fill:10", "it still applies");
-    assert_eq!(m.legacy_fills(), vec![(RawMap::Ao, 10)]);
-    let mut m = m;
-    m.settings.advanced_open = true;
-    let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(1400.0, 900.0))
-        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run();
-    h.get_by_label_contains("Project-wide fills (legacy): ao 10");
-    assert!(h.query_by_label("Packing fill values").is_none());
-    h.get_by_label("Clear").click();
-    settle(&mut h);
-    let m = h.state();
-    assert!(m.legacy_fills().is_empty());
-    assert!(!channel(m, RMAOS, "pack.b").starts_with("fill:"));
-    assert!(h
-        .query_by_label_contains("Project-wide fills (legacy)")
-        .is_none());
-    // One undo brings it back.
-    h.state_mut().undo();
-    settle(&mut h);
-    assert_eq!(h.state().legacy_fills(), vec![(RawMap::Ao, 10)]);
 }
 
 #[test]

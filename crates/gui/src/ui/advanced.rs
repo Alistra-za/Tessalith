@@ -1,4 +1,4 @@
-//! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, batch, legacy project-wide fills and preview settings,
+//! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, batch and preview settings,
 //! the rarely changed texture fields, and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, AMBER, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
@@ -24,7 +24,6 @@ pub struct AdvancedState {
 enum Action {
     SetField(String, &'static str, Value),
     ClearField(String, &'static str),
-    ClearLegacyFills,
     RemoveUnmatched(String),
     PreviewMax(u32),
     Allow16k(bool),
@@ -88,7 +87,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     let mut actions = vec![];
     inspector(ui, model, state);
     batch(ui, model, &mut actions);
-    legacy_fills(ui, model, &mut actions);
     preview_settings(ui, model, &mut actions);
     interface(ui, model, &mut actions);
     checks(ui, model, &mut actions);
@@ -100,7 +98,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
         match a {
             Action::SetField(k, f, v) => model.set_field(&k, f, v),
             Action::ClearField(k, f) => model.clear_field(&k, f),
-            Action::ClearLegacyFills => model.clear_legacy_fills(),
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::PreviewMax(n) => model.set_preview_max(n),
             Action::Allow16k(on) => model.set_allow_16k_preview(on),
@@ -323,34 +320,6 @@ fn batch(ui: &mut egui::Ui, model: &mut AppModel, actions: &mut Vec<Action>) {
         }
         if settled {
             model.save_settings();
-        }
-    });
-}
-
-/// The project-wide fills an older `sdc.toml` may still hold (`defaults.packing.fill.*`). They still apply as a
-/// fallback under each packed output's own fills; new fills are set on the packed output's card.
-fn legacy_fills(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    let fills = model.legacy_fills();
-    if fills.is_empty() {
-        return;
-    }
-    let list: Vec<String> = fills
-        .iter()
-        .map(|(role, v)| format!("{} {v}", role.id()))
-        .collect();
-    ui.horizontal_wrapped(|ui| {
-        ui.label(format!("Project-wide fills (legacy): {}", list.join(", ")));
-        let why = toml_read_only_reason(model);
-        let editable = model.project.as_ref().is_some_and(|p| !p.read_only());
-        if ui
-            .add_enabled(editable, egui::Button::new("Clear"))
-            .on_hover_text(
-                "Remove the project-wide fills; set fills on each packed output's card instead",
-            )
-            .on_disabled_hover_text(why.unwrap_or_default())
-            .clicked()
-        {
-            actions.push(Action::ClearLegacyFills);
         }
     });
 }

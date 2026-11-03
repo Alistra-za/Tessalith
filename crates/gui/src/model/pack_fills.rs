@@ -206,29 +206,6 @@ impl AppModel {
         }
         None
     }
-
-    /// The project-wide `defaults.packing.fill.*` values still in `sdc.toml` (the retired global panel's keys).
-    pub fn legacy_fills(&self) -> Vec<(RawMap, u8)> {
-        let Some(p) = self.project.as_ref() else {
-            return vec![];
-        };
-        RawMap::ALL
-            .into_iter()
-            .filter_map(|r| p.fill(r).map(|v| (r, v)))
-            .collect()
-    }
-
-    /// Remove every project-wide fill, as one undo step.
-    pub fn clear_legacy_fills(&mut self) {
-        if self.project.as_ref().is_none_or(ProjectDoc::read_only) {
-            return;
-        }
-        self.edit_docs("Clear project-wide fills", None, true, |p, _| {
-            for r in RawMap::ALL {
-                p.set_fill(r, None);
-            }
-        });
-    }
 }
 
 /// Note DY18: the greyscale helpers of the packed output's set, `(item key, file name, role)`, in the engine's order

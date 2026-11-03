@@ -100,7 +100,7 @@ Any field in the centre column can be changed. The change goes into `sdc.toml` a
 
 **After an edit** the folder is planned in two steps: a quick plan of the sets the edit touches shows the change, then the whole plan lands behind it. Until the quick plan lands, the centre column's edit controls and the fix buttons in Problems and Review are greyed out ("Wait for the plan to finish"); the next edit can be made once it lands. These wait for the whole plan instead: set edits, the preset, the Mode, settings, per-file changes that move files between sets or change a set's outputs (a helper role, a PBR member's sub-type, a packing recipe, re-encoding a DDS), and any edit made before such an edit's whole plan has landed. <!-- D:FL6 --> Export blocks come from the whole plan, so their fix buttons stay greyed ("Being rechecked") until it lands. While it runs, the status line reads "· planning…" after the counts, and **Export** waits for it, then checks again ([Review and export](GUI-Review-and-Export.md#review)).
 
-The GUI writes only `target`, `preset`, the `[files.*]` tables, `[inputs.*]` aliases and `defaults.packing.fill.*`. Comments, ordering, rules and every other table in your `sdc.toml` are left byte for byte as they were.
+The GUI writes only `target`, `preset`, the `[files.*]` tables and `[inputs.*]` aliases. Comments, ordering, rules and every other table in your `sdc.toml` are left byte for byte as they were.
 
 Per-texture `[files]` entries sit above preset and config rules and analysis, and below any `--set` on the command line, so `sdc convert <folder>` honours them ([Project config](Project-Config.md#files)).
 

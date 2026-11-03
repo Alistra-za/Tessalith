@@ -236,8 +236,8 @@ fn a_bad_file_glob_is_refused() {
 #[test]
 fn a_non_finite_value_is_refused() {
     for v in ["inf", "-inf", "nan", "[1.0, nan]"] {
-        let e = parse_set(&format!("validation.min_mip_psnr_db={v}")).unwrap_err();
+        let e = parse_set(&format!("mips.bake_clamp={v}")).unwrap_err();
         assert!(e.contains("finite"), "{v}: {e}");
     }
-    parse_set("validation.min_mip_psnr_db=-1e9").unwrap();
+    parse_set("mips.bake_clamp=-1e9").unwrap();
 }

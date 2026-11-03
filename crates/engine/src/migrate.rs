@@ -85,6 +85,36 @@ pub const REMOVED: &[Removed] = &[
         value: Some("IN-FLOAT-LDR"),
         hint: "IN-FLOAT-LDR was removed in 2.0 (a float source is linear light; nothing reports it); delete it from the list",
     },
+    Removed {
+        key: "validation.min_mip_psnr_db",
+        value: None,
+        hint: "the value is fixed at 30 dB; delete the key",
+    },
+    Removed {
+        key: "validation.coverage_tolerance_pts",
+        value: None,
+        hint: "the value is fixed at 2 points; delete the key",
+    },
+    Removed {
+        key: "validation.complex_m_warn_alpha",
+        value: None,
+        hint: "the value is fixed at 247; delete the key",
+    },
+    Removed {
+        key: "validation.bc6h_min_peak_ratio",
+        value: None,
+        hint: "the value is fixed at 0.8; delete the key",
+    },
+    Removed {
+        key: "validation.pgpatcher_non_white_share",
+        value: None,
+        hint: "the value is fixed at 0.5; delete the key",
+    },
+    Removed {
+        key: "defaults.packing.fill",
+        value: None,
+        hint: "fills are set per set; delete the [defaults] packing.fill line by hand, then set each fill on its packed output's card",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {
@@ -304,5 +334,28 @@ mod tests {
         assert!(removed_set("file:a.png.subtype", "\"rfaos\"").is_some());
         assert_eq!(removed_set("format", "bc7"), None);
         assert_eq!(removed_set("subtype", "diffuse"), None);
+    }
+
+    #[test]
+    fn the_validation_thresholds_and_the_defaults_fill_are_named() {
+        let m = removed_in(&t(
+            "[defaults]\nvalidation = { coverage_tolerance_pts = 3.0 }",
+        ))
+        .unwrap();
+        assert!(
+            m.starts_with("defaults.validation.coverage_tolerance_pts: removed in 2.0;"),
+            "{m}"
+        );
+        let m = removed_in(&t("[defaults]\npacking = { fill = { ao = 1.0 } }")).unwrap();
+        assert!(
+            m.starts_with("defaults.packing.fill: removed in 2.0;") && m.contains("per set"),
+            "{m}"
+        );
+        assert!(removed_in(&t("[defaults]\nvalidation = { mips = \"smallest\" }")).is_none());
+        assert!(removed_in(&t("[files.\"a_rmaos.png\".packing.fill]\nao = 10")).is_none());
+        let m = removed_set("validation.bc6h_min_peak_ratio", "0.5").unwrap();
+        assert!(m.contains("fixed at 0.8"), "{m}");
+        assert_eq!(removed_set("packing.fill.ao", "10"), None);
+        assert_eq!(removed_set("validation.mips", "smallest"), None);
     }
 }

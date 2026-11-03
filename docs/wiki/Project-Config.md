@@ -198,7 +198,7 @@ Setting `helper.role` or `helper.fills` makes the helper *assigned*: it replaces
 
 An entry that names no file under the current target is reported as `CFG-FILE-UNMATCHED` (info), and the GUI lists it under "Unmatched [files] entries" in the Advanced drawer so you can remove it.
 
-The GUI writes only `target`, the `[files.*]` tables, `[inputs.*]` aliases and `defaults.packing.fill.*`. Everything else in your `sdc.toml`, including comments and order, is left as it was.
+The GUI writes only `target`, the `[files.*]` tables and `[inputs.*]` aliases. Everything else in your `sdc.toml`, including comments and order, is left as it was.
 
 ## [inputs]
 
