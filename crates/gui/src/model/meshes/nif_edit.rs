@@ -1843,13 +1843,22 @@ fn slot_paths<'a>(shapes: impl IntoIterator<Item = &'a ParsedShape>) -> Vec<(u32
     shapes
         .into_iter()
         .map(|s| {
-            let m = &s.material;
-            (
-                m.shader_type,
-                m.slots.iter().map(|t| t.norm.clone()).collect(),
-            )
+            let (ty, slots) = lookup_key(&s.material);
+            (ty, slots.map(str::to_owned).collect())
         })
         .collect()
+}
+
+/// What [`texture_sources`] reads of a material: its shader type and slot paths. [`slot_paths`] and
+/// [`same_lookup`] both go through it, so the store lookup and its trigger cannot drift apart.
+fn lookup_key(m: &MaterialState) -> (u32, impl Iterator<Item = &str>) {
+    (m.shader_type, m.slots.iter().map(|t| t.norm.as_str()))
+}
+
+/// Whether `a` and `b` name the same textures to [`texture_sources`].
+fn same_lookup(a: &MaterialState, b: &MaterialState) -> bool {
+    let ((ta, sa), (tb, sb)) = (lookup_key(a), lookup_key(b));
+    ta == tb && sa.eq(sb)
 }
 
 /// The same folder, ignoring ASCII case, `/` versus `\` and a trailing separator (MO2 paths on Windows).
@@ -2606,34 +2615,34 @@ impl MeshesModel {
         let (head_part, textures) = (nif.head_part, textures.clone());
         let mut next = e.preview_nif();
         next.head_part = head_part;
-        let old = |s: &ParsedShape| before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m);
-        let changed = |s: &&ParsedShape| old(s) != Some(&s.material);
+        let pairs: Vec<(&ParsedShape, Option<&MaterialState>)> = next
+            .shapes
+            .iter()
+            .map(|s| (s, before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m)))
+            .collect();
         // The store is asked only for shapes whose shader type or slot paths changed (the only inputs of
         // `texture_sources`): a drag tick on a float field changes a material but names no new texture.
-        let named = |s: &&ParsedShape| {
-            old(s).is_none_or(|m| {
-                let norms = |m: &MaterialState| -> Vec<String> {
-                    m.slots.iter().map(|t| t.norm.clone()).collect()
-                };
-                m.shader_type != s.material.shader_type || norms(m) != norms(&s.material)
-            })
-        };
-        let fresh = if next.shapes.iter().any(|s| named(&s)) {
-            match texture_sources(store, &slot_paths(next.shapes.iter().filter(named))) {
+        let named: Vec<&ParsedShape> = pairs
+            .iter()
+            .filter(|(s, old)| old.is_none_or(|m| !same_lookup(m, &s.material)))
+            .map(|(s, _)| *s)
+            .collect();
+        let fresh = if named.is_empty() {
+            HashMap::new()
+        } else {
+            match texture_sources(store, &slot_paths(named)) {
                 Ok(f) => f,
                 Err(err) => {
                     self.error = Some(db_err(err));
                     return;
                 }
             }
-        } else {
-            HashMap::new()
         };
         let mut reload = fresh.keys().any(|k| !textures.contains_key(k));
         if !reload {
             // The render thread keeps these edits and re-applies them on a reload it starts itself.
-            for s in next.shapes.iter().filter(changed) {
-                if !self.v3.set_material(s.id, s.material.clone()) {
+            for (s, old) in &pairs {
+                if *old != Some(&s.material) && !self.v3.set_material(s.id, s.material.clone()) {
                     reload = true;
                     break;
                 }

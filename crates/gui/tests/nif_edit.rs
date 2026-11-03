@@ -934,12 +934,21 @@ fn new_texture_path_reloads_the_same_view() {
 /// Note GP9: a drag tick on a float field names no texture, so it queries no store.
 #[test]
 fn a_float_edit_makes_no_store_query() {
-    let (_d, mut m) = session(false);
+    let (d, mut m) = session(false);
+    let cmds = attach(&mut m, d.path());
     m.open_edit();
+    m.v3.request_frame(64, 64);
+    assert_eq!(loads(&cmds).len(), 1, "the first LoadParsed");
     let n = sdc_gui::model::meshes::texture_source_calls();
     gloss(&mut m, 12.5);
     assert_eq!(m.error, None);
     assert_eq!(sdc_gui::model::meshes::texture_source_calls() - n, 0);
+    let got: Vec<V3Cmd> = cmds.try_iter().collect();
+    assert!(got.iter().any(|c| matches!(
+        c,
+        V3Cmd::SetMaterial { material, .. } if material.params.glossiness == 12.5
+    )));
+    assert!(!got.iter().any(|c| matches!(c, V3Cmd::LoadParsed { .. })));
 }
 
 /// Note GP9 (Review Focus 3): a slot path the store has and the loaded map lacks is still looked up and reloaded.
