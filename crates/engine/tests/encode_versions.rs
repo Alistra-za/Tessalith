@@ -281,6 +281,27 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
             &["subtype=diffuse", &fmt, "alpha.policy=blend"],
         );
     }
+    // `_SRGB`-tagged BC1 and BC3 (pbr_albedo is the cs sub-type that carries the tag), an opaque and a blend source.
+    add("srgb_bc1", rgb(64), &["subtype=pbr_albedo", "format=bc1"]);
+    add(
+        "srgb_bc3",
+        rgba64(),
+        &["subtype=pbr_albedo", "format=bc3", "alpha.policy=blend"],
+    );
+    // A non-square gradient: BC1 and BC3 with a 2:1 mip chain.
+    let wide = DynamicImage::ImageRgb8(ImageBuffer::from_fn(32, 16, |x, y| {
+        Rgb([(x * 8) as u8, (y * 14) as u8, ((x * y) % 256) as u8])
+    }));
+    add(
+        "wide_bc1",
+        wide.clone(),
+        &["subtype=diffuse", "format=bc1", "mips.filter=box"],
+    );
+    add(
+        "wide_bc3",
+        wide,
+        &["subtype=diffuse", "format=bc3", "mips.filter=box"],
+    );
     add("gray_bc4", rgb(64), &["subtype=height", "format=bc4"]);
     // A normal cannot be BC5 (FMT-BC5-NORMAL), so BC5 is a two-channel map.
     add(
@@ -490,6 +511,10 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "cutout_bc7",
         "blend_bc3",
         "blend_bc7",
+        "srgb_bc1",
+        "srgb_bc3",
+        "wide_bc1",
+        "wide_bc3",
     ] {
         assert!(covered(name), "identity pins miss the {name} fixture");
     }

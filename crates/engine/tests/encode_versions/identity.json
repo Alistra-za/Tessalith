@@ -48,6 +48,34 @@
     "subtype": "generic_two_channel",
     "width": 64
   },
+  "cov/textures/c/srgb_bc1.dds": {
+    "format": "Bc1 { srgb: true }",
+    "height": 64,
+    "payload_sha256": "f4dd4fb06a8d9e26ddfda2fb80d45f93cbceac1c831294d33047c1880f084bb8",
+    "subtype": "pbr_albedo",
+    "width": 64
+  },
+  "cov/textures/c/srgb_bc3.dds": {
+    "format": "Bc3 { srgb: true }",
+    "height": 64,
+    "payload_sha256": "32042c354c519004932e37a38d56593f15be80f4e0cdbfbcc0401aac207f4426",
+    "subtype": "pbr_albedo",
+    "width": 64
+  },
+  "cov/textures/c/wide_bc1.dds": {
+    "format": "Bc1 { srgb: false }",
+    "height": 16,
+    "payload_sha256": "1b054c3ffb4849b7ad1054a88bce1bc57551cd858a71d4de9361878c942b11f3",
+    "subtype": "diffuse",
+    "width": 32
+  },
+  "cov/textures/c/wide_bc3.dds": {
+    "format": "Bc3 { srgb: false }",
+    "height": 16,
+    "payload_sha256": "5c48c5bdd55d6cdb808f8e11866b30e592701ad196562ab40598ccd6e4c05606",
+    "subtype": "diffuse",
+    "width": 32
+  },
   "textures/h/backlight_tint.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
