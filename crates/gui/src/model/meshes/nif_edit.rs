@@ -220,6 +220,9 @@ pub const NIF_UNANSWERED: &str =
     "the file on disk was not written by Tessalith: answer Keep or Overwrite on its row";
 pub const NIF_KEPT: &str = "you kept the file on disk";
 pub const NIF_CHANGED_SINCE: &str = "changed on disk since you answered";
+/// Note GP10: the write found a file Tessalith did not write that the row had not (it changed in between).
+pub const NIF_FOREIGN_AT_WRITE: &str =
+    "the file on disk changed before the write: answer Keep or Overwrite on its row";
 /// Note GD2 (was CQ5's under-button line): the export will write the patch without dropping orphan blocks.
 pub const NO_CLEANUP: &str =
     "Exports without cleanup: the file has a block Tessalith does not understand";
@@ -1816,8 +1819,9 @@ pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// Note GP10: the file at `path` as an export of `out` finds it: None when absent or Tessalith's own (its hash is
-/// `last`, the last export's), Some(SHA-256) when Tessalith did not write it, Err when it cannot be read.
+/// Note GP10: what an export of `out` to `path` finds there: None when the file is absent, equal to `out` or
+/// Tessalith's own (its hash is `last`, the last export's); Some(its SHA-256) when Tessalith did not write it; Err
+/// when it cannot be read.
 fn foreign_hash(path: &Path, out: &[u8], last: Option<&str>) -> Result<Option<[u8; 32]>, String> {
     let cannot = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
     let ours = |b: &[u8]| last == Some(edit_doc::sha256_hex(b).as_str());
@@ -2173,7 +2177,9 @@ impl MeshesModel {
                 false,
             )),
             ExportOutcome::Blocked(s) => Some((s.clone(), true)),
-            ExportOutcome::Foreign => None,
+            ExportOutcome::Foreign => {
+                Some((format!("Not exported: {NIF_FOREIGN_AT_WRITE}."), true))
+            }
         };
         // the re-run row follows `export_note`, which has no `rev` of its own (Note GP8)
         e.refresh_blocked();
@@ -2349,7 +2355,9 @@ impl MeshesModel {
                     }
                 }
                 ExportOutcome::Blocked(why) => skipped.push(format!("{}: {why}", r.path)),
-                ExportOutcome::Foreign => skipped.push(format!("{}: {NIF_CHANGED_SINCE}", r.path)),
+                ExportOutcome::Foreign => {
+                    skipped.push(format!("{}: {NIF_FOREIGN_AT_WRITE}", r.path))
+                }
             }
         }
         match skipped.is_empty() {

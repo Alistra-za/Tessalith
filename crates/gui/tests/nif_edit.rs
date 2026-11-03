@@ -3276,6 +3276,65 @@ fn an_overwrite_answer_for_older_bytes_does_not_write() {
     assert_eq!(std::fs::read(&p).unwrap(), b"changed");
 }
 
+/// Note GP10: the write checks the export path again. A file equal to the export when the rows were read is not
+/// foreign; a source change re-applies the ops at the write, so it no longer matches and is not replaced.
+#[test]
+fn a_file_that_turns_foreign_at_the_write_is_not_written() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let e = m.edit.as_ref().unwrap();
+    let theirs = e.out.to_vec();
+    let p = exported(&d);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, &theirs).unwrap();
+    // the source's specular strength changes on disk: no conflict with the glossiness edit, but other bytes
+    let (shape, shader) = lit_shape(e);
+    let cur = e.model.lighting[&shader].lighting.params.specular_strength;
+    let src = nif::edit::apply(
+        &e.source,
+        &[Op::SetField {
+            at: nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap(),
+            field: Field::SpecularStrength,
+            value: Value::F32((cur + 1.0).to_bits()),
+            base: Value::F32(cur.to_bits()),
+        }],
+    )
+    .unwrap()
+    .bytes;
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    assert_eq!(
+        review_row(&m).foreign,
+        None,
+        "the rows still see the old export"
+    );
+    export_fails(&mut m, NIF_FOREIGN_AT_WRITE);
+    assert_eq!(std::fs::read(&p).unwrap(), theirs);
+    let e = m.edit.as_ref().unwrap();
+    assert_ne!(
+        *e.out, theirs,
+        "the write re-applied the ops to the new source"
+    );
+    let note = format!("Not exported: {NIF_FOREIGN_AT_WRITE}.");
+    assert_eq!(e.export_note, Some((note, true)));
+}
+
+/// Note GD2: an answer counts only while the file has the hash it was given for: Keep for a file that is then
+/// deleted no longer applies, and the export writes.
+#[test]
+fn a_keep_answer_for_a_deleted_file_no_longer_applies() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let p = exported(&d);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, b"junk").unwrap();
+    answer(&mut m, GuardChoice::KeepTheirs);
+    std::fs::remove_file(&p).unwrap();
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(std::fs::read(&p).unwrap(), *m.edit.as_ref().unwrap().out);
+}
+
 #[test]
 fn conflicting_doc_blocks_export() {
     let (d, mut m) = export_session();
@@ -3400,9 +3459,6 @@ fn an_unreadable_export_file_blocks_and_writes_nothing() {
     m.open_edit();
     gloss(&mut m, 12.5);
     std::fs::create_dir_all(exported(&d)).unwrap();
-    export_fails(&mut m, ": Cannot read ");
-    // an Overwrite answer does not get past it either
-    m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, [0; 32]);
     export_fails(&mut m, ": Cannot read ");
     assert!(exported(&d).is_dir());
     let doc = load(&m.edit.as_ref().unwrap().doc_path).unwrap().unwrap();
