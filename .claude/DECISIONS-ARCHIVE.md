@@ -448,6 +448,12 @@ ARCHIVED (superseded by Note AU6, 2026-10-15)
 ARCHIVED (wording before the edit; superseded in part by Note CC9, 2026-10-18)
 - **AJ1. The coat settings are a group under the Multilayer (coat) checkbox, not in Advanced.** The group holds coat colour, coat specular level, coat roughness, coat strength, coat diffuse, coat normal, coat parallax and inner UV scale, in schema key order. It shows only while Multilayer is on. `coat_color` and `inner_uv_scale` were the only two marked advanced; the schema flag is now off, and Multilayer is no longer an Advanced group. (Superseded in part by CC9 and CC13: the group is titled "Coat" and is always listed, reading "off" while Multilayer is off.)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **AJ1. The coat settings are a group under the Multilayer (coat) checkbox, not in Advanced.** The group holds coat colour, coat specular level, coat roughness, coat strength, coat diffuse, coat normal, coat parallax and inner UV scale, in schema key order. It is titled "Coat" and always listed, reading "off" while Multilayer is off (Notes CC9, CC13). `coat_color` and `inner_uv_scale` were the only two marked advanced; the schema flag is now off, and Multilayer is no longer an Advanced group.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **AJ4. Multilayer off keeps the values.** The group is hidden; the stored coat values stay in `sdc-project.toml` and the writer skips them (its existing rule: a group key is written only while its feature is live). A note under the checkbox reads "N coat values kept, unused while Multilayer is off".
+
 ## Note AM — MO2 button and preset creator (2026-10-15)
 
 ARCHIVED (wording before the edit; superseded in part by Note CE11 and Note FB7, 2026-10-18)
@@ -720,6 +726,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FC9 and Note FB2, 
 
 ARCHIVED (superseded by Note CD4 and Note FB2, 2026-10-18)
 - **CC14 K14: the JSON-editor button left `pgp_fields::panel`.** The 3D settings window therefore has no "Open the TruePBR JSON editor…" button any more. The Material tab has a small **TruePBR JSON editor…** button right-aligned on its header row (the set label on the left); the header's "PG JSON Editor" button and the palette still open the editor in 3D. (superseded by CD4)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CC9 Feature groups are always listed, reading "off" while off (A3 header-value design).** Coat, Emissive, Parallax, Glint and Fuzz used to be hidden while off; now they are listed, closed and "off". An off group's body is empty except Coat, whose body holds the kept-values note (A13), and Subsurface, whose body holds the selector (CC12). A group's id is keyed by its on/off state (`("pgp", g, on, set)`), so a group opens when its feature turns on (K16). A feature that is on but blocked reads `on, blocked by {feature}` in amber (Note FC9).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CC15 What the 3D settings window shows differently.** Every group is framed with its value in the header; the order is Material, Features, Coat, Subsurface, Emissive, Parallax, Glint, Fuzz (Subsurface used to follow Parallax); the five feature groups are always listed and closed while off; the Subsurface selector is inside the Subsurface group; NiAlphaProperty starts closed; the titles in CC13; no JSON-editor button; on a PBR Landscape set "PGPatcher JSON settings" and the "PBR Landscape" card are framed groups.
 
 ## Note CD — GUI layout v2, branch 3 (main team, 2026-10-18)
 

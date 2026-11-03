@@ -4,7 +4,9 @@
 //! two always agree. Drawing only.
 use super::columns::{AMBER, RED};
 use super::path_picker;
-use super::pgp_fields::{alpha_default, context, control, disabled_reason, edit_key, Ctx};
+use super::pgp_fields::{
+    alpha_default, context, control, disabled_reason, edit_key, kept_line, kept_unused, Ctx,
+};
 use crate::model::pbr_export::{json_issues, json_name, written_json_entries, JsonIssues};
 use crate::model::sections::{delete_hits, not_written_reason, DeleteHit};
 use crate::model::sets::{slot_matches, SetView};
@@ -572,6 +574,10 @@ fn key_pill(ui: &mut egui::Ui, k: &KeySpec, c: &Ctx, set: &str, acts: &mut Vec<A
         });
         if let Some(why) = reason {
             r.response.on_disabled_hover_text(why);
+        }
+        // Note FM33: the same rule as the set editor's cards.
+        if kept_unused(k, c) {
+            kept_line(ui, "The feature is off, so the writer skips this value");
         }
         if c.read_only.is_none() && remove_button(ui) {
             acts.push(Act::Unpend(Owner::Set(set.to_string()), k.key.to_string()));

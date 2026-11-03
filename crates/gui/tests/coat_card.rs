@@ -73,7 +73,7 @@ fn the_coat_group_shows_under_multilayer_and_not_in_advanced() {
 }
 
 #[test]
-fn the_coat_group_is_hidden_and_values_are_kept_while_multilayer_is_off() {
+fn the_coat_group_keeps_its_values_while_multilayer_is_off() {
     let d = tempfile::tempdir().unwrap();
     let mut h = panel(model(
         d.path(),
@@ -85,17 +85,16 @@ fn the_coat_group_is_hidden_and_values_are_kept_while_multilayer_is_off() {
     ));
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    // Layout v2 A13: Coat stays listed, closed and "off"; the kept note is in its body.
+    // Note FM33: with values stored Coat stays listed, "off", open on its "kept, not used" line.
     assert!(h.query_by_label("Coat colour").is_none());
     assert!(h.query_by_label("Inner UV scale").is_none());
-    h.get_by_label("Coat").click();
-    h.run();
-    h.get_by_label("2 coat values kept, unused while Multilayer is off");
+    h.get_by_label("Coat");
+    h.get_by_label("kept, not used");
     assert_eq!(stored(&h, "coat_color"), Some(json!([10, 20, 30])));
     assert_eq!(stored(&h, "inner_uv_scale"), Some(json!(2.0)));
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    assert!(h.query_by_label_contains("coat values kept").is_none());
+    assert!(h.query_by_label("kept, not used").is_none());
     h.get_by_label("Coat colour");
 }
 

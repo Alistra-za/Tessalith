@@ -79,13 +79,34 @@ fn blocked_head(f: Feature, s: &Settings, state: &str) -> Option<egui::RichText>
     Some(egui::RichText::new(format!("{state}, blocked by {}", feature_name(by))).color(AMBER))
 }
 
+/// Note FM33: what a card (or the Displacement scale row) says while its feature is off but the JSON still holds its
+/// values. The values stay as written; the writer skips them.
+pub(crate) const KEPT_NOT_USED: &str = "kept, not used";
+
+/// Note FM33: a value of a feature that is off or blocked, still in the set's JSON (`false` is no value). Both
+/// TruePBR editors read this one rule.
+pub(crate) fn kept_unused(k: &KeySpec, c: &Ctx) -> bool {
+    (group_feature(k.group).is_some() || k.group == Group::Subsurface)
+        && c.own
+            .get(edit_key(k.key))
+            .is_some_and(|v| *v != Value::Bool(false))
+        && !group_open(k.group, &c.eff)
+}
+
+/// The "kept, not used" line; `what` is its hover.
+pub(crate) fn kept_line(ui: &mut egui::Ui, what: &str) {
+    ui.label(egui::RichText::new(KEPT_NOT_USED).small().weak())
+        .on_hover_text(what);
+}
+
 fn group_title(g: Group) -> &'static str {
     match g {
         Group::Match => "Match",
         Group::Material => "Material",
         Group::Features => "Features",
         Group::Emissive => "Emissive settings",
-        Group::Parallax => "Parallax settings",
+        // No card: Displacement scale is a row of Material while Parallax is on (Note FM33).
+        Group::Parallax => "Parallax",
         Group::Subsurface => "Subsurface",
         Group::Multilayer => "Coat",
         Group::Glint => "Glint settings",
@@ -100,13 +121,12 @@ fn group_title(g: Group) -> &'static str {
 
 /// The visual settings (F1 spec §4 header 1), in layout v2 A3's order. Matching and the advanced keys have their own
 /// groups.
-const MAIN: [Group; 8] = [
+const MAIN: [Group; 7] = [
     Group::Material,
     Group::Features,
     Group::Multilayer,
     Group::Subsurface,
     Group::Emissive,
-    Group::Parallax,
     Group::Glint,
     Group::Fuzz,
 ];
@@ -201,19 +221,38 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
     let c = context(model, set);
     let mut edits: Vec<Edit> = vec![];
     for g in MAIN {
-        let keys: Vec<&KeySpec> = KEYS
+        let mut keys: Vec<&KeySpec> = KEYS
             .iter()
             .filter(|k| {
                 k.group == g && !k.advanced && k.kind != KeyKind::Slot && !is_sub_key(k.key)
             })
             .filter(|k| !(c.grass && grass_ignores(k.key)))
             .collect();
+        // Note FM33: Parallax has no card. Its Displacement scale is a row of Material, under Roughness scale, while
+        // Parallax is on, or while the JSON still holds the value (then with the "kept, not used" line).
+        let mut disp_kept = None;
+        if g == Group::Material && !c.grass {
+            if let Some(d) = spec("displacement_scale") {
+                if group_open(Group::Parallax, &c.eff) || kept_unused(d, &c) {
+                    disp_kept = Some(kept_unused(d, &c));
+                    keys.push(d);
+                }
+            }
+        }
         // The selector keeps Subsurface even when grass leaves it no rows.
         if keys.is_empty() && g != Group::Subsurface {
             continue;
         }
         // Material and Features are always "open"; a feature group is open while on and not blocked.
         let on = group_open(g, &c.eff);
+        // Note FM33: a feature's card shows while the feature is on (blocked included: its header says so) or while the
+        // JSON still holds its values. Subsurface holds its own switch (the selector), so it stays.
+        let kept = keys.iter().any(|k| kept_unused(k, &c));
+        if let Some(f) = group_feature(g) {
+            if !on && !kept && !feature_on(&c.eff, f) {
+                continue;
+            }
+        }
         // C14 (Note FB2): a feature's state shows once, in its own group's header; the Features ticks carry no count.
         let head = match g {
             Group::Material | Group::Features => None,
@@ -237,19 +276,24 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
         // K16: the id carries the state, so a group opens when its feature turns on and closes when it turns off.
         super::group::group(
             ui,
-            ("pgp", g as u8, on, &c.set),
+            ("pgp", g as u8, on, kept, &c.set),
             group_title(g),
             head,
-            on,
+            on || kept,
             |ui| {
                 if g == Group::Subsurface {
                     subsurface_selector(ui, &c, &mut edits);
                 }
                 if on {
                     key_grid(ui, &c, "pgp", g, &keys, &mut edits);
-                }
-                if g == Group::Multilayer {
-                    coat_kept_note(ui, &c);
+                    if disp_kept == Some(true) {
+                        kept_line(
+                            ui,
+                            "Displacement scale: Parallax is off, so it is not written",
+                        );
+                    }
+                } else if kept {
+                    kept_line(ui, "These values stay in the JSON; the writer skips them while the feature is off");
                 }
             },
         );
@@ -361,24 +405,6 @@ fn subsurface_selector(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     });
     for w in subsurface_pitfalls(&c.eff, c.tree_anim) {
         ui.colored_label(AMBER, w);
-    }
-}
-
-/// Coat values stay in the set while Multilayer is off but are not written (DECISIONS AJ4); say so.
-fn coat_kept_note(ui: &mut egui::Ui, c: &Ctx) {
-    let n = KEYS
-        .iter()
-        .filter(|k| k.group == Group::Multilayer && c.own.contains_key(k.key))
-        .count();
-    if n > 0 && !group_open(Group::Multilayer, &c.eff) {
-        let s = if n == 1 { "" } else { "s" };
-        ui.label(
-            egui::RichText::new(format!(
-                "{n} coat value{s} kept, unused while Multilayer is off"
-            ))
-            .small()
-            .weak(),
-        );
     }
 }
 

@@ -10,12 +10,11 @@ A PBR set under `cs` has the settings PGPatcher reads in the set editor's **Mate
 
 | Group | Settings |
 |---|---|
-| Material | Specular level, Roughness scale. |
+| Material | Specular level, Roughness scale, and Displacement scale while Parallax is on. |
 | Features | Emissive, Parallax, Hair, Multilayer (coat), Glint, Fuzz. |
 | Coat | Under the **Multilayer (coat)** checkbox: coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. |
 | Subsurface | The **Off / Standard / Foliage** selector, then colour and opacity for Standard and Foliage. |
 | Emissive settings | Emissive scale, Emissive colour. |
-| Parallax settings | Displacement scale. |
 | Glint settings | The glint parameters. |
 | Fuzz settings | Fuzz colour and weight. |
 | NiAlphaProperty | The schema's `alphaprop_*` keys ([below](#nialphaproperty)). Starts closed. |
@@ -25,9 +24,10 @@ A PBR set under `cs` has the settings PGPatcher reads in the set editor's **Mate
 
 A small **PGPatcher JSON editor…** button beside the Material tab opens the [JSON editor](#the-json-editor).
 
-**Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Parallax / Glint / Fuzz "on" or "off", NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records". Click a title to open or close it.
+**Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Glint / Fuzz "on" (or "off" while the card is kept, below), NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records". Click a title to open or close it.
 
-- The feature groups are always listed. While the feature is off they read "off" and are closed, and one opens when its feature turns on.
+- Coat, Emissive, Glint and Fuzz are listed only while their feature is on: ticking its box adds the group, open, and unticking removes it. If the feature is off but the JSON still holds its values, the group stays, reads "off" and says "kept, not used". The values are neither written nor deleted.
+- Parallax has no group: **Displacement scale** is a row of Material, under Roughness scale, while Parallax is on. Off with a stored value, the row stays with "kept, not used".
 - A feature's state shows once, in its own group's header; the Features group (the ticks) has no value.
 - A feature that is on but blocked (multilayer with hair) reads "on, blocked by hair" (amber) in its own header, stays closed and stays ticked in Features.
 
@@ -37,7 +37,7 @@ A small **PGPatcher JSON editor…** button beside the Material tab opens the [J
 
 **Switches turn on by themselves from the set's textures:** a `_cnr` turns on Multilayer and Coat normal, an `_f` Fuzz, a `_p` Parallax, a `_g` Emissive, and an `_s` Subsurface (Foliage when the set's scanned meshes are Tree Anim, or its path is under a trees or plants folder and there is no scan; Coat diffuse while Multilayer is on). They read "(auto)", with the reason on hover, and are written to the JSON. Untick one to store an explicit off, which wins; reset removes it. Removing the texture removes the auto value. Nothing is saved to the project until you set it. A hair diffuse defaults to cutout + blend alpha.
 
-**Coat.** Multilayer is what makes the coat values take effect. With Multilayer off the group reads "off" and stays closed; the values are kept but not written, and a note says how many are kept. Inner UV scale only shows where the diffuse alpha is below 1 and the set has an inner-layer texture.
+**Coat.** Multilayer is what makes the coat values take effect. Inner UV scale only shows where the diffuse alpha is below 1 and the set has an inner-layer texture.
 
 **Subsurface** is one selector, the first row of its group. Standard writes `subsurface`, Foliage writes `subsurface_foliage` (the Tree Anim term in Community Shaders), Off writes neither; it never writes both. Foliage needs an `_s`, like Standard.
 
@@ -96,7 +96,7 @@ Open it with **PGPatcher JSON editor…** in the header's **Export to ▾** menu
 
 Its top field, **JSON name:**, is the JSON's file name (by default the folder name, shown as grey hint text; empty restores it), with the full path beside it. A change applies when you leave the field, as one undo step.
 
-- Each PBR set's entry is a pill with its title, output prefix and **Show** (selects the set and brings its editor to the front), then its keys as small pills with the same controls as the Material tab's groups. Each entry has a **Collapse** / **Expand** button.
+- Each PBR set's entry is a pill with its title, output prefix and **Show** (selects the set and brings its editor to the front), then its keys as small pills with the same controls as the Material tab's groups. A key whose feature is off reads "kept, not used". Each entry has a **Collapse** / **Expand** button.
 - **+ key** adds any schema key. Keys Tessalith does not know are shown in amber and kept as written; they can be removed.
 - A texture match pill picks how it matches: *Match: exact, slot N (diffuse)* (`matchN`) or *path contains*. A set's own diffuse path reads *derived from the set*. A lock key reads *Keep the original texture (PGPatcher won't replace it): diffuse* (`lock_diffuse`, shown on hover).
 - The **▾** [path picker](GUI-Set-Editor.md#path-pickers) on a match lists the scan's textures for that slot, or every known texture path. The *mesh path contains* pill (`nif_filter`) has a picker of folders that hold scanned meshes. Without a scan, the pickers list only the project's own paths.

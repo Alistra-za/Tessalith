@@ -285,3 +285,7 @@ DY¶- shortcut: the filled analysis is not cached	DY		back	FM		archive-item	2026
 DY¶- shortcut: helper rows are mouse-only	DY		back	FM		archive-item	2026-11-03
 CF7	CF		back	FM		partial	2026-11-03		goes: the Tab and screen-reader limit, the stale off-screen heights, the scroll shift after a jump, the least-scroll jump; stays: the clip-rect skip, card_h, CARD_EST, REVEAL_TRIES, the drop on the target card (Note FM32)
 FC¶- **FC8 egui-limit rulings	FC		back	FM		partial	2026-11-03		goes: CF7 stands as a shortcut; stays: CG2 and CE20 as shortcuts (Note FM32)
+AJ1	AJ		back	FM		partial	2026-11-03		goes: 'always listed, reading "off" while Multilayer is off'; stays: the coat keys, their order, the title and the schema flag (Note FM33)
+AJ4	AJ		back	FM		partial	2026-11-03		goes: 'The group is hidden' and the note text "N coat values kept, unused while Multilayer is off"; stays: the values are kept and the writer skips them (Note FM33)
+CC9	CC		back	FM		partial	2026-11-03		goes: Coat, Emissive, Parallax, Glint and Fuzz always listed, closed and "off", and Coat as the only off group with a body; stays: the id keyed by state, Subsurface's selector body, the blocked header (Note FM33)
+CC15	CC		back	FM		partial	2026-11-03		goes: Parallax in the group order and the five feature groups always listed; stays: the rest (Note FM33)

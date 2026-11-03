@@ -188,10 +188,10 @@ fn the_material_groups_are_framed_in_order_with_values() {
     rock_selected(&mut m);
     let mut h = harness(m);
     h.run();
+    // Note FM33: a feature's card shows only while the feature is on, so Coat is not listed here.
     let ys: Vec<f32> = [
         "Material",
         "Features",
-        "Coat",
         "Subsurface",
         "NiAlphaProperty",
         "Matching",
@@ -202,9 +202,9 @@ fn the_material_groups_are_framed_in_order_with_values() {
     .map(|t| title(&h, t).rect().min.y)
     .collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
+    assert!(h.query_all_by_label("Coat").next().is_none());
     assert_eq!(header_value(&h, "Subsurface"), "Off");
     assert_eq!(header_value(&h, "Matching"), "1 match");
-    assert_eq!(header_value(&h, "Coat"), "off");
     assert_eq!(header_value(&h, "NiAlphaProperty"), "off");
     assert_eq!(header_value(&h, "CS PBR records"), "0 records");
 }
@@ -386,12 +386,15 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
     h.get_by_label("Multilayer (coat)").click();
     h.run();
     assert_eq!(header_value(&h, "Coat"), "on");
+    h.get_by_label("Emissive").scroll_to_me();
+    h.run();
+    h.get_by_label("Emissive").click();
+    h.run();
     let p = centre(&h);
     for t in [
         "Coat",
         "Subsurface",
         "Emissive settings",
-        "Parallax settings",
         "NiAlphaProperty",
         "Matching",
         "CS PBR records",
