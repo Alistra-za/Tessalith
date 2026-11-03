@@ -236,7 +236,10 @@ pub fn specular_chain(
                     for (k, p) in out.iter_mut().enumerate() {
                         let i = c * chunk + k;
                         let (f, j) = (i / per_face, (i % per_face) as u32);
-                        *p = prefilter(src, cube_dir(f, j % n, j / n, n), r, wt);
+                        // CS's getSamplingVector: the texel's corner (ThreadID / size, no + 0.5), Note GM2.
+                        let at = |c: u32| c as f32 / n as f32;
+                        let dir = engine::cube::dir_at(f, at(j % n), at(j / n));
+                        *p = prefilter(src, dir, r, wt);
                     }
                 });
             }

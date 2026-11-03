@@ -9,11 +9,13 @@ use windows::Win32::Graphics::Direct3D::{
     D3D11_SRV_DIMENSION_TEXTURECUBE,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    ID3D11Buffer, ID3D11ShaderResourceView, ID3D11Texture2D, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BUFFER_DESC, D3D11_BUFFER_SRV, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
-    D3D11_RESOURCE_MISC_TEXTURECUBE, D3D11_SHADER_RESOURCE_VIEW_DESC,
-    D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA, D3D11_TEX2D_ARRAY_SRV,
-    D3D11_TEX2D_SRV, D3D11_TEXCUBE_SRV, D3D11_TEXTURE2D_DESC, D3D11_USAGE_IMMUTABLE,
+    ID3D11Buffer, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11UnorderedAccessView,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BUFFER_DESC, D3D11_BUFFER_SRV,
+    D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_RESOURCE_MISC_TEXTURECUBE,
+    D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA,
+    D3D11_TEX2D_ARRAY_SRV, D3D11_TEX2D_ARRAY_UAV, D3D11_TEX2D_SRV, D3D11_TEXCUBE_SRV,
+    D3D11_TEXTURE2D_DESC, D3D11_UAV_DIMENSION_TEXTURE2DARRAY, D3D11_UNORDERED_ACCESS_VIEW_DESC,
+    D3D11_UNORDERED_ACCESS_VIEW_DESC_0, D3D11_USAGE_DEFAULT, D3D11_USAGE_IMMUTABLE,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN,
@@ -354,6 +356,118 @@ pub fn cube_srv(
     bpp: u32,
     data: &[u8],
 ) -> Result<ID3D11ShaderResourceView, String> {
+    let init = cube_init(size, mips, bpp, data)?;
+    let t = create_texture(gpu, &tex_desc(size, size, mips, 6, format), &init)?;
+    srv_from(gpu, &t.into(), &view_cube(format, mips))
+}
+
+/// [`cube_srv`]'s cube, but DEFAULT usage and also bound as a UAV, for a compute pass to overwrite levels of
+/// (Note GM1). The texture comes back too: [`uav_level`] makes a view per level.
+pub fn cube_rw(
+    gpu: &Gpu,
+    size: u32,
+    mips: u32,
+    format: DXGI_FORMAT,
+    bpp: u32,
+    data: &[u8],
+) -> Result<(ID3D11Texture2D, ID3D11ShaderResourceView), String> {
+    let init = cube_init(size, mips, bpp, data)?;
+    let mut d = tex_desc(size, size, mips, 6, format);
+    d.Usage = D3D11_USAGE_DEFAULT;
+    d.BindFlags |= D3D11_BIND_UNORDERED_ACCESS.0 as u32;
+    let t = create_texture(gpu, &d, &init)?;
+    let v = srv_from(gpu, &t.clone().into(), &view_cube(format, mips))?;
+    Ok((t, v))
+}
+
+/// A `RWTexture2DArray` view of level `mip` of every slice of `t`.
+pub fn uav_level(
+    gpu: &Gpu,
+    t: &ID3D11Texture2D,
+    format: DXGI_FORMAT,
+    mip: u32,
+    slices: u32,
+) -> Result<ID3D11UnorderedAccessView, String> {
+    let d = D3D11_UNORDERED_ACCESS_VIEW_DESC {
+        Format: format,
+        ViewDimension: D3D11_UAV_DIMENSION_TEXTURE2DARRAY,
+        Anonymous: D3D11_UNORDERED_ACCESS_VIEW_DESC_0 {
+            Texture2DArray: D3D11_TEX2D_ARRAY_UAV {
+                MipSlice: mip,
+                FirstArraySlice: 0,
+                ArraySize: slices,
+            },
+        },
+    };
+    let mut v = None;
+    // SAFETY: `t` belongs to `gpu.device`; `d` and the out-pointer are live locals.
+    unsafe {
+        gpu.device
+            .CreateUnorderedAccessView(t, Some(&d), Some(&mut v))
+    }
+    .map_err(|e| gpu.fail("CreateUnorderedAccessView", e))?;
+    v.ok_or_else(|| "CreateUnorderedAccessView returned no view".to_string())
+}
+
+/// Level `mip` of face `face` of an RGBA16F cube view, as f32 texels (tests only).
+#[cfg(feature = "test-hooks")]
+pub fn read_cube_level(
+    gpu: &Gpu,
+    v: &ID3D11ShaderResourceView,
+    face: u32,
+    mip: u32,
+) -> Result<Vec<[f32; 4]>, String> {
+    use windows::core::Interface;
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_USAGE_STAGING,
+    };
+    // SAFETY (whole block): every object belongs to `gpu.device`; the mapped rows are read inside Map/Unmap.
+    unsafe {
+        let t: ID3D11Texture2D = v
+            .GetResource()
+            .map_err(|e| e.to_string())?
+            .cast()
+            .map_err(|e| e.to_string())?;
+        let mut d = D3D11_TEXTURE2D_DESC::default();
+        t.GetDesc(&mut d);
+        let n = (d.Width >> mip).max(1);
+        let mut s = tex_desc(n, n, 1, 1, d.Format);
+        (s.Usage, s.BindFlags, s.MiscFlags) = (D3D11_USAGE_STAGING, 0, 0);
+        s.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        let mut st = None;
+        gpu.device
+            .CreateTexture2D(&s, None, Some(&mut st))
+            .map_err(|e| gpu.fail("CreateTexture2D (staging)", e))?;
+        let st = st.ok_or("no staging texture")?;
+        gpu.ctx
+            .CopySubresourceRegion(&st, 0, 0, 0, 0, &t, face * d.MipLevels + mip, None);
+        let mut m = Default::default();
+        gpu.ctx
+            .Map(&st, 0, D3D11_MAP_READ, 0, Some(&mut m))
+            .map_err(|e| gpu.fail("Map", e))?;
+        let mut out = Vec::with_capacity((n * n) as usize);
+        for y in 0..n as usize {
+            let row = std::slice::from_raw_parts(
+                (m.pData as *const u8).add(y * m.RowPitch as usize) as *const u16,
+                n as usize * 4,
+            );
+            out.extend(
+                row.chunks(4)
+                    .map(|c| std::array::from_fn(|k| half::f16::from_bits(c[k]).to_f32())),
+            );
+        }
+        gpu.ctx.Unmap(&st, 0);
+        Ok(out)
+    }
+}
+
+/// [`cube_srv`]'s initial data: `data` checked against the layout, one entry per face per level.
+fn cube_init(
+    size: u32,
+    mips: u32,
+    bpp: u32,
+    data: &[u8],
+) -> Result<Vec<D3D11_SUBRESOURCE_DATA>, String> {
     let need = cube_bytes(size, mips, bpp)?;
     if data.len() as u64 != need {
         return Err(format!(
@@ -380,8 +494,7 @@ pub fn cube_srv(
             at += slice as usize;
         }
     }
-    let t = create_texture(gpu, &tex_desc(size, size, mips, 6, format), &init)?;
-    srv_from(gpu, &t.into(), &view_cube(format, mips))
+    Ok(init)
 }
 
 /// Bytes per texel of the cube formats [`read_cube_dds`] accepts: R11G11B10_FLOAT (26), RGBA16F (10), RGBA32F (2).

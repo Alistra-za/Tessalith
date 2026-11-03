@@ -17,10 +17,10 @@ use crate::source::SourceSet;
 use std::collections::BTreeSet;
 use std::path::Path;
 use windows::Win32::Graphics::Direct3D11::{
-    ID3D11ComputeShader, ID3D11SamplerState, ID3D11ShaderResourceView, D3D11_COMPARISON_NEVER,
-    D3D11_FEATURE_DATA_FORMAT_SUPPORT2, D3D11_FEATURE_FORMAT_SUPPORT2,
+    ID3D11ComputeShader, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11Texture2D,
+    D3D11_COMPARISON_NEVER, D3D11_FEATURE_DATA_FORMAT_SUPPORT2, D3D11_FEATURE_FORMAT_SUPPORT2,
     D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FLOAT32_MAX, D3D11_FORMAT_SUPPORT2_UAV_TYPED_LOAD,
-    D3D11_SAMPLER_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_SAMPLER_DESC, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_WRAP,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT;
 
@@ -58,30 +58,194 @@ impl EnvMaps {
     /// split).
     /// Err unless `size` is a power of two up to [`crate::textures::MAX_CUBE`].
     pub fn new(gpu: &Gpu, img: &Hdr, size: u32, yaw: f32) -> Result<EnvMaps, String> {
-        if !size.is_power_of_two() || size > crate::textures::MAX_CUBE {
-            return Err(format!(
-                "env cube size {size} is not a power of two up to {}",
-                crate::textures::MAX_CUBE
-            ));
-        }
-        let mut data = Vec::new();
-        let mut mips = 0;
-        for chain in hdri::specular_chain(&hdri::cube_faces(img, size, yaw), size)? {
-            mips = chain.len() as u32;
-            for px in chain.iter().flatten() {
-                // As the backdrop: clamped below f16's maximum, so a hot pixel never becomes infinity.
-                data.extend(
-                    px.iter()
-                        .flat_map(|v| half::f16::from_f32(v.min(65000.0)).to_le_bytes()),
-                );
-            }
-        }
+        check_env_size(size)?;
+        let (mips, data) = f16_chains(hdri::specular_chain(
+            &hdri::cube_faces(img, size, yaw),
+            size,
+        )?);
         let v =
             crate::textures::cube_srv(gpu, size, mips, DXGI_FORMAT_R16G16B16A16_FLOAT, 8, &data)?;
         Ok(EnvMaps {
             env: v.clone(),
             reflection: v,
         })
+    }
+
+    /// [`EnvMaps::new`] with the GGX levels from CS's own SpecularIrradianceCS on the GPU (Note GM1): the faces and
+    /// their [`hdri::mip_chain`] on the CPU (the pass's input and the output's mip 0), then `pre` writes levels 1..
+    /// in place of the box mips. ~40 ms → a few ms per yaw change.
+    pub fn new_gpu(
+        gpu: &Gpu,
+        pre: &mut Prefilter,
+        img: &Hdr,
+        size: u32,
+        yaw: f32,
+    ) -> Result<EnvMaps, String> {
+        check_env_size(size)?;
+        let chains = hdri::cube_faces(img, size, yaw)
+            .iter()
+            .map(|f| hdri::mip_chain(f, size))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (mips, data) = f16_chains(chains);
+        let f = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        let input = crate::textures::cube_srv(gpu, size, mips, f, 8, &data)?;
+        let (out, v) = crate::textures::cube_rw(gpu, size, mips, f, 8, &data)?;
+        pre.run(gpu, &input, &out, size, mips)?;
+        Ok(EnvMaps {
+            env: v.clone(),
+            reflection: v,
+        })
+    }
+}
+
+fn check_env_size(size: u32) -> Result<(), String> {
+    if !size.is_power_of_two() || size > crate::textures::MAX_CUBE {
+        return Err(format!(
+            "env cube size {size} is not a power of two up to {}",
+            crate::textures::MAX_CUBE
+        ));
+    }
+    Ok(())
+}
+
+/// Per-face mip chains as RGBA16F bytes, face-major (the cube upload layout), and the level count.
+fn f16_chains(chains: impl IntoIterator<Item = Vec<Vec<[f32; 4]>>>) -> (u32, Vec<u8>) {
+    let mut data = Vec::new();
+    let mut mips = 0;
+    for chain in chains {
+        mips = chain.len() as u32;
+        for px in chain.iter().flatten() {
+            // As the backdrop: clamped below f16's maximum, so a hot pixel never becomes infinity.
+            data.extend(
+                px.iter()
+                    .flat_map(|v| half::f16::from_f32(v.min(65000.0)).to_le_bytes()),
+            );
+        }
+    }
+    (mips, data)
+}
+
+/// CS's Dynamic Cubemaps GGX prefilter ([`Prefilter::SOURCE`], cs_5_0) from the user's install (Note GM1): level L of the
+/// output = the input cube filtered at roughness L / (levels − 1), the same pass CS runs in game. Fails closed on an
+/// interface it does not know (one cube SRV, one UAV, one sampler, a `roughness` constant); the renderer then keeps
+/// the CPU [`hdri::specular_chain`].
+pub struct Prefilter {
+    cs: ID3D11ComputeShader,
+    cb: Cb,
+    sampler: ID3D11SamplerState,
+    input_slot: u32,
+    output_slot: u32,
+    sampler_slot: u32,
+    threads: [u32; 3],
+    /// What it was compiled with (the renderer rebuilds when its wanted list differs).
+    pub defines: Vec<String>,
+}
+
+impl Prefilter {
+    pub const SOURCE: &'static str = "DynamicCubemaps/SpecularIrradianceCS.hlsl";
+
+    pub fn new(
+        gpu: &Gpu,
+        src: &SourceSet,
+        defines: &[String],
+        cache_dir: &Path,
+    ) -> Result<Prefilter, String> {
+        let name = Prefilter::SOURCE;
+        let s = src.get(Path::new(name))?;
+        let c = compile(&s, &to_defines(defines), "cs_5_0", cache_dir)?;
+        let r = &c.reflection;
+        let one = |what: &str, n: usize| match n {
+            1 => Ok(()),
+            _ => Err(format!("{name}: {n} {what}, expected 1")),
+        };
+        one("SRVs", r.srvs.len())?;
+        one("UAVs", r.uavs.len())?;
+        one("samplers", r.samplers.len())?;
+        one("cbuffers", r.cbuffers.len())?;
+        let (input, input_slot, kind) = &r.srvs[0];
+        if *kind != SrvKind::Cube {
+            return Err(format!("{name}: {input} is {kind:?}, not Cube"));
+        }
+        if r.threads.contains(&0) {
+            return Err(format!("{name}: no thread-group size"));
+        }
+        let mut cb = cbuffers(gpu, r)?.remove(0);
+        if !cb.writer.set("roughness", &[0.0]) {
+            return Err(format!("{name}: no roughness constant"));
+        }
+        let mut cs = None;
+        // SAFETY: the bytecode slice is valid for the call; the out-pointer is a local.
+        unsafe {
+            gpu.device
+                .CreateComputeShader(&c.bytecode, None, Some(&mut cs))
+        }
+        .map_err(|e| gpu.fail("CreateComputeShader", e))?;
+        let sd = D3D11_SAMPLER_DESC {
+            Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+            AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
+            AddressV: D3D11_TEXTURE_ADDRESS_WRAP,
+            AddressW: D3D11_TEXTURE_ADDRESS_WRAP,
+            MipLODBias: 0.0,
+            MaxAnisotropy: 1,
+            ComparisonFunc: D3D11_COMPARISON_NEVER,
+            BorderColor: [0.0; 4],
+            MinLOD: 0.0,
+            MaxLOD: D3D11_FLOAT32_MAX,
+        };
+        let mut sampler = None;
+        // SAFETY: descriptor and out-pointer are locals.
+        unsafe { gpu.device.CreateSamplerState(&sd, Some(&mut sampler)) }
+            .map_err(|e| gpu.fail("CreateSamplerState", e))?;
+        Ok(Prefilter {
+            cs: cs.ok_or("no compute shader")?,
+            cb,
+            sampler: sampler.ok_or("no sampler")?,
+            input_slot: *input_slot,
+            output_slot: r.uavs[0].1,
+            sampler_slot: r.samplers[0].1,
+            threads: r.threads,
+            defines: defines.to_vec(),
+        })
+    }
+
+    /// Writes levels 1..`mips` of every face of `out` from `input` (both `size`² RGBA16F cubes with `mips` levels),
+    /// one dispatch per level, and unbinds everything again.
+    fn run(
+        &mut self,
+        gpu: &Gpu,
+        input: &ID3D11ShaderResourceView,
+        out: &ID3D11Texture2D,
+        size: u32,
+        mips: u32,
+    ) -> Result<(), String> {
+        let f = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        let uavs = (1..mips)
+            .map(|l| crate::textures::uav_level(gpu, out, f, l, 6))
+            .collect::<Result<Vec<_>, _>>()?;
+        let [tx, ty, _] = self.threads;
+        // SAFETY (whole block): every bound object belongs to `gpu.device`; slices outlive the calls.
+        unsafe {
+            let ctx = &gpu.ctx;
+            ctx.CSSetShader(&self.cs, None);
+            ctx.CSSetConstantBuffers(self.cb.slot, Some(&[Some(self.cb.buffer.clone())]));
+            ctx.CSSetShaderResources(self.input_slot, Some(&[Some(input.clone())]));
+            ctx.CSSetSamplers(self.sampler_slot, Some(&[Some(self.sampler.clone())]));
+            for (l, uav) in (1..mips).zip(&uavs) {
+                self.cb
+                    .writer
+                    .set("roughness", &[l as f32 / (mips - 1) as f32]);
+                upload(gpu, &self.cb);
+                ctx.CSSetUnorderedAccessViews(self.output_slot, 1, Some(&Some(uav.clone())), None);
+                let n = (size >> l).max(1);
+                ctx.Dispatch(n.div_ceil(tx), n.div_ceil(ty), 6);
+            }
+            ctx.CSSetUnorderedAccessViews(self.output_slot, 1, Some(&None), None);
+            ctx.CSSetShaderResources(self.input_slot, Some(&[None]));
+            ctx.CSSetSamplers(self.sampler_slot, Some(&[None]));
+            ctx.CSSetConstantBuffers(self.cb.slot, Some(&[None]));
+            ctx.CSSetShader(None, None);
+        }
+        Ok(())
     }
 }
 

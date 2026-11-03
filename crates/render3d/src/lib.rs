@@ -399,6 +399,9 @@ pub struct Renderer {
     /// The env cube from the HDRI (v2 D5), keyed by `Scene::env_yaw` bits; built in `render` only when the composite
     /// or a drawn program reads one.
     env: Option<(u32, composite::EnvMaps)>,
+    /// CS's GPU env prefilter (Note GM1) and the defines it was built for; Err = it does not build from these shaders
+    /// (the CPU [`hdri::specular_chain`] runs instead). Rebuilt with the composite's defines.
+    prefilter: Option<(Vec<String>, Result<composite::Prefilter, String>)>,
     /// Env cube builds (test hook).
     #[cfg(feature = "test-hooks")]
     env_builds: usize,
@@ -519,6 +522,7 @@ impl Renderer {
             #[cfg(feature = "test-hooks")]
             composite_builds: 0,
             env: None,
+            prefilter: None,
             #[cfg(feature = "test-hooks")]
             env_builds: 0,
             env_size: hdri::ENV_SIZE,
@@ -765,6 +769,7 @@ impl Renderer {
         self.shaders = shaders;
         self.programs.clear();
         self.composite = None;
+        (self.prefilter, self.env) = (None, None);
         self.old_ll = std::cell::OnceCell::new();
         // The LL generation may have changed, so the display encode (follows linear_lighting) must be re-derived.
         self.encode_srgb = self.linear_lighting();
@@ -2269,17 +2274,26 @@ impl Renderer {
                     .is_some_and(|d| !d.env_regs.is_empty())
             });
         let yaw = scene.env_yaw.to_bits();
-        // shortcut: a CPU rebuild per yaw change (~40 ms in release: the equirect gather ~4 ms, CS's GGX prefilter ~35 ms
-        // (Note GL1), the f16 conversion and the upload); if a yaw drag stutters, run CS's SpecularIrradianceCS on the
-        // GPU instead.
-        if want_env && self.env.as_ref().is_none_or(|e| e.0 != yaw) {
+        let defines = self.composite_defines();
+        // A rebuild per yaw change: CS's GGX levels on the GPU (Note GM1), else on the CPU (~40 ms in release, Note GL1).
+        if want_env
+            && (self.env.as_ref().is_none_or(|e| e.0 != yaw)
+                || self.prefilter.as_ref().is_some_and(|p| p.0 != defines))
+        {
             self.env = None;
-            match composite::EnvMaps::new(
-                &self.gpu,
-                &hdri::studio().image,
-                self.env_size,
-                scene.env_yaw,
-            ) {
+            if self.prefilter.as_ref().is_none_or(|p| p.0 != defines) {
+                let p =
+                    composite::Prefilter::new(&self.gpu, &self.sources, &defines, &self.cache_dir);
+                self.prefilter = Some((defines, p));
+            }
+            let img = &hdri::studio().image;
+            let built = match &mut self.prefilter {
+                Some((_, Ok(p))) => {
+                    composite::EnvMaps::new_gpu(&self.gpu, p, img, self.env_size, scene.env_yaw)
+                }
+                _ => composite::EnvMaps::new(&self.gpu, img, self.env_size, scene.env_yaw),
+            };
+            match built {
                 Ok(e) => {
                     self.env = Some((yaw, e));
                     #[cfg(feature = "test-hooks")]
