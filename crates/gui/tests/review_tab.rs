@@ -272,6 +272,9 @@ fn accept_all_explains_an_alpha_proposal() {
     h.get_by_label("Accept all suggestions").hover();
     h.run();
     h.get_by_label("Only type suggestions are accepted here; an alpha meaning needs your answer");
+    // Note FM35: Review's row asks it as one line and one dropdown, open on the proposed type.
+    h.get_by_label("Alpha: Cutout (proposed) — confirm");
+    h.get_by_label("Alpha type: Cutout");
 }
 
 /// Review Focus 3.

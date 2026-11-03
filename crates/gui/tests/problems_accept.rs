@@ -298,25 +298,49 @@ fn enter_on_the_last_row_accepts_and_keeps_focus_on_the_list() {
 }
 
 #[test]
-fn a_row_without_a_suggestion_ignores_enter_and_space() {
+fn a_row_with_nothing_to_confirm_ignores_enter_and_space() {
     let d = tempfile::tempdir().unwrap();
     let mut m = with_tint(d.path());
-    // leaf.png's sub-type decided: it asks only what its alpha means, which has no suggestion.
-    let leaf = "landscape/leaf.png";
-    m.decide(leaf, Answer::Subtype(Subtype::Diffuse));
+    // odd.png's sub-type decided: it asks only for an acknowledgement (DIM-SMALL), which is never a key press.
+    let odd = "landscape/odd.png";
+    m.decide(odd, Answer::Subtype(Subtype::Diffuse));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let p = rows(&m).into_iter().find(|p| key_of(p) == leaf).unwrap();
+    let p = rows(&m).into_iter().find(|p| key_of(p) == odd).unwrap();
     assert_eq!(p.suggested, None);
     let undo = m.undo_label().map(str::to_string);
     let mut h = harness(m);
     h.run();
-    focus_row(&mut h, leaf);
+    focus_row(&mut h, odd);
     for k in [egui::Key::Enter, egui::Key::Space] {
         h.key_press(k);
         h.run();
         assert!(!h.state().busy(), "{k:?} started a plan");
         assert_eq!(h.state().undo_label().map(str::to_string), undo, "{k:?}");
-        assert_eq!(focused_row(&h).as_deref(), Some(leaf), "{k:?} moved focus");
+        assert_eq!(focused_row(&h).as_deref(), Some(odd), "{k:?} moved focus");
     }
-    assert!(decide_row(h.state(), leaf));
+    assert!(decide_row(h.state(), odd));
+}
+
+/// Note FM35: a row that asks only its alpha shows the type its dropdown opens on, and Enter or Space on the focused row
+/// confirms that type: the write the dropdown's own pick makes, in memory until Save.
+#[test]
+fn enter_on_a_proposed_alpha_row_confirms_the_shown_type() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_tint(d.path());
+    let leaf = "landscape/leaf.png";
+    m.decide(leaf, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let p = rows(&m).into_iter().find(|p| key_of(p) == leaf).unwrap();
+    assert_eq!(p.text, "Alpha: Cutout (proposed) — confirm");
+    assert_eq!(p.suggested, None);
+    let mut h = harness(m);
+    h.run();
+    focus_row(&mut h, leaf);
+    h.key_press(egui::Key::Enter);
+    idle(&mut h);
+    let doc = h.state().project.as_ref().unwrap();
+    assert_eq!(doc.file_value(leaf, "alpha.policy"), Some(json!("cutout")));
+    assert!(doc.allow(leaf).is_empty());
+    assert!(!decide_row(h.state(), leaf), "the row leaves the list");
+    assert!(h.state().is_dirty());
 }

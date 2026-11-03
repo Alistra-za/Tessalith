@@ -2424,13 +2424,15 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         && f.analysis.alpha == AlphaContent::Varying
         && !alpha_policy_explicit(ctx, &provenance)
     {
+        // Note FM35: a mesh that uses the texture has already decided (above), so this is the no-mesh case: a short
+        // reason with the proposed type, never "the mesh decides".
         let hint = suggest_alpha(profile.subtype, f.analysis.alpha, near_binary(f.analysis))
-            .map(|(p, _, why)| format!("{p:?}: {why}"));
+            .map(|(p, _, why)| format!("proposed {p:?}: {why}"));
         if !allowed(ctx, f, Code::SugLowConfidence) {
             needs.push(Need::AlphaMeaning);
         }
         reasons.push(format!(
-            "alpha meaning is unconfirmed (proposal {})",
+            "alpha meaning is unconfirmed ({})",
             hint.unwrap_or_default()
         ));
     }

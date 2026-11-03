@@ -9,6 +9,7 @@ use egui_kittest::Harness;
 use engine::codes::{Code, Warning};
 use sdc_gui::model::bottom::{self, problems, At, Fix, Level, ProblemsFilter};
 use sdc_gui::model::code_text::code_sentence;
+use sdc_gui::model::items::Decision;
 use sdc_gui::model::meshes::{NifLevel, NifProblem, NifTab};
 use sdc_gui::model::shell::ShellRequest;
 use sdc_gui::model::AppModel;
@@ -424,4 +425,174 @@ fn a_slot_path_blocker_goes_to_its_set() {
         matches!(&h.state().selection, sdc_gui::model::Selection::Set(k) if *k == key),
         "the set is selected"
     );
+}
+
+/// The owner-style fixture of Note FM35: `leaf.png` (half opaque, half clear: a varying alpha no mesh covers) with its
+/// sub-type decided, so the alpha is the one open question.
+fn leaf_asks_its_alpha(dir: &std::path::Path) -> AppModel {
+    let mut m = opened(dir);
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+const LEAF: &str = "landscape/leaf.png";
+const LEAF_LINE: &str = "Alpha: Cutout (proposed) — confirm";
+
+/// Note FM35: the alpha question is one Problems row that names the type its dropdown opens on. Without a mesh the
+/// source is the engine's proposal; the dropdown, not a Decide… menu, is the control.
+#[test]
+fn the_problems_row_names_the_type() {
+    let d = tempfile::tempdir().unwrap();
+    let m = leaf_asks_its_alpha(d.path());
+    let row = problems(&m)
+        .iter()
+        .find(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide)
+        .cloned()
+        .expect("leaf's Decide row");
+    assert_eq!(row.text, LEAF_LINE);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&format!("{LEAF}: {LEAF_LINE}"));
+    h.get_by_label("Alpha type: Cutout");
+    assert!(h.query_by_label("Decide…").is_none());
+}
+
+/// Note FM35: the text builder's two sources. A mesh-decided texture is never undecided (the engine settles it), so the
+/// mesh line is reached only through this builder, never from a Problems row.
+#[test]
+fn the_confirm_line_names_its_source() {
+    use engine::config::AlphaPolicy::*;
+    use sdc_gui::model::code_text::alpha_confirm_text;
+    assert_eq!(
+        alpha_confirm_text(Cutout, true),
+        "Alpha: Cutout (from mesh) — confirm"
+    );
+    assert_eq!(
+        alpha_confirm_text(CutoutBlend, false),
+        "Alpha: Cutout + Blend (proposed) — confirm"
+    );
+}
+
+/// Note FM35: the three lines the alpha question used to take (the Undecided sentence, the "carries data the format
+/// would drop" acknowledgement and its button) are the one row, and the texture panel has one line and one dropdown.
+#[test]
+fn one_line_replaces_the_three_alpha_lines() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = leaf_asks_its_alpha(d.path());
+    // The engine still raises the loss code against the default `remove`; it is the same question.
+    let item = m.item(LEAF).unwrap();
+    assert!(
+        item.warnings.iter().any(|w| w.code == Code::LossAlphaData),
+        "{:?}",
+        item.warnings
+    );
+    assert_eq!(item.decisions, vec![Decision::AlphaMeaning]);
+    m.select_item(LEAF);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let gone = [
+        "carries data the format would drop",
+        "non-constant alpha would be discarded",
+        "What does the alpha channel mean?",
+        "Undecided: what its alpha means",
+    ];
+    for g in gone {
+        assert_eq!(h.query_all_by_label_contains(g).count(), 0, "{g}");
+    }
+    // (odd.png's own row keeps its Acknowledge; leaf's has none.)
+    for l in [
+        "Drop the alpha anyway",
+        "Drop the alpha anyway for this texture",
+        "Acknowledge for this texture",
+    ] {
+        assert_eq!(h.query_all_by_label(l).count(), 0, "{l}");
+    }
+    // The row and the panel's box each say it once; the row's hover keeps the code.
+    assert!(h.query_all_by_label_contains(LEAF_LINE).count() >= 2);
+    assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 2);
+    let row = problems(h.state())
+        .iter()
+        .find(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide)
+        .cloned()
+        .unwrap();
+    assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
+}
+
+/// Note FM35: a type picked in the dropdown is the write the five buttons made (`alpha.policy` in the texture's own
+/// entry, nothing in `allow`), from the row and from the texture panel alike; the dropdown opens on the proposal.
+#[test]
+fn picking_a_type_in_the_row_writes_what_the_old_buttons_wrote() {
+    let d = tempfile::tempdir().unwrap();
+    let m = leaf_asks_its_alpha(d.path());
+    let mut h = harness(m);
+    h.run();
+    pick_alpha(&mut h, "Cutout", "Blend");
+    idle(&mut h);
+    let doc = h.state().project.as_ref().unwrap();
+    assert_eq!(
+        doc.file_value(LEAF, "alpha.policy"),
+        Some(serde_json::json!("blend"))
+    );
+    assert!(doc.allow(LEAF).is_empty());
+    assert!(!problems(h.state())
+        .iter()
+        .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
+}
+
+/// Note FM35: a texture a mesh decided is Ready, not asked. A mesh `remove` is the case that keeps `mesh:alpha` (a
+/// non-remove mesh type is written into the project at once, `auto_record`), so the panel's Alpha row is the one
+/// dropdown, on `Remove`, with the source beside it.
+#[test]
+fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(
+        LEAF,
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .item(LEAF)
+        .unwrap()
+        .decisions
+        .contains(&Decision::AlphaMeaning));
+    let no_alpha = engine::shader::MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    m.mesh_alpha = [("textures/landscape/leaf".to_string(), vec![no_alpha])].into();
+    m.scan_store_unsettled = true;
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let item = m.item(LEAF).unwrap();
+    let j = item.job.as_ref().unwrap();
+    assert_eq!(
+        (
+            j.profile.alpha.policy,
+            j.provenance["alpha.policy"].to_string()
+        ),
+        (
+            engine::config::AlphaPolicy::Remove,
+            "mesh:alpha".to_string()
+        )
+    );
+    assert!(item.decisions.is_empty(), "{:?}", item.decisions);
+    m.select_item(LEAF);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    assert!(!problems(h.state())
+        .iter()
+        .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
+    // The Alpha row's dropdown is on the mesh's type and its hint says where it came from.
+    assert!(h
+        .query_all_by_role(egui::accesskit::Role::ComboBox)
+        .any(|n| n.accesskit_node().value().as_deref() == Some("Remove")));
+    h.get_by_label("from the meshes that use this texture");
 }

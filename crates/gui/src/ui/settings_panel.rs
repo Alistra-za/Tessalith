@@ -3,7 +3,7 @@
 use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
-use crate::model::code_text::{code_line, shown_for};
+use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, shown_for};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
@@ -111,13 +111,43 @@ pub fn offered_groups(target: Target, grass: bool) -> Vec<(&'static str, Vec<Sub
 }
 
 pub fn alpha_options() -> Options {
-    vec![
-        (json!(AlphaPolicy::Remove), "Remove".into()),
-        (json!(AlphaPolicy::Cutout), "Cutout".into()),
-        (json!(AlphaPolicy::Blend), "Blend".into()),
-        (json!(AlphaPolicy::CutoutBlend), "Cutout + Blend".into()),
-        (json!(AlphaPolicy::Data), "Data".into()),
-    ]
+    use AlphaPolicy::*;
+    [Remove, Cutout, Blend, CutoutBlend, Data]
+        .into_iter()
+        .map(|p| (json!(p), alpha_label(p).into()))
+        .collect()
+}
+
+/// Note FM35: the alpha question as one dropdown, open on `shown` (the resolved type). Picking an entry, the shown one
+/// too, is the answer; each entry's hover says what it does. `None` while nothing is picked. `why` is the hover while
+/// the dropdown is off.
+pub fn alpha_dropdown(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    shown: AlphaPolicy,
+    why: &str,
+) -> Option<AlphaPolicy> {
+    let mut picked = None;
+    let r = egui::ComboBox::from_id_salt(id)
+        .selected_text(alpha_label(shown))
+        .show_ui(ui, |ui| {
+            for (v, label) in alpha_options() {
+                let Ok(p) = serde_json::from_value::<AlphaPolicy>(v) else {
+                    continue;
+                };
+                let r = ui.selectable_label(p == shown, label);
+                if r.on_hover_text(alpha_hint(p)).clicked() {
+                    picked = Some(p);
+                }
+            }
+        })
+        .response;
+    let name = format!("Alpha type: {}", alpha_label(shown));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), &name));
+    if !why.is_empty() {
+        r.on_disabled_hover_text(why);
+    }
+    picked
 }
 
 /// One line on what an alpha meaning does (Note FB8, review C12): the hover of every place that offers one. Problems'
@@ -866,6 +896,7 @@ fn decision_box(
     cx: &Ctx,
     decisions: &[Decision],
     warnings: &[Warning],
+    alpha: Option<(AlphaPolicy, bool)>,
     actions: &mut Vec<Action>,
 ) {
     let frame = egui::Frame::new()
@@ -884,21 +915,18 @@ fn decision_box(
                     Decision::Subtype { suggested } => {
                         subtype_decision(ui, cx, *suggested, actions)
                     }
+                    // Note FM35: one line and one dropdown on the resolved type; the engine's reason is the line's hover.
                     Decision::AlphaMeaning => {
-                        if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
-                            ui.label(m);
-                        }
-                        ui.label("What does the alpha channel mean?");
-                        ui.horizontal_wrapped(|ui| {
-                            for (policy, label) in alpha_options()
-                                .into_iter()
-                                .filter_map(|(v, l)| Some((serde_json::from_value(v).ok()?, l)))
-                            {
-                                if ui.button(label).on_hover_text(alpha_hint(policy)).clicked() {
-                                    actions.push(Action::Decide(Answer::Alpha(policy)));
-                                }
+                        if let Some((shown, mesh)) = alpha {
+                            let line = ui.label(alpha_confirm_text(shown, mesh));
+                            if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
+                                line.on_hover_text(m);
                             }
-                        });
+                            let id = egui::Id::new(("alpha-decision", cx.key));
+                            if let Some(p) = alpha_dropdown(ui, id, shown, "") {
+                                actions.push(Action::Decide(Answer::Alpha(p)));
+                            }
+                        }
                     }
                     Decision::CubeLayout => {
                         ui.label("This image could be several cube layouts: pick one");
@@ -1014,8 +1042,9 @@ fn error_codes(codes: &[Code]) -> String {
         .join(", ")
 }
 
-/// Warnings the decision box does not already show.
-fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning]) {
+/// Warnings the decision box does not already show. Note FM35: while the alpha is asked, its line answers
+/// LOSS-ALPHA-DATA, so that warning is not listed a second time.
+fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool) {
     let rest: Vec<&Warning> = warnings
         .iter()
         .filter(|w| {
@@ -1025,7 +1054,7 @@ fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning]) {
                     | Code::InGreenUnstated
                     | Code::ChkGreenGuess
                     | Code::FmtHdrSource
-            )
+            ) && !(alpha_asked && w.code == Code::LossAlphaData)
         })
         .collect();
     if rest.is_empty() {
@@ -1113,6 +1142,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         model.item_messages(key),
         item.job.clone(),
     );
+    let alpha = crate::model::items::alpha_asked(item);
     let packed_output = match &status {
         ItemStatus::PackedInto(j) => model
             .items
@@ -1306,7 +1336,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 });
             }
             if !decisions.is_empty() {
-                decision_box(ui, &cx, &decisions, &warnings, &mut actions);
+                decision_box(ui, &cx, &decisions, &warnings, alpha, &mut actions);
             }
             if kind == ItemKind::Packed && !compact {
                 channels(ui, job);
@@ -1326,7 +1356,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                         None => model.clear_field(&k, &f),
                     }
                 }
-                other_warnings(ui, &warnings);
+                other_warnings(ui, &warnings, alpha.is_some());
             }
         }
     });

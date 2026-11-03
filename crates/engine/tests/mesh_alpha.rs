@@ -140,6 +140,41 @@ fn mesh_evidence_decides_the_alpha_and_no_evidence_asks_as_before() {
     assert!(asks_alpha(job(&other, "wall.dds")));
 }
 
+/// Note FM35: where a mesh has decided, nothing is unconfirmed and no text proposes or says "the mesh decides"; the
+/// state is Ready with `mesh:alpha`. (A mesh-decided texture never reaches Undecided.)
+#[test]
+fn a_mesh_resolved_cutout_shows_no_proposal_text() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    let p = plan(d.path(), None, &[], &[(WALL, vec![tested(128)])]);
+    let j = job(&p, "wall.dds");
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Cutout);
+    assert_eq!(prov(j, "alpha.policy"), "mesh:alpha");
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.status);
+    for w in &j.warnings {
+        let m = w.message.to_lowercase();
+        assert!(!m.contains("propos") && !m.contains("mesh decides"), "{m}");
+    }
+}
+
+/// Note FM35: with no mesh evidence the alpha is asked, and the reason is one short clause: the proposed type and
+/// why. It never says the mesh decides, since none did.
+#[test]
+fn without_a_mesh_the_short_proposal_shows() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    let p = plan(d.path(), None, &[], &[]);
+    let j = job(&p, "wall.dds");
+    assert!(asks_alpha(j), "{:?}", j.status);
+    let JobStatus::Unresolved { reasons, .. } = &j.status else {
+        unreachable!()
+    };
+    assert_eq!(
+        reasons,
+        &vec!["alpha meaning is unconfirmed (proposed Blend: soft alpha)".to_string()]
+    );
+}
+
 /// Spec §4.3, §6: an explicit layer beats the mesh: `--set`/`[files]` (applied after it) and a project config
 /// (applied before it).
 #[test]

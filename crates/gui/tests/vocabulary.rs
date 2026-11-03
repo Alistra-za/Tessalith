@@ -150,8 +150,10 @@ fn the_alpha_acknowledge_names_its_action() {
         .iter_mut()
         .find(|i| i.key == "landscape/odd.png")
         .unwrap();
+    // Note FM35: the alpha question's own line answers LOSS-ALPHA-DATA, so the acknowledgement is only left for a
+    // texture whose type is decided and whose format cannot keep it.
     it.decisions = vec![
-        Decision::AlphaMeaning,
+        Decision::Subtype { suggested: None },
         Decision::Acknowledge(Code::LossAlphaData),
     ];
     it.status = ItemStatus::NeedsDecision;
@@ -162,7 +164,7 @@ fn the_alpha_acknowledge_names_its_action() {
     h.run();
     assert!(h.query_all_by_label("Drop the alpha anyway").count() >= 1);
     assert!(
-        h.query_all_by_label_contains("Undecided: what its alpha means. This alpha channel")
+        h.query_all_by_label_contains("Undecided: sub-type. This alpha channel")
             .count()
             >= 1
     );

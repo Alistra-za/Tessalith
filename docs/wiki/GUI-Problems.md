@@ -16,7 +16,8 @@ A row is one line and does not wrap. The fix buttons sit at the panel's right ed
 |---|---|
 | A blocker the export would stop on, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …*, a texture that failed to plan | — |
-| *Undecided: sub-type; what its alpha means; <the warning's sentence>* | The [type buttons](#deciding-in-problems), **Decide…** (the alpha choices) and **Acknowledge**. A question that is an acknowledgement shows its warning's sentence, for example "This texture is too small for its format — use a bigger image". |
+| *Undecided: sub-type; <the warning's sentence>* | The [type buttons](#deciding-in-problems) and **Acknowledge**. A question that is an acknowledgement shows its warning's sentence, for example "This texture is too small for its format — use a bigger image". |
+| *Alpha: Cutout (proposed) — confirm* | An **Alpha type** dropdown set to the proposed type. A row with only this question has no *Undecided:* prefix. <!-- D:FM35 --> |
 | Export pitfalls, texture and set warnings | **Go to set** on a set's row. They are ordinary warnings: they never hold back Export or open Review. |
 | A file's export warnings, once the export has ended | Click the file to select it. |
 | Artist-check warnings ([Artist checks](GUI-Artist-Checks.md)) | A grey **check** dot that does not change "ready". A **Checks** pill narrows the list to them. |
@@ -24,7 +25,7 @@ A row is one line and does not wrap. The fix buttons sit at the panel's right ed
 
 Info rows never count against "ready", but the tab's number counts every row shown, these included. Each is something Tessalith changed for you that you may want back: a packing fill dropped because a helper now fills the channel, a format or tag reset when a texture's type changed, the types it set automatically. A `_curves`, `_curvature` or `_cavity` map no recipe reads is an info row too, with no button: "Read only by Also export; not written on its own".
 
-Each entry of the **Decide…** menu has a hover that says what it does; the same lines are on the alpha buttons in Review and in a texture's settings.
+Each entry of the **Alpha type** dropdown has a hover that says what it does; the same dropdown is in Review and in a texture's settings. The row reads "(proposed)" when the image analysis chose the type and "(from mesh)" when the meshes did.
 
 ### What the GUI writes on its own
 
@@ -43,7 +44,7 @@ An undecided texture with a suggested type shows it as one button, **Set type: s
 
 - The type picker opens at its button: the suggestion first, marked *(suggested)*, a search box that has the keyboard (type `tint` to list only the types with "tint" in their name), and the grouped list below it, which scrolls. Esc closes it and does nothing else.
 - **Accept all suggestions (n)** at the top of the list decides every texture that has a suggestion, as one undo step.
-- A row takes the keyboard (Tab, or Shift+Tab back). **Enter** or **Space** on a row with a suggestion accepts it and moves to the next row; on the last row the keyboard stays on the list. A row without a suggestion ignores both.
+- A row takes the keyboard (Tab, or Shift+Tab back). **Enter** or **Space** on a row with a suggestion accepts it and moves to the next row; on the last row the keyboard stays on the list. On an alpha row it confirms the type shown. A row with neither ignores both.
 - Every accept edits the project in memory, like any other edit: **Save** writes it to `sdc.toml`.
 - These buttons are greyed out, with the reason on hover, while `sdc.toml` is read-only or an edit's plan is still out ([after an edit](GUI-Texture-Panel.md#editing)).
 

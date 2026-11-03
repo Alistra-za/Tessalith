@@ -1,6 +1,7 @@
 //! Note FB8 (amendment D): the UI carries no code text. A row or banner shows a sentence that names the action; the
 //! code stays on the hover and in the Messages log.
 use engine::codes::Code;
+use engine::config::AlphaPolicy;
 
 /// The action sentence of `code`, one table for every code Problems or a banner can show (warnings, blockers and
 /// errors). Empty for the codes with none (Info results never get a row): the caller then shows the engine's message.
@@ -109,6 +110,24 @@ pub fn ack_label(code: Code) -> &'static str {
         Code::LossAlphaData => "Drop the alpha anyway",
         _ => "Acknowledge",
     }
+}
+
+/// The user-facing name of an alpha type: the dropdown's entries and the confirm line.
+pub fn alpha_label(policy: AlphaPolicy) -> &'static str {
+    match policy {
+        AlphaPolicy::Remove => "Remove",
+        AlphaPolicy::Cutout => "Cutout",
+        AlphaPolicy::Blend => "Blend",
+        AlphaPolicy::CutoutBlend => "Cutout + Blend",
+        AlphaPolicy::Data => "Data",
+    }
+}
+
+/// Note FM35: the one line of the alpha question, on the Problems row and in the texture panel: the type the dropdown
+/// opens on and where it came from (`from_mesh`: a mesh's alpha property; else the engine's proposal).
+pub fn alpha_confirm_text(policy: AlphaPolicy, from_mesh: bool) -> String {
+    let source = if from_mesh { "from mesh" } else { "proposed" };
+    format!("Alpha: {} ({source}) — confirm", alpha_label(policy))
 }
 
 /// [`ack_label`] with " for this texture", for the panels that act on the one texture.

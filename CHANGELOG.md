@@ -3,6 +3,7 @@
 ## Unreleased
 
 - 2.0.0 re-encodes every output once (one encode version for every texture type). Output bytes do not change; records written by 1.x are stale, so the next export writes them again.
+- The alpha question is one **Alpha type** dropdown already set to the proposed type, with one Problems line ("Alpha: Cutout (proposed) — confirm", or "(from mesh)"), where 1.x showed five buttons and up to three lines. The `Decide…` menu is gone, Enter on the row confirms the type shown, and the proposal text of `SUG-LOW-CONFIDENCE` is shorter. Choices are written as before.
 - NVTT removed: `encoder.backend = "nvtt"` and `--nvtt` now fail (as does an allow list naming `ENC-NVTT-MISSING`, `ENC-NVTT-VERSION` or `ENC-NVTT-FAILED`); re-encode with the built-in encoders. The GUI loses the NVTT section in Advanced, the Encoder row in the texture panel and the Textures column's Encoder filter, and `sdc encoders` stops looking for NVTT. `VAL-BC6H-PEAK` advice is now only `encoder.effort = "slowest"`.
 - The format alone picks the encoder: `encoder.backend` and `encoder.rgbcx_level` are removed (BC1 and BC3 colour always use rgbcx level 18, the value every built-in preset set), and a config, preset or `--set` that names either is an error that says so. The GUI loses the rgbcx level row in Advanced. Output bytes do not change.
 - The diagnostic code `IN-FLOAT-LDR` is removed (it was never emitted); an allow list naming it is an error.

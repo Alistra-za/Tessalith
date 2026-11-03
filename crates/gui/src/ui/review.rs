@@ -1,17 +1,15 @@
 //! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
 //! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
-use super::settings_panel::{
-    alpha_hint, alpha_options, offered_groups, subtype_label, unclear_layouts,
-};
+use super::settings_panel::{alpha_dropdown, offered_groups, subtype_label, unclear_layouts};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::code_text::{ack_label, ack_label_for_texture, code_line};
-use crate::model::items::Decision;
+use crate::model::code_text::{ack_label, ack_label_for_texture, alpha_confirm_text, code_line};
+use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
-use engine::config::{AlphaPolicy, CubeLayout, Subtype, Target};
+use engine::config::{CubeLayout, Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
 
@@ -57,7 +55,7 @@ fn layout_menu(ui: &mut egui::Ui, key: &str, why: &str) -> Option<RowPick> {
     pick
 }
 
-/// One undecided texture's controls: name link, sub-type combo + ✓ when it asks its sub-type, the alpha buttons,
+/// One undecided texture's controls: name link, sub-type combo + ✓ when it asks its sub-type, the alpha dropdown,
 /// "Acknowledge for this texture". The controls are disabled with `off` as hover; the name link always selects.
 pub fn undecided_row(
     ui: &mut egui::Ui,
@@ -112,15 +110,13 @@ pub fn undecided_row(
     ui.add_enabled_ui(off.is_none(), |ui| {
         for d in &item.decisions {
             ui.horizontal_wrapped(|ui| match d {
+                // Note FM35: one line and one dropdown on the resolved type.
                 Decision::AlphaMeaning => {
-                    ui.label("Alpha means:");
-                    for (v, label) in alpha_options() {
-                        let Ok(policy) = serde_json::from_value::<AlphaPolicy>(v) else {
-                            continue;
-                        };
-                        let b = ui.button(label).on_hover_text(alpha_hint(policy));
-                        if b.on_disabled_hover_text(why).clicked() {
-                            pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(policy)));
+                    if let Some((shown, mesh)) = alpha_asked(item) {
+                        ui.label(alpha_confirm_text(shown, mesh));
+                        let id = egui::Id::new(("undecided-alpha", key));
+                        if let Some(p) = alpha_dropdown(ui, id, shown, why) {
+                            pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
                     }
                 }
@@ -169,7 +165,7 @@ fn split_button(ui: &mut egui::Ui, text: &str) -> (egui::Response, egui::Respons
 }
 
 /// A Problems row's fix buttons (A1), one set per open question of the texture `key`: the suggestion's one-click
-/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), Decide… (the alpha options), Acknowledge. All
+/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown (Note FM35), Acknowledge. All
 /// disabled with `off` as hover.
 pub fn fix_buttons(
     ui: &mut egui::Ui,
@@ -222,23 +218,15 @@ pub fn fix_buttons(
                         pick = Some(RowPick::Decide(key.to_string(), st));
                     }
                 }
+                // Note FM35 (supersedes FI11's Decide… menu): the row's line names the type, and this dropdown opens
+                // on it; Enter on the row confirms it.
                 Decision::AlphaMeaning => {
-                    ui.menu_button("Decide…", |ui| {
-                        // Note FI11 (D14): the question, as Review's inline row asks it.
-                        ui.label(egui::RichText::new("Alpha means:").weak());
-                        for (v, label) in alpha_options() {
-                            let Ok(policy) = serde_json::from_value::<AlphaPolicy>(v) else {
-                                continue;
-                            };
-                            if ui.button(label).on_hover_text(alpha_hint(policy)).clicked() {
-                                let a = Answer::Alpha(policy);
-                                pick = Some(RowPick::Answer(key.to_string(), a));
-                                ui.close();
-                            }
+                    if let Some((shown, _)) = alpha_asked(item) {
+                        let id = egui::Id::new(("problems-alpha", key));
+                        if let Some(p) = alpha_dropdown(ui, id, shown, why) {
+                            pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
-                    })
-                    .response
-                    .on_disabled_hover_text(why);
+                    }
                 }
                 Decision::CubeLayout => {
                     if let Some(p) = layout_menu(ui, key, why) {

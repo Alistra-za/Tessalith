@@ -211,6 +211,15 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
+/// Note FM35: open the alpha dropdown that shows `shown` and pick `entry` in it.
+pub fn pick_alpha<S>(h: &mut egui_kittest::Harness<'static, S>, shown: &str, entry: &str) {
+    use egui_kittest::kittest::Queryable;
+    h.get_by_label(&format!("Alpha type: {shown}")).click();
+    h.run();
+    h.get_by_label(entry).click();
+    h.run();
+}
+
 /// Export as a user would: Export, then, if Review opened, press its Export.
 pub fn export_through(m: &mut AppModel) {
     m.export_clicked();

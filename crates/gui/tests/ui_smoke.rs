@@ -308,7 +308,7 @@ fn the_treat_as_directx_button_clears_an_opengl_setting() {
 }
 
 #[test]
-fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
+fn the_alpha_dropdown_writes_the_policy_and_the_reset_button_takes_it_back() {
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
     // A plain diffuse takes its alpha meaning from the mesh, so once the sub-type is decided the alpha is asked.
@@ -321,18 +321,11 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
     let mut h = harness(model);
     h.run();
     h.get_by_label("Undecided");
-    // The decision box offers the five meanings as buttons.
-    for label in ["Remove", "Blend", "Cutout + Blend", "Data"] {
-        assert!(h.query_all_by_label(label).count() >= 1, "{label}");
-    }
-    let cutout = h
-        .query_all_by_label("Cutout")
-        .next()
-        .expect("a Cutout button");
-    cutout.hover();
-    h.run();
-    h.query_all_by_label("Cutout").next().unwrap().click();
-    h.run();
+    // Note FM35: one line and one dropdown, open on the proposed type; the five buttons are gone.
+    h.get_by_label("Alpha: Cutout (proposed) — confirm");
+    h.get_by_label("Alpha type: Cutout");
+    assert_eq!(h.query_all_by_label("Blend").count(), 0);
+    pick_alpha(&mut h, "Cutout", "Cutout");
     settle(&mut h);
     let job = h
         .state()
@@ -346,6 +339,13 @@ fn an_alpha_button_writes_the_policy_and_the_reset_button_takes_it_back() {
         engine::config::AlphaPolicy::Cutout
     );
     assert_eq!(job.provenance["alpha.policy"].to_string(), "project_file");
+    // The write is the old buttons' write: the policy in the texture's own entry, and no acknowledgement.
+    let doc = h.state().project.as_ref().unwrap();
+    assert_eq!(
+        doc.file_value("landscape/leaf.png", "alpha.policy"),
+        Some(serde_json::json!("cutout"))
+    );
+    assert!(doc.allow("landscape/leaf.png").is_empty());
     assert!(h.query_by_label("Undecided").is_none());
     // The edited field offers a reset.
     // Two fields are edited now (sub-type, then alpha): the second reset is the alpha one.
@@ -379,12 +379,13 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
     use eframe::egui::accesskit::Role;
     let mut h = harness(model);
     h.run();
-    let button = |h: &Harness<'static, AppModel>, label: &str| {
-        h.get_by_role_and_label(Role::Button, label)
+    // Note FM35: the alpha question is one dropdown, open on the proposed type.
+    let dropdown = |h: &Harness<'static, AppModel>| {
+        h.get_by_label("Alpha type: Cutout")
             .accesskit_node()
             .is_disabled()
     };
-    assert!(!button(&h, "Blend"));
+    assert!(!dropdown(&h));
     // The Alpha combo: the one whose value is an alpha meaning.
     let meanings = ["Remove", "Cutout", "Blend", "Cutout + Blend", "Data"];
     let alpha_combo = |h: &Harness<'static, AppModel>| {
@@ -400,20 +401,15 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
         (n.rect(), n.accesskit_node().is_disabled())
     };
     let (before, _) = alpha_combo(&h);
-    h.get_by_role_and_label(Role::Button, "Cutout").hover();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Cutout").click();
-    h.run();
+    pick_alpha(&mut h, "Cutout", "Cutout");
     assert!(h.state().busy(), "the answer's plan is in flight");
     assert!(h.state().partial_pending, "the answer's partial is out");
-    for label in ["Remove", "Blend", "Data"] {
-        assert!(button(&h, label), "{label} is enabled");
-    }
+    assert!(dropdown(&h), "the dropdown is enabled");
     // The field combos are off too, and nothing moved: the reason is hover text, not a line.
     let (during, off) = alpha_combo(&h);
     assert!(off, "the Alpha combo is enabled");
     assert_eq!(before, during, "the panel moved when the plan started");
-    h.get_by_role_and_label(Role::Button, "Blend").hover();
+    h.get_by_label("Alpha type: Cutout").hover();
     h.run();
     h.get_by_label("Wait for the plan to finish");
     settle(&mut h);
@@ -464,7 +460,6 @@ fn alpha_combo<'a>(
 /// partial plan, not for the full plan, which stays parked until the end.
 #[test]
 fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
-    use eframe::egui::accesskit::Role;
     use engine::config::AlphaPolicy;
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
@@ -484,10 +479,7 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
             .map(|j| j.profile.alpha.policy)
     };
     let mut full = vec![];
-    h.get_by_role_and_label(Role::Button, "Cutout").hover();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Cutout").click();
-    h.run();
+    pick_alpha(&mut h, "Cutout", "Cutout");
     assert!(
         h.state().fix_off().is_some(),
         "the first answer's partial is out"
@@ -538,7 +530,6 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
 /// Note FK3: only the edit rows wait; with a read-only `sdc.toml` a group header still opens and closes.
 #[test]
 fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
-    use eframe::egui::accesskit::Role;
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
     model.decide(
@@ -557,7 +548,7 @@ fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
     h.run();
     // The answers and rows are off …
     assert!(h
-        .get_by_role_and_label(Role::Button, "Cutout")
+        .get_by_label("Alpha type: Cutout")
         .accesskit_node()
         .is_disabled());
     let format_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("Format").count();

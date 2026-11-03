@@ -1,5 +1,5 @@
 //! The bottom panel's state (layout v2 A1, A9; R7, R8): which tab shows, and whether the panel is open.
-use super::items::Decision;
+use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
 use super::{checks, code_text, counts_toward_badge, pbr_export, sets, AppModel, ItemStatus};
 use crate::pgp::settings::Feature;
@@ -410,18 +410,20 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         .iter()
         .filter(|i| i.status == ItemStatus::NeedsDecision)
     {
+        // Note FM35: the alpha question is one line on the type it opens on.
+        let alpha = items::alpha_asked(i).map(|(p, mesh)| code_text::alpha_confirm_text(p, mesh));
         let parts: Vec<String> = i
             .decisions
             .iter()
             .map(|d| match d {
                 Decision::Subtype { .. } => "sub-type".into(),
-                Decision::AlphaMeaning => "what its alpha means".into(),
+                Decision::AlphaMeaning => alpha.clone().unwrap_or_else(|| "alpha".into()),
                 Decision::CubeLayout => "cube layout".into(),
                 // Note FB8: the sentence names the action; the code is on the hover.
                 Decision::Acknowledge(c) => code_text::code_line(*c).into(),
             })
             .collect();
-        let also = i
+        let mut also: Vec<Code> = i
             .decisions
             .iter()
             .filter_map(|d| match d {
@@ -429,7 +431,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 _ => None,
             })
             .collect();
-        let text = format!("Undecided: {}", parts.join(". "));
+        // The alpha line answers LOSS-ALPHA-DATA too; the hover still names it.
+        if alpha.is_some() && i.warnings.iter().any(|w| w.code == Code::LossAlphaData) {
+            also.push(Code::LossAlphaData);
+        }
+        let text = match (&alpha, parts.len()) {
+            (Some(line), 1) => line.clone(),
+            _ => format!("Undecided: {}", parts.join(". ")),
+        };
         let suggested = i.decisions.iter().find_map(|d| match d {
             Decision::Subtype { suggested } => *suggested,
             _ => None,

@@ -1,7 +1,7 @@
 //! What the columns show, built from a plan and its events (M3a spec §2.2–2.3).
 use engine::api::Plan;
 use engine::codes::{Code, Severity, Warning};
-use engine::config::{Subtype, Target};
+use engine::config::{AlphaPolicy, Subtype, Target};
 use engine::discover::{InputFile, InputKind};
 use engine::events::{EngineEvent, EventKind, RecipeReport};
 use engine::helper::report::HelperReport;
@@ -9,8 +9,9 @@ use engine::manifest::output_key;
 use engine::overrides::project_rel;
 use engine::pack::plan::virtual_stem;
 use engine::pack::RecipeKind;
-use engine::policy::{JobStatus, Need, ResolvedJob, SourceStamp};
+use engine::policy::{near_binary, JobStatus, Need, Provenance, ResolvedJob, SourceStamp};
 use engine::session::{Session, Thumbnail};
+use engine::suggest::suggest_alpha;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -143,12 +144,35 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
             });
         }
     }
+    // Note FM35: while the alpha is asked, its type answers LOSS-ALPHA-DATA too (Remove is an explicit drop, any other
+    // type is kept), so that code is no second question. Once asked and answered it can come back for a format that
+    // cannot store the type, and is then its own Acknowledge.
+    let alpha_asked = out.contains(&Decision::AlphaMeaning);
     for w in &job.warnings {
-        if w.severity == Severity::Blocking && w.code != Code::SugLowConfidence {
+        let merged = alpha_asked && w.code == Code::LossAlphaData;
+        if w.severity == Severity::Blocking && w.code != Code::SugLowConfidence && !merged {
             out.push(Decision::Acknowledge(w.code));
         }
     }
     out
+}
+
+/// Note FM35: the type the alpha question opens on and whether a mesh gave it, for an item that asks it. A mesh's
+/// alpha property settles the question in the engine (such an item is Ready, never asked), so the engine's proposal
+/// is the live source; the mesh arm only keeps the line true should a mesh-decided policy ever sit under a question.
+pub fn alpha_asked(item: &TextureItem) -> Option<(AlphaPolicy, bool)> {
+    let job = item
+        .job
+        .as_ref()
+        .filter(|_| item.decisions.contains(&Decision::AlphaMeaning))?;
+    if job.provenance.get("alpha.policy") == Some(&Provenance::MeshAlpha) {
+        return Some((job.profile.alpha.policy, true));
+    }
+    let proposed = item
+        .analysis
+        .as_deref()
+        .and_then(|a| suggest_alpha(job.profile.subtype, a.alpha, near_binary(a)));
+    Some((proposed.map_or(job.profile.alpha.policy, |p| p.0), false))
 }
 
 /// Note DY16: where a helper went, from the engine's report: "fills to x_rmaos R, x alpha" or "not used: <reason>".

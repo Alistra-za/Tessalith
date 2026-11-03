@@ -73,7 +73,7 @@ A texture that still needs an answer has an **amber border**: a Medium or Low su
 | Question | Controls |
 |---|---|
 | What kind of texture is this? | A sub-type dropdown and **Confirm**. |
-| What does the alpha channel mean? | *Remove*, *Cutout*, *Blend*, *Cutout + Blend*, *Data*. |
+| What does the alpha channel mean? | One line, "Alpha: Cutout (proposed) — confirm", and an **Alpha type** dropdown already set to the proposed type. Pick the type you want, or pick the shown one to confirm it. <!-- D:FM35 --> |
 | An info line "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press *Treat as OpenGL (flip green)* if it is an OpenGL map; an OpenGL file then shows *Green: OpenGL (flipped)* with a *Treat as DirectX* button that undoes it. |
 | A blocking warning | **Acknowledge for this texture**. |
 

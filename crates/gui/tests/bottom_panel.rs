@@ -225,34 +225,13 @@ fn a_problems_row_selects_its_texture_and_decides_in_place() {
     assert!(!has(&h, "landscape/odd.png", ack), "odd lost its question");
     let alpha = |d: &Decision| matches!(d, Decision::AlphaMeaning);
     assert!(has(&h, "landscape/leaf.png", alpha));
-    h.get_by_label("Decide…").click();
-    h.run();
-    h.get_by_label("Cutout").click();
+    // Note FM35: the row's dropdown opens on the proposed type; picking an entry answers.
+    pick_alpha(&mut h, "Cutout", "Cutout");
     idle(&mut h);
     assert!(
         !has(&h, "landscape/leaf.png", alpha),
         "leaf lost its alpha question"
     );
-}
-
-/// Note FI11 (D14): the Decide… menu says what it asks before the options, as Review's inline row does.
-#[test]
-fn the_decide_menu_starts_with_alpha_means() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.decide(
-        "landscape/leaf.png",
-        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
-    );
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let mut h = harness(m);
-    h.state_mut().open_problems(None);
-    h.run();
-    h.get_by_label("Decide…").click();
-    h.run();
-    let lead = h.get_by_label("Alpha means:").rect();
-    let first = h.get_by_label("Cutout").rect();
-    assert!(lead.max.y <= first.min.y, "{lead:?} {first:?}");
 }
 
 #[test]
@@ -272,7 +251,7 @@ fn a_read_only_project_disables_the_fix_buttons_with_the_reason() {
     let mut h = harness(m);
     h.run();
     let mut seen = 0;
-    for label in ["Set type…", "Decide…", "Acknowledge"] {
+    for label in ["Set type…", "Alpha type: Cutout", "Acknowledge"] {
         for n in h.query_all_by_label(label) {
             seen += 1;
             assert!(n.accesskit_node().is_disabled(), "{label} is enabled");
@@ -581,7 +560,12 @@ fn at_1280x800_a_long_problems_row_keeps_its_buttons_on_screen() {
             && r.top() < panel.bottom()
     };
     let mut seen = 0;
-    for label in ["Go to set", "Set type…", "Decide…", "Acknowledge"] {
+    for label in [
+        "Go to set",
+        "Set type…",
+        "Alpha type: Cutout",
+        "Acknowledge",
+    ] {
         for n in h.query_all_by_label(label) {
             seen += 1;
             assert!(

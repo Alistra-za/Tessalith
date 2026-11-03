@@ -205,14 +205,10 @@ pub fn suggest_alpha(
                 Some((
                     AlphaPolicy::Cutout,
                     Confidence::Low,
-                    "≥90% of alpha is ≤5 or ≥250; the mesh decides".into(),
+                    "≥90% of alpha is ≤5 or ≥250".into(),
                 ))
             } else {
-                Some((
-                    AlphaPolicy::Blend,
-                    Confidence::Low,
-                    "soft alpha; the mesh decides".into(),
-                ))
+                Some((AlphaPolicy::Blend, Confidence::Low, "soft alpha".into()))
             }
         }
         _ => None,

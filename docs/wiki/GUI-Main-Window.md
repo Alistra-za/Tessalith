@@ -109,7 +109,7 @@ Keys, button layout and every dialog's buttons are on [Dialogs](GUI-Dialogs.md).
 
 One word for each idea, everywhere in the window. The code, where there is one, is on hover.
 
-- **Undecided.** A texture that waits for your answer (its sub-type, what its alpha means, its cube layout, or an acknowledgement). The Textures column counts them (*n undecided*), the pill is *Undecided*, a Problems row reads *Undecided: …*, and each row's button is *Decide…*. Export skips them.
+- **Undecided.** A texture that waits for your answer (its sub-type, what its alpha means, its cube layout, or an acknowledgement). The Textures column counts them (*n undecided*), the pill is *Undecided*, a Problems row reads *Undecided: …* (or *Alpha: … — confirm* for the alpha question alone), and its fix is a button or the **Alpha type** dropdown. Export skips them.
 - **Not ready.** A set with a problem in the set or in one of its textures. It is the Sets column's *Not ready* pill, the opposite of *Ready*.
 - **Blocker.** A problem that stops the export (a red dot). Fix it or remove the texture and export again.
 - **Warning.** A problem that does not stop the export (an amber dot). Export writes the file anyway.
@@ -121,7 +121,7 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Set.** The textures that belong to one material: they share a name stem (and a PGPatcher JSON entry under Community Shaders).
 - **Helper.** A source file that is not a texture of its own: it fills a channel of another output, or blends into the normal. It is never written as a DDS.
 - **PGPatcher JSON.** The editor for the JSON PGPatcher reads is *PGPatcher JSON* everywhere: the *PGPatcher JSON editor…* menu item and set button, and the tab or window title. Its *+ Add a delete section* button adds a PGPatcher "delete" section.
-- **Drop the alpha anyway.** The acknowledgement button of a texture whose varying alpha the chosen format or setting discards: the export writes the texture without its alpha. Every other blocking warning keeps *Acknowledge*.
+- **Drop the alpha anyway.** The acknowledgement button of a texture whose varying alpha the chosen format or setting discards, once its alpha type is confirmed: the export writes the texture without its alpha. Every other blocking warning keeps *Acknowledge*.
 - **Not exported yet.** What the Files tab says before the first export of the session; the counts (*converted*, *up to date*, …) appear once there are files.
 - **Sub-type labels.** A sub-type reads as its id with spaces (*pbr albedo*); *Skin RFAOS* is the one name spelled out. The id (`skin_rfaos`) is on hover.
 - **One accent.** The window has one non-status colour (teal), for selection and the RNM outline. Red, amber and green are for status only.

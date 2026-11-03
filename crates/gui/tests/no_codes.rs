@@ -133,7 +133,7 @@ fn no_code_text_in_the_banner() {
     );
 }
 
-/// C12: each Decide… entry says what it does.
+/// C12 (Note FM35: the Decide… menu is the alpha dropdown): each entry says what it does.
 #[test]
 fn every_decide_entry_has_a_hover() {
     let d = tempfile::tempdir().unwrap();
@@ -146,7 +146,7 @@ fn every_decide_entry_has_a_hover() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Decide…").click();
+    h.get_by_label("Alpha type: Cutout").click();
     h.run();
     use engine::config::AlphaPolicy::*;
     for (entry, policy) in [

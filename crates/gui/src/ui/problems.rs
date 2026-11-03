@@ -4,6 +4,7 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{filtered, flagged, problems, At, Fix, Level, Problem, ProblemsFilter};
+use crate::model::items::alpha_asked;
 use crate::model::meshes::NifTab;
 use crate::model::sets::Missing;
 use crate::model::shell::ShellRequest;
@@ -386,18 +387,28 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     let stroke = ui.visuals().selection.stroke;
                     ui.painter()
                         .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                    // Note FM35: a row with no type suggestion that asks its alpha confirms the type it shows.
+                    let alpha = match &p.at {
+                        At::Texture(k) if p.suggested.is_none() => {
+                            m.item(k).and_then(alpha_asked).map(|a| a.0)
+                        }
+                        _ => None,
+                    };
                     // Consumed only when the row acts, so the Grid's Enter (open the preview) never sees it too.
-                    let acting = matches!(
-                        (first, &off, &p.at, p.suggested),
-                        (true, None, At::Texture(_), Some(_))
-                    );
+                    let acting = matches!((first, &off, &p.at), (true, None, At::Texture(_)))
+                        && (p.suggested.is_some() || alpha.is_some());
                     let pressed = acting
                         && ui.input_mut(|k| {
                             k.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                                 || k.consume_key(egui::Modifiers::NONE, egui::Key::Space)
                         });
-                    if let (true, At::Texture(k), Some(st)) = (pressed, &p.at, p.suggested) {
-                        act = Some(Act::Pick(RowPick::Decide(k.clone(), st)));
+                    if let (true, At::Texture(k)) = (pressed, &p.at) {
+                        let k = k.clone();
+                        act = p
+                            .suggested
+                            .map(|st| RowPick::Decide(k.clone(), st))
+                            .or(alpha.map(|a| RowPick::Answer(k, Answer::Alpha(a))))
+                            .map(Act::Pick);
                         // The last row keeps focus: no wrap to the top.
                         if let Some(next) = list.get(i + 1) {
                             ui.memory_mut(|mem| mem.request_focus(row_id(next)));

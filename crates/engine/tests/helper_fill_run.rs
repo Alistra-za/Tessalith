@@ -193,7 +193,7 @@ fn fill_runs_before_alpha_policy() {
     assert!(j.fill.is_some());
     match &j.status {
         JobStatus::Unresolved { reasons, .. } => assert!(
-            reasons.iter().any(|r| r.contains("proposal Cutout")),
+            reasons.iter().any(|r| r.contains("proposed Cutout")),
             "{reasons:?}"
         ),
         s => panic!("{s:?}"),
