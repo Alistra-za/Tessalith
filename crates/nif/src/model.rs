@@ -110,10 +110,6 @@ fn is_extra(kind: &[u8]) -> bool {
         || kind.starts_with(b"BSConnectPoint")
 }
 
-fn is_node(kind: &[u8]) -> bool {
-    kind.ends_with(b"Node")
-}
-
 pub fn read_model(b: &[u8]) -> Result<NifModel, NifError> {
     let h = Header::parse(b)?;
     h.check_file_length(b)?;
@@ -222,7 +218,7 @@ pub fn read_model(b: &[u8]) -> Result<NifModel, NifError> {
                 Ok(s) => m.sequences.push(s),
                 Err(e) => p.push(format!("block {i}: {e}")),
             }
-        } else if Some(i as u32) == m.root && is_node(kind) {
+        } else if Some(i as u32) == m.root && crate::graph::is_root_node(kind) {
             match read_net(&h, b, i) {
                 Ok(net) => m.root_net = Some(net),
                 Err(e) => p.push(format!("block {i}: {e}")),
