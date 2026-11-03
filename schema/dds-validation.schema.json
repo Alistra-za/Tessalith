@@ -59,6 +59,7 @@
         "FMT-BC5-NORMAL",
         "FMT-LANDSCAPE-BC1",
         "FMT-BC1-ALPHA",
+        "FMT-RGB8-ALPHA",
         "FMT-PERCEPTUAL-DATA",
         "FMT-HDR-SOURCE",
         "ALPHA-EXACT-OFF-M",

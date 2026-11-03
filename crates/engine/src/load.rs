@@ -224,8 +224,10 @@ fn dds_source_info(f: crate::dds::DdsPixelFormat) -> SourceInfo {
         Bc1 { .. } | Bc2 { .. } | Bc3 { .. } | Bc7 { .. } | Rgba8 { .. } | Bgra8 { .. } => {
             (8, 4, true, false)
         }
-        Bgrx8 => (8, 3, false, false),
-        Bc4 | R8 => (8, 1, false, false),
+        Bgrx8 | Rgb8 => (8, 3, false, false),
+        // A8L8 reads as grey with alpha; L16 reads its high byte only, so it counts as 8-bit.
+        La8 => (8, 2, true, false),
+        Bc4 | R8 | R16 => (8, 1, false, false),
         Bc5 | Rg8 => (8, 2, false, false),
         Bc6hUf16 | Bc6hSf16 => (16, 3, false, true),
         Rgba16f => (16, 4, true, true),

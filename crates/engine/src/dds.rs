@@ -45,6 +45,7 @@ pub fn legacy_fourcc(format: Format) -> Option<[u8; 4]> {
         Format::Bc6hUf16
         | Format::Bc7
         | Format::Rgba8
+        | Format::Rgb8
         | Format::R8
         | Format::Rg8
         | Format::Rgba16f => None,
@@ -56,8 +57,8 @@ pub const DDPF_RGB: u32 = 0x40;
 /// Legacy uncompressed pixel format: the alpha mask is valid.
 pub const DDPF_ALPHAPIXELS: u32 = 0x1;
 
-/// The legacy pixel-format block `(flags, bit count, [R, G, B, A] masks)` of an uncompressed format: only `rgba8`
-/// UNORM has one, B8G8R8A8 (DECISIONS S4).
+/// The legacy pixel-format block `(flags, bit count, [R, G, B, A] masks)` of an uncompressed format: `rgba8` UNORM is
+/// B8G8R8A8 (DECISIONS S4), `rgb8` is B8G8R8 (Note FM38).
 pub fn legacy_masks(format: Format) -> Option<(u32, u32, [u32; 4])> {
     match format {
         Format::Rgba8 => Some((
@@ -65,6 +66,7 @@ pub fn legacy_masks(format: Format) -> Option<(u32, u32, [u32; 4])> {
             32,
             [0xff_0000, 0xff00, 0xff, 0xff00_0000],
         )),
+        Format::Rgb8 => Some((DDPF_RGB, 24, [0xff_0000, 0xff00, 0xff, 0])),
         _ => None,
     }
 }
@@ -72,10 +74,12 @@ pub fn legacy_masks(format: Format) -> Option<(u32, u32, [u32; 4])> {
 /// Header form for a request. `Auto` picks legacy only for BC1/BC3/RGBA8 UNORM.
 ///
 /// An explicit `legacy` on a format with no legacy form (BC6H, BC7, any `_SRGB`) maps to DX10 here as a defensive
-/// fallback only; Resolve rejects such requests as a user error (`CFG-INVALID`) before this is reached.
+/// fallback only; Resolve rejects such requests as a user error (`CFG-INVALID`) before this is reached. `rgb8` is
+/// the reverse: DXGI has no 24-bit format, so it is always legacy (Note FM38; Resolve rejects an explicit `dx10`).
 pub fn resolve_header(format: Format, srgb: bool, h: HeaderForm) -> ResolvedHeader {
     let legacy_ok = !srgb && (legacy_fourcc(format).is_some() || legacy_masks(format).is_some());
     match h {
+        _ if format == Format::Rgb8 => ResolvedHeader::Legacy,
         HeaderForm::Auto
             if !srgb && matches!(format, Format::Bc1 | Format::Bc3 | Format::Rgba8) =>
         {
@@ -99,6 +103,8 @@ pub fn dxgi_format(format: Format, srgb: bool) -> u32 {
         (Format::Bc7, true) => 99,
         (Format::Rgba8, false) => 87,
         (Format::Rgba8, true) => 91,
+        // DXGI has no 24-bit format; `header_bytes` refuses a DX10 header for it, so this is never written.
+        (Format::Rgb8, _) => 0,
         (Format::R8, _) => 61,
         (Format::Rg8, _) => 49,
         (Format::Rgba16f, _) => 10,
@@ -155,6 +161,8 @@ pub enum DdsError {
     },
     #[error("no legacy FourCC for {format:?} (srgb={srgb}); use dx10")]
     NoLegacyForm { format: Format, srgb: bool },
+    #[error("no DX10 form for {format:?}; use a legacy header")]
+    NoDx10Form { format: Format },
     /// A cube file that is not six square, equal-length chains.
     #[error("cubemap shape: {0}")]
     CubeShape(String),
@@ -328,6 +336,11 @@ pub fn header_bytes_with(desc: &DdsDesc, mips: u32, cube: bool) -> Result<Vec<u8
             }
         }
         ResolvedHeader::Dx10 => {
+            if desc.format == Format::Rgb8 {
+                return Err(DdsError::NoDx10Form {
+                    format: desc.format,
+                });
+            }
             hd[19] = DDPF_FOURCC;
             hd[20] = u32::from_le_bytes(*b"DX10");
         }
@@ -485,6 +498,12 @@ pub enum DdsPixelFormat {
     Rgba8 { srgb: bool },
     Bgra8 { srgb: bool },
     Bgrx8,
+    // Legacy 24-bit B8G8R8 (Note FM38): read, and written as `Format::Rgb8`.
+    Rgb8,
+    // Legacy A8L8: grey in R, alpha in A. Read only.
+    La8,
+    // Legacy L16: 16-bit grey. Read only; the LDR decode keeps the high byte.
+    R16,
     R8,
     Rg8,
     Rgba16f,
@@ -506,8 +525,9 @@ impl DdsPixelFormat {
         use DdsPixelFormat::*;
         match self {
             Rgba8 { .. } | Bgra8 { .. } | Bgrx8 => 4,
+            Rgb8 => 3,
             R8 => 1,
-            Rg8 => 2,
+            Rg8 | La8 | R16 => 2,
             Rgba16f => 8,
             Rgba32f => 16,
             _ => 0,
@@ -532,7 +552,7 @@ impl DdsPixelFormat {
     }
 
     /// The writable format and `_SRGB` tag, or `None` for formats sdc never writes (BC2, signed BC6H, RGBA-order
-    /// RGBA8, BGRX8, RGBA32F).
+    /// RGBA8, BGRX8, A8L8, L16, RGBA32F).
     pub fn as_format(self) -> Option<(Format, bool)> {
         use DdsPixelFormat as P;
         Some(match self {
@@ -543,6 +563,7 @@ impl DdsPixelFormat {
             P::Bc6hUf16 => (Format::Bc6hUf16, false),
             P::Bc7 { srgb } => (Format::Bc7, srgb),
             P::Bgra8 { srgb } => (Format::Rgba8, srgb),
+            P::Rgb8 => (Format::Rgb8, false),
             P::R8 => (Format::R8, false),
             P::Rg8 => (Format::Rg8, false),
             P::Rgba16f => (Format::Rgba16f, false),
@@ -565,6 +586,9 @@ impl DdsPixelFormat {
             }
             Rg8 => 49,
             R8 => 61,
+            // Legacy-only layouts have no DXGI equivalent the reader maps back: 0 (unknown). A8L8 must not read as
+            // R8G8 (49), which `policy` takes for a two-channel normal.
+            Rgb8 | La8 | R16 => 0,
             Bc1 { srgb } => {
                 if srgb {
                     72
@@ -791,8 +815,13 @@ pub fn read_dds(bytes: &[u8]) -> Result<DdsFile, DdsError> {
             (32, 0xff, 0xff00, 0xff_0000, 0xff00_0000) => Rgba8 { srgb: false },
             (32, 0xff_0000, 0xff00, 0xff, 0xff00_0000) => Bgra8 { srgb: false },
             (32, 0xff_0000, 0xff00, 0xff, 0) => Bgrx8,
+            (24, 0xff_0000, 0xff00, 0xff, 0) => Rgb8,
             (8, 0xff, 0, 0, 0) => R8,
             (16, 0xff, 0xff00, 0, 0) => Rg8,
+            // A8L8 (luminance in the low byte, alpha in the high byte). Some writers put a bit count of 8 on it, but
+            // the alpha mask is above bit 8, so the texel is two bytes either way.
+            (16 | 8, 0xff, 0, 0, 0xff00) => La8,
+            (16, 0xffff, 0, 0, 0) => R16,
             _ => {
                 return Err(DdsError::Unsupported(format!(
                     "uncompressed layout {bits} bits, masks {rm:x}/{gm:x}/{bm:x}/{am:x}"

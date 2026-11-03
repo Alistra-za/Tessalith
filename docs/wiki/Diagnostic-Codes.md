@@ -49,6 +49,7 @@ Every warning has a code and a severity:
 | `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](../research/encoder-benchmark.md)). | Use BC7. |
 | `FMT-LANDSCAPE-BC1` | blocking | BC1 on `landscape_diffuse` destroys the snow mask. | Use BC7 or BC3. |
 | `FMT-BC1-ALPHA` | blocking | BC1 with alpha kept, without `encoder.bc1_alpha` or with `data` alpha ([BC1 alpha](Texture-Types.md#alpha-policies)). | Turn on `encoder.bc1_alpha`, use BC7 or BC3, or `remove`. |
+| `FMT-RGB8-ALPHA` | blocking | RGB8 with alpha kept ([RGB8](Texture-Types.md#formats)). | Use BC7 or RGBA8, or `remove` the alpha. |
 | `FMT-PERCEPTUAL-DATA` | error | Perceptual encoding on a data map. | Turn `encoder.perceptual` off. |
 | `FMT-HDR-SOURCE` | info | Why a `pbr_emissive` is BC6H (float source above 1.0) or BC7 sRGB. | Set `format` on the file to choose. |
 | `TAG-SRGB-VANILLA` | error | `_SRGB` under `vanilla`. | UNORM. |

@@ -2850,3 +2850,74 @@ fn an_alpha_pick_needs_an_alpha_channel_and_is_not_a_discarded_alpha() {
         "{m}"
     );
 }
+
+/// Note FM38: rgb8 stores no alpha, so a texture that keeps its alpha cannot be written as one.
+#[test]
+fn rgb8_is_refused_when_alpha_is_kept() {
+    for policy in ["cutout", "blend", "cutout_blend", "data"] {
+        let p = format!("alpha.policy={policy}");
+        let j = run(
+            Target::Cs,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            &["subtype=diffuse", "format=rgb8", &p],
+            &[],
+        );
+        assert!(
+            matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&Code::FmtRgb8Alpha)),
+            "{policy}: {:?}",
+            j.status
+        );
+    }
+    // An opaque source, or an explicit remove, is written.
+    for sets in [
+        &["subtype=diffuse", "format=rgb8"][..],
+        &["subtype=diffuse", "format=rgb8", "alpha.policy=remove"][..],
+    ] {
+        let j = run(
+            Target::Cs,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            sets,
+            &[],
+        );
+        assert_eq!(j.status, JobStatus::Ready, "{sets:?}: {:?}", j.warnings);
+        assert_eq!(j.profile.format, Format::Rgb8);
+    }
+}
+
+/// Note FM38: a legacy header cannot carry the `_SRGB` tag, so rgb8 is linear only.
+#[test]
+fn rgb8_is_refused_with_an_srgb_tag() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x.png",
+        None,
+        &[],
+        opaque(),
+        &["subtype=pbr_albedo", "format=rgb8"],
+        &[],
+    );
+    assert_eq!(j.profile.color.tag, ColorTag::Srgb);
+    assert!(codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+    assert!(
+        !matches!(j.status, JobStatus::Ready),
+        "an sRGB rgb8 must not be written: {:?}",
+        j.status
+    );
+    // An explicit `header = dx10` has no 24-bit form to write.
+    let j = run(
+        Target::Cs,
+        "textures/a/x.png",
+        None,
+        &[],
+        opaque(),
+        &["subtype=diffuse", "format=rgb8", "header=dx10"],
+        &[],
+    );
+    assert!(codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+}

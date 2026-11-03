@@ -370,6 +370,15 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         &["subtype=diffuse", "format=bc3", "mips.filter=box"],
     );
     add("gray_bc4", rgb(64), &["subtype=height", "format=bc4"]);
+    // Note FM38: 24-bit RGB (legacy header, B, G, R bytes), square and with a 2:1 mip chain.
+    add("opaque_rgb8", rgb(64), &["subtype=diffuse", "format=rgb8"]);
+    add(
+        "wide_rgb8",
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(32, 16, |x, y| {
+            Rgb([(x * 8) as u8, (y * 14) as u8, ((x * y) % 256) as u8])
+        })),
+        &["subtype=diffuse", "format=rgb8", "mips.filter=box"],
+    );
     // Note FM37: the Gray sub-type as R8, red read from an RGB source (its BC4 form is the forced `gray` fixture).
     add("gray_r8", rgb(64), &["subtype=gray", "format=r8"]);
     // A normal cannot be BC5 (FMT-BC5-NORMAL), so BC5 is a two-channel map.
@@ -614,7 +623,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         .values()
         .map(|p| p["format"].as_str().unwrap())
         .collect();
-    for want in ["Bc1", "Bc3", "Bc4", "Bc5"] {
+    for want in ["Bc1", "Bc3", "Bc4", "Bc5", "Rgb8"] {
         assert!(
             formats.iter().any(|f| f.starts_with(want)),
             "identity pins cover no {want} output: {formats:?}"
@@ -635,6 +644,8 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "npot_1000_bc1",
         "height_half",
         "gray_r8",
+        "opaque_rgb8",
+        "wide_rgb8",
         "twosize_rmaos",
         "gpick_rmaos",
         "rpick_rmaos",

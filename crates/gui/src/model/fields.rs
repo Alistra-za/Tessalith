@@ -176,6 +176,7 @@ pub fn format_name(format: Format) -> &'static str {
         Format::Bc5 => "BC5",
         Format::Bc6hUf16 => "BC6H",
         Format::Rgba8 => "RGBA8",
+        Format::Rgb8 => "RGB8",
         Format::R8 => "R8",
         Format::Rg8 => "RG8",
         Format::Rgba16f => "RGBA16F",
@@ -195,6 +196,8 @@ pub fn format_label(format: Format, tag: ColorTag) -> String {
         Format::Bc5 => "linear (two channels)".into(),
         Format::Bc6hUf16 => "HDR linear".into(),
         Format::Rgba8 => format!("{space} (uncompressed)"),
+        // Note FM38: written with a legacy header, which cannot carry the _SRGB tag, so always linear.
+        Format::Rgb8 => "linear (24-bit, uncompressed)".into(),
         Format::R8 => "linear (one channel, uncompressed)".into(),
         Format::Rg8 => "linear (two channels, uncompressed)".into(),
         Format::Rgba16f => "HDR linear (uncompressed)".into(),
@@ -264,6 +267,7 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "color.tag" if matches!(p.format, Format::R8 | Format::Rg8) => {
             Some("R8 and RG8 have no _SRGB form")
         }
+        "color.tag" if p.format == Format::Rgb8 => Some("RGB8 has no _SRGB form"),
         "encoder.effort" | "encoder.perceptual" if !p.format.is_block() => {
             Some("no encoder runs for uncompressed formats")
         }

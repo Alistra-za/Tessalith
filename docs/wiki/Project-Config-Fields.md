@@ -48,7 +48,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgba8` is written as B8G8R8A8. |
+| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `rgb8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgba8` is written as B8G8R8A8, `rgb8` as 24-bit B8G8R8 (no alpha, linear only). |
 | `header` | `auto`, `dx10`, `legacy` | `auto` | DDS header form. `auto` writes a legacy header for BC1, BC3 and RGBA8 without the `_SRGB` tag, and the DX10 header for everything else. `legacy` is valid only for formats that have a legacy form (such as BC1, BC3, BC4, BC5) and no `_SRGB` tag; otherwise it is `CFG-INVALID`. |
 | `resize` | `none`, `half`, `quarter`, `eighth` | `none` | Halves both sides once, twice or three times. Each halving happens only while the longer side stays at or above `resize_floor`: with the 512 floor, 2048x1024 under `quarter` becomes 512x256, and 1024x1024 under `eighth` stops at 512x512. <!-- D:FM29 --> |
 | `resize_floor` | pixels, 1 to 16384 | 512; 256 for `height` | The longer side `resize` never halves below. Outside 1 to 16384 it is `CFG-INVALID`. <!-- D:FM29 --> |

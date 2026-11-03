@@ -149,6 +149,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                     Format::Bc7
                     | Format::Bc6hUf16
                     | Format::Rgba8
+                    | Format::Rgb8
                     | Format::R8
                     | Format::Rg8
                     | Format::Rgba16f => unreachable!("handled elsewhere"),
@@ -180,12 +181,15 @@ fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], zero: bool) {
     }
 }
 
-/// Uncompressed level bytes (DECISIONS S4): `rgba8` as B8G8R8A8, `r8` as R, `rg8` as R then G, `rgba16f` as four
+/// Uncompressed level bytes (DECISIONS S4): `rgba8` as B8G8R8A8, `rgb8` as B8G8R8 (Note FM38), `r8` as R, `rg8` as R then G, `rgba16f` as four
 /// little-endian halves per texel. Rows are tightly packed (pitch `w * bytes_per_pixel`).
 pub(crate) fn pack_uncompressed(input: &EncoderInput, format: Format) -> Vec<u8> {
     match (input, format) {
         (EncoderInput::Ldr(px), Format::Rgba8) => {
             px.iter().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect()
+        }
+        (EncoderInput::Ldr(px), Format::Rgb8) => {
+            px.iter().flat_map(|p| [p[2], p[1], p[0]]).collect()
         }
         (EncoderInput::Ldr(px), Format::R8) => px.iter().map(|p| p[0]).collect(),
         (EncoderInput::Ldr(px), Format::Rg8) => px.iter().flat_map(|p| [p[0], p[1]]).collect(),
@@ -435,6 +439,8 @@ mod tests {
         let px = vec![[10u8, 20, 30, 40], [50, 60, 70, 80]];
         for (f, want) in [
             (Format::Rgba8, vec![30u8, 20, 10, 40, 70, 60, 50, 80]),
+            // Note FM38: B, G, R with no alpha byte.
+            (Format::Rgb8, vec![30, 20, 10, 70, 60, 50]),
             (Format::R8, vec![10, 50]),
             (Format::Rg8, vec![10, 20, 50, 60]),
         ] {

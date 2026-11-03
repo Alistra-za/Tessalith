@@ -1437,8 +1437,11 @@ fn encoding_warnings(
         add(CfgInvalid, msg);
     }
     // BC4, BC5, R8 and RG8 have no _SRGB DXGI format: the file would be written UNORM (owner, 2026-10-13, for BC4/BC5).
-    if matches!(format, Format::Bc4 | Format::Bc5 | Format::R8 | Format::Rg8)
-        && tag == ColorTag::Srgb
+    // Note FM38: RGB8 is a legacy header, which cannot carry the tag either.
+    if matches!(
+        format,
+        Format::Bc4 | Format::Bc5 | Format::Rgb8 | Format::R8 | Format::Rg8
+    ) && tag == ColorTag::Srgb
     {
         add(
             CfgInvalid,
@@ -1681,6 +1684,7 @@ pub fn allowed_encodings_for(
         Format::Bc6hUf16,
         Format::Bc7,
         Format::Rgba8,
+        Format::Rgb8,
         Format::R8,
         Format::Rg8,
         Format::Rgba16f,
@@ -1881,6 +1885,25 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
                     ),
                 );
             }
+        }
+    }
+    // Note FM38: rgb8 stores no alpha at all, so any policy but `remove` is a loss the user must choose.
+    if p.format == Format::Rgb8 {
+        if p.alpha.policy != AlphaPolicy::Remove {
+            add(
+                FmtRgb8Alpha,
+                format!(
+                    "RGB8 keeps no alpha.policy {:?} alpha; choose a format with alpha or remove the alpha",
+                    p.alpha.policy
+                ),
+            );
+        }
+        // DXGI has no 24-bit format, so the file can only be a legacy header.
+        if p.header == HeaderForm::Dx10 {
+            add(
+                CfgInvalid,
+                "no DX10 form for Rgb8; use header=legacy or auto".into(),
+            );
         }
     }
     if p.encoder.perceptual

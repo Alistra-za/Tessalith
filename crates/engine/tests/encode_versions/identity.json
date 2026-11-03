@@ -90,6 +90,13 @@
     "subtype": "diffuse",
     "width": 64
   },
+  "cov/textures/c/opaque_rgb8.dds": {
+    "format": "Rgb8",
+    "height": 64,
+    "payload_sha256": "e4e1a71322a13a8f6f2f75a356056cc098492318be60751cd2e3acbeae851fca",
+    "subtype": "diffuse",
+    "width": 64
+  },
   "cov/textures/c/rg_bc5.dds": {
     "format": "Bc5",
     "height": 64,
@@ -136,6 +143,13 @@
     "format": "Bc3 { srgb: false }",
     "height": 16,
     "payload_sha256": "0d60ade067c4f74d2e857c1897e8705b392972a93d9e3abddca9892af667b7b1",
+    "subtype": "diffuse",
+    "width": 32
+  },
+  "cov/textures/c/wide_rgb8.dds": {
+    "format": "Rgb8",
+    "height": 16,
+    "payload_sha256": "ca07679161f50bc86b651219fec8a4de6c89aa4e71f289ed4672620c484c0c15",
     "subtype": "diffuse",
     "width": 32
   },

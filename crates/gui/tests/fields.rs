@@ -435,6 +435,7 @@ fn every_format_label_starts_with_its_one_name() {
         Format::Bc5,
         Format::Bc6hUf16,
         Format::Rgba8,
+        Format::Rgb8,
         Format::R8,
         Format::Rg8,
         Format::Rgba16f,
@@ -524,4 +525,43 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
         "hidden, the row left a gap: {row} vs {next_row}"
     );
     assert!(top(&h, "Exact opaque alpha").unwrap() - coverage > row);
+}
+
+/// Note FM38: RGB8 is listed beside RGBA8 UNORM, linear only; a cubemap and a Gray map keep their own lists.
+#[test]
+fn the_dropdown_offers_rgb8_where_rgba8_unorm_is_offered() {
+    let reg = PresetRegistry::builtin().unwrap();
+    assert_eq!(
+        format_label(Format::Rgb8, ColorTag::Unorm),
+        "RGB8 · linear (24-bit, uncompressed)"
+    );
+    for t in [Target::Cs, Target::Vanilla] {
+        for st in [
+            Subtype::Diffuse,
+            Subtype::Normal,
+            Subtype::Envmask,
+            Subtype::Height,
+        ] {
+            let o: Vec<_> = encoding_options(t, &reg.base_profile(t, st))
+                .into_iter()
+                .map(|(pair, _)| pair)
+                .collect();
+            assert_eq!(
+                o.contains(&(Format::Rgb8, ColorTag::Unorm)),
+                o.contains(&(Format::Rgba8, ColorTag::Unorm)),
+                "{st:?} {t:?}: {o:?}"
+            );
+            assert!(!o.contains(&(Format::Rgb8, ColorTag::Srgb)), "{st:?} {t:?}");
+        }
+    }
+    let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+    p.format = Format::Rgb8;
+    assert_eq!(
+        field_lock(Target::Cs, &p, "color.tag"),
+        Some("RGB8 has no _SRGB form")
+    );
+    let o = encoding_options(Target::Cs, &reg.base_profile(Target::Cs, Subtype::Diffuse));
+    assert!(o
+        .iter()
+        .any(|((f, _), l)| *f == Format::Rgb8 && !l.ends_with(NOT_VALID)));
 }

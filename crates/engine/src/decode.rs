@@ -139,6 +139,28 @@ fn decode(
                 .map(|c| [c[2], c[1], c[0], if fmt == Bgrx8 { 255 } else { c[3] }])
                 .collect(),
         ),
+        Rgb8 => Decoded::Ldr(
+            data.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|c| [c[2], c[1], c[0], 255])
+                .collect(),
+        ),
+        La8 => Decoded::Ldr(
+            data.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| [c[0], c[0], c[0], c[1]])
+                .collect(),
+        ),
+        // Little-endian 16-bit grey; the LDR decode keeps the high byte (no 16-bit path exists here).
+        R16 => Decoded::Ldr(
+            data.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| [c[1], c[1], c[1], 255])
+                .collect(),
+        ),
         R8 => Decoded::Ldr(data.iter().map(|&v| [v, v, v, 255]).collect()),
         Rg8 => Decoded::Ldr(
             data.as_chunks::<2>()

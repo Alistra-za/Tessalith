@@ -571,6 +571,7 @@
         "bc6h_uf16",
         "bc7",
         "rgba8",
+        "rgb8",
         "r8",
         "rg8",
         "rgba16f"

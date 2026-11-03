@@ -147,9 +147,14 @@ The full list of format, tag and target rules is on [Presets and targets](Preset
 | BC6H | `bc6h_uf16` | HDR RGB, unsigned | HDR emissive and sky, `cs` only. |
 | BC7 | `bc7` | RGBA | Default for almost everything. |
 | RGBA8 | `rgba8` | Uncompressed, written as B8G8R8A8 | |
+| RGB8 | `rgb8` | Uncompressed 24-bit B8G8R8, legacy header | No alpha and no `_SRGB`, see below. |
 | R8 | `r8` | Uncompressed, one channel | |
 | RG8 | `rg8` | Uncompressed, two channels | |
 | RGBA16F | `rgba16f` | Uncompressed half-float | `cs` only. |
+
+RGB8 is offered wherever RGBA8 is offered with a linear tag, except for cubemaps. It has two limits. A texture that keeps its alpha is refused (`FMT-RGB8-ALPHA`, blocking), so the source must be opaque or use the `remove` policy. The tag must be linear, because the legacy header it needs has no `_SRGB` form (`header = "dx10"` is refused for the same reason). <!-- D:FM38 -->
+
+As a DDS input, Tessalith also reads BC2, signed BC6H, BGRX8, RGBA32F and three legacy layouts: 24-bit R8G8B8 (the format above), A8L8 (grey with alpha) and L16 (grey, from the high byte). It never writes A8L8 or L16. R5G6B5, A1R5G5B5, A4R4G4B4, X8B8G8R8 and A8 are not read.
 
 Which encoder each format uses is in [Format and encoder](Project-Config.md#format-and-encoder).
 

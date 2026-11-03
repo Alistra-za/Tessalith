@@ -20,6 +20,7 @@
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
 //! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM)
 //! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
+//! and FMT-RGB8-ALPHA (a 24-bit RGB output for a texture that keeps its alpha, DECISIONS Note FM38).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +68,8 @@ codes! {
     FmtBc5Normal = "FMT-BC5-NORMAL" => Blocking,
     FmtLandscapeBc1 = "FMT-LANDSCAPE-BC1" => Blocking,
     FmtBc1Alpha = "FMT-BC1-ALPHA" => Blocking,
+    // Note FM38: rgb8 stores no alpha, so a texture whose alpha is kept cannot be written as one.
+    FmtRgb8Alpha = "FMT-RGB8-ALPHA" => Blocking,
     FmtPerceptualData = "FMT-PERCEPTUAL-DATA" => Error,
     FmtHdrSource = "FMT-HDR-SOURCE" => Info,
     AlphaExactOffM = "ALPHA-EXACT-OFF-M" => Blocking,
@@ -252,7 +255,9 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 93);
+        assert_eq!(Code::ALL.len(), 94);
+        assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
+        assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

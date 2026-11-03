@@ -581,6 +581,8 @@ pub fn dxgi_format(f: DdsPixelFormat, dx10: Option<u32>) -> DXGI_FORMAT {
         P::Rgba8 { srgb } => 28 + srgb as i32,
         P::Bgra8 { srgb } => 87 + 4 * srgb as i32,
         P::Bgrx8 => 88,
+        // Note FM38: legacy 24-bit RGB, A8L8 and L16 have no DXGI format; `load_dds_as` refuses them (0 = unknown).
+        P::Rgb8 | P::La8 | P::R16 => 0,
         P::R8 => 61,
         P::Rg8 => 49,
         P::Rgba16f => 10,
@@ -637,6 +639,9 @@ pub fn load_dds_as(gpu: &Gpu, bytes: &[u8], linear: bool) -> Result<Texture, Str
     let f = read_dds(bytes).map_err(|e| format!("{e:?}"))?;
     let format = dxgi_format(f.format, f.dx10.map(|d| d.dxgi));
     let format = if linear { without_srgb(format) } else { format };
+    if format.0 == 0 {
+        return Err(format!("{:?} DDS has no GPU format", f.format));
+    }
     let mips = f.levels.len().max(1);
     let slice_bytes = f.levels.last().map_or(0, |l| l.2.end);
     let faces = if f.is_cubemap { 6 } else { 1 };
@@ -691,6 +696,14 @@ mod tests {
             dxgi_format(DdsPixelFormat::Bgra8 { srgb: false }, None).0,
             87
         );
+        // Note FM38: the legacy layouts with no DXGI equivalent map to UNKNOWN, which `load_dds_as` refuses.
+        for f in [
+            DdsPixelFormat::Rgb8,
+            DdsPixelFormat::La8,
+            DdsPixelFormat::R16,
+        ] {
+            assert_eq!(dxgi_format(f, None).0, 0, "{f:?}");
+        }
     }
 
     fn norm(raw: &str) -> String {

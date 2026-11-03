@@ -35,7 +35,7 @@ Every file is written to a temporary `.sdc-*.tmp` file in the target folder and 
 
 Tessalith writes its own DDS headers:
 
-- BC1 and BC3 without `_SRGB`, and uncompressed RGBA8 without `_SRGB`, get a legacy header. Everything else (BC4, BC5, BC6H, BC7, any `_SRGB` format, R8, RG8, RGBA16F) gets a DX10 header. You can change this with the `header` field.
+- BC1 and BC3 without `_SRGB`, and uncompressed RGBA8 without `_SRGB`, get a legacy header. RGB8 always gets a legacy header, because DXGI has no 24-bit format. Everything else (BC4, BC5, BC6H, BC7, any `_SRGB` format, R8, RG8, RGBA16F) gets a DX10 header. You can change this with the `header` field, except for RGB8.
 - The flags, caps, linear size and mip count are always set consistently, which some other tools get wrong.
 - The non-standard `DDPF_NORMAL` flag is never written.
 

@@ -18,6 +18,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         FmtBc5Normal => "BC5 can't store this normal map the way it is set up — choose another format",
         FmtLandscapeBc1 => "Landscape textures can't use BC1 — choose another format",
         FmtBc1Alpha => "BC1 can't keep this texture's alpha — turn on 1-bit alpha, choose a format with alpha or remove the alpha",
+        FmtRgb8Alpha => "RGB8 can't keep this texture's alpha — choose a format with alpha or remove the alpha",
         FmtPerceptualData => "Perceptual weighting is wrong for a data map — turn it off or change the format",
         AlphaExactOffM => "This map needs exact alpha but it is switched off — turn it on",
         AlphaBc1OneBit => "BC1 1-bit alpha turns this texture's soft alpha edges hard — choose BC7 or BC3 to keep them, or accept",

@@ -236,7 +236,7 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
         let ch: Vec<usize> = match p.format {
             Format::Bc4 | Format::R8 => vec![0],
             Format::Bc5 | Format::Rg8 => vec![0, 1],
-            Format::Bc1 => vec![0, 1, 2],
+            Format::Bc1 | Format::Rgb8 => vec![0, 1, 2],
             _ if alpha_present => vec![0, 1, 2, 3],
             _ => vec![0, 1, 2],
         };

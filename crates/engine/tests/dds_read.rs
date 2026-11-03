@@ -819,10 +819,10 @@ fn malformed_headers_are_rejected_without_panicking() {
             "dxgi {d}"
         );
     }
-    // Unknown uncompressed masks, and RGBX (no matching pixel format).
+    // Unknown uncompressed masks: 24-bit in R, G, B order has no matching pixel format (B, G, R reads since Note FM38).
     let b = raw_file(
         (4, 4, 1),
-        (RGB_FLAGS, [0; 4], 24, [0xff_0000, 0xff00, 0xff, 0]),
+        (RGB_FLAGS, [0; 4], 24, [0xff, 0xff00, 0xff_0000, 0]),
         0,
         None,
         &[0; 48],
@@ -1351,4 +1351,181 @@ fn check_header_accepts_a_written_cube_and_flags_partial_ones() {
         issues.iter().any(|m| m.contains("not square")),
         "{issues:?}"
     );
+}
+
+// ---- Note FM38: legacy uncompressed layouts (24-bit RGB, A8L8, L16) ----
+
+/// A legacy header's pixel-format block: DDPF_RGB for a colour layout, DDPF_LUMINANCE (0x20000) for a grey one.
+const LUMINANCE: u32 = 0x2_0000;
+
+/// 3 x 2 is an odd width: a reader that padded rows to 4 bytes, or to a multiple of 4 pixels, would misplace the second
+/// row. Bytes are B, G, R.
+#[test]
+fn a_24_bit_bgr_file_reads_with_its_rows_unpadded() {
+    let data: Vec<u8> = (1..=18).collect();
+    let file = raw_file(
+        (3, 2, 1),
+        (RGB_FLAGS, [0; 4], 24, [0xff_0000, 0xff00, 0xff, 0]),
+        0,
+        None,
+        &data,
+    );
+    let f = read_dds(&file).unwrap();
+    assert_eq!(f.format, DdsPixelFormat::Rgb8);
+    assert_eq!(f.levels, vec![(3, 2, 0..18)]);
+    let want: Vec<[u8; 4]> = data.chunks(3).map(|c| [c[2], c[1], c[0], 255]).collect();
+    assert_eq!(
+        decode_level(f.format, 3, 2, &f.data).unwrap(),
+        Decoded::Ldr(want)
+    );
+}
+
+#[test]
+fn an_a8l8_file_reads_as_grey_with_alpha() {
+    let file = raw_file(
+        (2, 1, 1),
+        (LUMINANCE | 1, [0; 4], 16, [0xff, 0, 0, 0xff00]),
+        0,
+        None,
+        &[10, 200, 30, 40],
+    );
+    let f = read_dds(&file).unwrap();
+    assert_eq!(f.format, DdsPixelFormat::La8);
+    assert_eq!(
+        decode_level(f.format, 2, 1, &f.data).unwrap(),
+        Decoded::Ldr(vec![[10, 10, 10, 200], [30, 30, 30, 40]])
+    );
+}
+
+/// Some tools write the 16-bit A8L8 layout with a bit count of 8; the masks still name it, and it holds two bytes a texel.
+#[test]
+fn an_a8l8_file_with_an_8_bit_count_reads_the_same() {
+    let file = raw_file(
+        (2, 1, 1),
+        (LUMINANCE | 1, [0; 4], 8, [0xff, 0, 0, 0xff00]),
+        0,
+        None,
+        &[10, 200, 30, 40],
+    );
+    let f = read_dds(&file).unwrap();
+    assert_eq!(f.format, DdsPixelFormat::La8);
+    assert_eq!(f.levels, vec![(2, 1, 0..4)]);
+    assert_eq!(
+        decode_level(f.format, 2, 1, &f.data).unwrap(),
+        Decoded::Ldr(vec![[10, 10, 10, 200], [30, 30, 30, 40]])
+    );
+}
+
+/// L16 is little-endian 16-bit grey; the LDR decode keeps the high byte.
+#[test]
+fn an_l16_file_reads_as_grey() {
+    let file = raw_file(
+        (2, 1, 1),
+        (LUMINANCE, [0; 4], 16, [0xffff, 0, 0, 0]),
+        0,
+        None,
+        &[0x34, 0x12, 0xff, 0x80],
+    );
+    let f = read_dds(&file).unwrap();
+    assert_eq!(f.format, DdsPixelFormat::R16);
+    assert_eq!(f.levels, vec![(2, 1, 0..4)]);
+    assert_eq!(
+        decode_level(f.format, 2, 1, &f.data).unwrap(),
+        Decoded::Ldr(vec![[0x12, 0x12, 0x12, 255], [0x80, 0x80, 0x80, 255]])
+    );
+}
+
+/// The layouts the reader still does not know keep the one error.
+#[test]
+fn other_legacy_layouts_stay_unsupported() {
+    for (bits, masks) in [
+        (16, [0xf800, 0x7e0, 0x1f, 0]),      // R5G6B5
+        (16, [0x7c00, 0x3e0, 0x1f, 0x8000]), // A1R5G5B5
+        (16, [0xf00, 0xf0, 0xf, 0xf000]),    // A4R4G4B4
+        (32, [0xff, 0xff00, 0xff_0000, 0]),  // X8B8G8R8
+        (8, [0, 0, 0, 0xff]),                // A8
+        (24, [0xff, 0xff00, 0xff_0000, 0]),  // RGB order, not BGR
+    ] {
+        let file = raw_file(
+            (2, 2, 1),
+            (RGB_FLAGS, [0; 4], bits, masks),
+            0,
+            None,
+            &[0; 32],
+        );
+        assert!(
+            matches!(read_dds(&file), Err(DdsError::Unsupported(s)) if s.starts_with("uncompressed layout")),
+            "{bits} bits {masks:x?}"
+        );
+    }
+}
+
+/// Write `Format::Rgb8` with a full mip chain through the encoder and the writer, read it back: a legacy header with
+/// 24 bits and the B, G, R masks, no DX10 block, `3 * w * h` bytes a level, and the same pixels out as went in.
+#[test]
+fn rgb8_output_round_trips_through_the_reader() {
+    let (w, h) = (7u32, 5u32);
+    let p = profile(Subtype::Diffuse, Format::Rgb8);
+    let desc = DdsDesc {
+        width: w,
+        height: h,
+        format: Format::Rgb8,
+        srgb: false,
+        header: resolve_header(Format::Rgb8, false, HeaderForm::Auto),
+    };
+    assert_eq!(desc.header, ResolvedHeader::Legacy);
+    // DX10 has no 24-bit format, so an explicit `dx10` still writes the legacy header.
+    assert_eq!(
+        resolve_header(Format::Rgb8, false, HeaderForm::Dx10),
+        ResolvedHeader::Legacy
+    );
+    let dims = chain_dims(w, h);
+    assert_eq!(dims.len(), 3);
+    let (mut src, mut levels) = (vec![], vec![]);
+    for (i, &(lw, lh)) in dims.iter().enumerate() {
+        let px: Vec<[u8; 4]> = (0..lw * lh)
+            .map(|k| {
+                [
+                    (k * 5 + i as u32 * 11) as u8,
+                    (k * 3 + 1) as u8,
+                    (k * 7 + 2) as u8,
+                    255,
+                ]
+            })
+            .collect();
+        let bytes = encode_level(
+            &EncoderInput::Ldr(px.clone()),
+            lw,
+            lh,
+            &p,
+            &EncodeCtx::default(),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(bytes.len(), 3 * (lw * lh) as usize);
+        src.push(px);
+        levels.push(bytes);
+    }
+    let bytes = dds_bytes(&desc, &levels).unwrap();
+    let want: usize = dims.iter().map(|&(a, b)| 3 * (a * b) as usize).sum();
+    assert_eq!(bytes.len(), 128 + want);
+    let u = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+    assert_eq!(u(80), DDPF_RGB, "no FourCC, no alpha flag");
+    assert_eq!(
+        (u(88), u(92), u(96), u(100), u(104)),
+        (24, 0xff_0000, 0xff00, 0xff, 0)
+    );
+    assert_eq!(u(20), 3 * w, "the pitch is one unpadded row");
+    let f = read_dds(&bytes).unwrap();
+    assert_eq!(f.header_kind, HeaderKind::Legacy);
+    assert_eq!(f.format, DdsPixelFormat::Rgb8);
+    assert_eq!(f.format.as_format(), Some((Format::Rgb8, false)));
+    assert_eq!(f.mip_count, 3);
+    assert!(check_header(&f).is_empty(), "{:?}", check_header(&f));
+    for ((lw, lh, r), px) in f.levels.iter().zip(&src) {
+        assert_eq!(
+            decode_level(f.format, *lw, *lh, &f.data[r.clone()]).unwrap(),
+            Decoded::Ldr(px.clone())
+        );
+    }
 }

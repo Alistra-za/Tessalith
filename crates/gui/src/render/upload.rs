@@ -11,7 +11,7 @@ pub fn wgpu_format(format: Format) -> Option<wgpu::TextureFormat> {
         Format::Bc5 => wgpu::TextureFormat::Bc5RgUnorm,
         Format::Bc6hUf16 => wgpu::TextureFormat::Bc6hRgbUfloat,
         Format::Bc7 => wgpu::TextureFormat::Bc7RgbaUnorm,
-        Format::Rgba8 | Format::R8 | Format::Rg8 | Format::Rgba16f => return None,
+        Format::Rgba8 | Format::Rgb8 | Format::R8 | Format::Rg8 | Format::Rgba16f => return None,
     })
 }
 
