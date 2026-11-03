@@ -768,3 +768,42 @@ fn fill_step_cancel_still_ends_the_helper() {
     assert_eq!(t.len(), 1, "{t:?}");
     assert!(filled_into(t[0], "/fillcancel.dds"), "{t:?}");
 }
+
+/// Note FM39: the decision to keep `data` alpha on BC1 reads the alpha the run writes. A helper that fills a target
+/// whose own alpha is empty makes it non-empty, so BC1 still refuses it; a helper that is solid 255 changes nothing.
+#[test]
+fn a_helper_filled_alpha_decides_whether_bc1_keeps_data_alpha() {
+    let sets = [DIFFUSE, "format=bc1", "alpha.policy=data"];
+    let d = tempfile::tempdir().unwrap();
+    rgb(d.path(), "x.png");
+    checker(d.path(), "x_opacity.png", 0, 255);
+    let p = plan(d.path(), Target::Cs, &sets);
+    let j = job(&p, "x.png");
+    assert!(j.fill.is_some(), "the opacity helper fills x.png");
+    assert!(
+        matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&engine::codes::Code::FmtBc1Alpha)),
+        "{:?} {:#?}",
+        j.status,
+        j.warnings
+    );
+    let (s, _) = run(p);
+    assert_eq!(s.converted, 0);
+    assert!(!out(d.path(), "x.dds").exists());
+
+    // Solid 255: the filled alpha is empty too, so the file is written, with alpha 255.
+    let d = tempfile::tempdir().unwrap();
+    rgb(d.path(), "x.png");
+    checker(d.path(), "x_opacity.png", 255, 255);
+    let p = plan(d.path(), Target::Cs, &sets);
+    let j = job(&p, "x.png");
+    assert!(j.fill.is_some());
+    assert_eq!(j.status, JobStatus::Ready, "{:#?}", j.warnings);
+    let (s, _) = run(p);
+    assert_eq!(s.converted, 1);
+    let (f, a) = alpha(d.path(), "x.dds");
+    assert!(
+        matches!(f, engine::dds::DdsPixelFormat::Bc1 { .. }),
+        "{f:?}"
+    );
+    assert_codes(&a, |_, _| 255);
+}

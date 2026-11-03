@@ -303,4 +303,3 @@ M6	M		back	FM		partial	2026-11-03		goes: channels.grayscale_source is only R or 
 M12	M		back	FM		partial	2026-11-03		goes: the provenance example names only R and luma; stays: the recipe sub-type and the pack.* keys (Note FM36)
 FM20	FM		back	FM		partial	2026-11-03		goes: `data` always blocks (Note FM39: an empty `data` alpha is accepted); stays: the rest of the item
 FM38	FM		back	FM		partial	2026-11-03		goes: FMT-RGB8-ALPHA for any alpha policy but remove (Note FM39: an empty data alpha is accepted); stays: the rest of the item
-FM21	FM		back	FM		partial	2026-11-03		goes: a data alpha that is constant is still written as data (Note FM39: on BC1 and RGB8 an empty data alpha is written as remove); stays: the rest of the item

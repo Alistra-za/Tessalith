@@ -2921,7 +2921,7 @@ fn rgb8_is_refused_with_an_srgb_tag() {
 }
 
 /// Note FM39: an opaque BC1 decodes alpha as 255, so `data` alpha that is empty (none, or constant 255) is kept
-/// exactly, and BC1 is accepted. The resolved profile then reads `remove`, the plain RGB-only encode.
+/// exactly, and BC1 is accepted. The profile keeps the policy the user picked.
 #[test]
 fn bc1_accepts_an_rmaos_whose_alpha_is_constant_255() {
     for format in ["bc1", "rgb8"] {
@@ -2941,7 +2941,7 @@ fn bc1_accepts_an_rmaos_whose_alpha_is_constant_255() {
             "{format}: {:?}",
             j.warnings
         );
-        assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove, "{format}");
+        assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data, "{format}");
     }
 }
 
@@ -2963,7 +2963,62 @@ fn bc1_accepts_a_normal_with_no_alpha() {
         &[],
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
-    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
+}
+
+/// Ruling T27C-b: under an explicit `data`, a stray texel is data. Only alpha that is 255 everywhere is empty, not
+/// the near-opaque class that FM34 reads as opaque.
+#[test]
+fn bc1_refuses_a_data_alpha_with_one_stray_texel() {
+    let mut img = Rgba32F::new(256, 256, [0.5, 0.5, 1.0, 1.0]);
+    img.px[100][3] = 200.0 / 255.0;
+    for format in ["bc1", "rgb8"] {
+        let f = format!("format={format}");
+        let j = run(
+            Target::Cs,
+            "textures/a/x_rmaos.png",
+            Some("rmaos"),
+            &["rmaos"],
+            img.clone(),
+            &["subtype=rmaos", &f, "alpha.policy=data"],
+            &[],
+        );
+        let want = if format == "bc1" {
+            Code::FmtBc1Alpha
+        } else {
+            Code::FmtRgb8Alpha
+        };
+        assert!(
+            matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&want)),
+            "{format}: {:?}",
+            j.status
+        );
+    }
+}
+
+/// Ruling T27C-d: the complex-material sentence is for an empty alpha; a varying one gets the generic message.
+#[test]
+fn bc1_refuses_a_varying_complex_material_alpha_with_the_generic_message() {
+    let mut img = opaque();
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.0);
+    let j = run(
+        Target::Cs,
+        "textures/a/x_m.png",
+        Some("m"),
+        &["m"],
+        img,
+        &[
+            "subtype=complex_material",
+            "format=bc1",
+            "alpha.policy=data",
+        ],
+        &[],
+    );
+    let m = &warning(&j, Code::FmtBc1Alpha).message;
+    assert!(
+        m.starts_with("BC1 keeps no alpha.policy Data alpha;"),
+        "{m}"
+    );
 }
 
 #[test]

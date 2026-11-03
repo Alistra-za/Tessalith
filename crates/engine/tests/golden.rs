@@ -4162,3 +4162,56 @@ fn bc1_with_empty_data_alpha_matches_the_remove_encode() {
         assert_eq!(write("data"), write("remove"), "{rel}");
     }
 }
+
+/// Note FM39: a packed `_rmaos` with no specular source takes the neutral default 255 for A (DD9). The plan analyses
+/// the packed image, so its `data` alpha is empty and BC1 is accepted, with the bytes of the `remove` encode and
+/// alpha 255 in the file. A specular source with varying values is not empty and still blocks.
+#[test]
+fn a_packed_rmaos_with_a_default_specular_is_accepted_on_bc1() {
+    let write = |policy: &str, specular: bool| {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), "textures/c/pk_roughness.png", gray_ramp(64));
+        put(d.path(), "textures/c/pk_ao.png", gray_ramp(64));
+        if specular {
+            put(
+                d.path(),
+                "textures/c/pk_specular.png",
+                DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 64, |x, _| {
+                    Rgb([(x * 4) as u8; 3])
+                })),
+            );
+        }
+        let policy = format!("file:**/pk_rmaos.png.alpha.policy={policy}");
+        let o = convert(
+            d.path(),
+            Target::Cs,
+            &["file:**/pk_rmaos.png.format=bc1", &policy],
+            &[],
+        );
+        let out = d.path().join("out/textures/c/pk_rmaos.dds");
+        (o, std::fs::read(out).ok(), d)
+    };
+    let (o, data, d) = write("data", false);
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
+    assert!(!warnings(&o).contains(&Code::FmtBc1Alpha));
+    let job = planned(&o, "pk_roughness.png");
+    assert_eq!(job["profile"]["alpha"]["policy"].as_str(), Some("data"));
+    assert_dds(
+        &dds(d.path(), "textures/c/pk_rmaos.dds"),
+        DdsPixelFormat::Bc1 { srgb: false },
+        HeaderKind::Legacy,
+        7,
+    );
+    assert_alpha_kept(&dds(d.path(), "textures/c/pk_rmaos.dds"), |_, _| 255, 0);
+    let (_, remove, _d) = write("remove", false);
+    assert_eq!(data, remove);
+    // A real specular channel is data: the packed alpha varies and BC1 cannot keep it.
+    let (o, bytes, _d) = write("data", true);
+    assert_eq!(o.summary.converted, 0, "{:?}", warnings(&o));
+    assert!(bytes.is_none());
+    assert!(
+        warnings(&o).contains(&Code::FmtBc1Alpha),
+        "{:?}",
+        warnings(&o)
+    );
+}
