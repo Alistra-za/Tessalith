@@ -2,13 +2,12 @@
 //! size, and so is every nested group inside a wanted one.
 use crate::{records, PluginFacts, Rec, FLAG_COMPRESSED};
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 use std::io::Read;
 
 /// Record and group headers are both 24 bytes.
 pub(crate) const HEADER: usize = 24;
 
-/// Nested groups entered under a CELL/WRLD top group; valid files use at most 5.
+/// Nested groups `group_records` enters (the MATO DATA walk); valid files use at most 5.
 const MAX_DEPTH: usize = 8;
 
 /// Largest decompressed record accepted (the size field comes from the file).
@@ -232,26 +231,20 @@ pub fn parse(name: &str, b: &[u8]) -> PluginFacts {
         ));
     }
     f.masters = masters;
-    let mut bases = BTreeSet::new();
     top_groups(b, end, |g| match g {
         Err(e) => f.errors.push(e),
         Ok(g) => {
-            let wanted = g.top && records::wanted(&g.label);
-            let placed = g.top && (&g.label == b"CELL" || &g.label == b"WRLD");
-            if wanted {
+            if g.top && records::wanted(&g.label) {
                 walk_group(b, g.start, g.end, &mut f);
-            } else if placed {
-                walk_placed(b, g.start, g.end, &mut bases, &mut f);
             }
         }
     });
-    f.placed = bases.into_iter().collect();
     f
 }
 
 /// The records of one wanted top-level group, `start..end`. A fault ends this group, never the plugin.
 fn walk_group(b: &[u8], start: usize, end: usize, f: &mut PluginFacts) {
-    // CELL/WRLD children and any other nested group are not wanted (spec §2.1): skipped by size.
+    // WRLD children and any other nested group are not wanted (spec §2.1): skipped by size.
     group_records(b, start, end, 0, false, &mut |r| match r {
         Ok((p, rend)) => read_record(b, p, rend, f),
         Err(e) => f.errors.push(e),
@@ -282,42 +275,6 @@ fn read_record(b: &[u8], p: usize, rend: usize, f: &mut PluginFacts) {
         ));
     }
     f.records.push(rec);
-}
-
-/// A CELL/WRLD group, `start..end` (filtering spec §3): every nested group is entered; of the records only REFR and
-/// ACHR are read, for their base FormID (NAME); every other record is skipped by its size. A fault ends this group.
-fn walk_placed(b: &[u8], start: usize, end: usize, bases: &mut BTreeSet<u32>, f: &mut PluginFacts) {
-    group_records(b, start, end, 0, true, &mut |r| {
-        let (p, rend) = match r {
-            Ok(x) => x,
-            Err(e) => return f.errors.push(e),
-        };
-        let sig = sig_at(b, p);
-        if &sig == b"WRLD" {
-            // The worldspace record itself carries a cloud model (xEdit `wbRecord(WRLD…)`).
-            read_record(b, p, rend, f);
-        } else if &sig == b"REFR" || &sig == b"ACHR" {
-            let data = match record_data(b, p, rend) {
-                Ok(d) => d,
-                Err(e) => return f.errors.push(e),
-            };
-            let mut base = None;
-            if let Err(at) = each_sub(&data, |s, d| {
-                if &s == b"NAME" && d.len() >= 4 && base.is_none() {
-                    base = Some(u32_at(d, 0));
-                }
-            }) {
-                f.errors.push(format!(
-                    "offset {p:#x}: {} {:08X}: subrecord at +{at:#x} runs past the record",
-                    sig_str(&sig),
-                    u32_at(b, p + 12)
-                ));
-            }
-            if let Some(id) = base.filter(|&id| id != 0) {
-                bases.insert(id);
-            }
-        }
-    });
 }
 
 /// u32 decompressed size + zlib stream → the record data.

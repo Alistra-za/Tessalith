@@ -205,14 +205,13 @@ fn dump(s: &Store, root: &std::path::Path) -> String {
     let queries: Vec<(&str, String)> = vec![
         ("path", "SELECT p FROM path".into()),
         ("origin", "SELECT o.kind, o.name, o.root, (SELECT x.root FROM origin x WHERE x.id = o.parent_origin), o.priority, o.enabled, o.derived_by, o.derived_state FROM origin o".into()),
-        ("nif_copy", "SELECT p.p, o.root, c.size, c.mtime IS NOT NULL, c.crc32, c.parse_status, c.bsver, c.le_mesh, c.is_derived, sp.p || '@' || so.root, c.derive_check, c.problem FROM nif_copy c JOIN path p ON p.id = c.path_id JOIN origin o ON o.id = c.origin_id LEFT JOIN nif_copy s ON s.id = c.source_copy_id LEFT JOIN path sp ON sp.id = s.path_id LEFT JOIN origin so ON so.id = s.origin_id".into()),
+        ("nif_copy", "SELECT p.p, o.root, c.size, c.mtime IS NOT NULL, c.parse_status, c.bsver, c.le_mesh, c.is_derived, sp.p || '@' || so.root, c.problem FROM nif_copy c JOIN path p ON p.id = c.path_id JOIN origin o ON o.id = c.origin_id LEFT JOIN nif_copy s ON s.id = c.source_copy_id LEFT JOIN path sp ON sp.id = s.path_id LEFT JOIN origin so ON so.id = s.origin_id".into()),
         ("shape", format!("{ts}SELECT cp.p, co.root, s.block, s.name, s.kind, s.shader_kind, s.shader_type, s.slsf1, s.slsf2, ts.k, s.alpha_flags, s.alpha_threshold, s.params, s.skinned, s.vertex_desc, s.num_vertices, s.num_triangles FROM shape s {} LEFT JOIN ts ON ts.id = s.texset_id", copy("s.copy_id"))),
         ("tex_raw", format!("SELECT cp.p, co.root, r.block, r.slot, r.raw, r.flags FROM tex_raw r {}", copy("r.copy_id"))),
         ("texset", format!("{ts}SELECT k FROM ts")),
         ("tex_use", format!("{ts}SELECT p.p, ts.k, u.slot FROM tex_use u JOIN path p ON p.id = u.tex_path_id JOIN ts ON ts.id = u.texset_id")),
         ("nif_winner", format!("SELECT p.p, cp.p, co.root, w.n_copies FROM nif_winner w JOIN path p ON p.id = w.path_id {}", copy("w.copy_id"))),
         ("nif_winner_src", format!("SELECT p.p, cp.p, co.root FROM nif_winner_src w JOIN path p ON p.id = w.path_id {}", copy("w.copy_id"))),
-        ("pgp_diff", "SELECT p.p, d.crc_orig, d.crc_patched FROM pgp_diff d JOIN path p ON p.id = d.path_id".into()),
         ("tex_winner", "SELECT p.p, o.root, w.n_copies FROM tex_winner w JOIN path p ON p.id = w.path_id JOIN origin o ON o.id = w.origin_id".into()),
         ("plugin", "SELECT name, path, size, lo_index, light, flags, masters_json, error_text FROM plugin".into()),
         ("rec", "SELECT pl.name, r.local, r.formid, r.sig, r.edid, r.owner_ok, r.txst_flags, r.decal FROM rec r JOIN plugin pl ON pl.id = r.plugin_id".into()),
@@ -220,8 +219,6 @@ fn dump(s: &Store, root: &std::path::Path) -> String {
         ("txst_slot", "SELECT pl.name, t.local, t.formid, t.slot, p.p FROM txst_slot t JOIN plugin pl ON pl.id = t.plugin_id JOIN path p ON p.id = t.path_id".into()),
         ("model_ref", "SELECT pl.name, m.local, m.formid, m.slot, p.p FROM model_ref m JOIN plugin pl ON pl.id = m.plugin_id JOIN path p ON p.id = m.path_id".into()),
         ("alt_tex", "SELECT pl.name, a.local, a.formid, a.model_slot, a.shape_name, a.txst_formid, a.txst_local, a.idx FROM alt_tex a JOIN plugin pl ON pl.id = a.plugin_id".into()),
-        ("txst_ref", "SELECT pl.name, t.local, t.formid, t.role, t.txst_formid, t.txst_local FROM txst_ref t JOIN plugin pl ON pl.id = t.plugin_id".into()),
-        ("tex_ref", "SELECT pl.name, t.local, t.formid, t.role, p.p FROM tex_ref t JOIN plugin pl ON pl.id = t.plugin_id JOIN path p ON p.id = t.path_id".into()),
     ];
     let roots = [
         root.display().to_string(),

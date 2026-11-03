@@ -2,7 +2,7 @@
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
 mod common;
-use b::{edid, form, grup, plugin, rec, sub, top, zstr};
+use b::{edid, plugin, rec, sub, top, zstr};
 use common::{bsa, instance_fixture, put};
 use modscan::mo2::Instance;
 use modscan::scan::{run, Source};
@@ -30,20 +30,6 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
             ("meshes\\bsa", "okb.nif", &n),
         ]),
     );
-    let refs = [
-        rec(b"REFR", 0x0F00, &[form(b"NAME", 0x801)]),
-        rec(b"REFR", 0x0F01, &[form(b"NAME", 0x800)]),
-    ];
-    let cell = 0x0F80u32.to_le_bytes();
-    let placed = grup(
-        b"CELL",
-        0,
-        &[grup(
-            &0u32.to_le_bytes(),
-            2,
-            &[grup(&0u32.to_le_bytes(), 3, &[grup(&cell, 9, &refs)])],
-        )],
-    );
     put(
         r,
         "mods/A/A.esp",
@@ -67,7 +53,6 @@ fn lod_meshes_textures_and_plugin_paths_are_skipped() {
                         &[edid("LodStat"), sub(b"MODL", &zstr("lod\\gone.nif"))],
                     )],
                 ),
-                placed,
             ],
         ),
     );

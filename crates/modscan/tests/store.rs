@@ -246,7 +246,7 @@ fn schema_v3_rebuilds_old_databases_and_sets_pragmas() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(v, modscan::store::SCHEMA_VERSION);
-    assert_eq!(v, 8);
+    assert_eq!(v, 9);
     let n: i64 = c
         .query_row("SELECT count(*) FROM shape", [], |r| r.get(0))
         .unwrap();
@@ -665,7 +665,7 @@ fn open_read_only_never_creates_rebuilds_or_writes() {
     }
     assert!(matches!(
         Store::open_read_only(&old),
-        Err(modscan::ScanError::SchemaVersion { found: 2, want: 8 })
+        Err(modscan::ScanError::SchemaVersion { found: 2, want }) if want == modscan::store::SCHEMA_VERSION
     ));
     let n: i64 = rusqlite::Connection::open(&old)
         .unwrap()
@@ -1182,24 +1182,41 @@ fn a_derived_copy_keeps_its_3d_index_through_commit_pending() {
     assert_eq!(s.shapes_of(id).unwrap()[0].index3d, Some(5));
 }
 
+/// 2.0 debloat (Note GJ7): a 1.x store (schema 8) is a version mismatch: read-only opens ask for a scan, and the next
+/// read-write open rebuilds it empty, without the dropped tables.
 #[test]
-fn a_schema_7_database_is_rebuilt_with_the_index3d_column() {
+fn a_schema_8_store_opens_empty() {
     let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("v7.db");
+    let p = d.path().join("v8.db");
     {
-        let c = rusqlite::Connection::open(&p).unwrap();
-        c.execute_batch(
-            "CREATE TABLE shape (copy_id INTEGER, block INTEGER, PRIMARY KEY(copy_id, block));
-             INSERT INTO shape VALUES (1, 1); PRAGMA user_version = 7;",
+        let mut s = Store::open(&p).unwrap();
+        s.upsert_origin(&OriginSpec {
+            kind: KIND_MOD,
+            name: "A".into(),
+            root: "C:/mods/A".into(),
+            parent: None,
+            priority: 1,
+            derived_by: None,
+            derived_state: None,
+        })
+        .unwrap();
+        s.conn().execute_batch("PRAGMA user_version = 8;").unwrap();
+    }
+    assert!(matches!(
+        Store::open_read_only(&p),
+        Err(modscan::ScanError::SchemaVersion { found: 8, want }) if want == modscan::store::SCHEMA_VERSION
+    ));
+    let s = Store::open(&p).unwrap();
+    assert!(s.mods().unwrap().is_empty(), "rebuilt: no origin left");
+    let gone: i64 = s
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('tex_ref', 'txst_ref', 'placed', 'rec_inert', 'pgp_diff', 'tex_copy')",
+            [],
+            |r| r.get(0),
         )
         .unwrap();
-    }
-    let s = Store::open(&p).unwrap();
-    let n: i64 = s
-        .conn()
-        .query_row("SELECT count(index3d) FROM shape", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(n, 0, "rebuilt: the column exists and the old row is gone");
+    assert_eq!(gone, 0, "the dropped tables are not recreated");
 }
 
 /// Audit 2026-10-15 item 17: texsets (and their tex_use rows) that no live or pending shape uses are dropped at the

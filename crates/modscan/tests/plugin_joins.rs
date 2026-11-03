@@ -1,8 +1,8 @@
-//! esp scanner spec §6 "Store joins": set → TXST, NIF → alternate texture, missing / unused.
+//! esp scanner spec §6 "Store joins": set → TXST, NIF → alternate texture.
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
 mod common;
-use b::{alt, edid, form, grup, plugin, rec, sub, top, zstr};
+use b::{alt, edid, plugin, rec, sub, top, zstr};
 use common::{instance_fixture, put};
 use modscan::mo2::Instance;
 use modscan::plugin_store::{ShapeSwap, TxstUse};
@@ -13,28 +13,10 @@ use std::sync::atomic::AtomicBool;
 const DIRT: u32 = 0x0000_0ABC;
 const GHOST: u32 = 0x0000_0AB0;
 
-/// A CELL group placing `bases` (filtering spec §3), so the fixture's TXSTs and STATs are live, not inert.
-fn placing(bases: &[u32]) -> Vec<u8> {
-    let refs: Vec<Vec<u8>> = bases
-        .iter()
-        .enumerate()
-        .map(|(i, &b)| rec(b"REFR", 0x0F00 + i as u32, &[form(b"NAME", b)]))
-        .collect();
-    let cell = 0x0F80u32.to_le_bytes();
-    grup(
-        b"CELL",
-        0,
-        &[grup(
-            &0u32.to_le_bytes(),
-            2,
-            &[grup(&0u32.to_le_bytes(), 3, &[grup(&cell, 9, &refs)])],
-        )],
-    )
-}
-
 /// Skyrim.esm: DirtTXST (TX00 dirt02, TX01 dirt02_n, TX02 old/gone), GhostTXST (missing texture), RockStat
-/// (meshes/x.nif with Shape0 → DirtTXST), GhostStat (missing mesh), FireFX (EFSH, present texture). A.esp overrides
-/// DirtTXST without TX02. Loose textures: dirt02, dirt02_n, effects/fire, unused/lonely, pbr/landscape/dirt02.
+/// (meshes/x.nif with Shape0 → DirtTXST), GhostStat (missing mesh). Nothing places them (no CELL group): since Note
+/// GJ7 that does not hide a record. A.esp overrides DirtTXST without TX02. Loose textures: dirt02, dirt02_n,
+/// effects/fire, unused/lonely, pbr/landscape/dirt02.
 fn fixture() -> tempfile::TempDir {
     let d = instance_fixture("+B\n+A\n");
     let r = d.path();
@@ -104,15 +86,6 @@ fn fixture() -> tempfile::TempDir {
                         ),
                     ],
                 ),
-                top(
-                    b"EFSH",
-                    &[rec(
-                        b"EFSH",
-                        0xE00,
-                        &[edid("FireFX"), sub(b"ICON", &zstr("Effects\\Fire.dds"))],
-                    )],
-                ),
-                placing(&[DIRT, GHOST, 0xDEF, 0xD00]),
             ],
         ),
     );

@@ -7,7 +7,7 @@ use modscan::plugins::{clamp_local, is_light, plugin_files, prefixes};
 use std::fs;
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
-use b::{alt, edid, form, plugin, rec, sub, top, zstr};
+use b::{alt, edid, plugin, rec, sub, top, zstr};
 use modscan::plugins::{scan_plugins, PluginStats};
 use modscan::scan::{run, run_with, Source, PLUGINS_CANCELLED};
 use modscan::store::Store;
@@ -189,11 +189,15 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
                     )],
                 ),
                 top(
-                    b"LTEX",
+                    b"STAT",
                     &[rec(
-                        b"LTEX",
+                        b"STAT",
                         0x0200_0802,
-                        &[edid("LTex"), form(b"TNAM", 0x0100_0800)],
+                        &[
+                            edid("LTex"),
+                            sub(b"MODL", &zstr("lt.nif")),
+                            sub(b"MODS", &alt(&[("LT", 0x0100_0800, 0)])),
+                        ],
                     )],
                 ),
             ],
@@ -215,11 +219,15 @@ fn load_order(plugins_txt: &str) -> tempfile::TempDir {
             0,
             &["Skyrim.esm", "L.esp"],
             &[top(
-                b"LTEX",
+                b"STAT",
                 &[rec(
-                    b"LTEX",
+                    b"STAT",
                     0x0200_0900,
-                    &[edid("FTex"), form(b"TNAM", 0x0100_0801)],
+                    &[
+                        edid("FTex"),
+                        sub(b"MODL", &zstr("ft.nif")),
+                        sub(b"MODS", &alt(&[("FT", 0x0100_0801, 0)])),
+                    ],
                 )],
             )],
         ),
@@ -276,7 +284,7 @@ fn formids_follow_the_load_order_full_and_light() {
     );
     assert_eq!(formid(&s, "FTex"), 0x0200_0900);
     let txst_of = |e: &str| {
-        one_i64(&s, "SELECT t.txst_formid FROM txst_ref t JOIN rec r ON r.plugin_id = t.plugin_id AND r.local = t.local WHERE r.edid = ?1", [e]) as u32
+        one_i64(&s, "SELECT t.txst_formid FROM alt_tex t JOIN rec r ON r.plugin_id = t.plugin_id AND r.local = t.local WHERE r.edid = ?1", [e]) as u32
     };
     assert_eq!(
         txst_of("LTex"),

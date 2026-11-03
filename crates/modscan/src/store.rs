@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// `PRAGMA user_version` of the current schema. Older databases are dropped and rebuilt (the store is a cache).
-/// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6).
-pub const SCHEMA_VERSION: i64 = 8;
+/// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6). 9: 2.0 debloat (Note GJ7), the dead tables and
+/// columns dropped.
+pub const SCHEMA_VERSION: i64 = 9;
 
 const SCHEMA: &str = r#"
 CREATE TABLE path   (id INTEGER PRIMARY KEY, p TEXT NOT NULL UNIQUE);
@@ -18,9 +19,9 @@ CREATE TABLE origin (id INTEGER PRIMARY KEY, kind INTEGER NOT NULL, name TEXT NO
                      parent_origin INTEGER, priority INTEGER NOT NULL, enabled INTEGER NOT NULL,
                      derived_by INTEGER, derived_state INTEGER, UNIQUE(kind, root));
 CREATE TABLE nif_copy (id INTEGER PRIMARY KEY, path_id INTEGER NOT NULL, origin_id INTEGER NOT NULL,
-                     size INTEGER, mtime INTEGER, crc32 INTEGER, parse_status INTEGER NOT NULL,
+                     size INTEGER, mtime INTEGER, parse_status INTEGER NOT NULL,
                      bsver INTEGER, le_mesh INTEGER NOT NULL DEFAULT 0, is_derived INTEGER NOT NULL DEFAULT 0,
-                     source_copy_id INTEGER, derive_check INTEGER, problem TEXT,
+                     source_copy_id INTEGER, problem TEXT,
                      UNIQUE(path_id, origin_id));
 CREATE TABLE shape (copy_id INTEGER NOT NULL, block INTEGER NOT NULL, name TEXT, kind TEXT NOT NULL,
                      shader_kind INTEGER NOT NULL, shader_type INTEGER, slsf1 INTEGER, slsf2 INTEGER,
@@ -40,10 +41,6 @@ CREATE TABLE tex_use (tex_path_id INTEGER, texset_id INTEGER, slot INTEGER,
                      PRIMARY KEY(tex_path_id, texset_id, slot)) WITHOUT ROWID;
 CREATE TABLE nif_winner     (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE TABLE nif_winner_src (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL);
-CREATE TABLE pgp_diff (path_id INTEGER PRIMARY KEY, crc_orig INTEGER NOT NULL, crc_patched INTEGER NOT NULL);
--- Unused since audit 2026-10-16 (Note BE): no longer written, nothing reads it. Drop at the next schema bump.
-CREATE TABLE tex_copy   (path_id INTEGER NOT NULL, origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER,
-                     PRIMARY KEY(path_id, origin_id)) WITHOUT ROWID;
 CREATE TABLE tex_winner (path_id INTEGER PRIMARY KEY, origin_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE INDEX nif_copy_origin ON nif_copy(origin_id);
 -- The texset uniqueness key. SQLite treats NULLs as distinct in UNIQUE, so empty (NULL) slots are folded to 0
@@ -60,8 +57,7 @@ CREATE TABLE plugin (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE N
                      flags INTEGER NOT NULL, masters_json TEXT NOT NULL, error_text TEXT);
 -- rec.mato_flags: the MATO DATA flags of that copy (bit 0 single pass, offset 44), NULL when DATA is under 48 bytes.
 CREATE TABLE rec (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, sig TEXT NOT NULL, edid TEXT,
-                     owner_ok INTEGER NOT NULL DEFAULT 0, txst_flags INTEGER, decal INTEGER, hdpt_flags INTEGER,
-                     mato_flags INTEGER);
+                     owner_ok INTEGER NOT NULL DEFAULT 0, txst_flags INTEGER, decal INTEGER, mato_flags INTEGER);
 CREATE TABLE rec_winner (formid INTEGER PRIMARY KEY, plugin_id INTEGER NOT NULL, n_overrides INTEGER NOT NULL);
 CREATE TABLE txst_slot (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, slot INTEGER NOT NULL,
                      path_id INTEGER NOT NULL);
@@ -69,21 +65,6 @@ CREATE TABLE model_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGE
                      path_id INTEGER NOT NULL);
 CREATE TABLE alt_tex (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, model_slot INTEGER NOT NULL,
                      shape_name TEXT NOT NULL, txst_formid INTEGER, txst_local INTEGER NOT NULL, idx INTEGER NOT NULL);
--- txst_ref rows with role HNAM (HDPT -> extra-part HDPT), GNAM (LTEX -> GRAS) and MODL (ARMO -> ARMA) point at those
--- types, not TXSTs.
-CREATE TABLE txst_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, role TEXT NOT NULL,
-                     txst_formid INTEGER, txst_local INTEGER NOT NULL);
-CREATE TABLE tex_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, role TEXT NOT NULL,
-                     path_id INTEGER NOT NULL);
--- Base FormIDs placed by REFR/ACHR in a plugin's CELL/WRLD groups, once per plugin (filtering spec §3). `base_local`
--- clamped like `local`; `base_formid` set by `resolve_plugins`, NULL when its master is not loaded. A plugin whose
--- `error_text` is set may have an incomplete list (the walk stops at a fault).
-CREATE TABLE placed (plugin_id INTEGER NOT NULL, base_local INTEGER NOT NULL, base_formid INTEGER);
--- Winning records nothing reaches (filtering spec §3), rebuilt with rec_winner. reason: 1 no reference, 2 not
--- placed, 3 head part not playable.
-CREATE TABLE rec_inert (formid INTEGER PRIMARY KEY, reason INTEGER NOT NULL);
-CREATE INDEX placed_base ON placed(base_formid);
-CREATE INDEX placed_plugin ON placed(plugin_id);
 CREATE INDEX rec_formid ON rec(formid);
 CREATE INDEX rec_plugin ON rec(plugin_id, local);
 CREATE INDEX txst_slot_path ON txst_slot(path_id);
@@ -92,10 +73,6 @@ CREATE INDEX model_ref_path ON model_ref(path_id);
 CREATE INDEX model_ref_plugin ON model_ref(plugin_id, local);
 CREATE INDEX alt_tex_txst ON alt_tex(txst_formid);
 CREATE INDEX alt_tex_plugin ON alt_tex(plugin_id, local);
-CREATE INDEX txst_ref_txst ON txst_ref(txst_formid);
-CREATE INDEX txst_ref_plugin ON txst_ref(plugin_id, local);
-CREATE INDEX tex_ref_path ON tex_ref(path_id);
-CREATE INDEX tex_ref_plugin ON tex_ref(plugin_id, local);
 "#;
 
 const SHAPE_COLS: &str = "block, name, kind, shader_kind, shader_type, slsf1, slsf2, texset_id, alpha_flags, \
@@ -103,7 +80,7 @@ const SHAPE_COLS: &str = "block, name, kind, shader_kind, shader_type, slsf1, sl
 
 const TEMP: &str = r#"
 CREATE TEMP TABLE IF NOT EXISTS pending_derived (pid INTEGER PRIMARY KEY, path_id INTEGER NOT NULL,
-                     origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER, crc32 INTEGER,
+                     origin_id INTEGER NOT NULL, size INTEGER, mtime INTEGER,
                      parse_status INTEGER NOT NULL, bsver INTEGER, le_mesh INTEGER NOT NULL, problem TEXT,
                      UNIQUE(path_id, origin_id));
 CREATE TEMP TABLE IF NOT EXISTS pending_shape (pid INTEGER NOT NULL, block INTEGER NOT NULL, name TEXT, kind TEXT NOT NULL,
@@ -118,11 +95,10 @@ DELETE FROM pending_shape;
 DELETE FROM pending_derived;
 "#;
 
-/// `origin.kind`. 02 §6 used 3 for BSAs; the controller gave 3 to separators, so BSAs are 4.
+/// `origin.kind`. 3 was MO2 separators until schema 9 (Note GJ7); BSAs keep 4.
 pub const KIND_DATA: i32 = 0;
 pub const KIND_MOD: i32 = 1;
 pub const KIND_OVERWRITE: i32 = 2;
-pub const KIND_SEPARATOR: i32 = 3;
 pub const KIND_BSA: i32 = 4;
 
 /// `nif_copy.parse_status`.
@@ -683,12 +659,12 @@ fn upsert_copy_row(
     let (status, bsver, le, problem) = it.result.record();
     let id: i64 = c
         .prepare_cached(
-            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, is_derived, problem)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, is_derived, problem)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(path_id, origin_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
-               crc32 = excluded.crc32, parse_status = excluded.parse_status, bsver = excluded.bsver,
+               parse_status = excluded.parse_status, bsver = excluded.bsver,
                le_mesh = excluded.le_mesh, is_derived = excluded.is_derived, problem = excluded.problem,
-               source_copy_id = NULL, derive_check = NULL
+               source_copy_id = NULL
              RETURNING id",
         )?
         .query_row(
@@ -697,7 +673,6 @@ fn upsert_copy_row(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                Option::<i64>::None, // Task 7 drops nif_copy.crc32
                 status,
                 bsver.map(i64::from),
                 le,
@@ -721,8 +696,8 @@ fn stage_derived(
     let (status, bsver, le, problem) = it.result.record();
     let pid: i64 = c
         .prepare_cached(
-            "INSERT OR REPLACE INTO pending_derived(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, problem)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) RETURNING pid",
+            "INSERT OR REPLACE INTO pending_derived(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, problem)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) RETURNING pid",
         )?
         .query_row(
             params![
@@ -730,7 +705,6 @@ fn stage_derived(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                Option::<i64>::None, // Task 7 drops pending_derived.crc32
                 status,
                 bsver.map(i64::from),
                 le,
@@ -1095,13 +1069,13 @@ impl Store {
     pub fn commit_pending(&mut self) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
-            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, is_derived, problem)
-               SELECT path_id, origin_id, size, mtime, crc32, parse_status, bsver, le_mesh, 1, problem
+            "INSERT INTO nif_copy(path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, is_derived, problem)
+               SELECT path_id, origin_id, size, mtime, parse_status, bsver, le_mesh, 1, problem
                FROM pending_derived WHERE true
                ON CONFLICT(path_id, origin_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
-                 crc32 = excluded.crc32, parse_status = excluded.parse_status, bsver = excluded.bsver,
+                 parse_status = excluded.parse_status, bsver = excluded.bsver,
                  le_mesh = excluded.le_mesh, is_derived = 1, problem = excluded.problem,
-                 source_copy_id = NULL, derive_check = NULL;
+                 source_copy_id = NULL;
              DELETE FROM shape WHERE copy_id IN (SELECT c.id FROM nif_copy c JOIN pending_derived d
                ON c.path_id = d.path_id AND c.origin_id = d.origin_id);
              DELETE FROM tex_raw WHERE copy_id IN (SELECT c.id FROM nif_copy c JOIN pending_derived d
@@ -1296,7 +1270,7 @@ impl Store {
         let tx = self.conn.transaction()?;
         {
             let mut u = tx.prepare(
-                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3, derive_check = NULL WHERE id = ?1",
+                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3 WHERE id = ?1",
             )?;
             for r in rows {
                 u.execute(params![r.copy_id, r.is_derived, r.source_copy_id])?;
@@ -1349,16 +1323,13 @@ impl Store {
         Ok(n)
     }
 
-    /// Origins of the latest run: loose ones and separators by priority (highest first), then BSAs by game rank.
-    /// A separator is listed after the mods it owns: MO2 shows a separator above its mods in ascending priority,
-    /// so in this highest-first order it owns the loose mods listed just above it, up to the previous separator.
-    /// Adjacent separators share a priority and keep modlist.txt order (stored in `parent_origin` for kind 3).
+    /// Origins of the latest run: loose ones by priority (highest first), then BSAs by game rank.
     pub fn mods(&self) -> Result<Vec<ModRow>, ScanError> {
         let mut st = self.conn.prepare(
             "SELECT id, name, kind, priority, derived_by IS NOT NULL,
                     (SELECT count(*) FROM nif_copy c WHERE c.origin_id = origin.id)
              FROM origin WHERE enabled = 1
-             ORDER BY kind = 4, priority DESC, kind = 3 DESC, CASE WHEN kind = 3 THEN parent_origin END, id",
+             ORDER BY kind = 4, priority DESC, id",
         )?;
         let v = st
             .query_map([], |r| {

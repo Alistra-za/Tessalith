@@ -240,19 +240,17 @@ fn copies_of_path_marks_pgpatcher_output_in_overwrite_derived() {
     assert_eq!(names, [("overwrite", true), ("A", false)]);
 }
 
+/// 2.0 debloat (Note GJ7): MO2 separators are not stored (nothing showed them since Note GC1).
 #[test]
-fn separators_are_listed_above_their_group() {
+fn separators_are_not_origins() {
     let d = instance_fixture("+B\n-Sep_separator\n+A\n");
     let (store, _) = go(&d, vec![]);
-    let names: Vec<(String, i32)> = store
-        .mods()
-        .unwrap()
-        .into_iter()
-        .map(|m| (m.name, m.kind))
-        .collect();
-    let pos = |n: &str| names.iter().position(|m| m.0 == n).unwrap();
-    assert!(pos("B") < pos("Sep_separator") && pos("Sep_separator") < pos("A"));
-    assert_eq!(names[pos("Sep_separator")].1, 3);
+    let mods = store.mods().unwrap();
+    assert!(mods.iter().any(|m| m.name == "A"), "{mods:?}");
+    assert!(
+        !mods.iter().any(|m| m.name.ends_with("_separator")),
+        "{mods:?}"
+    );
 }
 
 #[test]
@@ -854,27 +852,4 @@ fn tainted_run_does_not_keep_previous_winners() {
     let nifs = store.nifs_of(b.id).unwrap();
     assert_eq!(nifs.len(), 1);
     assert_eq!(nifs[0].overridden_by, None, "{:?}", nifs[0]);
-}
-
-/// Trace-debug #38: adjacent separators share a priority; they follow modlist order, not row id, after a swap.
-#[test]
-fn tied_separators_follow_modlist_order_after_a_reorder() {
-    let d = instance_fixture("+B\n-X_separator\n-Y_separator\n+A\n");
-    let order = |d: &tempfile::TempDir| -> Vec<String> {
-        let (store, _) = go(d, vec![]);
-        store
-            .mods()
-            .unwrap()
-            .into_iter()
-            .map(|m| m.name)
-            .filter(|n| n.ends_with("_separator"))
-            .collect()
-    };
-    assert_eq!(order(&d), ["X_separator", "Y_separator"]);
-    std::fs::write(
-        d.path().join("profiles/Default/modlist.txt"),
-        "+B\n-Y_separator\n-X_separator\n+A\n",
-    )
-    .unwrap();
-    assert_eq!(order(&d), ["Y_separator", "X_separator"]);
 }

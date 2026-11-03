@@ -32,73 +32,16 @@ pub struct PluginRow {
 }
 
 /// Tables with plugin rows, for deletes.
-const PLUGIN_TABLES: [&str; 7] = [
-    "rec",
-    "txst_slot",
-    "model_ref",
-    "alt_tex",
-    "txst_ref",
-    "tex_ref",
-    "placed",
-];
+const PLUGIN_TABLES: [&str; 4] = ["rec", "txst_slot", "model_ref", "alt_tex"];
 
 /// (table, load-order column, local column) recomputed by `resolve_plugins`.
-const REMAP: [(&str, &str, &str); 9] = [
+const REMAP: [(&str, &str, &str); 5] = [
     ("rec", "formid", "local"),
     ("txst_slot", "formid", "local"),
     ("model_ref", "formid", "local"),
-    ("tex_ref", "formid", "local"),
     ("alt_tex", "formid", "local"),
     ("alt_tex", "txst_formid", "txst_local"),
-    ("txst_ref", "formid", "local"),
-    ("txst_ref", "txst_formid", "txst_local"),
-    ("placed", "base_formid", "base_local"),
 ];
-
-/// Filtering spec §3: which winning records nothing reaches, conservatively. Runs after `rec_winner` is built, in the
-/// same transaction. `win` = each winning copy; edges and alternate textures count only from winning copies, matched by the copy's `local` (an unresolved copy
-/// can share its FormID with the winner). An active
-/// plugin with `error_text` may have an incomplete placement list, so then nothing is judged "not placed".
-const INERT_SQL: &str = "
-DELETE FROM rec_inert;
-CREATE TEMP TABLE IF NOT EXISTS win (formid INTEGER PRIMARY KEY, plugin_id INTEGER NOT NULL, sig TEXT NOT NULL,
-  hdpt_flags INTEGER, local INTEGER NOT NULL);
-DELETE FROM win;
-INSERT OR IGNORE INTO win SELECT w.formid, w.plugin_id, r.sig, r.hdpt_flags, r.local FROM rec_winner w
-  JOIN rec r ON r.plugin_id = w.plugin_id AND r.formid = w.formid AND r.owner_ok = 1;
-CREATE TEMP TABLE IF NOT EXISTS placed_base (formid INTEGER PRIMARY KEY);
-DELETE FROM placed_base;
-INSERT OR IGNORE INTO placed_base SELECT p.base_formid FROM placed p JOIN plugin pl ON pl.id = p.plugin_id
-  WHERE pl.lo_index IS NOT NULL AND p.base_formid IS NOT NULL;
--- A faulted active plugin (parse error, or past the load-order limit so unmapped): pretend every TXST/placeable is placed.
-INSERT OR IGNORE INTO placed_base SELECT formid FROM win
-  WHERE EXISTS (SELECT 1 FROM plugin pl WHERE pl.lo_index IS NOT NULL AND (pl.error_text IS NOT NULL
-    OR NOT EXISTS (SELECT 1 FROM lo_map m WHERE m.plugin_id = pl.id)));
--- 2 not placed: placeable bases no REFR/ACHR of the load order places (ruling R10).
-INSERT INTO rec_inert SELECT formid, 2 FROM win
-  WHERE sig IN ('STAT', 'MSTT', 'FURN', 'DOOR', 'CONT', 'LIGH', 'ACTI', 'TREE', 'FLOR')
-    AND formid NOT IN (SELECT formid FROM placed_base);
--- 3 head part not playable: DATA without Playable (0x01; no DATA = playable) and no playable winning HDPT lists it
--- in HNAM (ruling R9).
-INSERT INTO rec_inert SELECT h.formid, 3 FROM win h
-  WHERE h.sig = 'HDPT' AND h.hdpt_flags & 1 = 0
-    AND NOT EXISTS (SELECT 1 FROM txst_ref e JOIN win p ON p.local = e.local AND p.plugin_id = e.plugin_id
-      WHERE e.role = 'HNAM' AND e.txst_formid = h.formid AND p.sig = 'HDPT' AND ifnull(p.hdpt_flags, 1) & 1 = 1);
--- 1 no reference: grass no winning landscape texture lists (GNAM).
-INSERT INTO rec_inert SELECT g.formid, 1 FROM win g
-  WHERE g.sig = 'GRAS'
-    AND NOT EXISTS (SELECT 1 FROM txst_ref e JOIN win l ON l.local = e.local AND l.plugin_id = e.plugin_id
-      WHERE e.role = 'GNAM' AND e.txst_formid = g.formid);
--- 1 no reference: TXSTs that no reference places and no winning, non-inert record uses (alternate textures; LTEX/HDPT
--- TNAM, NPC_ FTST, RACE face sets, ARMA NAM0/NAM1, IPCT DNAM/ENAM, PROJ decal, any FLST entry). MODL is ARMO -> ARMA, not a texture use.
-INSERT INTO rec_inert SELECT t.formid, 1 FROM win t
-  WHERE t.sig = 'TXST'
-    AND t.formid NOT IN (SELECT formid FROM placed_base)
-    AND NOT EXISTS (SELECT 1 FROM alt_tex a JOIN win u ON u.local = a.local AND u.plugin_id = a.plugin_id
-      WHERE a.txst_formid = t.formid AND u.formid NOT IN (SELECT formid FROM rec_inert))
-    AND NOT EXISTS (SELECT 1 FROM txst_ref e JOIN win u ON u.local = e.local AND u.plugin_id = e.plugin_id
-      WHERE e.txst_formid = t.formid AND e.role NOT IN ('HNAM', 'GNAM', 'MODL')
-        AND u.formid NOT IN (SELECT formid FROM rec_inert));";
 
 fn sig_text(s: &[u8; 4]) -> String {
     String::from_utf8_lossy(s).into_owned()
@@ -142,14 +85,12 @@ impl Store {
             |r| r.get(0),
         )?;
         delete_rows(&tx, id)?;
-        // Verdicts rest on the old rows; a cancelled pass must not keep them (resolve rebuilds them).
-        tx.execute("DELETE FROM rec_inert", [])?;
         let nm = facts.masters.len();
         for r in &facts.records {
             let local = i64::from(clamp_local(r.local_formid, nm));
             let t = r.payload.txst.as_ref();
             tx.prepare_cached(
-                "INSERT INTO rec(local, plugin_id, sig, edid, txst_flags, decal, hdpt_flags, mato_flags) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                "INSERT INTO rec(local, plugin_id, sig, edid, txst_flags, decal, mato_flags) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             )?
             .execute(params![
                 local,
@@ -158,7 +99,6 @@ impl Store {
                 r.edid,
                 t.map(|t| i64::from(t.flags)),
                 t.map(|t| t.decal),
-                r.payload.hdpt_flags.map(i64::from),
                 r.payload.mato_flags.map(i64::from)
             ])?;
             if let Some(t) = t {
@@ -193,28 +133,6 @@ impl Store {
                     ])?;
                 }
             }
-            for (role, t) in &r.payload.txst_refs {
-                tx.prepare_cached(
-                    "INSERT INTO txst_ref(local, plugin_id, role, txst_local) VALUES (?1,?2,?3,?4)",
-                )?
-                .execute(params![
-                    local,
-                    id,
-                    sig_text(role),
-                    i64::from(clamp_local(*t, nm))
-                ])?;
-            }
-            for (role, p) in &r.payload.textures {
-                let pid = intern_path(&tx, &mut self.intern, p)?;
-                tx.prepare_cached(
-                    "INSERT INTO tex_ref(local, plugin_id, role, path_id) VALUES (?1,?2,?3,?4)",
-                )?
-                .execute(params![local, id, sig_text(role), pid])?;
-            }
-        }
-        for &base in &facts.placed {
-            tx.prepare_cached("INSERT INTO placed(plugin_id, base_local) VALUES (?1,?2)")?
-                .execute(params![id, i64::from(clamp_local(base, nm))])?;
         }
         tx.commit()?;
         Ok(id)
@@ -240,9 +158,7 @@ impl Store {
         }
         if !gone.is_empty() {
             // Same transaction as the removal: a failed resolution then cannot leave a stale order that looks resolved.
-            tx.execute_batch(
-                "UPDATE plugin SET lo_index = NULL; DELETE FROM rec_winner; DELETE FROM rec_inert;",
-            )?;
+            tx.execute_batch("UPDATE plugin SET lo_index = NULL; DELETE FROM rec_winner;")?;
         }
         tx.commit()?;
         Ok(gone.len())
@@ -338,7 +254,6 @@ impl Store {
                  FROM rec r JOIN plugin p ON p.id = r.plugin_id
                  WHERE r.owner_ok = 1 AND p.lo_index IS NOT NULL GROUP BY r.formid);",
         )?;
-        tx.execute_batch(INERT_SQL)?;
         tx.commit()?;
         Ok(())
     }
@@ -347,9 +262,7 @@ impl Store {
     /// re-resolves them (`lo_index` NULL never matches).
     pub fn unload_plugins(&mut self) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
-        tx.execute_batch(
-            "UPDATE plugin SET lo_index = NULL; DELETE FROM rec_winner; DELETE FROM rec_inert;",
-        )?;
+        tx.execute_batch("UPDATE plugin SET lo_index = NULL; DELETE FROM rec_winner;")?;
         tx.commit()?;
         Ok(())
     }
@@ -403,15 +316,6 @@ impl Store {
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<Result<_, _>>()?;
         Ok(v)
-    }
-}
-
-/// The text of a `rec_inert.reason` (ruling R13).
-pub fn inert_reason(code: i64) -> &'static str {
-    match code {
-        2 => "not placed",
-        3 => "head part not playable",
-        _ => "no reference",
     }
 }
 
@@ -586,20 +490,6 @@ impl Store {
              WHERE p.p = ?1 AND r.sig = 'HDPT')",
         )?;
         Ok(st.query_row([norm], |r| r.get(0))?)
-    }
-
-    /// The inert reason (filtering spec §3) of each of `formids` that is inert.
-    pub fn inert_of(&self, formids: &[u32]) -> Result<HashMap<u32, &'static str>, ScanError> {
-        let ids = serde_json::to_string(formids).map_err(json_err)?;
-        let mut st = self.conn.prepare(
-            "SELECT formid, reason FROM rec_inert WHERE formid IN (SELECT value FROM json_each(?1))",
-        )?;
-        let v = st
-            .query_map([ids], |r| {
-                Ok((r.get::<_, i64>(0)? as u32, inert_reason(r.get(1)?)))
-            })?
-            .collect::<Result<_, _>>()?;
-        Ok(v)
     }
 
     /// Winning records of type `sig` (`"TXST"`, `"MATO"`) that have an EDID, by EDID then FormID.

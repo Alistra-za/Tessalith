@@ -513,10 +513,6 @@ pub struct MeshesModel {
     pub tex_users: Option<(String, Vec<TexUser>)>,
     /// Winning plugin records that use the shown mesh (esp spec §4.2).
     pub plugin_uses: Vec<MeshUse>,
-    /// Inert reasons (filtering spec §3) of the `plugin_uses` records that are inert.
-    pub plugin_inert: HashMap<u32, &'static str>,
-    /// "Show inert" in Plugin overrides.
-    pub show_inert_uses: bool,
     /// Database or scan errors; shown, never swallowed.
     pub error: Option<String>,
     pub dialog: Option<MeshesDialog>,
@@ -653,8 +649,6 @@ impl MeshesModel {
             banner: None,
             tex_users: None,
             plugin_uses: vec![],
-            plugin_inert: HashMap::new(),
-            show_inert_uses: false,
             error: None,
             dialog: None,
             report: None,
@@ -903,8 +897,6 @@ impl MeshesModel {
         // Note GC14: a row read still out may read the origins this scan disables; its answer is dropped, and the
         // lists on screen stay until the scan ends.
         self.rows_rx = None;
-        // The scan rewrites origins and winners: a cached list is stale from here on, whatever the scan's outcome.
-        self.show_inert_uses = false;
         self.progress = Some(("starting", 0, 0));
         self.status = if req.skip_derived {
             "Scanning without PGPatcher output…".into()
@@ -1013,7 +1005,6 @@ impl MeshesModel {
             Ok(report) => {
                 self.scan_rev += 1;
                 self.status = report_summary(&report);
-                self.show_inert_uses = false;
                 let incomplete = report
                     .pgp
                     .iter()
@@ -1178,8 +1169,6 @@ impl MeshesModel {
         self.view_source = false;
         self.tex_users = None;
         self.plugin_uses.clear();
-        self.plugin_inert.clear();
-        self.show_inert_uses = false;
         self.drop_edit();
         self.v3.set_mesh(None);
     }
@@ -1753,23 +1742,14 @@ impl MeshesModel {
         });
         match r {
             Ok(s) => {
-                let uses = store
-                    .copy_location(copy)
-                    .and_then(|l| match l {
-                        Some((path, ..)) => store.plugin_uses_of_mesh(&path),
-                        None => Ok(vec![]),
-                    })
-                    .and_then(|u| {
-                        let ids: Vec<u32> = u.iter().map(|x| x.formid).collect();
-                        Ok((store.inert_of(&ids)?, u))
-                    });
-                (self.plugin_inert, self.plugin_uses) = match uses {
-                    Ok(x) => x,
-                    Err(e) => {
-                        self.error = Some(db_err(e));
-                        (HashMap::new(), vec![])
-                    }
-                };
+                let uses = store.copy_location(copy).and_then(|l| match l {
+                    Some((path, ..)) => store.plugin_uses_of_mesh(&path),
+                    None => Ok(vec![]),
+                });
+                self.plugin_uses = uses.unwrap_or_else(|e| {
+                    self.error = Some(db_err(e));
+                    vec![]
+                });
                 let spec = mesh_spec(store, copy, &s);
                 let location = store.copy_location(copy).ok().flatten();
                 self.shapes = s;
@@ -1789,7 +1769,6 @@ impl MeshesModel {
                 self.shapes.clear();
                 self.resolved.clear();
                 self.plugin_uses.clear();
-                self.plugin_inert.clear();
                 self.error = Some(db_err(e));
             }
         }

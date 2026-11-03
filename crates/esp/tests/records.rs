@@ -119,8 +119,6 @@ fn models_carry_their_own_alternate_textures() {
         ],
         "an entry with TXST 0 is no swap"
     );
-    // NAM1 = 0 is no reference; NAM2/NAM3 are FormLists (xEdit), not read.
-    assert_eq!(r.payload.txst_refs, vec![(*b"NAM0", 0x0000_0D00)]);
 }
 
 #[test]
@@ -192,18 +190,28 @@ fn unlisted_subrecords_and_orphan_lists_are_skipped() {
             ],
         ),
     );
-    assert!(
-        r.payload.models.is_empty() && r.payload.textures.is_empty() && r.payload.txst.is_none()
-    );
+    assert!(r.payload.models.is_empty() && r.payload.txst.is_none());
+}
+
+/// Note GJ7: types whose only facts fed the dropped reference tables (LTEX, NPC_, EFSH, FLST) are not read at all.
+#[test]
+fn reference_only_record_types_are_skipped() {
+    for sig in [b"LTEX", b"NPC_", b"EFSH", b"FLST"] {
+        let f = parse(
+            "x.esp",
+            &plugin(
+                0,
+                &[],
+                &[top(sig, &[rec(sig, 1, &[edid("X"), form(b"TNAM", 0xABC)])])],
+            ),
+        );
+        assert!(f.errors.is_empty(), "{:?}", f.errors);
+        assert!(f.records.is_empty(), "{}", String::from_utf8_lossy(sig));
+    }
 }
 
 #[test]
-fn txst_references_of_ltex_hdpt_and_npc() {
-    let l = one(
-        b"LTEX",
-        rec(b"LTEX", 1, &[edid("LDirt"), form(b"TNAM", 0xABC)]),
-    );
-    assert_eq!(l.payload.txst_refs, vec![(*b"TNAM", 0xABC)]);
+fn head_part_model_is_read_and_tri_parts_are_not() {
     let h = one(
         b"HDPT",
         rec(
@@ -217,29 +225,15 @@ fn txst_references_of_ltex_hdpt_and_npc() {
             ],
         ),
     );
-    assert_eq!(h.payload.txst_refs, vec![(*b"TNAM", 0xABD)]);
     assert_eq!(h.payload.models.len(), 1, "NAM1 .tri parts are not models");
     assert_eq!(
         h.payload.models[0].path,
         "meshes/actors/character/brows.nif"
     );
-    let n = one(
-        b"NPC_",
-        rec(
-            b"NPC_",
-            3,
-            &[edid("Guard"), form(b"FTST", 0xABE), form(b"TNAM", 0xFFF)],
-        ),
-    );
-    assert_eq!(
-        n.payload.txst_refs,
-        vec![(*b"FTST", 0xABE)],
-        "TNAM is read on LTEX/HDPT only"
-    );
 }
 
 #[test]
-fn race_face_texture_sets_models_and_tint_masks() {
+fn race_models_are_read_and_dds_paths_are_not() {
     let r = one(
         b"RACE",
         rec(
@@ -271,16 +265,6 @@ fn race_face_texture_sets_models_and_tint_masks() {
             ],
         ),
     );
-    assert_eq!(
-        r.payload.txst_refs,
-        vec![
-            (*b"DFTM", 0xA01),
-            (*b"DFTF", 0xA02),
-            (*b"FTSM", 0xA03),
-            (*b"FTSF", 0xA04)
-        ],
-        "WNAM is a skin ARMO, not a TXST"
-    );
     let models: Vec<&str> = r.payload.models.iter().map(|m| m.path.as_str()).collect();
     assert_eq!(
         models,
@@ -289,74 +273,19 @@ fn race_face_texture_sets_models_and_tint_masks() {
             "meshes/actors/character/character assets/head.nif"
         ]
     );
-    assert_eq!(
-        r.payload.textures,
-        vec![
-            (
-                *b"MODL",
-                "textures/actors/character/character assets/malebody.dds".to_string()
-            ),
-            (
-                *b"TINT",
-                "textures/actors/character/character assets/tintmasks/cheek.dds".to_string()
-            ),
-        ]
-    );
 }
 
+/// WTHR is read for its aurora model only (Note GJ7: the cloud-layer textures are not read).
 #[test]
-fn effect_shader_texture_paths() {
-    let r = one(
-        b"EFSH",
-        rec(
-            b"EFSH",
-            5,
-            &[
-                edid("FireFX"),
-                sub(b"ICON", &zstr("Effects\\Fire01.dds")),
-                sub(b"ICO2", &zstr("Effects\\Particle.dds")),
-                sub(b"NAM7", &zstr("Effects\\Holes.dds")),
-                sub(b"NAM8", &zstr("Effects\\Membrane.dds")),
-                sub(b"NAM9", &zstr("Effects\\ParticlePal.dds")),
-                sub(b"NAM0", &zstr("")),
-            ],
-        ),
-    );
-    let roles: Vec<String> = r
-        .payload
-        .textures
-        .iter()
-        .map(|(s, _)| String::from_utf8_lossy(s).into_owned())
-        .collect();
-    assert_eq!(roles, ["ICON", "ICO2", "NAM7", "NAM8", "NAM9"]);
-    assert_eq!(r.payload.textures[0].1, "textures/effects/fire01.dds");
-}
-
-/// xEdit `wbWeatherCloudTextures`: `_30_0TX` (= "00TX") … `_40_0TX` ("@0TX"), then `A0TX` … `O0TX`: 32 layers.
-#[test]
-fn weather_cloud_layers() {
-    let mut subs = vec![edid("SkyrimClear")];
-    let layers: Vec<[u8; 4]> = (0x30u8..=0x4F).map(|c| [c, b'0', b'T', b'X']).collect();
-    for (i, s) in layers.iter().enumerate() {
-        subs.push(sub(s, &zstr(&format!("Sky\\Cloud{i:02}.dds"))));
-    }
-    subs.push(sub(b"DNAM", &zstr("Sky\\OldStyleLayer.dds")));
-    subs.push(sub(b"MODL", &zstr("Sky\\Aurora.nif")));
+fn weather_aurora_model_is_read() {
+    let subs = [
+        edid("SkyrimClear"),
+        sub(b"00TX", &zstr("Sky\\Cloud00.dds")),
+        sub(b"MODL", &zstr("Sky\\Aurora.nif")),
+    ];
     let r = one(b"WTHR", rec(b"WTHR", 6, &subs));
-    assert_eq!(r.payload.textures.len(), 32);
-    assert_eq!(
-        r.payload.textures[0],
-        (*b"00TX", "textures/sky/cloud00.dds".to_string())
-    );
-    assert_eq!(
-        r.payload.textures[16],
-        (*b"@0TX", "textures/sky/cloud16.dds".to_string())
-    );
-    assert_eq!(
-        r.payload.textures[31],
-        (*b"O0TX", "textures/sky/cloud31.dds".to_string())
-    );
-    assert_eq!(r.payload.models[0].path, "meshes/sky/aurora.nif");
+    let models: Vec<&str> = r.payload.models.iter().map(|m| m.path.as_str()).collect();
+    assert_eq!(models, ["meshes/sky/aurora.nif"]);
 }
 
 #[test]
@@ -366,10 +295,6 @@ fn race_dds_classification_ignores_trailing_space() {
         rec(b"RACE", 4, &[sub(b"MODL", &zstr("Actors\\Body.dds "))]),
     );
     assert!(r.payload.models.is_empty());
-    assert_eq!(
-        r.payload.textures,
-        vec![(*b"MODL", "textures/actors/body.dds".to_string())]
-    );
 }
 
 fn weap_alt(d: &[u8]) -> Rec {
@@ -404,20 +329,18 @@ fn truncated_and_odd_subrecords_do_not_panic_or_lose_earlier_data() {
     d.extend([0; 8]);
     assert!(weap_alt(&d).payload.models[0].alt.is_empty());
 
-    // Short DNAM keeps flags 0; short FormID subrecord is no reference.
+    // Short DNAM keeps flags 0.
     let t = one(b"TXST", rec(b"TXST", 1, &[sub(b"DNAM", &[7])]))
         .payload
         .txst
         .unwrap();
     assert_eq!(t.flags, 0);
-    let l = one(b"LTEX", rec(b"LTEX", 1, &[sub(b"TNAM", &[1, 2, 3])]));
-    assert!(l.payload.txst_refs.is_empty());
 }
 
-/// Filtering spec §3, xEdit dev-4.1.6 `wbDefinitionsTES5.pas` l.6238-6276: IPCT DNAM/ENAM are TXSTs; its model is read
-/// like every model record (ruling R11); sounds are not read.
+/// xEdit dev-4.1.6 `wbDefinitionsTES5.pas` l.6238-6276: the IPCT model is read like every model record (ruling R11);
+/// its texture sets and sounds are not read (Note GJ7).
 #[test]
-fn impact_texture_sets() {
+fn impact_model_is_read() {
     let r = one(
         b"IPCT",
         rec(
@@ -433,69 +356,8 @@ fn impact_texture_sets() {
             ],
         ),
     );
-    assert_eq!(
-        r.payload.txst_refs,
-        vec![(*b"DNAM", 0xA1), (*b"ENAM", 0xA2)]
-    );
-    assert_eq!(r.payload.models[0].path, "meshes/effects/imp.nif");
-}
-
-/// l.5279-5309: HDPT DATA is a u8 flag set (0x01 Playable); HNAM lists extra-part HDPTs (ruling R7).
-#[test]
-fn head_part_flags_and_extra_parts() {
-    let h = one(
-        b"HDPT",
-        rec(
-            b"HDPT",
-            2,
-            &[
-                edid("Hair"),
-                sub(b"DATA", &[0x03]),
-                sub(b"PNAM", &3u32.to_le_bytes()),
-                form(b"HNAM", 0xB1),
-                form(b"HNAM", 0xB2),
-                form(b"TNAM", 0xB3),
-            ],
-        ),
-    );
-    assert_eq!(h.payload.hdpt_flags, Some(0x03));
-    assert_eq!(
-        h.payload.txst_refs,
-        vec![(*b"HNAM", 0xB1), (*b"HNAM", 0xB2), (*b"TNAM", 0xB3)]
-    );
-    assert_eq!(
-        one(b"HDPT", rec(b"HDPT", 3, &[edid("NoData")]))
-            .payload
-            .hdpt_flags,
-        None
-    );
-    let s = one(
-        b"STAT",
-        rec(b"STAT", 4, &[edid("S"), sub(b"DATA", &[0x01])]),
-    );
-    assert_eq!(s.payload.hdpt_flags, None, "DATA is read on HDPT only");
-}
-
-/// l.8009: LTEX GNAM lists the grasses of the landscape texture.
-#[test]
-fn landscape_texture_grasses() {
-    let l = one(
-        b"LTEX",
-        rec(
-            b"LTEX",
-            5,
-            &[
-                edid("Dirt"),
-                form(b"TNAM", 0xC1),
-                form(b"GNAM", 0xC2),
-                form(b"GNAM", 0xC3),
-            ],
-        ),
-    );
-    assert_eq!(
-        l.payload.txst_refs,
-        vec![(*b"TNAM", 0xC1), (*b"GNAM", 0xC2), (*b"GNAM", 0xC3)]
-    );
+    let models: Vec<&str> = r.payload.models.iter().map(|m| m.path.as_str()).collect();
+    assert_eq!(models, ["meshes/effects/imp.nif"]);
 }
 
 /// Ruling F-2: Skyrim ARMO MODL is an ARMA FormID (per armature), not a mesh path; world models are MOD2/MOD4.
@@ -514,36 +376,18 @@ fn armor_modl_names_armatures() {
             ],
         ),
     );
-    assert_eq!(r.payload.models.len(), 1);
-    assert_eq!(r.payload.models[0].slot, 2);
-    assert_eq!(r.payload.txst_refs, vec![(*b"MODL", 0xA1)]);
-}
-
-/// Final review I2: FLST LNAM entries (ARMA NAM2/NAM3 skin-swap lists) and the PROJ DATA decal TXST (struct offset 84,
-/// xEdit dev-4.1.6 `wbRecord(PROJ…)`) are TXST references.
-#[test]
-fn flst_entries_and_the_projectile_decal_are_txst_refs() {
-    let r = one(
-        b"FLST",
-        rec(
-            b"FLST",
-            1,
-            &[edid("L"), form(b"LNAM", 0xA1), form(b"LNAM", 0xA2)],
-        ),
+    assert_eq!(
+        r.payload.models.len(),
+        1,
+        "MODL is an ARMA FormID, not a path"
     );
-    assert_eq!(r.payload.txst_refs, [(*b"LNAM", 0xA1), (*b"LNAM", 0xA2)]);
-    let mut data = vec![0u8; 88];
-    data[84..88].copy_from_slice(&0xA3u32.to_le_bytes());
-    let r = one(b"PROJ", rec(b"PROJ", 2, &[edid("P"), sub(b"DATA", &data)]));
-    assert_eq!(r.payload.txst_refs, [(*b"DATA", 0xA3)]);
-    let r = one(b"PROJ", rec(b"PROJ", 3, &[sub(b"DATA", &data[..84])]));
-    assert!(r.payload.txst_refs.is_empty(), "a short DATA has no decal");
+    assert_eq!(r.payload.models[0].slot, 2);
 }
 
 /// Re-review: the WRLD record's cloud model (xEdit `wbRecord(WRLD…)`, `wbGenericModel`) is read with its alternate
-/// textures, and the placement walk of the world's children is unchanged.
+/// textures; the world's children (cells, references) are skipped (Note GJ7).
 #[test]
-fn a_worldspace_cloud_model_is_read_and_its_children_still_place() {
+fn a_worldspace_cloud_model_is_read_and_its_children_are_skipped() {
     let id = 0x3000u32.to_le_bytes();
     let refr = rec(b"REFR", 0x3100, &[form(b"NAME", 0xB01)]);
     let f = parse(
@@ -569,8 +413,7 @@ fn a_worldspace_cloud_model_is_read_and_its_children_still_place() {
         ),
     );
     assert!(f.errors.is_empty(), "{:?}", f.errors);
-    assert_eq!(f.placed, [0xB01]);
-    assert_eq!(f.records.len(), 1);
+    assert_eq!(f.records.len(), 1, "the REFR is not a record");
     let m = &f.records[0].payload.models;
     assert_eq!((m.len(), m[0].alt.len()), (1, 1));
 }

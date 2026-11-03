@@ -1,6 +1,6 @@
 //! Targeted Skyrim SE plugin reader (esp scanner spec §2.1): one plugin's bytes → the facts sdc needs (TXSTs, model
-//! paths with alternate textures, TXST references, direct texture paths). Unwanted top-level groups are skipped by
-//! size; nothing is ever written. Layouts: xEdit `wbDefinitionsTES5.pas` / `wbDefinitionsCommon.pas` (dev-4.1.6).
+//! paths with alternate textures, MATO flags, EDIDs). Unwanted top-level groups are skipped by size; nothing is ever
+//! written. Layouts: xEdit `wbDefinitionsTES5.pas` / `wbDefinitionsCommon.pas` (dev-4.1.6).
 pub mod mato;
 mod read;
 mod records;
@@ -22,9 +22,6 @@ pub struct PluginFacts {
     pub flags: u32,
     pub masters: Vec<String>,
     pub records: Vec<Rec>,
-    /// Base FormIDs (as stored) placed by REFR/ACHR records in CELL and WRLD groups, once each, ascending
-    /// (filtering spec §3). The references themselves are not kept.
-    pub placed: Vec<u32>,
     /// `"offset 0x…: message"`, in file order. Records read before a fault are kept.
     pub errors: Vec<String>,
 }
@@ -51,22 +48,14 @@ pub struct Rec {
     pub payload: Payload,
 }
 
-/// What a record carries for sdc (spec §2.1). A record can carry several parts (ARMA: models and TXST references).
-/// Paths are canonical (`nif::path`): lower case, `/`, `textures/…` or `meshes/…`.
+/// What a record carries for sdc (spec §2.1). Paths are canonical (`nif::path`): lower case, `/`, `textures/…` or
+/// `meshes/…`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Payload {
     pub txst: Option<Txst>,
     pub models: Vec<ModelRef>,
-    /// (role = subrecord signature, local FormID). The target is a TXST, except role HNAM (an extra-part HDPT), GNAM (a GRAS)
-    /// and ARMO MODL (an ARMA); FormID 0 is never stored.
-    pub txst_refs: Vec<([u8; 4], u32)>,
-    /// HDPT DATA flags (xEdit: 0x01 Playable, 0x02 Male, 0x04 Female, 0x08 Is Extra Part, 0x10 Use Solid Tint);
-    /// `None` on other records and when DATA is absent.
-    pub hdpt_flags: Option<u8>,
     /// MATO DATA flags (u32 at DATA offset 44; bit 0 = Single Pass); `None` when DATA is absent or shorter than 48 bytes.
     pub mato_flags: Option<u32>,
-    /// (role = subrecord signature, canonical texture path).
-    pub textures: Vec<([u8; 4], String)>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

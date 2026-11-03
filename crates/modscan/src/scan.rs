@@ -6,7 +6,7 @@ use crate::pgp::{self, Diff, Signature};
 use crate::resolve::{winners, Copy, OriginRef};
 use crate::store::{
     ChunkItem, CopyResult, DeriveRow, DerivedState, OriginSpec, ScanLock, Store, KIND_BSA,
-    KIND_DATA, KIND_MOD, KIND_OVERWRITE, KIND_SEPARATOR, PARSE_FAILED, PARSE_NOT_SKYRIM,
+    KIND_DATA, KIND_MOD, KIND_OVERWRITE, PARSE_FAILED, PARSE_NOT_SKYRIM,
 };
 use crate::ScanError;
 use nif::path::{is_facegen, is_lod_path};
@@ -103,35 +103,6 @@ pub(crate) fn file_mtime(p: &std::path::Path) -> i64 {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs() as i64)
-}
-
-/// `_separator` lines from modlist.txt (`+` or `-`; MO2 writes them as `-`), each with the priority of the
-/// first enabled mod below it (-1 if none).
-fn separators(inst: &Instance, loose: &[LooseOrigin]) -> Result<Vec<(String, i32)>, ScanError> {
-    let text = crate::read_text(&inst.profiles.join(&inst.profile).join("modlist.txt"))?;
-    let prio: HashMap<&str, i32> = loose
-        .iter()
-        .filter(|o| o.kind == OriginKind::Mod)
-        .map(|o| (o.name.as_str(), o.priority))
-        .collect();
-    let lines: Vec<&str> = text.lines().collect();
-    let mut out = vec![];
-    for (i, l) in lines.iter().enumerate() {
-        let Some(name) = l.strip_prefix('+').or_else(|| l.strip_prefix('-')) else {
-            continue;
-        };
-        let name = name.trim();
-        if !name.ends_with("_separator") {
-            continue;
-        }
-        let below = lines[i + 1..]
-            .iter()
-            .filter_map(|l| l.strip_prefix('+'))
-            .find_map(|n| prio.get(n.trim()).copied())
-            .unwrap_or(-1);
-        out.push((name.to_string(), below));
-    }
-    Ok(out)
 }
 
 fn kind_code(k: OriginKind) -> i32 {
@@ -231,14 +202,13 @@ fn scan_body(
     let mut t = Instant::now();
 
     // 2. Origins.
-    let (mut loose, bsas, seps) = match src {
+    let (mut loose, bsas) = match src {
         Source::Mo2(inst) => {
             let (l, missing) = loose_origins(inst)?;
             report.missing_mods = missing;
             let (b, notes) = active_bsas(inst, &l);
             report.notes = notes;
-            let s = separators(inst, &l)?;
-            (l, b, s)
+            (l, b)
         }
         Source::Folder(p) => (
             vec![LooseOrigin {
@@ -251,13 +221,12 @@ fn scan_body(
                 priority: 0,
             }],
             vec![],
-            vec![],
         ),
     };
     // Plugins are not NIF-derived output and the load order must not shrink with the PGPatcher mods (ruling F-6).
     let plugin_origins = loose.clone();
     if skip_derived {
-        // BSA ranks and separator priorities above were computed with these mods present, as MO2 sees them.
+        // BSA ranks above were computed with these mods present, as MO2 sees them.
         loose.retain(|o| o.kind != OriginKind::Mod || pgp::signature(&o.root) == Signature::None);
     }
     store.begin_scan()?;
@@ -325,22 +294,6 @@ fn scan_body(
             derived_state: None,
         })?);
     }
-    let mut sep_ids = vec![];
-    if let Source::Mo2(inst) = src {
-        for (line, (name, prio)) in seps.iter().enumerate() {
-            sep_ids.push(store.upsert_origin_staged(&OriginSpec {
-                kind: KIND_SEPARATOR,
-                name: name.clone(),
-                root: inst.mods.join(name).display().to_string(),
-                // Separators only: modlist.txt order (no parent), the tie-break of adjacent separators in `mods`.
-                parent: Some(line as i64),
-                priority: *prio,
-                derived_by: None,
-                derived_state: None,
-            })?);
-        }
-    }
-
     report.phase_ms.push(("origins", lap(&mut t)));
 
     // 3. Walk.
@@ -456,7 +409,6 @@ fn scan_body(
                         .push((format!("{} ({})", c.path, origin_name(c.origin)), m.clone())),
                     _ => {}
                 }
-
                 items.push(ChunkItem {
                     path_id: path_ids[i],
                     origin_id: origin_id(c.origin),
@@ -501,7 +453,7 @@ fn scan_body(
         // Old rec_winner rows would make Missing list every path a record names (the texture tables are empty).
         store.unload_plugins()?;
         // A tainted run still returns a (flagged) result: its origins are listed, as before.
-        enable_run(store, &loose_ids, &enable_bsa_ids, &sep_ids)?;
+        enable_run(store, &loose_ids, &enable_bsa_ids)?;
         for p in &mut report.pgp {
             p.state = DerivedState::RunningAtScan;
             store.set_derived_state(p.origin_id, DerivedState::RunningAtScan)?;
@@ -587,7 +539,7 @@ fn scan_body(
     // 7. Drop copies not seen in this walk.
     let seen: HashSet<i64> = ids.iter().copied().collect();
     // Commit point: only a run that got here makes its origins readable (the plugin pass below needs them enabled).
-    enable_run(store, &loose_ids, &enable_bsa_ids, &sep_ids)?;
+    enable_run(store, &loose_ids, &enable_bsa_ids)?;
     store.delete_unseen(&seen)?;
     resolve_ms += lap(&mut t);
     report.phase_ms.push(("resolve", resolve_ms));
@@ -619,8 +571,8 @@ fn scan_body(
     Ok(report)
 }
 
-fn enable_run(store: &mut Store, loose: &[i64], bsa: &[i64], sep: &[i64]) -> Result<(), ScanError> {
-    let all: Vec<i64> = loose.iter().chain(bsa).chain(sep).copied().collect();
+fn enable_run(store: &mut Store, loose: &[i64], bsa: &[i64]) -> Result<(), ScanError> {
+    let all: Vec<i64> = loose.iter().chain(bsa).copied().collect();
     store.enable_origins(&all)
 }
 

@@ -555,14 +555,17 @@ fn owner_meshes_view() {
     }
     let kinds = |k: i32| m.mods.iter().filter(|r| r.kind == k).count();
     println!(
-        "mods list: {} rows (data {}, mods {}, overwrite {}, separators {}, bsa {}); derived chips: {:?}",
+        "mods list: {} rows (data {}, mods {}, overwrite {}, bsa {}); derived chips: {:?}",
         m.mods.len(),
         kinds(0),
         kinds(1),
         kinds(2),
-        kinds(3),
         kinds(4),
-        m.mods.iter().filter(|r| r.derived).map(|r| r.name.as_str()).collect::<Vec<_>>()
+        m.mods
+            .iter()
+            .filter(|r| r.derived)
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>()
     );
     let Some(id) = m
         .mods
@@ -670,7 +673,7 @@ fn the_path_filter_and_the_chips_combine() {
     assert!(h.query_by_label("meshes/rock/big.nif").is_none());
 }
 
-/// B (highest) and A both have rock.nif; A also has tree/oak.nif; the separator owns B.
+/// B (highest) and A both have rock.nif; A also has tree/oak.nif; modlist.txt has a separator line the scan skips.
 fn scanned() -> (tempfile::TempDir, MeshesModel) {
     scanned_with(None)
 }
@@ -1361,6 +1364,60 @@ fn plugin_overrides_say_when_no_record_uses_the_mesh() {
     h.get_by_label("No plugin record of the latest scan uses this mesh.");
 }
 
+/// 2.0 debloat (Note GJ7, owner 2026-11-02 "drop Show inert"): a STAT no reference places (once hidden as "not
+/// placed") is listed next to a MISC (a type never judged), both in the count, with no Show inert control.
+#[test]
+fn plugin_overrides_list_every_record_without_an_inert_toggle() {
+    let (d, mut m) = scanned();
+    let rec = |id: u32, sig: &[u8; 4], edid: &str| esp::Rec {
+        local_formid: id,
+        sig: *sig,
+        edid: Some(edid.into()),
+        payload: esp::Payload {
+            models: vec![esp::ModelRef {
+                slot: 0,
+                path: "meshes/rock.nif".into(),
+                alt: vec![],
+            }],
+            ..Default::default()
+        },
+    };
+    let facts = esp::PluginFacts {
+        name: "P.esp".into(),
+        records: vec![rec(0x800, b"STAT", "Lonely"), rec(0x801, b"MISC", "Kept")],
+        ..Default::default()
+    };
+    {
+        let mut s = modscan::store::Store::open(&d.path().join("scan.db")).unwrap();
+        let file = modscan::plugin_store::PluginFile {
+            name: "P.esp",
+            path: "P.esp",
+            size: Some(1),
+            mtime: 0,
+        };
+        let id = s.write_plugin(&file, &facts).unwrap();
+        s.resolve_plugins(&[(id, 0)], &[[id, 0, 0, 0x00FF_FFFF]])
+            .unwrap();
+    }
+    let a_id = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a_id);
+    let copy = m
+        .nifs
+        .iter()
+        .find(|n| n.path == "meshes/rock.nif")
+        .unwrap()
+        .copy_id;
+    m.select_nif(copy);
+    assert_eq!(m.error, None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Plugin overrides (2)").click();
+    h.run();
+    h.get_by_label("Lonely [00000800] STAT — P.esp");
+    h.get_by_label("Kept [00000801] MISC — P.esp");
+    assert!(h.query_by_label_contains("Show inert").is_none());
+}
+
 /// 2.0 debloat (Note GJ5): the Plugin file references window is gone; a scanned store shows no button for it.
 #[test]
 fn the_meshes_header_has_no_plugin_file_references_button() {
@@ -1451,56 +1508,6 @@ fn long_override_labels_wrap_inside_the_column() {
     h.run();
     let r = h.get_by_label_contains("SSSSSSSSSS").rect();
     assert!(r.max.x <= 1400.0 && r.height() > 30.0, "{r:?}");
-}
-
-/// Filtering spec §3 / ruling R12: inert records are left out of "Plugin overrides" and its count, shown dimmed with
-/// their reason behind "Show inert (N)".
-#[test]
-fn plugin_overrides_hide_inert_records_until_asked() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
-    m.selected_nif = Some(1);
-    let used = |formid: u32, edid: &str| MeshUse {
-        formid,
-        edid: Some(edid.into()),
-        sig: "STAT".into(),
-        plugin: "Skyrim.esm".into(),
-        model_slot: 0,
-        n_overrides: 0,
-        swaps: vec![],
-    };
-    m.plugin_uses = vec![used(1, "Placed"), used(2, "Lonely")];
-    m.plugin_inert = [(2u32, "not placed")].into_iter().collect();
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("Plugin overrides (1)").click();
-    h.run();
-    h.get_by_label("Placed [00000001] STAT — Skyrim.esm");
-    assert!(h.query_by_label_contains("Lonely").is_none());
-    h.get_by_label("Show inert (1)").click();
-    h.run();
-    h.get_by_label("Lonely [00000002] STAT — Skyrim.esm · not placed");
-}
-
-/// Review I1: Show inert does not follow the selection to another NIF, nor survive a rescan.
-#[test]
-fn show_inert_resets_on_nif_change_and_on_scan() {
-    let mut m = model_with(None);
-    m.nifs = Arc::new(vec![nif(1, "meshes/a.nif"), nif(2, "meshes/b.nif")]);
-    m.select_nif(1);
-    m.show_inert_uses = true;
-    m.select_nif(2);
-    assert!(!m.show_inert_uses);
-
-    let (_d, mut m) = scanned();
-    m.show_inert_uses = true;
-    m.request_scan(false);
-    let req = m.take_request().unwrap();
-    m.start(req);
-    assert!(!m.show_inert_uses, "scan start");
-    m.show_inert_uses = true;
-    wait(&mut m);
-    assert!(!m.show_inert_uses, "scan end");
 }
 
 fn shapes_model(shapes: Vec<ShapeView>) -> MeshesModel {

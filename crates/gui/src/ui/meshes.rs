@@ -11,7 +11,7 @@ use crate::model::meshes::{
 };
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use eframe::egui;
-use modscan::plugin_store::{record_label, MeshUse};
+use modscan::plugin_store::record_label;
 use modscan::store::{NifRow, ShapeView, TexResolution, KIND_BSA, KIND_DATA};
 use std::collections::HashMap;
 
@@ -1126,24 +1126,13 @@ fn open_button(ui: &mut egui::Ui, m: &MeshesModel, path: &str, open: &mut Option
     }
 }
 
-/// Winning plugin records that use this mesh and the shapes they re-texture (esp spec §4.2). Inert records (filtering
-/// spec §3) only behind "Show inert", dimmed, with their reason. Information only.
-fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
-    let (uses, inert, show) = (&m.plugin_uses, &m.plugin_inert, &mut m.show_inert_uses);
-    let n_inert = uses
-        .iter()
-        .filter(|u| inert.contains_key(&u.formid))
-        .count();
-    egui::CollapsingHeader::new(format!("Plugin overrides ({})", uses.len() - n_inert))
+/// Winning plugin records that use this mesh and the shapes they re-texture (esp spec §4.2), every one of them
+/// (Note GJ7: no inert filtering). Information only.
+fn plugin_overrides(ui: &mut egui::Ui, m: &MeshesModel) {
+    let shown = &m.plugin_uses;
+    egui::CollapsingHeader::new(format!("Plugin overrides ({})", shown.len()))
         .id_salt("meshes-plugin-overrides")
         .show(ui, |ui| {
-            if n_inert > 0 {
-                ui.checkbox(&mut *show, format!("Show inert ({n_inert})"));
-            }
-            let shown: Vec<&MeshUse> = uses
-                .iter()
-                .filter(|u| *show || !inert.contains_key(&u.formid))
-                .collect();
             egui::ScrollArea::vertical()
                 .id_salt("meshes-plugin-overrides-scroll")
                 .max_height(240.0)
@@ -1152,19 +1141,11 @@ fn plugin_overrides(ui: &mut egui::Ui, m: &mut MeshesModel) {
                         ui.label("No plugin record of the latest scan uses this mesh.");
                     }
                     for (i, u) in shown.iter().take(MAX_LISTED).enumerate() {
-                        let text = format!(
+                        ui.label(format!(
                             "{}{}",
                             record_label(u.edid.as_deref(), u.formid, &u.sig, &u.plugin),
                             overridden_text(u.n_overrides)
-                        );
-                        match inert.get(&u.formid) {
-                            Some(why) => {
-                                ui.weak(format!("{text} · {why}"));
-                            }
-                            None => {
-                                ui.label(text);
-                            }
-                        }
+                        ));
                         ui.indent(("plugin-swaps", i), |ui| {
                             for s in &u.swaps {
                                 // formid 0 = the TXST's master is not in the load order
