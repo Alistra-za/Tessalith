@@ -24,7 +24,6 @@ Every warning has a code and a severity:
 | `IN-DECODE` | error | The source cannot be read. | Fix or re-save the file. |
 | `IN-NONFINITE` | warning | NaN or infinite samples were replaced. | Fix the source. |
 | `IN-UNREADABLE` | warning | A file or folder under an input folder could not be read (access denied, broken junction, cloud placeholder) and was skipped. | Fix permissions, or ignore. |
-| `IN-ICC-IGNORED` | info | An embedded ICC profile was ignored; pixels are read as stored. | Convert the source to sRGB or linear first if the profile matters. |
 | `IN-ALIAS-INVALID` | warning | An `[inputs]` alias that breaks the [rules](Project-Config.md#inputs) is ignored. | Fix the `as` path. |
 | `IN-ALIAS-STALE` | info | An `[inputs]` key matches no file ([inputs](Project-Config.md#inputs)). | Remove the entry. |
 
@@ -34,7 +33,6 @@ Every warning has a code and a severity:
 |---|---|---|---|
 | `LOSS-ALPHA-DATA` | blocking | Varying alpha would be discarded by `remove` or a format without alpha. Not raised for a `pbr_normal` or an explicit `alpha.policy = "remove"`. | Keep the alpha, choose `remove` explicitly, or acknowledge. |
 | `LOSS-CLAMP-HDR` | warning | Float values outside 0 to 1 written to an LDR format are clamped. | Use an HDR format under `cs`, or accept. |
-| `LOSS-BITDEPTH` | info | A 16-bit or float source goes to an 8-bit-endpoint format. | |
 | `LOSS-REENCODE` | warning | A compressed DDS is being re-encoded. | Use the source image. |
 
 ### Channels
@@ -42,11 +40,7 @@ Every warning has a code and a severity:
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CHAN-NOT-GRAY` | warning | A grayscale sub-type's R, G and B differ by more than 4/255; only R (or luma) is kept. | Pick the channel or the sub-type. |
-| `CHAN-CONSTANT-ALPHA-DATA` | info | `data` alpha is constant; `remove` would save bits. | |
 | `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | Use **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. |
-| `CHAN-NORMAL-SHORT` | info | The normal source's mean length at mip 0 is below 0.9. See [`mips.normal_base`](Project-Config-Fields.md#mipmaps). | |
-| `CHAN-AO-INVERTED` | warning | The `_rmaos` B channel is mostly black; AO may be inverted. | Check the source. |
-| `CHAN-GLOSS-AS-ROUGH` | warning | The `_rmaos` R channel is mostly high; it may be gloss, not roughness. | Invert it or confirm. |
 
 ### Format and tag
 
@@ -68,9 +62,6 @@ Every warning has a code and a severity:
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `ALPHA-EXACT-OFF-M` | blocking | `exact_opaque` turned off on a BC7 `_m`; decoded 254s may trip PGPatcher's 50% rule or ENB checks. | Keep it on, or acknowledge. |
-| `ALPHA-254` | info | Opaque alpha decodes as 254 in places. Harmless to Community Shaders' 251/255 gate. | Turn `alpha.exact_opaque` on if the alpha is read. |
-| `ALPHA-NEAR-OPAQUE` | info | Source alpha 251 to 254 with a minimum of 251 or more is treated as opaque and removed. | |
-| `ALPHA-PBR-NORMAL-DROPPED` | info | Vanilla specular in a `pbr_normal`'s alpha was dropped ([sub-types](Texture-Types.md#sub-types)). | |
 | `ALPHA-BC1-ONE-BIT` | warning | BC1 1-bit alpha on a source whose soft alpha would turn hard ([BC1 alpha](Texture-Types.md#alpha-policies)). | Use BC7 or BC3 to keep the soft edges, or accept. |
 
 ### Configuration
@@ -105,8 +96,7 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member, an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
-| `SET-COMPANION-OUTSIDE` | info | The missing companion is on disk but not in the batch ([bake](Texture-Packing.md#variance-bake)). | Include it. |
+| `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member (or has it on disk but not in the batch, [bake](Texture-Packing.md#variance-bake)), an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
 | `SET-BAKE-RATIO` | warning | `_n` and the roughness member are not powers of two with one aspect; bake off. | Resize. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that does not exist. | Fix or remove it. |
@@ -148,7 +138,6 @@ Every warning has a code and a severity:
 | `PACK-UNUSED-INPUT` | warning | A raw map is used by no recipe under the target. | Change the target, set a sub-type, or remove it. |
 | `PACK-RECIPE-CONFLICT` | warning | The `_rfaos` and `_rmaos` keys of one set disagree on `packing.recipe`; the `_rfaos` entry wins. | Keep the recipe on one key. |
 | `PACK-RECIPE-UNBUILDABLE` | warning | An `rfaos` recipe the set cannot build; `_rmaos` was built ([recipes](Texture-Packing.md#community-shaders-cs)). | Add roughness, glossiness or AO, or drop the setting. |
-| `PACK-ORM-OVERRIDDEN` | info | A separate map (such as `_roughness`) is used instead of the matching `_orm` channel, or an `_rfaos` drops the `_orm` metallic. | Nothing, or remove the separate map to use the `_orm` channel. |
 
 ### RNM, skin, shaders and grass
 
@@ -157,9 +146,7 @@ Every warning has a code and a severity:
 | `RNM-NO-BASE` | warning | A layer or mask has no base normal to feed. | Add the base, or set `rnm.target`. |
 | `RNM-IGNORED-EYE` | warning | A layer in an eye set; eye normals are model-space. | Remove or move the layer. |
 | `RNM-MASK-ORPHAN` | warning | A mask without its layer. | Add the layer, or remove the mask. |
-| `RNM-AO-MISSING` | info | A `bent` layer in `ao_blend` mode has no AO source; the weight is uniform. | Add an AO map, or set `rnm.bent.ao = false`. |
 | `RNM-LAYER-SHADOWED` | warning | Two files fill one layer of one base. | Rename or remove one, or change `rnm.target`. |
-| `SKIN-WET-FORM` | info | Which form a `skin_wet` file was read as (BC4 height or BC7 normal with mask). | Set `format` to force one. |
 | `SHADER-AUTO` | info | The set's shader was picked automatically, with the rule. | |
 | `SHADER-UNAVAILABLE` | warning | The shader is not available under the target; it fell back. | Change the shader or target. |
 | `SHADER-EXTRA-MAP` | warning | A member the shader does not use; it still converts ([set shaders](Set-Shaders.md#set-shaders)). | |

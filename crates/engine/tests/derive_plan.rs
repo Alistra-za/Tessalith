@@ -245,20 +245,14 @@ fn env_m_needs_an_envmap_vote_and_metal() {
     let (_d, p) = run(Some(vec![Shader::Default]), true);
     assert!(out_job(&p, "textures/arm/steel_m.dds").is_none());
     let diffuse = out_job(&p, "textures/arm/steel.dds").unwrap();
-    assert!(has(diffuse, Code::DeriveNoEnvmap), "{:?}", diffuse.warnings);
+    assert!(diffuse.warnings.is_empty(), "{:?}", diffuse.warnings);
     assert_eq!(diffuse.shader.as_ref().unwrap().shader, Shader::Default);
 
+    // No scan: no env _m, and no note either.
     let (_d, p) = run(None, true);
     assert!(out_job(&p, "textures/arm/steel_m.dds").is_none());
-    assert!(has(
-        out_job(&p, "textures/arm/steel.dds").unwrap(),
-        Code::DeriveNoScan
-    ));
-
-    let (_d, p) = run(None, false);
-    assert!(out_job(&p, "textures/arm/steel_m.dds").is_none());
     let diffuse = out_job(&p, "textures/arm/steel.dds").unwrap();
-    assert!(!has(diffuse, Code::DeriveNoScan) && !has(diffuse, Code::DeriveNoEnvmap));
+    assert!(diffuse.warnings.is_empty(), "{:?}", diffuse.warnings);
 }
 
 #[test]
@@ -1237,7 +1231,6 @@ fn landscape_puts_p_in_the_diffuse_alpha_and_uses_ao_0_3() {
     for c in [
         Code::ShaderExtraMap,
         Code::ShaderUnavailable,
-        Code::DeriveNoScan,
         Code::DeriveNifSuggest,
     ] {
         assert!(!codes.contains(&c), "{codes:?}");
@@ -1398,7 +1391,6 @@ fn grass_is_a_plain_diffuse_under_vanilla_and_a_stack_under_cm() {
     assert_eq!(j.shader.as_ref().unwrap().shader, Shader::Default);
     let codes = event_codes(&ev);
     assert!(!codes.contains(&Code::DeriveNifSuggest), "{codes:?}");
-    assert!(!codes.contains(&Code::DeriveNoScan), "{codes:?}");
 
     // `[files]` forces `remove`; only the CN14 hook in `finish_derived` turns it into `cutout` (review M2).
     let (p, _) = cs_then(DeriveMode::Cm, &inputs, &d.path().join("cm"), |r, d| {

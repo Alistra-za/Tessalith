@@ -1762,7 +1762,6 @@ impl Engine {
                         cache.count_loads(1);
                         enter(Stage::Analyse);
                         let mut a = analyse_with(&img, &info, hints);
-                        a.icc_profile = meta.icc_profile;
                         a.dds_dxgi = meta.dds_dxgi;
                         a.dds_cube = meta.dds_cube;
                         if let Some(s) = source {
@@ -1979,10 +1978,10 @@ impl Engine {
                 (work[*wi].1.path.clone(), facts)
             })
             .collect();
-        // The load facts a filled target's re-analysis cannot see (it loads pixels only): ICC flag, DDS format.
-        let load_meta: BTreeMap<PathBuf, (bool, Option<u32>)> = pass1
+        // The load fact a filled target's re-analysis cannot see (it loads pixels only): the DDS format.
+        let load_meta: BTreeMap<PathBuf, Option<u32>> = pass1
             .iter()
-            .map(|(wi, a, _)| (work[*wi].1.path.clone(), (a.icc_profile, a.dds_dxgi)))
+            .map(|(wi, a, _)| (work[*wi].1.path.clone(), a.dds_dxgi))
             .collect();
         // 6c. Re-resolve the members of a set whose shader changes member defaults.
         let mut jobs = vec![];
@@ -2263,8 +2262,7 @@ impl Engine {
                     stage.set(Stage::Analyse);
                     let hints = crate::checks::hints_for(split.suffix.as_deref(), cache.checks);
                     let mut a = analyse_with(&img, &info, hints);
-                    if let Some(&(icc, dxgi)) = load_meta.get(&c.target) {
-                        a.icc_profile = icc;
+                    if let Some(&dxgi) = load_meta.get(&c.target) {
                         a.dds_dxgi = dxgi;
                     }
                     drop(img);

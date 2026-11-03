@@ -456,7 +456,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         });
     }
     for a in pbr_export::export_asks(m) {
-        // FC7: a re-encode row is project-wide.
+        // A project-wide ask (a photo crop) belongs to no set.
         let at = if a.set_id.is_empty() {
             At::Project
         } else {
@@ -626,12 +626,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         // K2: an engine CHK-* row is a check row and follows its switch. The switches are not in `ProblemsKey`:
         // a switch change reaches this build through `refresh_checks`' `invalidate_views()`.
         let on = &m.settings.checks;
-        // Note FC3 (CN67): the DERIVE results the user acts on are Warning rows that open the report; the other
+        // Note FC3 (CN67): the DERIVE result the user acts on is a Warning row that opens the report; the other
         // Info results stay on the row's hover (P11).
-        let file_row = |w: &engine::codes::Warning| {
-            counts_toward_badge(w)
-                || matches!(w.code, Code::DeriveNoEnvmap | Code::DeriveNifSuggest)
-        };
+        let file_row =
+            |w: &engine::codes::Warning| counts_toward_badge(w) || w.code == Code::DeriveNifSuggest;
         // Note DP4: the live item row is the current truth and carries the fix, so a same-code copy of it from
         // the last export is dropped. Only when the job maps to exactly one item (None = several share a job_key).
         // Built once, and only when some export row has a listed warning (no per-row scan of all items).
@@ -664,7 +662,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 };
                 let fix = match w.code {
                     // No report written: Messages says why (fix round 1: a row always carries its action).
-                    Code::DeriveNoEnvmap | Code::DeriveNifSuggest => Some(
+                    Code::DeriveNifSuggest => Some(
                         m.also_report
                             .clone()
                             .map_or(Fix::ShowMessages, Fix::OpenReport),

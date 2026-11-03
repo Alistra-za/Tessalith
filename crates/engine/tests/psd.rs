@@ -153,7 +153,6 @@ fn rgb8_raw_reads_exactly() {
     assert_eq!((img.width, img.height), (2, 2));
     assert_eq!(img.at(1, 0), [51.0 / 255.0, 20.0 / 255.0, 0.0, 1.0]);
     assert_eq!(img.at(1, 1), [1.0, 40.0 / 255.0, 9.0 / 255.0, 1.0]);
-    assert!(!meta.icc_profile);
     assert_eq!(meta.dds_dxgi, None);
     assert_eq!(image_size(&p).unwrap(), (2, 2));
 }
@@ -276,15 +275,6 @@ fn psb_reads_like_psd() {
     assert_eq!((info.bit_depth, info.channels), (16, 4));
     assert_eq!(img.at(0, 0), [1.0, 0.0, 0.0, 1.0]);
     assert_eq!(img.at(1, 0), [1.0, 1.0, 1.0, 1.0]);
-}
-
-#[test]
-fn icc_profile_is_detected() {
-    let d = tempfile::tempdir().unwrap();
-    let mut psd = Psd::rgb(1, 1, 8, vec![vec![1], vec![2], vec![3]]);
-    psd.res = vec![(1005, vec![0; 16]), (1039, vec![7; 33])];
-    let p = psd.write(d.path(), "icc.psd");
-    assert!(load_image_meta(&p).unwrap().2.icc_profile);
 }
 
 /// Content picks the decoder: a PSD named `.png` still reads, and a PNG named `.psd` reads as a PNG.

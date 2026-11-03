@@ -22,8 +22,6 @@ pub enum LoadError {
 /// What `load_image_meta` learns besides the pixels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SourceMeta {
-    /// The file embeds a non-empty ICC profile; values are still read as stored (DECISIONS S8, `IN-ICC-IGNORED`).
-    pub icc_profile: bool,
     /// DXGI format of a DDS input (DECISIONS S6); `None` for images.
     pub dds_dxgi: Option<u32>,
     /// A single cube DDS (DECISIONS DS7): the image is its six mip-0 faces side by side, a 6:1 strip.
@@ -113,7 +111,7 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
     };
     let exr = reader.format() == Some(image::ImageFormat::OpenExr);
     lift_limits(&mut reader);
-    let mut decoder = reader.into_decoder().map_err(err)?;
+    let decoder = reader.into_decoder().map_err(err)?;
     // Checked on the decoder chosen by content (the one that allocates), not one chosen by extension.
     let (w, h) = decoder.dimensions();
     if w.max(h) > MAX_DIM {
@@ -122,12 +120,7 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
             dim: w.max(h),
         });
     }
-    // A decoder that cannot read a profile, or finds none, is not an error: the profile is ignored either way.
-    let icc_profile = decoder
-        .icc_profile()
-        .ok()
-        .flatten()
-        .is_some_and(|p| !p.is_empty());
+
     let img = image::DynamicImage::from_decoder(decoder).map_err(err)?;
     let ct = img.color();
     let channels = ct.channel_count();
@@ -151,14 +144,7 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
             }
         }
     }
-    Ok((
-        Rgba32F { width, height, px },
-        info,
-        SourceMeta {
-            icc_profile,
-            ..Default::default()
-        },
-    ))
+    Ok((Rgba32F { width, height, px }, info, SourceMeta::default()))
 }
 
 /// Width and height of `path` from its header alone, MAX_DIM-checked: a `.dds` from its DDS header, anything else
@@ -229,16 +215,8 @@ fn psd_error(path: &Path, e: crate::psd::PsdError) -> LoadError {
 
 /// A PSD or PSB input: its merged image, MAX_DIM-checked from the header before anything is allocated.
 fn load_psd(path: &Path) -> Result<(Rgba32F, SourceInfo, SourceMeta), LoadError> {
-    let (img, info, icc_profile) =
-        crate::psd::load(path, MAX_DIM).map_err(|e| psd_error(path, e))?;
-    Ok((
-        img,
-        info,
-        SourceMeta {
-            icc_profile,
-            ..Default::default()
-        },
-    ))
+    let (img, info) = crate::psd::load(path, MAX_DIM).map_err(|e| psd_error(path, e))?;
+    Ok((img, info, SourceMeta::default()))
 }
 
 /// `SourceInfo` of a DDS input's pixel format (DECISIONS S6).
@@ -320,7 +298,6 @@ fn load_dds(path: &Path) -> Result<(Rgba32F, SourceInfo, SourceMeta), LoadError>
         SourceMeta {
             dds_dxgi: Some(f.format.dxgi()),
             dds_cube: f.is_cubemap,
-            ..Default::default()
         },
     ))
 }

@@ -489,8 +489,6 @@ fn pack_codes_are_in_the_catalogue() {
         ("PACK-UNUSED-INPUT", Severity::Warning),
         ("PACK-RECIPE-CONFLICT", Severity::Warning),
         ("PACK-RECIPE-UNBUILDABLE", Severity::Warning),
-        ("PACK-ORM-OVERRIDDEN", Severity::Info),
-        ("SKIN-WET-FORM", Severity::Info),
     ] {
         let c = Code::parse(s).unwrap();
         assert_eq!((c.as_str(), c.severity()), (s, sev));
@@ -1159,6 +1157,34 @@ fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {
         let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
         assert!(e.to_string().contains(code), "{e}");
+    }
+}
+
+/// Note FM: the 15 info-only codes 2.0 removed are named in an `allow` list, in `--set allow=` and in `--allow`.
+#[test]
+fn removed_codes_in_allow_lists_are_named() {
+    for code in [
+        "LOSS-BITDEPTH",
+        "CHAN-CONSTANT-ALPHA-DATA",
+        "CHAN-NORMAL-SHORT",
+        "ALPHA-254",
+        "ALPHA-NEAR-OPAQUE",
+        "ALPHA-PBR-NORMAL-DROPPED",
+        "IN-ICC-IGNORED",
+        "SKIN-WET-FORM",
+        "PACK-ORM-OVERRIDDEN",
+        "RNM-AO-MISSING",
+        "SET-COMPANION-OUTSIDE",
+        "DERIVE-NO-SCAN",
+        "DERIVE-NO-ENVMAP",
+        "CHAN-AO-INVERTED",
+        "CHAN-GLOSS-AS-ROUGH",
+    ] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains(code), "{e}");
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 2.0"), "{e}");
     }
 }
 

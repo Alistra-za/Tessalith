@@ -64,7 +64,7 @@ fn an_unreadable_entry_is_a_row_with_open_folder() {
     assert_eq!(h.state().shell, vec![ShellRequest::Open(folder)]);
 }
 
-/// CN67: DERIVE-NO-ENVMAP and DERIVE-NIF-SUGGEST are engine Info; in the GUI they are Warning rows with `Open report`.
+/// CN67: DERIVE-NIF-SUGGEST is an engine Info; in the GUI it is a Warning row with `Open report`.
 /// Other Info results of the last export stay off the list.
 #[test]
 fn derive_results_are_rows_that_open_the_report() {
@@ -75,19 +75,16 @@ fn derive_results_are_rows_that_open_the_report() {
     assert!(m.wait_idle(Duration::from_secs(120)));
     let report = d.path().join("export").join("x conversion-report.md");
     m.also_report = Some(report.clone());
-    m.export.rows[0].warnings.extend([
-        Warning::new(
-            Code::DeriveNoEnvmap,
-            "set x: metal found, but no scanned mesh uses it",
-        ),
-        Warning::new(Code::DeriveNotConverted, "not converted"),
-    ]);
+    m.export.rows[0]
+        .warnings
+        .push(Warning::new(Code::DeriveNotConverted, "not converted"));
     m.export.rows[1].warnings.push(Warning::new(
         Code::DeriveNifSuggest,
         "suggested NIF values: glossiness 30.0, specular strength 1.0",
     ));
     m.invalidate_views();
-    for c in [Code::DeriveNoEnvmap, Code::DeriveNifSuggest] {
+    {
+        let c = Code::DeriveNifSuggest;
         let row = row_of(&m, c);
         assert_eq!(row.level, Level::Warning, "{c:?}");
         assert!(matches!(row.at, At::File(_)));
@@ -107,7 +104,7 @@ fn derive_results_are_rows_that_open_the_report() {
     h.state_mut().also_report = None;
     h.state_mut().invalidate_views();
     assert_eq!(
-        row_of(h.state(), Code::DeriveNoEnvmap).fix,
+        row_of(h.state(), Code::DeriveNifSuggest).fix,
         Some(Fix::ShowMessages)
     );
     h.run();

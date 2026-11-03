@@ -43,7 +43,7 @@ Tessalith writes its own DDS headers:
 
 ## Validation
 
-Every converted file is decoded again before it is written, and the decoded result is checked. `sdc validate` runs the checks that need no source on DDS files that already exist: `VAL-HEADER`, `VAL-ALPHA-GUARANTEE`, `ALPHA-254`, the `VAL-M-*` checks, `VAL-PGPATCHER-50` and `VAL-GRASS-DETECT`. Mip quality, cutout coverage and the BC6H peak need the encoder input, so `validate` cannot run them.
+Every converted file is decoded again before it is written, and the decoded result is checked. `sdc validate` runs the checks that need no source on DDS files that already exist: `VAL-HEADER`, `VAL-ALPHA-GUARANTEE`, the `VAL-M-*` checks, `VAL-PGPATCHER-50` and `VAL-GRASS-DETECT`. Mip quality, cutout coverage and the BC6H peak need the encoder input, so `validate` cannot run them.
 
 The thresholds are fixed; only `validation.mips` is a setting.
 
@@ -52,7 +52,6 @@ The thresholds are fixed; only `validation.mips` is a setting.
 | Header | Flags, caps, mip count, format and header form are correct. | `VAL-HEADER` | error |
 | Mip quality | Each mip's PSNR (one value, with the error pooled over the channels that matter) against the encoder input is at least 30 dB. With `validation.mips = "smallest"`, only the smallest mip is checked. | `VAL-MIP-ERROR` | warning |
 | Opaque alpha | With `remove`, decoded alpha meets the guarantee: at least 254 for any BC7 file without `exact_opaque`, exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
-| Decoded 254 | Opaque alpha that decodes as 254 is reported for information. Community Shaders' complex-material gate is not affected by it. | `ALPHA-254` | info |
 | Cutout coverage | With `cutout`, `cutout_blend`, or `blend` as BC1 1-bit alpha, each mip's alpha coverage stays within 2 points of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
 | Complex `_m` margin | The smallest mip's alpha is at or above 247, close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
 | Complex `_m` grey | The smallest mip is grey and not black-with-height, so Community Shaders reads it as a plain env mask. | `VAL-M-GRAYSCALE` | warning |
@@ -119,17 +118,6 @@ The JSON Schema is available with `sdc presets schema manifest`.
 - the resolved settings (by hash).
 
 So editing a source, changing a setting in `sdc.toml` or a preset re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed, and nothing when none did. Touching an output by hand (or replacing it) also re-encodes it.
-
-### After an upgrade
-
-Before the run, `sdc convert` prints what the new version re-encodes and why, one line per cause, and the GUI's Review lists the same lines as warnings to tick:
-
-- `2 files re-encode: the normal encoder changed in 1.1.0`: that texture type's encode version moved;
-- `3 files re-encode: their settings changed`: the resolved settings differ from what the older version recorded (for example, a changed default);
-- `1 file re-encodes: new output type`: the plan writes a file the older version did not;
-- `First export with 1.1.0: 20 files`: no manifest to compare with (a new output folder, or records from before encode versions existed). In the GUI this is a plain line, not a warning.
-
-Only records an older version wrote are compared this way. A record keeps the version that wrote it until that file is encoded again, so a setting you change later on a file the upgrade left alone is still listed once, as "their settings changed". New files stop being listed once the new version has written any file to the folder. Changed source files are never listed, and the CLI prints these lines only with `--on-existing if-changed` (the default).
 
 An existing output with no manifest record is never overwritten by `if-changed`. It is kept and reported as `OUT-UNKNOWN-EXISTING`, and the run exits with 1. Use `--on-existing overwrite` to replace it.
 

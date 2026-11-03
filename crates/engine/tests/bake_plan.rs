@@ -249,7 +249,7 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
 
 /// Review Focus 2: converting one file of a set leaves the other on disk.
 #[test]
-fn a_companion_on_disk_but_not_in_the_batch_is_set_companion_outside() {
+fn a_companion_on_disk_but_not_in_the_batch_is_set_missing_companion() {
     for (given, other) in [
         ("iron_n.png", "iron_rmaos.png"),
         ("iron_rmaos.png", "iron_n.png"),
@@ -261,11 +261,11 @@ fn a_companion_on_disk_but_not_in_the_batch_is_set_companion_outside() {
         r.inputs = vec![d.path().join("in/textures/pbr").join(given)];
         let (p, _) = plan(r);
         let j = job(&p, given);
-        assert_eq!(set_codes(j), vec![Code::SetCompanionOutside], "{given}");
+        assert_eq!(set_codes(j), vec![Code::SetMissingCompanion], "{given}");
         let w = j
             .warnings
             .iter()
-            .find(|w| w.code == Code::SetCompanionOutside)
+            .find(|w| w.code == Code::SetMissingCompanion)
             .unwrap();
         assert!(
             w.data["companion"].as_str().unwrap().ends_with(other),

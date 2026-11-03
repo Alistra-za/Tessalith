@@ -1588,7 +1588,6 @@ fn rmaos_with_constant_alpha_removes_it_and_16_bit_reports_bitdepth() {
     );
     let o = convert(d.path(), Target::Cs, &[], &[]);
     assert_eq!(o.summary.converted, 2, "{:?}", warnings(&o));
-    assert!(warnings(&o).contains(&Code::LossBitdepth));
     // exact_opaque is off for data maps (DECISIONS: "Only _m / env masks").
     assert_profile(&o, "iron_rmaos.png", "rmaos", "remove", false, "bc7");
     assert_dds(
@@ -1739,10 +1738,10 @@ fn suffix_alias_writes_the_canonical_name_with_the_alias_preset_provenance() {
     assert_eq!(e.raw["provenance"]["mips.levels"], "preset:ultra");
 }
 
-/// DECISIONS Note L, end to end: a PBR `_n` re-exported with alpha 251..=255 converts with the alpha removed, the
-/// ALPHA-NEAR-OPAQUE info and no LOSS-ALPHA-DATA; one texel at 250 is genuinely varying alpha, dropped with ALPHA-PBR-NORMAL-DROPPED (P25).
+/// DECISIONS Note L, end to end: a PBR `_n` re-exported with alpha 251..=255 converts with the alpha removed and no
+/// LOSS-ALPHA-DATA; one texel at 250 is genuinely varying alpha, dropped silently, still with no LOSS-ALPHA-DATA (P25).
 #[test]
-fn near_opaque_normal_alpha_is_removed_with_an_info() {
+fn near_opaque_normal_alpha_is_removed_silently() {
     let d = tempfile::tempdir().unwrap();
     put(
         d.path(),
@@ -1762,13 +1761,7 @@ fn near_opaque_normal_alpha_is_removed_with_an_info() {
         warnings(&o)
     );
     assert_profile(&o, "iron_n.png", "pbr_normal", "remove", false, "bc7");
-    let w = warning_of(&o, "iron_n.png", Code::AlphaNearOpaque);
-    assert_eq!(w.severity, Severity::Info);
-    assert!(w.message.contains("min 251"), "{}", w.message);
-    assert_eq!(
-        warnings(&o),
-        vec![Code::AlphaNearOpaque, Code::SetMissingCompanion]
-    );
+    assert_eq!(warnings(&o), vec![Code::SetMissingCompanion]);
     assert_dds(
         &dds(d.path(), "textures/pbr/iron_n.dds"),
         DdsPixelFormat::Bc7 { srgb: false },
@@ -1794,13 +1787,10 @@ fn near_opaque_normal_alpha_is_removed_with_an_info() {
         &["file:**/iron_n.png.subtype=pbr_normal"],
         &[],
     );
-    // Owner 2026-10-11 (DECISIONS P25): a PBR normal's genuinely varying alpha is dropped with an info, no block.
+    // Owner 2026-10-11 (DECISIONS P25): a PBR normal's genuinely varying alpha is dropped silently, no block.
     assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
-    assert_eq!(
-        warnings(&o),
-        vec![Code::AlphaPbrNormalDropped, Code::SetMissingCompanion]
-    );
-    assert!(!warnings(&o).contains(&Code::AlphaNearOpaque));
+    assert_eq!(warnings(&o), vec![Code::SetMissingCompanion]);
+    assert!(!warnings(&o).contains(&Code::LossAlphaData));
 }
 /// Roadmap M4 exit: `_n` + `_rmaos` and `_n` + `_rfaos` at 1:1 and 2:1 (and a half-size `_n`). Every texel of every
 /// level of the roughness chain the encoder receives is within 1/255 of the f64 reference, and the bake widens it.
@@ -2243,9 +2233,9 @@ fn jpeg_diffuse_is_bc7_unorm_close_to_the_decoded_jpeg() {
     }
 }
 
-/// DECISIONS S8: an embedded ICC profile is an info, never a block; the output matches the same PNG without it.
+/// DECISIONS S8: an embedded ICC profile is ignored; the output matches the same PNG without it.
 #[test]
-fn an_icc_profile_is_reported_as_info_and_ignored() {
+fn an_icc_profile_is_ignored() {
     use image::ImageEncoder;
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("in/textures/a/rock.png");
@@ -2267,10 +2257,6 @@ fn an_icc_profile_is_reported_as_info_and_ignored() {
         &[],
     );
     assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
-    assert_eq!(
-        warning_of(&o, "rock.png", Code::InIccIgnored).severity,
-        Severity::Info
-    );
     let plain = tempfile::tempdir().unwrap();
     put(plain.path(), "textures/a/rock.png", rgb(64));
     let o2 = convert(
@@ -2279,7 +2265,7 @@ fn an_icc_profile_is_reported_as_info_and_ignored() {
         &["file:**/rock.png.subtype=diffuse"],
         &[],
     );
-    assert!(!warnings(&o2).contains(&Code::InIccIgnored));
+    assert_eq!(o2.summary.converted, 1, "{:?}", warnings(&o2));
     let out = |p: &Path| std::fs::read(p.join("out/textures/a/rock.dds")).unwrap();
     assert_eq!(
         out(d.path()),

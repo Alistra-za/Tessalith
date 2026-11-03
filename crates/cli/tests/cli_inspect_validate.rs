@@ -187,7 +187,7 @@ fn inspect_cleans_up_and_writes_nothing_into_its_temp_root() {
 }
 
 #[test]
-fn validate_flags_254_as_info_and_passes_bench_bc7() {
+fn validate_passes_bench_bc7() {
     let Some(bench) = bench_dds("bc7e_u6") else {
         return;
     };
@@ -198,7 +198,7 @@ fn validate_flags_254_as_info_and_passes_bench_bc7() {
         .unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     let err = text(&o.stdout);
-    assert!(err.contains("ALPHA-254") && err.contains("ok"), "{err}");
+    assert!(err.contains("ok"), "{err}");
 }
 
 #[test]
@@ -754,7 +754,7 @@ fn bc7_flat_alpha_file(dir: &Path, name: &str, a7: u128, p: u128) -> PathBuf {
 }
 /// Codex-CLI 3: standalone `validate` does not hold a third-party file to `alpha.exact_opaque`, which only
 /// sdc's own encoder promises (the `envmask` and `complex_material` presets turn it on). A clean BC7 `_m` whose
-/// alpha decodes to 254 passes with the ALPHA-254 info; `--exact-opaque` asks for the 255 guarantee.
+/// alpha decodes to 254 passes; `--exact-opaque` asks for the 255 guarantee.
 #[test]
 fn validate_does_not_inherit_exact_opaque_unless_asked() {
     let d = tempfile::tempdir().unwrap();
@@ -771,7 +771,6 @@ fn validate_does_not_inherit_exact_opaque_unless_asked() {
             .iter()
             .map(|w| w["code"].as_str().unwrap())
             .collect();
-        assert!(codes.contains(&"ALPHA-254"), "{v}");
         assert!(!codes.contains(&"VAL-ALPHA-GUARANTEE"), "{v}");
 
         let o = validate(&["--target", target, "--exact-opaque", "--json"], &dds);

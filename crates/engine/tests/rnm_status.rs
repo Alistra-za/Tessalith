@@ -15,7 +15,6 @@ fn codes_are_in_the_catalogue() {
         ("RNM-NO-BASE", Severity::Warning),
         ("RNM-IGNORED-EYE", Severity::Warning),
         ("RNM-MASK-ORPHAN", Severity::Warning),
-        ("RNM-AO-MISSING", Severity::Info),
         ("RNM-LAYER-SHADOWED", Severity::Warning),
     ] {
         let c = Code::parse(s).unwrap();

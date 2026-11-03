@@ -181,7 +181,7 @@ fn missing_normal(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut Res
                 "{} is on disk but not in this batch: the roughness is written without the variance bake; add it to the batch",
                 p.display()
             );
-            note(j, Code::SetCompanionOutside, msg, Some(&p));
+            note(j, Code::SetMissingCompanion, msg, Some(&p));
         }
         None => note(j, Code::SetMissingCompanion, NO_NORMAL.into(), None),
     }
@@ -234,7 +234,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
                 "{} is on disk but not in this batch: the normal is renormalised only; add it to bake its variance into the roughness",
                 p.display()
             );
-            note(j, Code::SetCompanionOutside, msg, Some(&p));
+            note(j, Code::SetMissingCompanion, msg, Some(&p));
         }
         None => note(
             j,

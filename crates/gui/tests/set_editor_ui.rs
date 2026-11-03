@@ -1002,7 +1002,7 @@ fn with_only_warnings(ws: &[engine::codes::Warning]) -> (tempfile::TempDir, AppM
 #[test]
 fn an_info_only_warning_shows_no_badge_on_the_pill_or_the_tile() {
     use engine::codes::{Code, Warning};
-    let (_d, m) = with_only_warnings(&[Warning::new(Code::AlphaPbrNormalDropped, "dropped")]);
+    let (_d, m) = with_only_warnings(&[Warning::new(Code::DimResized, "dropped")]);
     let mut h = harness(m);
     h.run();
     assert_eq!(
@@ -1017,7 +1017,7 @@ fn a_warning_level_warning_still_shows_the_pill_and_tile_badge() {
     use engine::codes::{Code, Warning};
     let (_d, m) = with_only_warnings(&[
         Warning::new(Code::LossReencode, "re-encoded"),
-        Warning::new(Code::AlphaPbrNormalDropped, "dropped"),
+        Warning::new(Code::DimResized, "dropped"),
     ]);
     let mut h = harness(m);
     h.run();

@@ -47,3 +47,32 @@ FJ9	FJ		back	FM		archive-item	2026-11-02		per-mesh alpha thresholds now reach th
 F¶- BC1 is opaque-only in v1	F		back	FM		partial	2026-11-02		goes: BC1 is opaque-only (no 1-bit alpha); stays: without encoder.bc1_alpha rgbcx never emits transparent-black texels (FM20)
 K¶- **`encoder.bc1_transparent_black = true`	K		back	FM		archive-item	2026-11-02		whole: the field is removed; encoder.bc1_alpha replaces it (FM20)
 T2	T		back	FM		partial	2026-11-02		goes: bc1_transparent_black stays false (the field is removed, FM20); stays: the rule mechanics
+DM8	DM		back	FM		partial	2026-11-02		goes: "(amended by FC7)", the upgrade notice; stays: the semantic versioning rule
+J¶`validate` infers the alpha policy	J		back	FM		partial	2026-11-02		goes: the ALPHA-254 info; stays: the inferred alpha policy and exact_opaque
+L¶- **Rule:**	L		back	FM		partial	2026-11-02		goes: the ALPHA-NEAR-OPAQUE info; stays: near-opaque alpha is opaque (Note L)
+P25	P		back	FM		partial	2026-11-02		goes: the Info ALPHA-PBR-NORMAL-DROPPED; stays: a PBR normal drops its alpha without LOSS-ALPHA-DATA
+R-skin-1	R		back	FM		partial	2026-11-02		goes: SKIN-WET-FORM; stays: the sub-types and the form choice
+R1	R		back	FM		partial	2026-11-02		goes: CHAN-NORMAL-SHORT; stays: mips.normal_base
+R8	R		back	FM		partial	2026-11-02		goes: SET-COMPANION-OUTSIDE; SET-MISSING-COMPANION covers it
+S8	S		back	FM		partial	2026-11-02		goes: IN-ICC-IGNORED; stays: an ICC profile is ignored
+W9	W		back	FM		partial	2026-11-02		goes: RNM-AO-MISSING; stays: the AO source order and the uniform weight
+AC2	AC		back	FM		partial	2026-11-02		goes: IN-ICC-IGNORED; stays: what a PSD reads
+AC7	AC		back	FM		partial	2026-11-02		goes: IN-ICC-IGNORED; stays: WebP input
+AH1	AH		back	FM		partial	2026-11-02		goes: CHAN-CONSTANT-ALPHA-DATA; stays: the other warnings
+AL2	AL		back	FM		partial	2026-11-02		goes: PACK-ORM-OVERRIDDEN; stays: a loose map wins its slot
+AL4	AL		back	FM		partial	2026-11-02		goes: RNM-AO-MISSING; stays: the AO source order
+AL5	AL		back	FM		partial	2026-11-02		goes: the PACK-ORM-OVERRIDDEN note; stays: _rfaos from an _orm
+CN17	CN		back	FM		partial	2026-11-02		goes: DERIVE-NO-SCAN and DERIVE-NO-ENVMAP; stays: the env _m vote
+CN20	CN		back	FM		partial	2026-11-02		goes: DERIVE-NO-SCAN and DERIVE-NO-ENVMAP; stays: the other set-level notes
+CN25	CN		back	FM		partial	2026-11-02		goes: DERIVE-NO-SCAN and DERIVE-NO-ENVMAP (five codes remain)
+CN26	CN		back	FM		partial	2026-11-02		goes: the landscape DERIVE-NO-SCAN/DERIVE-NO-ENVMAP mention
+CN67	CN		back	FM		partial	2026-11-02		goes: DERIVE-NO-ENVMAP as a Problems row; stays: DERIVE-NIF-SUGGEST
+CV5	CV		back	FM		partial	2026-11-02		goes: the DERIVE-NO-ENVMAP symptom name
+FC3	FC		back	FM		partial	2026-11-02		goes: DERIVE-NO-ENVMAP as a Problems row; stays: DERIVE-NIF-SUGGEST
+FC7	FC		back	FM		partial	2026-11-02		goes: the re-encode report, its GUI and CLI rows and the First export line; stays: validate warns on a 2D cube file, CN3/CN4
+FC9	FC		back	FM		partial	2026-11-02		goes: the recode_causes sentence
+FC11	FC		back	FM		partial	2026-11-02		goes: the comparison with recode_causes and recode on the plan view
+FC12	FC		back	FM		partial	2026-11-02		goes: FC7 re-encode rows before the photo asks
+FF8	FF		back	FM		partial	2026-11-02		goes: the re-encode notices
+FM9	FM		back	FM		partial	2026-11-02		goes: the First export upgrade notice; stays: a 1.x record is stale and re-encodes
+FM17	FM		back	FM		partial	2026-11-02		goes: ANALYSIS_VERSION stays 1 (it is 2 since Note FM, task 10)

@@ -88,6 +88,81 @@ pub const REMOVED: &[Removed] = &[
         hint: "IN-FLOAT-LDR was removed in 2.0 (a float source is linear light; nothing reports it); delete it from the list",
     },
     Removed {
+        key: "allow",
+        value: Some("LOSS-BITDEPTH"),
+        hint: "LOSS-BITDEPTH was removed in 2.0 (a 16-bit or float source is written with 8-bit endpoints and nothing reports it); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("CHAN-CONSTANT-ALPHA-DATA"),
+        hint: "CHAN-CONSTANT-ALPHA-DATA was removed in 2.0 (nothing reports a constant `data` alpha); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("CHAN-NORMAL-SHORT"),
+        hint: "CHAN-NORMAL-SHORT was removed in 2.0 (nothing reports a short normal; mip 0 is renormalised as before); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ALPHA-254"),
+        hint: "ALPHA-254 was removed in 2.0 (nothing reports opaque alpha that decodes as 254); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ALPHA-NEAR-OPAQUE"),
+        hint: "ALPHA-NEAR-OPAQUE was removed in 2.0 (alpha 251 to 254 is still treated as opaque, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("ALPHA-PBR-NORMAL-DROPPED"),
+        hint: "ALPHA-PBR-NORMAL-DROPPED was removed in 2.0 (a `pbr_normal` still drops its vanilla specular alpha, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("IN-ICC-IGNORED"),
+        hint: "IN-ICC-IGNORED was removed in 2.0 (an embedded ICC profile is still ignored, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("SKIN-WET-FORM"),
+        hint: "SKIN-WET-FORM was removed in 2.0 (a `skin_wet` is still read as BC4 height or BC7 normal, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("PACK-ORM-OVERRIDDEN"),
+        hint: "PACK-ORM-OVERRIDDEN was removed in 2.0 (a loose map still wins over an `_orm` channel, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("RNM-AO-MISSING"),
+        hint: "RNM-AO-MISSING was removed in 2.0 (a `bent` layer with no AO source still uses a uniform weight, silently); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("SET-COMPANION-OUTSIDE"),
+        hint: "SET-COMPANION-OUTSIDE was removed in 2.0 (SET-MISSING-COMPANION covers the case); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("DERIVE-NO-SCAN"),
+        hint: "DERIVE-NO-SCAN was removed in 2.0 (nothing reports a missing scan); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("DERIVE-NO-ENVMAP"),
+        hint: "DERIVE-NO-ENVMAP was removed in 2.0 (nothing reports a missing Environment Map mesh); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("CHAN-AO-INVERTED"),
+        hint: "CHAN-AO-INVERTED was removed in 2.0 (nothing guesses at an inverted AO map); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("CHAN-GLOSS-AS-ROUGH"),
+        hint: "CHAN-GLOSS-AS-ROUGH was removed in 2.0 (nothing guesses at gloss stored as roughness); delete it from the list",
+    },
+    Removed {
         key: "validation.min_mip_psnr_db",
         value: None,
         hint: "the value is fixed at 30 dB; delete the key",

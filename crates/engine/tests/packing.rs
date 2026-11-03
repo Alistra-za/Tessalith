@@ -282,7 +282,7 @@ fn a_fuzz_set_packs_rfaos() {
     assert_channel(&levels(&dds(d.path(), "iron_rfaos.dds"))[0], 1, 4, ao);
 }
 
-/// Exit: height → `_p` BC4; a 16-bit source reports its bit-depth loss like any file.
+/// Exit: height → `_p` BC4 from a 16-bit source.
 #[test]
 fn height_packs_p_as_bc4() {
     let d = tempfile::tempdir().unwrap();
@@ -297,9 +297,7 @@ fn height_packs_p_as_bc4() {
     assert_channel(&levels(&f)[0], 0, 3, |x, _| {
         ((x * 1024) as f32 / 65535.0 * 255.0).round() as u8
     });
-    assert!(warnings_of(&o, "iron_height.png")
-        .iter()
-        .any(|w| w.code == Code::LossBitdepth));
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
 }
 
 /// Exit: gloss-only cs set → roughness = 1 − gloss.
@@ -604,32 +602,17 @@ fn an_orm_packs_rmaos_with_the_specular_fill_or_default() {
     }
 }
 
-/// Note AL2: a loose `_roughness` beside an `_orm` wins the R channel, with an info note; the ORM still gives G and B.
+/// Note AL2: a loose `_roughness` beside an `_orm` wins the R channel; the ORM still gives G and B.
 #[test]
 fn a_loose_roughness_overrides_the_orm_green() {
     let d = tempfile::tempdir().unwrap();
     put_orm(d.path(), "iron_orm.png");
     put(d.path(), "iron_roughness.png", spec);
-    let o = convert(d.path(), Target::Cs, &[]);
+    let _ = convert(d.path(), Target::Cs, &[]);
     let px = &levels(&dds(d.path(), "iron_rmaos.dds"))[0];
     assert_channel(px, 0, 4, spec);
     assert_channel(px, 1, 4, m);
     assert_channel(px, 2, 4, ao);
-    let notes: Vec<Warning> = o
-        .events
-        .iter()
-        .filter_map(|e| match &e.kind {
-            EventKind::Warning(w) if w.code == Code::PackOrmOverridden => Some(w.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(notes.len(), 1, "{:?}", warnings(&o));
-    assert_eq!(notes[0].severity, engine::codes::Severity::Info);
-    assert!(
-        notes[0].message.contains("iron_roughness.png"),
-        "{}",
-        notes[0].message
-    );
 }
 
 /// Note AL3: the complex `_m` takes metallic (R env mask and B) from the ORM's B and glossiness from 1 − its G.

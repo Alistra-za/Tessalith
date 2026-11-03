@@ -22,7 +22,6 @@ pub struct ChannelStats {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AlphaHistogram {
     pub eq255: u64,
-    pub eq254: u64,
     pub eq0: u64,
     pub le5: u64,
     pub ge250: u64,
@@ -37,9 +36,7 @@ pub struct Analysis {
     pub channels: [ChannelStats; 4],
     /// Alpha class. `Constant255` includes near-opaque alpha (see [`NEAR_OPAQUE_ALPHA`]).
     pub alpha: AlphaContent,
-    /// The source carries alpha whose every texel is within 251..=255 but not all 255 (DECISIONS Note L): `alpha`
-    /// is `Constant255` and the alpha is treated as BC encode noise.
-    pub alpha_near_opaque: bool,
+
     pub alpha_hist: AlphaHistogram,
     /// R, G and B agree within 4/255 for every pixel.
     pub grayscale: bool,
@@ -49,16 +46,10 @@ pub struct Analysis {
     pub mean_alpha: f64,
     /// Mean |length - 1| of RGB decoded as `*2 - 1`.
     pub normal_len_err: f64,
-    /// Mean length of RGB decoded as `*2 - 1` (DECISIONS R1: below 0.9 a normal map's mip 0 is noticeably short).
-    pub normal_len_mean: f64,
-    /// More than half of the pixels have blue below 0.1.
-    pub blue_mostly_black: bool,
-    /// More than half of the pixels have red above 0.9.
-    pub red_mostly_high: bool,
+
     /// Largest Rec. 709 luma over the image (not clamped, so HDR sources report above 1).
     pub peak_luminance: f32,
-    /// The source embeds an ICC profile, which sdc ignores (DECISIONS S8). Set by the caller from `SourceMeta`.
-    pub icc_profile: bool,
+
     /// DXGI format of a DDS input (DECISIONS S6, spec §5.1); `None` for images. Set by the caller from `SourceMeta`.
     pub dds_dxgi: Option<u32>,
     /// The input is a single cube DDS, loaded as a 6:1 strip (DECISIONS DS7). Set by the caller from `SourceMeta`.
@@ -121,11 +112,10 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         mean: 0.0,
     }; 4];
     let mut hist = AlphaHistogram::default();
-    let mut len_sum = 0.0f64;
     let mut nonfinite = [0u64; 4];
     let mut finite = [0u64; 4];
     let mut len_n = 0u64;
-    let (mut gray, mut len_err, mut bb, mut rh, mut peak) = (true, 0.0f64, 0u64, 0u64, 0f32);
+    let (mut gray, mut len_err, mut peak) = (true, 0.0f64, 0f32);
     let mut codes = hints.bands.then(|| Box::new([[0u64; 256]; 5]));
     for p in &img.px {
         for (c, (s, &v)) in ch.iter_mut().zip(p).enumerate() {
@@ -141,7 +131,6 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         let a = code8(p[3]);
         match a {
             255 => hist.eq255 += 1,
-            254 => hist.eq254 += 1,
             0 => hist.eq0 += 1,
             _ => {}
         }
@@ -156,13 +145,10 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         if let Some(h) = &mut codes {
             CheckStats::hist_add(h, [r as u8, g as u8, b as u8, a]);
         }
-        bb += u64::from(p[2] < 0.1);
-        rh += u64::from(p[0] > 0.9);
         if p[..3].iter().all(|v| v.is_finite()) {
             let v = [p[0] * 2.0 - 1.0, p[1] * 2.0 - 1.0, p[2] * 2.0 - 1.0];
             let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
             len_err += f64::from((len - 1.0).abs());
-            len_sum += f64::from(len);
             len_n += 1;
             peak = peak.max(0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]);
         }
@@ -196,17 +182,12 @@ pub fn analyse_with(img: &Rgba32F, info: &SourceInfo, hints: AnalyseHints) -> An
         is_pot: img.width.is_power_of_two() && img.height.is_power_of_two(),
         channels: ch,
         alpha,
-        alpha_near_opaque: near_opaque && !all_255,
         alpha_hist: hist,
         grayscale: gray,
         non_white_share: (count as u64 - hist.eq255) as f64 / n,
         mean_alpha: ch[3].mean,
         normal_len_err: len_err / ln,
-        normal_len_mean: len_sum / ln,
-        blue_mostly_black: bb as f64 / n > 0.5,
-        red_mostly_high: rh as f64 / n > 0.5,
         peak_luminance: peak,
-        icc_profile: false,
         dds_dxgi: None,
         dds_cube: false,
         nonfinite,
@@ -306,20 +287,11 @@ mod tests {
     }
 
     #[test]
-    fn normal_length_mean() {
-        let flat = Rgba32F::new(4, 4, [0.5, 0.5, 1.0, 1.0]);
-        assert!((analyse(&flat, &RGBA8).normal_len_mean - 1.0).abs() < 0.01);
-        let short = Rgba32F::new(4, 4, [0.75, 0.5, 0.5, 1.0]); // decodes to (0.5, 0, 0)
-        assert!((analyse(&short, &RGBA8).normal_len_mean - 0.5).abs() < 1e-6);
-    }
-
-    #[test]
-    fn normal_length_error_and_roughness_hints() {
+    fn normal_length_error() {
         let flat = Rgba32F::new(4, 4, [0.5, 0.5, 1.0, 1.0]); // (0, 0, 1) encoded
         assert!(analyse(&flat, &RGBA8).normal_len_err < 0.01);
-        let rough = Rgba32F::new(4, 4, [0.95, 0.0, 0.02, 1.0]);
-        let a = analyse(&rough, &RGBA8);
-        assert!(a.blue_mostly_black && a.red_mostly_high);
+        let short = Rgba32F::new(4, 4, [0.75, 0.5, 0.5, 1.0]); // decodes to (0.5, 0, 0)
+        assert!((analyse(&short, &RGBA8).normal_len_err - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -349,7 +321,7 @@ mod tests {
         assert!(a.channels[1].mean.is_finite() && a.channels[1].max == 0.5);
         assert!((a.mean_alpha - 1.0).abs() < 1e-12);
         // Only the fully finite pixel (index 3) is measured: (0, 0, 1) has unit length.
-        assert!(a.normal_len_err < 1e-6 && (a.normal_len_mean - 1.0).abs() < 1e-6);
+        assert!(a.normal_len_err < 1e-6);
         assert!(a.peak_luminance.is_finite());
     }
 
@@ -362,7 +334,7 @@ mod tests {
             (a.channels[0].min, a.channels[0].max, a.channels[0].mean),
             (0.0, 0.0, 0.0)
         );
-        assert_eq!((a.normal_len_err, a.normal_len_mean), (0.0, 0.0));
+        assert_eq!(a.normal_len_err, 0.0);
     }
 
     #[test]
@@ -378,7 +350,6 @@ mod tests {
             a.alpha_hist,
             AlphaHistogram {
                 eq255: 0,
-                eq254: 1,
                 eq0: 0,
                 le5: 1,
                 ge250: 2
@@ -411,13 +382,8 @@ mod tests {
         };
         let a = alpha(&[251, 252, 253, 254, 255]);
         assert_eq!(a.alpha, AlphaContent::Constant255);
-        assert!(a.alpha_near_opaque);
         assert_eq!(alpha(&[250, 255, 255]).alpha, AlphaContent::Varying);
-        assert!(!alpha(&[250, 255, 255]).alpha_near_opaque);
-        // Exactly 255 everywhere is opaque but not "near": nothing to report.
-        let flat = alpha(&[255, 255]);
-        assert_eq!(flat.alpha, AlphaContent::Constant255);
-        assert!(!flat.alpha_near_opaque);
+        assert_eq!(alpha(&[255, 255]).alpha, AlphaContent::Constant255);
         // No alpha channel in the source: never near-opaque.
         let none = SourceInfo {
             channels: 3,
@@ -425,7 +391,7 @@ mod tests {
             ..RGBA8
         };
         let img = Rgba32F::new(2, 1, [0.5, 0.5, 0.5, 251.0 / 255.0]);
-        assert!(!analyse(&img, &none).alpha_near_opaque);
+        assert_eq!(analyse(&img, &none).alpha, AlphaContent::None);
     }
 
     #[test]
@@ -511,9 +477,7 @@ mod tests {
         img.px[0][3] = 250.9 / 255.0;
         assert_eq!(analyse(&img, &src).alpha, AlphaContent::Varying);
         img.px[0][3] = 251.0 / 255.0;
-        let a = analyse(&img, &src);
-        assert_eq!(a.alpha, AlphaContent::Constant255);
-        assert!(a.alpha_near_opaque);
+        assert_eq!(analyse(&img, &src).alpha, AlphaContent::Constant255);
     }
 
     /// Trace-debug #6: one NaN alpha texel on an otherwise opaque float source is not "near-opaque" (its code is 0,
@@ -526,8 +490,6 @@ mod tests {
         };
         let mut img = Rgba32F::new(2, 1, [0.5, 0.5, 0.5, 1.0]);
         img.px[0][3] = f32::NAN;
-        let a = analyse(&img, &src);
-        assert_eq!(a.alpha, AlphaContent::Constant255);
-        assert!(!a.alpha_near_opaque);
+        assert_eq!(analyse(&img, &src).alpha, AlphaContent::Constant255);
     }
 }

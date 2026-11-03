@@ -143,8 +143,6 @@ pub struct Recipe {
     pub kind: RecipeKind,
     /// R, G, B, A.
     pub channels: [ChannelNeed; 4],
-    /// A loose map that won a slot over an `_orm` channel, one line each (`PACK-ORM-OVERRIDDEN`, Note AL2).
-    pub notes: Vec<String>,
 }
 
 impl Recipe {
@@ -232,25 +230,6 @@ fn unused_reason(
             "vanilla packs only an env-mask _m, from a metallic or specular source".into()
         }
     }
-}
-
-/// `loose` wins over the `_orm` channel `orm` for `slot` (DECISIONS Note AL2); a note says so when both exist.
-fn prefer(
-    loose: Option<ChannelNeed>,
-    orm: Option<ChannelNeed>,
-    slot: &str,
-    notes: &mut Vec<String>,
-) -> Option<ChannelNeed> {
-    if let (Some(ChannelNeed::Source { path: l, .. }), Some(ChannelNeed::Source { path: o, .. })) =
-        (&loose, &orm)
-    {
-        notes.push(format!(
-            "{} is used for {slot}, not the {} channel",
-            file_name(l),
-            file_name(o)
-        ));
-    }
-    loose.or(orm)
 }
 
 /// The recipes of one set under `target` (spec §6.4 recipe table) and the raw maps none of them uses, with
@@ -416,18 +395,15 @@ pub fn recipes_for_sel(
                         src(Ao, false).unwrap_or(Missing(Slot::Ao)),
                         ch(Slot::Specular),
                     ],
-                    notes: vec![],
                 });
             } else if triggers.iter().copied().any(has) || forced.contains(&cs_pack) {
-                let mut notes = vec![];
-                let rough = prefer(
-                    src(Roughness, false).or_else(|| src(Glossiness, true)),
-                    orm(1, false),
-                    "roughness",
-                    &mut notes,
-                )
-                .unwrap_or(Missing(Slot::Roughness));
-                let ao = prefer(src(Ao, false), orm(0, false), "AO", &mut notes)
+                // A loose map wins its slot over the `_orm` channel (DECISIONS Note AL2).
+                let rough = src(Roughness, false)
+                    .or_else(|| src(Glossiness, true))
+                    .or_else(|| orm(1, false))
+                    .unwrap_or(Missing(Slot::Roughness));
+                let ao = src(Ao, false)
+                    .or_else(|| orm(0, false))
                     .unwrap_or(Missing(Slot::Ao));
                 let spec = src(Specular, false).unwrap_or(Missing(Slot::Specular));
                 // DECISIONS Note R-fills-1: `auto` is `_rfaos` when a fuzz source exists; `rfaos` always is, with
@@ -438,28 +414,18 @@ pub fn recipes_for_sel(
                     PackRecipe::Rmaos => None,
                 };
                 match fuzz {
+                    // Note AL5: an ORM's B has nowhere to go in an `_rfaos`.
                     Some(fuzz) => recipes.push(Recipe {
-                        // Note AL5: an ORM's B has nowhere to go; say so, as a loose metallic map would be unused.
-                        notes: {
-                            if let Some(ChannelNeed::Source { path, .. }) = orm(2, false) {
-                                notes.push(format!(
-                                    "_rfaos has no metallic channel; the metallic (B) of {} is not used",
-                                    file_name(&path)
-                                ));
-                            }
-                            notes
-                        },
                         kind: RecipeKind::Rfaos,
                         channels: [rough, fuzz, ao, spec],
                     }),
                     None => {
-                        let metal =
-                            prefer(src(Metallic, false), orm(2, false), "metallic", &mut notes)
-                                .unwrap_or(Missing(Slot::Metallic));
+                        let metal = src(Metallic, false)
+                            .or_else(|| orm(2, false))
+                            .unwrap_or(Missing(Slot::Metallic));
                         recipes.push(Recipe {
                             kind: RecipeKind::Rmaos,
                             channels: [rough, metal, ao, spec],
-                            notes,
                         })
                     }
                 }
@@ -472,7 +438,6 @@ pub fn recipes_for_sel(
                 recipes.push(Recipe {
                     kind: RecipeKind::Parallax,
                     channels: [h, MirrorR, MirrorR, Opaque],
-                    notes: vec![],
                 });
             }
         }
@@ -482,14 +447,10 @@ pub fn recipes_for_sel(
                 .any(has)
                 || forced.contains(&RecipeKind::CpmM)
             {
-                let mut notes = vec![];
-                let metal = prefer(src(Metallic, false), orm(2, false), "metallic", &mut notes);
-                let gloss = prefer(
-                    src(Glossiness, false).or_else(|| src(Roughness, true)),
-                    orm(1, true),
-                    "glossiness",
-                    &mut notes,
-                );
+                let metal = src(Metallic, false).or_else(|| orm(2, false));
+                let gloss = src(Glossiness, false)
+                    .or_else(|| src(Roughness, true))
+                    .or_else(|| orm(1, true));
                 recipes.push(Recipe {
                     kind: RecipeKind::CpmM,
                     channels: [
@@ -501,13 +462,12 @@ pub fn recipes_for_sel(
                         metal.unwrap_or(Missing(Slot::Metallic)),
                         src(Height, false).unwrap_or(Missing(Slot::Height)),
                     ],
-                    notes,
                 });
             }
         }
         Target::Vanilla => {
-            let mut notes = vec![];
-            if let Some(env) = prefer(src(Metallic, false), orm(2, false), "metallic", &mut notes)
+            if let Some(env) = src(Metallic, false)
+                .or_else(|| orm(2, false))
                 .or_else(|| src(Specular, false))
                 .or_else(|| {
                     forced
@@ -518,7 +478,6 @@ pub fn recipes_for_sel(
                 recipes.push(Recipe {
                     kind: RecipeKind::VanillaM,
                     channels: [env, MirrorR, MirrorR, Opaque],
-                    notes,
                 });
             }
         }

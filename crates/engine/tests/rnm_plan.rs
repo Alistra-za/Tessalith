@@ -179,10 +179,10 @@ fn ao_source_order() {
         .unwrap();
     assert!(ao.file.path.ends_with("iron_rmaos.png") && ao.channel == 2);
     std::fs::remove_file(d.path().join("in/iron_rmaos.png")).unwrap();
+    // No AO source left: the bent layer's weight is uniform, silently.
     let p = plan_dir(d.path(), vec![]);
-    assert!(codes(job(&p, "iron_n.png")).contains(&Code::RnmAoMissing));
-    let p = plan_dir(d.path(), vec!["rnm.bent.ao=false".into()]);
-    assert!(!codes(job(&p, "iron_n.png")).contains(&Code::RnmAoMissing));
+    let n = job(&p, "iron_n.png");
+    assert!(n.rnm.as_ref().unwrap().ao.is_none());
 }
 
 #[test]
@@ -207,5 +207,4 @@ fn an_orm_gives_the_bent_layer_its_ao() {
     let n = job(&p, "iron_n.png");
     let ao = n.rnm.as_ref().unwrap().ao.clone().unwrap();
     assert!(ao.file.path.ends_with("iron_orm.png") && ao.channel == 0);
-    assert!(!codes(n).contains(&Code::RnmAoMissing));
 }

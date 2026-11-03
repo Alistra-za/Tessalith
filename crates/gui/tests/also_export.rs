@@ -310,11 +310,13 @@ fn an_also_file_row_reveals_its_file_instead_of_selecting() {
     m.export
         .on_event(ev(Warning::new(Code::OutUnknownExisting, "kept")));
     m.export
-        .on_event(ev(Warning::new(Code::DeriveNoScan, "no scan")));
+        .on_event(ev(Warning::new(Code::DeriveNotConverted, "no scan")));
     m.invalidate_views();
     let rows = problems(&m);
     assert!(rows.iter().any(|p| p.at == At::File(key.into())));
-    assert!(!rows.iter().any(|p| p.code == Some(Code::DeriveNoScan)));
+    assert!(!rows
+        .iter()
+        .any(|p| p.code == Some(Code::DeriveNotConverted)));
 }
 
 #[test]

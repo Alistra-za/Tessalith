@@ -1047,45 +1047,6 @@ fn skin_wet_form(
     }
 }
 
-/// The `SKIN-WET-FORM` notice: which form a `skin_wet` file was read as, and why.
-fn skin_wet_notice(p: &Profile, f: &FileFacts, prov: &BTreeMap<String, Provenance>) -> Warning {
-    let height = p.category == Category::Grayscale;
-    let grey = f.analysis.grayscale;
-    let format_src = prov
-        .get("format")
-        .map_or("builtin".to_string(), |s| s.to_string());
-    let (form, why) = match (height, grey) {
-        (true, true) => (
-            "height",
-            "grey content (R = G = B): a height map".to_string(),
-        ),
-        (true, false) => (
-            "height",
-            format!(
-                "colour content, but format {} (from {format_src}) asks for a red-only height map",
-                p.format.id()
-            ),
-        ),
-        (false, _) => (
-            "normal_mask",
-            "colour content: a tangent-space normal with a binary mask in alpha".to_string(),
-        ),
-    };
-    Warning::new(
-        Code::SkinWetForm,
-        format!(
-            "skin_wet is read as a {}: {why}; written as {}",
-            if height {
-                "height map"
-            } else {
-                "normal map with a mask in alpha"
-            },
-            p.format.id()
-        ),
-    )
-    .with_data(json!({ "form": form, "format": p.format }))
-}
-
 /// DECISIONS O2/S3: a float source with a finite R, G or B above 1.0.
 pub fn is_hdr_source(f: &FileFacts) -> bool {
     f.info.is_float && f.analysis.channels[..3].iter().any(|c| c.max > 1.0)
@@ -1388,12 +1349,6 @@ fn stores_alpha(p: &Profile) -> bool {
 
 /// `normal_len_err` above this is "far from unit length" (CHAN-NORMAL-LENGTH).
 const NORMAL_LEN_TOL: f64 = 0.1;
-
-/// Mean decoded normal length below which mip 0 is "noticeably short" (CHAN-NORMAL-SHORT, DECISIONS R1).
-const NORMAL_SHORT_MEAN: f64 = 0.9;
-const NORMAL_SHORT_RENORMALISED: &str =
-    "mip 0 is renormalised to unit length (set mips.normal_base = keep to store it as authored)";
-const NORMAL_SHORT_KEPT: &str = "mip 0 is stored as authored (mips.normal_base = keep)";
 
 /// Spec §4.3 rule 5: content that contradicts the decided sub-type. Reported, never blocking.
 fn contradictions(p: &Profile, f: &FileFacts) -> Vec<String> {
@@ -1907,28 +1862,13 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
         && !explicit_remove
         && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p))
     {
-        if st == Subtype::PbrNormal {
-            add(
-                AlphaPbrNormalDropped,
-                "vanilla specular in alpha dropped (PBR normals don't use alpha)".into(),
-            );
-        } else {
+        // A PBR normal's vanilla specular alpha is dropped silently (no code); anything else blocks.
+        if st != Subtype::PbrNormal {
             add(
                 LossAlphaData,
                 "non-constant alpha would be discarded".into(),
             );
         }
-    }
-    // DECISIONS Note L: the analysis already classed near-opaque alpha as constant, so no LOSS-ALPHA-DATA above;
-    // this only reports that the (noise) alpha is dropped. Under `data` the alpha is kept, so nothing is claimed.
-    if a.alpha_near_opaque && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p)) {
-        let min = crate::analyse::code8(a.channels[3].min);
-        add(
-            AlphaNearOpaque,
-            format!(
-                "source alpha 251–254 present (min {min}): treated as opaque (BC encode artefact); alpha removed"
-            ),
-        );
     }
     // DECISIONS S1: a float source is linear light; Quantise clamps it to [0, 1] and encodes it per color.content.
     // Values outside that range are lost: a warning, never a block.
@@ -1955,15 +1895,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             );
         }
     }
-    if (f.info.bit_depth > 8 || f.info.is_float) && !hdr {
-        add(
-            LossBitdepth,
-            format!(
-                "{}-bit source written with 8-bit endpoints",
-                f.info.bit_depth
-            ),
-        );
-    }
+
     if p.category == Category::Grayscale && !a.grayscale {
         add(
             ChanNotGray,
@@ -1973,21 +1905,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         );
     }
-    if p.alpha.policy == AlphaPolicy::Data
-        && a.alpha == AlphaContent::Constant255
-        && !crate::ops::complex_alpha_zero(p, f.info.has_alpha)
-    {
-        // DECISIONS Note L: near-opaque alpha (minimum 251..=254) is classed constant too; say what it holds.
-        let msg = if a.alpha_near_opaque {
-            format!(
-                "data alpha is near-opaque (min {}, 251–254 is BC encode noise); remove would save bits",
-                crate::analyse::code8(a.channels[3].min)
-            )
-        } else {
-            "data alpha is constant 255; remove would save bits".to_string()
-        };
-        add(ChanConstantAlphaData, msg);
-    }
+
     if p.category == Category::Normal
         && st != Subtype::Msn
         && a.normal_len_err > NORMAL_LEN_TOL
@@ -2001,36 +1919,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         );
     }
-    // Owner 2026-10-11 (DECISIONS R1): a noticeably short normal map (`_msn` included), and what happens to its
-    // mip 0. A rebuilt Z is unit length by construction. Reported under both `normal_base` values.
-    if p.category == Category::Normal
-        && !p.channels.reconstruct_z
-        && a.normal_len_mean < NORMAL_SHORT_MEAN
-    {
-        let what = match p.mips.normal_base {
-            NormalBase::Renormalize => NORMAL_SHORT_RENORMALISED,
-            NormalBase::Keep => NORMAL_SHORT_KEPT,
-        };
-        add(
-            ChanNormalShort,
-            format!(
-                "mean normal length {:.3} at mip 0: {what}",
-                a.normal_len_mean
-            ),
-        );
-    }
-    if st.is_roughness_member() && a.blue_mostly_black {
-        add(
-            ChanAoInverted,
-            "blue (AO) is mostly black: AO may be inverted".into(),
-        );
-    }
-    if st.is_roughness_member() && a.red_mostly_high {
-        add(
-            ChanGlossAsRough,
-            "red (roughness) is mostly high: is this gloss?".into(),
-        );
-    }
+
     if matches!(st, Subtype::Envmask | Subtype::ComplexMaterial)
         && p.format == Format::Bc7
         && !p.alpha.exact_opaque
@@ -2178,13 +2067,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         }
     }
-    if a.icc_profile {
-        add(
-            InIccIgnored,
-            "embedded ICC profile ignored: values are read as stored (colour content as sRGB)"
-                .into(),
-        );
-    }
+
     // DECISIONS S6: a re-encoded block-compressed DDS keeps its compression error and gains a second one [SC §7].
     if let Some(src) = a
         .dds_dxgi
@@ -2592,9 +2475,6 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         alpha_policy_explicit(ctx, &provenance),
     ));
     warnings.extend(green_conflict(ctx, &profile, &provenance));
-    if available && profile.subtype == Subtype::SkinWet {
-        warnings.push(skin_wet_notice(&profile, f, &provenance));
-    }
     if available && profile.subtype == Subtype::PbrEmissive {
         warnings.push(hdr_source_notice(ctx, &profile, f, &provenance));
     }

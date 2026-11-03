@@ -224,7 +224,7 @@ fn icc_blob() -> Vec<u8> {
 }
 
 #[test]
-fn an_embedded_icc_profile_is_reported_and_ignored() {
+fn an_embedded_icc_profile_is_ignored() {
     let d = tempfile::tempdir().unwrap();
     let px: Vec<u8> = (0..2 * 2 * 3).map(|i| (i * 20) as u8).collect();
     let with = d.path().join("icc.png");
@@ -238,15 +238,14 @@ fn an_embedded_icc_profile_is_reported_and_ignored() {
         .write_image(&px, 2, 2, ExtendedColorType::Rgb8)
         .unwrap();
     let (a, _, meta) = load_image_meta(&with).unwrap();
-    let (b, _, plain) = load_image_meta(&without).unwrap();
-    assert!(meta.icc_profile && !plain.icc_profile);
+    let (b, _, _) = load_image_meta(&without).unwrap();
     assert_eq!(a, b, "the profile changes no value");
     assert_eq!(meta.dds_dxgi, None);
 }
 
 /// Audit 2026-10-15 item 1 (DECISIONS AV1): a PNG's iCCP inflates under a bound, so a small file cannot make the
 /// decoder allocate gigabytes before any size check. 96 MiB of zeros compresses to ~100 KB. The png crate drops a
-/// profile over the bound and decodes on, so the image loads with no profile reported.
+/// profile over the bound and decodes on, so the image loads.
 #[test]
 fn an_iccp_bomb_is_dropped_not_inflated() {
     let d = tempfile::tempdir().unwrap();
@@ -261,9 +260,8 @@ fn an_iccp_bomb_is_dropped_not_inflated() {
     drop(f);
     assert!(std::fs::metadata(&p).unwrap().len() < 1 << 20);
     assert_eq!(image_size(&p).unwrap(), (1, 1));
-    let (img, _, meta) = load_image_meta(&p).unwrap();
+    let (img, _, _) = load_image_meta(&p).unwrap();
     assert_eq!((img.width, img.height), (1, 1));
-    assert!(!meta.icc_profile, "the profile was inflated past the bound");
 }
 
 /// The iCCP bound is not a cap on the image: a PNG whose decoded pixels outgrow it still loads.

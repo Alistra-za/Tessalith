@@ -134,7 +134,7 @@ fn clean_bc7_passes_and_header_matches() {
 }
 
 #[test]
-fn alpha_254_is_info_with_flag_off_and_an_error_with_flag_on() {
+fn alpha_254_passes_with_flag_off_and_is_an_error_with_flag_on() {
     let off = profile(Subtype::Diffuse);
     let mut on = off.clone();
     on.alpha.exact_opaque = true;
@@ -148,22 +148,17 @@ fn alpha_254_is_info_with_flag_off_and_an_error_with_flag_on() {
     let b = dds_bytes(&desc, &[mode6_p0_payload(1)]).unwrap();
     let r = run(&b, &off, None, None, None);
     assert!(r.summary.passed);
-    let w = r
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::Alpha254)
-        .unwrap();
-    assert_eq!(w.severity, Severity::Info);
-    assert!(w.data["mip0_share"].as_f64().unwrap() > 0.0);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(r.summary.alpha[0].eq254 > 0);
     let r = run(&b, &on, None, None, None);
     assert!(!r.summary.passed);
     assert!(codes(&r).contains(&Code::ValAlphaGuarantee));
 }
 
-/// Mip 0 has one 254 block in four, the next two mips are 255, the smallest is all 254: the info reports the
-/// share of the first and of the last level separately.
+/// Mip 0 has one 254 block in four, the next two mips are 255, the smallest is all 254: each level's own count of
+/// 254 is kept, and the file passes.
 #[test]
-fn alpha_254_reports_the_first_and_the_smallest_mip_shares() {
+fn alpha_254_counts_are_kept_per_mip() {
     let p = profile(Subtype::Diffuse);
     let mip0 = [mode6_block(254), mode6_block(255).repeat(3)].concat();
     let b = wrap(
@@ -175,13 +170,11 @@ fn alpha_254_reports_the_first_and_the_smallest_mip_shares() {
     let r = run(&b, &p, None, None, Some(4));
     assert!(r.summary.passed, "{:?}", r.warnings);
     assert_eq!(r.summary.alpha.len(), 4);
-    let w = r
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::Alpha254)
-        .unwrap();
-    assert_eq!(w.data["mip0_share"].as_f64().unwrap(), 0.25);
-    assert_eq!(w.data["smallest_share"].as_f64().unwrap(), 1.0);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert_eq!(
+        (r.summary.alpha[0].eq254, r.summary.alpha[3].eq254),
+        (16, 1)
+    );
 }
 
 /// Flag off, `remove`: BC7 may decode to 254 but not below. Decoded alpha 253, 200 and 0 are errors.
@@ -714,7 +707,6 @@ fn bc7_exact_opaque_noise_decodes_to_255_everywhere() {
         let b = wrap(&p, 37, 21, &enc);
         let r = run(&b, &p, Some(&inputs), None, Some(6));
         assert!(r.summary.passed, "{policy:?}: {:?}", r.warnings);
-        assert!(!codes(&r).contains(&Code::Alpha254));
         assert_eq!(r.summary.alpha.len(), 6);
         for (l, a) in r.summary.alpha.iter().enumerate() {
             assert_eq!(a.eq255, a.pixels, "{policy:?} level {l}: {a:?}");

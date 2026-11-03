@@ -321,30 +321,13 @@ pub fn plan_derived(
                         crate::group::split_suffix(&stem).0
                     };
                     let mesh = vanilla_game_path(&mesh_key(&anchor.game_path, &stem));
-                    if !d.scanned {
-                        notes.push(Warning::new(
-                            Code::DeriveNoScan,
-                            format!(
-                                "set {}: metal found, but no env _m is written: no mesh scan",
-                                set.id
-                            ),
-                        ));
-                    } else if mesh_shaders
-                        .get(&mesh)
-                        .is_some_and(|v| v.contains(&Shader::Envmap))
+                    // No scan, or no scanned mesh with the Environment Map shader: no env _m, silently (Note FM).
+                    if d.scanned
+                        && mesh_shaders
+                            .get(&mesh)
+                            .is_some_and(|v| v.contains(&Shader::Envmap))
                     {
                         kinds.push(EnvM);
-                    } else {
-                        notes.push(
-                            Warning::new(
-                                Code::DeriveNoEnvmap,
-                                format!(
-                                    "set {}: metal found, but no scanned mesh uses {mesh}.dds with the Environment Map shader; no env _m is written",
-                                    set.id
-                                ),
-                            )
-                            .with_data(json!({ "mesh_key": mesh })),
-                        );
                     }
                 }
             }

@@ -1,7 +1,7 @@
 //! M6 Track F2 (spec 2.3, 3.3; DECISIONS Note W4, W5, W9): attach each set's layer files to its base normals.
 use super::{LayerTerm, RnmAo, RnmFile, RnmJob, RnmLayer};
 use crate::codes::{Code, Warning};
-use crate::config::{BentMode, LayerId, RnmTarget};
+use crate::config::{LayerId, RnmTarget};
 use crate::discover::InputFile;
 use crate::group::{split_suffix_with, vocab_of, TextureSet, VocabRole};
 use crate::policy::{rnm_target_requested, JobStatus, ResolveCtx, ResolvedJob, SourceStamp};
@@ -208,15 +208,7 @@ pub fn plan_rnm(
                 continue;
             }
             let job = &mut jobs[b];
-            let wants_ao = stack.iter().any(|l| l.id == LayerId::Bent)
-                && job.profile.rnm.bent.mode == BentMode::AoBlend
-                && job.profile.rnm.bent.ao;
-            if wants_ao && ao.is_none() {
-                notes.push(Warning::new(
-                    Code::RnmAoMissing,
-                    "the bent layer has no AO (no _ao, _orm or _rmaos/_rfaos file), so its weight is uniform",
-                ));
-            }
+
             job.warnings.extend(notes);
             job.rnm = Some(RnmJob {
                 layers: stack,

@@ -12,7 +12,7 @@ Tessalith decides how to encode each file from its sub-type: what the texture is
 | `.kra`, `.ora` | Krita and OpenRaster: the `mergedimage.png` stored in the archive. Layers are never read. |
 | `.dds` | Skipped by default (`IN-DDS-SKIPPED`). Set `reencode = true` on the file to convert it anyway, at a quality cost (`LOSS-REENCODE`). |
 
-Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Embedded ICC profiles are ignored and the pixels are read as stored (`IN-ICC-IGNORED`). NaN or infinite samples are replaced (`IN-NONFINITE`).
+Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Embedded ICC profiles are ignored and the pixels are read as stored. NaN or infinite samples are replaced (`IN-NONFINITE`).
 
 ## Texture sets
 
@@ -106,11 +106,11 @@ There are 32 sub-types in five categories.
 | `skin_albedo` | Color | BC7 | UNORM | remove | `cs` Advanced skin. UNORM because the CS skin shader reads it that way. |
 | `normal` | Normal | BC7 | UNORM | data | Alpha often holds specular. |
 | `landscape_normal` | Normal | BC7 | UNORM | data | |
-| `pbr_normal` | Normal | BC7 | UNORM | remove | `cs` only. Vanilla specular in alpha is dropped (`ALPHA-PBR-NORMAL-DROPPED`). |
+| `pbr_normal` | Normal | BC7 | UNORM | remove | `cs` only. Vanilla specular in alpha is dropped. |
 | `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile. Not an RNM base: no layers blend into it. A `_detail` or `_detailnorm` file in a landscape set is read as it ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)); in other sets no suffix suggests it, so pick it on the file. |
 | `msn` | Normal | BC7 | UNORM | remove | Model-space normal. |
 | `coat_normal` | Normal | BC7 | UNORM | data | `cs` only. Normal plus coat roughness in alpha; bakes its own detail into that roughness. |
-| `skin_wet` | Normal | BC7, or BC4 for grey content | UNORM | data | `cs` Advanced skin. `SKIN-WET-FORM` says which form was read. |
+| `skin_wet` | Normal | BC7, or BC4 for grey content | UNORM | data | `cs` Advanced skin. Grey content is read as a height map (BC4), colour as a normal with a mask in alpha (BC7). |
 | `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | Environment mask (`_m`). |
 | `height` | Grayscale | BC4 | UNORM | remove | Parallax height (`_p`). |
 | `projected_noise` | Grayscale | BC4 | UNORM | remove | `_noise`: a landscape set's projected-noise map for an XPMF profile. |
@@ -129,7 +129,7 @@ There are 32 sub-types in five categories.
 Notes on the defaults:
 
 - A single photo as a cubemap (`cubemap.layout = "photo"`) is an approximation: the photo becomes the front half of a mirrored fake panorama, and the cube is blurred by default (0.6). It gives soft reflections, not an exact sky.
-- The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha whose minimum is 251 or more is treated as opaque (`ALPHA-NEAR-OPAQUE`). A colour map whose alpha really varies is undecided unless scanned meshes supply one.
+- The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha whose minimum is 251 or more is treated as opaque. A colour map whose alpha really varies is undecided unless scanned meshes supply one.
 - Exact opaque means opaque alpha decodes as exactly 255 in BC7 rather than 254. It is on for `_m` maps because PGPatcher and ENB read their alpha; turning it off for a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
 - Normal maps are never BC4 or BC5: the game would decode Z as -1 and lose alpha (`FMT-BC5-NORMAL`, blocking).
 

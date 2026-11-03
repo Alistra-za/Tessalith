@@ -76,7 +76,6 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             inner_layer_sets: BTreeSet::new(),
         };
         // `run_also` returns Ok even when the PBR phase failed (CN56), so the exit code is the summary's.
-        // shortcut: `run_also` plans inside, so FC7's re-encode lines are not printed here; add them per phase if asked.
         let sum = run_also(
             &engine,
             &AnalysisCache::default(),
@@ -89,14 +88,6 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
     }
     let rep = reporter(a.batch.json);
     let plan = engine.plan(req, &rep, &cancel)?;
-    // FC7: what re-encodes after an upgrade, and why, before the run (Review's Warning rows).
-    // Only `if-changed` re-encodes by the record; `skip` and `overwrite` ignore it.
-    if plan.request.on_existing == engine::api::OnExisting::IfChanged {
-        let manifest = engine::manifest::Manifest::at(&plan.request.output_root);
-        for c in engine::manifest::recode_causes(&manifest, &plan) {
-            err!("{}", c.line());
-        }
-    }
     Ok(engine.run(plan, &rep, &cancel)?.exit_code())
 }
 

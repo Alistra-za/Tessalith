@@ -162,7 +162,7 @@ fn outside_advanced_skin_sk_is_the_vanilla_guess_and_wet_is_a_base_name() {
     assert_eq!(top(&p, "x.png").0, Subtype::Diffuse);
 }
 
-/// (c) A grey `_wet` is a BC4 height map and a colour one BC7 with its alpha, and `SKIN-WET-FORM` says which.
+/// (c) A grey `_wet` is a BC4 height map and a colour one BC7 with its alpha.
 #[test]
 fn wet_form_follows_the_content() {
     let d = tempfile::tempdir().unwrap();
@@ -172,35 +172,8 @@ fn wet_form_follows_the_content() {
     put(d.path(), "c/y.png", colour(64));
     put(d.path(), "c/y_rfaos.png", colour(64));
     put(d.path(), "c/y_wet.png", wet_normal(64));
-    let (ev, s) = run(&d);
+    let (_, s) = run(&d);
     assert_eq!(s.exit_code(), 0, "{s:?}");
-    let form = |suffix: &str| {
-        ev.iter()
-            .find_map(|e| match &e.kind {
-                EventKind::Warning(w)
-                    if w.code == Code::SkinWetForm
-                        && e.path.as_deref().is_some_and(|p| p.ends_with(suffix)) =>
-                {
-                    Some(w.clone())
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no SKIN-WET-FORM for {suffix}"))
-    };
-    let g = form("g/x_wet.png");
-    assert_eq!(g.data["form"], "height");
-    assert!(
-        g.message.contains("height map") && g.message.contains("bc4"),
-        "{}",
-        g.message
-    );
-    let c = form("c/y_wet.png");
-    assert_eq!(c.data["form"], "normal_mask");
-    assert!(
-        c.message.contains("mask in alpha") && c.message.contains("bc7"),
-        "{}",
-        c.message
-    );
     assert_eq!(out(&d, "g/x_wet.dds").format, DdsPixelFormat::Bc4);
     let cw = out(&d, "c/y_wet.dds");
     assert_eq!(cw.format, DdsPixelFormat::Bc7 { srgb: false });
@@ -219,12 +192,6 @@ fn wet_format_override_wins() {
     let p = plan(&d, Target::Cs, &["subtype:skin_wet.format=bc7"]);
     let j = job(&p, "x_wet.png");
     assert_eq!(j.profile.format, Format::Bc7);
-    let w = j
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::SkinWetForm)
-        .unwrap();
-    assert!(w.message.contains("bc7"), "{}", w.message);
 }
 
 /// (d) `skin_albedo` is UNORM, never sRGB.

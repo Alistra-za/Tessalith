@@ -14,14 +14,6 @@ pub struct AlphaStats {
 }
 
 impl AlphaStats {
-    pub fn share_254(&self) -> f64 {
-        if self.pixels == 0 {
-            0.0
-        } else {
-            self.eq254 as f64 / self.pixels as f64
-        }
-    }
-
     pub fn share_not_255(&self) -> f64 {
         if self.pixels == 0 {
             0.0
@@ -94,7 +86,6 @@ mod tests {
             (s.pixels, s.eq255, s.eq254, s.below254, s.min),
             (4, 2, 1, 1, 10)
         );
-        assert!((s.share_254() - 0.25).abs() < 1e-12);
         assert!((s.share_not_255() - 0.5).abs() < 1e-12);
     }
 

@@ -4,8 +4,8 @@
 //! discovery could not read; skipped, audit 6) and the four `PACK-*` codes of channel packing (spec §6.4, plan M2.5), and CFG-FILE-UNMATCHED (a
 //! `[files]` key of `sdc.toml` that matches no file, M3a) and SET-EDIT-STALE (a GUI set edit that names a file or
 //! set that no longer exists, M3b), PACK-RECIPE-CONFLICT and PACK-RECIPE-UNBUILDABLE (a `packing.recipe` the set
-//! could not follow, packing-fills Task 1) and SKIN-WET-FORM (which form `skin_wet` was read as, Task 1b) and
-//! IN-ICC-IGNORED (an embedded ICC profile, M6) and FMT-HDR-SOURCE (why `pbr_emissive` is or is not BC6H, O2) and
+//! could not follow, packing-fills Task 1) and
+//! FMT-HDR-SOURCE (why `pbr_emissive` is or is not BC6H, O2) and
 //! DDS-HEADER-PATCHED / DDS-HEADER-UNPATCHABLE (a header-only DDS fix applied or refused, M6 DECISIONS S7) and
 //! DIM-RESIZED (`resize = pot-down` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
 //! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
@@ -61,14 +61,9 @@ impl Code {
 codes! {
     LossAlphaData = "LOSS-ALPHA-DATA" => Blocking,
     LossClampHdr = "LOSS-CLAMP-HDR" => Warning,
-    LossBitdepth = "LOSS-BITDEPTH" => Info,
     LossReencode = "LOSS-REENCODE" => Warning,
     ChanNotGray = "CHAN-NOT-GRAY" => Warning,
-    ChanConstantAlphaData = "CHAN-CONSTANT-ALPHA-DATA" => Info,
     ChanNormalLength = "CHAN-NORMAL-LENGTH" => Warning,
-    ChanNormalShort = "CHAN-NORMAL-SHORT" => Info,
-    ChanAoInverted = "CHAN-AO-INVERTED" => Warning,
-    ChanGlossAsRough = "CHAN-GLOSS-AS-ROUGH" => Warning,
     FmtBc5Normal = "FMT-BC5-NORMAL" => Blocking,
     FmtLandscapeBc1 = "FMT-LANDSCAPE-BC1" => Blocking,
     FmtBc1Alpha = "FMT-BC1-ALPHA" => Blocking,
@@ -76,9 +71,6 @@ codes! {
     FmtHdrSource = "FMT-HDR-SOURCE" => Info,
     AlphaExactOffM = "ALPHA-EXACT-OFF-M" => Blocking,
     AlphaParallaxNoAlpha = "ALPHA-PARALLAX-NO-ALPHA" => Warning,
-    Alpha254 = "ALPHA-254" => Info,
-    AlphaNearOpaque = "ALPHA-NEAR-OPAQUE" => Info,
-    AlphaPbrNormalDropped = "ALPHA-PBR-NORMAL-DROPPED" => Info,
     // Note FM: BC1 1-bit alpha on a source with more than 1 % soft alpha (1..=254).
     AlphaBc1OneBit = "ALPHA-BC1-ONE-BIT" => Warning,
     TagSrgbVanilla = "TAG-SRGB-VANILLA" => Error,
@@ -98,7 +90,6 @@ codes! {
     DimResized = "DIM-RESIZED" => Info,
     DimTooLarge = "DIM-TOO-LARGE" => Error,
     SetMissingCompanion = "SET-MISSING-COMPANION" => Info,
-    SetCompanionOutside = "SET-COMPANION-OUTSIDE" => Info,
     SetCompanionDds = "SET-COMPANION-DDS" => Warning,
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
     SetEditStale = "SET-EDIT-STALE" => Info,
@@ -121,7 +112,6 @@ codes! {
     InDecode = "IN-DECODE" => Error,
     InNonfinite = "IN-NONFINITE" => Warning,
     InUnreadable = "IN-UNREADABLE" => Warning,
-    InIccIgnored = "IN-ICC-IGNORED" => Info,
     InAliasInvalid = "IN-ALIAS-INVALID" => Warning,
     InAliasStale = "IN-ALIAS-STALE" => Info,
     OutUnknownExisting = "OUT-UNKNOWN-EXISTING" => Warning,
@@ -133,13 +123,10 @@ codes! {
     PackUnusedInput = "PACK-UNUSED-INPUT" => Warning,
     PackRecipeConflict = "PACK-RECIPE-CONFLICT" => Warning,
     PackRecipeUnbuildable = "PACK-RECIPE-UNBUILDABLE" => Warning,
-    PackOrmOverridden = "PACK-ORM-OVERRIDDEN" => Info,
     RnmNoBase = "RNM-NO-BASE" => Warning,
     RnmIgnoredEye = "RNM-IGNORED-EYE" => Warning,
     RnmMaskOrphan = "RNM-MASK-ORPHAN" => Warning,
-    RnmAoMissing = "RNM-AO-MISSING" => Info,
     RnmLayerShadowed = "RNM-LAYER-SHADOWED" => Warning,
-    SkinWetForm = "SKIN-WET-FORM" => Info,
     ShaderAuto = "SHADER-AUTO" => Info,
     ShaderUnavailable = "SHADER-UNAVAILABLE" => Warning,
     ShaderExtraMap = "SHADER-EXTRA-MAP" => Warning,
@@ -168,10 +155,6 @@ codes! {
     DeriveDdsSource = "DERIVE-DDS-SOURCE" => Warning,
     // No albedo: no diffuse (and no CM diffuse).
     DeriveNoAlbedo = "DERIVE-NO-ALBEDO" => Warning,
-    // Metal found, env `_m` not written: no scan.
-    DeriveNoScan = "DERIVE-NO-SCAN" => Info,
-    // Metal found, no scanned mesh uses the Environment Map shader.
-    DeriveNoEnvmap = "DERIVE-NO-ENVMAP" => Info,
     // A derived output lands on another job's output (TA12); the other job is kept.
     DerivePathConflict = "DERIVE-PATH-CONFLICT" => Error,
     // A member with no recipe role (TA11), or an RNM detail layer (TA28; its own reason).
@@ -231,14 +214,7 @@ mod tests {
     #[test]
     fn severities_follow_spec_section_10() {
         assert_eq!(Code::FmtBc5Normal.severity(), Severity::Blocking);
-        assert_eq!(Code::ChanNormalShort.severity(), Severity::Info);
         assert_eq!(Code::TagSrgbVanilla.severity(), Severity::Error);
-        assert_eq!(Code::Alpha254.severity(), Severity::Info);
-        assert_eq!(Code::AlphaNearOpaque.severity(), Severity::Info);
-        assert_eq!(
-            Code::parse("ALPHA-NEAR-OPAQUE"),
-            Some(Code::AlphaNearOpaque)
-        );
         assert_eq!(Code::ValCoverage.severity(), Severity::Warning);
         assert_eq!(Code::ValMipError.severity(), Severity::Warning);
         assert_eq!(Code::CfgInvalid.severity(), Severity::Error);
@@ -277,7 +253,6 @@ mod tests {
             Code::parse("CFG-GREEN-CONFLICT"),
             Some(Code::CfgGreenConflict)
         );
-        assert_eq!(Code::InIccIgnored.severity(), Severity::Info);
         assert_eq!(Code::ShaderAuto.severity(), Severity::Info);
         assert_eq!(Code::ShaderMissingMap.severity(), Severity::Warning);
         assert_eq!(Code::parse("SHADER-EXTRA-MAP"), Some(Code::ShaderExtraMap));
@@ -285,7 +260,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 115);
+        assert_eq!(Code::ALL.len(), 100);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

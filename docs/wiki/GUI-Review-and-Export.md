@@ -35,8 +35,7 @@ Each column's heading carries its count: **Blockers (n)**, **Undecided (n)**, **
 
 - **Blockers** (red), with **Go to set**. A missing export folder is a blocker, so it counts. Export stays greyed out, with the reason beside it ("Fix 2 blockers first"), until they are fixed.
 - **Undecided**: one row per texture with its question: a sub-type box and **✓**, the alpha choices, or **Acknowledge for this texture** (or **Drop the alpha anyway**, see [Words](GUI-Main-Window.md#words)). Click the name to select the texture. **Accept all suggestions** works as in [Problems](GUI-Problems.md#deciding-in-problems); the others stay listed. A texture decided here leaves the list. Below them come the [half-size rows](GUI-Artist-Checks.md#half-size).
-- **Warnings**: what re-encodes after an upgrade, then pitfalls grouped by set.
-  - After a Tessalith upgrade, one row per reason files re-encode (`2 files re-encode: the normal encoder changed in 1.1.0`, `their settings changed`, `new output type`), compared with what the older version recorded. An export folder with no manifest shows a plain line, `First export with 1.1.0: 20 files`, that asks nothing. The rows go when the export starts.
+- **Warnings**: pitfalls grouped by set.
   - Tick each one to say you have seen it, or press **Acknowledge all**. Export stays greyed out ("Acknowledge 2 warnings first") until every current pitfall is ticked. Ticks count for this export only: they are not saved, they go when the export starts or Review closes, and a changed or new pitfall needs a new tick.
   - With no pitfall to tick the column reads "None that block the export"; "N warnings in Problems (do not block)" opens the rest.
 

@@ -413,7 +413,6 @@ fn an_orm_feeds_ao_roughness_and_metallic() {
             Missing(Slot::Specular),
         ]
     );
-    assert!(r[0].notes.is_empty());
     let (r, _) = complex(&set);
     assert_eq!(
         r[0].channels,
@@ -434,7 +433,7 @@ fn an_orm_feeds_ao_roughness_and_metallic() {
     );
 }
 
-/// DECISIONS Note AL2: a loose map wins its slot over the ORM channel, with a note; a fully overridden ORM is unused.
+/// DECISIONS Note AL2: a loose map wins its slot over the ORM channel; a fully overridden ORM is unused.
 #[test]
 fn a_loose_map_wins_over_the_orm_channel() {
     let (r, u) = recipes_for(
@@ -444,12 +443,7 @@ fn a_loose_map_wins_over_the_orm_channel() {
     assert!(u.is_empty());
     assert_eq!(r[0].channels[0], src("iron_rough.png", Roughness, false));
     assert_eq!(r[0].channels[1], orm("iron_orm.png", 2, false));
-    assert_eq!(r[0].notes.len(), 1);
-    assert!(
-        r[0].notes[0].contains("iron_rough.png"),
-        "{}",
-        r[0].notes[0]
-    );
+
     let (r, u) = recipes_for(
         Target::Vanilla,
         &raw(&[("iron_orm.png", Orm), ("iron_metal.png", Metallic)]),
@@ -472,21 +466,6 @@ fn a_loose_map_wins_over_the_orm_channel() {
             u[0].reason
         );
     }
-}
-
-/// DECISIONS Note AL5: `_rfaos` has no metallic channel, so the ORM's B is dropped with a note.
-#[test]
-fn rfaos_notes_the_dropped_orm_metallic() {
-    let (r, _) = recipes_for(
-        Target::Cs,
-        &raw(&[("iron_orm.png", Orm), ("iron_fuzz.png", Fuzz)]),
-    );
-    assert_eq!(kinds(&r), [RecipeKind::Rfaos]);
-    assert_eq!(r[0].notes.len(), 1, "{:?}", r[0].notes);
-    assert!(r[0].notes[0].contains("metallic"), "{}", r[0].notes[0]);
-    // an `_rmaos` from the same ORM drops nothing
-    let (r, _) = recipes_for(Target::Cs, &raw(&[("iron_orm.png", Orm)]));
-    assert!(r[0].notes.is_empty());
 }
 
 /// Note AZ (ruling 3): under vanilla a gloss/height set packs the complex `_m` only when its shader is complex

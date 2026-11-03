@@ -133,10 +133,10 @@ pub(crate) fn size(path: &Path) -> Result<(u32, u32), PsdError> {
     Ok((h.width, h.height))
 }
 
-/// What the image resources say: an ICC profile (1039), and whether the composite is real (1057, Version Info:
-/// `hasRealMergedData`; absent means real, as writers other than Photoshop omit it).
-fn resources(r: &mut In, end: u64) -> Result<(bool, bool), PsdError> {
-    let (mut icc, mut merged) = (false, true);
+/// Whether the composite is real, from the image resources (1057, Version Info: `hasRealMergedData`; absent means
+/// real, as writers other than Photoshop omit it).
+fn resources(r: &mut In, end: u64) -> Result<bool, PsdError> {
+    let mut merged = true;
     while r.pos()? + 12 <= end {
         r.tag()?; // "8BIM", or another vendor's signature: the layout is the same.
         let id = r.u16()?;
@@ -145,7 +145,6 @@ fn resources(r: &mut In, end: u64) -> Result<(bool, bool), PsdError> {
         let size = u64::from(r.u32()?);
         let data = r.pos()?;
         match id {
-            1039 => icc = size > 0,
             1057 if size >= 5 => {
                 r.u32()?;
                 merged = r.u8()? != 0;
@@ -154,7 +153,7 @@ fn resources(r: &mut In, end: u64) -> Result<(bool, bool), PsdError> {
         }
         r.seek(data + ((size + 1) & !1))?;
     }
-    Ok((icc, merged))
+    Ok(merged)
 }
 
 /// A negative layer count (in the layer info, or at the start of an `Lr16`/`Lr32` block in a 16/32-bit document)
@@ -238,9 +237,9 @@ fn unpack_bits(src: &[u8], dst: &mut [u8]) -> bool {
     o == dst.len()
 }
 
-/// The merged image of `path` as float RGBA, its `SourceInfo` and whether it embeds an ICC profile. The size is
-/// checked against `max_dim` before anything is allocated.
-pub(crate) fn load(path: &Path, max_dim: u32) -> Result<(Rgba32F, SourceInfo, bool), PsdError> {
+/// The merged image of `path` as float RGBA and its `SourceInfo`. The size is checked against `max_dim` before
+/// anything is allocated.
+pub(crate) fn load(path: &Path, max_dim: u32) -> Result<(Rgba32F, SourceInfo), PsdError> {
     let mut r = In(BufReader::new(File::open(path)?));
     let h = header(&mut r)?;
     if h.width.max(h.height) > max_dim {
@@ -280,7 +279,7 @@ pub(crate) fn load(path: &Path, max_dim: u32) -> Result<(Rgba32F, SourceInfo, bo
     r.skip(colour_data)?;
     let res_len = u64::from(r.u32()?);
     let res_end = r.pos()? + res_len;
-    let (icc, real) = resources(&mut r, res_end)?;
+    let real = resources(&mut r, res_end)?;
     if !real {
         return bad(
             "saved without a composite image; re-save it in Photoshop with Maximize Compatibility on",
@@ -387,7 +386,6 @@ pub(crate) fn load(path: &Path, max_dim: u32) -> Result<(Rgba32F, SourceInfo, bo
             px,
         },
         info,
-        icc,
     ))
 }
 

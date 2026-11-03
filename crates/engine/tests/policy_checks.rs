@@ -1544,10 +1544,10 @@ fn alpha_codes(codes: &[u8]) -> Rgba32F {
     img
 }
 
-/// DECISIONS Note L: a PBR normal re-exported from BC7 with alpha 251..=255 removes the alpha silently, with the
-/// ALPHA-NEAR-OPAQUE info and no LOSS-ALPHA-DATA.
+/// DECISIONS Note L: a PBR normal re-exported from BC7 with alpha 251..=255 removes the alpha silently, with no
+/// question and no code.
 #[test]
-fn near_opaque_alpha_on_pbr_normal_resolves_to_remove_with_an_info() {
+fn near_opaque_alpha_still_resolves_opaque() {
     let j = run(
         Target::Cs,
         "textures/a/x_n.png",
@@ -1564,13 +1564,8 @@ fn near_opaque_alpha_on_pbr_normal_resolves_to_remove_with_an_info() {
         "{:?}",
         j.warnings
     );
-    let w = warning(&j, Code::AlphaNearOpaque);
-    assert_eq!(w.severity, engine::codes::Severity::Info);
-    assert_eq!(
-        w.message,
-        "source alpha 251–254 present (min 251): treated as opaque (BC encode artefact); alpha removed"
-    );
-    // One texel below the cutoff: genuinely varying alpha is no longer "near opaque", so the PBR-normal drop info replaces the near-opaque one
+    assert!(j.warnings.is_empty(), "{:?}", j.warnings);
+    // One texel below the cutoff: genuinely varying alpha is no longer "near opaque"; a PBR normal drops it silently
     // (owner 2026-10-11, DECISIONS P25: no LOSS-ALPHA-DATA block on a PBR normal).
     let j = run(
         Target::Cs,
@@ -1583,9 +1578,7 @@ fn near_opaque_alpha_on_pbr_normal_resolves_to_remove_with_an_info() {
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
     assert!(!codes(&j).contains(&Code::LossAlphaData));
-    assert!(codes(&j).contains(&Code::AlphaPbrNormalDropped));
-    assert!(!codes(&j).contains(&Code::AlphaNearOpaque));
-    // Constant 255 raises neither.
+    // Constant 255 raises nothing.
     let j = run(
         Target::Cs,
         "textures/a/x_n.png",
@@ -1596,7 +1589,7 @@ fn near_opaque_alpha_on_pbr_normal_resolves_to_remove_with_an_info() {
         &[],
     );
     assert!(
-        !codes(&j).contains(&Code::AlphaNearOpaque),
+        !codes(&j).contains(&Code::LossAlphaData),
         "{:?}",
         j.warnings
     );
@@ -1615,29 +1608,7 @@ fn explicit_data_policy_keeps_near_opaque_alpha() {
         &[],
     );
     assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
-    assert!(
-        !codes(&j).contains(&Code::AlphaNearOpaque) && !codes(&j).contains(&Code::LossAlphaData),
-        "{:?}",
-        j.warnings
-    );
-    // Final review m8: the info says what the alpha holds, not "constant 255".
-    assert_eq!(
-        warning(&j, Code::ChanConstantAlphaData).message,
-        "data alpha is near-opaque (min 252, 251–254 is BC encode noise); remove would save bits"
-    );
-    let j = run(
-        Target::Cs,
-        "textures/a/x_n.png",
-        Some("n"),
-        &["n"],
-        opaque(),
-        &["subtype=pbr_normal", "alpha.policy=data"],
-        &[],
-    );
-    assert_eq!(
-        warning(&j, Code::ChanConstantAlphaData).message,
-        "data alpha is constant 255; remove would save bits"
-    );
+    assert!(j.warnings.is_empty(), "{:?}", j.warnings);
 }
 
 /// A diffuse whose alpha is 252..=255 is not blocked on the alpha meaning under `--accept-suggestions high`;
@@ -1655,7 +1626,6 @@ fn near_opaque_diffuse_alpha_is_not_an_unconfirmed_meaning() {
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
     assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
-    assert!(codes(&j).contains(&Code::AlphaNearOpaque));
     let j = run(
         Target::Cs,
         "textures/a/x.png",
@@ -1707,9 +1677,9 @@ fn roughness_default_outside_0_1_is_cfg_invalid() {
 // Owner 2026-10-11 (DECISIONS P25): LOSS-ALPHA-DATA was too broad. A PBR normal's vanilla specular in alpha is
 // dropped with an info, and an alpha the user explicitly removed is not reported as a loss.
 
-/// A varying `pbr_normal` alpha (inferred remove) is an info, not a block.
+/// A varying `pbr_normal` alpha (inferred remove) is dropped silently, not blocked.
 #[test]
-fn pbr_normal_alpha_drop_is_an_info_not_a_block() {
+fn pbr_normal_alpha_drop_is_silent_not_a_block() {
     let j = run(
         Target::Cs,
         "textures/a/x_n.png",
@@ -1724,12 +1694,6 @@ fn pbr_normal_alpha_drop_is_an_info_not_a_block() {
         !codes(&j).contains(&Code::LossAlphaData),
         "{:?}",
         j.warnings
-    );
-    let w = warning(&j, Code::AlphaPbrNormalDropped);
-    assert_eq!(w.severity, engine::codes::Severity::Info);
-    assert_eq!(
-        w.message,
-        "vanilla specular in alpha dropped (PBR normals don't use alpha)"
     );
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 }
@@ -1783,12 +1747,6 @@ fn inferred_remove_on_diffuse_and_vanilla_normal_still_block() {
         &[],
     );
     assert!(codes(&j).contains(&Code::LossAlphaData), "{:?}", j.warnings);
-    assert!(!codes(&j).contains(&Code::AlphaPbrNormalDropped));
-}
-
-fn short_normal(len: f32) -> Rgba32F {
-    // Decodes to (len, 0, 0): mean decoded length `len`.
-    Rgba32F::new(64, 64, [0.5 + len / 2.0, 0.5, 0.5, 1.0])
 }
 
 fn run_normal(suffix: &str, img: Rgba32F, sets_cli: &[&str]) -> ResolvedJob {
@@ -1810,39 +1768,6 @@ fn run_normal(suffix: &str, img: Rgba32F, sets_cli: &[&str]) -> ResolvedJob {
 
 fn count(j: &ResolvedJob, c: Code) -> usize {
     codes(j).iter().filter(|x| **x == c).count()
-}
-
-#[test]
-fn chan_normal_short_fires_below_0_9_only() {
-    let j = run_normal("n", short_normal(0.89), &[]);
-    assert_eq!(count(&j, Code::ChanNormalShort), 1, "{:?}", j.warnings);
-    let j = run_normal("n", short_normal(0.91), &[]); // 0.9 itself is not exact in f32
-    assert_eq!(count(&j, Code::ChanNormalShort), 0, "{:?}", j.warnings);
-}
-
-#[test]
-fn chan_normal_short_is_reported_under_both_normal_bases() {
-    // The brief emits it under `keep` too, with a message saying mip 0 is stored as authored.
-    let msg = |j: &ResolvedJob| {
-        j.warnings
-            .iter()
-            .find(|w| w.code == Code::ChanNormalShort)
-            .map(|w| w.message.clone())
-            .unwrap_or_else(|| panic!("no CHAN-NORMAL-SHORT: {:?}", j.warnings))
-    };
-    let renorm = run_normal("n", short_normal(0.5), &[]);
-    assert!(msg(&renorm).contains("renormalised"), "{}", msg(&renorm));
-    let keep = run_normal("n", short_normal(0.5), &["mips.normal_base=keep"]);
-    assert!(msg(&keep).contains("as authored"), "{}", msg(&keep));
-}
-
-#[test]
-fn chan_normal_short_fires_for_msn_and_coexists_with_the_length_warning() {
-    let msn = run_normal("msn", short_normal(0.5), &[]);
-    assert_eq!(count(&msn, Code::ChanNormalShort), 1, "{:?}", msn.warnings);
-    let n = run_normal("n", short_normal(0.5), &[]);
-    assert_eq!(count(&n, Code::ChanNormalShort), 1);
-    assert_eq!(count(&n, Code::ChanNormalLength), 1, "{:?}", n.warnings);
 }
 
 /// Note DP4: a short normal keeps CHAN-NORMAL-LENGTH only; the "unit normals" contradiction is gone.

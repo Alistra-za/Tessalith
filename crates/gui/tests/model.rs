@@ -358,7 +358,7 @@ fn the_has_warnings_filter_ignores_info_like_the_badge() {
     for i in m.items.iter_mut() {
         i.warnings = vec![];
     }
-    m.items[0].warnings = vec![Warning::new(Code::AlphaPbrNormalDropped, "dropped")];
+    m.items[0].warnings = vec![Warning::new(Code::DimResized, "dropped")];
     m.items[1].warnings = vec![Warning::new(Code::LossReencode, "re-encoded")];
     m.invalidate_views();
     m.filter.warnings = true;

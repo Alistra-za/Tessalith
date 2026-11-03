@@ -105,10 +105,10 @@ fn a_pitfall_is_a_warning_row_of_its_set() {
 
 #[test]
 fn info_warnings_are_not_problems() {
-    let (_d, m) = with_only_warnings(&[Warning::new(Code::AlphaPbrNormalDropped, "dropped")]);
+    let (_d, m) = with_only_warnings(&[Warning::new(Code::DimResized, "dropped")]);
     assert!(!problems(&m)
         .iter()
-        .any(|p| p.code == Some(Code::AlphaPbrNormalDropped)));
+        .any(|p| p.code == Some(Code::DimResized)));
     let (_d, m) = with_only_warnings(&[Warning::new(Code::LossReencode, "re-encoded")]);
     assert!(problems(&m)
         .iter()

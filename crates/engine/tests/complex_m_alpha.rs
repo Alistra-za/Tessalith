@@ -124,7 +124,6 @@ fn assert_quiet(o: &Out) {
         Code::ValMComplexMargin,
         Code::ValMHeightClip,
         Code::ValAlphaGuarantee,
-        Code::ChanConstantAlphaData,
         Code::SugContradiction,
     ] {
         assert!(!w.contains(&c), "{c:?} in {w:?}");

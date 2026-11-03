@@ -14,8 +14,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         LossReencode => "This DDS would be decoded and encoded again, losing quality — keep its format or use the original image",
         ChanNotGray => "This map should be grey but has colour — replace the file or convert it to grey",
         ChanNormalLength => "This normal map's blue (Z) channel doesn't match its red and green — use Rebuild Z or replace the file",
-        ChanAoInverted => "This AO map looks inverted — flip it or replace the file",
-        ChanGlossAsRough => "This map looks like gloss, not roughness — invert it or rename it",
         FmtBc5Normal => "BC5 can't store this normal map the way it is set up — choose another format",
         FmtLandscapeBc1 => "Landscape textures can't use BC1 — choose another format",
         FmtBc1Alpha => "BC1 can't keep this texture's alpha — turn on 1-bit alpha, choose a format with alpha or remove the alpha",
@@ -97,7 +95,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         CubeNoMips => "A cubemap without mips sparkles on curved surfaces — turn mips on",
         // Note FC3: the Info results that are rows, since the user acts on them.
         GenStale => "This generated map no longer matches its normal map or set — regenerate it",
-        DeriveNoEnvmap => "No environment mask was written for this converted set — see the report",
         DeriveNifSuggest => "This converted set needs NIF values set by hand — the report lists them",
         ChkGreenGuess => "This normal map's green channel looks flipped — treat it as OpenGL if its lighting looks inverted",
         // The other Info results: no row, no sentence.

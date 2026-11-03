@@ -350,25 +350,6 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
                     .with_data(json!({"causes": causes})),
             );
         }
-        if p.alpha.policy == AlphaPolicy::Remove
-            && guarantee == 254
-            && s.alpha.iter().any(|a| a.eq254 > 0)
-        {
-            let (first, last) = (s.alpha[0], *s.alpha.last().expect("alpha has a level"));
-            w.push(
-                Warning::new(
-                    Code::Alpha254,
-                    format!(
-                        "decoded alpha 254 on {:.1}% of mip 0 and {:.1}% of the smallest mip",
-                        first.share_254() * 100.0,
-                        last.share_254() * 100.0
-                    ),
-                )
-                .with_data(
-                    json!({"mip0_share": first.share_254(), "smallest_share": last.share_254()}),
-                ),
-            );
-        }
 
         if p.coverage_enabled() {
             if let Some(base) = inp.base_coverage {

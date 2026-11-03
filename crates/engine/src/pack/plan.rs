@@ -765,7 +765,6 @@ pub fn plan_packing(
                     super::ChannelNeed::MirrorR,
                     super::ChannelNeed::Opaque,
                 ],
-                notes: vec![],
             });
         }
         heads.push((set, members, recipe_note, recipes, unused));
@@ -1012,12 +1011,6 @@ pub fn plan_packing(
                     .iter()
                     .filter(|_| matches!(recipe.kind, RecipeKind::Rfaos | RecipeKind::Rmaos))
                     .cloned()
-                    .chain(
-                        recipe
-                            .notes
-                            .iter()
-                            .map(|n| (Code::PackOrmOverridden, n.clone())),
-                    )
                     .collect(),
             });
         }

@@ -488,15 +488,9 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
     out
 }
 
-/// What Review asks to acknowledge: first what re-encodes after an upgrade (FC7, project-wide), then the pitfalls
-/// of every PBR set.
+/// What Review asks to acknowledge: the photo crops (project-wide), then the pitfalls of every PBR set.
 pub fn export_asks(m: &AppModel) -> Vec<ExportIssue> {
-    let recode = m
-        .recode
-        .iter()
-        .filter(|c| !matches!(c.why, engine::manifest::RecodeWhy::FirstExport { .. }))
-        .map(|c| general(c.line()));
-    recode.chain(photo_crops(m)).chain(set_asks(m)).collect()
+    photo_crops(m).into_iter().chain(set_asks(m)).collect()
 }
 
 /// Note FC12 (supersedes DS26's "no warning"): a single photo taller than wide keeps only its middle `w` rows when it
@@ -877,7 +871,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
     for i in export_blocks(m) {
         place(i, true);
     }
-    // FC7's re-encode rows are not the JSON's: the sets' pitfalls only.
+    // The photo crops are not the JSON's: the sets' pitfalls only.
     for i in set_asks(m) {
         place(i, false);
     }
