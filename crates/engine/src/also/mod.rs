@@ -693,8 +693,6 @@ struct Copy {
 /// The copy rule (O4, TA25): write each copy into the Vanilla folder and append its record, under `on_existing`
 /// and fix/pre-v2's `may_replace`. Each copy ends with one terminal event; counts go into `sum`. The record is the
 /// twin's (cs profile, hash and preset included; Note CN33, review L1).
-// shortcut: copies write no `--sidecar`, and their up-to-date check does not look for one; upgrade by copying
-// `<twin>.dds.json` when sidecars matter for Vanilla.
 fn do_copies(
     copies: &[Copy],
     req: &BatchRequest,

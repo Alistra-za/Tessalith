@@ -76,3 +76,37 @@ FC12	FC		back	FM		partial	2026-11-02		goes: FC7 re-encode rows before the photo 
 FF8	FF		back	FM		partial	2026-11-02		goes: the re-encode notices
 FM9	FM		back	FM		partial	2026-11-02		goes: the First export upgrade notice; stays: a 1.x record is stale and re-encodes
 FM17	FM		back	FM		partial	2026-11-02		goes: ANALYSIS_VERSION stays 1 (it is 2 since Note FM, task 10)
+Answers¶| 15 |	Answers		back	FM		archive-item	2026-11-02		sidecars and patch-header are gone; no reserved-header hash
+F¶- Provenance:	F		back	FM		partial	2026-11-02		goes: per-file .dds.json sidecars optional (2.0 writes none); stays: the batch manifest
+J¶The verbs whose report	J		back	FM		partial	2026-11-02		goes: the encoders verb (folded into --version); stays: inspect, validate, presets
+M5	M		back	FM		partial	2026-11-02		goes: the CLI --fill flag; stays: the packing.fill field and its provenance
+S¶Rulings of `docs/superpowers/plans/2026-10-11-sdc-m6-inputs-formats.md`	S		back	FM		partial	2026-11-02		goes: header-patch destination as S7; stays: the other owner defaults
+S¶- **One canonical same-file guard**	S		back	FM		partial	2026-11-02		goes: patch-header and the GUI Patch as users of the guard; stays: the rule and the re-encode check
+S7	S		back	FM		archive-item	2026-11-02		patch-header and the GUI header patch are removed
+T8	T		back	FM		archive-item	2026-11-02		presets diff, export and validate are removed
+X6	X		back	FM		archive-item	2026-11-02		patch-header removed
+Y2	Y		back	FM		archive-item	2026-11-02		--sidecar removed
+AL3	AL		back	FM		partial	2026-11-02		goes: the --fill orm example; stays: the representation
+AV-S1	AV		back	FM		archive-item	2026-11-02		patch-header removed
+AZ1	AZ		back	FM		partial	2026-11-02		goes: patch-header as a --target user; stays: cs or vanilla only
+BC7	BC		back	FM		archive-item	2026-11-02		presets export removed
+BC5	BC		back	FM		partial	2026-11-02		goes: sdc presets validate as a glob-check consumer; stays: where globs are checked
+BI6	BI		back	FM		partial	2026-11-02		goes: open_folder resets dds_patch; stays: the other small items
+BQ7	BQ		back	FM		archive-item	2026-11-02		patch-header removed
+BQ10	BQ		back	FM		archive-item	2026-11-02		sidecars removed; a 1.x .dds.json is never deleted
+BV3	BV		back	FM		partial	2026-11-02		goes: Patch header and --sidecar as may_replace users; stays: the rule and the other writers
+BV4	BV		back	FM		archive-item	2026-11-02		--sidecar removed
+BY9	BY		back	FM		archive-item	2026-11-02		--sidecar removed
+CN33	CN		back	FM		partial	2026-11-02		goes: a copy writes no --sidecar; stays: the copy rule
+CN42	CN		back	FM		partial	2026-11-02		goes: the copies write no --sidecar shortcut; stays: the order
+CN63	CN		back	FM		partial	2026-11-02		goes: the DDS header patch as a user of the export folder; stays: the other GUI wiring
+CV2	CV		back	FM		archive-item	2026-11-02		patch-header removed
+DS12	DS		back	FM		partial	2026-11-02		goes: the 2D cube check is a warning in 1.x unless --strict-cubemaps; stays: the four messages
+FB1	FB		back	FM		partial	2026-11-02		goes: the DDS header patch needs a chosen folder; stays: the export folder rule and the JSON editor
+FB8	FB		back	FM		partial	2026-11-02		goes: the DDS header patch result line; stays: the rest
+FC7	FC		back	FM		partial	2026-11-02		goes: the validate warning ruling; stays: the CN3/CN4 sub-bullet
+T8	FC		back	FM		partial	2026-11-02		goes: presets export copies the text (toml_edit in engine); stays: the Remove aliases button
+FI3	FI		back	FM		partial	2026-11-02		goes: the header issue line and Patch header offer; stays: the re-encode button
+FM13	FM		back	FM		partial	2026-11-02		goes: Not deleted here: the preset export and validate methods; stays: the rest of the item
+FM14	FM		back	FM		partial	2026-11-02		goes: --nvtt on encoders (the verb is gone); stays: the rest of the item
+FM¶- **Patch header.**	FM		back	FM		archive-item	2026-11-02		patch-header removed

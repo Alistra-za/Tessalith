@@ -163,6 +163,21 @@ pub const REMOVED: &[Removed] = &[
         hint: "CHAN-GLOSS-AS-ROUGH was removed in 2.0 (nothing guesses at gloss stored as roughness); delete it from the list",
     },
     Removed {
+        key: "allow",
+        value: Some("OUT-SIDECAR-KEPT"),
+        hint: "OUT-SIDECAR-KEPT was removed in 2.0 (Tessalith no longer writes or removes .dds.json files); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("DDS-HEADER-PATCHED"),
+        hint: "DDS-HEADER-PATCHED was removed in 2.0 (patch-header is gone); delete it from the list",
+    },
+    Removed {
+        key: "allow",
+        value: Some("DDS-HEADER-UNPATCHABLE"),
+        hint: "DDS-HEADER-UNPATCHABLE was removed in 2.0 (patch-header is gone); delete it from the list",
+    },
+    Removed {
         key: "validation.min_mip_psnr_db",
         value: None,
         hint: "the value is fixed at 30 dB; delete the key",

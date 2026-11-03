@@ -59,7 +59,7 @@ packing.fill.metallic = 255     # fully metallic
 packing.fill.specular = 128
 ```
 
-or for a whole run with `--fill metallic=255`. In the GUI, set it on the packed output's card in the set editor.
+or for a whole run with `--set packing.fill.metallic=255`. In the GUI, set it on the packed output's card in the set editor.
 
 If a set has both a ready-made packed file (`iron_rmaos.png`) and raw maps for it, the packed file wins and the raw maps are reported (`PACK-CONFLICT`). Set `packing.prefer = "raw"` to build from the raw maps instead. All sources of one recipe must be the same size (`PACK-SIZE-MISMATCH` otherwise). Set `packing.enabled = false` to leave the raw maps alone (`IN-PACKING-INPUT`).
 

@@ -795,61 +795,12 @@ fn rule_match_subtypes_is_optional() {
     assert!(plain.get("subtypes").is_none());
 }
 
-const ULTRA_ALIASES: &str = "schema_version = 1\nid = \"ultra\"\nversion = \"2.0.0\"\nbase = \"cs-compact\"\n[subtypes.diffuse]\nalpha = { threshold = 100 }\n[suffix_aliases]\nrmaosultrahigh = \"rmaos\"\n";
-
-/// Spec §4 and Review Focus 4: an export keeps its `base` link, drops its aliases (Note FC10), validates beside the
-/// original and resolves equal to the original for every sub-type.
+/// A preset file that fails to load or to pass its check names the first problem (the batch and the GUI creator
+/// show it).
 #[test]
-fn export_round_trips_and_drops_aliases() {
-    let mut r = PresetRegistry::builtin().unwrap();
-    r.add_toml(ULTRA_ALIASES).unwrap();
-    let text = r.export("ultra", "ultra-export").unwrap();
-    let out: PresetFile = toml::from_str(&text).unwrap();
-    assert_eq!(out.id, "ultra-export");
-    assert_eq!(out.base.as_deref(), Some("cs-compact"));
-    assert!(out.suffix_aliases.is_empty());
+fn a_bad_preset_file_names_its_first_problem() {
     let d = tempfile::tempdir().unwrap();
-    let f = write(d.path(), "export.toml", &text);
-    assert_eq!(r.validate_file(&f), Vec::<String>::new());
-    let mut both = PresetRegistry::builtin().unwrap();
-    let id = both.add_file(&f).unwrap();
-    for st in Subtype::ALL {
-        assert_eq!(
-            both.profile(&id, Target::Cs, st).unwrap(),
-            r.profile("ultra", Target::Cs, st).unwrap(),
-            "{st:?}"
-        );
-    }
-}
-
-/// Spec §4: the default export is the preset's own table (base stays a link) under the new id.
-#[test]
-fn default_export_keeps_the_base_link_under_a_new_id() {
     let r = PresetRegistry::builtin().unwrap();
-    let text = r.export("cs-compact", "my-compact").unwrap();
-    let p: PresetFile = toml::from_str(&text).unwrap();
-    assert_eq!(
-        (p.id.as_str(), p.base.as_deref()),
-        ("my-compact", Some("cs-quality"))
-    );
-    assert_eq!(p.rules, r.get("cs-compact").unwrap().rules);
-    assert!(matches!(
-        r.export("nope", "x"),
-        Err(PresetError::Unknown(_))
-    ));
-}
-
-/// Spec §4: validate names the first problem; a folder file validates in place of its own copy.
-#[test]
-fn validate_file_reports_problems_and_accepts_a_folder_file() {
-    let d = tempfile::tempdir().unwrap();
-    let mut r = PresetRegistry::builtin().unwrap();
-    let mine = write(d.path(), "mine.toml", MINE);
-    assert!(r.add_dir(d.path()).is_empty());
-    assert!(
-        r.validate_file(&mine).is_empty(),
-        "a folder file validates against itself"
-    );
     for (name, text, says) in [
         ("dup.toml", "schema_version = 1\nid = \"cs-quality\"\nversion = \"1\"\n", "already loaded"),
         ("nobase.toml", "schema_version = 1\nid = \"x\"\nversion = \"1\"\nbase = \"nope\"\n", "nope"),
@@ -857,24 +808,16 @@ fn validate_file_reports_problems_and_accepts_a_folder_file() {
         ("newer.toml", "schema_version = 9\nid = \"z\"\n", "newer"),
         ("rule.toml", "schema_version = 1\nid = \"w\"\nversion = \"1\"\nbase = \"cs-quality\"\n[[rules]]\nmatch = { subtypes = [\"nope\"] }\n", "nope"),
     ] {
-        let f = write(&d.path().join("v"), name, text);
-        let p = r.validate_file(&f);
-        assert_eq!(p.len(), 1, "{name}: {p:?}");
-        assert!(p[0].contains(says), "{name}: {p:?}");
+        let f = write(d.path(), name, text);
+        let mut copy = r.clone();
+        let problem = match copy.add_file(&f) {
+            Ok(id) => copy.check_preset(&id).err().map(|e| e.to_string()),
+            Err(e) => Some(e.to_string()),
+        };
+        let p = problem.unwrap_or_else(|| panic!("{name}: no problem"));
+        assert!(p.contains(says), "{name}: {p}");
     }
 }
-
-/// Fix round 1: an export under an id that is already loaded is refused, naming that preset's source.
-#[test]
-fn export_refuses_a_loaded_new_id() {
-    let r = PresetRegistry::builtin().unwrap();
-    let e = r
-        .export("cs-compact", "cs-quality")
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("already loaded") && e.contains("builtin"), "{e}");
-}
-
 /// Note AT: vanilla-compact halves a complex `_m` (BC7 with alpha), as cs-compact does.
 #[test]
 fn vanilla_compact_halves_a_complex_m() {
@@ -1199,4 +1142,21 @@ fn a_quoted_dotted_files_key_is_refused_not_ignored() {
     let ok = ConfigFile::parse("[files.\"a.dds\"]\nalpha.policy = \"cutout\"\n", "t").unwrap();
     let (o, _) = ok.file_entries().unwrap();
     assert_eq!(o[0].value, json!("cutout"));
+}
+
+/// Note FM22: the output codes of the removed `.dds.json` sidecar and `patch-header` are gone. An allow list that
+/// names one gets the removal message from config and `Code::parse_allow` (so `--set` and `--allow` too).
+#[test]
+fn removed_output_codes_in_allow_lists_are_named() {
+    for code in [
+        "OUT-SIDECAR-KEPT",
+        "DDS-HEADER-PATCHED",
+        "DDS-HEADER-UNPATCHABLE",
+    ] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains(code), "{e}");
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 2.0"), "{e}");
+    }
 }

@@ -137,20 +137,21 @@ fn cli_inspect_lists_cube_issues() {
     assert!(!all.contains("cubemap is expected"), "{all}");
 }
 
-/// FC7 (supersedes DS12's FAIL-by-default in 1.x): a 2D `_e` or `cubemaps\` file is a warning and exits 0;
-/// `--strict-cubemaps` makes it FAIL.
+/// FM (supersedes FC7's warning): a 2D `_e` or `cubemaps\` file FAILS validation, with no flag. 1.x warned and
+/// exited 0 unless `--strict-cubemaps` was given.
 #[test]
-fn validate_warns_on_2d_e_files_by_default() {
-    let dir = scratch("warn2d").join("textures").join("cubemaps");
+fn validate_is_strict_about_cubemaps_by_default() {
+    let dir = scratch("strict2d").join("textures").join("cubemaps");
     std::fs::create_dir_all(&dir).unwrap();
     for name in ["x_e.dds", "plain.dds"] {
         let p = dir.join(name);
         std::fs::write(&p, dds(false, 4, 1)).unwrap();
         let o = sdc().args(["validate", "--json"]).arg(&p).output().unwrap();
-        assert_eq!(o.status.code(), Some(0), "{name}: {}", text(&o));
+        assert_eq!(o.status.code(), Some(4), "{name}: {}", text(&o));
+        assert!(text(&o).contains("FAIL "), "{}", text(&o));
         let line = String::from_utf8_lossy(&o.stdout);
         let v: serde_json::Value = serde_json::from_str(line.lines().next().unwrap()).unwrap();
-        assert_eq!(v["passed"], true, "{line}");
+        assert_eq!(v["passed"], false, "{line}");
         let w = v["warnings"]
             .as_array()
             .unwrap()
@@ -162,29 +163,9 @@ fn validate_warns_on_2d_e_files_by_default() {
                     .contains("cubemap is expected")
             })
             .unwrap_or_else(|| panic!("{line}"));
-        assert_eq!(w["severity"], "warning", "{line}");
-        assert!(
-            text(&o).contains("  warning VAL-HEADER 2D texture where"),
-            "{}",
-            text(&o)
-        );
+        assert_eq!(w["severity"], "error", "{line}");
     }
 }
-
-#[test]
-fn strict_cubemaps_fails() {
-    let dir = scratch("strict2d");
-    let p = dir.join("x_e.dds");
-    std::fs::write(&p, dds(false, 4, 1)).unwrap();
-    let o = sdc()
-        .args(["validate", "--strict-cubemaps"])
-        .arg(&p)
-        .output()
-        .unwrap();
-    assert_eq!(o.status.code(), Some(4), "{}", text(&o));
-    assert!(text(&o).contains("FAIL "), "{}", text(&o));
-}
-
 #[test]
 fn cli_validate_flags_a_mipless_cube() {
     let dir = scratch("validate");

@@ -61,6 +61,48 @@ fn help_and_version_exit_0_bad_flag_exits_2() {
 }
 
 #[test]
+fn version_lists_the_encoders() {
+    let o = sdc().arg("--version").output().unwrap();
+    assert_eq!(code(&o), 0);
+    let out = text(&o.stdout);
+    for want in ["sdc 2.0.0", "bc7enc_rdo", "ispc"] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    assert!(out.lines().count() >= 4, "one encoder per line: {out}");
+}
+
+/// FM: the verbs and flags that 2.0 removed are refused by name (exit 2, nothing on stdout).
+#[test]
+fn removed_verbs_and_flags_are_refused() {
+    let dir = std::env::temp_dir().join("sdc-removed-flags-none");
+    let dds = dir.join("x.dds");
+    for (args, word) in [
+        (vec!["encoders"], "encoders"),
+        (vec!["patch-header", "--in-place"], "patch-header"),
+        (vec!["presets", "diff", "cs-quality", "cs-compact"], "diff"),
+        (vec!["presets", "export", "cs-quality"], "export"),
+        (vec!["presets", "validate", "x.toml"], "validate"),
+        (vec!["convert", "in", "--fill", "metallic=255"], "--fill"),
+        (vec!["convert", "in", "--sidecar"], "--sidecar"),
+        (
+            vec!["validate", "--strict-cubemaps", dds.to_str().unwrap()],
+            "--strict-cubemaps",
+        ),
+    ] {
+        let o = sdc().args(&args).output().unwrap();
+        assert_eq!(code(&o), 2, "{args:?}: {}", text(&o.stderr));
+        assert!(
+            o.stdout.is_empty(),
+            "{args:?}: usage errors write no stdout"
+        );
+        assert!(
+            text(&o.stderr).contains(word),
+            "{args:?} should name {word}: {}",
+            text(&o.stderr)
+        );
+    }
+}
+#[test]
 fn the_nvtt_flag_is_refused() {
     let o = sdc()
         .args(["convert", "--nvtt", "x", "in", "out"])

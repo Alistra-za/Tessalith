@@ -1,19 +1,18 @@
 # CLI reference
 
-`sdc` is the command-line front end of Tessalith. It has six subcommands:
+`sdc` is the command-line front end of Tessalith. It has five subcommands:
 
 | Subcommand | What it does |
 |---|---|
 | [`convert`](#sdc-convert) | Convert images or folders to DDS. |
 | [`inspect`](#sdc-inspect) | Show the plan for images, or the header and alpha statistics of DDS files. Writes nothing. |
 | [`validate`](#sdc-validate) | Check existing DDS files against a target's rules. |
-| [`presets`](#sdc-presets) | List, show, compare, export and check presets; print JSON schemas. |
-| [`encoders`](#sdc-encoders) | Print the built-in encoder versions. |
-| [`patch-header`](#sdc-patch-header) | Fix DDS header faults that need no pixel change. |
+| [`presets`](#sdc-presets) | List and show presets; print JSON schemas. |
+| [`cubemap-marker`](#sdc-cubemap-marker) | Write the 1×1 dynamic-cubemap marker DDS. |
 
-`sdc --version` prints the version. `sdc --help` and `sdc <subcommand> --help` print the built-in help. The help text calls the program "Skyrim SE/AE DDS converter (working name)"; that is Tessalith.
+`sdc --version` prints the version, then the version of each linked encoder, one per line. `sdc --help` and `sdc <subcommand> --help` print the built-in help. The help text calls the program "Skyrim SE/AE DDS converter (working name)"; that is Tessalith.
 
-Human-readable output from `convert` goes to stderr. The result verbs (`inspect`, `validate`, `presets`, `encoders`, `patch-header`) print their results to stdout. With `--json`, stdout carries only JSON.
+Human-readable output from `convert` goes to stderr. The result verbs (`inspect`, `validate`, `presets`) print their results to stdout. With `--json`, stdout carries only JSON.
 
 ## Shared batch flags
 
@@ -28,7 +27,6 @@ Human-readable output from `convert` goes to stderr. The result verbs (`inspect`
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
 | `--config <file>` | `sdc.toml` in the first input folder | The project config file. |
 | `--set <override>` | none | Override a profile field. Repeatable. See [--set syntax](#--set-syntax). |
-| `--fill ROLE=VALUE` | none | Same as `--set packing.fill.<role>=<value>` ([roles](Project-Config-Fields.md#packing)), applied after every `--set`. Repeatable. |
 | `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence sub-type suggestion. High-confidence alpha suggestions apply either way. With `none`, a file whose sub-type is only suggested stays unresolved. |
 | `--allow <CODE>` | none | Acknowledge a blocking warning code for the whole batch. Repeatable. An unknown code is a usage error. |
 | `--json` | off | Write JSON Lines events to stdout. Human output stays on stderr. |
@@ -117,7 +115,6 @@ Plans the batch, then encodes every file whose status is ready.
 | `--mem-budget <size>` | 50% of RAM | Memory budget for files in flight. Bytes, or a `G`/`M` suffix (binary): `8G`, `512M`. `0` is an error; leave the flag out for the default. |
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists. See below. |
 | `--dry-run` | off | Plan and report, write nothing. |
-| `--sidecar` | off | Also write `<name>.dds.json` next to each output with its record. |
 
 ### Also export as Vanilla / CM
 
@@ -132,7 +129,7 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 | Value | Behaviour |
 |---|---|
-| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 encode target (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. With `--sidecar`, a missing sidecar on an up-to-date output is written from the manifest record; the file re-encodes only if that write fails. |
+| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 encode target (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. |
 | `skip` | Keep every existing output. Counted as skipped on purpose. |
 | `overwrite` | Always re-encode. |
 
@@ -192,9 +189,6 @@ sdc convert src --recursive --accept-suggestions high --preset fast-preview -o p
 
 # Rebuild everything, 8 threads, 6 GiB budget
 sdc convert src --recursive --accept-suggestions high --on-existing overwrite --jobs 8 --mem-budget 6G
-
-# Set metallic to fully metallic on every packed output with no metallic map
-sdc convert src --recursive --accept-suggestions high --fill metallic=255
 
 # Acknowledge a non-power-of-two texture
 sdc convert src --recursive --accept-suggestions high --allow DIM-NPOT
@@ -258,10 +252,9 @@ Runs the post-encode checks on DDS files that already exist, including files mad
 | `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A sub-type the target does not have is an error. |
 | `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the sub-type's default, except that a sub-type whose default is `remove` is inferred as `data`. |
 | `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders do not promise it. |
-| `--strict-cubemaps` | off | Fail a flat 2D file the game reads as a cube (a name ending in `_e`, or under `textures\cubemaps\`). Without it that check is a warning and the file passes. See [Cubemaps](Cubemaps.md). |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
 
-The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules rather than on Tessalith's preferred format. A cube DDS is judged as a `cubemap`, and a 2D file whose name ends in `_e` or that sits under `textures\cubemaps\` gets a warning and still passes; `--strict-cubemaps` fails it (the game reads it as a cube). See [Validation and output](Validation-and-Output.md#cube-checks). A format Tessalith never writes has only its header checked and is reported as not judged.
+The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules rather than on Tessalith's preferred format. A cube DDS is judged as a `cubemap`, and a 2D file whose name ends in `_e` or that sits under `textures\cubemaps\` fails (the game reads it as a cube). See [Validation and output](Validation-and-Output.md#cube-checks). A format Tessalith never writes has only its header checked and is reported as not judged.
 
 ```text
 ok    C:/out/rock.dds (diffuse, alpha remove)
@@ -286,9 +279,6 @@ sdc presets [--preset-file <file>]... <COMMAND>
 |---|---|
 | `list [--json]` | Lists selectable presets: id, version, target, description, suffix aliases, and the source file for user presets. |
 | `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each sub-type (or one) as JSON, with the provenance of each field. |
-| `diff <a> <b> [--subtype <id>] [--target <t>] [--json]` | Prints every field where two presets resolve differently, as `<subtype>.<field>: <a value> → <b value>`, then `(rules are not compared)`. Prints `no differences` when they match. |
-| `export <id> [--out <file>] [--id <new id>]` | Copies the preset's own TOML under a new id (default `<id>-export`), keeping its `base`, its comments and its key order. Its `[suffix_aliases]` table is left out, so the copy loads beside the original. A preset written for an older schema is re-serialised instead, which drops its comments. `--out` refuses the source file of a loaded preset. |
-| `validate <files>...` | Checks preset files (migration, parse, ids, base, aliases, rules, every profile). Prints `ok <file>` or the problem. Exit 1 if any file has a problem. |
 | `schema <which> [--out <dir>]` | Prints a JSON Schema: `profile`, `preset`, `config`, `event`, `manifest`, `dds-info`, `dds-validation`. `all` writes every schema to `--out` and requires it (`schema all needs --out <dir>`). |
 
 Examples:
@@ -296,64 +286,8 @@ Examples:
 ```powershell
 sdc presets list
 sdc presets show cs-quality --subtype diffuse
-sdc presets diff cs-quality cs-compact --target cs
-sdc presets export cs-quality --id my-cs --out "$env:APPDATA\sdc\presets\my-cs.toml"
-sdc presets validate "$env:APPDATA\sdc\presets\my-cs.toml"
 sdc presets schema all --out schemas
 ```
-
-## sdc encoders
-
-```text
-sdc encoders [--json]
-```
-
-Prints the versions of the linked encoders:
-
-```text
-bc7e (bc7enc_rdo <commit>) patch <patch id or none>
-rgbcx (bc7enc_rdo <commit>) patch <patch id or none>
-ISPC Texture Compressor <version> (BC6H)
-ISPC <version> objects; dispatched ISA on this CPU: <isa>
-BC1 encode target: dual
-```
-
-`--json` prints one JSON object instead.
-
-## sdc patch-header
-
-```text
-sdc patch-header (--out-dir <dir> | --in-place) [OPTIONS] <DDS>...
-```
-
-Fixes DDS header faults that need no change to the pixel data: mip count, flags, caps, linear size or pitch, reserved fields, a non-standard DDPF_NORMAL flag, the legacy or DX10 header form, the DX10 dimension, array and misc fields, the header and pixel-format size fields, and the `_SRGB` tag. Exactly one of `--out-dir` or `--in-place` is required.
-
-| Flag | Meaning |
-|---|---|
-| `--out-dir <dir>` | Write each patched file into this folder under its own name. The input is never changed. |
-| `--in-place` | Rewrite each input in place, atomically. |
-| `--target cs\|vanilla` | Whose rules give the tag and mip expectation of `--subtype` (default `cs`). |
-| `--subtype <id>` | What the files are meant to be. Sets the tag, and requires a full mip chain when that sub-type's profile has one. |
-| `--tag srgb\|unorm` | Tag to write. Overrides the tag from `--subtype`. Without either, the file's tag is kept. |
-| `--format <format>` | The block format the files must be; a file in another format is refused. |
-| `--dry-run` | Report what would change, write nothing. |
-
-Per file, it prints one of (with `--dry-run` a file that would change prints `<file>: would patch: <fixes>` instead of the `DDS-HEADER-PATCHED` line, and no code):
-
-```text
-<file>: header already valid; nothing to patch
-<file>: DDS-HEADER-PATCHED: <what changed>
-<file>: DDS-HEADER-UNPATCHABLE: <why>
-<file>: unreadable: <error>
-```
-
-Example: a third-party PBR albedo saved without the `_SRGB` tag.
-
-```powershell
-sdc patch-header --out-dir fixed --subtype pbr_albedo textures\pbr\rock\rock.dds
-```
-
-Exit codes: 0; 1 if a file is unreadable or refused; 2 if `--out-dir` would write over an input or two inputs share a file name; 3 if a write fails (files written before it stay written).
 
 ## sdc cubemap-marker
 
@@ -394,7 +328,6 @@ Errors that stop a run before it starts print `sdc: <message>` to stderr. Exampl
 ```text
 sdc: input not found: C:\Work\missing
 sdc: --mem-budget '0': must be greater than 0 (omit the flag for the default, 50% of RAM)
-sdc: --fill 'metal=1': unknown role 'metal' (one of roughness, metallic, ao, specular, glossiness, height, opacity, fuzz)
 sdc: --allow FOO: unknown code
 sdc: --set 'alpha.treshold=100': unknown field 'alpha.treshold'
 sdc: unknown preset 'cs-qualty'

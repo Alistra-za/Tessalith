@@ -1,6 +1,6 @@
 //! One `ResolvedJob` end to end (spec §5, carry order of Task 31):
 //! load → preprocess → mips → coverage → quantise → encode → DDS bytes → validate the bytes → atomic write →
-//! sidecar → manifest record.
+//! manifest record.
 //!
 //! The caller (`api::Engine::run`) has initialised the encoders with the batch BC1 model, admitted the file
 //! against the memory budget and runs this on its rayon pool under `catch_unwind`; the encode stage's band
@@ -61,8 +61,6 @@ pub struct FileOutcome {
 pub struct FileTracker {
     pub stage: Cell<Stage>,
     pub written: Cell<bool>,
-    /// Whether this run wrote the `.dds.json` sidecar: only then may a failure remove it (a foreign one stays, BV3).
-    pub sidecar_written: Cell<bool>,
 }
 
 impl Default for FileTracker {
@@ -70,7 +68,6 @@ impl Default for FileTracker {
         FileTracker {
             stage: Cell::new(Stage::Load),
             written: Cell::new(false),
-            sidecar_written: Cell::new(false),
         }
     }
 }
@@ -474,8 +471,8 @@ pub(crate) fn encode_levels(
 
 /// Convert one file and append its manifest record. Cancellation is checked between stages and between encode
 /// bands, last just before the write, so a cancelled file never leaves an output behind. Everything that can fail
-/// before the output exists (validation of the in-memory DDS bytes, the profile hash, the record and sidecar text)
-/// runs before the write; only the sidecar write and the manifest append come after it. When one of those fails,
+/// before the output exists (validation of the in-memory DDS bytes, the profile hash, the record)
+/// runs before the write; only the manifest append comes after it. When that fails,
 /// or anything panics, `tracker.written` tells the caller to remove the output, so an output on disk has its
 /// record, except after a second Ctrl-C: that aborts the process (exit 3) and can leave `.sdc-*.tmp` files, or an
 /// output without a record (`OUT-UNKNOWN-EXISTING` on the next run). A failed validation (`passed = false`) is not a failure here: the output is written and recorded.
@@ -700,58 +697,6 @@ pub fn process_file(
     // Note Y1: taken after the rename, so `if-changed` notices a replaced output. Any failure from here on removes
     // the output (`run_one`, `tracker.written`).
     record.output_stamp = SourceStamp::of(&job.output);
-    let side = job.output.with_extension("dds.json");
-    // A `.dds.json` that reads as sdc's record for this output; any other file there is not sdc's.
-    let ours = |b: &[u8]| {
-        serde_json::from_slice::<serde_json::Value>(b).is_ok_and(|v| {
-            v["output"].as_str() == Some(record.output.as_str())
-                && v.get("profile_sha256").is_some()
-        })
-    };
-    if req.sidecar {
-        let text =
-            serde_json::to_string_pretty(&record).map_err(|e| fail(Stage::Write)(e.to_string()))?;
-        // Audit 08d-6 (Note BV3): a file sdc did not write is kept, as OUT-SIDECAR-KEPT; the DDS stays.
-        // Audit 08d-5 (Note BV4): the new DDS already replaced the old one, so a failed sidecar write is a warning,
-        // as in BQ10, and the DDS stays; the next `if-changed --sidecar` run rewrites a stale sdc sidecar from the record (`sidecar_present`).
-        match crate::dds::may_replace(&side, text.as_bytes(), ours) {
-            Ok(()) => {
-                let wrote = write_atomic(&side, text.as_bytes());
-                tracker.sidecar_written.set(wrote.is_ok());
-                if let Err(e) = wrote {
-                    report.warnings.push(crate::codes::Warning::new(
-                        crate::codes::Code::OutSidecarKept,
-                        format!(
-                            "{}: the sidecar could not be written ({e}); a sidecar left there describes the previous output",
-                            side.display()
-                        ),
-                    ));
-                }
-            }
-            Err(k) => report.warnings.push(crate::codes::Warning::new(
-                crate::codes::Code::OutSidecarKept,
-                format!("{}; the sidecar was not written", k.note(&side)),
-            )),
-        }
-    } else {
-        // Trace-debug #27 (Note BQ): an earlier run's sidecar describes the bytes just replaced. Only a file that
-        // reads as sdc's record for this output is removed: never a file sdc did not write.
-        if std::fs::read(&side).is_ok_and(|b| ours(&b)) {
-            match std::fs::remove_file(&side) {
-                // Owner, 2026-10-16 (Note BQ10): a warning; the new DDS stays.
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                    report.warnings.push(crate::codes::Warning::new(
-                        crate::codes::Code::OutSidecarKept,
-                        format!(
-                            "{}: the old sidecar describes the previous output and could not be removed: {e}",
-                            side.display()
-                        ),
-                    ));
-                }
-                _ => {}
-            }
-        }
-    }
     manifest
         .append(&record)
         .map_err(|e| fail(Stage::Write)(format!("manifest {}: {e}", manifest.path().display())))?;

@@ -57,7 +57,7 @@ Its sides are not powers of two. Resize the source, set `resize = "pot-down"` on
 
 ### DDS files in the folder are skipped
 
-DDS inputs are skipped by default (`IN-DDS-SKIPPED`) because re-encoding a compressed DDS loses quality. Use the source image instead, or set `reencode = true` on the file. To fix only a DDS header, use `sdc patch-header`.
+DDS inputs are skipped by default (`IN-DDS-SKIPPED`) because re-encoding a compressed DDS loses quality. Use the source image instead, or set `reencode = true` on the file.
 
 ### Existing outputs are not replaced (OUT-UNKNOWN-EXISTING)
 
@@ -65,7 +65,7 @@ The output folder holds a DDS that the manifest has no record of, for example fr
 
 ### A packed channel uses a default value (PACK-DEFAULTED)
 
-The set has no source for that channel, for example no specular map for `_rmaos`. Add the map, or set a fill: `--fill specular=128`, or `packing.fill.specular = 128` on the packed output's `[files]` key.
+The set has no source for that channel, for example no specular map for `_rmaos`. Add the map, or set a fill: `--set packing.fill.specular=128`, or `packing.fill.specular = 128` on the packed output's `[files]` key.
 
 ### The PBR set is not packed, or its raw maps are reported as unused
 
@@ -116,19 +116,17 @@ A hard abort can leave temporary files in the output folders ([atomic writes](Va
 | Message | Cause |
 |---|---|
 | `input not found: <path>` | An input path does not exist. |
-| `<path> is a folder; give .dds files` | `validate` and `patch-header` take files, not folders. |
+| `<path> is a folder; give .dds files` | `validate` takes files, not folders. |
 | `--mem-budget '<s>': must be greater than 0 (omit the flag for the default, 50% of RAM)` | `--mem-budget 0`. |
 | `--mem-budget '<s>': use bytes or a G/M suffix` | A size ending in something other than a digit, `G` or `M`, such as `8Q`. |
 | `--mem-budget '<s>': not a valid size` | A number that is not a whole number, such as `1.5G`. |
-| `--fill '<s>': unknown role '<role>' (one of …)` | A misspelt fill role. |
-| `--fill '<s>': the value must be a whole number 0..255` | A fill outside 0 to 255. |
 | `--allow <X>: unknown code` | A misspelt code. |
 | `--set '<s>': unknown field '<f>'` | A misspelt field name. |
 | `--set '<s>': unknown sub-type '<id>'` | A misspelt sub-type. |
 | `--set '<s>': a sub-type scope cannot set the sub-type` | `subtype:<id>.subtype=…`. |
 | `--set '<s>': reencode takes true or false` | |
 | `--set '<s>': a set scope sets only `shader`` | `set:<id>.<anything but shader>`. |
-| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` or `patch-header` with a sub-type the target lacks. |
+| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
 | `unknown preset '<id>'` | A preset id that is not loaded. |
 | `preset inheritance cycle at '<id>'` | Presets whose `base` chain loops. |
 | `<file>: config schema_version N is newer than this sdc supports (1)` | A config written by a newer version. A preset gives `preset schema_version N is newer …`. |

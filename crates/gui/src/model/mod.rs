@@ -10,7 +10,6 @@ pub mod code_text;
 pub mod cs_pbr;
 pub mod cs_pbr_export;
 pub mod cube_cross;
-pub mod dds_patch;
 pub mod encoding_follow;
 pub mod export;
 pub mod fields;
@@ -513,8 +512,6 @@ pub struct AppModel {
     pub expanded: Option<String>,
     pub export: export::ExportModel,
     pub preview: preview::PreviewModel,
-    /// The DDS header-patch choice (DECISIONS S7).
-    pub dds_patch: dds_patch::DdsPatchState,
     pub view: view::ViewState,
     /// The preview overlay job and the overlay on show (v2 checks, Note CL).
     pub overlay: overlay::OverlayState,
@@ -814,7 +811,6 @@ impl AppModel {
             expanded: None,
             export: export::ExportModel::default(),
             preview,
-            dds_patch: Default::default(),
             view: view::ViewState::default(),
             overlay: Default::default(),
             uv: Default::default(),
@@ -898,60 +894,6 @@ impl AppModel {
         }
     }
 
-    /// The header check and patch plan of DDS item `key` (DECISIONS S7); `None` for other items.
-    pub fn dds_header(&mut self, key: &str) -> Option<dds_patch::DdsHeaderView> {
-        let item = self.item(key).filter(|i| i.kind == ItemKind::Dds)?;
-        let path = item.input.clone();
-        Some(self.dds_patch.view(key, &path))
-    }
-
-    pub fn set_dds_patch_tag(&mut self, key: &str, srgb: Option<bool>) {
-        self.dds_patch.set_tag(key, srgb);
-    }
-
-    /// Write the patched copy of DDS item `key` to `<export root>/<job key>` (Note FB1: only into a chosen folder). Every outcome lands in
-    /// `dds_patch.last` (the panel shows it) and ends the confirmation.
-    pub fn patch_dds_header(&mut self, key: &str) -> Result<PathBuf, String> {
-        self.dds_patch.confirming = None;
-        let r = match self.item(key).filter(|i| i.kind == ItemKind::Dds) {
-            None => Err("not a DDS item".to_string()),
-            Some(_) if self.export_folder_chosen().is_none() => {
-                Err(review::NO_EXPORT_FOLDER.to_string())
-            }
-            Some(item) => {
-                let (src, dest) = (item.input.clone(), self.export_root().join(&item.job_key));
-                // Amended S7: never write over another item's output; the DDS's own copy may be re-patched.
-                match self
-                    .items
-                    .iter()
-                    .find(|o| o.key != key && o.job_key == item.job_key)
-                {
-                    Some(other) => Err(format!(
-                        "{} already exports to {}; patch this DDS with `sdc patch-header --out-dir` into another folder",
-                        other.key, item.job_key
-                    )),
-                    None => {
-                        let tag = self.dds_header(key).and_then(|v| v.tag);
-                        dds_patch::write_patch(&src, &dest, tag).map(|m| (m, dest))
-                    }
-                }
-            }
-        };
-        let line = match &r {
-            Ok((m, _)) => m.clone(),
-            Err(e) => e.clone(),
-        };
-        // Note FB8: the panel shows the line without its code; the log keeps it whole.
-        let severity = if r.is_ok() {
-            messages::Severity::Info
-        } else {
-            messages::Severity::Warning
-        };
-        self.messages.log(severity, line.clone());
-        self.dds_patch.last = Some((key.to_string(), line));
-        r.map(|(_, dest)| dest)
-    }
-
     pub fn open_folder(&mut self, root: PathBuf) {
         self.open_cancelled = false;
         // Whatever was pending for the previous folder no longer applies (spec §8).
@@ -1005,8 +947,6 @@ impl AppModel {
         self.drawer_epoch += 1;
         self.folder_epoch += 1;
         self.dropped_fills.clear();
-        // Audit GM-6: the previous folder's header-patch result, tag choices and open confirmation.
-        self.dds_patch = Default::default();
         self.scan_db_error = None;
         let same_folder = self.root.as_ref() == Some(&root);
         self.ignored_by_plan = false;

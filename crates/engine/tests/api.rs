@@ -353,9 +353,7 @@ fn a_failed_manifest_append_removes_the_output() {
         std::fs::set_permissions(manifest.path(), perm).unwrap();
     };
     set_readonly(true);
-    let mut req = request(d.path());
-    req.sidecar = true;
-    let (s, ev) = run(req);
+    let (s, ev) = run(request(d.path()));
     set_readonly(false);
     assert_eq!((s.converted, s.failed), (0, 2), "{ev:#?}");
     assert_eq!(s.exit_code(), 1);
@@ -363,10 +361,6 @@ fn a_failed_manifest_append_removes_the_output() {
         files_with_ext(&d.path().join("out"), "dds").is_empty(),
         "{:?}",
         files_with_ext(&d.path().join("out"), "dds")
-    );
-    assert!(
-        files_with_ext(&d.path().join("out"), "json").is_empty(),
-        "sidecars are removed too"
     );
     assert_eq!(kinds(&ev, "file_done"), 0);
     let failed: Vec<_> = ev
@@ -387,41 +381,6 @@ fn a_failed_manifest_append_removes_the_output() {
     // The rerun converts both instead of keeping unrecorded outputs.
     let (s, _) = run(request(d.path()));
     assert_eq!((s.converted, s.failed), (2, 0));
-}
-
-/// Trace-debug wave 2 #15: the cleanup after a failed manifest append removes only a sidecar this run wrote; a
-/// hand-made `.dds.json` kept by Note BV3 stays.
-#[test]
-fn a_failed_manifest_append_keeps_a_foreign_sidecar() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    let foreign = d.path().join("out/armor/iron.dds.json");
-    std::fs::create_dir_all(foreign.parent().unwrap()).unwrap();
-    std::fs::write(&foreign, "{\"mine\": true}").unwrap();
-    let manifest = Manifest::at(&d.path().join("out"));
-    std::fs::create_dir_all(manifest.path().parent().unwrap()).unwrap();
-    std::fs::write(manifest.path(), b"").unwrap();
-    let set_readonly = |ro: bool| {
-        let mut perm = std::fs::metadata(manifest.path()).unwrap().permissions();
-        perm.set_readonly(ro);
-        std::fs::set_permissions(manifest.path(), perm).unwrap();
-    };
-    set_readonly(true);
-    let mut req = request(d.path());
-    req.sidecar = true;
-    let (s, ev) = run(req);
-    set_readonly(false);
-    assert_eq!((s.converted, s.failed), (0, 2), "{ev:#?}");
-    assert_eq!(
-        std::fs::read_to_string(&foreign).unwrap(),
-        "{\"mine\": true}",
-        "the foreign sidecar is kept"
-    );
-    assert_eq!(
-        files_with_ext(&d.path().join("out"), "json").len(),
-        1,
-        "only the foreign sidecar is left"
-    );
 }
 
 /// Audit 5 (DECISIONS Note Y1): an output replaced after it was recorded is re-encoded, not kept as up to date.
@@ -508,23 +467,6 @@ fn a_1x_manifest_record_is_known_and_stale() {
         let (s, _) = run(request(d.path()));
         assert_eq!((s.converted, s.up_to_date), (0, 2));
     }
-}
-
-/// Audit 15 (Note Y2): `--sidecar` on a re-run writes the missing sidecar of an up-to-date output from its record.
-#[test]
-fn sidecar_is_written_for_an_up_to_date_output() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    run(request(d.path()));
-    let side = d.path().join("out/armor/iron.dds.json");
-    assert!(!side.exists());
-    let mut req = request(d.path());
-    req.sidecar = true;
-    let (s, _) = run(req);
-    assert_eq!((s.converted, s.up_to_date), (0, 2));
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&side).unwrap()).unwrap();
-    assert_eq!(v["output"], "armor/iron.dds");
 }
 
 /// I2: every record carries the BC1 encode target.
@@ -721,13 +663,11 @@ fn existing_output_without_record_is_kept_unless_overwrite() {
 }
 
 #[test]
-fn changed_source_is_reencoded_and_sidecar_is_written() {
+fn changed_source_is_reencoded() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
-    let mut req = request(d.path());
-    req.sidecar = true;
+    let req = request(d.path());
     run(req.clone());
-    assert!(d.path().join("out/armor/iron.dds.json").exists());
     ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, 9]))
         .save(d.path().join("textures/armor/iron.png"))
         .unwrap();
@@ -1258,145 +1198,45 @@ fn a_dry_run_in_place_does_not_rewrite_a_big_stale_manifest() {
     );
 }
 
-/// Trace-debug #27 (Note BQ): an output re-encoded without `--sidecar` loses its old sidecar, which described the
-/// previous source; a later `--sidecar` run then writes a fresh one.
+/// FM (supersedes BQ, BV3, BV4, BQ10): Tessalith neither writes nor deletes `.dds.json` files. One left by 1.x next to
+/// a DDS survives a re-encode and a failed manifest append, which removes only the new DDS.
 #[test]
-fn stale_sidecar_is_not_kept_after_a_run_without_sidecar() {
+fn a_1x_dds_json_is_never_deleted() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
+    run(request(d.path()));
     let side = d.path().join("out/armor/iron.dds.json");
-    let mut with = request(d.path());
-    with.sidecar = true;
-    run(with.clone());
-    let first = std::fs::read_to_string(&side).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, 9]))
-        .save(d.path().join("textures/armor/iron.png"))
-        .unwrap();
+    assert!(!side.exists(), "2.0 writes no sidecar");
+    // What 1.x wrote: the record itself.
+    let record = serde_json::to_string_pretty(
+        &Manifest::at(&d.path().join("out")).load().unwrap()["armor/iron.dds"].raw,
+    )
+    .unwrap();
+    std::fs::write(&side, &record).unwrap();
+    let change = |blue: u8| {
+        ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, blue]))
+            .save(d.path().join("textures/armor/iron.png"))
+            .unwrap();
+    };
+    change(9);
     let (s, _) = run(request(d.path()));
     assert_eq!(s.converted, 1);
-    assert!(!side.exists(), "the stale sidecar was kept");
-    run(with);
-    assert_ne!(std::fs::read_to_string(&side).unwrap(), first);
-    // A `.dds.json` sdc did not write stays.
-    std::fs::write(&side, "{\"mine\": true}").unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([x as u8, y as u8, 99]))
-        .save(d.path().join("textures/armor/iron.png"))
-        .unwrap();
-    let (s, _) = run(request(d.path()));
-    assert_eq!(s.converted, 1);
-    assert_eq!(std::fs::read_to_string(&side).unwrap(), "{\"mine\": true}");
-}
+    assert_eq!(std::fs::read_to_string(&side).unwrap(), record);
 
-/// Review M2 (owner, 2026-10-16; Note BQ10): a stale sidecar sdc wrote but cannot remove (held open without
-/// delete sharing here) is a warning, OUT-SIDECAR-KEPT; the new DDS is kept and the file counts as converted.
-#[cfg(windows)]
-#[test]
-fn an_unremovable_stale_sidecar_is_a_warning_not_a_failure() {
-    use std::os::windows::fs::OpenOptionsExt;
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    let side = d.path().join("out/armor/iron.dds.json");
-    let mut with = request(d.path());
-    with.sidecar = true;
-    run(with);
-    // FILE_SHARE_READ only: sdc can read the record, but not delete it while this handle is open.
-    let hold = std::fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(&side)
-        .unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, 9]))
-        .save(d.path().join("textures/armor/iron.png"))
-        .unwrap();
+    change(99);
+    let manifest = Manifest::at(&d.path().join("out"));
+    let set_readonly = |ro: bool| {
+        let mut perm = std::fs::metadata(manifest.path()).unwrap().permissions();
+        perm.set_readonly(ro);
+        std::fs::set_permissions(manifest.path(), perm).unwrap();
+    };
+    set_readonly(true);
     let (s, ev) = run(request(d.path()));
-    drop(hold);
-    assert_eq!((s.converted, s.failed), (1, 0));
-    assert!(d.path().join("out/armor/iron.dds").exists());
-    assert!(side.exists());
-    assert!(ev
-        .iter()
-        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::OutSidecarKept)));
+    set_readonly(false);
+    assert_eq!(s.failed, 1, "{ev:#?}");
+    assert!(!d.path().join("out/armor/iron.dds").exists());
+    assert_eq!(std::fs::read_to_string(&side).unwrap(), record);
 }
-
-/// Audit 08d-6 (Note BV3): `--sidecar` never replaces a `.dds.json` sdc did not write; it is kept with
-/// OUT-SIDECAR-KEPT and the DDS stays.
-#[test]
-fn sidecar_keeps_a_foreign_dds_json() {
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    let side = d.path().join("out/armor/iron.dds.json");
-    std::fs::create_dir_all(side.parent().unwrap()).unwrap();
-    std::fs::write(&side, "{\"mine\": true}").unwrap();
-    let mut with = request(d.path());
-    with.sidecar = true;
-    let (s, ev) = run(with);
-    assert_eq!(s.failed, 0, "{ev:?}");
-    assert!(d.path().join("out/armor/iron.dds").exists());
-    assert_eq!(std::fs::read_to_string(&side).unwrap(), "{\"mine\": true}");
-    assert!(ev
-        .iter()
-        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::OutSidecarKept)));
-}
-
-/// Audit 08d-5 (Note BV4): a sidecar that cannot be written (held open without delete sharing here) is a warning,
-/// OUT-SIDECAR-KEPT; the new DDS, already in place of the old one, is kept and recorded.
-#[cfg(windows)]
-#[test]
-fn a_sidecar_write_failure_keeps_the_dds() {
-    use std::os::windows::fs::OpenOptionsExt;
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    let side = d.path().join("out/armor/iron.dds.json");
-    let mut with = request(d.path());
-    with.sidecar = true;
-    run(with.clone());
-    let hold = std::fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(&side)
-        .unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, 9]))
-        .save(d.path().join("textures/armor/iron.png"))
-        .unwrap();
-    let (s, ev) = run(with);
-    drop(hold);
-    assert_eq!(s.failed, 0, "{ev:?}");
-    assert!(d.path().join("out/armor/iron.dds").exists());
-    assert!(ev
-        .iter()
-        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::OutSidecarKept)));
-}
-
-/// Review m10 (Note BV4): after a failed sidecar write leaves the previous output's sidecar, the next
-/// `if-changed --sidecar` run rewrites it from the current record.
-#[cfg(windows)]
-#[test]
-fn a_stale_sdc_sidecar_is_rewritten_on_the_next_run() {
-    use std::os::windows::fs::OpenOptionsExt;
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    let side = d.path().join("out/armor/iron.dds.json");
-    let mut with = request(d.path());
-    with.sidecar = true;
-    run(with.clone());
-    let hold = std::fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(&side)
-        .unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([y as u8 * 4, x as u8 * 4, 9]))
-        .save(d.path().join("textures/armor/iron.png"))
-        .unwrap();
-    run(with.clone());
-    drop(hold);
-    let (s, ev) = run(with);
-    assert_eq!(s.failed, 0, "{ev:?}");
-    let m = Manifest::at(&d.path().join("out")).load().unwrap();
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&side).unwrap()).unwrap();
-    assert_eq!(v, m["armor/iron.dds"].raw);
-}
-
 /// A 64 px BC1 DDS at `path`, written by the engine's writer.
 fn bc1_dds(path: &Path) {
     use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};

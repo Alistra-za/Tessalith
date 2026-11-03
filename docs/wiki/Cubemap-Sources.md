@@ -98,7 +98,7 @@ A cube DDS goes through the same size, filter, blur and format settings as any o
 
 - It is always read as its six mip-0 faces. `cubemap.layout` must be unset (or `hstrip`) for it.
 - It can only be re-encoded as a cubemap.
-- Cube arrays are refused, and `sdc patch-header` still refuses cubes.
+- Cube arrays are refused.
 
 ### Dynamic marker
 

@@ -6,7 +6,6 @@
 //! set that no longer exists, M3b), PACK-RECIPE-CONFLICT and PACK-RECIPE-UNBUILDABLE (a `packing.recipe` the set
 //! could not follow, packing-fills Task 1) and
 //! FMT-HDR-SOURCE (why `pbr_emissive` is or is not BC6H, O2) and
-//! DDS-HEADER-PATCHED / DDS-HEADER-UNPATCHABLE (a header-only DDS fix applied or refused, M6 DECISIONS S7) and
 //! DIM-RESIZED (`resize = pot-down` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
 //! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
 //! CFG-PRESET-SKIPPED (a user preset folder file that failed to load, skipped) and CFG-GREEN-CONFLICT (an explicit
@@ -115,8 +114,6 @@ codes! {
     InAliasInvalid = "IN-ALIAS-INVALID" => Warning,
     InAliasStale = "IN-ALIAS-STALE" => Info,
     OutUnknownExisting = "OUT-UNKNOWN-EXISTING" => Warning,
-    // Note BQ10: a stale sidecar sdc wrote could not be removed; the new output is kept.
-    OutSidecarKept = "OUT-SIDECAR-KEPT" => Warning,
     PackDefaulted = "PACK-DEFAULTED" => Warning,
     PackSizeMismatch = "PACK-SIZE-MISMATCH" => Error,
     PackConflict = "PACK-CONFLICT" => Warning,
@@ -131,8 +128,6 @@ codes! {
     ShaderUnavailable = "SHADER-UNAVAILABLE" => Warning,
     ShaderExtraMap = "SHADER-EXTRA-MAP" => Warning,
     ShaderMissingMap = "SHADER-MISSING-MAP" => Warning,
-    DdsHeaderPatched = "DDS-HEADER-PATCHED" => Info,
-    DdsHeaderUnpatchable = "DDS-HEADER-UNPATCHABLE" => Warning,
     GrassShape = "GRASS-SHAPE" => Error,
     GrassTopOpaque = "GRASS-TOP-OPAQUE" => Warning,
     GrassNormals = "GRASS-NORMALS" => Warning,
@@ -260,7 +255,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 100);
+        assert_eq!(Code::ALL.len(), 97);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));

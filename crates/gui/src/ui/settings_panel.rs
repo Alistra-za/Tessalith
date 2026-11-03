@@ -3,7 +3,7 @@
 use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
-use crate::model::code_text::{code_line, shown_for, without_codes};
+use crate::model::code_text::{code_line, shown_for};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
@@ -21,18 +21,12 @@ use engine::config::{
 use engine::policy::{offered, Provenance, ResolvedJob};
 use serde_json::{json, Value};
 
-use crate::model::review::NO_EXPORT_FOLDER;
-
 /// What a control asks of the model; applied once the drawing is over.
 enum Action {
     Set(&'static str, Value),
     Clear(&'static str),
     Decide(Answer),
     Select(String),
-    PatchTag(Option<bool>),
-    PatchAsk,
-    PatchDo,
-    PatchCancel,
     Reencode(bool),
 }
 
@@ -1045,81 +1039,6 @@ fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning]) {
     }
 }
 
-fn dds_header_panel(
-    ui: &mut egui::Ui,
-    v: &crate::model::dds_patch::DdsHeaderView,
-    confirming: bool,
-    last: Option<&str>,
-    export_folder_chosen: bool,
-    actions: &mut Vec<Action>,
-) {
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("DDS header").strong());
-    if v.issues.is_empty() && matches!(v.patch, Ok(None)) {
-        ui.label("Header: valid");
-    }
-    // Note FI3 (A23): one plain line; the raw header fields are on hover (rule 4.5).
-    if !v.issues.is_empty() {
-        let patch = if matches!(v.patch, Ok(Some(_))) {
-            " Patch header… writes a copy with a fixed header."
-        } else {
-            ""
-        };
-        ui.label(
-            egui::RichText::new(format!(
-                "The DDS header has fields other tools may misread.{patch}"
-            ))
-            .small(),
-        )
-        .on_hover_text(v.issues.join("\n"));
-    }
-    ui.horizontal(|ui| {
-        ui.label("Tag on patch:");
-        for (label, tag) in [("keep", None), ("sRGB", Some(true)), ("UNORM", Some(false))] {
-            if ui.radio(v.tag == tag, label).clicked() {
-                actions.push(Action::PatchTag(tag));
-            }
-        }
-    });
-    match &v.patch {
-        Ok(Some(fixes)) => {
-            for f in fixes {
-                ui.label(format!("• {f}"));
-            }
-            if confirming {
-                ui.label("Writes a copy with a fixed header to the export folder; the pixel data is copied byte for byte.");
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(export_folder_chosen, egui::Button::new("Patch"))
-                        .on_disabled_hover_text(NO_EXPORT_FOLDER)
-                        .clicked()
-                    {
-                        actions.push(Action::PatchDo);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        actions.push(Action::PatchCancel);
-                    }
-                });
-            } else if ui
-                .add_enabled(export_folder_chosen, egui::Button::new("Patch header…"))
-                .on_disabled_hover_text(NO_EXPORT_FOLDER)
-                .clicked()
-            {
-                actions.push(Action::PatchAsk);
-            }
-        }
-        Ok(None) => {}
-        Err(reason) => {
-            ui.colored_label(RED, format!("Cannot patch: {reason}"));
-        }
-    }
-    if let Some(l) = last {
-        // The result line is kept whole (code first) for the Messages log; the panel shows the words.
-        ui.label(egui::RichText::new(without_codes(l)).small())
-            .on_hover_text(l);
-    }
-}
-
 /// Why `sdc.toml` cannot take an edit, when its file is read-only.
 /// Item 9: the meshes that use this texture, winner first, from the scan database (read off the UI thread).
 fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
@@ -1208,10 +1127,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     // has no partial) every edit control is off, as Problems' fix buttons are (CA12), so a click is not lost to a
     // stale view. A read-only `sdc.toml` gives its own reason first.
     let edit_off = model.fix_off();
-    let header = model.dds_header(key);
-    let confirming = model.dds_patch.confirming.as_deref() == Some(key);
-    let last = model.dds_patch.last_for(key).map(str::to_string);
-    let export_folder_chosen = model.export_folder_chosen().is_some();
     // Note FI3: why the re-encode button is off (read-only first), and whether it would write over its source. Only a
     // skipped DDS draws that button, so nothing else pays for the scan or the file-system check each frame.
     let skipped_dds = kind == ItemKind::Dds && job.is_none();
@@ -1327,16 +1242,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 if r.clicked() {
                     actions.push(Action::Reencode(true));
                 }
-                if let Some(v) = &header {
-                    dds_header_panel(
-                        ui,
-                        v,
-                        confirming,
-                        last.as_deref(),
-                        export_folder_chosen,
-                        &mut actions,
-                    );
-                }
             }
             if let Some(out) = packed_output {
                 if ui.button("Show packed output").clicked() {
@@ -1439,14 +1344,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             Action::Clear(f) => model.clear_field(key, f),
             Action::Decide(a) => model.decide(key, a),
             Action::Select(k) => model.select_item(&k),
-            Action::PatchTag(t) => model.set_dds_patch_tag(key, t),
-            Action::PatchAsk => model.dds_patch.confirming = Some(key.to_string()),
-            Action::PatchCancel => model.dds_patch.confirming = None,
             Action::Reencode(on) => model.set_reencode(&[key.to_string()], on),
-            Action::PatchDo => {
-                // The result line lands in `dds_patch.last`, shown under the panel.
-                let _ = model.patch_dds_header(key);
-            }
         }
     }
 }

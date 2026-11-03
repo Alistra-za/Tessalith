@@ -73,10 +73,9 @@ Copy the two `.exe` files wherever you like, or add the folder to your `PATH` so
 
 ```powershell
 sdc --version
-sdc encoders
 ```
 
-`sdc encoders` lists the encoder libraries that were linked in and which instruction set the ISPC code dispatched to on your CPU. If it runs, the native encoder layer works.
+`sdc --version` lists the encoder libraries that were linked in. If it runs, the native encoder layer works.
 
 ### Workspace layout
 

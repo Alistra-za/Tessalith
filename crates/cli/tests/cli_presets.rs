@@ -11,7 +11,7 @@ fn sdc() -> Command {
 }
 
 #[test]
-fn presets_list_show_and_encoders() {
+fn presets_list_and_show() {
     let (code, out, _) = stdout_of(&["presets", "list"]);
     assert_eq!(code, 0);
     assert!(
@@ -25,9 +25,6 @@ fn presets_list_show_and_encoders() {
         "{out}"
     );
     assert_eq!(stdout_of(&["presets", "show", "nope"]).0, 2);
-    let (code, out, _) = stdout_of(&["encoders"]);
-    assert_eq!(code, 0);
-    assert!(out.contains("b943862") && out.contains("1.31.0"), "{out}");
 }
 
 fn stdout_of(args: &[&str]) -> (i32, String, String) {
@@ -107,41 +104,6 @@ fn presets_schema_prints_one_schema_or_writes_all() {
     );
 }
 
-#[test]
-fn encoders_reports_versions_isa_and_bc1_target() {
-    let (code, out, err) = stdout_of(&["encoders"]);
-    assert_eq!(code, 0);
-    assert!(err.is_empty(), "result verbs print on stdout: {err}");
-    for needle in [
-        "b943862",
-        "79ddbc9",
-        "1.31.0",
-        "0001-exact-opaque-alpha@sha256:",
-        "patch bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha@sha256:",
-        "dispatched ISA",
-        "BC1 encode target: dual",
-    ] {
-        assert!(out.contains(needle), "{needle} not in {out}");
-    }
-}
-
-#[test]
-fn encoders_json_is_one_object() {
-    let (code, out, _) = stdout_of(&["encoders", "--json"]);
-    assert_eq!(code, 0);
-    assert_eq!(out.lines().count(), 1, "{out}");
-    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["kind"], "encoders");
-    assert_eq!(v["ispc"], "1.31.0");
-    assert_eq!(v["bc1_model"], "dual");
-    assert!(v["bc7e_patch"].as_str().unwrap().contains("@sha256:"));
-    assert!(v["rgbcx_patch"]
-        .as_str()
-        .unwrap()
-        .starts_with("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha@sha256:"));
-    assert!(["sse2", "sse4", "avx", "avx2"].contains(&v["isa"].as_str().unwrap()));
-}
-
 fn sdc_in(appdata: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let o = Command::new(env!("CARGO_BIN_EXE_sdc"))
         .env("APPDATA", appdata)
@@ -219,160 +181,6 @@ fn preset_file_on_the_verbs_and_duplicates() {
     assert!(err.contains("already loaded"), "{err}");
 }
 
-/// Spec §4: `diff` prints `<subtype>.<field>: a → b`, `no differences`, or JSON rows.
-#[test]
-fn diff_prints_only_differences() {
-    let d = appdata_with_mine();
-    let (code, out, err) = sdc_in(d.path(), &["presets", "diff", "cs-quality", "mine"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(
-        out.trim(),
-        "diffuse.format: \"bc7\" → \"bc1\"\n(rules are not compared)"
-    );
-    let (code, out, _) = sdc_in(d.path(), &["presets", "diff", "cs-quality", "cs-quality"]);
-    assert_eq!(
-        (code, out.trim()),
-        (0, "no differences\n(rules are not compared)")
-    );
-    let (code, out, _) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "diff",
-            "cs-quality",
-            "cs-compact",
-            "--subtype",
-            "normal",
-            "--json",
-        ],
-    );
-    assert_eq!(code, 0);
-    let rows: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(
-        rows,
-        serde_json::json!([
-            {"subtype": "normal", "field": "encoder.bc45_search_radius", "a": "default", "b": "fast"},
-            {"subtype": "normal", "field": "resize", "a": null, "b": "half"}
-        ])
-    );
-    assert_eq!(
-        sdc_in(d.path(), &["presets", "diff", "cs-quality", "nope"]).0,
-        2
-    );
-}
-
-/// Spec §4: export writes files that validate; validate exits 1 on a bad file.
-#[test]
-fn export_then_validate() {
-    let d = appdata_with_mine();
-    let out = d.path().join("x.toml");
-    let (code, _, err) = sdc_in(
-        d.path(),
-        &["presets", "export", "mine", "--out", out.to_str().unwrap()],
-    );
-    assert_eq!(code, 0, "{err}");
-    let text = std::fs::read_to_string(&out).unwrap();
-    assert!(
-        text.contains("id = \"mine-export\"") && text.contains("base = \"cs-quality\""),
-        "{text}"
-    );
-    let renamed = d.path().join("packed.toml");
-    let (code, _, _) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "export",
-            "cs-compact",
-            "--id",
-            "packed",
-            "--out",
-            renamed.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 0);
-    assert!(std::fs::read_to_string(&renamed)
-        .unwrap()
-        .contains("id = \"packed\""));
-    let (code, stdout, _) = sdc_in(d.path(), &["presets", "export", "fast-preview"]);
-    assert_eq!(code, 0);
-    assert!(stdout.contains("id = \"fast-preview-export\""), "{stdout}");
-    let (code, stdout, _) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "validate",
-            out.to_str().unwrap(),
-            renamed.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 0, "{stdout}");
-    assert_eq!(
-        stdout.lines().filter(|l| l.starts_with("ok ")).count(),
-        2,
-        "{stdout}"
-    );
-    let bad = d.path().join("bad.toml");
-    std::fs::write(
-        &bad,
-        "schema_version = 1\nid = \"b\"\nversion = \"1\"\nbase = \"nope\"\n",
-    )
-    .unwrap();
-    let (code, stdout, _) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "validate",
-            out.to_str().unwrap(),
-            bad.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 1);
-    assert!(
-        stdout
-            .lines()
-            .any(|l| l.starts_with(bad.to_str().unwrap()) && l.contains("nope")),
-        "{stdout}"
-    );
-}
-
-/// Fix round 1: `export --id <loaded id>` fails (exit 2) and writes no file; neither does the default id when taken.
-#[test]
-fn export_refuses_a_taken_id_and_writes_nothing() {
-    let d = appdata_with_mine();
-    let out = d.path().join("clash.toml");
-    let (code, _, err) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "export",
-            "cs-compact",
-            "--id",
-            "cs-quality",
-            "--out",
-            out.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 2, "{err}");
-    assert!(err.contains("already loaded"), "{err}");
-    assert!(!out.exists());
-    let first = d.path().join("first.toml");
-    std::fs::write(&first, MINE.replace("\"mine\"", "\"mine-export\"")).unwrap();
-    let (code, _, err) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "export",
-            "mine",
-            "--preset-file",
-            first.to_str().unwrap(),
-            "--out",
-            out.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 2, "{err}");
-    assert!(!out.exists());
-}
-
 /// M6 Track D spec §8: the CLI help names the user presets folder.
 #[test]
 fn help_names_the_user_presets_folder() {
@@ -381,38 +189,4 @@ fn help_names_the_user_presets_folder() {
         assert_eq!(code, 0);
         assert!(out.contains(r"%APPDATA%\sdc\presets"), "{args:?}: {out}");
     }
-}
-
-/// Final review Minor 10: `export --out` refuses to overwrite the source file of a loaded preset.
-#[test]
-fn export_refuses_to_overwrite_a_loaded_preset_file() {
-    let d = appdata_with_mine();
-    let src = d.path().join("sdc/presets/mine.toml");
-    let (code, _, err) = sdc_in(
-        d.path(),
-        &[
-            "presets",
-            "export",
-            "cs-compact",
-            "--out",
-            src.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 2, "{err}");
-    assert!(
-        err.contains("is the source of loaded preset 'mine'"),
-        "{err}"
-    );
-    assert_eq!(std::fs::read_to_string(&src).unwrap(), MINE);
-}
-
-/// Final review Minors 8 and 13: `diff --help` says rules are not compared; `export --help` warns about aliases.
-#[test]
-fn diff_and_export_help_state_their_limits() {
-    let (code, out, _) = stdout_of(&["presets", "diff", "--help"]);
-    assert_eq!(code, 0);
-    assert!(out.contains("rules are not compared"), "{out}");
-    let (code, out, _) = stdout_of(&["presets", "export", "--help"]);
-    assert_eq!(code, 0);
-    assert!(out.contains("suffix aliases"), "{out}");
 }

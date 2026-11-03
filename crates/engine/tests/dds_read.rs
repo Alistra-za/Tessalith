@@ -1208,7 +1208,7 @@ fn a_padded_pitch_is_a_header_issue_not_a_panic() {
 }
 
 /// Fix wave (final review minor 1): a DX10 header with `D3D10_RESOURCE_DIMENSION_TEXTURE3D` is a volume even without
-/// the legacy volume flags. It is refused, not relabelled 2D (so `plan_patch` refuses it too).
+/// the legacy volume flags. It is refused, not relabelled 2D.
 #[test]
 fn dx10_texture3d_without_volume_flags_is_unsupported() {
     let good = dds_bytes(
@@ -1229,9 +1229,65 @@ fn dx10_texture3d_without_volume_flags_is_unsupported() {
         "{:?}",
         read_dds(&b)
     );
-    assert!(engine::dds_patch::plan_patch(&b, &Default::default()).is_err());
 }
 
+/// Note FM17 (ruling T7-a): a BC1 DDS read as an input decodes model-less (`bcdec_rs`), not as NVIDIA. A 4-colour block
+/// the two decoders disagree on (found by search, so the test does not hard-code either one's rounding) loads as the
+/// exact decode; a 3-colour block with index 3 loads transparent.
+#[test]
+fn a_bc1_dds_input_decodes_exactly() {
+    let fmt = DdsPixelFormat::Bc1 { srgb: false };
+    let ldr = |d: Decoded| match d {
+        Decoded::Ldr(v) => v,
+        _ => panic!("BC1 decodes to LDR"),
+    };
+    let mut s = 0x9e3779b9u32;
+    let mut next = || {
+        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+        (s >> 16) as u8
+    };
+    let diverging = (0..100_000)
+        .find_map(|_| {
+            let mut blk: [u8; 8] = std::array::from_fn(|_| next());
+            if u16::from_le_bytes([blk[0], blk[1]]) <= u16::from_le_bytes([blk[2], blk[3]]) {
+                blk.swap(0, 2);
+                blk.swap(1, 3);
+            }
+            let (a, b) = (
+                ldr(decode_level(fmt, 4, 4, &blk).unwrap()),
+                ldr(decode_input_level(fmt, 4, 4, &blk).unwrap()),
+            );
+            (a != b).then_some(blk)
+        })
+        .expect("no 4-colour block decodes differently: the input decode is the NVIDIA one");
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, block: [u8; 8]| {
+        let b = dds_bytes(
+            &DdsDesc {
+                width: 4,
+                height: 4,
+                format: Format::Bc1,
+                srgb: false,
+                header: ResolvedHeader::Dx10,
+            },
+            &[block.to_vec()],
+        )
+        .unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, b).unwrap();
+        path
+    };
+    let (img, _) = engine::load::load_image(&write("four.dds", diverging)).unwrap();
+    let exact = ldr(decode_input_level(fmt, 4, 4, &diverging).unwrap());
+    let nvidia = ldr(decode_level(fmt, 4, 4, &diverging).unwrap());
+    let px = |q: [u8; 4]| [q[0], q[1], q[2]].map(|c| c as f32 / 255.0);
+    assert_eq!(&img.px[0][..3], &px(exact[0]), "exact decode");
+    assert_ne!(exact, nvidia);
+
+    let three = [0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    let (img, _) = engine::load::load_image(&write("three.dds", three)).unwrap();
+    assert!(img.px.iter().all(|p| *p == [0.0; 4]), "{:?}", &img.px[..2]);
+}
 #[test]
 fn cube_round_trips_through_the_reader() {
     for (fmt, hdr) in [

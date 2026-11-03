@@ -53,7 +53,6 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         .unwrap_or(0);
     req.on_existing = a.on_existing.into();
     req.dry_run = a.dry_run;
-    req.sidecar = a.sidecar;
     // Before planning, so a Ctrl-C during a long scan is not lost. A failed install is not fatal, but it is
     // reported: without the handler Ctrl-C ends the process at once, as for any console program.
     let cancel = CancelToken::default();
@@ -97,8 +96,6 @@ fn run(cli: Cli) -> Result<i32, EngineError> {
         Command::Inspect(a) => verbs::inspect(a),
         Command::Validate(a) => verbs::validate_files(a),
         Command::Presets(c) => verbs::presets(c),
-        Command::Encoders(a) => verbs::encoders(a),
-        Command::PatchHeader(a) => verbs::patch_header(a),
         Command::CubemapMarker(a) => verbs::cubemap_marker(a),
     }
 }

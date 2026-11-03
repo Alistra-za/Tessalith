@@ -39,8 +39,6 @@ Tessalith writes its own DDS headers:
 - The flags, caps, linear size and mip count are always set consistently, which some other tools get wrong.
 - The non-standard `DDPF_NORMAL` flag is never written.
 
-`sdc patch-header` can fix these header faults in DDS files made by other tools without re-encoding. See [CLI reference](CLI-Reference.md#sdc-patch-header).
-
 ## Validation
 
 Every converted file is decoded again before it is written, and the decoded result is checked. `sdc validate` runs the checks that need no source on DDS files that already exist: `VAL-HEADER`, `VAL-ALPHA-GUARANTEE`, the `VAL-M-*` checks, `VAL-PGPATCHER-50` and `VAL-GRASS-DETECT`. Mip quality, cutout coverage and the BC6H peak need the encoder input, so `validate` cannot run them.
@@ -64,7 +62,7 @@ A file with an error from validation is still written. It is reported as `ok ...
 
 ### Cube checks
 
-`sdc inspect` lists these as header issues, and `sdc validate` reports them as `VAL-HEADER` warnings. The first three fail the file; *Cube expected* is a warning that passes in 1.x unless you give `--strict-cubemaps`:
+`sdc inspect` lists these as header issues, and `sdc validate` fails the file with `VAL-HEADER` for each:
 
 | Check | Rule |
 |---|---|
@@ -73,7 +71,7 @@ A file with an error from validation is still written. It is reported as `ok ...
 | Format | A cube is UNORM, never an `_SRGB` format. |
 | Cube expected | A file named `_e`, or under `textures\cubemaps\` (a `textures` folder directly followed by `cubemaps`), is a cube DDS, not a 2D one. |
 
-The messages are quoted word for word under [Cubemaps](Cubemaps.md#checks). The last check keeps the verdict for 2D files: a 2D `_e` or `cubemaps\` file gets the warning and still passes, and `--strict-cubemaps` makes it fail (the default flips only in 2.0). Every other 2D file is judged as before. A cube is judged on all six faces, and each message names the face and mip. See [Cubemaps](Cubemaps.md).
+The messages are quoted word for word under [Cubemaps](Cubemaps.md#checks). A cube is judged on all six faces, and each message names the face and mip. See [Cubemaps](Cubemaps.md).
 
 ### The BC1 encode target
 
@@ -100,10 +98,6 @@ A record holds:
 | `output_stamp` | Size and modified time of the output as written. |
 
 The JSON Schema is available with `sdc presets schema manifest`.
-
-### Sidecar files
-
-`sdc convert --sidecar` also writes `<name>.dds.json` next to each output with that file's record. With `if-changed`, an up-to-date output whose sidecar is missing gets its sidecar rewritten from the manifest.
 
 ## Re-runs and if-changed
 

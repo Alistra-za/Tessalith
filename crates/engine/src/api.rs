@@ -117,8 +117,6 @@ pub struct BatchRequest {
     pub jobs: usize,
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
     pub mem_budget: u64,
-    /// Also write `<name>.dds.json` next to each output.
-    pub sidecar: bool,
     pub dry_run: bool,
     /// GUI (DECISIONS AG91): counters the planner updates while it loads and resolves; nothing is emitted or written.
     pub plan_progress: Option<PlanProgress>,
@@ -186,7 +184,6 @@ impl BatchRequest {
             on_existing: OnExisting::IfChanged,
             jobs: 0,
             mem_budget: 0,
-            sidecar: false,
             dry_run: false,
             plan_progress: None,
             low_detail: LowDetailMode::Off,
@@ -241,14 +238,13 @@ impl BatchRequest {
             on_existing,
             jobs,
             mem_budget,
-            sidecar,
             dry_run,
             plan_progress: _,
             low_detail,
             derive,
             skip_root,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 32] = [
+        let fields: [&dyn std::fmt::Debug; 31] = [
             inputs,
             output_root,
             target,
@@ -276,7 +272,6 @@ impl BatchRequest {
             on_existing,
             jobs,
             mem_budget,
-            sidecar,
             dry_run,
             low_detail,
             derive,
@@ -881,29 +876,6 @@ fn pack_roles_match(e: &ManifestEntry, job: &ResolvedJob) -> bool {
                 .sources
                 .iter()
                 .map(|s| (Some(s.role), pack::invert_of(pk, &s.path)))),
-    }
-}
-
-/// `--sidecar` on an up-to-date output (audit 15, DECISIONS Note Y2): write the stored record when the sidecar is
-/// missing, or when it is sdc's record of an earlier output (a failed write left it, review m10 / Note BV4). A file
-/// sdc did not write is left alone (BV3). `false` when the record cannot be written, so the file re-encodes and the
-/// encode reports the error.
-fn sidecar_present(output: &Path, e: &ManifestEntry) -> bool {
-    let side = output.with_extension("dds.json");
-    match std::fs::read(&side) {
-        Ok(b) => {
-            let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) else {
-                return true;
-            };
-            let stale_ours =
-                v != e.raw && v["output"] == e.raw["output"] && v.get("profile_sha256").is_some();
-            !stale_ours
-                || serde_json::to_string_pretty(&e.raw)
-                    .is_ok_and(|t| crate::dds::write_atomic(&side, t.as_bytes()).is_ok())
-        }
-        Err(e2) if e2.kind() != std::io::ErrorKind::NotFound => true,
-        Err(_) => serde_json::to_string_pretty(&e.raw)
-            .is_ok_and(|t| crate::dds::write_atomic(&side, t.as_bytes()).is_ok()),
     }
 }
 
@@ -3053,17 +3025,14 @@ impl Engine {
                             }
                             // Note CL20 (owner answer 2): "flagged again next time" — Hold re-measures an eligible
                             // up-to-date output; the size half of eligibility is known only after Load.
-                            Some(e)
+                            Some(_)
                                 if current
-                                    && (!req.sidecar || sidecar_present(&job.output, e))
                                     && req.low_detail == LowDetailMode::Hold
                                     && crate::checks::low_detail_profile_eligible(&job.profile) =>
                             {
                                 measure_only = true;
                             }
-                            Some(e)
-                                if current && (!req.sidecar || sidecar_present(&job.output, e)) =>
-                            {
+                            Some(_) if current => {
                                 summary.up_to_date += 1;
                                 rep.emit_job(
                                     Some(&key(&job.output)),
@@ -3147,7 +3116,7 @@ impl Engine {
 }
 
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
-/// output was written (manifest append; a sidecar failure is only a warning, Note BV4) has that output, and a sidecar this run wrote, removed, best effort, so no output is
+/// output was written (manifest append) has that output removed, best effort, so no output is
 /// left on disk without a record (review I1). A panic is reported at the last stage the file entered (review M10).
 #[allow(clippy::too_many_arguments)]
 fn run_one(
@@ -3220,9 +3189,6 @@ fn run_one(
     };
     if tracker.written.get() {
         let _ = std::fs::remove_file(&job.output);
-        if tracker.sidecar_written.get() {
-            let _ = std::fs::remove_file(job.output.with_extension("dds.json"));
-        }
     }
     lock(state).failed += 1;
     emit(EventKind::FileFailed { stage, error });

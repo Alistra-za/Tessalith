@@ -14,7 +14,6 @@ pub mod config;
 pub(crate) mod coverage;
 pub mod cube;
 pub mod dds;
-pub mod dds_patch;
 pub mod decode;
 pub mod derive;
 pub(crate) mod dilate;

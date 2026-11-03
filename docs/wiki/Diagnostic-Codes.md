@@ -72,7 +72,7 @@ Every warning has a code and a severity:
 | `CFG-INVALID` | error | A value outside its range, or a combination that cannot be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope, and so on). In a config, preset, rule or `--set`, the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config-Fields.md#mipmaps) this texture cannot use; it uses box. | Scope the filter to colour maps, or ignore. |
-| `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file (`sdc presets validate`). When another preset already declares its suffix aliases, the GUI's Problems row has **Remove aliases from {id}**. |
+| `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file. When another preset already declares its suffix aliases, the GUI's Problems row has **Remove aliases from {id}**. |
 | `CFG-GREEN-CONFLICT` | warning | An explicit `flip_green` contradicts the [green convention](Project-Config-Fields.md#channels). | Remove one. |
 
 ### Dimensions
@@ -107,7 +107,7 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `VAL-HEADER` | error | The written header fails the header rules. On `sdc validate`, also a cube with no mips, a 1×1 cube with a non-black +Y, a cube in an sRGB format, or a 2D file named `_e` or under `textures\cubemaps\` (the cube ones fail the file; the 2D one is a warning that passes unless `--strict-cubemaps` is given; see [Validation and output](Validation-and-Output.md#cube-checks)). | Report it as a bug, or fix the cube. |
+| `VAL-HEADER` | error | The written header fails the header rules. On `sdc validate`, also a cube with no mips, a 1×1 cube with a non-black +Y, a cube in an sRGB format, or a 2D file named `_e` or under `textures\cubemaps\` (each fails the file; see [Validation and output](Validation-and-Output.md#cube-checks)). | Report it as a bug, or fix the cube. |
 | `VAL-MIP-ERROR` | warning | A mip's PSNR is below 30 dB. | Check the source, raise the effort, or accept. |
 | `VAL-ALPHA-GUARANTEE` | error | Decoded opaque alpha is below the encoder's guarantee. | Report it as a bug. |
 | `VAL-COVERAGE` | warning | Cutout coverage drifted more than 2 points on a mip. | Adjust the threshold. |
@@ -124,9 +124,6 @@ Every warning has a code and a severity:
 |---|---|---|---|
 | `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format is not BC7, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
 | `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([`--on-existing`](CLI-Reference.md#--on-existing)). | `--on-existing overwrite`. |
-| `OUT-SIDECAR-KEPT` | warning | The `.dds.json` next to the output was not changed, and the new DDS was written. Either an old sidecar sdc wrote for the previous output could not be removed or replaced (locked or protected), or with `--sidecar` the file there is not one sdc wrote, so it was kept. | Unlock or delete the old `.dds.json` and run again (with `--sidecar` to write a new one). A file that is not sdc's is yours: move it away if you want the sidecar. |
-| `DDS-HEADER-PATCHED` | info | `patch-header` (or the GUI) rewrote a header; the payload is byte-identical. | |
-| `DDS-HEADER-UNPATCHABLE` | warning | The header cannot be fixed without re-encoding (unreadable, cubemap or array, a format Tessalith does not write, missing mips, BC1 with transparent texels, wrong block format). | Re-encode from the source. |
 
 ### Packing
 

@@ -108,11 +108,6 @@ In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "
 
 BC3 is never used for compact output, because it is the same size as BC7.
 
-Compare any two presets field by field:
-
-```powershell
-sdc presets diff cs-quality cs-compact --subtype diffuse
-```
 
 ### Built-in rules
 
@@ -153,7 +148,7 @@ rmaosultrahigh = "rmaos"
 | `schema_version` | yes | 1. |
 | `id` | yes | The preset's id. Must not clash with an id that is already loaded, built-in or user. |
 | `version` | yes | Your version string. |
-| `base` | in practice | The preset this one inherits from, such as `cs-quality` or `sdc-base`. Every sub-type's profile must resolve completely, so a preset without a `base` would have to supply every field itself; `sdc presets validate` reports what is missing. A cycle is an error (`preset inheritance cycle at '<id>'`). |
+| `base` | in practice | The preset this one inherits from, such as `cs-quality` or `sdc-base`. Every sub-type's profile must resolve completely, so a preset without a `base` would have to supply every field itself, and the load names what is missing. A cycle is an error (`preset inheritance cycle at '<id>'`). |
 | `target` | no | The preset's target, used when nothing else sets one. Leave it out for a target-neutral preset like `fast-preview`. |
 | `hidden` | no | `true` keeps the preset out of `presets list`. |
 | `description` | no | Shown by `presets list`. |
@@ -194,14 +189,8 @@ normalmap = "n"
 ### Checking and installing
 
 ```powershell
-# Check a preset file
-sdc presets validate my-armor.toml
-
-# See what it resolves to for one sub-type
+# See what a preset resolves to for one sub-type
 sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse
-
-# Start from a built-in preset
-sdc presets export cs-compact --id my-compact --out my-compact.toml
 ```
 
 A file in the user presets folder that fails to load is skipped with `CFG-PRESET-SKIPPED` (a warning naming the file and the reason), and the run continues. A file given with `--preset-file` that fails to load is an error.

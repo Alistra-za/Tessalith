@@ -2,17 +2,35 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use engine::api::{BatchRequest, OnExisting};
 use engine::codes::Code;
-use engine::config::{RawMap, Target};
-use engine::overrides::{parse_set, SetOverride};
+use engine::config::Target;
+use engine::overrides::parse_set;
 use engine::policy::AcceptSuggestions;
 use engine::presets::PresetRegistry;
 use engine::schemas::SchemaKind;
 use std::path::PathBuf;
 
+/// `sdc --version`: the engine version, then each vendored encoder's version, one per line.
+fn long_version() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let v = encoders_sys::versions();
+        let mut lines = vec![
+            env!("CARGO_PKG_VERSION").to_string(),
+            format!("bc7enc_rdo {}", v.bc7enc_rdo),
+            format!("ispc_texture_compressor {}", v.ispctc),
+            format!("ispc {}", v.ispc),
+        ];
+        lines.extend(v.bc7e_patch.map(|p| format!("bc7e patch {p}")));
+        lines.extend(v.rgbcx_patch.map(|p| format!("rgbcx patch {p}")));
+        lines.join("\n")
+    })
+}
+
 #[derive(Parser)]
 #[command(
     name = "sdc",
     version,
+    long_version = long_version(),
     about = "sdc — the Tessalith command line: Skyrim SE/AE DDS converter"
 )]
 pub struct Cli {
@@ -28,13 +46,8 @@ pub enum Command {
     Inspect(InspectArgs),
     /// Run the spec §5.8 checks on existing DDS files.
     Validate(ValidateArgs),
-    /// Inspect, compare, export and validate presets, and print schemas. User presets in %APPDATA%\sdc\presets\*.toml
-    /// are always loaded.
+    /// List and show presets, and print schemas. User presets in %APPDATA%\sdc\presets\*.toml are always loaded.
     Presets(PresetsArgs),
-    /// Built-in encoder versions.
-    Encoders(EncodersArgs),
-    /// Fix DDS header faults that need no pixel change (mip count, flags, caps, legacy/DX10, an explicit tag).
-    PatchHeader(PatchHeaderArgs),
     /// Write the 1x1 CS/ENB dynamic cubemap marker DDS (152 bytes).
     CubemapMarker(MarkerArgs),
 }
@@ -99,10 +112,6 @@ pub struct BatchArgs {
     /// picks a set's shader (ids as `inspect` prints them after `set`).
     #[arg(long = "set")]
     pub set: Vec<String>,
-    /// Fill value for a packed channel without a source map: <role>=<0..255>, e.g. metallic=255 (repeatable). Same
-    /// as `--set packing.fill.<role>=<value>`, applied after every `--set`.
-    #[arg(long = "fill", value_name = "ROLE=VALUE")]
-    pub fill: Vec<String>,
     #[arg(long, value_enum, default_value = "none")]
     pub accept_suggestions: AcceptArg,
     /// Acknowledge a blocking warning code (repeatable).
@@ -132,16 +141,6 @@ pub struct ConvertArgs {
     pub on_existing: OnExistingArg,
     #[arg(long)]
     pub dry_run: bool,
-    /// Also write <name>.dds.json next to each output.
-    #[arg(long)]
-    pub sidecar: bool,
-}
-
-#[derive(Args)]
-pub struct EncodersArgs {
-    /// Print one JSON object instead of the human report.
-    #[arg(long)]
-    pub json: bool,
 }
 
 #[derive(Args)]
@@ -168,9 +167,6 @@ pub struct ValidateArgs {
     /// default: only sdc's own encoder promises it, so third-party files are not judged by it.
     #[arg(long)]
     pub exact_opaque: bool,
-    /// Fail a 2D file the game reads as a cubemap (`_e`, `textures\cubemaps\`); a warning without it (1.x).
-    #[arg(long)]
-    pub strict_cubemaps: bool,
     /// Write one JSON object per file to stdout (the human report goes to stderr).
     #[arg(long)]
     pub json: bool,
@@ -228,37 +224,6 @@ pub enum PresetsCmd {
         #[arg(long, value_enum)]
         target: Option<TargetArg>,
     },
-    /// Print the fields where two presets resolve differently: `<subtype>.<field>: <a> → <b>`.
-    ///
-    /// Profiles only: rules are not compared.
-    Diff {
-        a: String,
-        b: String,
-        #[arg(long)]
-        subtype: Option<String>,
-        #[arg(long, value_enum)]
-        target: Option<TargetArg>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Write a preset's own TOML (keeping its `base` link) under a new id (default `<id>-export`).
-    ///
-    /// The preset's text is copied with its comments and key order. Its suffix aliases are removed, so the copy
-    /// loads beside the original (a preset an older schema migrated is re-serialised instead, dropping comments).
-    /// `--out` refuses the source file of a loaded preset.
-    Export {
-        id: String,
-        #[arg(long)]
-        out: Option<PathBuf>,
-        /// Id of the exported preset.
-        #[arg(long = "id")]
-        new_id: Option<String>,
-    },
-    /// Check preset files (migration, parse, ids, base, aliases, rules, every profile). Exit 1 if any has a problem.
-    Validate {
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
     /// Print a JSON Schema (profile, preset, config, event, manifest, dds-info, dds-validation) or write all to a folder.
     Schema {
         #[arg(value_enum)]
@@ -290,26 +255,6 @@ pub fn parse_bytes(s: &str) -> Result<u64, String> {
         Some(n) => Ok(n),
         None => Err(format!("--mem-budget '{s}': not a valid size")),
     }
-}
-
-/// `--fill <role>=<0..255>` (spec §6.4, DECISIONS Note M5): an unscoped `packing.fill.<role>` override.
-pub fn parse_fill(s: &str) -> Result<SetOverride, String> {
-    let (role, value) = s
-        .split_once('=')
-        .ok_or_else(|| format!("--fill '{s}': expected <role>=<0..255>"))?;
-    let role = role.trim().to_ascii_lowercase();
-    if !RawMap::ALL.iter().any(|r| r.id() == role) {
-        let roles: Vec<String> = RawMap::ALL.iter().map(|r| r.id()).collect();
-        return Err(format!(
-            "--fill '{s}': unknown role '{role}' (one of {})",
-            roles.join(", ")
-        ));
-    }
-    let code: u8 = value
-        .trim()
-        .parse()
-        .map_err(|_| format!("--fill '{s}': the value must be a whole number 0..255"))?;
-    parse_set(&format!("packing.fill.{role}={code}"))
 }
 
 /// `%APPDATA%\sdc\presets`, the user presets folder (M6 Track D spec §3); `None` when APPDATA is unset.
@@ -346,10 +291,6 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
         .iter()
         .map(|s| parse_set(s))
         .collect::<Result<_, _>>()?;
-    // DECISIONS Note M5: fills rank after every --set (the same precedence group as an unscoped --set, later).
-    for f in &b.fill {
-        r.overrides.push(parse_fill(f)?);
-    }
     r.allow = b
         .allow
         .iter()
@@ -366,15 +307,6 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fill_is_an_unscoped_packing_override() {
-        let o = parse_fill("Metallic=255").unwrap();
-        assert_eq!(o.field, "packing.fill.metallic");
-        assert_eq!(o.value, serde_json::json!(255));
-        assert!(parse_fill("metal=1").unwrap_err().contains("unknown role"));
-        assert!(parse_fill("ao=300").unwrap_err().contains("0..255"));
-    }
 
     #[test]
     fn parse_bytes_units() {
@@ -397,40 +329,6 @@ mod tests {
         }
         assert!(parse_bytes("0").unwrap_err().contains("greater than 0"));
     }
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum TagArg {
-    Srgb,
-    Unorm,
-}
-
-#[derive(Args)]
-#[command(group(clap::ArgGroup::new("dest").required(true).args(["out_dir", "in_place"])))]
-pub struct PatchHeaderArgs {
-    #[arg(required = true)]
-    pub dds: Vec<PathBuf>,
-    /// Write each patched file into this folder (by file name). The input is never changed.
-    #[arg(long)]
-    pub out_dir: Option<PathBuf>,
-    /// Rewrite each input in place (atomically).
-    #[arg(long)]
-    pub in_place: bool,
-    /// Target whose rules give the tag and mip expectation of `--subtype` (default cs).
-    #[arg(long, value_enum)]
-    pub target: Option<TargetArg>,
-    /// Sub-type the files are meant to be: sets the tag and requires a full mip chain when its profile has one.
-    #[arg(long)]
-    pub subtype: Option<String>,
-    /// Tag to write; overrides `--subtype`'s. Without either, the file's tag is kept.
-    #[arg(long, value_enum)]
-    pub tag: Option<TagArg>,
-    /// Block format the files must be; another one is refused.
-    #[arg(long)]
-    pub format: Option<String>,
-    /// Report what would change; write nothing.
-    #[arg(long)]
-    pub dry_run: bool,
 }
 
 #[derive(Args)]

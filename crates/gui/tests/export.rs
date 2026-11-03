@@ -120,6 +120,17 @@ fn the_cli_command_reproduces_the_export() {
     assert!(c.ends_with("--accept-suggestions high --jobs 6"));
 }
 
+/// FM: the copied command carries none of the flags 2.0 removed, with or without a job count.
+#[test]
+fn copy_cli_command_uses_no_removed_flag() {
+    for jobs in [0, 6] {
+        let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), jobs);
+        for gone in ["--sidecar", "--fill", "--strict-cubemaps"] {
+            assert!(!c.contains(gone), "{gone}: {c}");
+        }
+    }
+}
+
 fn ev(seq: u64, job: &str, path: &str, kind: EventKind) -> EngineEvent {
     EngineEvent {
         schema: EVENT_SCHEMA,

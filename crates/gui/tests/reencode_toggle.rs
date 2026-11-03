@@ -267,41 +267,6 @@ fn enter_with_nothing_focused_writes_no_reencode() {
     assert!(!toml(h.state()).contains("reencode"), "{}", toml(h.state()));
 }
 
-/// A23: the header issues read as one plain line; the raw `check_header` text is on hover only.
-#[test]
-fn dds_header_issues_read_in_words() {
-    use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = open(d.path(), |r| {
-        let desc = DdsDesc {
-            width: 64,
-            height: 64,
-            format: engine::config::Format::Bc1,
-            srgb: false,
-            header: ResolvedHeader::Dx10,
-        };
-        let data = vec![[0x00, 0xF8, 0x00, 0xF8, 0, 0, 0, 0].repeat(256)];
-        let mut b = dds_bytes(&desc, &data).unwrap();
-        // DX10 miscFlags2 (magic 4 + header 124 + dxgiFormat, resourceDimension, miscFlag, arraySize).
-        b[144..148].copy_from_slice(&1u32.to_le_bytes());
-        std::fs::write(r.join("h.dds"), b).unwrap();
-    });
-    m.select_item("h.dds");
-    let mut h = harness(m);
-    h.run();
-    let line = "The DDS header has fields other tools may misread.";
-    h.get_by_label_contains(line);
-    assert_eq!(h.query_all_by_label_contains("DX10 header:").count(), 0);
-    h.ctx.global_style_mut(|s| {
-        s.interaction.tooltip_delay = 0.0;
-        s.interaction.show_tooltips_only_when_still = false;
-    });
-    h.get_by_label_contains(line).hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("DX10 header: dimension 3, array 1, misc2 1");
-}
-
 /// Review Focus 4: into its own folder, S6 fails the file at plan: a red Failed row, never a silent skip.
 #[test]
 fn reencode_into_its_own_folder_is_a_failed_row() {

@@ -597,10 +597,8 @@ pub struct PresetRegistry {
     alias_owner: BTreeMap<String, String>,
     /// Id → where the preset was loaded from: `builtin`, `inline` or a file path (M6 Track D, Note T7).
     sources: BTreeMap<String, Source>,
-    /// Id → the preset's TOML table as loaded (`presets export`, Note T8).
+    /// Id → the preset's TOML table as loaded.
     tables: BTreeMap<String, toml::Table>,
-    /// Id → the preset's text as loaded (`presets export` keeps comments and order, Note FC10).
-    texts: BTreeMap<String, String>,
 }
 
 impl PresetRegistry {
@@ -660,7 +658,6 @@ impl PresetRegistry {
         }
         self.sources.insert(id.clone(), source);
         self.tables.insert(id.clone(), table);
-        self.texts.insert(id.clone(), text.to_string());
         self.presets.insert(id.clone(), p);
         Ok(id)
     }
@@ -793,7 +790,7 @@ impl PresetRegistry {
         self.alias_owner.retain(|_, o| o != id);
     }
 
-    /// Spec §3/§4 (`presets validate`, the user folder): the chain resolves and passes [`check_chain`] for each target
+    /// Spec §3/§4 (the user folder): the chain resolves and passes [`check_chain`] for each target
     /// it allows (its nearest `target`, else both).
     pub fn check_preset(&self, id: &str) -> Result<(), PresetError> {
         let chain = self.chain(id)?;
@@ -880,64 +877,6 @@ impl PresetRegistry {
             }
             pending = refused.into_iter().map(|(f, _)| f).collect();
         }
-    }
-
-    /// The id of the preset loaded from the file `path` (compared canonically), if any.
-    pub fn loaded_from(&self, path: &Path) -> Option<&str> {
-        self.sources
-            .iter()
-            .find(|(_, s)| same_file(s, path))
-            .map(|(id, _)| id.as_str())
-    }
-
-    /// `sdc presets validate` (spec §4): load `path` into a copy of this registry (without a preset already loaded
-    /// from that same file, so a user folder file validates in place of itself) and check it. One line per problem;
-    /// loading stops at the first, so a file has at most one (Note T8). Empty = clean.
-    pub fn validate_file(&self, path: &Path) -> Vec<String> {
-        let mut r = self.clone();
-        if let Some(id) = self.loaded_from(path).map(str::to_string) {
-            r.remove(&id);
-        }
-        match r.add_file(path) {
-            Ok(id) => r
-                .check_preset(&id)
-                .err()
-                .map(|e| e.to_string())
-                .into_iter()
-                .collect(),
-            Err(e) => vec![e.to_string()],
-        }
-    }
-
-    /// `sdc presets export` (spec §4, Note T8, Note FC10): `id`'s own text as loaded (`base` stays a link) under
-    /// `new_id`, with comments and order kept and only `[suffix_aliases]` removed, so the copy loads beside the
-    /// original. A preset the schema migration changed is re-serialised from its migrated table instead.
-    pub fn export(&self, id: &str, new_id: &str) -> Result<String, PresetError> {
-        let mut t = self
-            .tables
-            .get(id)
-            .cloned()
-            .ok_or_else(|| PresetError::Unknown(id.to_string()))?;
-        if let Some(src) = self.source(new_id) {
-            return Err(PresetError::Invalid(format!(
-                "CFG-INVALID: preset id '{new_id}' is already loaded from {src}"
-            )));
-        }
-        if let Some(text) = self.texts.get(id) {
-            let mut doc: toml_edit::DocumentMut = text
-                .parse()
-                .map_err(|e: toml_edit::TomlError| PresetError::Invalid(e.to_string()))?;
-            doc.remove("suffix_aliases");
-            let decor = doc["id"].as_value().map(|v| v.decor().clone());
-            doc["id"] = toml_edit::value(new_id);
-            if let (Some(d), Some(v)) = (decor, doc["id"].as_value_mut()) {
-                *v.decor_mut() = d;
-            }
-            return Ok(doc.to_string());
-        }
-        t.remove("suffix_aliases");
-        t.insert("id".into(), toml::Value::String(new_id.to_string()));
-        toml::to_string(&t).map_err(|e| PresetError::Invalid(e.to_string()))
     }
 
     /// The inheritance chain, root base first.
@@ -1061,7 +1000,7 @@ pub fn chain_doc(chain: &[&PresetFile], configs: &[&ConfigFile], st: Subtype) ->
     doc
 }
 
-/// Spec §3/§4/§8, audit EC-6 (Note BJ): the checks `presets validate` and the batch share. Every rule of `chain` and
+/// Spec §3/§4/§8, audit EC-6 (Note BJ): the checks the batch and the GUI preset creator share. Every rule of `chain` and
 /// of `configs` compiles its glob (audit #7), leaves `subtype` out of its overrides (EC-4) and names only known
 /// fields; every sub-type's profile ([`chain_doc`]) deserialises under `target`, alone and with each rule applied.
 pub fn check_chain(

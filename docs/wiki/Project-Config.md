@@ -84,7 +84,7 @@ Every texture's final settings (its profile) are built from layers. Later layers
 8. Facts from the file's suffix.
 9. Accepted suggestions (`--accept-suggestions high`, or always in the GUI). A suggestion only picks the sub-type, never a field value. In that choice it ranks below `--set`, `[files]`, rules and a shader you chose for the set.
 10. The file's `[files]` entry.
-11. `--set` on the command line: unscoped first (`--fill` counts as an unscoped `--set` applied after the others), then `subtype:` scoped, then `file:` scoped. So a scoped `--set packing.fill.<role>` beats `--fill`.
+11. `--set` on the command line: unscoped first, then `subtype:` scoped, then `file:` scoped.
 
 `sdc presets show` and `sdc inspect --json` report the provenance of every field, so you can see which layer set it. The GUI shows it next to each value.
 

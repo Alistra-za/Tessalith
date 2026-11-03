@@ -686,7 +686,7 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
         };
         let mut policy = None;
         let mut judged = true;
-        let report = match file.format.as_format() {
+        let mut report = match file.format.as_format() {
             None => {
                 judged = false;
                 let (name, _) = format_name(file.format);
@@ -719,18 +719,10 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
                 })
             }
         };
-        let mut report = report;
-        // FC7: a 2D file where a cube is expected (the one issue of a 2D file) is a warning in 1.x; failing it by
-        // default is MAJOR (DM8). A cube's own issues still fail.
-        let fail = file.is_cubemap || a.strict_cubemaps;
+        // A 2D file where a cube is expected fails, as a cube's own issues do (FM).
         for m in engine::cube::checks::inspect_issues(&path_s, &file) {
-            let mut w = Warning::new(Code::ValHeader, m);
-            if fail {
-                report.summary.passed = false;
-            } else {
-                w.severity = engine::codes::Severity::Warning;
-            }
-            report.warnings.push(w);
+            report.summary.passed = false;
+            report.warnings.push(Warning::new(Code::ValHeader, m));
         }
         let passed = report.summary.passed;
         let alpha_part = match policy {
@@ -889,102 +881,6 @@ pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
             }
             Ok(0)
         }
-        PresetsCmd::Diff {
-            a,
-            b,
-            subtype,
-            target,
-            json,
-        } => {
-            let usage = |e: engine::presets::PresetError| EngineError::Usage(e.to_string());
-            reg.chain(&a).map_err(usage)?;
-            reg.chain(&b).map_err(usage)?;
-            let target = target
-                .map(Target::from)
-                .or_else(|| reg.chain(&a).ok()?.iter().rev().find_map(|p| p.target))
-                .or_else(|| reg.chain(&b).ok()?.iter().rev().find_map(|p| p.target))
-                .unwrap_or(Target::Cs);
-            let subtypes: Vec<Subtype> = match subtype {
-                Some(s) => vec![serde_json::from_value(Value::String(s.clone()))
-                    .map_err(|_| EngineError::Usage(format!("--subtype {s}: unknown sub-type")))?],
-                None => Subtype::ALL.to_vec(),
-            };
-            let mut rows = vec![];
-            for st in subtypes {
-                let pa = serde_json::to_value(reg.profile(&a, target, st).map_err(usage)?)
-                    .unwrap_or_default();
-                let pb = serde_json::to_value(reg.profile(&b, target, st).map_err(usage)?)
-                    .unwrap_or_default();
-                let mut fields = vec![];
-                engine::presets::leaf_paths(&pa, "", &mut fields);
-                engine::presets::leaf_paths(&pb, "", &mut fields);
-                fields.sort();
-                fields.dedup();
-                let at = |v: &Value, f: &str| {
-                    f.split('.')
-                        .try_fold(v, |v, k| v.get(k))
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                };
-                for f in fields {
-                    let (va, vb) = (at(&pa, &f), at(&pb, &f));
-                    if va != vb {
-                        rows.push(json!({ "subtype": st, "field": f, "a": va, "b": vb }));
-                    }
-                }
-            }
-            if json {
-                out!("{}", Value::Array(rows));
-            } else if rows.is_empty() {
-                out!("no differences");
-            } else {
-                for r in &rows {
-                    out!(
-                        "{}.{}: {} \u{2192} {}",
-                        r["subtype"].as_str().unwrap_or_default(),
-                        r["field"].as_str().unwrap_or_default(),
-                        r["a"],
-                        r["b"]
-                    );
-                }
-            }
-            if !json {
-                out!("(rules are not compared)");
-            }
-            Ok(0)
-        }
-        PresetsCmd::Export { id, out, new_id } => {
-            let new_id = new_id.unwrap_or_else(|| format!("{id}-export"));
-            let text = reg
-                .export(&id, &new_id)
-                .map_err(|e| EngineError::Usage(e.to_string()))?;
-            if let Some((p, owner)) = out.as_deref().and_then(|p| Some((p, reg.loaded_from(p)?))) {
-                return Err(EngineError::Usage(format!(
-                    "--out {} is the source of loaded preset '{owner}'; choose another file",
-                    p.display()
-                )));
-            }
-            match out {
-                Some(p) => engine::dds::write_atomic(&p, text.as_bytes())
-                    .map_err(|e| EngineError::Fatal(format!("{}: {e}", p.display())))?,
-                None => out_raw!("{text}"),
-            }
-            Ok(0)
-        }
-        PresetsCmd::Validate { files } => {
-            let mut bad = false;
-            for f in &files {
-                let problems = reg.validate_file(f);
-                if problems.is_empty() {
-                    out!("ok {}", f.display());
-                }
-                for p in &problems {
-                    out!("{}: {p}", f.display());
-                }
-                bad |= !problems.is_empty();
-            }
-            Ok(i32::from(bad))
-        }
         PresetsCmd::Schema { which, out } => {
             match (SchemaKind::from(which), out) {
                 (SchemaKind::All, Some(dir)) => {
@@ -1026,141 +922,6 @@ fn alias_list(aliases: &BTreeMap<String, String>) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", ")
     })
-}
-
-/// `sdc encoders`: the vendored encoder versions, the ISA the ISPC kernels dispatch to, the BC1
-/// encode target. Result verb: stdout (DECISIONS Note J); `--json` prints one object.
-pub fn encoders(a: EncodersArgs) -> Result<i32, EngineError> {
-    let v = engine::manifest::EncoderVersions::current();
-    let isa = engine::manifest::dispatched_isa();
-    let model = engine::manifest::BC1_ENCODE_ID;
-    if a.json {
-        out!(
-            "{}",
-            json!({
-                "kind": "encoders",
-                "bc7enc_rdo": v.bc7enc_rdo, "ispc_texture_compressor": v.ispctc, "ispc": v.ispc,
-                "bc7e_patch": v.bc7e_patch, "rgbcx_patch": v.rgbcx_patch, "isa": isa, "bc1_model": model,
-            })
-        );
-        return Ok(0);
-    }
-    out!(
-        "bc7e (bc7enc_rdo {}) patch {}",
-        v.bc7enc_rdo,
-        v.bc7e_patch.as_deref().unwrap_or("none")
-    );
-    out!(
-        "rgbcx (bc7enc_rdo {}) patch {}",
-        v.bc7enc_rdo,
-        v.rgbcx_patch.as_deref().unwrap_or("none")
-    );
-    out!("ISPC Texture Compressor {} (BC6H)", v.ispctc);
-    out!("ISPC {} objects; dispatched ISA on this CPU: {isa}", v.ispc);
-    out!("BC1 encode target: {model}");
-    Ok(0)
-}
-
-/// `sdc patch-header` (DECISIONS S7). Exit 1 when a file is unreadable, refused or fails to write, else 0; usage
-/// errors are 2 (including `--out-dir` resolving to an input itself, DECISIONS S6). A failed write does not stop
-/// the batch: the other files are still patched (audit 2026-10-15 item 10).
-pub fn patch_header(a: PatchHeaderArgs) -> Result<i32, EngineError> {
-    if let Some(p) = a.dds.iter().find(|p| p.is_dir()) {
-        return Err(EngineError::Usage(format!(
-            "{} is a folder; give .dds files",
-            p.display()
-        )));
-    }
-    use engine::dds_patch::{plan_patch, PatchRequest};
-    let target = a.target.map_or(Target::Cs, Target::from);
-    let mut req = PatchRequest::default();
-    if let Some(id) = &a.subtype {
-        let st: Subtype = serde_json::from_value(Value::String(id.clone()))
-            .map_err(|_| EngineError::Usage(format!("--subtype {id}: unknown sub-type")))?;
-        if !matches!(availability(target, st), Availability::Available) {
-            return Err(EngineError::Usage(format!(
-                "--subtype {id} is unavailable under {target:?} (CFG-UNAVAILABLE)"
-            )));
-        }
-        let p = Engine::new()?.registry().base_profile(target, st);
-        req.srgb = Some(p.srgb_tag());
-        req.require_full_mips = p.mips.levels == MipLevels::Keyword(MipKeyword::Full);
-        req.complex_grass = st == Subtype::ComplexGrass;
-    }
-    if let Some(t) = a.tag {
-        req.srgb = Some(matches!(t, TagArg::Srgb));
-    }
-    if let Some(f) = &a.format {
-        req.expect_format = Some(
-            serde_json::from_value(Value::String(f.clone()))
-                .map_err(|_| EngineError::Usage(format!("--format {f}: unknown format")))?,
-        );
-    }
-    let mut names = std::collections::BTreeSet::new();
-    if let Some(dir) = &a.out_dir {
-        for p in &a.dds {
-            let out = dir.join(p.file_name().unwrap_or_default());
-            // DECISIONS S6, as convert does (api.rs).
-            if engine::dds::same_file(p, &out) {
-                return Err(EngineError::Usage(format!(
-                    "--out-dir would write over the input {}; use --in-place to rewrite it",
-                    p.display()
-                )));
-            }
-            let n = p
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            if !names.insert(n.clone()) {
-                return Err(EngineError::Usage(format!(
-                    "two inputs are named {n}: --out-dir would write one over the other"
-                )));
-            }
-        }
-    }
-    let mut exit = 0;
-    for path in &a.dds {
-        let shown = path.display();
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                out!("{shown}: unreadable: {e}");
-                exit = 1;
-                continue;
-            }
-        };
-        match plan_patch(&bytes, &req) {
-            Ok(None) => out!("{shown}: header already valid; nothing to patch"),
-            Ok(Some(p)) => {
-                if a.dry_run {
-                    // The code is for a real patch; scripts count it.
-                    out!("{shown}: would patch: {}", p.fixes.join("; "));
-                    continue;
-                } else {
-                    let out = match &a.out_dir {
-                        Some(dir) => dir.join(path.file_name().unwrap_or_default()),
-                        None => path.clone(),
-                    };
-                    // Audit 2026-10-15 item 10: one failed write does not stop the batch.
-                    if let Err(e) = engine::dds::write_atomic(&out, &p.bytes) {
-                        out!("{shown}: write failed: {e}");
-                        exit = 1;
-                        continue;
-                    }
-                }
-                // After the write, so a failed write never reads as patched.
-                let w = p.warning();
-                out!("{shown}: {}: {}", w.code.as_str(), w.message);
-            }
-            Err(u) => {
-                let w = u.warning();
-                out!("{shown}: {}: {}", w.code.as_str(), w.message);
-                exit = 1;
-            }
-        }
-    }
-    Ok(exit)
 }
 
 /// `sdc cubemap-marker`: 0 written, 1 kept (a file Tessalith did not write), 2 usage, 3 write failed.

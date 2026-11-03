@@ -519,9 +519,8 @@ fn nothing_is_written_without_a_ticked_export() {
     assert!(m.sets_doc.as_ref().unwrap().cm_json_shas().is_empty());
 }
 
-/// Design §6/§9: the file sits next to the `_m`, holds only the set keys, and is recorded. A `--sidecar` record
-/// (`<name>.dds.json`) is another file and stays. The GUI exports with `sidecar = false`; the engine then removes
-/// a `<name>.dds.json` only when it reads as sdc's record for that output (Note BQ10), so this stub stays.
+/// Design §6/§9: the file sits next to the `_m`, holds only the set keys, and is recorded. A 1.x `<name>.dds.json`
+/// is another file and stays (Tessalith deletes no file it no longer writes, Note FM).
 #[test]
 fn export_writes_the_json_next_to_the_m_and_records_its_hash() {
     let d = tempfile::tempdir().unwrap();

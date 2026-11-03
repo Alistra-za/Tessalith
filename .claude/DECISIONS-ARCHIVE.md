@@ -16,6 +16,9 @@ ARCHIVED (wording before the edit; superseded in part by Note BV1, 2026-10-17)
 - **M9 Pre-packed conflict** is keyed on an image member whose canonical suffix equals the recipe's suffix (`rmaos`, `rfaos`, `p` under `cs`; `m` under `cpm`/`vanilla`). DDS members are never written, so they never conflict. With `packing.prefer = raw` the replaced file is skipped with `PACK-CONFLICT` and counts as an intentional skip (Note I). Exception (never write neither): when the recipe's sources differ in size, the sizes are checked first, the pre-packed file stays a job (no skip, no `PACK-CONFLICT`) and the recipe fails with `PACK-SIZE-MISMATCH`. When `packing.prefer = raw` but the raw sources differ in size, the recipe fails (`PACK-SIZE-MISMATCH`) and the pre-packed file is kept; it converts under the normal never-auto-decide rule (its sub-type is a suggestion, so it needs `--accept-suggestions` or a rule). (amended by BV1, 2026-10-17: a re-encoded DDS member is written, so it conflicts like an image; a skipped DDS still never conflicts)
   - (pointer, Note CO7: a generated member that a real map replaces is skipped `GEN-REPLACED` before M9, so it never reaches M9 and `packing.prefer` never sees it.)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **M5 (#22) Fill values:** field `packing.fill.<role>` (one per §4.4 raw-map role: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`), an 8-bit code 0–255. CLI `--fill <role>=<0..255>` is an unscoped `--set packing.fill.<role>=<v>` added after every `--set`, so it beats an unscoped `--set` of the same field and loses to sub-type- and file-scoped ones. A roughness fill is used for a glossiness channel as `255 − v` and back. A filled channel has provenance `fill:<code written>` and raises **no** `PACK-DEFAULTED` (the user chose it). The GUI slider lands with M3's settings panel.
+
 ## Note N — M3a converter GUI decisions (owner and M3a plan, 2026-10-10)
 
 ARCHIVED (wording before the edit; superseded in part by Note CA1, 2026-10-18)
@@ -98,6 +101,18 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **S8 ICC:** detected and ignored; `IN-ICC-IGNORED` (info).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+Rulings of `docs/superpowers/plans/2026-10-11-sdc-m6-inputs-formats.md`, for owner review. Owner confirmed the defaults on 2026-10-11: `hdr_sky` keeps BC6H for every source (S3), `rgba16f` is `cs`-only (S4), header-patch destination as S7.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+  - **One canonical same-file guard** (controller rulings, Task 10 and Task 11 reviews): "its own path" is judged by `engine::dds::same_file` (canonical path, with junctions, symlinks and `..` resolved and a missing output judged by its folder; else lexical; case-insensitive). The re-encode check, `sdc patch-header --out-dir` and the GUI Patch all use it. Hard links are not detected.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **S7 DDS header patch (owner idea 2026-10-11):** header-only, payload byte-identical (new header + the old bytes after the old header). Patchable: flags, caps, linear size/pitch, mip count (the whole-level count that fills the payload), reserved fields, `DDPF_NORMAL`, DX10 fields, `ATI1`/`ATI2` → DX10, legacy → DX10 where the tag needs it, and the tag only on an explicit `--tag`, `--subtype` or GUI choice. Refused with a reason (`DDS-HEADER-UNPATCHABLE`): unreadable, cubemap/array, a format sdc does not write, sRGB on a format without one, a payload holding no whole chain, missing mips when a full chain is wanted, BC1 with transparent texels, the wrong block format under `--format`. `DDS-HEADER-PATCHED` (info) lists the fixes. CLI `sdc patch-header` needs `--out-dir` or `--in-place`; the GUI writes a copy to the export folder only. Not recorded in the manifest.
+  - *Amended (final review I1, 2026-10-11):* the GUI refuses the patch, with the reason under that item's panel, when another item in the job list exports to the same output key (e.g. `rock.dds` next to `rock.png`); an existing file at the destination alone is not a refusal, so the same DDS can be re-patched.
+  - **`--out-dir` onto the input is a usage error** (controller ruling, Task 10 review, overriding the plan's Step 3 code): an `--out-dir` that resolves to an input itself (the S6 guard), or two inputs with one file name, exits 2 before anything is written. `PATCHED` is printed only after the write succeeds; a write failure exits 1 for that file and the batch goes on (Note AV-S1).
+  - **The GUI Patch writes under `export_root()`** (controller ruling, Task 11 review, overriding the brief's code): the copy goes to the export root (the chosen export folder, else the default `sdc-out`), so the button never silently does nothing; every error reaches the status line and the confirmation always ends.
+
 ## Note T — M6 Track D: presets (plan rulings, 2026-10-12)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
@@ -128,6 +143,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
   - No resolved-policy matcher was added (it would be circular).
   - An explicit non-`remove` policy on an opaque colour map under compact is `FMT-BC1-ALPHA`.
   - `bc1_transparent_black` stays false.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **T8 Verbs (owner / plan, 2026-10-12).**
+  - `diff` compares profiles from presets alone (rules are not shown: spec gap).
+  - `export` writes the preset's own TOML under a new id (`<id>-export` or `--id`); `base` stays a link, and there is no `--flat` (owner).
+  - `export` copies the preset's text as loaded, sets `id` in place and removes only `[suffix_aliases]`, so comments and order stay and the copy loads beside the original; a preset the schema migration changed is re-serialised from its migrated table, also without aliases (Note FC10).
+  - `export --out` refuses to overwrite the source file of any loaded preset (final review Minor 10).
+  - `diff` help and its human output footer say "rules are not compared" (final review Minor 13).
+  - `validate` reports the first problem per file, and validates a folder file in place of itself.
 
 ## Note U — M6 Track E: NIF-aware alpha and fewer confirmations (plan rulings, 2026-10-12)
 
@@ -178,6 +202,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note FC10, 2026-10-29)
 - **X10 Auto-detect needs a `textures` folder.** Like mesh votes and mesh alpha, the GRAS match uses the input's game path, so a folder opened without a `textures` ancestor is never auto-tagged; tag by hand there. (superseded by FC10)
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **X6 Header patch.** `PatchRequest.complex_grass` (set by `sdc patch-header --subtype complex_grass`) accepts exactly one level short of the full chain for a 1:2 file.
+
 ## Note Y — audit fixes (plan rulings, 2026-10-13)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC3, 2026-10-29)
@@ -185,6 +212,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC3, 2026-10-29)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - **Y9 `--nvtt` (owner D3).** `sdc convert --nvtt` is a usage error (exit 2) until M5. `sdc encoders --nvtt` (detection only) is unchanged. Superseded by Note NV (M5): `--nvtt` selects nvcompress.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **Y2 Sidecar (audit 15).** Under `--sidecar`, an up-to-date output with no sidecar gets one, written from its stored record (no re-encode). If that write fails, the file re-encodes, and the encode reports the error.
 
 ## Note Z — M6 Track F3a: multi-select and bulk settings (plan rulings, 2026-10-13)
 
@@ -403,6 +433,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GE8, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note FC13, 2026-10-29)
 - **AV2 Thumbnail size (item 2, engine part).** `session::THUMB_MAX` 256 → 128 (as `rnm_preview::THUMB_MAX`): a quarter of the memory, 64 KiB per file, ~640 MiB of thumbnails for a 10k folder instead of ~2.5 GiB. The default 96 pt tile is drawn from ≥ its pixel size at 1x; at 1.5x and above, and for tiles over 128 pt, the thumbnail is upscaled (slightly soft). 192 would keep 128 pt tiles sharp on HiDPI for 2.25× the memory; memory was the audit's point. Nothing else reads the thumbnail (the grid only); the GUI's texture eviction is a separate GUI item. (superseded by FC13)
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **AV-S1 patch-header write errors (item 10).** A failed write in a `patch-header` batch prints `<file>: write failed: <e>`, sets exit 1 and carries on with the next file; it is no longer Fatal (exit 3). The file is not reported patched.
+
 ## Note BD — Audit REPORT 2026-10-16: render3d upload test, export save
 
 ARCHIVED (wording before the edit; superseded in part by Note FC11, 2026-10-29)
@@ -473,6 +506,12 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - **BQ3 NVTT working folder (#17).** nvcompress runs with the level's temp folder as its working folder and gets bare `l<N>.in.dds` / `l<N>.out.dds` names, because it reads argv in the ANSI code page. Its error text no longer names the folder. The test fake mangles non-Latin-1 argument characters to `?` like the real tool.
 
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BQ7 BC1 transparency on every level (#23).** patch-header decodes every stored BC1 level, not only mip 0, before refusing 1-bit alpha (S7).
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BQ10 Stale sidecar removed (#27).** Under Note F / Y2: an encode without `--sidecar` removes the output's existing `.dds.json` when it reads as sdc's record for that output (a JSON object whose `output` is the output's key and that has `profile_sha256`); any other file of that name is not sdc's and stays (the complex-material export test keeps such a stub). A removal error other than NotFound fails the file at Write and removes the output. Owner, 2026-10-16 (review M2): superseded: a removal error other than NotFound is a warning, OUT-SIDECAR-KEPT, and the new DDS stays (the file counts as converted). An up-to-date output keeps its sidecar, which still matches.
+
 ## Note BR — Trace-debug minor fixes: GUI model
 
 ARCHIVED (wording before the edit; superseded in part by Note BV7, 2026-10-17)
@@ -500,6 +539,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FB1, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note CA1 and Note FC5, 2026-10-18)
 - **BV10 Export dialogs (audit 08f).** An export queued behind a plan never starts over an open dialog: it is dropped with "Export not started: answer the open dialog, then click Export again", and answering Open-unsaved while an export runs asks to stop it first (`ExportRunning`), as Open does (08f-1). "Proceed anyway" waits for a plan in flight and runs the guards again, like the other answers (08f-2). The end-of-export OverwriteJson question and error dialog never replace an open dialog: the JSON is kept with a note, and the error stays in the drawer and Messages (an unanswered `ExportRunning` is not in the way; it is dropped when the export ends) (08f-6). A refused context-menu pick says why in the status line and Messages (08f-8). An export-thread panic sets one error dialog: `export_ended`'s, else the panic arm's own when the user was leaving, which keeps BI6 (08f-9). (Superseded in part by CA1: ProceedAnyway, ExportBlocked and ExportWarnings are not dialogs. 08f-1 carries over to Review's queued export, CA13, and 08f-2 to `export_from_review`, CA3 and CA7. The drawer is the bottom panel's Files tab, CA16.) (superseded by FC5)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **BV3 One rule for replacing an existing file (audit 08a-2).** `engine::dds::may_replace(path, new, ours)`: absent → write; unreadable → kept (never treated as absent); bytes equal to `new` → write, and the writer records it as its own; `ours(bytes)` (the writer's record says it wrote them) → write; anything else → kept, with a note. The PGPatcher, CS PBR and complex-material JSON, the vanilla borrowed-slot copies, Patch header and `--sidecar` all use it. Changes: an unreadable PGPatcher or CS PBR JSON is no longer written over; a byte-identical complex-material JSON with no record is now adopted and recorded (supersedes Note AT's "not adopted, even if identical"); a foreign PGPatcher JSON still asks (P21). `ours` per writer: the JSON files compare the recorded SHA-256; a borrowed-slot copy compares its record, new in `[project] copy_sha256` (absolute lower-case path → hash; a copy now replaces only a file it wrote, so it follows its owner on later exports, and goes through `write_atomic`; P4's "not tracked by the manifest" still holds); Patch header accepts a file that ends with this DDS's payload (an earlier patched copy under any header, S7); `--sidecar` accepts a file that reads as sdc's record for this output (BQ10's test). DDS outputs keep their manifest check in `run`. *shortcut:* a copy record waits for the next Save when `sdc-project.toml` has unsaved edits (BD2); discarding them loses the record, and that copy is then kept until deleted by hand.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BV4 A sidecar write failure keeps the DDS (audit 08d-5).** The new DDS has already replaced the old output when the `--sidecar` write fails, so the failure is an `OUT-SIDECAR-KEPT` warning and the DDS stays (it counts as converted), as for an unremovable stale sidecar (BQ10). A foreign `.dds.json` kept by BV3 is the same warning. The next `if-changed --sidecar` run writes the sidecar from the manifest record: `sidecar_present` now rewrites a missing sidecar or sdc's sidecar of an earlier output (one whose JSON is not this record but has the same `output` and a `profile_sha256`), and leaves a file sdc did not write alone (review m10).
+
 ## Note BY — Trace-debug wave 2 fixes (main team, 2026-10-17)
 
 ARCHIVED (wording before the edit; superseded in part by Note FB5, 2026-10-29)
@@ -510,6 +555,9 @@ ARCHIVED (wording before the edit; superseded in part by Note CW1, 2026-10-22)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - **BY1 A `pbr_emissive` switched to BC7 drops an unpinned BC6H-only backend (#1; amends S3).** When the hdr-source fact turns BC6H into BC7, an explicit backend is kept only if it can write BC7 or was pinned (sub-type- or file-scoped `--set`, a rule), the rule `backend_follows_format` already uses. A preset or config `[subtypes.pbr_emissive] encoder.backend = "ispc_bc6h"` (what the preset creator writes for "Built-in") now gives bc7e, with the fact's provenance, instead of CFG-INVALID on every 8-bit emissive. A pinned BC6H-only backend still reports CFG-INVALID.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BY9 A failure after the DDS write removes only a sidecar this run wrote (#15; BV3, BV4).** `FileTracker::sidecar_written` limits `run_one`'s cleanup, so a hand-made `.dds.json` kept as OUT-SIDECAR-KEPT survives a failed manifest append.
 
 ## Note BZ — bc7e tuning: the `max` level and patch 0002 (2026-10-18)
 
@@ -837,6 +885,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **CN67 Files rows and Problems (re-check A5, P11).** Vanilla and CM rows carry the `PrefixSink` key `"<folder name>/…"`. `AppModel::also_file(key)` maps such a key to its file in the folders of the last Also export (`None` for any other key, which keeps `select_job`); Task 12's Problems click reveals it. Which File-row warnings are Problems rows follows the row table in `model/bottom.rs`: `DERIVE-NO-ENVMAP` and `DERIVE-NIF-SUGGEST` are Warning rows with **Open report** or **Show in Messages** (Note FC3).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CN33 The copy rule (O4, TA25).** After the PBR run, each ready, non-derived, non-packed Vanilla job whose cs twin (a PBR-plan job with the same input) passes `also::same_identity` and is current is taken out of the Vanilla plan and copied from the PBR folder before the Vanilla run (Note CN42). `same_identity`: both `Ready`; equal inputs; equal `output_key`s relative to their roots, the cs key folded by `vanilla_rel` (O6's landscape `_p` copies); equal `pack`, `rnm` and `bake`; `van.derive` none; `Profile { target: Cs, ..van.profile } == cs.profile`. Current means the PBR folder's record passes `api::is_up_to_date` (now `pub(crate)`, not restated) for this run's twin and encoders, which also checks its file stamp. Any other twin is encoded, so a failed or stale PBR output is never copied and never leaves a gap. The copy record is the twin's record with `output` = the Vanilla key, `ts` = now, `output_stamp` after writing and `copied_from` = the twin's `output_stamp`. `ManifestRecord::copied_from` / `ManifestEntry::copied_from` is skipped when `None`, so no existing manifest line changes; only `manifest.schema.json` gains it. A copy is up to date when the Vanilla record's `sources` and `source_sha256` equal the twin's, its `copied_from` equals the twin file's stamp now, and its `output_stamp` matches the file (`FileSkipped UpToDate`); a re-encoded twin's stamp moves, and the copy is redone. An existing file under `if-changed` goes through fix/pre-v2's `may_replace` with "the Vanilla record's `output_stamp` matches" as `ours`; `Kept` is `OUT-UNKNOWN-EXISTING` and the file is unchanged. `--on-existing skip` and `overwrite` act as for encodes. A copy ends with `FileDone` carrying the PBR record's validation. `shortcut:` a packed job is never copied (its raw sources' `packed_source` events belong to its encode), and a copy writes no `--sidecar`; upgrade if either matters. Copy outcomes count in the Vanilla phase's summary (up to date, skipped, failed, cancelled) and in `AlsoSummary::copied`, after that phase's `batch_done`, whose counts therefore leave them out. A dry run plans every phase and counts the copies, but writes and records nothing.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CN42 Copies before the Vanilla run (Task 7 review M2; supersedes CN33's order).** `do_copies` runs before `engine.run(vplan)`, into the phase summary that `run`'s counts are then added to, so every copy event comes before the Vanilla `batch_done`. The copies read only the PBR folder and their keys are out of the Vanilla plan, so the order changes no byte. `batch_done`'s own counts still leave the copies out (they are in `AlsoSummary`'s Vanilla phase and `copied`); the GUI (Task 11) counts rows, not those numbers. The copy record keeps the twin's `profile`, `profile_sha256`, `preset` and `shader` (review L1, intended): `same_identity` already proved the bytes equal, and a later plain `--target vanilla` export into the Vanilla folder re-encodes the copies once, which is safe. `shortcut:` copies write no `--sidecar` (comment at `do_copies`).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **CN63 TA10 in the GUI.** `also_location()` is `[project] also_location` in `sdc-project.toml`, else `export_root()`; `also_folders()` joins it with `[export.names]` (default `<opened folder name> PBR/Vanilla/CM`, recomputed as the engine names them, pinned against `AlsoSummary::folders`); `also_root()` is the PBR folder whenever a tick is on, and `output_root()` is that or `export_root()`. `request()` (so `replan()` and the export) plans with `output_root()` and, while ticked, `skip_root = also_location()` (P15), so the plan on screen is the PBR phase's; `view_key` keys on `output_root()`. Re-check A4: `PendingJson.root` (as `PendingCs.root`/`PendingCm.root`) carries the root to `finish_json`, `pgp_record(root, path)` and `record_json_sha(root, ..)`; the three `prepare` functions and `cm_json::targets` (P13) use `output_root()`, so Review's "What will be written" and the JSON hash records follow the tick. P14: `export_stopped` checks the export folder only without a tick (Review's location row covers the rest); "Copy CLI command" passes `cli_output()` (the location while ticked); "Open export folder", the header's path, the DDS header patch and the JSON editor stay on `export_root()` (docs/gui.md says so). P19: `model::export::export_folder_problem` delegates to `engine::also::export_folder_problem`.
+
 ## Note CM — NIF v2 Phase B: animation clock, key editor, controllers, clips, In game preview (NIF team, 2026-10-21)
 
 ARCHIVED (wording before the edit; superseded in part by Note CM33, 2026-10-21)
@@ -936,6 +993,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **CV5 The env-map gate asks for the colour member's own key (trace 17; Notes CN17 and CN68).** CN17 says the vote key is the output stem "without a §6.1 suffix"; CN68 says the GUI asks for the colour member's own key (`colour_mesh_key`, the output stem as written). They differ only when the colour member is `_d`: the vanilla file keeps the name (`steel_d.dds`, Note BQ colour-term rule), the GUI asked for `textures/arm/steel_d` and the engine looked up `textures/arm/steel`, so the vote was never found (DERIVE-NO-ENVMAP). The file name that gets written is what a vanilla mesh references, so CN68 is the intended form: with an albedo the engine uses the stem as it is; a set with no albedo (its anchor is the `_n`) still drops the suffix, as before, and the GUI does not ask for it. Sets without `_d` are unchanged.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **CV2 `patch-header --dry-run` no longer prints the real code (trace 4).** A dry run printed `DDS-HEADER-PATCHED` ("header patched") with exit 0 while the file was untouched, so a script counting that code over-counted. It now prints `<file>: would patch: <fixes>` and no code; a real patch still prints the code, after the write. Cost: anything that read the code from a dry run must read the text instead.
 
 ## Note CZ — Meshes page redesign (owner, 2026-10-22)
 
@@ -1134,6 +1194,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FC7, 2026-10-29)
 ARCHIVED (wording before the edit; superseded in part by Note FC12, 2026-10-29)
 - **DS26 A portrait photo is cropped, and the photo faces east (final review M9; amends DS16).** `photo_panorama` keeps the photo's middle `w` rows when it is taller than wide (`h > w`): its top and bottom are lost, with no warning, and there are no fill rows when `h >= w`. That stays the behaviour (a single photo is an approximation); the wiki's Single photo section now says so, tells the user to crop to choose, and says the photo's centre faces east (`cubemap.yaw = -90` turns it north). DS16's wording is amended. The wiki also lists `photo` (0.6) as a blur default in the Blur section, and Troubleshooting's DIM-SMALL row says a cube face under 4 cannot be acknowledged (DS20). (superseded by FC12)
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **DS12 Cube checks in inspect and validate (Task 10).** `cube::checks::inspect_issues(game_path, file)` adds four messages to `sdc inspect`'s header issues and, as `VAL-HEADER` warnings that fail the verdict, to `sdc validate`: a cube with one mip (width > 1), a 1x1 cube whose +Y texel is non-black, a cube in an `_SRGB` format, and a 2D file where a cubemap is expected (a `textures` component directly followed by `cubemaps`, so a `cubemaps` folder above `textures` does not count, or a stem ending `_e`, ASCII case-insensitive, either separator, Note BF). The last one is a warning in 1.x: the verdict stays `ok` unless `--strict-cubemaps` makes it FAIL (Note FC7). Other 2D files are unchanged. The marker keeps its colour on +X and +Y black, so any `--color` reads as a dynamic marker and raises no issue. `sdc validate` judges a cube file as `cubemap` when no `--subtype` is given.
+
 ## Note DT — Cubemap GUI (owner, 2026-10-28)
 
 ARCHIVED (wording before the edit; superseded in part by Note DT32, 2026-10-28)
@@ -1209,6 +1272,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **FB8 No codes in the UI: rows and banners say what to do; the code is on the hover and in the Messages log (review C10, C12, amendment D; supersedes the code text of A1's Problems rows (owner, 2026-10-29)).** A Problems row shows `code_sentence(code)` (`model::code_text`, in the GUI crate; the engine's `codes.rs` and the schemas are untouched): one table with a sentence that names the action for every Warning, Blocking and Error code (a unit test fails for a new code without one; Info codes never get a row and have none). `LOSS-ALPHA-DATA` reads "This alpha channel carries data the format would drop — choose what it means". A code with no sentence shows the engine's message with any code taken out (`without_codes`: a leading `CODE: ` goes with its colon). The row's hover is the engine's own message and, under it, the code (`Problem::codes_text`); the small grey code at the row's right edge is gone. A failed texture's row (`Failed: …`) and a decision row (`Needs a decision: …`) name their codes in words, and the codes they stand for are kept in the new `Problem::also` for the hover. The same sentence replaces the bare code on Review's acknowledge row and in a texture's "Needs a decision" box (code on its hover), and in the settings panel's `Error:` line. Banners: `refresh_banner` shows `without_codes` of every line, and logs each line that names a code to the Messages tab as the engine wrote it, once per appearance (`banner_logged`). C12: the five alpha meanings share `settings_panel::alpha_hint` (Remove, Cutout, Blend, Cutout + Blend, Data; Data's says the alpha is kept as data, written as it is and not as see-through) as the hover of every alpha button: the Decide… menu in Problems, Review's inline buttons and the settings box. The Alpha field combo in the settings grid has no per-option hover and keeps none. Round 1 (review): no panel prints a code any more. The settings panel's "Warnings" list, the set editor's and the RNM section's warning lines show `shown_for(code, message)` (the sentence, else the engine's message without its code) with the message and the code on the hover (`status::code_hover`, the one place a code is printed in a panel); the two Info lines beside "Treat as OpenGL (flip green)" (`IN-GREEN-UNSTATED`, `CHK-GREEN-GUESS`) show their message and keep the code on the hover; a texture that cannot be previewed gives the engine's reason without its code; the DDS header patch result line is shown without its code (hover and Messages log keep it, `patch_dds_header` now logs it). A banner line that leads with a code shows that code's sentence and then the engine's detail (`code_text::banner_line`); the log entry takes its severity from the code (Info, Warning for Warning and Blocking, Error). `without_codes` also drops the backticks around a code and the doubled space it leaves. The Alpha field combo (settings grid, preset editor) shows `alpha_hint` on each option (`combo_for`), so the five meanings have one source everywhere. What still prints a code, and why: the Files tab's warning hover, the sets column's and the tiles' tooltips, and the new hovers (hover-only); the Messages log (by design); the Troubleshooting wiki catalogue and docs (reference text); the Meshes view (NIF team). Tests: `tests/no_codes.rs` (`no_code_text_in_problems_rows`, `no_code_text_in_the_banner`, `a_failed_row_and_a_decide_row_say_it_in_words`, `every_decide_entry_has_a_hover`, `the_settings_panel_and_the_set_editor_say_it_in_words`, `the_alpha_combo_options_have_hovers`) and the `code_text` unit tests; `a_failed_item_is_a_red_row`, `the_checks_filter_shows_only_check_rows`, the OpenGL hint test in `checks.rs` and the header patch test in `ui_smoke.rs` now expect the words.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FB1 No inherited export folder; the header Export is neutral until the project is clean (review C2, amendment B; supersedes BV6's fallback clause and A12's dot-only state, owner, 2026-10-29).** `AppModel::export_folder_chosen()` is the folder the user chose for this project: with a usable project document (loaded and not read-only) its `[project] export_folder` and nothing else, so the `gui.toml` value from another mod is never inherited; without one (no folder open, or an `sdc-project.toml` that does not parse) the pick lives in `gui.toml` as BV6 says, and that counts as chosen, or the user could never export. `export_root()` is that folder, else `<root>/sdc-out`, which is now only a name: `review_gate` returns `No export folder chosen` right after the read-only check, Review's Blockers column draws it as a red row with a `Choose…` button, and a click on the header Export with no folder chosen opens Review instead of exporting a clean project into `sdc-out`. The header button reads `Review {n} files` in the plain button colour while `export_is_clean()` is false (the gate is not Ok, anything is undecided, planning or a vote is still running, or there are no files to write), and `Export {n} files`, accent-filled, once Review would write without skipping anything (`header_export_text`; an empty or still-planning project is never clean). The DDS header patch and the JSON editor's path need a chosen folder too: `patch_dds_header` returns `No export folder chosen` and writes nothing, the Patch buttons are off with that reason, and the JSON editor shows the same words instead of a `sdc-out` path. A12's green state dot is deleted; the hover now also says what Review still has open. A click still opens Review (CA1), which a clean project skips as before (C2). The export menu reads `Export to: {folder} ▾`, or `Export to: not chosen ▾` while a project is open, and `More ▾` with no project (Note FI5; it also holds the marker cube, the Also ticks and the JSON editor, so hiding it whole would have taken the marker cube out of reach); its `Open export folder` entry is off with the reason. NIF edits need a chosen export folder too (`nif_export_root` is `Some` only when `export_folder_chosen()` is `Some`, so they fall back to the MO2 `sdc NIF Edits` mod instead of `<root>\sdc-out`; the NIF team's GD5 builds on it). Every export-folder dialog (the menu and the Blockers row) opens in the app-wide folder saved in `gui.toml`, if there is one (`PickerSpec::start_in`): a pick in a normal project goes to its `[project] export_folder` and never updates that value, so this is not a last-pick memory. Tests: `tests/export_folder.rs`.
 
 ## Note GE — pgpsim simulates PGPatcher 2.3.1 (NIF team, 2026-10-29)
 
@@ -1308,6 +1374,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
   - **"Don't save" then Cancel.** `resolve_open_unsaved` drops the edits and clears the history before `open_folder`, so Cancel brings back no step whose state is gone (pinned by a test).
   - **Tests.** `gui/tests/open_cancel.rs` (`cancel_keeps_the_previous_project`, `a_completed_open_replaces_the_history`, `a_config_error_keeps_undo`, `undo_label_names_the_nif_history`), `engine/tests/zip_limits.rs` (`zip_over_the_limit_blocks_before_the_write`), `review_tab::{portrait_face_is_a_row, zip_over_the_limit_is_a_blocker_row}`, `input_name_edit::match_selector_starts_from_the_set_and_stays` (replaces DO5's `picking_a_normal_from_all_slots_sets_match2_and_switches_the_selector` and `a_pick_matches_in_the_slot_the_scan_saw_it_in`); `plan_progress` takes the new hover; two `input_name_edit` tests and `popups.rs` pick Match 1 first; `history::a_plan_rejection_clears_the_history` becomes `a_plan_rejection_keeps_the_history`; `nif_edit`'s panel-fit test finds exactly one `Undo NIF edit` (the panel's) and the header's `Undo (NIF edit history)`. Fix round 1: `open_cancel::cancel_after_dont_save_brings_back_no_dropped_step`, `also_export::a_zip_over_the_limit_blocks_and_its_estimate_counts_every_entry`, `input_name_edit::the_match_selector_is_per_project`; `portrait_face_is_a_row` uses two same-named photos.
   - **Step 1.** All six live at f045d01a: Cancel reset the history and selection (hover said so), `plan_failed` cleared the history, no zip estimate existed (`write_zip` refused at write time), no portrait row, the selector started at Match 1 and switched on a pick (the RED runs).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FC7 validate's cube check on a 2D file warns in 1.x (theme 7; supersedes DS12's FAIL-by-default in 1.x; owner, 2026-10-29). The re-encode report this item also ruled (what re-encodes after an upgrade, in Review and the CLI) was removed in 2.0 (Note FM21).**
+  - **`sdc validate`.** The DS12 check a 2D file can raise (a 2D `_e` or `textures\cubemaps\` file) is a `VAL-HEADER` with severity `warning` on that instance (the code's level is unchanged) and keeps the verdict: `ok`, exit 0. `--strict-cubemaps` makes it FAIL (exit 4) as DS12 had it. Failing it by default is MAJOR (2.0, DM8). A cube file's own three checks (no mips, lit 1x1, sRGB) still fail: they judge a cube, not a 2D file.
+  - **CN3/CN4.** A `*_curves`/`*_curvature`/`*_cavity` map no recipe reads (`PACK-UNUSED-INPUT` with `pack::ALSO_ONLY`, now a const) is an Info Problems row `Read only by Also export; not written on its own` with no button, instead of the generic "remove it" warning. The alias refusal reads `suffix alias '{alias}' is an exporter vocabulary term` (no spec section).
+  - **Step 1.** Live: `validate` failed a 2D `_e` file (exit 4, `validate_warns_on_2d_e_files_by_default` RED); the CN3 row was not in place (the curves file was a Warning row with the generic sentence).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+  - **T8.** `presets export` copies the preset's text as loaded with `toml_edit`, which is now an `engine` dependency (`"0.25"`, the gui's requirement, already in `Cargo.lock`; fix round 1, controller ruling). It sets `id` in place, keeping that line's comment, and removes only `[suffix_aliases]`, so comments and order stay and the copy loads beside the original. A preset the schema migration changed has no kept text; it is re-serialised from its migrated table, also without aliases. `PresetRegistry` keeps the text only when the migration left the table unchanged. This supersedes Note T8's "copies `suffix_aliases` as they are" and its help line. Also in the GUI: a CFG-PRESET-SKIPPED whose reason is an alias clash is a Warning row "Preset {skipped} was skipped: it clashes with {loaded} on aliases" with **Remove aliases from {skipped}** (Note FC14): it deletes that file's `suffix_aliases` table through `toml_edit` (comments and order kept), writes with `write_atomic` and plans again. Only a file directly in the user presets folder, and refused while an export runs (`EXPORT_RUNNING`, as `Reset also.json`). This button and `Clear read-only flag` write to disk, so they answer a pointer click only: `problems::click_only_button`, the FC5 guard without the red outline, ignores Enter and Space on a focused button. A test presses both keys, and swapping the guard for a plain button fails it. `shortcut:` the id and the other preset are parsed from the engine's message (`presets::check_aliases`), pinned by `bottom::tests::alias_clash_reads_the_engine_reason`.
 
 ## Note FE — BC6H peak-preserving mode (agent, 2026-10-31)
 
@@ -1466,6 +1541,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **BC13 Review minors (2026-10-16).** `bake::decode_peak` returns 0 for a header over `MAX_DIM` (a forged size could overflow the product; the load refuses it anyway). Open, not fixed here: non-finite values in `[defaults]`, sub-type tables and rule overrides (BC6); the complex-grass top half is not coverage-validated (BC3, accepted).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **BC5 Glob typos (#7).** `policy::compile_glob` (the matcher `glob_match_input` caches) checks every glob where it enters: `parse_set`'s `file:<glob>` (usage error), `check_preset`'s own rule globs (preset error, so `sdc presets validate` and the GUI preset editor see it), and `check_up_front` for `file:` overrides built without `parse_set` (usage) and every rule glob of the preset chain, the alias presets and the configs (config error). The lazy cache stays.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **BC7 Preset export (#16).** `sdc presets export --out` writes with `write_atomic`, so a failed or killed write leaves the old file whole. No new test (the report proposed none; the export tests cover the normal write).
+
 ## Note FF — BC6H Slowest and Max use the peak-preserving mode; engine 1.2.0 (owner, 2026-10-31)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
@@ -1534,6 +1615,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
   - **Pin.** `crates/encoders-sys/tests/bc1_dual.rs` pins the summed NVIDIA + AMD squared error of the 64x64 research image at 4 998 895.
   - Supersedes: F (the BC1 decoder model bullet), CN32/CN33/CN64 (in part: the per-process model sentences).
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FM13 The old-version upgrade code is gone; the newer-version refusals stay (audit §3, controller ruling P4, 2026-11-02).** Deleted: `PRESET_STEPS`, `CONFIG_STEPS`, `MANIFEST_STEPS`, `run`, `manifest_v1_to_v2`, `check_aliases` (the migrate one; `PresetRegistry::check_aliases` for suffix aliases is a different check and stays). Kept: `NoVersion` and `Newer` (`PresetError::NewerSchema`, `NewerConfigSchema`), `ManifestEntry::is_newer_schema`, and `PresetRegistry.tables`. Not deleted here: `PresetRegistry::export`, `validate_file`, `texts` and `loaded_from`, which the CLI `presets export` and `presets validate` verbs still call; the task that removes those verbs removes them together. The IN-FLOAT-LDR tests stay where they are for the task that moves them.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FM14 NVTT is removed everywhere; VAL-BC6H-PEAK advice reworded (plan task 4, 2026-11-02).** The optional external encoder backend (`nvcompress`) is gone: `crates/engine/src/nvtt.rs`, the `nvcompress` test fake, `Backend::Nvtt`, `EncoderVersions.nvtt`, `BatchRequest.nvtt`, `--nvtt` on `convert` and `encoders`, the three codes `ENC-NVTT-MISSING`, `ENC-NVTT-VERSION` and `ENC-NVTT-FAILED` (118 codes become 115), the GUI's NVTT path (Advanced drawer, `gui.toml` `nvtt_path`, the picker purpose), the Encoder row in the settings, preset and bulk panels, the Encoder filter in the Textures column (and the saved `filter_encoder`), the `NVTT-Backend` wiki page, the bug template's NVTT dropdown and the NVTT 3 rows of the README charts. A preview now always encodes with the profile's own backend. `encoder.backend = "nvtt"` and an `allow` list naming one of the three codes are errors that name the removal (`migrate::REMOVED`, FM10); `--nvtt` is a usage error (exit 2) from clap. `identity.json` is unchanged: no built-in output moved. `VAL-BC6H-PEAK` advice no longer offers NVTT as the other way to keep the peak: it says to set `encoder.effort = "slowest"`. Supersedes: Y9, all of Note NV, AF3 (and its AF9 sub-bullet), BC9, BC12, BQ3, CV3 and CV15 (moved whole); AF10, AF11, AG40, AG42, AG46, AG111, AM5, BC13, BS3, CN33, CP4, CV21, DM4, DT2, FB8, FE7, FF6, FL2 and the BC7-exactness bullet of Note AH (the NVTT wording edited out, old wording archived). Code comments that cited NV, AF3 or BC9 went with the code they described.
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+  - **Patch header.** It still refuses BC1 with transparent texels (S7); the reason now names `encoder.bc1_alpha`.
+
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
@@ -1541,6 +1631,9 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - BC1 is opaque-only in v1 (no 1-bit alpha). rgbcx 3-colour mode stays on but **never emits transparent-black texels** (equivalent to bc7enc_rdo `-b`), so decoded alpha is always 255.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- Provenance: **batch manifest by default**; per-file `.dds.json` sidecars optional.
 
 ## Note K — Task 44 CLI edge-case rulings (controller, 2026-10-09)
 
@@ -1551,6 +1644,9 @@ ARCHIVED (superseded by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 `validate` infers the alpha policy from the file: mip-0 alpha ≥ 254 everywhere → `remove`; otherwise the sub-type's alpha-keeping default, or `data`. `--alpha-policy` overrides it. `alpha.exact_opaque` is a promise of sdc's own encoder, so `validate` sets it off whatever the sub-type's preset says (a third-party BC7 whose alpha decodes to 254 passes with the `ALPHA-254` info); `--exact-opaque` asks for the 255 guarantee (Codex-CLI 3). Conversion-time validation is unchanged. For sub-type inference, mip-0 alpha with a minimum of 251 or more is not varying (Note L).
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+The verbs whose report *is* the result print their human report on **stdout**: `inspect`, `validate`, `presets` and `encoders`.
 
 ## Note L — near-opaque source alpha (owner, 2026-10-09)
 
@@ -1575,3 +1671,26 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **AL5 `_rfaos` notes the dropped ORM metallic (fix round 1).** A cs set with an `_orm` and a fuzz source (or `packing.recipe = rfaos`) builds `_rfaos`, which has no metallic channel. The `_orm` is still used for R and B, so it is not `PACK-UNUSED-INPUT`; the packed job gets a `PACK-ORM-OVERRIDDEN` info note naming the unused B instead. That code now covers any `_orm` channel left unused.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AL3 Representation.** `ChannelSource::Source` gains an optional `channel` (0..=2), serialised only when set, so a job without an `_orm` keeps its JSON and manifest bytes; provenance reads `iron_orm.png:G`. The packed source's role is `orm`. `RawMap::ALL` stays the eight single-channel roles that have a `packing.fill` (`--fill orm=…` is refused); `RawMap::INPUTS` adds `orm` where a file name is mapped to a role. The engine version stays 0.7.0; outputs of sets without an `_orm` are unchanged.
+
+## Answers
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+| 15 | Reserved-header hash | Deferred; sidecar first. |
+
+## Note AZ — cpm target removed (owner, 2026-10-15)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **AZ1 Hard error.** `Target` is `cs` or `vanilla`; `TargetArg` lost `Cpm`. Serde and clap reject `cpm` in `--target` (convert, validate, patch-header), `sdc.toml`, the user config and a preset's `target`. `--preset cpm-quality` and `base = "cpm-quality"` are unknown presets. No alias was added. The CLI exits 2 for each (tested). `sdc-project.toml` has no target field, so it has nothing to reject. A manifest is read leniently (its `target` is not deserialised as `Target`): an old cpm record no longer matches and re-encodes once under `if-changed`. A user preset in `%APPDATA%\sdc\presets\` with `target = "cpm"` is skipped with `CFG-PRESET-SKIPPED` (Note T6, unchanged; the run goes on), and the warning's reason names the unknown variant `cpm`; selecting that preset is then an unknown-preset error (review M3, tested).
+
+## Note BI — GUI doc state and caches (audit 2026-10-16)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **BI6 Small items.** GM-6: `open_folder` resets `dds_patch`. GM-5: the mesh-evidence and known-paths read errors are Messages warnings ("Scan database: …"), each distinct text once (`scan_db_error`, cleared by a successful read and by `open_folder`). GM-4: `export_ended(Result)` serves `ExportDone` and the export `Panicked` arm (`Err("internal error: …")`): the pace clock stops, pending JSON/CS/CM are finished or noted, and an error is always logged before the dialog decision; the panic arm still shows its own error dialog. LC-7: `ProjectDoc::read_as_all` (no readers) is gone. GM-10: a model unit test replaces every mesh-evidence read with alternating GRAS sets and checks three plans, then the "sets changed while planning" refusal.
+
+## Note FI — GUI review D fixes (main team, 2026-10-31)
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **FI3.** A DDS input is re-encoded from a button (texture panel **Re-encode this file**, bulk panel **Re-encode *n* DDS files**), which writes the S6 `reencode` selector to the file's `[files]` entry as one undo step (`AppModel::set_reencode`; off clears the field, false is never stored; refused while `sdc.toml` is read-only); the hand-edit hint goes (extends FC10's hand-remedy rule; S6's default off stands). A re-encoded DDS (it has a job, or failed at plan) shows **Stop re-encoding** at the top of its panel. The button is off for a DDS another input already writes, since re-encoding it would make both blocking duplicates (`IN-DUPLICATE`, `api.rs` duplicate check): `reencode_blocker` compares the item's `job_key` (the case-folded output path) with every other item that has a job, which leaves out GEN-REPLACED and IN-DUPLICATE inputs (no job) and counts an image twin or another re-encoded DDS. The bulk row counts only skipped DDS files without a blocker and names the left-out ones on hover. Into the folder it comes from, the button stays on (its hover says it cannot be written there) and S6 fails the file at plan: a red Failed row, never a silent skip. The panel says a skipped DDS is not written to the export, and its header issues read as one line in words with the raw `check_header` fields on hover (naming **Patch header…** when it is offered). Re-encoding the diffuse of an all-DDS PBR set (FI2) gives the set `pbr`, its Diffuse slot and its PGPatcher JSON entry; re-encoding only another member leaves `pbr` off, since `SetView.pbr` follows the diffuse's job. The FC1 recording the re-encode's settled plan makes (the new job's sub-type) joins the re-encode's step by its history merge key, as FC8's weighting follow does, and gets no Problems row of its own: one Undo takes back the selector and the types it caused, one Redo puts both back. FC1 is unchanged for every other trigger. No bytes change for files that are not opted in.
