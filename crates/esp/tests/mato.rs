@@ -292,3 +292,23 @@ fn owner_faultier_values() {
         (0.4, 0.5, 20.0)
     );
 }
+
+#[test]
+fn an_edid_padded_with_nuls_is_found_as_the_scan_stores_it() {
+    let r = rec(
+        b"MATO",
+        0x0100_0810,
+        &[sub(b"EDID", b"Snow\0\0"), sub(b"DATA", &data48())],
+    );
+    assert!(mato_data(&mato_plugin(&[r]), "Snow").is_some());
+}
+
+#[test]
+fn a_windows_1252_edid_is_found_by_its_decoded_name() {
+    let r = rec(
+        b"MATO",
+        0x0100_0811,
+        &[sub(b"EDID", b"Sn\xF6\0"), sub(b"DATA", &data48())],
+    );
+    assert!(mato_data(&mato_plugin(&[r]), "Sn\u{f6}").is_some());
+}
