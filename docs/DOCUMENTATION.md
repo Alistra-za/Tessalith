@@ -7,7 +7,7 @@ They cover these files:
 - **The ruling log:** .claude/DECISIONS.md.
 - **History:** CHANGELOG.md (versions) and docs/presets-changelog.md (presets).
 
-docs/research/ is a record of measurements. It may describe old results, but each page states the date and the build it measured.
+docs/research/ is a record of measurements. It may describe old results, but each page states the date and the build it measured. Research is organised by format or texture type (BC1, BC4 family, BC7, BC6H, mips and alpha), not by date: a new measurement goes into its format's section and replaces or extends what is there, rather than becoming another dated chapter.
 
 ## 1. Current state only
 Documentation describes the build on `main` as it is now. History lives only in the changelog.
@@ -47,6 +47,13 @@ Every fact has exactly one home: the one place where it is explained in full, wi
 - **Say what happens.** "Export skips the file and adds a Problems row" is precise. "Export may have trouble with it" is not.
 - **Every claim can be checked against the code or a test.** If you can't find where the code does it, don't write it.
 - **State defaults and limits in the home only.** A short reference never restates a number, because numbers drift. It links instead.
+
+## 3a. Brief (owner, 2026-11-02)
+The docs grew too large, mostly from over-explaining and over-stating limits. Write for a reader who can infer.
+- **Don't explain what the name already says.** A generic term or a self-describing setting gets no sentence of its own. Explain only what a reader could get wrong.
+- **State a limit once, plainly, at its home.** Don't repeat a caveat, soften it with "note that…", or warn about cases nobody will hit.
+- **A methodology caveat is explained once, where it first comes up, then dropped.** Example: perceptual metrics (error weighting tuned for colour seen by the eye) don't fit linear data such as normals, masks and height. Say that and why once, at its first use on the page. Later rows and tables just omit or mark those cells. Repeating the caveat reads as surprise at our own method.
+- **Tools:** write new prose with the `writing-docs-without-ai-tells` skill; rewrite existing prose with the `humanizer` skill. Both keep the facts and cut AI-style padding.
 
 ## 4. Page size and structure
 - **Size budget:** a wiki page holds at most about 15 KB of text, around 2,500 words. Over that, split it. A page under about 2 KB merges into its parent.
@@ -106,7 +113,7 @@ DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only r
 **Why archive.** DECISIONS.md had grown to about 1.3 MB across 139 notes. That is too big to read whole, so agents search it. A search returns superseded rulings beside the live ones with no way to tell them apart. Agents have planned from stale rulings: the first drafts of the 2026-10-29 fix plans were rejected for exactly that.
 
 ## 8. Checklist for a documentation change
-1. Find the fact's home. Edit it there.
+1. Find the fact's home. Edit it there, with the skills in §3a.
 2. Grep for other mentions. At most one short reference stays, two only if essential. Every reference links to the home.
 3. Delete what is no longer true, everywhere, and make sure the change is in CHANGELOG.md.
 4. Check page sizes and split any page over budget. Update _Sidebar.md.
