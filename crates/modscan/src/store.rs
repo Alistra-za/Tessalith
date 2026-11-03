@@ -140,31 +140,6 @@ pub enum DerivedState {
     InOverwrite = 3,
 }
 
-/// `nif_copy.derive_check` as stored (integer) and shown (string).
-pub fn check_code(c: crate::pgp::DeriveCheck) -> i32 {
-    use crate::pgp::DeriveCheck::*;
-    match c {
-        Match => 0,
-        StaleChanged => 1,
-        StaleReordered => 2,
-        Unverified => 3,
-        UnknownSource => 4,
-        DupOf => 5,
-    }
-}
-
-pub fn check_name(code: i32) -> Option<&'static str> {
-    Some(match code {
-        0 => "match",
-        1 => "stale_changed",
-        2 => "stale_reordered",
-        3 => "unverified",
-        4 => "unknown",
-        5 => "dup_of",
-        _ => return None,
-    })
-}
-
 /// Where the game gets a texture slot path from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TexResolution {
@@ -192,8 +167,6 @@ pub struct NifRow {
     pub overridden_by: Option<String>,
     pub n_copies: u32,
     pub derived: bool,
-    /// Own check for a derived copy; for a source copy patched in game, the check of the derived winner.
-    pub derive_check: Option<String>,
     pub le_mesh: bool,
     pub problem: Option<String>,
     /// The game winner is a derived copy whose source copy is this copy.
@@ -411,7 +384,6 @@ pub struct ChunkItem {
     pub origin_id: i64,
     pub size: u64,
     pub mtime: i64,
-    pub crc32: Option<u32>,
     /// Derived copies are staged in `pending_derived` until the post-walk PGPatcher check passes.
     pub derived: bool,
     pub result: CopyResult,
@@ -439,7 +411,6 @@ pub struct CopyMeta {
     pub parse_status: i32,
     pub le_mesh: bool,
     pub problem: Option<String>,
-    pub crc32: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -459,7 +430,6 @@ pub struct DeriveRow {
     pub copy_id: i64,
     pub is_derived: bool,
     pub source_copy_id: Option<i64>,
-    pub derive_check: Option<i32>,
 }
 
 /// One copy of a NIF path ([`Store::copies_of_path`]). `derived`: the copy is PGPatcher output (`nif_copy.is_derived`:
@@ -727,7 +697,7 @@ fn upsert_copy_row(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                it.crc32.map(i64::from),
+                Option::<i64>::None, // Task 7 drops nif_copy.crc32
                 status,
                 bsver.map(i64::from),
                 le,
@@ -760,7 +730,7 @@ fn stage_derived(
                 it.origin_id,
                 it.stored_size(),
                 it.stored_mtime(),
-                it.crc32.map(i64::from),
+                Option::<i64>::None, // Task 7 drops pending_derived.crc32
                 status,
                 bsver.map(i64::from),
                 le,
@@ -1089,7 +1059,7 @@ impl Store {
 
     pub fn existing_copies(&self) -> Result<HashMap<(i64, i64), CopyMeta>, ScanError> {
         let mut st = self.conn.prepare(
-            "SELECT id, path_id, origin_id, size, mtime, parse_status, le_mesh, problem, crc32 FROM nif_copy",
+            "SELECT id, path_id, origin_id, size, mtime, parse_status, le_mesh, problem FROM nif_copy",
         )?;
         let rows = st.query_map([], |r| {
             Ok((
@@ -1101,7 +1071,6 @@ impl Store {
                     parse_status: r.get(5)?,
                     le_mesh: r.get(6)?,
                     problem: r.get(7)?,
-                    crc32: r.get::<_, Option<i64>>(8)?.map(|c| c as u32),
                 },
             ))
         })?;
@@ -1173,7 +1142,6 @@ impl Store {
         size: u64,
         mtime: i64,
         result: CopyResult,
-        crc32: Option<u32>,
     ) -> Result<i64, ScanError> {
         let tx = self.conn.transaction()?;
         let it = ChunkItem {
@@ -1181,7 +1149,6 @@ impl Store {
             origin_id,
             size,
             mtime,
-            crc32,
             derived: false,
             result,
         };
@@ -1324,33 +1291,15 @@ impl Store {
         Ok(v)
     }
 
-    /// Replaces `pgp_diff` with path → (crc32original, crc32patched).
-    pub fn set_pgp_diff(&mut self, diff: &HashMap<String, (u32, u32)>) -> Result<(), ScanError> {
-        let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM pgp_diff", [])?;
-        for (p, (o, n)) in diff {
-            let id = intern_path(&tx, &mut self.intern, p)?;
-            tx.prepare_cached("INSERT OR REPLACE INTO pgp_diff VALUES (?1,?2,?3)")?
-                .execute(params![id, *o as i64, *n as i64])?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Writes the derived-layer columns for every copy, in one transaction.
     pub fn set_derived(&mut self, rows: &[DeriveRow]) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
         {
             let mut u = tx.prepare(
-                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3, derive_check = ?4 WHERE id = ?1",
+                "UPDATE nif_copy SET is_derived = ?2, source_copy_id = ?3, derive_check = NULL WHERE id = ?1",
             )?;
             for r in rows {
-                u.execute(params![
-                    r.copy_id,
-                    r.is_derived,
-                    r.source_copy_id,
-                    r.derive_check
-                ])?;
+                u.execute(params![r.copy_id, r.is_derived, r.source_copy_id])?;
             }
         }
         tx.commit()?;
@@ -1694,8 +1643,8 @@ fn match_sql(cond: &str) -> String {
 }
 
 /// Columns and joins shared by `nifs_of`, `winners` and `losers`; each adds its own WHERE and ORDER BY.
-const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.derive_check, c.le_mesh, c.problem,
-        w.copy_id, w.n_copies, wc.is_derived, wc.source_copy_id, wc.derive_check, wo.name,
+const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.le_mesh, c.problem,
+        w.copy_id, w.n_copies, wc.is_derived, wc.source_copy_id, wo.name,
         ws.copy_id, so.name, co.name
  FROM nif_copy c JOIN path p ON p.id = c.path_id
  JOIN origin co ON co.id = c.origin_id AND co.enabled = 1
@@ -1710,15 +1659,13 @@ const NIF_ROWS: &str = "SELECT c.id, p.p, c.is_derived, c.derive_check, c.le_mes
 fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
     let id: i64 = r.get(0)?;
     let derived: bool = r.get(2)?;
-    let own_check: Option<i32> = r.get(3)?;
-    let win: Option<i64> = r.get(6)?;
-    let n: Option<i64> = r.get(7)?;
-    let win_derived: Option<bool> = r.get(8)?;
-    let win_source: Option<i64> = r.get(9)?;
-    let win_check: Option<i32> = r.get(10)?;
-    let win_origin: Option<String> = r.get(11)?;
-    let src: Option<i64> = r.get(12)?;
-    let src_origin: Option<String> = r.get(13)?;
+    let win: Option<i64> = r.get(5)?;
+    let n: Option<i64> = r.get(6)?;
+    let win_derived: Option<bool> = r.get(7)?;
+    let win_source: Option<i64> = r.get(8)?;
+    let win_origin: Option<String> = r.get(9)?;
+    let src: Option<i64> = r.get(10)?;
+    let src_origin: Option<String> = r.get(11)?;
     let wins = win == Some(id);
     let patched_in_game = !wins && win_derived == Some(true) && win_source == Some(id);
     let overridden_by = if wins {
@@ -1730,13 +1677,6 @@ fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
     } else {
         None
     };
-    let check = if derived {
-        own_check
-    } else if patched_in_game {
-        win_check
-    } else {
-        None
-    };
     let row = NifRow {
         copy_id: id,
         path: r.get(1)?,
@@ -1744,10 +1684,9 @@ fn nif_row(r: &rusqlite::Row) -> rusqlite::Result<(NifRow, String)> {
         overridden_by,
         n_copies: n.unwrap_or(0) as u32,
         derived,
-        derive_check: check.and_then(check_name).map(str::to_string),
-        le_mesh: r.get(4)?,
-        problem: r.get(5)?,
+        le_mesh: r.get(3)?,
+        problem: r.get(4)?,
         patched_in_game,
     };
-    Ok((row, r.get(14)?))
+    Ok((row, r.get(12)?))
 }

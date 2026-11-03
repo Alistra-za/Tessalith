@@ -112,14 +112,7 @@ fn shapes_of_shares_one_name_across_rows() {
         })
         .collect();
     let id = s
-        .upsert_copy(
-            "meshes/x.nif",
-            o,
-            1,
-            1,
-            CopyResult::Scanned(scan_of(rows)),
-            None,
-        )
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan_of(rows)))
         .unwrap();
     let v = s.shapes_of(id).unwrap();
     assert_eq!(v.len(), 2000);
@@ -157,7 +150,7 @@ fn raw_strings_and_flags_are_kept_for_odd_slots() {
         },
     ]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let v = s.shapes_of(id).unwrap();
     assert_eq!(v.len(), 2);
@@ -197,7 +190,6 @@ fn raw_strings_and_flags_are_kept_for_odd_slots() {
             2,
             2,
             CopyResult::Scanned(scan_of(vec![])),
-            None,
         )
         .unwrap();
     assert_eq!(id, id2);
@@ -221,7 +213,7 @@ fn more_than_nine_slots_is_recorded_as_a_problem() {
         alpha: None,
     }]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::from(Ok(scan)), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::from(Ok(scan)))
         .unwrap();
     let (status, problem): (i32, Option<String>) = s
         .conn()
@@ -341,7 +333,7 @@ fn put(s: &mut Store, path: &str, o: i64, block: u32, shader: Shader, skinned: b
         shader,
         alpha: None,
     }]);
-    s.upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan), None)
+    s.upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan))
         .unwrap()
 }
 
@@ -426,7 +418,6 @@ fn query_store() -> (tempfile::TempDir, Store, HashMap<&'static str, i64>) {
         copy_id: ids["d"],
         is_derived: true,
         source_copy_id: Some(ids["d_src"]),
-        derive_check: Some(0),
     }])
     .unwrap();
     let names = ["a", "b", "c", "d", "e", "f", "g"];
@@ -738,7 +729,7 @@ fn small_store(nifs: &[(&str, Shapes)]) -> (tempfile::TempDir, Store) {
             })
             .collect();
         ids.push(
-            s.upsert_copy(path, a, 1, 1, CopyResult::Scanned(scan_of(rows)), None)
+            s.upsert_copy(path, a, 1, 1, CopyResult::Scanned(scan_of(rows)))
                 .unwrap(),
         );
     }
@@ -1051,15 +1042,8 @@ fn a_cold_scan_runs_with_synchronous_off_and_ends_normal() {
     assert_eq!(pragma(&s, "synchronous"), 0, "OFF during a cold scan");
     s.end_scan().unwrap();
     assert_eq!(pragma(&s, "synchronous"), 1);
-    s.upsert_copy(
-        "meshes/a.nif",
-        1,
-        1,
-        1,
-        CopyResult::Failed("x".into()),
-        None,
-    )
-    .unwrap();
+    s.upsert_copy("meshes/a.nif", 1, 1, 1, CopyResult::Failed("x".into()))
+        .unwrap();
     s.begin_scan().unwrap();
     assert_eq!(pragma(&s, "synchronous"), 1, "a warm scan keeps NORMAL");
     s.end_scan().unwrap();
@@ -1158,7 +1142,7 @@ fn shapes_of_round_trips_the_3d_index() {
     ]);
     scan.index3d = BTreeMap::from([(7, 0)]);
     let id = s
-        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy("meshes/x.nif", o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let v: Vec<(u32, Option<u32>)> = s
         .shapes_of(id)
@@ -1189,7 +1173,6 @@ fn a_derived_copy_keeps_its_3d_index_through_commit_pending() {
         origin_id: o,
         size: 1,
         mtime: 1,
-        crc32: None,
         derived: true,
         result: CopyResult::Scanned(scan),
     }])
@@ -1266,7 +1249,7 @@ fn winners_read_time_on_100k_paths() {
     for (i, p) in paths.iter().enumerate() {
         let o = if i % 10 == 0 { b } else { a };
         let id = s
-            .upsert_copy(p, o, 1, 1, CopyResult::Scanned(scan_of(vec![])), None)
+            .upsert_copy(p, o, 1, 1, CopyResult::Scanned(scan_of(vec![])))
             .unwrap();
         game.insert(pid[i], (id, 1));
     }
@@ -1323,7 +1306,6 @@ fn copies_of_path_orders_loose_by_priority_then_bsas() {
         copy_id: ids[2],
         is_derived: true,
         source_copy_id: None,
-        derive_check: None,
     }])
     .unwrap();
     let c = s.copies_of_path(p).unwrap();

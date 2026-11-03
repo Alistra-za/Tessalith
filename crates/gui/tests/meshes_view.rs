@@ -43,7 +43,6 @@ fn nif(copy_id: i64, path: &str) -> NifRow {
         overridden_by: None,
         n_copies: 1,
         derived: false,
-        derive_check: None,
         le_mesh: false,
         problem: None,
         patched_in_game: false,
@@ -82,7 +81,6 @@ fn mod_list_and_badges() {
     m.nifs = Arc::new(vec![NifRow {
         wins: false,
         n_copies: 2,
-        derive_check: Some("stale_changed".into()),
         patched_in_game: true,
         ..nif(1, "meshes/x.nif")
     }]);
@@ -94,28 +92,25 @@ fn mod_list_and_badges() {
     // Review C17: the row says the path is under meshes\ (a dimmed prefix), so !ube/… reads as a path.
     h.get_by_label("meshes/x.nif");
     h.get_by_label("Patched by PGPatcher (in game)");
-    h.get_by_label("PGPatcher patch out of date");
 }
 
 /// Note GC16 (review fix 3): in a row too narrow for every chip, the warnings come first and stay in sight, and
 /// hovering the chips lists every one in full (rule 3.4), the mod's own chip too.
 #[test]
-fn a_patched_stale_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip() {
-    use sdc_gui::model::meshes::{DERIVED_CHIP, STALE_CHIP};
+fn a_patched_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip() {
+    use sdc_gui::model::meshes::DERIVED_CHIP;
     let mut m = MeshesModel::empty();
     m.mods = vec![mod_row(1, "PGPatcher output", 1, true)];
     let row = NifRow {
         wins: false,
         patched_in_game: true,
         le_mesh: true,
-        derive_check: Some("stale_changed".into()),
         ..nif(1, "meshes/x.nif")
     };
     m.winners = Arc::new(vec![(row, "PGPatcher output".to_string())]);
     let mut h = harness(m);
     h.run();
-    // A label cut by its cell is elided ("…"), so each warning's rect must hold its whole shown text: the short
-    // "Stale patch" at least (its full name is the AccessKit name).
+    // A label cut by its cell is elided ("…"), so the warning's rect must hold its whole shown text.
     let font = eframe::egui::TextStyle::Small.resolve(&h.ctx.global_style());
     let width = |text: &str| {
         h.ctx.fonts_mut(|f| {
@@ -124,21 +119,14 @@ fn a_patched_stale_row_keeps_its_warning_in_sight_and_its_hover_lists_every_chip
                 .x
         })
     };
-    for (name, shown) in [(STALE_CHIP, "Stale patch"), ("LE", "LE")] {
-        let r = h.get_by_role_and_label(Role::Label, name).rect();
-        assert!(
-            r.width() + 0.5 >= width(shown),
-            "{name} is cut by its cell: {r:?}"
-        );
-    }
+    let r = h.get_by_role_and_label(Role::Label, "LE").rect();
+    assert!(
+        r.width() + 0.5 >= width("LE"),
+        "LE is cut by its cell: {r:?}"
+    );
     h.get_by_role_and_label(Role::Label, "LE").hover();
     h.run();
-    for text in [
-        "Patched by PGPatcher (in game)",
-        STALE_CHIP,
-        "LE",
-        DERIVED_CHIP,
-    ] {
+    for text in ["Patched by PGPatcher (in game)", "LE", DERIVED_CHIP] {
         assert_eq!(
             h.query_all_by_label(text).count(),
             2,
@@ -257,15 +245,11 @@ fn shapes_show_shader_type_flags_and_slot_resolution() {
 }
 
 #[test]
-fn incomplete_and_stale_banners_use_the_spec_text() {
+fn the_incomplete_banner_uses_the_spec_text() {
     assert_eq!(
         Banner::PgpIncomplete("PGP".into()).text(),
         "PGPatcher output 'PGP' looks incomplete (no ParallaxGen_Diff.json). Re-run PGPatcher."
     );
-    let mut h = harness(model_with(Some(Banner::PgpStale(3))));
-    h.run();
-    h.get_by_label("PGPatcher output is out of date for 3 meshes.");
-    h.get_by_label("Show list");
 }
 
 #[test]
@@ -443,8 +427,10 @@ fn a_running_pgpatcher_is_a_banner_and_skip_scans_without_its_output() {
     assert!(m.mods.iter().all(|r| r.name != "PGP"));
 }
 
+/// Note GJ6: a PGPatcher copy whose source no longer matches the Diff (the old "stale" case) is an ordinary derived
+/// row: the PGPatcher chip and the In game / Source toggle, and no Stale chip, banner or "PGPatcher check" line.
 #[test]
-fn stale_output_raises_the_stale_banner_with_its_list() {
+fn a_derived_row_has_no_stale_chip_or_banner() {
     let d = instance("+PGP\n+A\n");
     put(d.path(), "mods/A/meshes/x.nif", None);
     put(d.path(), "mods/PGP/meshes/x.nif", None);
@@ -461,12 +447,23 @@ fn stale_output_raises_the_stale_banner_with_its_list() {
     let req = m.take_request().unwrap();
     m.start(req);
     wait(&mut m);
-    assert_eq!(m.banner, Some(Banner::PgpStale(1)));
-    m.show_stale_list();
-    assert_eq!(
-        m.stale_list.as_deref(),
-        Some(&[("meshes/x.nif".to_string(), "PGP".to_string())][..])
-    );
+    assert_eq!(m.banner, None);
+    // Any mod lists the PGPatcher copy, the game's winner for the path.
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("PGPatcher");
+    let a_id = h.state().mods.iter().find(|r| r.name == "A").unwrap().id;
+    h.state_mut().select_mod(a_id);
+    let copy = h.state().nifs[0].copy_id;
+    h.state_mut().select_nif(copy);
+    h.run();
+    h.get_by_label("In game");
+    h.get_by_label("Source");
+    for text in ["Stale patch", "PGPatcher patch out of date", "Show list"] {
+        assert!(h.query_by_label(text).is_none(), "{text}");
+    }
+    assert_eq!(h.query_all_by_label_contains("out of date").count(), 0);
+    assert_eq!(h.query_all_by_label_contains("PGPatcher check").count(), 0);
 }
 
 #[test]
@@ -587,18 +584,9 @@ fn owner_meshes_view() {
     for n in m.nifs.iter() {
         *labels.entry(n.status_label()).or_default() += 1;
     }
-    let stale = m
-        .nifs
-        .iter()
-        .filter(|n| {
-            n.derive_check
-                .as_deref()
-                .is_some_and(|c| c.starts_with("stale"))
-        })
-        .count();
     let le = m.nifs.iter().filter(|n| n.le_mesh).count();
     let problems = m.nifs.iter().filter(|n| n.problem.is_some()).count();
-    println!("badges: {labels:?}; stale chips {stale}; LE {le}; problems {problems}");
+    println!("badges: {labels:?}; LE {le}; problems {problems}");
     if let Some(n) = m.nifs.iter().find(|n| n.patched_in_game).cloned() {
         let t = Instant::now();
         m.select_nif(n.copy_id);

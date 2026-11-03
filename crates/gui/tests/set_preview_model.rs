@@ -878,7 +878,7 @@ pub fn scan_db_with(dir: &Path, slots: &[&str], le_mesh: bool) -> PathBuf {
     };
     let path = "meshes/landscape/rocks/rock01.nif";
     let id = s
-        .upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy(path, o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let pid = s.path_ids(&[path]).unwrap()[0];
     s.set_winners(&[(pid, (id, 1))].into_iter().collect(), &Default::default())

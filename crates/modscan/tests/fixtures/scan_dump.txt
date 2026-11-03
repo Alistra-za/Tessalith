@@ -7,9 +7,9 @@ nif_copy|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa|21861|1|NULL|0|100|0|0|NULL|
 nif_copy|meshes/fo4.nif|<root>/mods/B|11327|1|NULL|2|130|0|0|NULL|NULL|not a Skyrim LE/SE NIF (version 0x14020007, user 12, BS version 130)
 nif_copy|meshes/le.nif|<root>/mods/B|14945|1|NULL|0|83|1|0|NULL|NULL|NULL
 nif_copy|meshes/multi.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/A|21861|1|1326886995|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/B|21861|1|1326886995|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|0|NULL
+nif_copy|meshes/x.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/B|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|NULL|NULL
 nif_winner_src|meshes/a_only.nif|meshes/a_only.nif|<root>/mods/A
 nif_winner_src|meshes/bad.nif|meshes/bad.nif|<root>/mods/A
 nif_winner_src|meshes/bsa/inbsa.nif|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa
@@ -54,7 +54,6 @@ path|textures/white.dds
 path|textures/x.dds
 path|textures/y.jpeg
 path|textures/z/q.dds
-pgp_diff|meshes/x.nif|1326886995|1
 plugin|Bar.esp|<root>/mods/B/Bar.esp|225|1|0|0|["Foo.esp"]|NULL
 plugin|Baz.esp|<root>/mods/B/Baz.esp|117|2|1|512|[]|NULL
 plugin|Foo.esp|<root>/mods/A/Foo.esp|288|0|0|0|[]|NULL
@@ -129,9 +128,9 @@ nif_copy|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa|21861|1|NULL|0|100|0|0|NULL|
 nif_copy|meshes/fo4.nif|<root>/mods/B|11327|1|NULL|2|130|0|0|NULL|NULL|not a Skyrim LE/SE NIF (version 0x14020007, user 12, BS version 130)
 nif_copy|meshes/le.nif|<root>/mods/B|14945|1|NULL|0|83|1|0|NULL|NULL|NULL
 nif_copy|meshes/multi.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/A|21861|1|1326886995|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/B|21861|1|1326886995|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|0|NULL
+nif_copy|meshes/x.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/B|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|NULL|NULL
 nif_winner_src|meshes/a_only.nif|meshes/a_only.nif|<root>/mods/A
 nif_winner_src|meshes/bad.nif|meshes/bad.nif|<root>/mods/A
 nif_winner_src|meshes/bsa/inbsa.nif|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa
@@ -176,7 +175,6 @@ path|textures/white.dds
 path|textures/x.dds
 path|textures/y.jpeg
 path|textures/z/q.dds
-pgp_diff|meshes/x.nif|1326886995|1
 plugin|Bar.esp|<root>/mods/B/Bar.esp|225|1|0|0|["Foo.esp"]|NULL
 plugin|Baz.esp|<root>/mods/B/Baz.esp|117|2|1|512|[]|NULL
 plugin|Foo.esp|<root>/mods/A/Foo.esp|288|0|0|0|[]|NULL
@@ -250,9 +248,9 @@ nif_copy|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa|21861|1|NULL|0|100|0|0|NULL|
 nif_copy|meshes/fo4.nif|<root>/mods/B|11327|1|NULL|2|130|0|0|NULL|NULL|not a Skyrim LE/SE NIF (version 0x14020007, user 12, BS version 130)
 nif_copy|meshes/le.nif|<root>/mods/B|14945|1|NULL|0|83|1|0|NULL|NULL|NULL
 nif_copy|meshes/multi.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/A|21861|1|1326886995|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/B|21861|1|1084105575|0|100|0|0|NULL|NULL|NULL
-nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|2|NULL
+nif_copy|meshes/x.nif|<root>/mods/A|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/B|21861|1|NULL|0|100|0|0|NULL|NULL|NULL
+nif_copy|meshes/x.nif|<root>/mods/PGP|21861|1|NULL|0|100|0|1|meshes/x.nif@<root>/mods/B|NULL|NULL
 nif_winner_src|meshes/bad.nif|meshes/bad.nif|<root>/mods/A
 nif_winner_src|meshes/bsa/inbsa.nif|meshes/bsa/inbsa.nif|<root>/mods/A/Foo.bsa
 nif_winner_src|meshes/fo4.nif|meshes/fo4.nif|<root>/mods/B
@@ -296,7 +294,6 @@ path|textures/white.dds
 path|textures/x.dds
 path|textures/y.jpeg
 path|textures/z/q.dds
-pgp_diff|meshes/x.nif|1326886995|1
 plugin|Bar.esp|<root>/mods/B/Bar.esp|225|1|0|0|["Foo.esp"]|NULL
 plugin|Baz.esp|<root>/mods/B/Baz.esp|117|2|1|512|[]|NULL
 plugin|Foo.esp|<root>/mods/A/Foo.esp|288|0|0|0|[]|NULL

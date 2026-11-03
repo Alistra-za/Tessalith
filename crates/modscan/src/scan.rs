@@ -2,11 +2,11 @@
 //! winners, link PGPatcher-derived copies to their sources.
 use crate::archives::{active_bsas, ActiveBsa};
 use crate::mo2::{loose_origins, Instance, LooseOrigin, OriginKind};
-use crate::pgp::{self, DeriveCheck, Diff, Signature};
+use crate::pgp::{self, Diff, Signature};
 use crate::resolve::{winners, Copy, OriginRef};
 use crate::store::{
-    check_code, ChunkItem, CopyResult, DeriveRow, DerivedState, OriginSpec, ScanLock, Store,
-    KIND_BSA, KIND_DATA, KIND_MOD, KIND_OVERWRITE, KIND_SEPARATOR, PARSE_FAILED, PARSE_NOT_SKYRIM,
+    ChunkItem, CopyResult, DeriveRow, DerivedState, OriginSpec, ScanLock, Store, KIND_BSA,
+    KIND_DATA, KIND_MOD, KIND_OVERWRITE, KIND_SEPARATOR, PARSE_FAILED, PARSE_NOT_SKYRIM,
 };
 use crate::ScanError;
 use nif::path::{is_facegen, is_lod_path};
@@ -386,31 +386,11 @@ fn scan_body(
     // 4. Parse or reuse.
     let path_ids = store.path_ids(&copies.iter().map(|c| c.path.as_str()).collect::<Vec<_>>())?;
     let existing = store.existing_copies()?;
-    // Source candidates of derived copies: every non-derived copy of a derived copy's (dup-stripped) path.
-    let source_paths: HashSet<String> = copies
-        .iter()
-        .zip(&derived)
-        .filter(|(_, d)| **d)
-        .map(|(c, _)| pgp::dup_source(&c.path).unwrap_or_else(|| c.path.clone()))
-        .collect();
-    let candidate: Vec<bool> = copies
-        .iter()
-        .zip(&derived)
-        .map(|(c, d)| !d && source_paths.contains(&c.path))
-        .collect();
-    let mut crc_known: HashMap<usize, u32> = HashMap::new();
     let mut work = vec![];
     for (i, c) in copies.iter().enumerate() {
         match existing.get(&(path_ids[i], origin_id(c.origin))) {
-            Some(m)
-                if m.size == Some(c.size)
-                    && m.mtime == Some(c.mtime)
-                    && !(candidate[i] && m.crc32.is_none()) =>
-            {
+            Some(m) if m.size == Some(c.size) && m.mtime == Some(c.mtime) => {
                 report.reused += 1;
-                if let Some(crc) = m.crc32 {
-                    crc_known.insert(i, crc);
-                }
                 if m.le_mesh {
                     report.le_meshes += 1;
                 }
@@ -448,7 +428,7 @@ fn scan_body(
                 done: n * CHUNK,
                 total,
             });
-            let results: Vec<(usize, CopyResult, Option<u32>)> = chunk
+            let results: Vec<(usize, CopyResult)> = chunk
                 .par_iter()
                 .map(|&i| {
                     let bytes = match &locs[i] {
@@ -459,16 +439,13 @@ fn scan_body(
                         }
                     };
                     match bytes {
-                        Ok(b) => {
-                            let crc = candidate[i].then(|| crc32fast::hash(&b));
-                            (i, scan_guarded(&b), crc)
-                        }
-                        Err(e) => (i, CopyResult::ReadFailed(e), None),
+                        Ok(b) => (i, scan_guarded(&b)),
+                        Err(e) => (i, CopyResult::ReadFailed(e)),
                     }
                 })
                 .collect();
             let mut items = Vec::with_capacity(results.len());
-            for (i, res, crc) in results {
+            for (i, res) in results {
                 let c = &copies[i];
                 report.parsed += 1;
                 match &res {
@@ -479,15 +456,12 @@ fn scan_body(
                         .push((format!("{} ({})", c.path, origin_name(c.origin)), m.clone())),
                     _ => {}
                 }
-                if let Some(crc) = crc {
-                    crc_known.insert(i, crc);
-                }
+
                 items.push(ChunkItem {
                     path_id: path_ids[i],
                     origin_id: origin_id(c.origin),
                     size: c.size,
                     mtime: c.mtime,
-                    crc32: crc,
                     derived: derived[i],
                     result: res,
                 });
@@ -594,71 +568,18 @@ fn scan_body(
     store.set_textures(&tex_win_rows)?;
     let textures_ms = lap(&mut t);
 
-    // pgp_diff: higher-priority origins overwrite lower ones on the same key.
-    let mut order: Vec<usize> = (0..loose.len()).filter(|&i| diffs[i].is_some()).collect();
-    order.sort_by_key(|&i| loose[i].priority);
-    let mut diff_rows: HashMap<String, (u32, u32)> = HashMap::new();
-    for i in order {
-        let d = diffs[i].as_ref().unwrap();
-        for (k, &o) in &d.crc_orig {
-            diff_rows.insert(k.clone(), (o, d.crc_patched.get(k).copied().unwrap_or(0)));
-        }
-    }
-    store.set_pgp_diff(&diff_rows)?;
-
-    // Non-derived copies by path, for the "deeper copies" CRC comparison.
-    let mut by_path: HashMap<&str, Vec<usize>> = HashMap::new();
-    for &i in &nd {
-        by_path.entry(copies[i].path.as_str()).or_default().push(i);
-    }
-    // Every candidate has a CRC here: reuse skips candidates without one, so the parallel pass hashed them (loose and BSA).
-    // A candidate whose read failed has none: it is unverified and re-read next scan, which is acceptable.
-    let crc_of = |i: usize| -> Option<u32> { crc_known.get(&i).copied() };
     let mut rows = Vec::with_capacity(copies.len());
     for (i, c) in copies.iter().enumerate() {
-        if !derived[i] {
-            rows.push(DeriveRow {
-                copy_id: ids[i],
-                is_derived: false,
-                source_copy_id: None,
-                derive_check: None,
-            });
-            continue;
-        }
-        let dup = pgp::dup_source(&c.path);
-        let sp = dup.clone().unwrap_or_else(|| c.path.clone());
-        let src_i = source.get(&sp).copied();
-        let check = if dup.is_some() {
-            DeriveCheck::DupOf
-        } else {
-            let diff_crc = match c.origin {
-                OriginRef::Loose(o) => diffs[o]
-                    .as_ref()
-                    .and_then(|d| d.crc_orig.get(&c.path).copied()),
-                OriginRef::Bsa(_) => None,
-            };
-            match (diff_crc, src_i) {
-                (None, _) | (_, None) => DeriveCheck::UnknownSource,
-                (Some(d), Some(s)) => {
-                    let sc = crc_of(s);
-                    let deeper: Vec<u32> = if sc.is_some_and(|x| x != d) {
-                        by_path[sp.as_str()]
-                            .iter()
-                            .filter(|&&j| j != s)
-                            .filter_map(|&j| crc_of(j))
-                            .collect()
-                    } else {
-                        vec![]
-                    };
-                    pgp::check(Some(d), sc, &deeper)
-                }
-            }
-        };
+        let source_copy_id = derived[i]
+            .then(|| {
+                let sp = pgp::dup_source(&c.path).unwrap_or_else(|| c.path.clone());
+                source.get(&sp).map(|&s| ids[s])
+            })
+            .flatten();
         rows.push(DeriveRow {
             copy_id: ids[i],
-            is_derived: true,
-            source_copy_id: src_i.map(|s| ids[s]),
-            derive_check: Some(check_code(check)),
+            is_derived: derived[i],
+            source_copy_id,
         });
     }
     store.set_derived(&rows)?;

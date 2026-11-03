@@ -44,7 +44,7 @@ fn diff_json_keys_are_canonical() {
         br#"{"meshes\\Armor\\Iron\\Cuirass.nif":{"crc32original":305419896,"crc32patched":1}}"#,
     );
     let diff = read_diff(d.path()).unwrap();
-    assert_eq!(diff.crc_orig["meshes/armor/iron/cuirass.nif"], 0x1234_5678);
+    assert!(diff.keys.contains("meshes/armor/iron/cuirass.nif"));
     assert!(is_derived_path(
         "meshes/armor/iron/cuirass.nif",
         Some(&diff)
@@ -60,18 +60,6 @@ fn dup_paths_map_to_source() {
         Some("meshes/armor/x.nif")
     );
     assert_eq!(dup_source("meshes/armor/x.nif"), None);
-}
-
-#[test]
-fn staleness_uses_crc_not_mtime() {
-    assert_eq!(check(Some(7), Some(7), &[]), DeriveCheck::Match);
-    assert_eq!(check(Some(7), Some(8), &[]), DeriveCheck::StaleChanged);
-    assert_eq!(
-        check(Some(7), Some(8), &[9, 7]),
-        DeriveCheck::StaleReordered
-    );
-    assert_eq!(check(Some(7), None, &[]), DeriveCheck::Unverified);
-    assert_eq!(check(None, Some(8), &[]), DeriveCheck::UnknownSource);
 }
 
 #[test]
@@ -114,15 +102,14 @@ fn scan(d: &tempfile::TempDir) -> (Store, Report) {
 fn add_pgp_output(r: &std::path::Path, nif: &[u8]) {
     common::put(r, "mods/PGP/meshes/x.nif", nif);
     common::put(r, "mods/PGP/PGPatcher.esp", b"e");
-    let crc = crc32fast::hash(nif);
     common::put(
         r,
         "mods/PGP/ParallaxGen_Diff.json",
-        format!(r#"{{"meshes\\x.nif":{{"crc32original":{crc},"crc32patched":1}}}}"#).as_bytes(),
+        br#"{"meshes\\x.nif":{"crc32original":1,"crc32patched":1}}"#,
     );
 }
 
-fn check_of(d: &tempfile::TempDir, origin: &str) -> Option<String> {
+fn status_of(d: &tempfile::TempDir, origin: &str) -> &'static str {
     let (s, _) = scan(d);
     let a = s
         .mods()
@@ -130,7 +117,7 @@ fn check_of(d: &tempfile::TempDir, origin: &str) -> Option<String> {
         .into_iter()
         .find(|m| m.name == origin)
         .unwrap();
-    s.nifs_of(a.id).unwrap()[0].derive_check.clone()
+    s.nifs_of(a.id).unwrap()[0].status_label()
 }
 
 fn nif_bytes() -> Vec<u8> {
@@ -142,7 +129,7 @@ fn nif_bytes() -> Vec<u8> {
 }
 
 #[test]
-fn rescan_after_pgpatcher_output_verifies_loose_source() {
+fn rescan_after_pgpatcher_output_reuses_the_loose_source() {
     let d = common::instance_fixture("+PGP\n+A\n");
     let n = nif_bytes();
     common::put(d.path(), "mods/A/meshes/x.nif", &n);
@@ -151,17 +138,16 @@ fn rescan_after_pgpatcher_output_verifies_loose_source() {
     assert_eq!((r1.parsed, r1.reused), (1, 0));
     add_pgp_output(d.path(), &n);
     let (s, r2) = scan(&d);
-    // The unchanged source has no stored CRC, so it is re-parsed (to get one); the PGP copy is new.
-    assert_eq!((r2.parsed, r2.reused), (2, 0));
+    // The unchanged source is reused (size and mtime); only the PGP copy is new.
+    assert_eq!((r2.parsed, r2.reused), (1, 1));
     drop(s);
-    assert_eq!(check_of(&d, "A").as_deref(), Some("match"));
-    // Third scan: the CRC is stored now, everything is reused.
+    assert_eq!(status_of(&d, "A"), "Patched by PGPatcher (in game)");
     let (_, r3) = scan(&d);
     assert_eq!((r3.parsed, r3.reused), (0, 2));
 }
 
 #[test]
-fn rescan_after_pgpatcher_output_verifies_bsa_source() {
+fn rescan_after_pgpatcher_output_links_a_bsa_source() {
     let d = common::instance_fixture("+PGP\n+A\n");
     let n = nif_bytes();
     common::put(
@@ -179,7 +165,7 @@ fn rescan_after_pgpatcher_output_verifies_bsa_source() {
     std::fs::create_dir_all(d.path().join("mods/PGP")).unwrap();
     scan(&d);
     add_pgp_output(d.path(), &n);
-    assert_eq!(check_of(&d, "A.bsa").as_deref(), Some("match"));
+    assert_eq!(status_of(&d, "A.bsa"), "Patched by PGPatcher (in game)");
 }
 
 fn esp_plugin() -> Vec<u8> {

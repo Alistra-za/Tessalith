@@ -80,11 +80,10 @@ fn fixture() -> tempfile::TempDir {
     );
     put(r, "mods/PGP/meshes/x.nif", &n);
     put(r, "mods/PGP/PGPatcher.esp", b"e");
-    let crc = crc32fast::hash(&n);
     put(
         r,
         "mods/PGP/ParallaxGen_Diff.json",
-        format!(r#"{{"meshes\\x.nif":{{"crc32original":{crc},"crc32patched":1}}}}"#).as_bytes(),
+        br#"{"meshes\\x.nif":{"crc32original":1,"crc32patched":1}}"#,
     );
     put(r, "mods/A/textures/a/a_d.dds", b"DDS ");
     put(r, "mods/B/textures/a/a_d.dds", b"DDS ");

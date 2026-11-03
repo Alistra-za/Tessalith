@@ -1,6 +1,6 @@
-//! PGPatcher (ParallaxGen) output as a derived layer (plan 05 §5). Detection by marker files, staleness by CRC32.
+//! PGPatcher (ParallaxGen) output as a derived layer (plan 05 §5). Detection by marker files and the Diff's keys.
 use nif::path::canon_mesh;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 pub fn running(names: &[String]) -> bool {
@@ -56,26 +56,18 @@ pub fn signature(root: &Path) -> Signature {
     }
 }
 
+/// The paths ParallaxGen_Diff.json names (canonical mesh keys): the files PGPatcher wrote.
 #[derive(Debug, Default)]
 pub struct Diff {
-    pub crc_orig: HashMap<String, u32>,
-    pub crc_patched: HashMap<String, u32>,
+    pub keys: HashSet<String>,
 }
 
 pub fn read_diff(root: &Path) -> Option<Diff> {
     let text = std::fs::read_to_string(root.join("ParallaxGen_Diff.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let mut d = Diff::default();
-    for (k, e) in v.as_object()? {
-        let key = canon_mesh(k);
-        if let Some(c) = e.get("crc32original").and_then(|x| x.as_u64()) {
-            d.crc_orig.insert(key.clone(), c as u32);
-        }
-        if let Some(c) = e.get("crc32patched").and_then(|x| x.as_u64()) {
-            d.crc_patched.insert(key, c as u32);
-        }
-    }
-    Some(d)
+    Some(Diff {
+        keys: v.as_object()?.keys().map(|k| canon_mesh(k)).collect(),
+    })
 }
 
 pub fn dup_source(norm: &str) -> Option<String> {
@@ -85,25 +77,5 @@ pub fn dup_source(norm: &str) -> Option<String> {
 }
 
 pub fn is_derived_path(norm: &str, diff: Option<&Diff>) -> bool {
-    dup_source(norm).is_some() || diff.is_some_and(|d| d.crc_orig.contains_key(norm))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeriveCheck {
-    Match,
-    StaleChanged,
-    StaleReordered,
-    Unverified,
-    UnknownSource,
-    DupOf,
-}
-
-pub fn check(diff_crc: Option<u32>, source_crc: Option<u32>, deeper_crcs: &[u32]) -> DeriveCheck {
-    match (diff_crc, source_crc) {
-        (None, _) => DeriveCheck::UnknownSource,
-        (Some(_), None) => DeriveCheck::Unverified,
-        (Some(d), Some(s)) if d == s => DeriveCheck::Match,
-        (Some(d), Some(_)) if deeper_crcs.contains(&d) => DeriveCheck::StaleReordered,
-        _ => DeriveCheck::StaleChanged,
-    }
+    dup_source(norm).is_some() || diff.is_some_and(|d| d.keys.contains(norm))
 }

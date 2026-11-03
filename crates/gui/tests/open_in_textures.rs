@@ -41,7 +41,6 @@ fn meshes() -> MeshesModel {
         overridden_by: None,
         n_copies: 1,
         derived: false,
-        derive_check: None,
         le_mesh: false,
         problem: None,
         patched_in_game: false,

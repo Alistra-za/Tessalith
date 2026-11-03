@@ -36,16 +36,12 @@ fn winner_and_source_with_pgpatcher_output() {
     let d = instance_fixture("+PGP\n+A\n");
     std::fs::create_dir_all(d.path().join("mods/PGP")).unwrap();
     put(d.path(), "mods/A/meshes/x.nif", None);
-    let a_bytes = std::fs::read(d.path().join("mods/A/meshes/x.nif")).unwrap();
     put(d.path(), "mods/PGP/meshes/x.nif", None);
     put(d.path(), "mods/PGP/PGPatcher.esp", Some(b"e"));
-    let crc = crc32fast::hash(&a_bytes);
     put(
         d.path(),
         "mods/PGP/ParallaxGen_Diff.json",
-        Some(
-            format!(r#"{{"meshes\\x.nif":{{"crc32original":{crc},"crc32patched":1}}}}"#).as_bytes(),
-        ),
+        Some(br#"{"meshes\\x.nif":{"crc32original":1,"crc32patched":1}}"#),
     );
     let (store, r) = go(&d, vec![]);
     assert!(!r.tainted);
@@ -54,31 +50,6 @@ fn winner_and_source_with_pgpatcher_output() {
     let a = mods.iter().find(|m| m.name == "A").unwrap();
     let nifs = store.nifs_of(a.id).unwrap();
     assert_eq!(nifs[0].status_label(), "Patched by PGPatcher (in game)");
-    assert_eq!(nifs[0].derive_check.as_deref(), Some("match"));
-}
-
-#[test]
-fn stale_when_source_changed_even_with_older_mtime() {
-    let d = instance_fixture("+PGP\n+A\n");
-    put(d.path(), "mods/A/meshes/x.nif", None);
-    put(d.path(), "mods/PGP/meshes/x.nif", None);
-    put(d.path(), "mods/PGP/PGPatcher.esp", Some(b"e"));
-    put(
-        d.path(),
-        "mods/PGP/ParallaxGen_Diff.json",
-        Some(br#"{"meshes\\x.nif":{"crc32original":1,"crc32patched":2}}"#),
-    );
-    let (store, _) = go(&d, vec![]);
-    let a = store
-        .mods()
-        .unwrap()
-        .into_iter()
-        .find(|m| m.name == "A")
-        .unwrap();
-    assert_eq!(
-        store.nifs_of(a.id).unwrap()[0].derive_check.as_deref(),
-        Some("stale_changed")
-    );
 }
 
 #[test]
@@ -187,28 +158,23 @@ fn mod_id(store: &Store, name: &str) -> i64 {
 }
 
 #[test]
-fn stale_reordered_when_diff_matches_a_deeper_copy() {
-    // 05 §5.4 case 3: B inserted between PGP and A; the diff CRC matches A (deeper), not B (the source).
+fn patched_in_game_follows_the_source_winner_even_when_the_diff_names_a_deeper_copy() {
+    // B sits between PGP and A, so B is the source winner whatever hash the diff holds (no stale check).
     let d = instance_fixture("+PGP\n+B\n+A\n");
     put(d.path(), "mods/A/meshes/x.nif", None);
-    let a = std::fs::read(d.path().join("mods/A/meshes/x.nif")).unwrap();
-    let mut b = a.clone();
+    let mut b = std::fs::read(d.path().join("mods/A/meshes/x.nif")).unwrap();
     b.push(0); // different bytes (a file-length failure, still a copy)
     put(d.path(), "mods/B/meshes/x.nif", Some(&b));
     put(d.path(), "mods/PGP/meshes/x.nif", None);
     put(d.path(), "mods/PGP/PGPatcher.esp", Some(b"e"));
-    let crc = crc32fast::hash(&a);
     put(
         d.path(),
         "mods/PGP/ParallaxGen_Diff.json",
-        Some(
-            format!(r#"{{"meshes\\x.nif":{{"crc32original":{crc},"crc32patched":1}}}}"#).as_bytes(),
-        ),
+        Some(br#"{"meshes\\x.nif":{"crc32original":1,"crc32patched":1}}"#),
     );
     let (store, _) = go(&d, vec![]);
     let bn = &store.nifs_of(mod_id(&store, "B")).unwrap()[0];
     assert!(bn.patched_in_game);
-    assert_eq!(bn.derive_check.as_deref(), Some("stale_reordered"));
     let an = &store.nifs_of(mod_id(&store, "A")).unwrap()[0];
     assert_eq!(an.status_label(), "Overridden");
     assert_eq!(an.overridden_by.as_deref(), Some("B"));
@@ -218,7 +184,7 @@ fn stale_reordered_when_diff_matches_a_deeper_copy() {
 }
 
 #[test]
-fn dups_are_dup_of_and_overwrite_only_derives_listed_paths() {
+fn dups_are_derived_and_overwrite_only_derives_listed_paths() {
     let d = instance_fixture("+A\n");
     put(d.path(), "mods/A/meshes/x.nif", None);
     put(d.path(), "mods/A/meshes/y.nif", None);
@@ -241,7 +207,6 @@ fn dups_are_dup_of_and_overwrite_only_derives_listed_paths() {
         .find(|n| n.path.contains("_pgpatcher_dups"))
         .unwrap();
     assert!(dup.derived);
-    assert_eq!(dup.derive_check.as_deref(), Some("dup_of"));
     let y = rows.iter().find(|n| n.path == "meshes/y.nif").unwrap();
     assert!(!y.derived && y.wins);
     let ay = store
@@ -456,13 +421,6 @@ fn owner_smoke() {
         100.0 * pg as f64 / w.max(1) as f64,
         100.0 * pg as f64 / loose_w.max(1) as f64
     );
-    let checks: Vec<(Option<i64>, i64)> = c
-        .prepare("SELECT derive_check, count(*) FROM nif_copy WHERE is_derived = 1 GROUP BY 1")
-        .unwrap()
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
     println!(
         "bsa origins: {}; tex_raw rows: {}; shapes: {}; tex winners: {}",
         q("SELECT count(*) FROM origin WHERE kind = 4 AND enabled = 1"),
@@ -470,7 +428,6 @@ fn owner_smoke() {
         q("SELECT count(*) FROM shape"),
         q("SELECT count(*) FROM tex_winner")
     );
-    println!("derive_check counts (0 match,1 stale_changed,2 stale_reordered,3 unverified,4 unknown,5 dup_of): {checks:?}");
 }
 
 fn folder_run(store: &mut Store, dir: &std::path::Path) -> modscan::scan::Report {
@@ -597,9 +554,7 @@ fn skip_derived_ignores_pgp_and_running_process() {
     );
     let a = store.nifs_of(mod_id(&store, "A")).unwrap();
     assert_eq!(a.len(), 2);
-    assert!(a
-        .iter()
-        .all(|n| n.wins && !n.patched_in_game && n.derive_check.is_none()));
+    assert!(a.iter().all(|n| n.wins && !n.patched_in_game && !n.derived));
     let ow: Vec<String> = store
         .nifs_of(mod_id(&store, "overwrite"))
         .unwrap()
@@ -774,14 +729,10 @@ fn a_failed_run_discards_staged_derived_copies() {
     put(d.path(), "mods/A/meshes/x.nif", None);
     put(d.path(), "mods/PGP/meshes/x.nif", None);
     put(d.path(), "mods/PGP/PGPatcher.esp", Some(b"e"));
-    let a_bytes = std::fs::read(d.path().join("mods/A/meshes/x.nif")).unwrap();
-    let crc = crc32fast::hash(&a_bytes);
     put(
         d.path(),
         "mods/PGP/ParallaxGen_Diff.json",
-        Some(
-            format!(r#"{{"meshes\x.nif":{{"crc32original":{crc},"crc32patched":1}}}}"#).as_bytes(),
-        ),
+        Some(br#"{"meshes\x.nif":{"crc32original":1,"crc32patched":1}}"#),
     );
     let mut store = Store::open(&d.path().join("scan.db")).unwrap();
     let scan = |store: &mut Store| {

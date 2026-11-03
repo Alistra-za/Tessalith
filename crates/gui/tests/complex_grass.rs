@@ -71,7 +71,7 @@ fn gras_db(dir: &std::path::Path, tex: &str) -> std::path::PathBuf {
         index3d: Default::default(),
     };
     let id = s
-        .upsert_copy(mesh, o, 1, 1, CopyResult::Scanned(scan), None)
+        .upsert_copy(mesh, o, 1, 1, CopyResult::Scanned(scan))
         .unwrap();
     let pid = s.path_ids(&[mesh]).unwrap()[0];
     s.set_winners(&[(pid, (id, 1))].into_iter().collect(), &Default::default())

@@ -13,7 +13,6 @@ vfs = { path = "../vfs" }
 rusqlite.workspace = true
 rayon.workspace = true
 serde_json.workspace = true
-crc32fast.workspace = true
 esp = { path = "../esp" }
 
 [target.'cfg(windows)'.dependencies]
