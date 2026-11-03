@@ -379,6 +379,15 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         })),
         &["subtype=diffuse", "format=rgb8", "mips.filter=box"],
     );
+    // Note FM39: an `_rmaos` whose data alpha is constant 255, on BC1. It takes the `remove` path, so its bytes are
+    // the `opaque_bc1` kind (the `rmaos` arm of `encode_version` covers the verdict).
+    add(
+        "rmaos_bc1_data255",
+        DynamicImage::ImageRgba8(ImageBuffer::from_fn(64, 64, |x, y| {
+            Rgba([(x * 4) as u8, (y * 4) as u8, 90, 255])
+        })),
+        &["subtype=rmaos", "format=bc1", "alpha.policy=data"],
+    );
     // Note FM37: the Gray sub-type as R8, red read from an RGB source (its BC4 form is the forced `gray` fixture).
     add("gray_r8", rgb(64), &["subtype=gray", "format=r8"]);
     // A normal cannot be BC5 (FMT-BC5-NORMAL), so BC5 is a two-channel map.
@@ -646,6 +655,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "gray_r8",
         "opaque_rgb8",
         "wide_rgb8",
+        "rmaos_bc1_data255",
         "twosize_rmaos",
         "gpick_rmaos",
         "rpick_rmaos",

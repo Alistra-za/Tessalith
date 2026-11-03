@@ -1857,7 +1857,8 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             "roughness member with sRGB content: roughness is linear data, so it is not variance-baked".into(),
         );
     }
-    // Note FM: BC1 stores alpha only as 1-bit alpha, which `encoder.bc1_alpha` turns on; `data` alpha never fits.
+    // Note FM: BC1 stores alpha only as 1-bit alpha, which `encoder.bc1_alpha` turns on; `data` alpha never fits,
+    // except an empty one (Note FM39: `resolve_decided` has turned that into `remove` before this check).
     if p.format == Format::Bc1 && p.alpha.policy != AlphaPolicy::Remove {
         if !stores_alpha(p) {
             let fix = if p.alpha.policy == AlphaPolicy::Data {
@@ -1865,13 +1866,18 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             } else {
                 "set encoder.bc1_alpha for 1-bit alpha, choose BC7/BC3, or remove the alpha"
             };
-            add(
-                FmtBc1Alpha,
+            let msg = if p.subtype == Subtype::ComplexMaterial
+                && p.alpha.policy == AlphaPolicy::Data
+            {
+                "BC1 cannot keep a complex material's alpha 0; an opaque `_m` is read as an env mask. Use BC7/BC3, or the envmask type."
+                    .to_string()
+            } else {
                 format!(
                     "BC1 keeps no alpha.policy {:?} alpha; {fix}",
                     p.alpha.policy
-                ),
-            );
+                )
+            };
+            add(FmtBc1Alpha, msg);
         } else if a.alpha == AlphaContent::Varying {
             let n = (u64::from(a.width) * u64::from(a.height)).max(1);
             let soft = n.saturating_sub(a.alpha_hist.eq0 + a.alpha_hist.eq255);
@@ -1887,7 +1893,8 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             }
         }
     }
-    // Note FM38: rgb8 stores no alpha at all, so any policy but `remove` is a loss the user must choose.
+    // Note FM38: rgb8 stores no alpha at all, so any policy but `remove` is a loss the user must choose (an empty `data`
+    // alpha was turned into `remove` in `resolve_decided`, Note FM39).
     if p.format == Format::Rgb8 {
         if p.alpha.policy != AlphaPolicy::Remove {
             let id = serde_json::to_value(p.alpha.policy).unwrap_or_default();
@@ -2450,7 +2457,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
             subtype_prov = Provenance::Fallback;
         }
     }
-    let (profile, mut provenance, dropped_filter) =
+    let (mut profile, mut provenance, dropped_filter) =
         match layered_profile_with(ctx, f, subtype, false) {
             Ok(v) => v,
             Err(e) => {
@@ -2525,6 +2532,19 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                 "green convention of _{term} is unstated; assumed DirectX (set channels.green_convention=opengl if this is an OpenGL map)"
             ));
         }
+    }
+    // Note FM39: an opaque BC1 or RGB8 decodes alpha as 255, which is what an empty `data` alpha holds. The job then
+    // takes the `remove` path, so its bytes are the `remove` encode's. A complex material is excluded: its empty
+    // alpha is written as 0 (`ops::complex_alpha_zero`).
+    if matches!(profile.format, Format::Bc1 | Format::Rgb8)
+        && profile.alpha.policy == AlphaPolicy::Data
+        && profile.subtype != Subtype::ComplexMaterial
+        && matches!(
+            f.analysis.alpha,
+            AlphaContent::None | AlphaContent::Constant255
+        )
+    {
+        profile.alpha.policy = AlphaPolicy::Remove;
     }
     let mut warnings: Vec<Warning> = fallback_note.into_iter().collect();
     warnings.extend(dropped_filter.map(|d| filter_ignored_notice(&profile, f, d)));

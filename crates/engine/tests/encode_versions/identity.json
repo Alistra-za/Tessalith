@@ -104,6 +104,13 @@
     "subtype": "generic_two_channel",
     "width": 64
   },
+  "cov/textures/c/rmaos_bc1_data255.dds": {
+    "format": "Bc1 { srgb: false }",
+    "height": 64,
+    "payload_sha256": "aba8a85b1861f22f841281b2d3f425fc774f1252ab68a62b797e5cadf26a29b0",
+    "subtype": "rmaos",
+    "width": 64
+  },
   "cov/textures/c/rpick_rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,

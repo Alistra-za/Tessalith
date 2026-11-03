@@ -605,7 +605,8 @@ fn unavailable_subtype_reports_cfg_unavailable_only() {
 /// Carry 3: without `encoder.bc1_alpha` BC1 is opaque only, whatever the alpha policy; `has_alpha()` is not relied on.
 #[test]
 fn bc1_blocks_every_alpha_policy_but_remove() {
-    for policy in ["cutout", "blend", "cutout_blend", "data"] {
+    // `data` with an empty alpha is the one exception (Note FM39, tested below).
+    for policy in ["cutout", "blend", "cutout_blend"] {
         let p = format!("alpha.policy={policy}");
         let j = run(
             Target::Cs,
@@ -1451,15 +1452,10 @@ fn bc1_with_alpha_still_blocks_without_the_setting() {
     let blocked = |sets: &[&str]| {
         let mut all = vec!["subtype=diffuse", "format=bc1"];
         all.extend(sets);
-        let j = run(
-            Target::Cs,
-            "textures/a/x.png",
-            None,
-            &[],
-            opaque(),
-            &all,
-            &[],
-        );
+        // Over the 0.1 % noise share (Note FM34), so the alpha is varying and `data` cannot be kept.
+        let mut img = opaque();
+        img.px[..16].iter_mut().for_each(|p| p[3] = 0.0);
+        let j = run(Target::Cs, "textures/a/x.png", None, &[], img, &all, &[]);
         matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&Code::FmtBc1Alpha))
     };
     for policy in ["cutout", "blend", "cutout_blend", "data"] {
@@ -2854,6 +2850,8 @@ fn an_alpha_pick_needs_an_alpha_channel_and_is_not_a_discarded_alpha() {
 /// Note FM38: rgb8 stores no alpha, so a texture that keeps its alpha cannot be written as one.
 #[test]
 fn rgb8_is_refused_when_alpha_is_kept() {
+    let mut varying = opaque();
+    varying.px[..16].iter_mut().for_each(|p| p[3] = 0.0); // over the 0.1 % noise share (Note FM34)
     for policy in ["cutout", "blend", "cutout_blend", "data"] {
         let p = format!("alpha.policy={policy}");
         let j = run(
@@ -2861,7 +2859,7 @@ fn rgb8_is_refused_when_alpha_is_kept() {
             "textures/a/x.png",
             None,
             &[],
-            opaque(),
+            varying.clone(),
             &["subtype=diffuse", "format=rgb8", &p],
             &[],
         );
@@ -2920,4 +2918,113 @@ fn rgb8_is_refused_with_an_srgb_tag() {
         &[],
     );
     assert!(codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+}
+
+/// Note FM39: an opaque BC1 decodes alpha as 255, so `data` alpha that is empty (none, or constant 255) is kept
+/// exactly, and BC1 is accepted. The resolved profile then reads `remove`, the plain RGB-only encode.
+#[test]
+fn bc1_accepts_an_rmaos_whose_alpha_is_constant_255() {
+    for format in ["bc1", "rgb8"] {
+        let f = format!("format={format}");
+        let j = run(
+            Target::Cs,
+            "textures/a/x_rmaos.png",
+            Some("rmaos"),
+            &["rmaos"],
+            opaque(),
+            &["subtype=rmaos", &f, "alpha.policy=data"],
+            &[],
+        );
+        assert_eq!(j.status, JobStatus::Ready, "{format}: {:?}", j.warnings);
+        assert!(
+            !codes(&j).contains(&Code::FmtBc1Alpha) && !codes(&j).contains(&Code::FmtRgb8Alpha),
+            "{format}: {:?}",
+            j.warnings
+        );
+        assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove, "{format}");
+    }
+}
+
+#[test]
+fn bc1_accepts_a_normal_with_no_alpha() {
+    let rgb = SourceInfo {
+        channels: 3,
+        has_alpha: false,
+        ..RGBA8
+    };
+    let j = run_info(
+        Target::Cs,
+        "textures/a/x_n.png",
+        Some("n"),
+        &["n"],
+        opaque(),
+        &rgb,
+        &["subtype=normal", "format=bc1", "alpha.policy=data"],
+        &[],
+    );
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
+}
+
+#[test]
+fn bc1_still_refuses_a_varying_data_alpha() {
+    let mut img = opaque();
+    img.px[..16].iter_mut().for_each(|p| p[3] = 0.0);
+    for format in ["bc1", "rgb8"] {
+        let f = format!("format={format}");
+        let j = run(
+            Target::Cs,
+            "textures/a/x_rmaos.png",
+            Some("rmaos"),
+            &["rmaos"],
+            img.clone(),
+            &["subtype=rmaos", &f, "alpha.policy=data"],
+            &[],
+        );
+        let want = if format == "bc1" {
+            Code::FmtBc1Alpha
+        } else {
+            Code::FmtRgb8Alpha
+        };
+        assert!(
+            matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&want)),
+            "{format}: {:?}",
+            j.status
+        );
+        assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data, "{format}");
+    }
+}
+
+/// Note FM39: a complex material's empty alpha is written as 0, which BC1 cannot hold with colour.
+#[test]
+fn bc1_refuses_a_complex_material_with_empty_alpha_and_says_why() {
+    let rgb = SourceInfo {
+        channels: 3,
+        has_alpha: false,
+        ..RGBA8
+    };
+    let j = run_info(
+        Target::Cs,
+        "textures/a/x_m.png",
+        Some("m"),
+        &["m"],
+        opaque(),
+        &rgb,
+        &[
+            "subtype=complex_material",
+            "format=bc1",
+            "alpha.policy=data",
+        ],
+        &[],
+    );
+    assert!(
+        matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&Code::FmtBc1Alpha)),
+        "{:?}",
+        j.status
+    );
+    let m = &warning(&j, Code::FmtBc1Alpha).message;
+    assert_eq!(
+        m,
+        "BC1 cannot keep a complex material's alpha 0; an opaque `_m` is read as an env mask. Use BC7/BC3, or the envmask type."
+    );
 }

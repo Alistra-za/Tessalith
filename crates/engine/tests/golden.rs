@@ -4132,3 +4132,33 @@ fn cube_vstrip_bc7() {
     assert_eq!((f.width, f.height), (64, 64));
     assert_faces_in_order(&f, &faces, 35.0);
 }
+
+/// Note FM39: BC1 on a data-alpha type with empty alpha writes the same bytes as `alpha.policy = remove`.
+#[test]
+fn bc1_with_empty_data_alpha_matches_the_remove_encode() {
+    type Case = (&'static str, &'static str, fn() -> DynamicImage);
+    let cases: [Case; 3] = [
+        ("textures/pbr/iron_rmaos.png", "subtype=rmaos", || {
+            rgba(64, |x, y| [(x * 4) as u8, (y * 4) as u8, 90, 255])
+        }),
+        ("textures/pbr/iron_n.png", "subtype=normal", || rgb(64)),
+        ("textures/pbr/iron_rmaos.png", "subtype=rmaos", || rgb(64)),
+    ];
+    for (rel, subtype, img) in cases {
+        let write = |policy: &str| {
+            let d = tempfile::tempdir().unwrap();
+            put(d.path(), rel, img());
+            let policy = format!("alpha.policy={policy}");
+            let o = convert(d.path(), Target::Cs, &[subtype, "format=bc1", &policy], &[]);
+            assert_eq!(
+                (o.summary.converted, o.summary.exit_code()),
+                (1, 0),
+                "{rel} {policy}: {:?}",
+                warnings(&o)
+            );
+            assert!(!warnings(&o).contains(&Code::FmtBc1Alpha), "{rel} {policy}");
+            std::fs::read(d.path().join("out").join(rel).with_extension("dds")).unwrap()
+        };
+        assert_eq!(write("data"), write("remove"), "{rel}");
+    }
+}
