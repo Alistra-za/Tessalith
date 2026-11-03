@@ -297,7 +297,7 @@ reason = "its rows hold timings and the export folder, so no two renders match; 
 [[exempt]]
 what = "Toasts"
 page = "GUI-Bottom-Tabs"
-reason = "a toast rises and fades on a clock, so no two renders match"
+reason = "a toast goes after a few seconds on a clock, so no two renders match"
 
 [[exempt]]
 what = "Editing a NIF (edit panel, shapes, animation)"

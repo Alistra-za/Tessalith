@@ -612,7 +612,6 @@ fn drag_handle(h: &mut Harness<'static, AppModel>, from: &str, onto: &str) {
         h.run();
     }
     h.event(press(to, false));
-    // A moved set's border flashes (it repaints for a second): steps, not `run`.
     h.run_steps(3);
 }
 
@@ -620,8 +619,7 @@ fn order_text(h: &Harness<'static, AppModel>) -> String {
     h.state().sets_doc.as_ref().unwrap().text()
 }
 
-/// The control for `reordering_is_off_while_filtered`: with no filter the same drag moves the set. (A test of its own:
-/// the drawing state, and so the moved set's flash, is per thread.)
+/// The control for `reordering_is_off_while_filtered`: with no filter the same drag moves the set.
 #[test]
 fn a_handle_drag_reorders_with_no_filter() {
     let d = tempfile::tempdir().unwrap();

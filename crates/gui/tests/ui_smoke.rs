@@ -1803,10 +1803,9 @@ fn text_opacity(h: &Harness<'static, AppModel>, text: &str) -> Vec<f32> {
     out
 }
 
-/// Task 9 (CF16, K1): the columns fade in when a folder opens; a folder already open on the first frame (restored at
-/// launch) and the start screen show at full opacity.
+/// Note FM25: the columns show at full opacity the frame a folder opens, as a restored folder and the start screen do.
 #[test]
-fn opening_a_folder_fades_the_columns_in_and_a_restored_one_does_not() {
+fn opening_a_folder_shows_the_columns_at_full_opacity_at_once() {
     let small = |m: AppModel| {
         let h = Harness::builder()
             .with_size(eframe::egui::vec2(1280.0, 800.0))
@@ -1841,47 +1840,5 @@ fn opening_a_folder_fades_the_columns_in_and_a_restored_one_does_not() {
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.step();
     let a = text_opacity(&h, "Sets");
-    assert!(
-        !a.is_empty() && a.iter().any(|&x| x < 1.0),
-        "fading in: {a:?} (rest {rest:?})"
-    );
-    // The header's "Sets" eye is drawn before the fade and stays; the column heading fades.
-    assert!(a.contains(&1.0), "the header is not faded: {a:?}");
-    for _ in 0..6 {
-        h.step();
-    }
-    assert_eq!(text_opacity(&h, "Sets"), rest, "faded in");
-}
-
-/// Review M5 (CF1): under reduce motion the folder fade is capped at 0.12 s: full after 3 steps of 0.05 s, where the
-/// 0.25 s fade is still at about 0.84.
-#[test]
-fn reduce_motion_shortens_the_folder_fade_in() {
-    let d = tempfile::tempdir().unwrap();
-    let root = mod_folder(d.path());
-    let s = GuiSettings {
-        reduce_motion: true,
-        ..Default::default()
-    };
-    let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(1280.0, 800.0))
-        .with_step_dt(0.05)
-        .build_ui_state(
-            |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
-            AppModel::new(s, None, session()),
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.step();
-    h.state_mut().open_folder(root);
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.step();
-    let a = text_opacity(&h, "Sets");
-    assert!(a.iter().any(|&x| x < 1.0), "still a fade: {a:?}");
-    h.step();
-    h.step();
-    let a = text_opacity(&h, "Sets");
-    assert!(
-        !a.is_empty() && a.iter().all(|&x| x == 1.0),
-        "full by 0.15 s: {a:?}"
-    );
+    assert_eq!(a, rest, "no fade on opening");
 }

@@ -73,7 +73,7 @@ fn the_layout_round_trips_through_gui_toml() {
 
 #[test]
 fn a_missing_or_old_file_gives_todays_defaults() {
-    let (s, err) = load_text("preview_max = 2048\nset_view_3d = true\n");
+    let (s, err) = load_text("live_encode = true\nset_view_3d = true\n");
     assert_eq!(err, None);
     assert_eq!(s.layout, LayoutSettings::default());
     assert!(s.set_view_3d, "the 2D | 3D switch is kept (AB4)");
@@ -88,7 +88,7 @@ fn a_missing_or_old_file_gives_todays_defaults() {
 fn a_bad_value_is_ignored_on_its_own() {
     let (s, err) = load_text(
         r#"
-preview_max = 2048
+live_encode = true
 [layout]
 meshes_view = true
 filters = ["warnings", "bogus", 7, "failed"]
@@ -115,7 +115,7 @@ radius = 0.0
 "#,
     );
     assert_eq!(err, None, "no whole-file failure");
-    assert_eq!(s.preview_max, 2048, "the rest of the file is read");
+    assert!(s.live_encode, "the rest of the file is read");
     let l = &s.layout;
     assert!(l.meshes_view, "a valid sibling survives");
     assert_eq!(

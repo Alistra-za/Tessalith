@@ -28,9 +28,8 @@ Every note that shows in the status line (the encoding-follows-type note, *Expor
 Routine results show as **toasts**: short notices at the bottom right that do not block anything. While the bottom panel is open they sit just above it, so they never cover its buttons (Review's Export included).
 
 - *Saved*, *Export finished: N written, M skipped, K failed*, *Scan finished: …*, *Copied 3D view*, *Picker result ignored* and the *Undid / Redid* note each appear as one.
-- A new toast fades in over 0.2 s while rising a few points. It fades out over 0.2 s after 4 seconds (8 seconds for a warning). The whole toast fades, box and shadow with the text.
+- A toast shows for 4 seconds (8 seconds for a warning), then goes.
 - At most 3 are on screen; the rest wait their turn. A newer notice of the same kind ("Undid", "Saved", "Export finished") replaces the one still waiting.
-- Holding the pointer over a toast keeps it. A toast you let go of in its last 0.2 s may vanish a little early.
-- With **Reduce motion** on ([Advanced drawer](GUI-Advanced-Drawer.md#reduce-motion)) there is no rise, and the fades take about an eighth of a second.
+- Holding the pointer over a toast keeps it.
 
 Anything that needs a decision (Replace or Cancel, an external change, an error that blocks) stays a dialog ([Dialogs](GUI-Dialogs.md#dialogs)).

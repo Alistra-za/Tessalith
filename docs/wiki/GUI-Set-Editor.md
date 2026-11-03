@@ -45,8 +45,6 @@ The File column takes the width the other columns leave, so the rows fill the ce
 
 **Slot commands…** on a row offers *From this set*, *Path*, *Clear* and *Pin slot N* (the sdc pin), each one undo step. *From this set* is off, with "This set has no file for this slot", when the set has none. Right-click on a row opens the full [slot menu](GUI-Sets-Column.md#slot-menus), which also has *From another set*, the pin and the PGPatcher lock.
 
-A row whose texture just changed (a drop, **Replace**, **Assign…**, a file from Explorer, undo or redo) outlines in the accent colour for about a third of a second, then fades. Only the first changed slot flashes, and a slot that only emptied does not. Two slot kinds share a number (Emissive and Skin 3, Coat normal and Fuzz 7), so with both filled a change to one of them may not flash. While the pointer is down on a slot's thumbnail it shrinks slightly (3 %).
-
 ## Packed channel sources
 
 Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**; it is as narrow as the format combo, so a long name is cut, and the hover shows it whole. The list holds the set's greyscale helpers (any role but the RNM layers) and **Value**:

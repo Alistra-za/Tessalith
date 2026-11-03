@@ -983,7 +983,7 @@ impl super::AppModel {
     }
 
     /// Read every offered colour texture of the open folder that is not cached yet (C4) and whose size is known, on
-    /// `settings.jobs` threads (0 = every core) inside one worker. Nothing to read: one `(0, 0)` and the run ends.
+    /// one thread per core inside one worker. Nothing to read: one `(0, 0)` and the run ends.
     pub fn check_all_uv(&mut self) {
         if self.uv.all.is_some() {
             return;
@@ -1004,10 +1004,7 @@ impl super::AppModel {
             done: 0,
             total: work.len(),
         });
-        let jobs = match self.settings.jobs {
-            0 => std::thread::available_parallelism().map_or(4, |n| n.get()),
-            n => n,
-        };
+        let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
         let job = AllJob {
             run: self.uv.runs,
             generation: self.uv.generation,

@@ -97,7 +97,7 @@ fn dialog_open(h: &Harness<'static, AppModel>) -> bool {
     h.query_by_label("Move landscape/rock01 to…").is_some()
 }
 
-/// Enter in the field, then steps (a moved card flashes, so `run` would not settle).
+/// Enter in the field, then a few steps.
 fn enter(h: &mut Harness<'static, AppModel>) {
     h.key_press(Key::Enter);
     h.run_steps(3);
@@ -650,12 +650,12 @@ fn the_position_number_is_body_size_in_the_handle_colour() {
     assert_eq!(colors, [style.visuals.widgets.inactive.fg_stroke.color]);
 }
 
-/// Final review D2: a reveal of a card cut by the view's edge glides with egui's scroll animation, and with Reduce
-/// motion it lands at once. Against an unreduced control, so the test fails if the setting is ignored.
+/// Final review D2 (Note FM25): a reveal of a card cut by the view's edge lands at once, though the style's scroll
+/// animation is on.
 #[test]
-fn a_reveal_glide_lands_at_once_with_reduce_motion() {
+fn a_reveal_lands_at_once() {
     // The card's label top after 2 steps and after the scroll has settled.
-    let tops = |reduce: bool| {
+    let tops = || {
         let d = tempfile::tempdir().unwrap();
         let m = many_sets(d.path(), 500);
         // Steps of 0.01 s, so 2 steps sit inside egui's 0.1-0.3 s scroll glide.
@@ -668,7 +668,6 @@ fn a_reveal_glide_lands_at_once_with_reduce_motion() {
         // kittest turns egui's scroll animation off; the app runs with the stock one.
         h.ctx
             .all_styles_mut(|s| s.scroll_animation = egui::style::ScrollAnimation::default());
-        h.state_mut().settings.reduce_motion = reduce;
         h.run();
         // Only cards on screen are laid out, so the last one is the card the view's bottom edge cuts (its label may
         // lie below the column, so no `in_sets_column` filter here).
@@ -687,11 +686,9 @@ fn a_reveal_glide_lands_at_once_with_reduce_motion() {
         h.run();
         (early, top(&h, n).unwrap())
     };
-    let (early, end) = tops(false);
-    assert!(early - end > 1.0, "the control glides: {early} then {end}");
-    let (early, end) = tops(true);
+    let (early, end) = tops();
     assert!(
         (early - end).abs() < 0.5,
-        "reduced lands at once: {early} then {end}"
+        "lands at once: {early} then {end}"
     );
 }

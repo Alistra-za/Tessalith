@@ -16,7 +16,7 @@ With no folder open the window shows one large **Open folder** button in the mid
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
-The Textures and Sets columns and the Advanced drawer are not drawn until a folder is open (the bottom strip is), and the column eyes in the header are hidden. The widths you dragged are kept and come back with the first folder. When a folder opens, the Textures and Sets columns and the centre fade in over a quarter of a second; they take clicks from the first frame.
+The Textures and Sets columns and the Advanced drawer are not drawn until a folder is open (the bottom strip is), and the column eyes in the header are hidden. The widths you dragged are kept and come back with the first folder.
 
 ### While a folder opens
 
@@ -125,4 +125,4 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Drop the alpha anyway.** The acknowledgement button of a texture whose varying alpha the chosen format or setting discards: the export writes the texture without its alpha. Every other blocking warning keeps *Acknowledge*.
 - **Not exported yet.** What the Files tab says before the first export of the session; the counts (*converted*, *up to date*, …) appear once there are files.
 - **Sub-type labels.** A sub-type reads as its id with spaces (*pbr albedo*); *Skin RFAOS* is the one name spelled out. The id (`skin_rfaos`) is on hover.
-- **One accent.** The window has one non-status colour (teal), for selection, the RNM outline and a slot's flash. Red, amber and green are for status only.
+- **One accent.** The window has one non-status colour (teal), for selection and the RNM outline. Red, amber and green are for status only.

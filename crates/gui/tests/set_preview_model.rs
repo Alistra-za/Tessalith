@@ -950,7 +950,6 @@ fn a_scanned_mesh_is_listed_and_an_unreadable_one_falls_back_to_the_sphere() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].nif_path, r"meshes\landscape\rocks\rock01.nif");
     assert_eq!(list[0].shapes, vec![(3, Some("Rock".into()))]);
-    assert!(s.timings.query_ms.is_some());
     // The NIF is not on disk: the sphere stands in and the reason is shown.
     assert!(matches!(
         s.v3.content(),
@@ -1288,7 +1287,7 @@ fn an_unchanged_frame_within_the_throttle_does_no_work() {
     m.select_set(&key);
     let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
     run(&mut s, &m);
-    let (checks, push) = (s.checks, s.timings.push_ms);
+    let (checks, scene) = (s.checks, s.v3.content().cloned());
     let t = Instant::now();
     s.shown = true;
     s.poll_at(&m, t);
@@ -1303,7 +1302,7 @@ fn an_unchanged_frame_within_the_throttle_does_no_work() {
     s.poll_at(&m, t + THROTTLE * 3);
     assert_eq!(s.checks, after + 1);
     assert!(!s.busy());
-    assert_eq!(s.timings.push_ms, push, "no scene was rebuilt");
+    assert_eq!(s.v3.content().cloned(), scene, "no scene was rebuilt");
 }
 
 #[test]

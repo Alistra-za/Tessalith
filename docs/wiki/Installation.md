@@ -134,7 +134,7 @@ It takes no parameters. It hashes every vendored file except `SHA256SUMS` itself
 |---|---|---|
 | `%APPDATA%\sdc\config.toml` | User config: default target, preset and overrides for every project. | You |
 | `%APPDATA%\sdc\presets\*.toml` | Your own presets. Loaded by the CLI and the GUI on every run; a file that fails to load is skipped. | You |
-| `%APPDATA%\sdc\gui.toml` | GUI settings: recent folders, the default export folder, preview limits, threads, window layout. | `tessalith.exe` |
+| `%APPDATA%\sdc\gui.toml` | GUI settings: recent folders, the default export folder, window layout. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\scan.db` | Mesh and plugin scan database. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\analysis-cache\` | What the GUI learned about each image, so a folder opened before reuses them instead of decoding again. Pruned to 200 MB when the GUI starts. Safe to delete. | `tessalith.exe` |
 | `%LOCALAPPDATA%\sdc\logs\` | GUI crash logs, `crash-<date>-<time>.log`. The CLI writes none. | `tessalith.exe` |

@@ -111,23 +111,23 @@ fn export_stops_when_the_save_fails() {
 
 #[test]
 fn the_cli_command_reproduces_the_export() {
-    let c = cli_command(Path::new("C:/mods/x/textures"), Path::new("D:/out dir"), 0);
+    let c = cli_command(Path::new("C:/mods/x/textures"), Path::new("D:/out dir"));
     assert_eq!(
         c,
         r#"sdc convert "C:/mods/x/textures" --recursive -o "D:/out dir" --accept-suggestions high"#
     );
-    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), 6);
-    assert!(c.ends_with("--accept-suggestions high --jobs 6"));
+    assert!(
+        !c.contains("--jobs"),
+        "the engine's defaults are not written out"
+    );
 }
 
-/// FM: the copied command carries none of the flags 2.0 removed, with or without a job count.
+/// FM: the copied command carries none of the flags 2.0 removed.
 #[test]
 fn copy_cli_command_uses_no_removed_flag() {
-    for jobs in [0, 6] {
-        let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), jobs);
-        for gone in ["--sidecar", "--fill", "--strict-cubemaps"] {
-            assert!(!c.contains(gone), "{gone}: {c}");
-        }
+    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"));
+    for gone in ["--sidecar", "--fill", "--strict-cubemaps"] {
+        assert!(!c.contains(gone), "{gone}: {c}");
     }
 }
 

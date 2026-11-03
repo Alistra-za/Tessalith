@@ -3,25 +3,7 @@ use sdc_gui::settings::*;
 #[test]
 fn defaults_follow_the_spec() {
     let s = GuiSettings::default();
-    assert_eq!(s.preview_max, 4096);
     assert!(!s.live_encode, "preview encoding is off by default");
-    assert!(!s.allow_16k_preview);
-    assert!(!s.reduce_motion, "motion is on by default");
-}
-
-#[test]
-fn reduce_motion_round_trips_in_gui_toml() {
-    let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("sdc/gui.toml");
-    let s = GuiSettings {
-        reduce_motion: true,
-        ..Default::default()
-    };
-    s.save(&p).unwrap();
-    assert_eq!(GuiSettings::load(&p).0, s);
-    assert!(std::fs::read_to_string(&p)
-        .unwrap()
-        .contains("reduce_motion = true"));
 }
 
 #[test]
@@ -32,7 +14,6 @@ fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     assert_eq!((s, err), (GuiSettings::default(), None));
     let mut s = GuiSettings {
         live_encode: true,
-        preview_max: 2048,
         ..GuiSettings::default()
     };
     s.push_recent("C:/a".into());
@@ -44,7 +25,7 @@ fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     );
     s.save(&p).unwrap();
     assert_eq!(GuiSettings::load(&p).0, s);
-    std::fs::write(&p, "preview_max = \"big\"").unwrap();
+    std::fs::write(&p, "live_encode = \"big\"").unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert_eq!(s, GuiSettings::default());
     assert!(err.is_some());
@@ -60,30 +41,41 @@ fn recent_keeps_ten() {
     assert_eq!(s.recent[0], std::path::PathBuf::from("C:/f11"));
 }
 
-/// 2.0 dropped the BC1 decoder setting; a 1.x gui.toml that still has the key loads, and the next save drops it.
+/// 2.0 dropped these settings (Note FM25). A 1.x gui.toml that still has their keys loads, the settings that remain
+/// keep their values, and the next save leaves the keys out.
 #[test]
-fn a_1x_gui_toml_with_bc1_decoder_still_loads() {
+fn a_1x_gui_toml_still_loads() {
+    let removed = [
+        "jobs = 6",
+        "mem_budget_mb = 2048",
+        "bc1_decoder = \"nvidia\"",
+        "nvtt_path = \"C:/nvtt/nvtt_export.exe\"",
+        "reduce_motion = true",
+        "allow_16k_preview = true",
+        "preview_max = 16384",
+    ];
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("gui.toml");
-    std::fs::write(&p, "bc1_decoder = \"amd\"\npreview_max = 2048\n").unwrap();
+    std::fs::write(
+        &p,
+        format!(
+            "{}\nrecent = [\"C:/mods/a\"]\nlive_encode = true\n",
+            removed.join("\n")
+        ),
+    )
+    .unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert_eq!(err, None);
-    assert_eq!(s.preview_max, 2048);
+    assert_eq!(s.recent, [std::path::PathBuf::from("C:/mods/a")]);
+    assert!(s.live_encode);
     s.save(&p).unwrap();
-    assert!(!std::fs::read_to_string(&p).unwrap().contains("bc1_decoder"));
-}
-
-#[test]
-fn a_preview_size_that_is_not_offered_loads_as_4096() {
-    let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("gui.toml");
-    std::fs::write(&p, "preview_max = 1000\nlive_encode = true\n").unwrap();
-    let (s, err) = GuiSettings::load(&p);
-    assert_eq!(err, None);
-    assert_eq!(s.preview_max, 4096);
-    assert!(s.live_encode, "the rest of the file is kept");
-    std::fs::write(&p, "preview_max = 8192\n").unwrap();
-    assert_eq!(GuiSettings::load(&p).0.preview_max, 8192);
+    let saved = std::fs::read_to_string(&p).unwrap();
+    for line in removed {
+        let key = line.split(' ').next().unwrap();
+        let kept = saved.lines().any(|l| l.starts_with(key));
+        assert!(!kept, "{key} is dropped on save: {saved}");
+    }
+    assert_eq!(GuiSettings::load(&p), (s, None));
 }
 
 #[test]
@@ -91,14 +83,14 @@ fn saving_is_atomic_and_keeps_an_unreadable_file_as_gui_toml_bad() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    std::fs::write(&p, "preview_max = \"big\"\n# my hand-written notes\n").unwrap();
+    std::fs::write(&p, "live_encode = \"big\"\n# my hand-written notes\n").unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_some());
     s.save(&p).unwrap();
     let bad = d.path().join("sdc/gui.toml.bad");
     assert_eq!(
         std::fs::read_to_string(&bad).unwrap(),
-        "preview_max = \"big\"\n# my hand-written notes\n"
+        "live_encode = \"big\"\n# my hand-written notes\n"
     );
     assert_eq!(GuiSettings::load(&p), (s.clone(), None));
     // Once: the next save finds a readable file and leaves the kept copy alone.
@@ -130,16 +122,20 @@ fn a_hand_edit_made_while_running_survives_the_next_save() {
     let (s, _) = GuiSettings::load(&p);
     let mut m = sdc_gui::model::AppModel::new(s, Some(p.clone()), support::session());
     let mut hand = GuiSettings::load(&p).0;
-    hand.jobs = 12;
-    hand.mem_budget_mb = 4096;
+    hand.export_folder = Some(d.path().join("hand"));
+    hand.set_view_3d = true;
     hand.save(&p).unwrap();
     m.settings.live_encode = true;
-    m.settings.mem_budget_mb = 512;
+    m.settings.export_folder = Some(d.path().join("app"));
     m.save_settings();
     let back = GuiSettings::load(&p).0;
-    assert_eq!(back.jobs, 12, "the hand edit is kept");
+    assert!(back.set_view_3d, "the hand edit is kept");
     assert!(back.live_encode, "the app's change is written");
-    assert_eq!(back.mem_budget_mb, 512, "both changed: the app wins");
+    assert_eq!(
+        back.export_folder,
+        Some(d.path().join("app")),
+        "both changed: the app wins"
+    );
     assert_eq!(m.settings, back, "the app now holds what it wrote");
 }
 
@@ -201,14 +197,14 @@ fn a_file_broken_while_running_is_kept_and_warned_about() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     let mut m = running(&p, GuiSettings::default());
-    std::fs::write(&p, "jobs = [broken").unwrap();
-    m.settings.jobs = 3;
+    std::fs::write(&p, "live_encode = [broken").unwrap();
+    m.settings.advanced_open = true;
     m.save_settings();
     assert_eq!(GuiSettings::load(&p), (m.settings.clone(), None));
-    assert_eq!(GuiSettings::load(&p).0.jobs, 3);
+    assert!(GuiSettings::load(&p).0.advanced_open);
     assert_eq!(
         std::fs::read_to_string(p.with_extension("toml.bad")).unwrap(),
-        "jobs = [broken"
+        "live_encode = [broken"
     );
     assert!(m
         .messages
@@ -244,7 +240,7 @@ fn saving_keeps_a_non_utf8_gui_toml_as_bad() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    let bytes = b"jobs = 12\n# caf\xe9\n".to_vec();
+    let bytes = b"live_encode = true\n# caf\xe9\n".to_vec();
     std::fs::write(&p, &bytes).unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_some());
@@ -261,7 +257,7 @@ fn a_gui_toml_locked_at_launch_is_merged_by_the_first_save() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     GuiSettings {
-        jobs: 12,
+        advanced_open: true,
         ..GuiSettings::default()
     }
     .save(&p)
@@ -278,7 +274,7 @@ fn a_gui_toml_locked_at_launch_is_merged_by_the_first_save() {
     m.settings.live_encode = true;
     m.save_settings();
     let back = GuiSettings::load(&p).0;
-    assert_eq!(back.jobs, 12, "the file's value is kept");
+    assert!(back.advanced_open, "the file's value is kept");
     assert!(back.live_encode, "the app's change is written");
 }
 
@@ -291,7 +287,7 @@ fn a_locked_broken_gui_toml_keeps_the_earlier_bad_copy() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("gui.toml");
     let bad = p.with_extension("toml.bad");
-    std::fs::write(&p, "preview_max = [").unwrap();
+    std::fs::write(&p, "live_encode = [").unwrap();
     std::fs::write(&bad, "earlier hand edit").unwrap();
     // FILE_SHARE_READ only: readable, but it cannot be renamed while this handle is open.
     let hold = std::fs::OpenOptions::new()
@@ -302,10 +298,10 @@ fn a_locked_broken_gui_toml_keeps_the_earlier_bad_copy() {
     assert!(GuiSettings::default().save(&p).is_err());
     drop(hold);
     assert_eq!(std::fs::read_to_string(&bad).unwrap(), "earlier hand edit");
-    assert_eq!(std::fs::read_to_string(&p).unwrap(), "preview_max = [");
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "live_encode = [");
     // Unlocked, the next save replaces the earlier copy.
     assert_eq!(GuiSettings::default().save(&p).unwrap(), Some(bad.clone()));
-    assert_eq!(std::fs::read_to_string(&bad).unwrap(), "preview_max = [");
+    assert_eq!(std::fs::read_to_string(&bad).unwrap(), "live_encode = [");
 }
 
 /// Trace #31: a folder name that is not valid Unicode (a lone surrogate) cannot be written to TOML. It is left out of

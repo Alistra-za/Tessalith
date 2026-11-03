@@ -3,10 +3,8 @@ use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::inspector::*;
-use sdc_gui::model::preview::{EncodedState, SourceState};
 use sdc_gui::model::AppModel;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use support::*;
 
 #[test]
@@ -52,148 +50,6 @@ fn unmatched_entries_are_listed_and_removable() {
         .contains(&"landscape/rock01_rmaos".to_string()));
 }
 
-#[test]
-fn preview_size_follows_its_rules() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_preview_max(16384);
-    assert_eq!(
-        m.settings.preview_max, 4096,
-        "16384 needs the explicit setting"
-    );
-    m.settings.allow_16k_preview = true;
-    m.set_preview_max(16384);
-    assert_eq!(m.settings.preview_max, 16384);
-}
-
-#[test]
-fn turning_16384_off_lowers_a_16384_limit() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_allow_16k_preview(true);
-    m.set_preview_max(16384);
-    m.set_allow_16k_preview(false);
-    assert!(!m.settings.allow_16k_preview);
-    assert!(m.settings.preview_max <= 8192);
-    m.set_preview_max(16384);
-    assert!(m.settings.preview_max <= 8192, "still refused");
-}
-
-/// Task 15's carry-over: a limit change restarts the expanded preview.
-#[test]
-fn changing_the_preview_limit_restarts_the_expanded_preview() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.expand("landscape/rock01_rmaos");
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    m.encode_now();
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let SourceState::Ready(before) = m.preview.source.clone() else {
-        panic!("no source")
-    };
-    assert!(matches!(m.preview.encoded, EncodedState::Done(_)));
-
-    m.set_preview_max(2048);
-    assert!(
-        matches!(m.preview.encoded, EncodedState::Stale(_)),
-        "the result was made under the old limit"
-    );
-    let t0 = Instant::now();
-    m.tick(t0);
-    m.tick(t0 + sdc_gui::model::preview::DEBOUNCE);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let SourceState::Ready(after) = &m.preview.source else {
-        panic!("no source")
-    };
-    assert!(!Arc::ptr_eq(&before, after), "the source was read again");
-}
-
-/// Turning 16384 off while it is the limit is the toggle path that changes the effective limit; a change that
-/// leaves the limit as it was leaves a finished result alone.
-#[test]
-fn the_16k_toggle_restarts_only_when_the_effective_limit_changes() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_allow_16k_preview(true);
-    m.set_preview_max(16384);
-    m.expand("landscape/rock01_rmaos");
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    m.encode_now();
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let SourceState::Ready(before) = m.preview.source.clone() else {
-        panic!("no source")
-    };
-    assert!(matches!(m.preview.encoded, EncodedState::Done(_)));
-
-    // No-ops: the same size again, and the box ticked again.
-    m.set_preview_max(16384);
-    m.set_allow_16k_preview(true);
-    assert!(matches!(m.preview.encoded, EncodedState::Done(_)));
-    assert!(!m.preview.scheduled(), "nothing was scheduled");
-
-    m.set_allow_16k_preview(false);
-    assert_eq!(m.settings.preview_max, 8192);
-    assert!(
-        matches!(m.preview.encoded, EncodedState::Stale(_)),
-        "the result was made under the 16384 limit"
-    );
-    let t0 = Instant::now();
-    m.tick(t0);
-    m.tick(t0 + sdc_gui::model::preview::DEBOUNCE);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let SourceState::Ready(after) = &m.preview.source else {
-        panic!("no source")
-    };
-    assert!(!Arc::ptr_eq(&before, after), "the source was read again");
-}
-
-/// A DDS input has no source side: its stored mips are read again under the new limit.
-#[test]
-fn changing_the_preview_limit_reopens_an_expanded_dds() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    export_through(&mut m);
-    assert!(m.wait_idle(Duration::from_secs(120)));
-    let dds = walk(&d.path().join("export"))
-        .into_iter()
-        .find(|p| p.extension().is_some_and(|e| e == "dds"))
-        .expect("the export wrote a .dds");
-    std::fs::copy(&dds, d.path().join("textures/landscape/stored.dds")).unwrap();
-    m.open_folder(d.path().join("textures"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    m.expand("landscape/stored.dds");
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let EncodedState::Done(before) = m.preview.encoded.clone() else {
-        panic!("not done: {:?}", m.preview.encoded)
-    };
-
-    m.set_preview_max(4096);
-    assert!(
-        matches!(&m.preview.encoded, EncodedState::Done(o) if Arc::ptr_eq(o, &before)),
-        "an unchanged limit leaves the result alone"
-    );
-    m.set_preview_max(2048);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let EncodedState::Done(after) = &m.preview.encoded else {
-        panic!("not done: {:?}", m.preview.encoded)
-    };
-    assert!(!Arc::ptr_eq(&before, after), "the DDS was read again");
-    assert!(!after.result.levels.is_empty());
-}
-
-fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut out = vec![];
-    for e in std::fs::read_dir(dir).unwrap().flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            out.extend(walk(&p));
-        } else {
-            out.push(p);
-        }
-    }
-    out
-}
-
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
         .with_size(eframe::egui::vec2(1400.0, 1000.0))
@@ -215,7 +71,6 @@ fn the_open_drawer_shows_its_sections() {
     h.run();
     for label in [
         "Preset inspector",
-        "Batch",
         "Preview",
         "Advanced texture fields",
         "Unmatched [files] entries",
@@ -354,11 +209,11 @@ fn no_inspector_value_passes_the_drawer_edge() {
         sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         let inspector_top = h.get_by_label("Preset inspector").rect().min.y;
-        let batch_top = h.get_by_label("Batch").rect().min.y;
+        let preview_top = h.get_by_label("Preview").rect().min.y;
         let mut checked = 0;
         for n in h.query_all_by_role(Role::Label) {
             let r = n.rect();
-            if r.min.y > inspector_top && r.min.y < batch_top {
+            if r.min.y > inspector_top && r.min.y < preview_top {
                 checked += 1;
                 assert!(
                     r.max.x <= width + 1.0,
@@ -429,20 +284,6 @@ fn remove_drops_an_unmatched_entry() {
         h.query_by_label("Packing fill values").is_none(),
         "the global fill panel is retired"
     );
-}
-
-#[test]
-fn the_batch_section_has_no_bc1_decoder_setting() {
-    let d = tempfile::tempdir().unwrap();
-    let mut model = opened(d.path());
-    model.settings.advanced_open = true;
-    let mut h = harness(model);
-    h.run();
-    h.get_by_label_contains("Worker threads");
-    assert!(h.query_by_label_contains("BC1 decoder").is_none());
-    assert!(h
-        .query_by_label_contains("restart Tessalith to apply")
-        .is_none());
 }
 
 #[test]
@@ -547,16 +388,49 @@ fn the_inspector_lists_skipped_user_presets_with_their_reason() {
     h.get_by_label_contains("unknown preset 'nope'");
 }
 
+/// Note FM25 (P17): the drawer's exact rows once the Batch section (threads, memory), the preview-size combo, the
+/// 16384 box and the Interface section (Reduce motion) are gone. Nothing is selected, so only the section headings,
+/// their always-present rows and the Close button remain.
 #[test]
-fn the_reduce_motion_box_saves_and_reaches_the_ui() {
+fn advanced_has_no_batch_or_preview_size_rows() {
+    use eframe::egui;
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
     model.settings.advanced_open = true;
     let mut h = harness(model);
     h.run();
-    assert!(!sdc_gui::ui::motion::reduce_motion(&h.ctx));
-    h.get_by_label("Reduce motion").click();
-    h.run();
-    assert!(h.state().settings.reduce_motion);
-    assert!(sdc_gui::ui::motion::reduce_motion(&h.ctx));
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
+        .expect("the drawer is open")
+        .outer_rect;
+    let mut labels: Vec<String> = h
+        .query_all_by_role(Role::Label)
+        .chain(h.query_all_by_role(Role::Button))
+        .chain(h.query_all_by_role(Role::CheckBox))
+        .chain(h.query_all_by_role(Role::SpinButton))
+        .chain(h.query_all_by_role(Role::ComboBox))
+        .filter(|n| panel.expand(1.0).contains_rect(n.rect()))
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    labels.sort();
+    labels.dedup();
+    let want = [
+        "Advanced texture fields",
+        "Also export recipe",
+        "Check all UV coverage",
+        "Checks",
+        "Close",
+        "Green direction check",
+        "Live encode",
+        "Low detail check",
+        "Mipmaps",
+        "Parallax check",
+        "Plastic look check",
+        "Preset inspector",
+        "Presets…",
+        "Preview",
+        "UV coverage check",
+        "Unmatched [files] entries",
+        "Value range check",
+    ];
+    assert_eq!(labels, want);
 }

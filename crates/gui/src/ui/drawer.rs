@@ -58,12 +58,8 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
         if running {
             let total = model.export.rows.len().max(1);
             ui.add(
-                egui::ProgressBar::new(super::header::shown_progress(
-                    ui.ctx(),
-                    model.drawer_epoch,
-                    finished as f32 / total as f32,
-                ))
-                .desired_width(120.0)
+                egui::ProgressBar::new(finished as f32 / total as f32)
+                    .desired_width(120.0)
                 .animate(false),
             );
             // `done/total · elapsed · files/s · ETA`; the clock moves between events, so ask for a repaint.
@@ -143,7 +139,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
     }
     if copy {
         if let Some(root) = &model.root {
-            let cmd = cli_command(root, &model.cli_output(), model.settings.jobs);
+            let cmd = cli_command(root, &model.cli_output());
             ui.ctx().copy_text(cmd);
         }
     }

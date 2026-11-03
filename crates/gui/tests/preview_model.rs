@@ -89,7 +89,7 @@ fn mode_change_cancels_and_drops_a_preview_of_a_vanished_job() {
 fn the_size_limit_skips_large_mips() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.settings.preview_max = 16;
+    m.gpu_max_dim = 16;
     m.expand("landscape/rock01_rmaos");
     m.encode_now();
     settle(&mut m);
@@ -194,8 +194,10 @@ fn live_encode_is_saved_and_encodes_on_expand() {
 fn the_gpu_limit_lowers_the_preview_limit() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
+    assert_eq!(m.preview_limit(), 4096, "a constant 4096 on a big GPU");
+    m.gpu_max_dim = 8192;
+    assert_eq!(m.preview_limit(), 4096, "a bigger GPU does not raise it");
     m.gpu_max_dim = 32;
-    assert_eq!(m.settings.preview_max, 4096);
     assert_eq!(m.preview_limit(), 32);
     m.expand("landscape/rock01_rmaos");
     settle(&mut m);
@@ -220,7 +222,6 @@ fn a_gpu_limit_that_changes_nothing_adds_no_notice() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.gpu_max_dim = 1024;
-    m.settings.preview_max = 2048;
     m.expand("landscape/rock01_rmaos");
     settle(&mut m);
     assert!(m.preview.notice.is_none(), "{:?}", m.preview.notice);

@@ -7,9 +7,11 @@ Where the GUI keeps its settings, what it remembers between sessions, and what h
 | File | Contents |
 |---|---|
 | `<folder>\sdc-project.toml` | Sets, shaders, slot pins, output names, TruePBR settings, JSON name, delete sections, the export folder, and the hashes of the JSON files and borrowed-slot copies Tessalith wrote, and the records of generated files (`[generated]`). GUI only. |
-| `%APPDATA%\sdc\gui.toml` | Window and app settings: the default export folder (a project's own is in its `sdc-project.toml`), recent folders (10), preview limit, 16384 previews, Live encode, worker threads, memory budget, column visibility and widths, window size and position, Textures filters, sort and tile size, 2D/3D choice, 3D View controls, Advanced drawer state, the scan source (`[meshes]`) and the 3D preview's shader folder and size (`[render3d]`). Never part of `sdc.toml`. |
+| `%APPDATA%\sdc\gui.toml` | Window and app settings: the default export folder (a project's own is in its `sdc-project.toml`), recent folders (10), Live encode, column visibility and widths, window size and position, Textures filters, sort and tile size, 2D/3D choice, 3D View controls, Advanced drawer state, the scan source (`[meshes]`) and the 3D preview's shader folder and size (`[render3d]`). Never part of `sdc.toml`. |
 
 Presets: [Presets](GUI-Presets.md#presets).
+
+The GUI runs the engine with its defaults: one worker thread per core, half of the memory, and previews up to 4096 pixels on a side (lower on a GPU that cannot hold that). The CLI's --jobs and --mem-budget ([CLI reference](CLI-Reference.md#sdc-convert)) change the first two.
 
 ## What Tessalith remembers
 
@@ -27,7 +29,7 @@ The zoom, the selection and the open folder are not remembered.
 How `gui.toml` is written:
 - It is saved a couple of seconds after you change something, and when you close the window. Starting and closing without changing anything does not rewrite it.
 - If the saved window would be off every screen (a monitor was unplugged), it opens centred on the main screen. If only its title bar would be off the screen, it moves down so you can still drag it.
-- A value that makes no sense is ignored on its own; the rest of the file still applies.
+- A value that makes no sense is ignored on its own; the rest of the file still applies. So is the key of a setting that no longer exists, and the next save leaves it out.
 - If you edit `gui.toml` while Tessalith runs, your edit is kept: the next save reads the file again and keeps every value Tessalith has not changed since its last save. A value both changed takes Tessalith's.
 - Recent folders merge folder by folder: a folder you removed by hand stays removed, one you added stays, and folders Tessalith added are kept.
 - If `gui.toml` cannot be written, a warning says why, once per distinct error.

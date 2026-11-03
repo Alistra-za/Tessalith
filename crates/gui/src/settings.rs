@@ -5,24 +5,14 @@ pub use layout::*;
 
 use std::path::{Path, PathBuf};
 
-/// Preview size limits offered (M3a spec §6.5); 16384 only when `allow_16k_preview` is set.
-pub const PREVIEW_SIZES: [u32; 5] = [1024, 2048, 4096, 8192, 16384];
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GuiSettings {
     pub export_folder: Option<PathBuf>,
     /// Most recent first, at most 10.
     pub recent: Vec<PathBuf>,
-    /// Preview size limit (M3a spec §6.5), 4096 by default.
-    pub preview_max: u32,
-    pub allow_16k_preview: bool,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
     pub live_encode: bool,
-    /// Worker threads; 0 = one per core.
-    pub jobs: usize,
-    /// Memory budget in MiB; 0 = half of physical memory.
-    pub mem_budget_mb: u64,
     /// The Textures and Sets columns: shown at all (the header's checkboxes), and collapsed to a strip (the
     /// arrows on each column).
     pub textures_hidden: bool,
@@ -34,8 +24,6 @@ pub struct GuiSettings {
     /// The 3D view's settings window (TruePBR settings…) is open (AG132).
     pub set_settings_open: bool,
     pub advanced_open: bool,
-    /// Reduce motion (Note CF1): shorter fades, no sliding or scaling.
-    pub reduce_motion: bool,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.
     pub meshes: MeshesSettings,
     /// The Meshes view's 3D panel (plan B Task B8), `[render3d]` in the file.
@@ -93,33 +81,6 @@ pub struct MeshesSettings {
     pub folder: Option<PathBuf>,
 }
 
-impl Default for GuiSettings {
-    fn default() -> Self {
-        GuiSettings {
-            export_folder: None,
-            recent: vec![],
-            preview_max: 4096,
-            allow_16k_preview: false,
-            live_encode: false,
-            jobs: 0,
-            mem_budget_mb: 0,
-            textures_hidden: false,
-            sets_hidden: false,
-            textures_collapsed: false,
-            sets_collapsed: false,
-            set_view_3d: false,
-            set_settings_open: false,
-            advanced_open: false,
-            reduce_motion: false,
-            meshes: MeshesSettings::default(),
-            render3d: Render3dSettings::default(),
-            layout: LayoutSettings::default(),
-            checks: ChecksSettings::default(),
-            match_slots: Default::default(),
-        }
-    }
-}
-
 /// `%APPDATA%\sdc\gui.toml`.
 pub fn settings_path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("gui.toml"))
@@ -135,11 +96,8 @@ impl GuiSettings {
                 Some(format!("{}: {e}", path.display())),
             ),
             Ok(text) => match toml::from_str::<GuiSettings>(&text) {
+                // Keys of removed settings (Note FM25) are ignored here and left out of the next save.
                 Ok(mut s) => {
-                    // The settings panel offers only these sizes; a hand-edited value becomes the default.
-                    if !PREVIEW_SIZES.contains(&s.preview_max) {
-                        s.preview_max = GuiSettings::default().preview_max;
-                    }
                     s.layout.sanitize();
                     (s, None)
                 }

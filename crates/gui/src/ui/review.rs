@@ -738,27 +738,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = egui::Button::new(m.review_button_text());
-                    // CF11: only the paint fades in; the button is live from the first frame. Asked every frame, so
-                    // an untick snaps the state to 0 (0 s) and a re-tick fades again.
-                    let t = ui.ctx().animate_bool_with_time_and_easing(
-                        egui::Id::new("review-export-ready"),
-                        gate.is_ok(),
-                        if gate.is_ok() {
-                            super::motion::fade_dur(ui.ctx(), 0.15)
-                        } else {
-                            0.0
-                        },
-                        egui::emath::easing::cubic_out,
-                    );
                     match &gate {
                         Ok(_) => {
-                            let v = ui.visuals();
-                            let fill = v
-                                .widgets
-                                .inactive
-                                .weak_bg_fill
-                                .lerp_to_gamma(v.selection.bg_fill, t);
-                            let r = ui.add(button.fill(fill));
+                            let r = ui.add(button.fill(ui.visuals().selection.bg_fill));
+
                             // Note FC8: a focused field commits on the press; the release exports.
                             super::blur_on_press(ui, r.rect);
                             if r.clicked() {

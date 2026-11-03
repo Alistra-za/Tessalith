@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 /// How long an edit must rest before a debounced request starts.
 pub const DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// The largest side the preview shows, before the GPU's own limit lowers it (Note FM25).
+pub const PREVIEW_MAX: u32 = 4096;
+
 const NOTHING: &str = "Nothing to preview";
 const ERRORED: &str = "This texture has an error; fix its settings to preview it";
 const SUGGESTED: &str = "Preview of the suggested settings";
@@ -389,19 +392,9 @@ pub fn dds_thumbnail(path: &std::path::Path) -> Result<engine::session::Thumbnai
 }
 
 impl AppModel {
-    /// The size limit the settings give: the setting, at most 8192 unless 16384 is allowed (M3a spec §6.5).
-    fn settings_limit(&self) -> u32 {
-        let m = self.settings.preview_max;
-        if self.settings.allow_16k_preview {
-            m
-        } else {
-            m.min(8192)
-        }
-    }
-
-    /// The size limit in effect: the settings' limit, lowered to what the GPU can hold (M3a spec §6.5).
+    /// The size limit in effect: [`PREVIEW_MAX`], lowered to what the GPU can hold (Note FM25).
     pub fn preview_limit(&self) -> u32 {
-        self.settings_limit().min(self.gpu_max_dim)
+        PREVIEW_MAX.min(self.gpu_max_dim)
     }
 
     fn set_base_notice(&mut self, notice: Option<String>) {
@@ -411,8 +404,8 @@ impl AppModel {
 
     /// Say so when the GPU's limit, not the setting, left mips out of a result (`dims` is the whole chain).
     fn note_gpu_limit(&mut self, dims: &[(u32, u32)], first_level: usize) {
-        let wanted = self.settings_limit();
-        let lowered = self.gpu_max_dim < wanted && first_level > first_level_within(dims, wanted);
+        let lowered =
+            self.gpu_max_dim < PREVIEW_MAX && first_level > first_level_within(dims, PREVIEW_MAX);
         self.preview.gpu_note = lowered.then(|| {
             format!(
                 "This GPU shows at most {} px: previewing from the first mip that fits",
@@ -537,45 +530,6 @@ impl AppModel {
         if self.preview.live {
             self.preview.encode_pending = true;
         }
-    }
-
-    /// The size limit changed from `before`: what the expanded texture shows was made under the old one.
-    fn preview_limit_changed(&mut self, before: u32) {
-        if self.preview_limit() == before {
-            return;
-        }
-        let Some(key) = self.expanded.clone() else {
-            return;
-        };
-        match self.item(&key).map(classify) {
-            Some(Previewable::Job(_)) => self.restart_job_preview(),
-            Some(Previewable::Dds) => self.preview_open(&key),
-            _ => {}
-        }
-    }
-
-    /// The preview size limit (M3a spec §6.5); 16384 only with `allow_16k_preview`. Saved.
-    pub fn set_preview_max(&mut self, size: u32) {
-        if (size == 16384 && !self.settings.allow_16k_preview)
-            || !crate::settings::PREVIEW_SIZES.contains(&size)
-        {
-            return;
-        }
-        let before = self.preview_limit();
-        self.settings.preview_max = size;
-        self.save_settings();
-        self.preview_limit_changed(before);
-    }
-
-    /// Allow (or stop allowing) a 16384 px limit. Turning it off lowers a 16384 limit to 8192.
-    pub fn set_allow_16k_preview(&mut self, on: bool) {
-        let before = self.preview_limit();
-        self.settings.allow_16k_preview = on;
-        if !on && self.settings.preview_max > 8192 {
-            self.settings.preview_max = 8192;
-        }
-        self.save_settings();
-        self.preview_limit_changed(before);
     }
 
     /// Start whatever has waited out the debounce. The UI calls this every frame with `Instant::now()`.

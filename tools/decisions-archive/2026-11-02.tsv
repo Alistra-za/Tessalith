@@ -184,3 +184,25 @@ FC¶- **No false JSON stale rows.**	FC		back	FM		archive-item	2026-11-03		whole:
 FC¶- **A failed save undoes the half size.**	FC		back	FM		archive-item	2026-11-03		whole: no half-size write (FM24)
 FC¶- **No auto-record onto the half step.**	FC		back	FM		archive-item	2026-11-03		whole: no half step (FM24)
 FC¶- **Review footer.**	FC		back	FM		partial	2026-11-03		goes: the stale list in the footer; stays: the NIF and JSON lists share one scroll area
+CF1	CF		back	FM		archive-item	2026-11-03		whole: Reduce motion and ui::motion are gone (FM25)
+CF2	CF		back	FM		archive-item	2026-11-03		whole: toasts no longer fade or rise (FM25)
+CF11	CF		back	FM		archive-item	2026-11-03		whole: the Export accent no longer fades (FM25)
+CF12	CF		back	FM		archive-item	2026-11-03		whole: the progress bar no longer glides (FM25)
+CF13	CF		back	FM		archive-item	2026-11-03		whole: the reorder flash is gone (FM25)
+CF14	CF		back	FM		archive-item	2026-11-03		whole: the slot flash is gone (FM25)
+CF15	CF		back	FM		archive-item	2026-11-03		whole: the thumbnail press scale is gone (FM25)
+CF16	CF		back	FM		archive-item	2026-11-03		whole: the folder fade-in is gone (FM25)
+CF18	CF		back	FM		archive-item	2026-11-03		whole: record of the motion shots, which showed the removed layer (FM25)
+CF3	CF		back	FM		partial	2026-11-03		goes: the Reduce motion sentence; stays: keyboard-opened overlays appear at once
+CF5	CF		back	FM		partial	2026-11-03		goes: the flash, the Reduce motion reveal and its test; stays: Move to... and its rules
+CF7	CF		back	FM		partial	2026-11-03		goes: the glide and Reduce motion wording; stays: virtualisation and drop on the target card
+CF10	CF		back	FM		partial	2026-11-03		goes: the reduce-motion remark; stays: instant hover and press looks
+CF19	CF		back	FM		partial	2026-11-03		goes: the tests of the removed motion layer; stays: the other test lists
+N1	N		back	FM		partial	2026-11-03		goes: the 1024-16384 setting and the 16384 option; stays: the 4096 cap and the byte-identical mips
+AG112	AG		back	FM		partial	2026-11-03		goes: the 0.5 s fade; stays: the toast rules
+AG¶- **Details** (collapsed by default)	AG		back	FM		partial	2026-11-03		goes: Timings in the Details list; stays: the rest of the list
+CL15	CL		back	FM		partial	2026-11-03		goes: after Interface; stays: the Checks section
+CL¶- **Check all** covers every offered item	CL		back	FM		partial	2026-11-03		goes: settings.jobs and the progress glide; stays: Check all
+BS5	BS		back	FM		partial	2026-11-03		goes: the flash in the reset state; stays: the folder-change reset
+BS8	BS		back	FM		partial	2026-11-03		goes: does not flash; stays: no edit for a move to its own place
+FC¶- **One accent.**	FC		back	FM		partial	2026-11-03		goes: the slot flash; stays: one accent, RNM outline

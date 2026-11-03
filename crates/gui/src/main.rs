@@ -54,8 +54,6 @@ fn main() -> eframe::Result {
     // Note FC4: a restart after a lost graphics device reopens the folder that was open.
     let reopen = sdc_gui::crash_log::after_device_loss_folder(std::env::args_os().skip(1));
     sdc_gui::crash_log::mark_started(reopen.is_some());
-    // The preview timing log (SDC_PREVIEW_LOG=0 turns it off); kept alive for the whole run.
-    let _perf = render3d::perf_log::start();
     // The saved window (AG17, AG18), fitted to the monitors before the window exists.
     let saved = settings::settings_path()
         .map(|p| settings::GuiSettings::load(&p).0.layout)

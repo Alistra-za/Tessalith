@@ -13,14 +13,6 @@ pub const JSON_EDITOR: &str = "PGPatcher JSON editor…";
 pub const MAKE_MARKER: &str = "Make marker cube…";
 /// Export's width; Note CD1 puts it beside Save at the right edge.
 const EXPORT_WIDTH: f32 = 240.0;
-/// CF12: the export bar's fraction as drawn: it glides linearly to `frac` over 0.3 s (at once under reduce motion). A
-/// new export (a new `drawer_epoch`) is a new animation, whose first frame is its own value, so it never sweeps back.
-#[doc(hidden)]
-pub fn shown_progress(ctx: &egui::Context, epoch: u64, frac: f32) -> f32 {
-    let id = egui::Id::new(("export-progress", epoch));
-    ctx.animate_value_with_time(id, frac, super::motion::move_dur(ctx, 0.3))
-}
-
 /// What the export menu's button says with no project open (Note FI5, was Note FB1's "no folder chosen").
 const MORE_TEXT: &str = "More ▾";
 /// What it says with a project open and no export folder chosen for it (Note FI5).
@@ -230,27 +222,8 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     let clean = model.export_is_clean();
     let mut export = egui::Button::new(egui::RichText::new(model.export_text(clean)).strong())
         .min_size(egui::vec2(size.x, button_h));
-    // CF11: the accent fades in (0.15 s) and snaps out. Asked every frame, so losing readiness resets it.
-    let ctx = ui.ctx().clone();
-    let secs = if clean {
-        super::motion::fade_dur(&ctx, 0.15)
-    } else {
-        0.0
-    };
-    let t = ctx.animate_bool_with_time_and_easing(
-        egui::Id::new("header-export-ready"),
-        clean,
-        secs,
-        egui::emath::easing::cubic_out,
-    );
-    if t > 0.0 {
-        let v = ui.visuals();
-        export = export.fill(
-            v.widgets
-                .inactive
-                .weak_bg_fill
-                .lerp_to_gamma(v.selection.bg_fill, t),
-        );
+    if clean {
+        export = export.fill(ui.visuals().selection.bg_fill);
     }
     ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Center), |ui| {
         // A12: the hover counts the files and the problems. FB1: and, while it reads Review, what is still open.
@@ -292,7 +265,7 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
                 None => "Exporting. Cancel is in the Files tab.".to_string(),
             };
             ui.add(
-                egui::ProgressBar::new(shown_progress(ui.ctx(), model.drawer_epoch, frac))
+                egui::ProgressBar::new(frac)
                     .desired_width(size.x)
                     .desired_height(size.y - gap - button_h)
                     .text(format!("{done}/{total}"))

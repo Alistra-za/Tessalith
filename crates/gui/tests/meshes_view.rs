@@ -517,7 +517,7 @@ fn meshes_settings_round_trip_in_gui_toml() {
     assert!(text.contains("[meshes]"), "{text}");
     assert_eq!(GuiSettings::load(&p), (s, None));
     // An older file without [meshes] still loads.
-    std::fs::write(&p, "preview_max = 2048\n").unwrap();
+    std::fs::write(&p, "live_encode = true\n").unwrap();
     assert_eq!(GuiSettings::load(&p).0.meshes, MeshesSettings::default());
 }
 

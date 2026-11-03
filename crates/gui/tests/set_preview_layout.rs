@@ -310,11 +310,7 @@ fn details_is_collapsed_by_default_and_holds_the_tech_lines() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness_at(d.path(), egui::vec2(1400.0, 900.0), |_| {});
     h.get_by_label("Details");
-    for t in [
-        JSON_WINS,
-        "Timings",
-        sdc_gui::model::viewport3d::FEATURES_LABEL,
-    ] {
+    for t in [JSON_WINS, sdc_gui::model::viewport3d::FEATURES_LABEL] {
         assert!(h.query_by_label(t).is_none(), "{t} is in Details");
     }
     assert!(h.query_by_label(&cap_text(2048)).is_none());
@@ -327,7 +323,10 @@ fn details_is_collapsed_by_default_and_holds_the_tech_lines() {
     ));
     h.get_by_label(JSON_WINS);
     h.get_by_label(&cap_text(2048));
-    h.get_by_label("Timings");
+    assert!(
+        h.query_by_label("Timings").is_none(),
+        "the Timings panel is gone"
+    );
     h.get_by_label(sdc_gui::model::viewport3d::FEATURES_LABEL);
     assert!(
         h.get_by_label(FRAME_LABEL).rect().height() < tall,

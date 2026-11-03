@@ -148,7 +148,6 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
                 if emissive_shown(s) {
                     ui.label(EMISSIVE_APPROX);
                 }
-                timings(ui, s);
                 // Until the CS settings are read the 3D part shows no off line: keep the P0 list here (Dynamic Cubemaps
                 // left it in v2 D5: previewed once the settings load it).
                 if s.v3.off_in_preview.is_empty() {
@@ -358,35 +357,6 @@ fn shapes(ui: &mut egui::Ui, s: &SetPreview, attention: bool) {
     } else {
         list(ui);
     }
-}
-
-fn timings(ui: &mut egui::Ui, s: &SetPreview) {
-    egui::CollapsingHeader::new("Timings")
-        .id_salt("set-3d-timings")
-        .show(ui, |ui| {
-            let f = |x: Option<f64>| x.map_or("–".to_string(), |v| format!("{v:.1} ms"));
-            ui.label(format!("Mesh query: {}", f(s.timings.query_ms)));
-            ui.label(format!("NIF read + parse: {}", f(s.timings.nif_ms)));
-            ui.label(format!("Simulate + scene: {}", f(s.timings.push_ms)));
-            for m in s.enc.members.values() {
-                if let Some(e) = m.state.shown() {
-                    ui.label(format!("Encode {}: {:.0} ms", m.slot.kind.label(), e.ms));
-                }
-            }
-            if let Some((k, t)) = s.v3.last_edit {
-                ui.label(format!("Last material edit: {k:?}, {t:.2} ms"));
-            }
-            if let Some(p) = render3d::perf_log::path() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Timing log: {}", p.display()));
-                    if ui.button("Copy log path").clicked() {
-                        ui.ctx().copy_text(p.display().to_string());
-                    }
-                });
-            } else {
-                ui.label("Timing log: off (SDC_PREVIEW_LOG=0)");
-            }
-        });
 }
 
 /// What the 3D view says until its first fingerprint is ready.

@@ -109,10 +109,8 @@ pub fn draw(
     let all = views(model);
     let Some(v) = all.iter().find(|v| v.key == key) else {
         ui.weak("This set is no longer in the plan.");
-        drops.slot_seen = None;
         return;
     };
-    slot_changes(ui.ctx(), drops, v);
     if view.three_d {
         // 3D (AG132): the set's 3D view takes the rest of this pane (`ui::centre`); the TruePBR settings and the skin
         // card are in the TruePBR settings… window, as are the CS PBR section and the complex material card, so an edit
@@ -131,14 +129,6 @@ pub fn draw(
     let drop_at = drops.file.as_ref().and_then(|f| f.pos);
     let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
     let why = model.banner.clone().unwrap_or_default();
-    let flash = drops
-        .slot_flash
-        .as_ref()
-        .filter(|(id, ..)| *id == v.id)
-        .and_then(|&(_, n, began)| Some((n, super::sets_column::flash_now(ui.ctx(), began)?)));
-    if flash.is_none() {
-        drops.slot_flash = None;
-    }
     // Note FB2 (amendment C): one column, as the texture settings panel: the name box, the slot rows at full width,
     // then the tabs and groups. Nothing sits beside the rows, so nothing can cover them.
     let mut area = egui::ScrollArea::vertical()
@@ -150,20 +140,6 @@ pub fn draw(
     area.show(ui, |ui| {
         head(ui, model, v, view);
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
-        // R9: the changed slot's row (its rect as `row` stored it this frame), outlined in the accent.
-        if let Some((n, a)) = flash {
-            let id = egui::Id::new(("slot-row", &v.id, n));
-            if let Some(r) = ui.data(|d| d.get_temp::<egui::Rect>(id)) {
-                let c = ui.visuals().selection.stroke.color.gamma_multiply(a);
-                ui.painter().rect_stroke(
-                    r,
-                    2.0,
-                    egui::Stroke::new(2.0, c),
-                    // Inside: the first row's top can be the scroll area's clip edge (final review M1).
-                    egui::StrokeKind::Inside,
-                );
-            }
-        }
         slot_note(ui, drops, &v.id);
         unslotted_packed(ui, model, v, &mut acts);
         ui.add_space(6.0);
@@ -272,37 +248,6 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
         });
     }
     ui.separator();
-}
-
-/// R9 (CF14): a slot that got a new member since last frame, in the same set, flashes; drop, Replace, Assign…, an
-/// Explorer drop and undo/redo all land here. Another set drawn (a switch), or the first frame after the editor was
-/// hidden (`ui::draw_with_scan` clears `slot_seen`), only records its slots.
-fn slot_changes(ctx: &egui::Context, drops: &mut DropState, v: &SetView) {
-    let mut slots: Vec<Option<String>> = vec![];
-    for (k, f) in &v.slots {
-        // shortcut: the XPMF maps (no slot number) do not flash; key the flash by kind if they should.
-        let Some(n) = k.slot_number().map(usize::from) else {
-            continue;
-        };
-        if slots.len() <= n {
-            slots.resize(n + 1, None);
-        }
-        slots[n] = match f {
-            SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => Some(item.clone()),
-            SlotFill::Empty => None,
-        };
-    }
-    if let Some((id, seen)) = drops.slot_seen.as_ref().filter(|(id, _)| *id == v.id) {
-        fn key(s: &[Option<String>], i: usize) -> Option<&str> {
-            s.get(i).and_then(|k| k.as_deref())
-        }
-        // Review M1: the slot that got a member; an emptied slot (the texture moved away, an undone drop) does not.
-        let got = |i: &usize| key(&slots, *i).is_some() && key(seen, *i) != key(&slots, *i);
-        if let Some(n) = (0..slots.len()).find(got) {
-            drops.slot_flash = Some((id.clone(), n as u8, ctx.input(|i| i.time)));
-        }
-    }
-    drops.slot_seen = Some((v.id.clone(), slots));
 }
 
 /// The tabs under the slot rows (C6, R12; Note FB2): Material on a JSON set or Set on any other, then Advanced;
@@ -567,7 +512,7 @@ fn row(
     let fill = &cell.fill;
     // K1: a Grid cell cannot hold the whole row, so last frame's row rect takes the right-click (F3a Task 8) and the
     // Explorer drop (item 17). It is registered before the cells, so they keep their own clicks.
-    // By slot number, as the R9 flash looks it up; the XPMF maps (no number) by kind, so their two rows differ.
+    // By slot number; the XPMF maps (no number) by kind, so their two rows differ.
     let row_id = match slot.slot_number() {
         Some(n) => egui::Id::new(("slot-row", &v.id, n)),
         None => egui::Id::new(("slot-row", &v.id, slot)),
@@ -668,21 +613,6 @@ fn row(
         egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{title} thumbnail"))
     });
     slot_menu(&resp, model, v, slot, acts);
-    // CF15: pressed, the thumbnail is drawn at 0.97 about its centre; the hit rect keeps its size. A scaled rect, not
-    // `with_visual_transform`: its scope would take a Grid cell. Reduce motion: no scale.
-    let ctx = ui.ctx();
-    let press = ctx.animate_bool_with_time_and_easing(
-        resp.id.with("press"),
-        resp.is_pointer_button_down_on(),
-        super::motion::move_dur(ctx, 0.1),
-        egui::emath::easing::cubic_out,
-    );
-    let scale = if super::motion::reduce_motion(ctx) {
-        1.0
-    } else {
-        egui::lerp(1.0..=0.97, press)
-    };
-    let shown = egui::Rect::from_center_size(rect.center(), rect.size() * scale);
     // A PGPatcher-locked slot has one hover, the lock's, in place of the thumbnail's path.
     let lock_cross = slot
         .slot_number()
@@ -696,11 +626,11 @@ fn row(
     if ui.is_rect_visible(rect) {
         match item.and_then(|i| thumbs.get(ui.ctx(), i)) {
             Some(t) => egui::Image::new(&t)
-                .fit_to_exact_size(shown.size())
-                .paint_at(ui, shown),
+                .fit_to_exact_size(rect.size())
+                .paint_at(ui, rect),
             None => {
                 ui.painter().rect_filled(
-                    shown,
+                    rect,
                     2.0,
                     ui.visuals().widgets.noninteractive.weak_bg_fill,
                 );
@@ -708,14 +638,14 @@ fn row(
         }
         if let Some(i) = item {
             ui.painter().rect_stroke(
-                shown,
+                rect,
                 2.0,
                 egui::Stroke::new(1.0, border_of(ui, &i.status)),
                 egui::StrokeKind::Inside,
             );
         }
         if lock_cross {
-            pgp_lock_mark(ui, shown, resp.id.with("pgp-lock"));
+            pgp_lock_mark(ui, rect, resp.id.with("pgp-lock"));
         }
     }
     if let Some(i) = item.filter(|_| borrowed.is_none()) {

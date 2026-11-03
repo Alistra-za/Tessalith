@@ -30,7 +30,7 @@ Press **Export**: a clean project exports at once, but when something is blocked
 
 - Review does not lock the window. Keep editing and its lists update; Export from Review always uses the plan current at that moment.
 - Review never exports by itself, not even when you decide the last texture: its **Export** button is the only way out. Enter does nothing there.
-- When Export becomes available, the button (in Review and in the header) fades to the accent colour over 0.15 s, and the header's "Review n files" turns into "Export n files"; losing it snaps back at once.
+- When Export becomes available, the button (in Review and in the header) turns to the accent colour, and the header's "Review n files" turns into "Export n files"; losing it takes both back.
 - **Size.** Review opens at 40 % of the window's height, worked out once, when Review first opens; drag its top edge to change that, and Tessalith remembers your height for Review. Review and Problems keep separate heights, so the tab strip moves when you switch between them. Under 1200 points of window width the sections stack in one scrolling column (Blockers, Undecided, then Also export as when it shows) instead of sitting side by side. Review's columns draw a thin scroll bar. In the Meshes view with a NIF selected the bottom panel (Review included) stops where the 3D preview keeps its 160 points; your height comes back in the Textures view.
 
 Each column's heading carries its count: **Blockers (n)**, **Undecided (n)**. Pitfalls and other warnings are not listed here: they are Warning rows in [Problems](GUI-Problems.md) and never hold back Export.
@@ -52,7 +52,7 @@ If a source changed on disk or a plan is still running, a click on Export waits 
 
 The **Files** tab of the bottom panel opens when Export starts. One row per file, with its state: queued, running, converted, validation failed, up to date, skipped, failed, cancelled.
 
-- While the export runs, its line reads *done/total · elapsed · files/s · ETA*. The bar glides to each new count over 0.3 s; the text is the exact count. Files per second is the average of the last 10 seconds, and the ETA appears once 3 files have finished or 2 seconds have passed.
+- While the export runs, its line reads *done/total · elapsed · files/s · ETA*. The bar and the text show the exact count. Files per second is the average of the last 10 seconds, and the ETA appears once 3 files have finished or 2 seconds have passed.
 - The list handles thousands of files: only the rows on screen are drawn. **Failed only** (failed, or failed validation) and **Has warnings** narrow it; together they show the files that match both. Click a row to select that texture. **Show in Explorer** on a row selects the written output once it exists, otherwise the source file.
 - A file's export warnings show when you hover its row, and the **Problems** tab lists them, once the export has ended, as rows that select the file.
 - **Cancel** stops the batch. **Save report…** writes the report (JSON Lines or Markdown) in the background and says "Saved report: <path>" (or why it failed) in the status line and a toast. **Copy CLI command** copies the matching `sdc` command ([above](#export)). **Open export folder** opens the export folder in Explorer (greyed out, with the reason, until Export has created it). **Close** collapses the panel.

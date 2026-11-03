@@ -77,12 +77,6 @@ pub struct SlotNote {
 #[derive(Debug, Default)]
 pub struct DropState {
     pub pending: Option<Pending>,
-    /// The set that was just reordered and when (egui time): its border flashes ([`flash_alpha`]).
-    pub flash: Option<(String, f64)>,
-    /// R9: the set the editor drew last frame and each slot's member key, by slot number.
-    pub slot_seen: Option<(String, Vec<Option<String>>)>,
-    /// R9: the set editor slot whose member changed (set id, slot number) and when (egui time): its row flashes.
-    pub slot_flash: Option<(String, u8, f64)>,
     /// Item 17: a file drop not yet taken by a slot card this frame (`ui::draw_with_scan` opens its folder after).
     pub file: Option<FileDrop>,
     pub slot_note: Option<SlotNote>,
@@ -99,35 +93,6 @@ const REVEAL_TRIES: u8 = 8;
 
 /// R4: the height of a card never laid out, until any card has been measured (then their mean).
 const CARD_EST: f32 = 110.0;
-
-/// CF13: a flash (moved pill, changed slot) holds full for this long, then fades out over `FLASH_FADE`.
-pub(super) const FLASH_HOLD: f64 = 0.35;
-pub(super) const FLASH_FADE: f64 = 0.25;
-
-/// A flash's alpha `since` seconds after it began: 1 while it holds, then `(1 - k)²` through `fade`, then gone.
-pub(super) fn flash_alpha(since: f64, fade: f64) -> Option<f32> {
-    if since < FLASH_HOLD {
-        return Some(1.0);
-    }
-    let k = (since - FLASH_HOLD) / fade;
-    (k < 1.0).then_some(((1.0 - k) * (1.0 - k)) as f32)
-}
-
-/// [`flash_alpha`] now, the fade shortened under reduce motion, asking for the frame it next changes on (K13): a
-/// timer to the end of the hold, then every frame through the fade.
-pub(super) fn flash_now(ctx: &egui::Context, began: f64) -> Option<f32> {
-    let since = ctx.input(|i| i.time) - began;
-    let a = flash_alpha(
-        since,
-        super::motion::fade_dur(ctx, FLASH_FADE as f32) as f64,
-    );
-    if since < FLASH_HOLD {
-        ctx.request_repaint_after_secs((FLASH_HOLD - since) as f32);
-    } else if a.is_some() {
-        ctx.request_repaint();
-    }
-    a
-}
 
 /// The warning tooltip shows this many lines, then "… and K more".
 const TIP_LINES: usize = 10;
@@ -587,13 +552,6 @@ pub fn draw(
     let dragged_index = dragged
         .as_deref()
         .and_then(|d| views.iter().position(|v| v.id == d));
-    let flash = st
-        .flash
-        .as_ref()
-        .and_then(|(id, t)| Some((id.clone(), flash_now(&ctx, *t)?)));
-    if flash.is_none() {
-        st.flash = None;
-    }
     // Laid-out cards by full index, for the insertion line.
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
     let est = if st.card_h.is_empty() {
@@ -651,10 +609,6 @@ pub fn draw(
             let rect = if ui.is_rect_visible(probe) {
                 let look = PillLook {
                     dragging: dragged.as_deref() == Some(v.id.as_str()),
-                    flash: flash
-                        .as_ref()
-                        .filter(|(id, _)| *id == v.id)
-                        .map(|(_, a)| *a),
                     selected: !v.key.is_empty() && sel_sets.contains(&v.key),
                     bulk: sel_sets.len() >= 2,
                 };
@@ -692,14 +646,9 @@ pub fn draw(
             };
             if reveal_at == Some(pos) {
                 reveal_drawn = rects.contains_key(&index);
-                // A target in or across last frame's view glides there as before; Reduce motion lands at once (D2).
+                // A target in or across last frame's view lands at once (Note FM25).
                 if jump.is_none() {
-                    let anim = if super::motion::reduce_motion(ui.ctx()) {
-                        egui::style::ScrollAnimation::none()
-                    } else {
-                        ui.style().scroll_animation
-                    };
-                    ui.scroll_to_rect_animation(rect, None, anim);
+                    ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
                 }
             }
         }
@@ -775,7 +724,7 @@ pub fn draw(
                     st.pending = Some(Pending::Refused(why));
                 }
             }
-            Act::Reorder(id, to) => apply_reorder(model, st, &ctx, &id, to),
+            Act::Reorder(id, to) => apply_reorder(model, &id, to),
             Act::OpenMoveTo(id) => {
                 st.pending = Some(Pending::MoveTo {
                     id,
@@ -821,21 +770,13 @@ pub fn draw(
     }
 }
 
-/// K5: every reorder (drag, Move up / Move down, Move to…): the moved set flashes and scrolls into view (CF5).
-fn apply_reorder(
-    model: &mut AppModel,
-    st: &mut DropState,
-    ctx: &egui::Context,
-    id: &str,
-    to: usize,
-) {
+/// K5: every reorder (drag, Move up / Move down, Move to…): the moved set scrolls into view (CF5).
+fn apply_reorder(model: &mut AppModel, id: &str, to: usize) {
     let key = crate::model::sets::views(model)
         .iter()
         .find(|v| engine::sets::same_id(&v.id, id))
         .map(|v| v.key.clone());
     if model.reorder_set(id, to) {
-        st.flash = Some((id.to_string(), ctx.input(|i| i.time)));
-        ctx.request_repaint();
         model.nav.reveal_set = key.filter(|k| !k.is_empty());
     }
 }
@@ -960,11 +901,10 @@ struct PillOut {
     rect: egui::Rect,
 }
 
-/// How a pill is drawn this frame: held by the pointer, or just moved (the flash's alpha).
+/// How a pill is drawn this frame.
 #[derive(Clone, Copy)]
 struct PillLook {
     dragging: bool,
-    flash: Option<f32>,
     selected: bool,
     /// Two or more sets are selected: the pills of selected ones show the bulk menu.
     bulk: bool,
@@ -1000,8 +940,6 @@ fn pill(
     let accent = ui.visuals().selection.stroke.color;
     let stroke = if look.dragging {
         egui::Stroke::new(2.0, accent)
-    } else if let Some(a) = look.flash {
-        egui::Stroke::new(2.0, accent.gamma_multiply(a))
     } else if selected {
         ui.visuals().selection.stroke
     } else {
@@ -1827,7 +1765,7 @@ fn move_to_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) 
         // The set's own position closes too: `reorder_set` refuses it, so nothing changes.
         let id = id.clone();
         st.pending = None;
-        apply_reorder(model, st, ctx, &id, to);
+        apply_reorder(model, &id, to);
     }
 }
 
@@ -1864,16 +1802,6 @@ mod tests {
             None,
             "hovering the dragged pill itself shows no line"
         );
-    }
-
-    #[test]
-    fn flash_alpha_holds_then_eases_out() {
-        assert_eq!(flash_alpha(0.0, 0.25), Some(1.0));
-        assert_eq!(flash_alpha(0.34, 0.25), Some(1.0));
-        let a = flash_alpha(0.475, 0.25).unwrap();
-        assert!((a - 0.25).abs() < 1e-3, "{a}");
-        assert_eq!(flash_alpha(0.6, 0.25), None);
-        assert_eq!(flash_alpha(0.47, 0.12), None);
     }
 
     #[test]

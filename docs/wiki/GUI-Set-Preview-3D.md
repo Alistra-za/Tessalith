@@ -21,7 +21,7 @@ The toolbar holds, for a set, *Encoded (exact export)* | *Source (faster, no com
 
 What needs attention shows as a line between the toolbar and the frame, never in Details: a map that failed, is stale or is blocked, a skipped shape or a patch badge, a shader that failed, an error, a missing texture (in magenta, with *Open in Textures*), "PGPatcher preview needs the CS target and a PBR set", Community Shaders not found, and the notices.
 
-Details holds the rest: "Assumes your Tessalith JSON wins…", the preview size, the mesh line ("No scanned mesh uses this diffuse"), each map's encode time, the built-in shape line, the emissive note, Timings, the **Community Shaders features** toggle (on by default; off compiles the shaders without the CS feature defines), "Off in this preview: …" and the frame stats.
+Details holds the rest: "Assumes your Tessalith JSON wins…", the preview size, the mesh line ("No scanned mesh uses this diffuse"), each map's encode time, the built-in shape line, the emissive note, the **Community Shaders features** toggle (on by default; off compiles the shaders without the CS feature defines), "Off in this preview: …" and the frame stats.
 
 ## A set in 3D
 
@@ -50,4 +50,3 @@ While the switch is on 3D, selecting any texture of a set (from the set or strai
 - The preview assumes your JSON wins over other mods' PGPatcher configs.
 - Large textures are previewed at a capped size ("Preview at N px, export writes full size").
 - These Community Shaders features are off in the preview: Light Limit Fix, Skylighting, Screen-Space Shadows, Subsurface Scattering, Image-Based Lighting, Physical Sky, Wetness, Cloud Shadows, terrain effects, water, fog, Volumetric Shadows.
-- A timing log is written while the preview runs. Set the environment variable `SDC_PREVIEW_LOG=0` to turn it off.

@@ -1046,8 +1046,6 @@ impl AppModel {
         });
         req.user_config = self.user_config.clone();
         req.user_presets = self.user_presets.clone();
-        req.jobs = self.settings.jobs;
-        req.mem_budget = self.settings.mem_budget_mb * 1024 * 1024;
         let (edits, paths) = sets::engine_inputs(self);
         req.set_edits = edits;
         req.output_paths = paths;
@@ -3669,11 +3667,6 @@ impl AppModel {
     pub fn remove_unmatched(&mut self, key: &str) {
         let k = key.to_string();
         self.edit("Remove entry", move |p| p.remove_file_entry(&k));
-    }
-
-    pub fn set_reduce_motion(&mut self, on: bool) {
-        self.settings.reduce_motion = on;
-        self.save_settings();
     }
 
     pub fn is_dirty(&self) -> bool {

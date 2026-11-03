@@ -14,8 +14,6 @@ pub const FADE: Duration = Duration::from_secs(4);
 pub const FADE_WARN: Duration = Duration::from_secs(8);
 /// A toast with a button (Note FB5) stays long enough to be answered: still frozen on hover.
 pub const FADE_ACTION: Duration = Duration::from_secs(20);
-/// The last part of a toast's time fades it out (on egui time, `ui::messages`; Note CF2).
-pub const FADE_OUT: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {

@@ -1,4 +1,4 @@
-//! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, batch and preview settings,
+//! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, the live-encode switch,
 //! the rarely changed texture fields, and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
@@ -6,7 +6,7 @@ use super::settings_panel::{field_row, toml_read_only_reason, Ctx, RowEdit};
 use crate::model::fields::{advanced_field_views, levels_view, provenance_text};
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::{AppModel, Selection};
-use crate::settings::{ChecksSettings, PREVIEW_SIZES};
+use crate::settings::ChecksSettings;
 use eframe::egui;
 use engine::derive::recipe::LegacyParams;
 use engine::policy::ResolvedJob;
@@ -25,19 +25,12 @@ enum Action {
     SetField(String, &'static str, Value),
     ClearField(String, &'static str),
     RemoveUnmatched(String),
-    PreviewMax(u32),
-    Allow16k(bool),
     Live(bool),
-    ReduceMotion(bool),
     Checks(ChecksSettings),
     CheckAllUv,
     CancelCheckAllUv,
     AlsoRecipe(LegacyParams),
 }
-
-/// K10: Check-all progress epochs are disjoint from the export's `drawer_epoch`, so the two bars never share one
-/// `shown_progress` animation.
-const UV_EPOCH: u64 = 1 << 63;
 
 /// The drawer: a 24 px "Advanced" strip while closed, the panel while `settings.advanced_open`.
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
@@ -85,9 +78,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
 pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
     let mut actions = vec![];
     inspector(ui, model, state);
-    batch(ui, model);
     preview_settings(ui, model, &mut actions);
-    interface(ui, model, &mut actions);
     checks(ui, model, &mut actions);
     also_recipe(ui, model, &mut actions);
     mipmaps(ui, model, &mut actions);
@@ -98,10 +89,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::SetField(k, f, v) => model.set_field(&k, f, v),
             Action::ClearField(k, f) => model.clear_field(&k, f),
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
-            Action::PreviewMax(n) => model.set_preview_max(n),
-            Action::Allow16k(on) => model.set_allow_16k_preview(on),
             Action::Live(on) => model.set_live(on),
-            Action::ReduceMotion(on) => model.set_reduce_motion(on),
             Action::Checks(c) => model.set_checks(c),
             Action::CheckAllUv => model.check_all_uv(),
             Action::CancelCheckAllUv => model.cancel_check_all_uv(),
@@ -275,55 +263,8 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     r.drag_stopped() || (r.changed() && !r.dragged())
 }
 
-fn batch(ui: &mut egui::Ui, model: &mut AppModel) {
-    section(ui, "Batch", |ui| {
-        let mut settled = false;
-        egui::Grid::new("batch").num_columns(2).show(ui, |ui| {
-            ui.label("Worker threads");
-            settled |= settled_drag(ui, &mut model.settings.jobs, 0.2, 0..=256);
-            ui.end_row();
-            ui.label("Memory budget (MiB)");
-            settled |= settled_drag(ui, &mut model.settings.mem_budget_mb, 16.0, 0..=1_048_576);
-            ui.end_row();
-        });
-        ui.label(
-            egui::RichText::new("0 threads = one per core; 0 MiB = half of the physical memory.")
-                .small()
-                .weak(),
-        );
-        if settled {
-            model.save_settings();
-        }
-    });
-}
-
 fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Preview", |ui| {
-        let allow = model.settings.allow_16k_preview;
-        let mut size = model.settings.preview_max;
-        ui.horizontal(|ui| {
-            ui.label("Largest previewed side");
-            egui::ComboBox::from_id_salt("preview-size")
-                .selected_text(format!("{} px", model.settings.preview_max))
-                .show_ui(ui, |ui| {
-                    for n in PREVIEW_SIZES.into_iter().filter(|n| *n < 16384 || allow) {
-                        ui.selectable_value(&mut size, n, format!("{n} px"));
-                    }
-                });
-        });
-        if size != model.settings.preview_max {
-            actions.push(Action::PreviewMax(size));
-        }
-        let mut allow_now = allow;
-        if ui
-            .checkbox(&mut allow_now, "Allow 16384 previews")
-            .on_hover_text(
-                "A 16384 px mip needs a very large GPU texture, so it is off unless you ask",
-            )
-            .changed()
-        {
-            actions.push(Action::Allow16k(allow_now));
-        }
         let mut live = model.settings.live_encode;
         if ui
             .checkbox(&mut live, "Live encode")
@@ -333,21 +274,6 @@ fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Actio
             .changed()
         {
             actions.push(Action::Live(live));
-        }
-    });
-}
-
-fn interface(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Interface", |ui| {
-        let mut on = model.settings.reduce_motion;
-        if ui
-            .checkbox(&mut on, "Reduce motion")
-            .on_hover_text(
-                "Shorter fades and no sliding or scaling: toasts, the Export highlight, progress bars and press feedback",
-            )
-            .changed()
-        {
-            actions.push(Action::ReduceMotion(on));
         }
     });
 }
@@ -551,23 +477,19 @@ fn also_recipe(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     });
 }
 
-/// "Check all UV coverage" for the open folder, or while it runs its bar (gliding only through `shown_progress`,
-/// CF12, with its own epoch, K10) and the button that stops it. Never greyed by `busy()` (owner answer 8).
+/// "Check all UV coverage" for the open folder, or while it runs its bar and the button that stops it. Never greyed
+/// by `busy()` (owner answer 8).
 fn check_all_uv(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    if let (Some((done, total)), Some(run)) = (model.uv.all_progress(), model.uv.all_run()) {
+    if let Some((done, total)) = model.uv.all_progress() {
         let frac = if total == 0 {
             0.0
         } else {
             done as f32 / total as f32
         };
         let bar = ui.add(
-            egui::ProgressBar::new(super::header::shown_progress(
-                ui.ctx(),
-                UV_EPOCH | run,
-                frac,
-            ))
-            .text(format!("{done} / {total}"))
-            .animate(false),
+            egui::ProgressBar::new(frac)
+                .text(format!("{done} / {total}"))
+                .animate(false),
         );
         // Review M3: the visible "3 / 72" alone names nothing.
         bar.widget_info(|| {

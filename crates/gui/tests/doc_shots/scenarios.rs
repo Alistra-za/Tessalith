@@ -364,12 +364,11 @@ fn marker(img: &mut RgbaImage, c: Pos2, n: u32) {
 
 const EXPORT: &str = "D:\\Mods\\StoneWork\\sdc-out";
 
-/// Settings that read the same on every machine: a fixed export folder and recent list and no motion.
+/// Settings that read the same on every machine: a fixed export folder and recent list.
 fn settings() -> GuiSettings {
     GuiSettings {
         export_folder: Some(EXPORT.into()),
         recent: recent(),
-        reduce_motion: true,
         ..GuiSettings::default()
     }
 }

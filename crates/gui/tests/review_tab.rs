@@ -456,7 +456,7 @@ fn awaiting_an_answer(dir: &std::path::Path, dt: f32) -> Harness<'static, AppMod
     h
 }
 
-/// Answer Keep with one model call and one frame, so the fade is caught at its start.
+/// Answer Keep with one model call, then step to the first frame the gate passes on.
 fn answer_once(h: &mut Harness<'static, AppModel>) {
     h.state_mut().answer_review_json(false);
     // The next frame is the first the gate passes.
@@ -469,68 +469,25 @@ fn answer_once(h: &mut Harness<'static, AppModel>) {
     h.step();
 }
 
-fn between(c: egui::Color32, a: egui::Color32, b: egui::Color32) -> bool {
-    let ok = |x: u8, p: u8, q: u8| x > p.min(q) && x < p.max(q);
-    c != a
-        && c != b
-        && (ok(c.r(), a.r(), b.r()) || ok(c.g(), a.g(), b.g()) || ok(c.b(), a.b(), b.b()))
-}
-
-/// Note CF11, Review Focus 3: Export fades to the accent when it becomes ready and snaps back at once (K11).
+/// Note FM25 (was Note CF11's fade): Export is the accent the frame it becomes ready and plain again at once.
 #[test]
-fn export_fades_to_the_accent_and_snaps_back() {
+fn export_is_the_accent_once_ready_and_plain_when_not() {
     let d = tempfile::tempdir().unwrap();
     let mut h = awaiting_an_answer(d.path(), 0.05);
     let text = h.state().review_button_text();
     let accent = h.ctx.global_style().visuals.selection.bg_fill;
-    let rest = h.ctx.global_style().visuals.widgets.inactive.weak_bg_fill;
     let off = fill_at(&h, h.get_by_label(&text).rect());
     answer_once(&mut h);
     assert!(!disabled(&h, &text));
-    let first = fill_at(&h, h.get_by_label(&text).rect());
-    assert!(
-        between(first, rest, accent),
-        "{first:?} not between {rest:?} and {accent:?}"
-    );
-    for _ in 0..4 {
-        h.step();
-    }
     assert_eq!(fill_at(&h, h.get_by_label(&text).rect()), accent);
-    // The answer is taken away: the gate fails, the state snaps to 0 and the disabled look returns.
+    // The answer is taken away: the gate fails and the disabled look returns.
     h.state_mut().review.as_mut().unwrap().json_answer = None;
     h.step();
     h.step();
     assert!(disabled(&h, &text));
     assert_eq!(fill_at(&h, h.get_by_label(&text).rect()), off);
-    // Answering again fades again.
-    answer_once(&mut h);
-    let again = fill_at(&h, h.get_by_label(&text).rect());
-    assert!(between(again, rest, accent), "{again:?}");
 }
-
-/// Final review M2: one step into the fade, the 0.12 s reduced fade (`cubic_out` 0.80) is nearer the accent than
-/// the 0.15 s one (0.70) in an unreduced control, so the test fails if Reduce motion is ignored.
-#[test]
-fn reduced_motion_brings_the_export_accent_sooner_than_the_control() {
-    let one_step_in = |reduce: bool| {
-        let d = tempfile::tempdir().unwrap();
-        let mut h = awaiting_an_answer(d.path(), 0.05);
-        h.state_mut().settings.reduce_motion = reduce;
-        let text = h.state().review_button_text();
-        answer_once(&mut h);
-        let accent = h.ctx.global_style().visuals.selection.bg_fill;
-        (fill_at(&h, h.get_by_label(&text).rect()), accent)
-    };
-    let ((reduced, accent), (control, _)) = (one_step_in(true), one_step_in(false));
-    let dist = |c: egui::Color32| {
-        c.r().abs_diff(accent.r()) as u32
-            + c.g().abs_diff(accent.g()) as u32
-            + c.b().abs_diff(accent.b()) as u32
-    };
-    assert!(dist(reduced) < dist(control), "{reduced:?} vs {control:?}");
-}
-
-/// Guard, green from the start (K11): the button is live on the frame the gate passes; only paint animates.
+/// Guard, green from the start (K11): the button is live on the frame the gate passes.
 #[test]
 fn the_review_export_works_on_the_frame_it_becomes_ready() {
     let d = tempfile::tempdir().unwrap();

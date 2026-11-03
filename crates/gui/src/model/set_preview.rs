@@ -1528,15 +1528,6 @@ enum Shown {
     Builtin(Builtin),
 }
 
-/// Wall times for the verification (Task 17); encode times are on each member, edit times in `v3.last_edit`.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Timings {
-    pub query_ms: Option<f64>,
-    pub nif_ms: Option<f64>,
-    /// Simulation of every shape plus building the scene.
-    pub push_ms: Option<f64>,
-}
-
 enum SpMsg {
     Queried {
         token: u64,
@@ -1687,7 +1678,6 @@ pub struct SetPreview {
     pub notices: Vec<String>,
     /// The NIF read's own notices (warnings, a failed read): dropped when the mesh pick changes.
     nif_notices: Vec<String>,
-    pub timings: Timings,
     /// Set by the panel each frame it draws; `poll` does nothing heavy otherwise.
     pub shown: bool,
     /// Set by the panel on a frame with input: the fingerprint is checked now instead of after `THROTTLE`.
@@ -1794,7 +1784,6 @@ impl SetPreview {
             rows: vec![],
             notices: vec![],
             nif_notices: vec![],
-            timings: Timings::default(),
             shown: false,
             input: false,
             checks: 0,
@@ -2104,8 +2093,7 @@ impl SetPreview {
                 SpMsg::Queried { token, result } if self.querying == Some(token) => {
                     self.querying = None;
                     match result {
-                        Ok((c, t)) => {
-                            self.timings.query_ms = Some(t);
+                        Ok((c, _)) => {
                             self.candidates = Candidates::Ready(c);
                         }
                         Err(e) => self.candidates = Candidates::Error(e),
@@ -2119,7 +2107,6 @@ impl SetPreview {
                     self.drop_nif_notices();
                     match result {
                         Ok(n) => {
-                            self.timings.nif_ms = Some(n.ms);
                             for e in n.parsed.errors.iter().chain(&n.parsed.warnings) {
                                 self.nif_notice(format!("{}: {e}", n.nif_path));
                             }
@@ -2369,7 +2356,6 @@ impl SetPreview {
     /// NIF before `LoadParsed` (no first-load edit burst), textures = the game's copies overlaid by the set's
     /// encodes. A NIF not read yet is read first (off the UI thread); the push repeats when it arrives.
     fn push_scene(&mut self) {
-        let t0 = Instant::now();
         self.want_scene = false;
         let memory = self.enc.memory_sources();
         self.v3.set_load_variant(variant_of(self.enc.mode()));
@@ -2445,7 +2431,6 @@ impl SetPreview {
         }
         self.xpmf_resume |= std::mem::take(&mut self.xpmf_cycle);
         self.reset_tex_mirror();
-        self.timings.push_ms = Some(ms(t0));
     }
 
     fn start_nif(&mut self, c: &Candidate) {

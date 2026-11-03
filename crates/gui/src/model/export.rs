@@ -350,17 +350,13 @@ pub fn export_folder_problem(root: &Path, export: &Path) -> Option<String> {
 /// The `sdc convert` command that reproduces the export from the saved `sdc.toml` (M3a spec §2.5). The GUI plans
 /// with High suggestions accepted (Note U3), so the command does too (audit 08c-2). Set edits in
 /// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither.
-pub fn cli_command(root: &Path, export: &Path, jobs: usize) -> String {
+pub fn cli_command(root: &Path, export: &Path) -> String {
     let q = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "/"));
-    let mut c = format!(
+    format!(
         "sdc convert {} --recursive -o {} --accept-suggestions high",
         q(root),
         q(export)
-    );
-    if jobs > 0 {
-        c += &format!(" --jobs {jobs}");
-    }
-    c
+    )
 }
 
 // ---- Task 5: progress line, Files filters and caches (DECISIONS AG35-AG37, AG39) ----
