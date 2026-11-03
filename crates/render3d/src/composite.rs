@@ -53,8 +53,9 @@ pub struct EnvMaps {
 }
 
 impl EnvMaps {
-    /// From the HDRI turned by `yaw`: [`hdri::cube_faces`] + [`hdri::mip_chain`] down to 1×1 (the composite divides by
-    /// the level-15 luminance), RGBA16F. `env` and `reflection` are the same view (an HDRI has no sky/no-sky split).
+    /// From the HDRI turned by `yaw`: [`hdri::cube_faces`] + [`hdri::specular_chain`] down to 1×1 (the composite
+    /// divides by the level-15 luminance), RGBA16F. `env` and `reflection` are the same view (an HDRI has no sky/no-sky
+    /// split).
     /// Err unless `size` is a power of two up to [`crate::textures::MAX_CUBE`].
     pub fn new(gpu: &Gpu, img: &Hdr, size: u32, yaw: f32) -> Result<EnvMaps, String> {
         if !size.is_power_of_two() || size > crate::textures::MAX_CUBE {
@@ -65,8 +66,7 @@ impl EnvMaps {
         }
         let mut data = Vec::new();
         let mut mips = 0;
-        for face in hdri::cube_faces(img, size, yaw) {
-            let chain = hdri::mip_chain(&face, size)?;
+        for chain in hdri::specular_chain(&hdri::cube_faces(img, size, yaw), size)? {
             mips = chain.len() as u32;
             for px in chain.iter().flatten() {
                 // As the backdrop: clamped below f16's maximum, so a hot pixel never becomes infinity.

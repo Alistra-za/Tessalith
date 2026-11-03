@@ -440,12 +440,8 @@ const M5: [f32; 3] = [0.25, 0.125, 0.5];
 /// The 1×1 mip of face +Z of the studio env cube at yaw 0, as the GPU stores it (RGBA16F).
 fn env_last_z() -> [f32; 4] {
     let faces = render3d::hdri::cube_faces(&render3d::hdri::studio().image, 256, 0.0);
-    for (k, f) in faces.iter().enumerate() {
-        let c = render3d::hdri::mip_chain(f, 256).unwrap();
-        eprintln!("DBG face {k}: {:?}", c.last().unwrap()[0]);
-    }
-    let chain = render3d::hdri::mip_chain(&faces[4], 256).unwrap();
-    chain.last().unwrap()[0].map(|v| half::f16::from_f32(v).to_f32())
+    let chains = render3d::hdri::specular_chain(&faces, 256).unwrap();
+    chains[4].last().unwrap()[0].map(|v| half::f16::from_f32(v).to_f32())
 }
 
 fn f16(v: f32) -> f32 {

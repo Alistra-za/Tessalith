@@ -2269,8 +2269,9 @@ impl Renderer {
                     .is_some_and(|d| !d.env_regs.is_empty())
             });
         let yaw = scene.env_yaw.to_bits();
-        // shortcut: a CPU rebuild per yaw change (~11-16 ms in release, D5 report: the 25 MB equirect gather, the f16
-        // conversion and the upload); if a yaw drag stutters, build the cube on the GPU from the backdrop's texture.
+        // shortcut: a CPU rebuild per yaw change (~40 ms in release: the equirect gather ~4 ms, CS's GGX prefilter ~35 ms
+        // (Note GL1), the f16 conversion and the upload); if a yaw drag stutters, run CS's SpecularIrradianceCS on the
+        // GPU instead.
         if want_env && self.env.as_ref().is_none_or(|e| e.0 != yaw) {
             self.env = None;
             match composite::EnvMaps::new(

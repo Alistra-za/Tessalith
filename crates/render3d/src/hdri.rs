@@ -157,8 +157,8 @@ pub fn cube_faces(img: &Hdr, size: u32, yaw: f32) -> [Vec<[f32; 4]>; 6] {
     })
 }
 
-/// 2×2 box mips down to 1×1, mip 0 included. Err unless `size` is a power of two and `face` is `size²` texels.
-/// shortcut: a box chain, not CS's GGX-prefiltered specular irradiance; prefilter if the owner's visual check asks (R4).
+/// 2×2 box mips down to 1×1, mip 0 included (the source [`specular_chain`] samples). Err unless `size` is a power of
+/// two and `face` is `size²` texels.
 pub fn mip_chain(face: &[[f32; 4]], size: u32) -> Result<Vec<Vec<[f32; 4]>>, String> {
     let n = size as usize;
     if !size.is_power_of_two() || n.checked_mul(n) != Some(face.len()) {
@@ -187,6 +187,124 @@ pub fn mip_chain(face: &[[f32; 4]], size: u32) -> Result<Vec<Vec<[f32; 4]>>, Str
         n = h;
     }
     Ok(out)
+}
+
+/// CS's specular irradiance chain (Dynamic Cubemaps, SpecularIrradianceCS.hlsl), per face, per level: mip 0 as given,
+/// mip L the GGX prefilter of the cube at roughness L / (levels − 1) (L/8 at 256², which Lighting.hlsl reads back as
+/// `level = roughness × 8`), 16 Hammersley samples with mip-filtered importance sampling from the [`mip_chain`].
+/// A box chain alone kept bright lights sharp at the rough mips: oily streaks on rough skin (owner 2026-11-02).
+/// Err unless `size` is a power of two and every face is `size²` texels.
+pub fn specular_chain(
+    faces: &[Vec<[f32; 4]>; 6],
+    size: u32,
+) -> Result<[Vec<Vec<[f32; 4]>>; 6], String> {
+    use engine::cube::Cube;
+    use engine::image::Rgba32F;
+    let boxed = faces
+        .iter()
+        .map(|f| mip_chain(f, size))
+        .collect::<Result<Vec<_>, _>>()?;
+    let levels = boxed[0].len();
+    let src: Vec<Cube> = (0..levels)
+        .map(|l| {
+            let n = size >> l;
+            Cube {
+                size: n,
+                faces: std::array::from_fn(|f| Rgba32F {
+                    width: n,
+                    height: n,
+                    px: boxed[f][l].clone(),
+                }),
+            }
+        })
+        .collect();
+    // Solid angle of one mip-0 texel.
+    let wt = 4.0 * PI / (6 * size * size) as f32;
+    let mut out: [Vec<Vec<[f32; 4]>>; 6] = std::array::from_fn(|f| vec![faces[f].clone()]);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    for l in 1..levels {
+        let r = l as f32 / (levels - 1) as f32;
+        let n = size >> l;
+        let per_face = (n * n) as usize;
+        // All six faces' texels in one list, split over every core (six face threads left most cores idle).
+        let mut level = vec![[0.0f32; 4]; 6 * per_face];
+        let chunk = level.len().div_ceil(threads);
+        let src = &src;
+        std::thread::scope(|s| {
+            for (c, out) in level.chunks_mut(chunk).enumerate() {
+                s.spawn(move || {
+                    for (k, p) in out.iter_mut().enumerate() {
+                        let i = c * chunk + k;
+                        let (f, j) = (i / per_face, (i % per_face) as u32);
+                        *p = prefilter(src, cube_dir(f, j % n, j / n, n), r, wt);
+                    }
+                });
+            }
+        });
+        for (f, v) in level.chunks(per_face).enumerate() {
+            out[f].push(v.to_vec());
+        }
+    }
+    Ok(out)
+}
+
+/// One texel of [`specular_chain`]: SpecularIrradianceCS.hlsl `main` with N = V = `n`.
+fn prefilter(src: &[engine::cube::Cube], n: [f32; 3], r: f32, wt: f32) -> [f32; 4] {
+    const SAMPLES: u32 = 16;
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let unit = |v: [f32; 3]| v.map(|c| c / dot(v, v).sqrt());
+    // computeBasisVectors
+    let t = cross(n, [0.0, 1.0, 0.0]);
+    let t = unit(if dot(t, t) < 1e-5 {
+        cross(n, [1.0, 0.0, 0.0])
+    } else {
+        t
+    });
+    let s = unit(cross(n, t));
+    let a2 = (r * r).powi(2);
+    let last = src.len() - 1;
+    let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+    for i in 0..SAMPLES {
+        // sampleHammersley + sampleGGX
+        let (u1, u2) = (
+            i as f32 / SAMPLES as f32,
+            i.reverse_bits() as f32 * 2.328_306_4e-10,
+        );
+        let cos_t = ((1.0 - u2) / (1.0 + (a2 - 1.0) * u2)).sqrt();
+        let sin_t = (1.0 - cos_t * cos_t).max(0.0).sqrt();
+        let (sp, cp) = (TAU * u1).sin_cos();
+        let h: [f32; 3] =
+            std::array::from_fn(|k| s[k] * sin_t * cp + t[k] * sin_t * sp + n[k] * cos_t);
+        let nh = dot(n, h);
+        let li: [f32; 3] = std::array::from_fn(|k| 2.0 * nh * h[k] - n[k]);
+        let cos_li = dot(n, li);
+        if cos_li <= 0.0 {
+            continue;
+        }
+        let d = nh.max(0.0).powi(2) * (a2 - 1.0) + 1.0;
+        let pdf = a2 / (PI * d * d) * 0.25;
+        let ws = 1.0 / (SAMPLES as f32 * pdf);
+        let mip = (0.5 * (ws / wt).log2() + 1.0).clamp(0.0, last as f32);
+        let lo = mip.floor() as usize;
+        let hi = (lo + 1).min(last);
+        let (a, b) = (
+            engine::cube::sample::fetch(&src[lo], li),
+            engine::cube::sample::fetch(&src[hi], li),
+        );
+        let f = mip - lo as f32;
+        for k in 0..3 {
+            sum[k] += (a[k] + (b[k] - a[k]) * f) * cos_li;
+        }
+        weight += cos_li;
+    }
+    [sum[0] / weight, sum[1] / weight, sum[2] / weight, 1.0]
 }
 
 /// The bundled studio HDRI with its ambient, decoded on first use.
