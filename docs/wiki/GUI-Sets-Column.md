@@ -39,8 +39,7 @@ The column lays out only the cards on screen, so it stays smooth with hundreds o
 
 - a card scrolled out of view is not reached by Tab or a screen reader (Ctrl+K *Go to set* and **Move to…** still reach every set);
 - a context menu or shader list open on a card closes when the card scrolls away;
-- the scroll bar's thumb changes length as card heights are learned;
-- *Go to set* on a far set jumps to it instead of gliding.
+- the scroll bar's thumb changes length as card heights are learned.
 
 ## Filter
 

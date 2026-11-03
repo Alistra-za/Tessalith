@@ -1339,11 +1339,9 @@ pub struct LoadedNif {
     pub nif_path: String,
     pub parsed: ParsedNif,
     pub vfs: HashMap<String, FileSource>,
-    pub ms: f64,
 }
 
 fn load_nif(path: &Path, c: &Candidate) -> Result<LoadedNif, String> {
-    let t0 = Instant::now();
     let store = Store::open_read_only(path).map_err(|e| e.to_string())?;
     let (p, kind, root, _) = store
         .copy_location(c.load_copy_id)
@@ -1366,7 +1364,6 @@ fn load_nif(path: &Path, c: &Candidate) -> Result<LoadedNif, String> {
         nif_path: c.nif_path.clone(),
         parsed,
         vfs,
-        ms: ms(t0),
     })
 }
 
@@ -1531,7 +1528,7 @@ enum Shown {
 enum SpMsg {
     Queried {
         token: u64,
-        result: Result<(Vec<Candidate>, f64), String>,
+        result: Result<Vec<Candidate>, String>,
     },
     NifLoaded {
         token: u64,
@@ -2075,10 +2072,9 @@ impl SetPreview {
         let prepared = pgpsim::prepare(&entry, &self.default);
         spawn(
             self.tx.clone(),
-            move || {
-                let t0 = Instant::now();
-                let result = query(&path, &key, &prepared).map(|c| (c, ms(t0)));
-                SpMsg::Queried { token, result }
+            move || SpMsg::Queried {
+                token,
+                result: query(&path, &key, &prepared),
             },
             move |e| SpMsg::Queried {
                 token,
@@ -2093,9 +2089,7 @@ impl SetPreview {
                 SpMsg::Queried { token, result } if self.querying == Some(token) => {
                     self.querying = None;
                     match result {
-                        Ok((c, _)) => {
-                            self.candidates = Candidates::Ready(c);
-                        }
+                        Ok(c) => self.candidates = Candidates::Ready(c),
                         Err(e) => self.candidates = Candidates::Error(e),
                     }
                     self.want_scene = true;

@@ -11,7 +11,7 @@ Where the GUI keeps its settings, what it remembers between sessions, and what h
 
 Presets: [Presets](GUI-Presets.md#presets).
 
-The GUI runs the engine with its defaults: one worker thread per core, half of the memory, and previews up to 4096 pixels on a side (lower on a GPU that cannot hold that). The CLI's --jobs and --mem-budget ([CLI reference](CLI-Reference.md#sdc-convert)) change the first two.
+The GUI runs the engine with its defaults: one worker thread per core, half of the memory, and previews up to 4096 pixels on a side (lower on a GPU that cannot hold that). The CLI's `--jobs` and `--mem-budget` ([CLI reference](CLI-Reference.md#sdc-convert)) change the first two.
 
 ## What Tessalith remembers
 

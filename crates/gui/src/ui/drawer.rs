@@ -60,7 +60,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             ui.add(
                 egui::ProgressBar::new(finished as f32 / total as f32)
                     .desired_width(120.0)
-                .animate(false),
+                    .animate(false),
             );
             // `done/total · elapsed · files/s · ETA`; the clock moves between events, so ask for a repaint.
             let line = match &model.export.pace {

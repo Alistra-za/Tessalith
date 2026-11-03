@@ -741,7 +741,6 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     match &gate {
                         Ok(_) => {
                             let r = ui.add(button.fill(ui.visuals().selection.bg_fill));
-
                             // Note FC8: a focused field commits on the press; the release exports.
                             super::blur_on_press(ui, r.rect);
                             if r.clicked() {

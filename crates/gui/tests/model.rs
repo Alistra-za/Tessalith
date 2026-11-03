@@ -401,6 +401,23 @@ fn npot_resize_choice_clears_the_block() {
 
 /// M6 Track E spec §2, §6: the GUI accepts High suggestions. A PBR set's colour, `_n` and `_rmaos` members decide
 /// themselves (no sub-type question; "(auto)" with the reason), and a Medium `_i` still asks.
+/// Note FM25: the GUI sets no thread count and no memory budget, so the engine's defaults apply (jobs 0 is rayon's
+/// one thread per core, mem_budget 0 is half of the RAM: pi::thread_pool, pi::budget_limit).
+#[test]
+fn the_request_leaves_jobs_and_the_memory_budget_at_the_engines_defaults() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures")).unwrap();
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let req = m.request().unwrap();
+    let default =
+        engine::api::BatchRequest::new(vec![], d.path().to_path_buf(), engine::config::Target::Cs);
+    assert_eq!((req.jobs, req.mem_budget), (0, 0));
+    assert_eq!(
+        (req.jobs, req.mem_budget),
+        (default.jobs, default.mem_budget)
+    );
+}
+
 #[test]
 fn the_gui_accepts_high_suggestions_and_still_asks_for_medium_ones() {
     use engine::policy::{AcceptSuggestions, Provenance};
