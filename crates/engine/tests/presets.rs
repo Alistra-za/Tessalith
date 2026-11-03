@@ -1160,7 +1160,7 @@ fn an_allow_list_naming_an_nvtt_code_is_named() {
     }
 }
 
-/// Note FM: the 15 info-only codes 2.0 removed are named in an `allow` list, in `--set allow=` and in `--allow`.
+/// Note FM: the 15 info and low-value warning codes 2.0 removed are named in an `allow` list, in `--set allow=` and in `--allow`.
 #[test]
 fn removed_codes_in_allow_lists_are_named() {
     for code in [

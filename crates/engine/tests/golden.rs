@@ -1217,7 +1217,7 @@ fn hdr_emissive() -> DynamicImage {
 }
 
 /// Spec §4.1/§4.2/§10: a float `_g` in a PBR set is BC6H UF16 (tag n/a); BC6H is not an 8-bit-endpoint format and
-/// keeps values above 1, so neither LOSS-BITDEPTH nor LOSS-CLAMP-HDR applies; the peak holds (no VAL-BC6H-PEAK).
+/// keeps values above 1, so LOSS-CLAMP-HDR does not apply; the peak holds (no VAL-BC6H-PEAK).
 #[test]
 fn hdr_float_emissive_is_bc6h() {
     let d = tempfile::tempdir().unwrap();

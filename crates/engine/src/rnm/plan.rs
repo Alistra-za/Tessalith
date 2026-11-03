@@ -208,7 +208,6 @@ pub fn plan_rnm(
                 continue;
             }
             let job = &mut jobs[b];
-
             job.warnings.extend(notes);
             job.rnm = Some(RnmJob {
                 layers: stack,

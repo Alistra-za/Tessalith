@@ -140,7 +140,7 @@ pub const REMOVED: &[Removed] = &[
     Removed {
         key: "allow",
         value: Some("SET-COMPANION-OUTSIDE"),
-        hint: "SET-COMPANION-OUTSIDE was removed in 2.0 (SET-MISSING-COMPANION covers the case); delete it from the list",
+        hint: "SET-COMPANION-OUTSIDE was removed in 2.0 (a companion on disk outside the batch is no longer reported); delete it from the list",
     },
     Removed {
         key: "allow",

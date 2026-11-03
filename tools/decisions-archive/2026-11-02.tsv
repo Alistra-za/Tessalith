@@ -53,7 +53,7 @@ L¶- **Rule:**	L		back	FM		partial	2026-11-02		goes: the ALPHA-NEAR-OPAQUE info;
 P25	P		back	FM		partial	2026-11-02		goes: the Info ALPHA-PBR-NORMAL-DROPPED; stays: a PBR normal drops its alpha without LOSS-ALPHA-DATA
 R-skin-1	R		back	FM		partial	2026-11-02		goes: SKIN-WET-FORM; stays: the sub-types and the form choice
 R1	R		back	FM		partial	2026-11-02		goes: CHAN-NORMAL-SHORT; stays: mips.normal_base
-R8	R		back	FM		partial	2026-11-02		goes: SET-COMPANION-OUTSIDE; SET-MISSING-COMPANION covers it
+R8	R		back	FM		partial	2026-11-02		goes: SET-COMPANION-OUTSIDE (a companion outside the batch is no longer reported)
 S8	S		back	FM		partial	2026-11-02		goes: IN-ICC-IGNORED; stays: an ICC profile is ignored
 W9	W		back	FM		partial	2026-11-02		goes: RNM-AO-MISSING; stays: the AO source order and the uniform weight
 AC2	AC		back	FM		partial	2026-11-02		goes: IN-ICC-IGNORED; stays: what a PSD reads

@@ -120,7 +120,6 @@ fn decode<R: std::io::BufRead + std::io::Seek>(
             dim: w.max(h),
         });
     }
-
     let img = image::DynamicImage::from_decoder(decoder).map_err(err)?;
     let ct = img.color();
     let channels = ct.channel_count();

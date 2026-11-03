@@ -96,7 +96,7 @@ Every warning has a code and a severity:
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member (or has it on disk but not in the batch, [bake](Texture-Packing.md#variance-bake)), an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
+| `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member, an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
 | `SET-BAKE-RATIO` | warning | `_n` and the roughness member are not powers of two with one aspect; bake off. | Resize. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that does not exist. | Fix or remove it. |

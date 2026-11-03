@@ -105,7 +105,6 @@ pub struct PlanView {
     pub rnm_keys: BTreeMap<PathBuf, String>,
     /// The export folder the plan ran with: set keys are under it (audit 08c-3).
     pub output_root: PathBuf,
-
     /// FC11: the recorded files this plan no longer writes (Review's `Stale outputs`).
     pub stale: Vec<engine::manifest::StaleOutput>,
 }

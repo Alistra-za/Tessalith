@@ -608,7 +608,8 @@ fn a_loose_roughness_overrides_the_orm_green() {
     let d = tempfile::tempdir().unwrap();
     put_orm(d.path(), "iron_orm.png");
     put(d.path(), "iron_roughness.png", spec);
-    let _ = convert(d.path(), Target::Cs, &[]);
+    let o = convert(d.path(), Target::Cs, &[]);
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
     let px = &levels(&dds(d.path(), "iron_rmaos.dds"))[0];
     assert_channel(px, 0, 4, spec);
     assert_channel(px, 1, 4, m);

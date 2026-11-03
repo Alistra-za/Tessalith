@@ -253,6 +253,12 @@ fn env_m_needs_an_envmap_vote_and_metal() {
     assert!(out_job(&p, "textures/arm/steel_m.dds").is_none());
     let diffuse = out_job(&p, "textures/arm/steel.dds").unwrap();
     assert!(diffuse.warnings.is_empty(), "{:?}", diffuse.warnings);
+
+    // No metal and no scan: still no env _m and no note.
+    let (_d, p) = run(None, false);
+    assert!(out_job(&p, "textures/arm/steel_m.dds").is_none());
+    let diffuse = out_job(&p, "textures/arm/steel.dds").unwrap();
+    assert!(diffuse.warnings.is_empty(), "{:?}", diffuse.warnings);
 }
 
 #[test]

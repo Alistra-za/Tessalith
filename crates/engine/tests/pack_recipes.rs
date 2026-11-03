@@ -468,6 +468,18 @@ fn a_loose_map_wins_over_the_orm_channel() {
     }
 }
 
+/// DECISIONS Note AL5: an `_orm` with a fuzz map builds `_rfaos`; the same `_orm` alone builds `_rmaos`.
+#[test]
+fn an_orm_with_fuzz_builds_rfaos_and_alone_rmaos() {
+    let (r, _) = recipes_for(
+        Target::Cs,
+        &raw(&[("iron_orm.png", Orm), ("iron_fuzz.png", Fuzz)]),
+    );
+    assert_eq!(kinds(&r), [RecipeKind::Rfaos]);
+    let (r, _) = recipes_for(Target::Cs, &raw(&[("iron_orm.png", Orm)]));
+    assert_eq!(kinds(&r), [RecipeKind::Rmaos]);
+}
+
 /// Note AZ (ruling 3): under vanilla a gloss/height set packs the complex `_m` only when its shader is complex
 /// material; otherwise nothing packs (the env-mask `_m` needs metallic or specular) and the maps are unused.
 #[test]

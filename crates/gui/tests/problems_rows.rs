@@ -83,14 +83,11 @@ fn derive_results_are_rows_that_open_the_report() {
         "suggested NIF values: glossiness 30.0, specular strength 1.0",
     ));
     m.invalidate_views();
-    {
-        let c = Code::DeriveNifSuggest;
-        let row = row_of(&m, c);
-        assert_eq!(row.level, Level::Warning, "{c:?}");
-        assert!(matches!(row.at, At::File(_)));
-        assert_eq!(row.fix, Some(Fix::OpenReport(report.clone())));
-        assert!(!code_sentence(c).is_empty());
-    }
+    let row = row_of(&m, Code::DeriveNifSuggest);
+    assert_eq!(row.level, Level::Warning);
+    assert!(matches!(row.at, At::File(_)));
+    assert_eq!(row.fix, Some(Fix::OpenReport(report.clone())));
+    assert!(!code_sentence(Code::DeriveNifSuggest).is_empty());
     assert!(!problems(&m)
         .iter()
         .any(|p| p.code == Some(Code::DeriveNotConverted)));

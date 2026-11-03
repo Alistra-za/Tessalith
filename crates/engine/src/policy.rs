@@ -1855,7 +1855,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
         }
     }
     // Owner 2026-10-11 (DECISIONS P25): an alpha the user explicitly removed is their decision, not a loss; a
-    // PBR normal's alpha is vanilla specular that PBR does not use, so dropping it is an info. Any other
+    // PBR normal's alpha is vanilla specular that PBR does not use, so dropping it is silent. Any other
     // discarded varying alpha (an inferred remove, or a format that cannot store it) still blocks.
     let explicit_remove = alpha_explicit && p.alpha.policy == AlphaPolicy::Remove;
     if a.alpha == AlphaContent::Varying
@@ -1895,7 +1895,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             );
         }
     }
-
     if p.category == Category::Grayscale && !a.grayscale {
         add(
             ChanNotGray,
@@ -1905,7 +1904,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         );
     }
-
     if p.category == Category::Normal
         && st != Subtype::Msn
         && a.normal_len_err > NORMAL_LEN_TOL
@@ -1919,7 +1917,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         );
     }
-
     if matches!(st, Subtype::Envmask | Subtype::ComplexMaterial)
         && p.format == Format::Bc7
         && !p.alpha.exact_opaque
@@ -2067,7 +2064,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ),
         }
     }
-
     // DECISIONS S6: a re-encoded block-compressed DDS keeps its compression error and gains a second one [SC §7].
     if let Some(src) = a
         .dds_dxgi

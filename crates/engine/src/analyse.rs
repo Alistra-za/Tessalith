@@ -36,7 +36,6 @@ pub struct Analysis {
     pub channels: [ChannelStats; 4],
     /// Alpha class. `Constant255` includes near-opaque alpha (see [`NEAR_OPAQUE_ALPHA`]).
     pub alpha: AlphaContent,
-
     pub alpha_hist: AlphaHistogram,
     /// R, G and B agree within 4/255 for every pixel.
     pub grayscale: bool,
@@ -46,10 +45,8 @@ pub struct Analysis {
     pub mean_alpha: f64,
     /// Mean |length - 1| of RGB decoded as `*2 - 1`.
     pub normal_len_err: f64,
-
     /// Largest Rec. 709 luma over the image (not clamped, so HDR sources report above 1).
     pub peak_luminance: f32,
-
     /// DXGI format of a DDS input (DECISIONS S6, spec §5.1); `None` for images. Set by the caller from `SourceMeta`.
     pub dds_dxgi: Option<u32>,
     /// The input is a single cube DDS, loaded as a 6:1 strip (DECISIONS DS7). Set by the caller from `SourceMeta`.

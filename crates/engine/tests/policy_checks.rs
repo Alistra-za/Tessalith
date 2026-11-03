@@ -1675,7 +1675,7 @@ fn roughness_default_outside_0_1_is_cfg_invalid() {
 }
 
 // Owner 2026-10-11 (DECISIONS P25): LOSS-ALPHA-DATA was too broad. A PBR normal's vanilla specular in alpha is
-// dropped with an info, and an alpha the user explicitly removed is not reported as a loss.
+// dropped silently, and an alpha the user explicitly removed is not reported as a loss.
 
 /// A varying `pbr_normal` alpha (inferred remove) is dropped silently, not blocked.
 #[test]
