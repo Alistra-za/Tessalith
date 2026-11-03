@@ -1017,12 +1017,13 @@ impl NifEdit {
                     ((c, None), k)
                 })
                 .collect();
-        // v2 B7: the keys of each clip a managed controller is driven by (once per change).
-        // shortcut: clips_of_in walks every property per (sequence, controller): ~18 ms a drag tick on a 608-controller,
-        // 818-shape NIF (CM32); invert it per sequence if a file the owner edits passes 16 ms.
+        // v2 B7: the keys of each clip a managed controller is driven by (once per change, one bound map per sequence).
         if let Ok(h) = &header {
-            for &c in self.model.ctrls.keys().filter(|&&c| self.model.managed(c)) {
-                for seq in nif::anim::clips_of_in(&self.model, h, c) {
+            for (c, seqs) in nif::anim::clips_by_ctrl(&self.model, h) {
+                if !self.model.ctrls.contains_key(&c) || !self.model.managed(c) {
+                    continue;
+                }
+                for seq in seqs {
                     let k = nif::edit::keys_of_in(h, &self.patched, &self.model, c, Some(seq));
                     self.keys.insert((c, Some(seq)), k);
                 }
