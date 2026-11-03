@@ -106,7 +106,7 @@ fn group_title(g: Group) -> &'static str {
         Group::Features => "Features",
         Group::Emissive => "Emissive settings",
         // No card: Displacement scale is a row of Material while Parallax is on (Note FM33).
-        Group::Parallax => "Parallax",
+        Group::Parallax => unreachable!("Parallax has no group; its row is drawn in Material"),
         Group::Subsurface => "Subsurface",
         Group::Multilayer => "Coat",
         Group::Glint => "Glint settings",
@@ -230,11 +230,11 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
             .collect();
         // Note FM33: Parallax has no card. Its Displacement scale is a row of Material, under Roughness scale, while
         // Parallax is on, or while the JSON still holds the value (then with the "kept, not used" line).
-        let mut disp_kept = None;
+        let mut disp_kept = false;
         if g == Group::Material && !c.grass {
             if let Some(d) = spec("displacement_scale") {
                 if group_open(Group::Parallax, &c.eff) || kept_unused(d, &c) {
-                    disp_kept = Some(kept_unused(d, &c));
+                    disp_kept = kept_unused(d, &c);
                     keys.push(d);
                 }
             }
@@ -284,16 +284,21 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                 if g == Group::Subsurface {
                     subsurface_selector(ui, &c, &mut edits);
                 }
-                if on {
+                // A kept group shows its stored values too, so they can be seen and reset without ticking the feature.
+                if kept && !on {
+                    kept_line(
+                        ui,
+                        "These values stay in the JSON; the writer skips them while the feature is off",
+                    );
+                }
+                if on || kept {
                     key_grid(ui, &c, "pgp", g, &keys, &mut edits);
-                    if disp_kept == Some(true) {
-                        kept_line(
-                            ui,
-                            "Displacement scale: Parallax is off, so it is not written",
-                        );
-                    }
-                } else if kept {
-                    kept_line(ui, "These values stay in the JSON; the writer skips them while the feature is off");
+                }
+                if disp_kept {
+                    kept_line(
+                        ui,
+                        "Displacement scale: Parallax is off, so it is not written",
+                    );
                 }
             },
         );

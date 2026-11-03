@@ -146,6 +146,48 @@ fn only_active_feature_cards_show() {
         assert!(!has(&h, t), "no {t} in the JSON editor");
     }
     h.get_by_label("Parallax");
+
+    // Every feature off and nothing stored: no feature card in either editor (Parallax's row is absent too).
+    let d = tempfile::tempdir().unwrap();
+    let h = panel(model(d.path(), &[]));
+    for t in FEATURE_CARDS {
+        assert!(!has(&h, t), "no {t} card with every feature off");
+    }
+    assert!(!has(&h, "Displacement scale") && !has(&h, KEPT));
+    let d = tempfile::tempdir().unwrap();
+    let h = editor(d.path(), &[("roughness_scale", json!(0.5))]);
+    for t in FEATURE_CARDS {
+        assert!(
+            !has(&h, t),
+            "no {t} in the JSON editor with every feature off"
+        );
+    }
+    assert!(!has(&h, "Displacement scale") && !has(&h, KEPT));
+}
+
+/// A feature that is on but blocked (Glint while Multilayer is on) keeps its card with the blocked header; stored
+/// values show their rows and the line, and none show without values.
+#[test]
+fn a_blocked_feature_with_stored_values_shows_rows_and_the_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = panel(model(
+        d.path(),
+        &[
+            ("multilayer", json!(true)),
+            ("glint_on", json!(true)),
+            ("glint.screen_space_scale", json!(2.0)),
+        ],
+    ));
+    h.get_by_label("Glint settings");
+    h.get_by_label(KEPT);
+    h.get_by_label("Screen-space scale");
+    assert_eq!(stored(&h, "glint.screen_space_scale"), Some(json!(2.0)));
+    assert!(written(&h).get("glint").is_none(), "blocked: not written");
+    h.state_mut()
+        .set_json_value(SET, "glint.screen_space_scale", None);
+    h.run();
+    h.get_by_label("Glint settings");
+    assert!(!has(&h, KEPT), "no stored value, no line");
 }
 
 #[test]
@@ -239,10 +281,25 @@ fn a_feature_off_with_stored_values_says_kept_not_used() {
     h.run();
     h.get_by_label("Glint settings");
     h.get_by_label(KEPT);
-    assert!(!has(&h, "Screen-space scale"), "the rows are not drawn");
+    h.get_by_label("Screen-space scale");
+    h.get_by_label("Microfacet roughness");
     for (k, v) in &values {
         assert_eq!(stored(&h, k).as_ref(), Some(v), "{k} is kept as written");
     }
+    assert!(written(&h).get("glint").is_none(), "off: nothing written");
+    // The rows reset: the first reset removes its value only, and the writer still writes no glint.
+    h.query_all_by_label("reset").next().unwrap().click();
+    h.run();
+    assert_eq!(stored(&h, "glint.screen_space_scale"), None);
+    assert_eq!(
+        stored(&h, "glint.microfacet_roughness"),
+        Some(json!(0.3)),
+        "the other value is untouched"
+    );
+    assert!(written(&h).get("glint").is_none());
+    h.state_mut()
+        .set_json_value(SET, "glint.screen_space_scale", Some(json!(2.0)));
+    h.run();
     h.get_by_label("Glint").click();
     h.run();
     assert!(!has(&h, KEPT));

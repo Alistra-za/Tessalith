@@ -85,9 +85,9 @@ fn the_coat_group_keeps_its_values_while_multilayer_is_off() {
     ));
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    // Note FM33: with values stored Coat stays listed, "off", open on its "kept, not used" line.
-    assert!(h.query_by_label("Coat colour").is_none());
-    assert!(h.query_by_label("Inner UV scale").is_none());
+    // Note FM33: with values stored Coat stays listed, "off", open, with the "kept, not used" line and its rows.
+    h.get_by_label("Coat colour");
+    h.get_by_label("Inner UV scale");
     h.get_by_label("Coat");
     h.get_by_label("kept, not used");
     assert_eq!(stored(&h, "coat_color"), Some(json!([10, 20, 30])));
