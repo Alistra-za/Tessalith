@@ -321,6 +321,37 @@ fn a_row_with_nothing_to_confirm_ignores_enter_and_space() {
     assert!(decide_row(h.state(), odd));
 }
 
+/// Note FM35: a row that asks a sub-type (no suggestion) and an alpha question must not have Enter answer only the
+/// alpha. The engine raises the alpha question only once the sub-type is settled, so the pair is built by hand.
+#[test]
+fn enter_on_a_row_with_a_subtype_and_an_alpha_question_does_nothing() {
+    use sdc_gui::model::items::Decision;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_tint(d.path());
+    let leaf = "landscape/leaf.png";
+    let item = m.items.iter_mut().find(|i| i.key == leaf).unwrap();
+    item.decisions = vec![
+        Decision::Subtype { suggested: None },
+        Decision::AlphaMeaning,
+    ];
+    let undo = m.undo_label().map(str::to_string);
+    let mut h = harness(m);
+    h.run();
+    let p = rows(h.state())
+        .into_iter()
+        .find(|p| key_of(p) == leaf)
+        .expect("leaf's row");
+    assert_eq!(p.suggested, None);
+    focus_row(&mut h, leaf);
+    for k in [egui::Key::Enter, egui::Key::Space] {
+        h.key_press(k);
+        h.run();
+        assert!(!h.state().busy(), "{k:?} started a plan");
+        let doc = h.state().project.as_ref().unwrap();
+        assert_eq!(doc.file_value(leaf, "alpha.policy"), None, "{k:?}");
+        assert_eq!(h.state().undo_label().map(str::to_string), undo, "{k:?}");
+    }
+}
 /// Note FM35: a row that asks only its alpha shows the type its dropdown opens on, and Enter or Space on the focused row
 /// confirms that type: the write the dropdown's own pick makes, in memory until Save.
 #[test]

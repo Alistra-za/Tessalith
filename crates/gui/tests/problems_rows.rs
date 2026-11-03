@@ -461,22 +461,6 @@ fn the_problems_row_names_the_type() {
     assert!(h.query_by_label("Decide…").is_none());
 }
 
-/// Note FM35: the text builder's two sources. A mesh-decided texture is never undecided (the engine settles it), so the
-/// mesh line is reached only through this builder, never from a Problems row.
-#[test]
-fn the_confirm_line_names_its_source() {
-    use engine::config::AlphaPolicy::*;
-    use sdc_gui::model::code_text::alpha_confirm_text;
-    assert_eq!(
-        alpha_confirm_text(Cutout, true),
-        "Alpha: Cutout (from mesh) — confirm"
-    );
-    assert_eq!(
-        alpha_confirm_text(CutoutBlend, false),
-        "Alpha: Cutout + Blend (proposed) — confirm"
-    );
-}
-
 /// Note FM35: the three lines the alpha question used to take (the Undecided sentence, the "carries data the format
 /// would drop" acknowledgement and its button) are the one row, and the texture panel has one line and one dropdown.
 #[test]

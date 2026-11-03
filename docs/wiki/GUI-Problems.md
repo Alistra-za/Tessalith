@@ -25,7 +25,7 @@ A row is one line and does not wrap. The fix buttons sit at the panel's right ed
 
 Info rows never count against "ready", but the tab's number counts every row shown, these included. Each is something Tessalith changed for you that you may want back: a packing fill dropped because a helper now fills the channel, a format or tag reset when a texture's type changed, the types it set automatically. A `_curves`, `_curvature` or `_cavity` map no recipe reads is an info row too, with no button: "Read only by Also export; not written on its own".
 
-Each entry of the **Alpha type** dropdown has a hover that says what it does; the same dropdown is in Review and in a texture's settings. The row reads "(proposed)" when the image analysis chose the type and "(from mesh)" when the meshes did.
+Each entry of the **Alpha type** dropdown has a hover that says what it does; the same dropdown is in Review and in a texture's settings. The row reads "(proposed)": the type is the image analysis's proposal, because a texture whose meshes decide its alpha is never asked.
 
 ### What the GUI writes on its own
 

@@ -124,10 +124,9 @@ pub fn alpha_label(policy: AlphaPolicy) -> &'static str {
 }
 
 /// Note FM35: the one line of the alpha question, on the Problems row and in the texture panel: the type the dropdown
-/// opens on and where it came from (`from_mesh`: a mesh's alpha property; else the engine's proposal).
-pub fn alpha_confirm_text(policy: AlphaPolicy, from_mesh: bool) -> String {
-    let source = if from_mesh { "from mesh" } else { "proposed" };
-    format!("Alpha: {} ({source}) — confirm", alpha_label(policy))
+/// opens on, the engine's proposal (a mesh-decided texture is never asked).
+pub fn alpha_confirm_text(policy: AlphaPolicy) -> String {
+    format!("Alpha: {} (proposed) — confirm", alpha_label(policy))
 }
 
 /// [`ack_label`] with " for this texture", for the panels that act on the one texture.

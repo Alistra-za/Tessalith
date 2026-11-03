@@ -110,9 +110,16 @@ pub fn offered_groups(target: Target, grass: bool) -> Vec<(&'static str, Vec<Sub
     subtype_groups(|s| engine::policy::offered_for(target, s, grass))
 }
 
+const ALPHA_POLICIES: [AlphaPolicy; 5] = [
+    AlphaPolicy::Remove,
+    AlphaPolicy::Cutout,
+    AlphaPolicy::Blend,
+    AlphaPolicy::CutoutBlend,
+    AlphaPolicy::Data,
+];
+
 pub fn alpha_options() -> Options {
-    use AlphaPolicy::*;
-    [Remove, Cutout, Blend, CutoutBlend, Data]
+    ALPHA_POLICIES
         .into_iter()
         .map(|p| (json!(p), alpha_label(p).into()))
         .collect()
@@ -131,11 +138,8 @@ pub fn alpha_dropdown(
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(alpha_label(shown))
         .show_ui(ui, |ui| {
-            for (v, label) in alpha_options() {
-                let Ok(p) = serde_json::from_value::<AlphaPolicy>(v) else {
-                    continue;
-                };
-                let r = ui.selectable_label(p == shown, label);
+            for p in ALPHA_POLICIES {
+                let r = ui.selectable_label(p == shown, alpha_label(p));
                 if r.on_hover_text(alpha_hint(p)).clicked() {
                     picked = Some(p);
                 }
@@ -150,8 +154,7 @@ pub fn alpha_dropdown(
     picked
 }
 
-/// One line on what an alpha meaning does (Note FB8, review C12): the hover of every place that offers one. Problems'
-/// Decide… menu and Review's buttons use it, and the question box in a texture's settings.
+/// One line on what an alpha meaning does (Note FB8, review C12): the hover of each entry of the alpha dropdown.
 pub fn alpha_hint(policy: AlphaPolicy) -> &'static str {
     match policy {
         AlphaPolicy::Remove => "Drops the alpha channel: the texture is fully solid",
@@ -896,7 +899,7 @@ fn decision_box(
     cx: &Ctx,
     decisions: &[Decision],
     warnings: &[Warning],
-    alpha: Option<(AlphaPolicy, bool)>,
+    alpha: Option<AlphaPolicy>,
     actions: &mut Vec<Action>,
 ) {
     let frame = egui::Frame::new()
@@ -917,8 +920,8 @@ fn decision_box(
                     }
                     // Note FM35: one line and one dropdown on the resolved type; the engine's reason is the line's hover.
                     Decision::AlphaMeaning => {
-                        if let Some((shown, mesh)) = alpha {
-                            let line = ui.label(alpha_confirm_text(shown, mesh));
+                        if let Some(shown) = alpha {
+                            let line = ui.label(alpha_confirm_text(shown));
                             if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
                                 line.on_hover_text(m);
                             }

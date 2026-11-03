@@ -112,8 +112,8 @@ pub fn undecided_row(
             ui.horizontal_wrapped(|ui| match d {
                 // Note FM35: one line and one dropdown on the resolved type.
                 Decision::AlphaMeaning => {
-                    if let Some((shown, mesh)) = alpha_asked(item) {
-                        ui.label(alpha_confirm_text(shown, mesh));
+                    if let Some(shown) = alpha_asked(item) {
+                        ui.label(alpha_confirm_text(shown));
                         let id = egui::Id::new(("undecided-alpha", key));
                         if let Some(p) = alpha_dropdown(ui, id, shown, why) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
@@ -221,7 +221,7 @@ pub fn fix_buttons(
                 // Note FM35 (supersedes FI11's Decide… menu): the row's line names the type, and this dropdown opens
                 // on it; Enter on the row confirms it.
                 Decision::AlphaMeaning => {
-                    if let Some((shown, _)) = alpha_asked(item) {
+                    if let Some(shown) = alpha_asked(item) {
                         let id = egui::Id::new(("problems-alpha", key));
                         if let Some(p) = alpha_dropdown(ui, id, shown, why) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));

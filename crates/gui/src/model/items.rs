@@ -9,7 +9,7 @@ use engine::manifest::output_key;
 use engine::overrides::project_rel;
 use engine::pack::plan::virtual_stem;
 use engine::pack::RecipeKind;
-use engine::policy::{near_binary, JobStatus, Need, Provenance, ResolvedJob, SourceStamp};
+use engine::policy::{near_binary, JobStatus, Need, ResolvedJob, SourceStamp};
 use engine::session::{Session, Thumbnail};
 use engine::suggest::suggest_alpha;
 use std::collections::BTreeMap;
@@ -157,22 +157,18 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
     out
 }
 
-/// Note FM35: the type the alpha question opens on and whether a mesh gave it, for an item that asks it. A mesh's
-/// alpha property settles the question in the engine (such an item is Ready, never asked), so the engine's proposal
-/// is the live source; the mesh arm only keeps the line true should a mesh-decided policy ever sit under a question.
-pub fn alpha_asked(item: &TextureItem) -> Option<(AlphaPolicy, bool)> {
+/// Note FM35: the type the alpha question opens on, for an item that asks it. A mesh's alpha property settles the
+/// question in the engine (such an item is Ready, never asked), so this is always the engine's proposal.
+pub fn alpha_asked(item: &TextureItem) -> Option<AlphaPolicy> {
     let job = item
         .job
         .as_ref()
         .filter(|_| item.decisions.contains(&Decision::AlphaMeaning))?;
-    if job.provenance.get("alpha.policy") == Some(&Provenance::MeshAlpha) {
-        return Some((job.profile.alpha.policy, true));
-    }
     let proposed = item
         .analysis
         .as_deref()
         .and_then(|a| suggest_alpha(job.profile.subtype, a.alpha, near_binary(a)));
-    Some((proposed.map_or(job.profile.alpha.policy, |p| p.0), false))
+    Some(proposed.map_or(job.profile.alpha.policy, |p| p.0))
 }
 
 /// Note DY16: where a helper went, from the engine's report: "fills to x_rmaos R, x alpha" or "not used: <reason>".

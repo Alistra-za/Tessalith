@@ -4,7 +4,7 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{filtered, flagged, problems, At, Fix, Level, Problem, ProblemsFilter};
-use crate::model::items::alpha_asked;
+use crate::model::items::{alpha_asked, Decision};
 use crate::model::meshes::NifTab;
 use crate::model::sets::Missing;
 use crate::model::shell::ShellRequest;
@@ -387,13 +387,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     let stroke = ui.visuals().selection.stroke;
                     ui.painter()
                         .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-                    // Note FM35: a row with no type suggestion that asks its alpha confirms the type it shows.
+                    // Note FM35: a row that asks only its alpha confirms the type it shows. With a sub-type question
+                    // too, Enter must not answer just one of the two, so it does nothing there.
                     let alpha = match &p.at {
-                        At::Texture(k) if p.suggested.is_none() => {
-                            m.item(k).and_then(alpha_asked).map(|a| a.0)
-                        }
+                        At::Texture(k) => m.item(k).filter(|i| {
+                            !i.decisions
+                                .iter()
+                                .any(|d| matches!(d, Decision::Subtype { .. }))
+                        }),
                         _ => None,
-                    };
+                    }
+                    .and_then(alpha_asked);
                     // Consumed only when the row acts, so the Grid's Enter (open the preview) never sees it too.
                     let acting = matches!((first, &off, &p.at), (true, None, At::Texture(_)))
                         && (p.suggested.is_some() || alpha.is_some());

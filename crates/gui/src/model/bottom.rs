@@ -411,7 +411,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         .filter(|i| i.status == ItemStatus::NeedsDecision)
     {
         // Note FM35: the alpha question is one line on the type it opens on.
-        let alpha = items::alpha_asked(i).map(|(p, mesh)| code_text::alpha_confirm_text(p, mesh));
+        let alpha = items::alpha_asked(i).map(code_text::alpha_confirm_text);
         let parts: Vec<String> = i
             .decisions
             .iter()
