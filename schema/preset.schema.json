@@ -379,7 +379,8 @@
     "EncoderSpec": {
       "additionalProperties": false,
       "properties": {
-        "bc1_transparent_black": {
+        "bc1_alpha": {
+          "description": "BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by\ndefault and never set automatically; not serialised when off.",
           "type": "boolean"
         },
         "bc45_search_radius": {
@@ -406,7 +407,6 @@
       "required": [
         "effort",
         "perceptual",
-        "bc1_transparent_black",
         "bc45_search_radius"
       ],
       "type": "object"
@@ -987,7 +987,8 @@
     "PartialEncoderSpec": {
       "additionalProperties": false,
       "properties": {
-        "bc1_transparent_black": {
+        "bc1_alpha": {
+          "description": "BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by\ndefault and never set automatically; not serialised when off.",
           "type": "boolean"
         },
         "bc45_search_radius": {

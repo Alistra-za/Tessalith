@@ -71,6 +71,7 @@
         "ALPHA-254",
         "ALPHA-NEAR-OPAQUE",
         "ALPHA-PBR-NORMAL-DROPPED",
+        "ALPHA-BC1-ONE-BIT",
         "TAG-SRGB-VANILLA",
         "TAG-SRGB-NONPBR",
         "TAG-UNORM-PBR",

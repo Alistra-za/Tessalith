@@ -241,6 +241,12 @@ namespace rgbcx
 	const uint32_t MIN_LEVEL = 0, MAX_LEVEL = 18;
 	void encode_bc1(uint32_t level, void* pDst, const uint8_t* pPixels, bool allow_3color, bool use_transparent_texels_for_black, const uint8_t* pForce_selectors = nullptr);
 
+	// sdc patch (bc1 alpha, see README-VENDOR.md): BC1 with 1-bit alpha. Bit i of transparent_mask marks texel i
+	// transparent. Mask 0 is encode_bc1(level, pDst, pPixels, true, false); mask 0xFFFF is an all-transparent block;
+	// otherwise a 3-colour block whose endpoints fit the opaque texels only. Opaque texels take selectors 0..2 (scored
+	// under cBC1Dual), masked texels selector 3, so an opaque texel never decodes transparent.
+	void encode_bc1_alpha(uint32_t level, void* pDst, const uint8_t* pPixels, uint32_t transparent_mask);
+
 	// Low-level interface for BC1 encoding.
 	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
 	// total_orderings_to_try controls the perf. vs. quality tradeoff on 4-color blocks when the cEncodeBC1UseLikelyTotalOrderings flag is used. It must range between [MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4].

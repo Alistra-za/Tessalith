@@ -10,6 +10,6 @@ fn init_is_idempotent() {
     assert_eq!(v.ispc, "1.31.0");
     assert_eq!(
         v.rgbcx_patch,
-        Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut")
+        Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha")
     );
 }

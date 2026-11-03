@@ -119,10 +119,16 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
             for (blk, src) in o.chunks_mut(bs).zip(b.chunks(BLOCK_TEXELS)) {
                 let src: &[[u8; 4]; 16] = src.try_into().unwrap();
                 match f {
-                    // BC1 is opaque-only in v1 (DECISIONS Note F): alpha is ignored by rgbcx.
-                    Format::Bc1 => {
-                        blk.copy_from_slice(&bc1_encode_block(src, true, e.bc1_transparent_black))
+                    // Note FM: with `bc1_alpha` quantise cut the alpha to 0/255; texels below 128 go transparent.
+                    // Without it rgbcx ignores alpha.
+                    Format::Bc1 if e.bc1_alpha => {
+                        let mask = src
+                            .iter()
+                            .enumerate()
+                            .fold(0u16, |m, (i, t)| m | (u16::from(t[3] < 128) << i));
+                        blk.copy_from_slice(&bc1_encode_block_alpha(src, mask))
                     }
+                    Format::Bc1 => blk.copy_from_slice(&bc1_encode_block(src, true, false)),
                     Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
                         src,
                         radius(e.bc45_search_radius),

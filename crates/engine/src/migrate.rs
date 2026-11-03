@@ -122,6 +122,11 @@ pub const REMOVED: &[Removed] = &[
         value: None,
         hint: "BC1 always encodes for NVIDIA + AMD in 2.0; delete the key",
     },
+    Removed {
+        key: "encoder.bc1_transparent_black",
+        value: None,
+        hint: "use encoder.bc1_alpha",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {
@@ -349,6 +354,20 @@ mod tests {
         assert!(removed_set("file:a.png.subtype", "\"rfaos\"").is_some());
         assert_eq!(removed_set("format", "bc7"), None);
         assert_eq!(removed_set("subtype", "diffuse"), None);
+    }
+
+    #[test]
+    fn bc1_transparent_black_names_bc1_alpha() {
+        let m = removed_in(&t(
+            "[defaults]\nencoder = { effort = \"veryslow\", bc1_transparent_black = false }",
+        ))
+        .unwrap();
+        assert!(
+            m.starts_with("defaults.encoder.bc1_transparent_black: removed in 2.0;")
+                && m.ends_with("use encoder.bc1_alpha"),
+            "{m}"
+        );
+        assert!(removed_in(&t("[defaults]\nencoder = { bc1_alpha = true }")).is_none());
     }
 
     #[test]

@@ -54,7 +54,7 @@ Every warning has a code and a severity:
 |---|---|---|---|
 | `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](../research/encoder-benchmark.md)). | Use BC7. |
 | `FMT-LANDSCAPE-BC1` | blocking | BC1 on `landscape_diffuse` destroys the snow mask. | Use BC7 or BC3. |
-| `FMT-BC1-ALPHA` | blocking | BC1 with an alpha policy other than `remove` ([format](Project-Config-Fields.md#format-and-size)). | Use BC7 or BC3, or `remove`. |
+| `FMT-BC1-ALPHA` | blocking | BC1 with alpha kept, without `encoder.bc1_alpha` or with `data` alpha ([BC1 alpha](Texture-Types.md#alpha-policies)). | Turn on `encoder.bc1_alpha`, use BC7 or BC3, or `remove`. |
 | `FMT-PERCEPTUAL-DATA` | error | Perceptual encoding on a data map. | Turn `encoder.perceptual` off. |
 | `FMT-HDR-SOURCE` | info | Why a `pbr_emissive` is BC6H (float source above 1.0) or BC7 sRGB. | Set `format` on the file to choose. |
 | `TAG-SRGB-VANILLA` | error | `_SRGB` under `vanilla`. | UNORM. |
@@ -71,13 +71,14 @@ Every warning has a code and a severity:
 | `ALPHA-254` | info | Opaque alpha decodes as 254 in places. Harmless to Community Shaders' 251/255 gate. | Turn `alpha.exact_opaque` on if the alpha is read. |
 | `ALPHA-NEAR-OPAQUE` | info | Source alpha 251 to 254 with a minimum of 251 or more is treated as opaque and removed. | |
 | `ALPHA-PBR-NORMAL-DROPPED` | info | Vanilla specular in a `pbr_normal`'s alpha was dropped ([sub-types](Texture-Types.md#sub-types)). | |
+| `ALPHA-BC1-ONE-BIT` | warning | BC1 1-bit alpha on a source whose soft alpha would turn hard ([BC1 alpha](Texture-Types.md#alpha-policies)). | Use BC7 or BC3 to keep the soft edges, or accept. |
 
 ### Configuration
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CFG-UNAVAILABLE` | blocking | The sub-type or format is not available under the target. | Accept the fallback with `--allow CFG-UNAVAILABLE`, or change the sub-type or target. |
-| `CFG-INVALID` | error | A value outside its range, or a combination that cannot be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, `bc1_transparent_black` with BC1, a bad filter scope, and so on). In a config, preset, rule or `--set`, the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
+| `CFG-INVALID` | error | A value outside its range, or a combination that cannot be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope, and so on). In a config, preset, rule or `--set`, the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config-Fields.md#mipmaps) this texture cannot use; it uses box. | Scope the filter to colour maps, or ignore. |
 | `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file (`sdc presets validate`). When another preset already declares its suffix aliases, the GUI's Problems row has **Remove aliases from {id}**. |

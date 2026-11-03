@@ -1041,9 +1041,8 @@ validation = { mips = \"smallest\" }
     assert_eq!(mip_errors(&o).len(), all, "{:?}", mip_errors(&o));
 }
 
-/// No setting reaches an error-severity `VAL-*` code (`encoder.bc1_transparent_black=true` with BC1 is
-/// `CFG-INVALID`, DECISIONS Note F), so exit 4 is triggered by the engine's test-only hook: the named file's
-/// validation report gets one `VAL-HEADER` error. The variable is set on the child process only.
+/// No setting reaches an error-severity `VAL-*` code, so exit 4 is triggered by the engine's test-only hook: the
+/// named file's validation report gets one `VAL-HEADER` error. The variable is set on the child process only.
 const FAIL_VALIDATION_ON: (&str, &str) = ("SDC_TEST_FAIL_VALIDATION", "checker");
 
 impl Fx {
@@ -1095,29 +1094,6 @@ fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     let o = fx.convert_failing_validation(&["--set", "file:**/bad.png.alpha.threshold=0"]);
     assert_eq!(code(&o), 1, "{}", text(&o.stderr));
     assert_eq!(batch_done(&o)["validation_failed"], 1);
-}
-
-/// DECISIONS Note F: BC1 with transparent-black texels is not offered in v1, so the setting is a `CFG-INVALID`
-/// failure of the file (exit 1), not a way to a failed validation.
-#[test]
-fn bc1_transparent_black_is_a_file_error_not_a_validation_failure() {
-    let fx = Fx::new();
-    fx.rgb("a.png");
-    let o = fx.convert(&[
-        "--set",
-        "subtype=diffuse",
-        "--set",
-        "format=bc1",
-        "--set",
-        "encoder.bc1_transparent_black=true",
-    ]);
-    assert_eq!(code(&o), 1, "{}", text(&o.stderr));
-    assert!(
-        text(&o.stderr).contains("CFG-INVALID"),
-        "{}",
-        text(&o.stderr)
-    );
-    assert!(!fx.dds("textures/a/a.dds").exists());
 }
 
 /// DECISIONS Note M5: `--fill` writes a packed channel that has no source; it is provenance `fill:<v>` and not a

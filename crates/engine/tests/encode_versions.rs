@@ -276,9 +276,8 @@ fn rnm_fixture(dir: &Path) {
 }
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
-/// opaque BC1, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a BC3 cutout at alpha.threshold
-/// 200, plus BC4 and BC5. Returns the
-/// `[files]` overrides.
+/// opaque BC1, a BC1 1-bit alpha cutout, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a
+/// BC3 cutout at alpha.threshold 200, plus BC4 and BC5. Returns the `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
     let mut add = |name: &str, img: DynamicImage, fields: &[&str]| {
@@ -294,8 +293,19 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
             Rgba([(x * 4) as u8, (y * 4) as u8, 90, a])
         }))
     };
-    // BC1 stores no alpha (FMT-BC1-ALPHA), so it gets an opaque source.
+    // BC1 stores no alpha (FMT-BC1-ALPHA), so it gets an opaque source; with `encoder.bc1_alpha` it keeps 1-bit alpha.
     add("opaque_bc1", rgb(64), &["subtype=diffuse", "format=bc1"]);
+    add(
+        "cutout_bc1",
+        checker(),
+        &[
+            "subtype=diffuse",
+            "format=bc1",
+            "alpha.policy=cutout",
+            "encoder.bc1_alpha=true",
+            "mips.filter=box",
+        ],
+    );
     for f in ["bc3", "bc7"] {
         let fmt = format!("format={f}");
         add(
@@ -553,6 +563,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     let covered = |name: &str| identity.keys().any(|k| k.contains(name));
     for name in [
         "opaque_bc1",
+        "cutout_bc1",
         "cutout_bc3",
         "cutout_bc7",
         "blend_bc3",

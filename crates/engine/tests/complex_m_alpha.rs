@@ -131,7 +131,7 @@ fn assert_quiet(o: &Out) {
     }
 }
 
-/// Every format complex_material may be written as that stores alpha (BC1 is opaque-only in v1).
+/// Every format complex_material may be written as that stores alpha (BC1 stores alpha only with encoder.bc1_alpha, which is never set automatically).
 fn alpha_formats() -> Vec<Format> {
     let mut v: Vec<Format> =
         engine::policy::allowed_encodings(Subtype::ComplexMaterial, Target::Cs)

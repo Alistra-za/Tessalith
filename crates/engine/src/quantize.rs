@@ -81,6 +81,10 @@ pub fn to_encoder_input(level: &Rgba32F, work: &Work, p: &Profile) -> EncoderInp
                 .collect(),
         );
     }
+    // Note FM: BC1 1-bit alpha cuts every level at the alpha-test cutoff (after the coverage mips). A transparent texel
+    // decodes as black, so it is quantised as black too and validation compares like with like.
+    let cut =
+        (work.alpha_present && p.bc1_one_bit_alpha()).then(|| crate::encode::alpha_cut(&p.alpha));
     EncoderInput::Ldr(
         level
             .px
@@ -92,7 +96,12 @@ pub fn to_encoder_input(level: &Rgba32F, work: &Work, p: &Profile) -> EncoderInp
                 } else {
                     255
                 };
-                [unorm8(rgb[0]), unorm8(rgb[1]), unorm8(rgb[2]), a]
+                let px = [unorm8(rgb[0]), unorm8(rgb[1]), unorm8(rgb[2]), a];
+                match cut {
+                    Some(c) if a < c => [0; 4],
+                    Some(_) => [px[0], px[1], px[2], 255],
+                    None => px,
+                }
             })
             .collect(),
     )

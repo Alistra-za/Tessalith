@@ -1524,7 +1524,7 @@ fn bc1_compact_is_legacy_dxt1_and_bc4_legacy_header_is_bc4u() {
         7,
     );
     assert_eq!(&f.fourcc, b"DXT1");
-    // DECISIONS Note F: BC1 is opaque only and never emits transparent-black texels.
+    // DECISIONS Note F: without encoder.bc1_alpha, BC1 never emits transparent-black texels.
     let lv = levels(&f);
     assert_eq!(lv.len(), 7);
     for (i, l) in lv.iter().enumerate() {

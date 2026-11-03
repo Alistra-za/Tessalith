@@ -1983,6 +1983,206 @@ namespace rgbcx
 		encode_bc1(pDst, pPixels, flags, total_orderings4, total_orderings3, pForce_selectors);
 	}
 
+	// sdc patch (bc1 alpha, see README-VENDOR.md): 3-colour selectors for the opaque texels only, on the summed NVidia +
+	// AMD error (bc1_find_sels3_dual without black). A masked texel gets selector 3 and adds no error.
+	static uint32_t bc1_alpha_find_sels(const color32* pSrc_pixels, uint32_t mask, int lr, int lg, int lb, int hr, int hg, int hb, uint8_t sels[16])
+	{
+		bc1_dual_palette p;
+		bc1_get_dual_palette(p, true, lr, lg, lb, hr, hg, hb);
+
+		uint32_t total_err = 0;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			if (mask & (1U << i))
+			{
+				sels[i] = 3;
+				continue;
+			}
+			uint32_t best_err = bc1_dual_err(p, 0, pSrc_pixels[i]), best_sel = 0;
+			for (uint32_t j = 1; j < 3; j++)
+			{
+				const uint32_t err = bc1_dual_err(p, j, pSrc_pixels[i]);
+				if (err < best_err)
+				{
+					best_err = err;
+					best_sel = j;
+				}
+			}
+			sels[i] = (uint8_t)best_sel;
+			total_err += best_err;
+		}
+		return total_err;
+	}
+
+	// sdc patch (bc1 alpha, see README-VENDOR.md): the fit of try_3color_block_useblack (principal axis, extreme texels,
+	// least-squares refits) over the opaque texels instead of the non-black ones, then a +-1 endpoint search.
+	void encode_bc1_alpha(uint32_t level, void* pDst, const uint8_t* pPixels, uint32_t transparent_mask)
+	{
+		transparent_mask &= 0xFFFF;
+		if (!transparent_mask)
+		{
+			encode_bc1(level, pDst, pPixels, true, false);
+			return;
+		}
+
+		bc1_block* pDst_block = static_cast<bc1_block*>(pDst);
+		if (transparent_mask == 0xFFFF)
+		{
+			pDst_block->set_low_color(0);
+			pDst_block->set_high_color(0);
+			pDst_block->set_selector_bits(0xFFFFFFFF);
+			return;
+		}
+
+		const color32* pSrc_pixels = (const color32*)pPixels;
+		const auto opaque = [transparent_mask](uint32_t i) { return (transparent_mask & (1U << i)) == 0; };
+
+		int total_r = 0, total_g = 0, total_b = 0, total_pixels = 0;
+		int max_r = 0, max_g = 0, max_b = 0;
+		int min_r = 255, min_g = 255, min_b = 255;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			if (!opaque(i))
+				continue;
+			const int r = pSrc_pixels[i].r, g = pSrc_pixels[i].g, b = pSrc_pixels[i].b;
+			max_r = std::max(max_r, r); max_g = std::max(max_g, g); max_b = std::max(max_b, b);
+			min_r = std::min(min_r, r); min_g = std::min(min_g, g); min_b = std::min(min_b, b);
+			total_r += r; total_g += g; total_b += b;
+			total_pixels++;
+		}
+
+		const int half_total_pixels = total_pixels >> 1;
+		const int avg_r = (total_r + half_total_pixels) / total_pixels;
+		const int avg_g = (total_g + half_total_pixels) / total_pixels;
+		const int avg_b = (total_b + half_total_pixels) / total_pixels;
+
+		int icov[6] = { 0, 0, 0, 0, 0, 0 };
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			if (!opaque(i))
+				continue;
+			const int r = (int)pSrc_pixels[i].r - avg_r, g = (int)pSrc_pixels[i].g - avg_g, b = (int)pSrc_pixels[i].b - avg_b;
+			icov[0] += r * r; icov[1] += r * g; icov[2] += r * b;
+			icov[3] += g * g; icov[4] += g * b; icov[5] += b * b;
+		}
+
+		float cov[6];
+		for (uint32_t i = 0; i < 6; i++)
+			cov[i] = (float)(icov[i]) * (1.0f / 255.0f);
+
+		float xr = (float)(max_r - min_r), xg = (float)(max_g - min_g), xb = (float)(max_b - min_b);
+		if (icov[2] < 0)
+			xr = -xr;
+		if (icov[4] < 0)
+			xg = -xg;
+
+		for (uint32_t power_iter = 0; power_iter < 4; power_iter++)
+		{
+			const float r = xr * cov[0] + xg * cov[1] + xb * cov[2];
+			const float g = xr * cov[1] + xg * cov[3] + xb * cov[4];
+			const float b = xr * cov[2] + xg * cov[4] + xb * cov[5];
+			xr = r; xg = g; xb = b;
+		}
+
+		const float k = maximum(fabsf(xr), fabsf(xg), fabsf(xb));
+		int saxis_r = 306, saxis_g = 601, saxis_b = 117;
+		if (k >= 2)
+		{
+			const float m = 1024.0f / k;
+			saxis_r = (int)(xr * m);
+			saxis_g = (int)(xg * m);
+			saxis_b = (int)(xb * m);
+		}
+
+		int low_dot = INT_MAX, high_dot = INT_MIN;
+		uint32_t low_c = 0, high_c = 0;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			if (!opaque(i))
+				continue;
+			const int dot = pSrc_pixels[i].r * saxis_r + pSrc_pixels[i].g * saxis_g + pSrc_pixels[i].b * saxis_b;
+			if (dot < low_dot)
+			{
+				low_dot = dot;
+				low_c = i;
+			}
+			if (dot > high_dot)
+			{
+				high_dot = dot;
+				high_c = i;
+			}
+		}
+
+		int lr = to_5(pSrc_pixels[low_c].r), lg = to_6(pSrc_pixels[low_c].g), lb = to_5(pSrc_pixels[low_c].b);
+		int hr = to_5(pSrc_pixels[high_c].r), hg = to_6(pSrc_pixels[high_c].g), hb = to_5(pSrc_pixels[high_c].b);
+
+		uint8_t sels[16];
+		uint32_t err = bc1_alpha_find_sels(pSrc_pixels, transparent_mask, lr, lg, lb, hr, hg, hb, sels);
+
+		// Least-squares refits while they improve; the solve skips selector 3, so only opaque texels count.
+		for (uint32_t pass = 0; err && (pass < 8); pass++)
+		{
+			vec3F xl, xh;
+			int lr2, lg2, lb2, hr2, hg2, hb2;
+			if (!compute_least_squares_endpoints3_rgb(false, pSrc_pixels, sels, &xl, &xh))
+			{
+				lr2 = g_bc1_match5_half[avg_r].m_hi;
+				lg2 = g_bc1_match6_half[avg_g].m_hi;
+				lb2 = g_bc1_match5_half[avg_b].m_hi;
+
+				hr2 = g_bc1_match5_half[avg_r].m_lo;
+				hg2 = g_bc1_match6_half[avg_g].m_lo;
+				hb2 = g_bc1_match5_half[avg_b].m_lo;
+			}
+			else
+			{
+				precise_round_565(xl, xh, hr2, hg2, hb2, lr2, lg2, lb2);
+			}
+
+			if ((lr == lr2) && (lg == lg2) && (lb == lb2) && (hr == hr2) && (hg == hg2) && (hb == hb2))
+				break;
+
+			uint8_t sels2[16];
+			const uint32_t err2 = bc1_alpha_find_sels(pSrc_pixels, transparent_mask, lr2, lg2, lb2, hr2, hg2, hb2, sels2);
+			if (err2 >= err)
+				break;
+			err = err2;
+			lr = lr2; lg = lg2; lb = lb2;
+			hr = hr2; hg = hg2; hb = hb2;
+			memcpy(sels, sels2, sizeof(sels));
+		}
+
+		// Step each endpoint channel by +-1 while any step improves (at most 64 rounds).
+		for (uint32_t round = 0; err && (round < 64); round++)
+		{
+			bool improved = false;
+			for (uint32_t step = 0; step < 12; step++)
+			{
+				int e[6] = { lr, lg, lb, hr, hg, hb };
+				const uint32_t c = step >> 1;
+				const int lim = ((c == 1) || (c == 4)) ? 63 : 31;
+				e[c] += (step & 1) ? 1 : -1;
+				if ((e[c] < 0) || (e[c] > lim))
+					continue;
+
+				uint8_t sels2[16];
+				const uint32_t err2 = bc1_alpha_find_sels(pSrc_pixels, transparent_mask, e[0], e[1], e[2], e[3], e[4], e[5], sels2);
+				if (err2 < err)
+				{
+					err = err2;
+					lr = e[0]; lg = e[1]; lb = e[2];
+					hr = e[3]; hg = e[4]; hb = e[5];
+					memcpy(sels, sels2, sizeof(sels));
+					improved = true;
+				}
+			}
+			if (!improved)
+				break;
+		}
+
+		bc1_encode3(pDst_block, lr, lg, lb, hr, hg, hb, sels);
+	}
+
 	static inline void encode_bc1_pick_initial(const color32* pSrc_pixels, uint32_t flags, bool grayscale_flag,
 		int min_r, int min_g, int min_b, int max_r, int max_g, int max_b,
 		int avg_r, int avg_g, int avg_b, int total_r, int total_g, int total_b,

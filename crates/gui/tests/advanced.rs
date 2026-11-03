@@ -464,7 +464,6 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
         names,
         [
             "encoder.bc7_weights",
-            "encoder.bc1_transparent_black",
             "encoder.bc45_search_radius",
             "header",
             "resize",

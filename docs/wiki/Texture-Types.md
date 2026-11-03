@@ -139,7 +139,7 @@ The full list of format, tag and target rules is on [Presets and targets](Preset
 
 | Format | Id | Contents | Use |
 |---|---|---|---|
-| BC1 | `bc1` | RGB, opaque only | Opaque colour in the compact presets. |
+| BC1 | `bc1` | RGB; 1-bit alpha only with `encoder.bc1_alpha` ([alpha policies](#alpha-policies)) | Opaque colour in the compact presets. |
 | BC3 | `bc3` | RGBA | Available, not chosen by any built-in preset. |
 | BC4 | `bc4` | One channel | Grayscale maps. |
 | BC5 | `bc5` | Two channels | Flow and generic two-channel maps. |
@@ -168,3 +168,5 @@ Which encoder each format uses is in [Format and encoder](Project-Config.md#form
 | `data` | Alpha is data (specular, height, a mask). | Treated as a plain channel. |
 
 Discarding varying alpha by accident is blocked (`LOSS-ALPHA-DATA`), except when you chose `remove` yourself or the file is a `pbr_normal`.
+
+**BC1 alpha.** BC1 is opaque unless you turn on `encoder.bc1_alpha` (GUI: **1-bit alpha**); nothing turns it on for you. With it on, a `cutout`, `blend` or `cutout_blend` texture keeps 1-bit alpha: each mip is built with coverage preserved (`blend` included), then texels below the alpha-test cutoff become transparent black and the rest opaque. The cutoff is `alpha.threshold` + 1 with `gt` and `alpha.threshold` with `ge` (128 by default). When more than 1 % of the source texels have alpha between 1 and 254, `ALPHA-BC1-ONE-BIT` warns that those soft edges turn hard. Without the setting, or with `data` alpha, BC1 with alpha is `FMT-BC1-ALPHA` (blocking). <!-- D:FM20 -->

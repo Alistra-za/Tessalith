@@ -33,6 +33,93 @@ fn bc1_with_transparent_black_off_always_decodes_opaque() {
 }
 
 #[test]
+fn bc1_alpha_keeps_opaque_black_opaque() {
+    let mut b = [[0u8; 4]; 16];
+    for (i, p) in b.iter_mut().enumerate() {
+        *p = match i {
+            0..=3 => [0, 0, 0, 255],
+            4..=7 => [200, 40, 40, 255],
+            _ => [90, 90, 90, 0],
+        };
+    }
+    let enc = bc1_encode_block_alpha(&b, 0xFF00);
+    for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
+        let dec = bc1_decode_block(&enc, model);
+        for (i, d) in dec.iter().enumerate() {
+            if i < 8 {
+                assert_eq!(d[3], 255, "{model:?} texel {i}: {d:?}");
+            } else {
+                assert_eq!(*d, [0, 0, 0, 0], "{model:?} texel {i}");
+            }
+        }
+        assert!(dec[..4].iter().all(|d| d[..3] == [0, 0, 0]), "{dec:?}");
+    }
+}
+
+#[test]
+fn bc1_alpha_all_transparent_block() {
+    let enc = bc1_encode_block_alpha(&ramp_block(), 0xFFFF);
+    for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
+        assert!(
+            bc1_decode_block(&enc, model)
+                .iter()
+                .all(|d| *d == [0, 0, 0, 0]),
+            "{model:?}"
+        );
+    }
+}
+
+#[test]
+fn bc1_alpha_without_transparent_texels_matches_plain_encode() {
+    let mut b = ramp_block();
+    for p in b.iter_mut().take(6) {
+        *p = [0, 0, 0, 255];
+    }
+    for blk in [ramp_block(), b] {
+        assert_eq!(
+            bc1_encode_block_alpha(&blk, 0),
+            bc1_encode_block(&blk, true, false)
+        );
+    }
+}
+
+#[test]
+fn bc1_alpha_fits_only_opaque_texels() {
+    let (c0, c1) = ([16u8, 200, 80], [240u8, 32, 160]);
+    let mut b = [[0u8; 4]; 16];
+    let mut mask = 0u16;
+    for (i, p) in b.iter_mut().enumerate() {
+        let h = (i as u32).wrapping_mul(2_654_435_761).to_le_bytes();
+        *p = match i % 4 {
+            0 => [c0[0], c0[1], c0[2], 255],
+            1 => [c1[0], c1[1], c1[2], 255],
+            // Noise the fit must ignore.
+            _ => {
+                mask |= 1 << i;
+                [h[1], h[2], h[3], 0]
+            }
+        };
+    }
+    let enc = bc1_encode_block_alpha(&b, mask);
+    for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
+        let dec = bc1_decode_block(&enc, model);
+        for (i, (d, s)) in dec.iter().zip(&b).enumerate() {
+            if mask & (1 << i) != 0 {
+                assert_eq!(*d, [0, 0, 0, 0], "{model:?} texel {i}");
+                continue;
+            }
+            assert_eq!(d[3], 255, "{model:?} texel {i}");
+            for c in 0..3 {
+                assert!(
+                    (d[c] as i32 - s[c] as i32).abs() <= 8,
+                    "{model:?} texel {i}: {d:?} vs {s:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn bc4_ramp_is_close() {
     let b = ramp_block();
     let enc = bc4_encode_block(&b, 0, BC45_RADIUS_MAX);

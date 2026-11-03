@@ -138,7 +138,7 @@ pub fn plan_patch(bytes: &[u8], req: &PatchRequest) -> Result<Option<HeaderPatch
     };
     if format == Format::Bc1 && (0..stored).any(transparent) {
         return refuse(
-            "BC1 with 1-bit alpha: sdc writes BC1 opaque only; re-encode as BC7 or BC3".into(),
+            "BC1 with 1-bit alpha: only opaque BC1 can be patched; re-encode as BC7, BC3 or BC1 with encoder.bc1_alpha".into(),
         );
     }
     let ati = matches!(&f.fourcc, b"ATI1" | b"ATI2");

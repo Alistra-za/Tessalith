@@ -588,7 +588,7 @@ fn unavailable_subtype_reports_cfg_unavailable_only() {
     );
 }
 
-/// Carry 3: BC1 is opaque only, whatever the alpha policy; `has_alpha()` is not relied on.
+/// Carry 3: without `encoder.bc1_alpha` BC1 is opaque only, whatever the alpha policy; `has_alpha()` is not relied on.
 #[test]
 fn bc1_blocks_every_alpha_policy_but_remove() {
     for policy in ["cutout", "blend", "cutout_blend", "data"] {
@@ -1431,10 +1431,32 @@ fn legacy_header_is_accepted_where_a_legacy_form_exists_and_auto_never_errors() 
     }
 }
 
-/// DECISIONS Note F: BC1 is opaque-only in v1, so `encoder.bc1_transparent_black = true` with a BC1 output is
-/// CFG-INVALID (an error, not acknowledgeable); the setting is inert for every other format.
+/// Note FM: BC1 keeps alpha only with `encoder.bc1_alpha` and an alpha-tested or blended policy; `data` always blocks.
 #[test]
-fn bc1_transparent_black_is_cfg_invalid_with_bc1_only() {
+fn bc1_with_alpha_still_blocks_without_the_setting() {
+    let blocked = |sets: &[&str]| {
+        let mut all = vec!["subtype=diffuse", "format=bc1"];
+        all.extend(sets);
+        let j = run(
+            Target::Cs,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            &all,
+            &[],
+        );
+        matches!(&j.status, JobStatus::Blocked { codes } if codes.contains(&Code::FmtBc1Alpha))
+    };
+    for policy in ["cutout", "blend", "cutout_blend", "data"] {
+        let p = format!("alpha.policy={policy}");
+        assert!(blocked(&[&p]), "{policy} without bc1_alpha");
+        assert_eq!(
+            blocked(&[&p, "encoder.bc1_alpha=true"]),
+            policy == "data",
+            "{policy} with bc1_alpha"
+        );
+    }
     let j = run(
         Target::Cs,
         "textures/a/x.png",
@@ -1444,52 +1466,71 @@ fn bc1_transparent_black_is_cfg_invalid_with_bc1_only() {
         &[
             "subtype=diffuse",
             "format=bc1",
-            "encoder.bc1_transparent_black=true",
+            "alpha.policy=cutout",
+            "encoder.bc1_alpha=true",
         ],
-        &[Code::CfgInvalid],
+        &[],
     );
-    assert!(
-        matches!(&j.status, JobStatus::Error { codes } if codes == &vec![Code::CfgInvalid]),
-        "{:?}",
-        j.status
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    // The setting is inert for every other format.
+    let j = run(
+        Target::Cs,
+        "textures/a/x.png",
+        None,
+        &[],
+        opaque(),
+        &["subtype=diffuse", "format=bc7", "encoder.bc1_alpha=true"],
+        &[],
     );
-    let w = j
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::CfgInvalid)
-        .unwrap();
-    assert!(w.message.contains("bc1_transparent_black"), "{}", w.message);
-    assert!(
-        !w.message.contains("  "),
-        "stray run of spaces: {}",
-        w.message
-    );
-    // Off (the default) is fine, and so is the setting under another format.
-    for sets in [
-        vec![
-            "subtype=diffuse",
-            "format=bc1",
-            "encoder.bc1_transparent_black=false",
-        ],
-        vec![
-            "subtype=diffuse",
-            "format=bc7",
-            "encoder.bc1_transparent_black=true",
-        ],
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+}
+
+/// Note FM: ALPHA-BC1-ONE-BIT warns when more than 1 % of the source texels have alpha 1..=254.
+#[test]
+fn bc1_alpha_warns_on_soft_alpha() {
+    let sets = [
+        "subtype=diffuse",
+        "format=bc1",
+        "alpha.policy=cutout",
+        "encoder.bc1_alpha=true",
+    ];
+    let with = |img: Rgba32F| {
+        let j = run(Target::Cs, "textures/a/x.png", None, &[], img, &sets, &[]);
+        codes(&j).contains(&Code::AlphaBc1OneBit)
+    };
+    // 10 % of the texels at 128, the rest 0 or 255.
+    let mut img = opaque();
+    let n = img.px.len();
+    for (i, p) in img.px.iter_mut().enumerate() {
+        p[3] = if i < n / 10 {
+            128.0 / 255.0
+        } else if i % 2 == 0 {
+            0.0
+        } else {
+            1.0
+        };
+    }
+    assert!(with(img.clone()), "10 % soft alpha");
+    // At most 1 % soft: no warning.
+    for (i, p) in img.px.iter_mut().enumerate() {
+        if i >= n / 100 && p[3] > 0.0 && p[3] < 1.0 {
+            p[3] = 1.0;
+        }
+    }
+    assert!(!with(img), "1 % soft alpha");
+}
+
+/// Note FM: the removed key names its replacement.
+#[test]
+fn bc1_transparent_black_is_named() {
+    for s in [
+        "encoder.bc1_transparent_black=true",
+        "file:*.png.encoder.bc1_transparent_black=false",
     ] {
-        let j = run(
-            Target::Cs,
-            "textures/a/x.png",
-            None,
-            &[],
-            opaque(),
-            &sets,
-            &[],
-        );
+        let e = parse_set(s).unwrap_err();
         assert!(
-            !codes(&j).contains(&Code::CfgInvalid),
-            "{sets:?}: {:?}",
-            j.warnings
+            e.contains("removed in 2.0") && e.contains("encoder.bc1_alpha"),
+            "{s}: {e}"
         );
     }
 }

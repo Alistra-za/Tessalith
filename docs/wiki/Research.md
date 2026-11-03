@@ -21,7 +21,7 @@ The defaults come from a literature review of BCn encoders, mip filtering and Sk
 
 - Community Shaders reads the `_n` blue channel directly and never rebuilds Z, so a BC5 `_n` decodes with Z = -1 and loses the specular alpha. Benchmarks that favour BC5 for normals rebuild Z, which Skyrim does not. Drove: normals are BC7, and BC4/BC5 on a normal map is a blocking warning ([where BC5 is used](../research/encoder-benchmark.md)).
 - Vanilla diffuse stores gamma-encoded colour in UNORM files, and an `_SRGB` tag darkens it in vanilla shaders, CS non-PBR paths and LOD. TruePBR expects albedo tagged `_SRGB`. Drove: `_SRGB` only for TruePBR colour (albedo, `_g`, `_s`, `_f`) and only under `cs`; `_SRGB` under a `lod` path is flagged.
-- BC1 alpha on cutouts lost anti-aliased edges and visible RGB quality against BC7 ([encoder benchmark](../research/encoder-benchmark.md)). Drove: BC1 is opaque only; the compact presets use it only for colour without alpha.
+- BC1 alpha on cutouts lost anti-aliased edges and visible RGB quality against BC7 ([encoder benchmark](../research/encoder-benchmark.md)). Drove: BC1 alpha is opt-in (`encoder.bc1_alpha`); the compact presets use BC1 only for colour without alpha.
 - Spike S2: small BC7 textures with full chains ran in game with no crash ([design overview](../research/design-overview.md)). Drove: no small-texture fallback to another format.
 - Skyrim SE loads both legacy `BC4U`/`BC5U` and DX10 BC4/BC5 headers, unsigned only. Drove: the [header choice](../research/design-overview.md).
 

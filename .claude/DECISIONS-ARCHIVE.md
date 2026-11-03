@@ -106,6 +106,14 @@ ARCHIVED (wording before the edit; superseded in part by Note FJ, 2026-11-01)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 - **T9 Migration table (plan, 2026-10-12).** Presets none, config none, manifest records v1 → v2 (`schema` set to 2; the manifest's key is `schema`). Version 0 is refused. `PresetError::NewerConfigSchema(file, v)` is the spec's `ConfigError::NewerSchema`. Config files accept an optional `schema_version`.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- **T2 BC1 rule mechanics (plan, 2026-10-12).**
+  - `RuleMatch` had no sub-type matcher, so it gained `match.subtypes` (matched while layering, never while deciding a sub-type).
+  - `match.alpha` matches the source's alpha content, so there are two rules: `none`, and `constant255` for sub-types whose policy resolves to `remove`.
+  - No resolved-policy matcher was added (it would be circular).
+  - An explicit non-`remove` policy on an opaque colour map under compact is `FMT-BC1-ALPHA`.
+  - `bc1_transparent_black` stays false.
+
 ## Note U — M6 Track E: NIF-aware alpha and fewer confirmations (plan rulings, 2026-10-12)
 
 ARCHIVED (wording before the edit; superseded in part by Note FC1, 2026-10-29)
@@ -1383,3 +1391,11 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - BC1 decoder model: **one batch-wide setting, default Ideal (D3D10 formula, no rounding)**; NVIDIA / AMD / IdealRound4 selectable for vendor-specific targets.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
+- BC1 is opaque-only in v1 (no 1-bit alpha). rgbcx 3-colour mode stays on but **never emits transparent-black texels** (equivalent to bc7enc_rdo `-b`), so decoded alpha is always 255.
+
+## Note K — Task 44 CLI edge-case rulings (controller, 2026-10-09)
+
+ARCHIVED (superseded by Note FM, 2026-11-02)
+- **`encoder.bc1_transparent_black = true` with a BC1 output is `CFG-INVALID`** (Note F: BC1 is opaque-only in v1). The setting stays in the schema for the day BC1 alpha is offered; it is inert for other formats.

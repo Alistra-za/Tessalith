@@ -41,6 +41,26 @@ pub fn bc1_encode_block(
     out
 }
 
+/// Encode one BC1 block with 1-bit alpha (DECISIONS Note FM): bit i of `transparent` marks texel i transparent. No
+/// bit set gives exactly `bc1_encode_block(px, true, false)`; otherwise a 3-colour block fitted to the opaque texels,
+/// with selector 3 (transparent black) on the masked texels only.
+pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16) -> [u8; 8] {
+    init();
+    let src = bytes(px);
+    let mut out = [0u8; 8];
+    // SAFETY: `src` holds 64 bytes (16 RGBA texels) and `out` 8 bytes, the sizes rgbcx::encode_bc1_alpha reads and
+    // writes.
+    unsafe {
+        ffi::sdc_bc1_encode_alpha(
+            out.as_mut_ptr(),
+            src.as_ptr(),
+            RGBCX_MAX_LEVEL,
+            transparent as u32,
+        )
+    };
+    out
+}
+
 /// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha). The alpha search keeps texels on their side of
 /// the alpha test: a texel passes when its alpha is at least `cut` (1..=255; 128 is the default test, Note FM).
 pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32, cut: u8) -> [u8; 16] {

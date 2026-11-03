@@ -636,6 +636,9 @@ pub struct ColorSpec {
 /// CFG-INVALID.
 pub const ALPHA_THRESHOLD: std::ops::RangeInclusive<u8> = 1..=254;
 
+/// ALPHA-BC1-ONE-BIT fires when more than this share of source texels has alpha 1..=254 (Note FM).
+pub const BC1_SOFT_ALPHA_SHARE: f64 = 0.01;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AlphaSpec {
@@ -709,7 +712,10 @@ pub struct EncoderSpec {
     /// profile hashes hold (DECISIONS Note CP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bc7_weights: Option<Bc7Weights>,
-    pub bc1_transparent_black: bool,
+    /// BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by
+    /// default and never set automatically; not serialised when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bc1_alpha: bool,
     pub bc45_search_radius: SearchRadius,
 }
 
@@ -908,13 +914,18 @@ pub struct Profile {
 impl Profile {
     /// Coverage preservation: on for `cutout` and `cutout_blend` unless `mips.coverage = off` (DECISIONS Note E).
     /// Never on for other policies, even with `mips.coverage = on` (spec §5.5: blended alpha keeps box-averaged
-    /// opacity).
+    /// opacity), except `blend` on a BC1 with `encoder.bc1_alpha`: its 1-bit alpha is a cutout (Note FM).
     pub fn coverage_enabled(&self) -> bool {
         self.mips.coverage != CoverageMode::Off
-            && matches!(
-                self.alpha.policy,
-                AlphaPolicy::Cutout | AlphaPolicy::CutoutBlend
-            )
+            && match self.alpha.policy {
+                AlphaPolicy::Cutout | AlphaPolicy::CutoutBlend => true,
+                AlphaPolicy::Blend => self.bc1_one_bit_alpha(),
+                AlphaPolicy::Data | AlphaPolicy::Remove => false,
+            }
+    }
+    /// BC1 output with `encoder.bc1_alpha` on: the alpha is cut to 0 or 255 before encoding (Note FM).
+    pub fn bc1_one_bit_alpha(&self) -> bool {
+        self.format == Format::Bc1 && self.encoder.bc1_alpha
     }
     pub fn alpha_weighted_mips(&self) -> bool {
         matches!(
@@ -1129,6 +1140,21 @@ mod tests {
             p.alpha.policy = policy;
             assert_eq!(p.coverage_enabled(), want, "{mode:?} {policy:?}");
         }
+        // Note FM: BC1 1-bit alpha is a cutout whatever the policy, so `blend` preserves coverage there too.
+        p.format = Format::Bc1;
+        p.encoder.bc1_alpha = true;
+        for (mode, policy, want) in [
+            (CoverageMode::Auto, AlphaPolicy::Blend, true),
+            (CoverageMode::Off, AlphaPolicy::Blend, false),
+            (CoverageMode::Auto, AlphaPolicy::Data, false),
+        ] {
+            p.mips.coverage = mode;
+            p.alpha.policy = policy;
+            assert_eq!(p.coverage_enabled(), want, "bc1_alpha {mode:?} {policy:?}");
+        }
+        p.format = Format::Bc7;
+        p.alpha.policy = AlphaPolicy::Blend;
+        assert!(!p.coverage_enabled(), "bc1_alpha is inert on BC7");
     }
 
     #[test]

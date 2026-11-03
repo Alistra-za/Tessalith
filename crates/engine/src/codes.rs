@@ -19,6 +19,7 @@
 //! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
 //! and the three `GEN-*` codes of generated maps: GEN-REPLACED, GEN-STALE (GUI only) and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
+//! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +79,8 @@ codes! {
     Alpha254 = "ALPHA-254" => Info,
     AlphaNearOpaque = "ALPHA-NEAR-OPAQUE" => Info,
     AlphaPbrNormalDropped = "ALPHA-PBR-NORMAL-DROPPED" => Info,
+    // Note FM: BC1 1-bit alpha on a source with more than 1 % soft alpha (1..=254).
+    AlphaBc1OneBit = "ALPHA-BC1-ONE-BIT" => Warning,
     TagSrgbVanilla = "TAG-SRGB-VANILLA" => Error,
     TagSrgbNonpbr = "TAG-SRGB-NONPBR" => Blocking,
     TagUnormPbr = "TAG-UNORM-PBR" => Blocking,
@@ -282,10 +285,11 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 114);
+        assert_eq!(Code::ALL.len(), 115);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));
         assert_eq!(Code::CubeFaces.severity(), Severity::Error);
         assert_eq!(Code::parse("CUBE-NO-MIPS"), Some(Code::CubeNoMips));
         assert_eq!(Code::CubeNoMips.severity(), Severity::Warning);
+        assert_eq!(Code::AlphaBc1OneBit.severity(), Severity::Warning);
     }
 }

@@ -13,6 +13,13 @@
     "subtype": "diffuse",
     "width": 64
   },
+  "cov/textures/c/cutout_bc1.dds": {
+    "format": "Bc1 { srgb: false }",
+    "height": 64,
+    "payload_sha256": "4ab1ba8f4bfee28e7388f5ddcb03fb15152f1198271ad5d9e2aa47d4fd1f018c",
+    "subtype": "diffuse",
+    "width": 64
+  },
   "cov/textures/c/cutout_bc3.dds": {
     "format": "Bc3 { srgb: false }",
     "height": 64,

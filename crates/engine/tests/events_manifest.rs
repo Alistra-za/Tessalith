@@ -340,13 +340,15 @@ fn encoder_versions_come_from_the_encoders_crate() {
     let rgbcx = hex::encode(sha2::Sha256::digest(&both));
     assert_eq!(
         v.rgbcx_patch,
-        Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut")
+        Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha")
     );
     assert_eq!(
         e.rgbcx_patch.as_deref(),
         Some(
-            format!("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut@sha256:{rgbcx}")
-                .as_str()
+            format!(
+                "bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha@sha256:{rgbcx}"
+            )
+            .as_str()
         )
     );
 }

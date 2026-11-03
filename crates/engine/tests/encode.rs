@@ -648,3 +648,151 @@ fn engine_bc4_bytes_equal_reference() {
         }
     }
 }
+
+/// One decoded level: width, height, RGBA8 texels.
+type Level = (u32, u32, Vec<[u8; 4]>);
+
+/// Converts `img` (saved as `textures/a/x.png`) through the full plan + run with `sets`, returning the summary, the
+/// warning codes and the decoded RGBA8 texels of every level of the output.
+fn convert_one(
+    img: image::DynamicImage,
+    sets: &[&str],
+) -> (
+    engine::api::BatchSummary,
+    Vec<engine::codes::Code>,
+    Vec<Level>,
+) {
+    use engine::api::*;
+    use engine::events::*;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("in/textures/a/x.png");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    img.save(&p).unwrap();
+    let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    req.recursive = true;
+    req.accept = engine::policy::AcceptSuggestions::High;
+    req.on_existing = OnExisting::Overwrite;
+    req.overrides = sets
+        .iter()
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .collect();
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "encode");
+    let e = Engine::new().unwrap();
+    let plan = e.plan(req, &rep, &CancelToken::default()).unwrap();
+    let summary = e.run(plan, &rep, &CancelToken::default()).unwrap();
+    let events = sink.take();
+    let codes = events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Warning(w) => Some(w.code),
+            _ => None,
+        })
+        .collect();
+    let bytes = std::fs::read(d.path().join("out/textures/a/x.dds"))
+        .unwrap_or_else(|e| panic!("{e}: {summary:?} {events:#?}"));
+    let f = engine::dds::read_dds(&bytes).unwrap();
+    assert!(matches!(f.format, engine::dds::DdsPixelFormat::Bc1 { .. }));
+    let levels = f
+        .levels
+        .iter()
+        .map(|(w, h, r)| {
+            match engine::decode::decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap() {
+                engine::decode::Decoded::Ldr(px) => (*w, *h, px),
+                engine::decode::Decoded::Hdr(_) => panic!("BC1 decodes LDR"),
+            }
+        })
+        .collect();
+    (summary, codes, levels)
+}
+
+fn rgba64(f: impl Fn(u32, u32) -> u8) -> image::DynamicImage {
+    image::DynamicImage::ImageRgba8(image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgba([(x * 4) as u8, (y * 4) as u8, 90, f(x, y)])
+    }))
+}
+
+/// Note FM: BC1 1-bit alpha decodes every level to alpha 0 or 255, and mip 0 is the source cut at the default cutoff
+/// (`gt` 127, so alpha >= 128 is opaque).
+#[test]
+fn bc1_alpha_cutout_decodes_one_bit_at_every_mip() {
+    let a = |x: u32, y: u32| [0u8, 60, 200, 255][((x / 3 + y / 5) % 4) as usize];
+    let (summary, codes, levels) = convert_one(
+        rgba64(a),
+        &[
+            "subtype=diffuse",
+            "format=bc1",
+            "alpha.policy=cutout",
+            "encoder.bc1_alpha=true",
+            "mips.filter=box",
+        ],
+    );
+    assert_eq!(
+        (summary.converted, summary.failed, summary.validation_failed),
+        (1, 0, 0),
+        "{codes:?}"
+    );
+    assert!(levels.len() > 1);
+    for (l, (_, _, px)) in levels.iter().enumerate() {
+        assert!(
+            px.iter().all(|p| p[3] == 0 || p[3] == 255),
+            "mip {l}: alpha other than 0 or 255"
+        );
+        assert!(
+            px.iter().all(|p| p[3] == 255 || *p == [0, 0, 0, 0]),
+            "mip {l}: a transparent texel that is not black"
+        );
+    }
+    let src = rgba64(a).to_rgba8();
+    for (i, p) in levels[0].2.iter().enumerate() {
+        let s = src.get_pixel(i as u32 % 64, i as u32 / 64).0;
+        assert_eq!(
+            p[3] == 255,
+            s[3] >= 128,
+            "mip 0 texel {i}: source alpha {}",
+            s[3]
+        );
+        // The fit follows the opaque texels only, so they keep their colour.
+        if p[3] == 255 {
+            let err = (0..3)
+                .map(|c| (p[c] as i32 - s[c] as i32).abs())
+                .max()
+                .unwrap();
+            assert!(err <= 12, "mip 0 texel {i}: {p:?} vs {s:?}");
+        }
+    }
+}
+
+/// Note FM (P8): `blend` with BC1 1-bit alpha uses the coverage-preserving mips, so the share of opaque texels holds
+/// across the chain. Box mips alone would lose these thin lines (7/16 opaque) once a level averages them below 128.
+#[test]
+fn bc1_alpha_blend_keeps_coverage_across_mips() {
+    let (summary, codes, levels) = convert_one(
+        rgba64(|x, y| if x % 4 == 0 || y % 4 == 0 { 255 } else { 0 }),
+        &[
+            "subtype=diffuse",
+            "format=bc1",
+            "alpha.policy=blend",
+            "encoder.bc1_alpha=true",
+        ],
+    );
+    assert_eq!((summary.converted, summary.failed), (1, 0), "{codes:?}");
+    let cov = |px: &[[u8; 4]]| px.iter().filter(|p| p[3] == 255).count() as f64 / px.len() as f64;
+    let base = cov(&levels[0].2);
+    assert!((base - 7.0 / 16.0).abs() < 1e-9, "base coverage {base}");
+    for (l, (w, h, px)) in levels
+        .iter()
+        .enumerate()
+        .filter(|(_, (w, h, _))| w * h >= 64)
+    {
+        let c = cov(px);
+        assert!(
+            (c - base).abs() <= 0.03,
+            "mip {l} ({w}x{h}): coverage {c:.3} vs base {base:.3}"
+        );
+    }
+    assert!(
+        !codes.contains(&engine::codes::Code::ValCoverage),
+        "{codes:?}"
+    );
+}

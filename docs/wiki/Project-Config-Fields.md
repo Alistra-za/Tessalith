@@ -42,13 +42,13 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 | `mips.normal` | `renormalize`, `renormalize_bake` | `renormalize`; `renormalize_bake` for `coat_normal` | How normal-map mips are built. `renormalize_bake` also bakes the normal detail lost in each mip into the roughness stored in the same texture (the coat roughness of a `_cnr`). |
 | `mips.normal_base` | `renormalize`, `keep` | `renormalize` | Mip 0 of a normal map: stored at unit length, or as authored. |
 | `mips.bake_clamp` | greater than 0, up to 1 | 0.25 | Limits how much roughness the variance bake can add (at most the square of this value). |
-| `mips.coverage` | `auto`, `on`, `off` | `auto` | Alpha-coverage preservation. Only ever applies to `cutout` and `cutout_blend`, where `auto` and `on` both enable it. |
+| `mips.coverage` | `auto`, `on`, `off` | `auto` | Alpha-coverage preservation. Applies to `cutout`, `cutout_blend`, and `blend` with `encoder.bc1_alpha`; there `auto` and `on` both enable it. |
 
 ## Format and size
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 is opaque-only: any alpha policy other than `remove` gives `FMT-BC1-ALPHA` (blocking). `rgba8` is written as B8G8R8A8. |
+| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgba8` is written as B8G8R8A8. |
 | `header` | `auto`, `dx10`, `legacy` | `auto` | DDS header form. `auto` writes a legacy header for BC1, BC3 and RGBA8 without the `_SRGB` tag, and the DX10 header for everything else. `legacy` is valid only for formats that have a legacy form (such as BC1, BC3, BC4, BC5) and no `_SRGB` tag; otherwise it is `CFG-INVALID`. |
 | `resize` | `none`, `pot-down`, `half` | `none` | `pot-down` shrinks each side to the largest power of two that fits (1000x600 becomes 512x512). `half` halves both sides when the larger side is above 512 (1024x512 becomes 512x256). A resized texture gets `DIM-RESIZED`. |
 
@@ -59,7 +59,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 | `encoder.effort` | `ultrafast`, `veryfast`, `fast`, `basic`, `veryslow`, `slowest`, `max` | `veryslow` | bc7e quality level. `max` is the sdc patch-0002 level from the [bc7e tuning study](../research/bc7e-tuning.md) and takes about 3× the time of `veryslow` (2.7 to 2.9× measured on Skyrim textures). For BC6H, `ultrafast` and `veryfast` map to veryfast and `veryslow` to veryslow; `slowest` and `max` both use a peak-preserving veryslow that keeps small, very bright highlights (a sun) near their source brightness. |
 | `encoder.perceptual` | `true`, `false` | `false` | Perceptual error metric for BC7. Allowed only on colour sub-types whose alpha policy is not `data`; anywhere else it is an error (`FMT-PERCEPTUAL-DATA`). |
 | `encoder.bc7_weights` | `linear`, `alpha2`, `alpha8`, `alpha16` | unset | BC7 linear error weights for bc7e (R, G, B, A): `linear` 1,1,1,1, the same encode as unset (use it to override an inherited weighting for one file); `alpha2` 1,1,1,2; `alpha8` 1,1,1,8 (an alternative to BC3 for delicate alpha); `alpha16` 1,1,1,16 (a `_n` with specular in alpha). Unset is today's linear 1,1,1,1, and is not written to profiles or manifests. `encoder.perceptual = true` wins over it. On another format, or with perceptual on, it has no effect and raises `ENC-WEIGHTS-IGNORED`. The GUI's *BC7 weighting* row edits both fields. |
-| `encoder.bc1_transparent_black` | `true`, `false` | `false` | BC1 output is opaque-only in this version, so `true` together with `format = "bc1"` is `CFG-INVALID`. |
+| `encoder.bc1_alpha` | `true`, `false` | `false` | BC1 with 1-bit alpha for `cutout`, `blend` and `cutout_blend` ([BC1 alpha](Texture-Types.md#alpha-policies)). Ignored by other formats. |
 | `encoder.bc45_search_radius` | `default`, `max`, `fast` | `default` | BC4/BC5 endpoint search. `max` searches a radius of 10, `fast` a radius of 4. |
 
 ## Validation

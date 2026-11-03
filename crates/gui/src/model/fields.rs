@@ -5,7 +5,7 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields in display order, with the label each row shows.
-pub const FIELDS: [(&str, &str); 14] = [
+pub const FIELDS: [(&str, &str); 15] = [
     ("subtype", "Sub-type"),
     ("color.content", "Content"),
     ("color.tag", "DDS tag"),
@@ -13,6 +13,8 @@ pub const FIELDS: [(&str, &str); 14] = [
     ("alpha.threshold", "Threshold"),
     ("alpha.compare", "Comparison"),
     ("mips.coverage", "Coverage"),
+    // Note FM: shown only for BC1 (`hidden_reason`).
+    ("encoder.bc1_alpha", "1-bit alpha"),
     ("alpha.exact_opaque", "Exact opaque alpha"),
     ("alpha.parallax", "Enable parallax"),
     ("mips.normal", "Normal handling"),
@@ -105,9 +107,8 @@ pub fn weighting_value(p: &Profile) -> Value {
 }
 
 /// The rarely changed fields the Advanced drawer edits (M3a spec §2.5).
-pub const ADVANCED_FIELDS: [(&str, &str); 6] = [
+pub const ADVANCED_FIELDS: [(&str, &str); 5] = [
     (WEIGHTING, "BC7 weighting"),
-    ("encoder.bc1_transparent_black", "BC1 transparent black"),
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
     ("header", "DDS header"),
     ("resize", "Resize"),
@@ -152,8 +153,9 @@ pub const FILTER_FIELD: (&str, &str) = ("mips.filter", "Filter");
 pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
 
 pub fn group_of(field: &str) -> &'static str {
-    // Coverage only ever applies to the alpha-tested policies, so it sits with the alpha settings.
-    if field == "mips.coverage" {
+    // Coverage only ever applies to the alpha-tested policies, and BC1 1-bit alpha is an alpha setting, so both sit
+    // with the alpha settings.
+    if matches!(field, "mips.coverage" | "encoder.bc1_alpha") {
         return "Alpha";
     }
     match field.split('.').next().unwrap_or("") {
@@ -224,12 +226,13 @@ pub fn encoding_options(target: Target, p: &Profile) -> Vec<((Format, ColorTag),
         .collect()
 }
 
-/// True for the alpha-tested policies (`cutout`, `cutout_blend`).
+/// True when the alpha is tested: `cutout`, `cutout_blend`, and `blend` stored as BC1 1-bit alpha (Note FM20).
 pub fn is_cutout(p: &Profile) -> bool {
-    matches!(
-        p.alpha.policy,
-        AlphaPolicy::Cutout | AlphaPolicy::CutoutBlend
-    )
+    match p.alpha.policy {
+        AlphaPolicy::Cutout | AlphaPolicy::CutoutBlend => true,
+        AlphaPolicy::Blend => p.bc1_one_bit_alpha(),
+        AlphaPolicy::Data | AlphaPolicy::Remove => false,
+    }
 }
 
 /// A field the panel leaves out entirely for this profile (coverage outside the cutout policies).
@@ -243,6 +246,7 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         "mips.coverage" if !is_cutout(p) => Some("used only by cutout and cutout + blend"),
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
+        "encoder.bc1_alpha" if p.format != Format::Bc1 => Some("BC1 only"),
         "alpha.parallax" if p.subtype != Subtype::ComplexMaterial => {
             Some("complex material _m only")
         }
@@ -287,7 +291,6 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "mips.normal" | "mips.normal_base" if p.subtype.category() != Category::Normal => {
             Some("normal maps only")
         }
-        "encoder.bc1_transparent_black" if p.format != Format::Bc1 => Some("BC1 only"),
         "encoder.bc45_search_radius" if !matches!(p.format, Format::Bc4 | Format::Bc5) => {
             Some("BC4 and BC5 only")
         }
@@ -303,6 +306,10 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
 
 /// Hover text of the "Enable parallax" check box (DECISIONS AH2).
 pub const PARALLAX_HOVER: &str = "Off writes alpha 0: complex material on, parallax off";
+
+/// Hover text of the "1-bit alpha" check box (Note FM).
+pub const BC1_ALPHA_HOVER: &str =
+    "On: texels below the alpha threshold become fully transparent, the rest stay solid. Off: BC1 is opaque";
 
 /// Why a complex `_m` cannot turn parallax on (DECISIONS AH2): its source has no alpha channel. Read from the
 /// resolve's analysis fact, or its ALPHA-PARALLAX-NO-ALPHA warning once the texture's own entry turned it on.
@@ -420,7 +427,7 @@ pub(crate) fn views_of(
                 .unwrap_or_else(|| match field {
                     "mips.edge" => Value::from("wrap"),
                     "resize" => Value::from("none"),
-                    "drop_top_mip" => Value::from(false),
+                    "drop_top_mip" | "encoder.bc1_alpha" => Value::from(false),
                     _ => Value::Null,
                 });
             let provenance = job

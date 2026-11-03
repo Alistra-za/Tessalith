@@ -109,6 +109,10 @@ void sdc_bc1_encode(uint8_t* dst, const uint8_t* px, uint32_t level, int allow3,
     rgbcx::encode_bc1(level, dst, px, allow3 != 0, black != 0);
 }
 
+void sdc_bc1_encode_alpha(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t transparent) {
+    rgbcx::encode_bc1_alpha(level, dst, px, transparent);
+}
+
 void sdc_bc3_encode(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t rad, uint32_t cut) {
     rgbcx::encode_bc3_hq(level, dst, px, rad, rgbcx::BC4_USE_ALL_MODES | rgbcx::BC4_SDC_SEARCH | rgbcx::BC4_SDC_GUARD128 | (cut << 8));
 }

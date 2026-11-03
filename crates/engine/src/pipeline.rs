@@ -107,8 +107,8 @@ fn source_peak(level: &Rgba32F, p: &Profile) -> Option<f32> {
 
 /// Test hook (Task 44): when `SDC_TEST_FAIL_VALIDATION` names the input's file stem, add one `VAL-HEADER` error to
 /// its validation report, so a written output fails validation (exit 4). No setting reaches an error-severity
-/// `VAL-*` code (`bc1_transparent_black` is `CFG-INVALID` with BC1, DECISIONS Note F), so the exit-4 path has no
-/// other deterministic trigger. Compiled only with the `test-hooks` cargo feature (off in release builds).
+/// `VAL-*` code, so the exit-4 path has no other deterministic trigger. Compiled only with the `test-hooks` cargo
+/// feature (off in release builds).
 #[cfg(feature = "test-hooks")]
 fn force_validation_failure_for_test(job: &ResolvedJob, report: &mut ValidationReport) {
     if std::env::var_os("SDC_TEST_FAIL_VALIDATION")

@@ -13,7 +13,7 @@ The settings of the selected texture, in groups: Type, Colour, Alpha, Mipmaps, C
 | DDS tag | _SRGB or UNORM (linear), limited to what the format and Mode allow. |
 | Alpha | The alpha policy ([values](Project-Config-Fields.md#alpha)). |
 | Threshold, Comparison | Slider 1 to 254; Greater than, or Greater than or equal. |
-| Coverage, Exact opaque alpha | Auto / On / Off; on or off. |
+| Coverage, 1-bit alpha, Exact opaque alpha | Auto / On / Off; on or off (BC1 only, [BC1 alpha](Texture-Types.md#alpha-policies)); on or off. |
 | Normal handling, Normal base level | Renormalise or Renormalise and bake; Renormalise to unit length or Keep as authored. |
 | Mipmaps: Levels, Filter, Edge | Full chain or None (base level only); Box, Tent, Mitchell, Kaiser; Wrap or Clamp. |
 | Format, Effort, BC7 weighting | The block formats plus RGBA8, R8, RG8 and (under `cs`) RGBA16F; bc7e effort; Linear, Perceptual, Alpha ×2, ×8 or ×16. |

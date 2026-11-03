@@ -11,7 +11,7 @@ channels = { flip_green = false, reconstruct_z = false, grayscale_source = "r" }
 mips = { levels = "full", filter = "box", normal = "renormalize", normal_base = "renormalize", bake_clamp = 0.25, coverage = "auto" }
 format = "bc7"
 header = "auto"
-encoder = { effort = "veryslow", perceptual = false, bc1_transparent_black = false, bc45_search_radius = "default" }
+encoder = { effort = "veryslow", perceptual = false, bc45_search_radius = "default" }
 packing = { enabled = true, roughness_default = 0.5, prefer = "prepacked" }
 
 [subtypes.diffuse]

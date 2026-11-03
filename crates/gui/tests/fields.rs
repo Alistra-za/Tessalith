@@ -31,6 +31,13 @@ fn locks_say_why() {
         field_lock(Target::Vanilla, &p, "alpha.threshold"),
         Some("used only by cutout and cutout + blend")
     );
+    // Note FM20: blend stored as BC1 1-bit alpha is alpha-tested, so its threshold and coverage apply.
+    let mut b = p.clone();
+    (b.format, b.encoder.bc1_alpha) = (Format::Bc1, true);
+    assert_eq!(field_lock(Target::Vanilla, &b, "alpha.threshold"), None);
+    assert!(!field_hidden(&b, "mips.coverage"));
+    b.encoder.bc1_alpha = false;
+    assert!(field_hidden(&b, "mips.coverage"));
     p.alpha.policy = AlphaPolicy::Cutout;
     assert_eq!(field_lock(Target::Vanilla, &p, "alpha.threshold"), None);
     let n = reg.base_profile(Target::Cs, Subtype::Normal);
@@ -378,4 +385,66 @@ fn a_grey_skin_wet_picker_offers_r8() {
     assert!(!r8(&p), "a colour skin_wet has no R8");
     p.category = Category::Grayscale;
     assert!(r8(&p));
+}
+
+/// Note FM: the "1-bit alpha" row sits in the Alpha group and is drawn only for BC1. Hidden, it leaves no gap: the
+/// row after it moves up into its place.
+#[test]
+fn the_one_bit_alpha_box_shows_only_for_bc1() {
+    use egui_kittest::kittest::Queryable;
+    const F: &str = "encoder.bc1_alpha";
+    assert!(FIELDS.contains(&(F, "1-bit alpha")));
+    assert_eq!(group_of(F), "Alpha");
+    let reg = PresetRegistry::builtin().unwrap();
+    let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+    p.format = Format::Bc7;
+    assert_eq!(hidden_reason(&p, F), Some("BC1 only"));
+    p.format = Format::Bc1;
+    assert_eq!(hidden_reason(&p, F), None);
+
+    const LEAF: &str = "landscape/leaf.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(LEAF, sdc_gui::model::Answer::Alpha(AlphaPolicy::Cutout));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_item(LEAF);
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(1280.0, 800.0))
+        .build_ui_state(
+            |ui, model: &mut sdc_gui::model::AppModel| sdc_gui::ui::draw(ui, model),
+            m,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let top = |h: &egui_kittest::Harness<'_, sdc_gui::model::AppModel>, label: &str| {
+        h.query_all_by_label(label).next().map(|n| n.rect().top())
+    };
+    assert_ne!(
+        h.state()
+            .item(LEAF)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .profile
+            .format,
+        Format::Bc1
+    );
+    assert_eq!(top(&h, "1-bit alpha"), None, "no row outside BC1");
+    // Offsets from the Coverage row: what is drawn above the Alpha group may change with the format.
+    let next_row =
+        top(&h, "Exact opaque alpha").expect("the row after it") - top(&h, "Coverage").unwrap();
+
+    h.state_mut()
+        .set_field(LEAF, "format", serde_json::json!("bc1"));
+    h.state_mut().wait_idle(std::time::Duration::from_secs(60));
+    h.run();
+    let coverage = top(&h, "Coverage").unwrap();
+    let row = top(&h, "1-bit alpha").expect("the row under BC1") - coverage;
+    assert!(row > 0.0, "inside the Alpha group, after Coverage");
+    assert!(
+        (row - next_row).abs() < 1.0,
+        "hidden, the row left a gap: {row} vs {next_row}"
+    );
+    assert!(top(&h, "Exact opaque alpha").unwrap() - coverage > row);
 }

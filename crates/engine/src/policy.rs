@@ -1373,13 +1373,17 @@ impl SourceStamp {
     }
 }
 
-/// Formats that store alpha in v1. BC1 is opaque only (spec §3.3, DECISIONS Note F), although
-/// `Format::has_alpha` counts its 1-bit mode.
-fn stores_alpha(f: Format) -> bool {
+/// Whether the output stores alpha: BC3, BC7, RGBA8 and RGBA16F always; BC1 only as 1-bit alpha, with
+/// `encoder.bc1_alpha` and an alpha-tested or blended policy (Note FM).
+fn stores_alpha(p: &Profile) -> bool {
     matches!(
-        f,
+        p.format,
         Format::Bc3 | Format::Bc7 | Format::Rgba8 | Format::Rgba16f
-    )
+    ) || (p.bc1_one_bit_alpha()
+        && matches!(
+            p.alpha.policy,
+            AlphaPolicy::Cutout | AlphaPolicy::Blend | AlphaPolicy::CutoutBlend
+        ))
 }
 
 /// `normal_len_err` above this is "far from unit length" (CHAN-NORMAL-LENGTH).
@@ -1839,22 +1843,35 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             "roughness member with sRGB content: roughness is linear data, so it is not variance-baked".into(),
         );
     }
+    // Note FM: BC1 stores alpha only as 1-bit alpha, which `encoder.bc1_alpha` turns on; `data` alpha never fits.
     if p.format == Format::Bc1 && p.alpha.policy != AlphaPolicy::Remove {
-        add(
-            FmtBc1Alpha,
-            format!(
-                "BC1 in v1 is opaque only; alpha.policy {:?} needs BC7/BC3 or remove",
-                p.alpha.policy
-            ),
-        );
-    }
-    // DECISIONS Note F: BC1 is opaque-only in v1, so rgbcx must never emit transparent-black texels.
-    if p.format == Format::Bc1 && p.encoder.bc1_transparent_black {
-        add(
-            CfgInvalid,
-            "encoder.bc1_transparent_black=true: BC1 is opaque-only in v1 (no 1-bit alpha), so the 3-colour mode never emits transparent-black texels; set it to false"
-                .into(),
-        );
+        if !stores_alpha(p) {
+            let fix = if p.alpha.policy == AlphaPolicy::Data {
+                "choose BC7/BC3 or remove the alpha"
+            } else {
+                "set encoder.bc1_alpha for 1-bit alpha, choose BC7/BC3, or remove the alpha"
+            };
+            add(
+                FmtBc1Alpha,
+                format!(
+                    "BC1 keeps no alpha.policy {:?} alpha; {fix}",
+                    p.alpha.policy
+                ),
+            );
+        } else if a.alpha == AlphaContent::Varying {
+            let n = (u64::from(a.width) * u64::from(a.height)).max(1);
+            let soft = n.saturating_sub(a.alpha_hist.eq0 + a.alpha_hist.eq255);
+            if soft as f64 / n as f64 > BC1_SOFT_ALPHA_SHARE {
+                add(
+                    AlphaBc1OneBit,
+                    format!(
+                        "{:.1}% of texels have alpha between 1 and 254; BC1 1-bit alpha cuts them at {}",
+                        soft as f64 * 100.0 / n as f64,
+                        crate::encode::alpha_cut(&p.alpha)
+                    ),
+                );
+            }
+        }
     }
     if p.encoder.perceptual
         && !(p.category == Category::Color && p.alpha.policy != AlphaPolicy::Data)
@@ -1888,7 +1905,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     let explicit_remove = alpha_explicit && p.alpha.policy == AlphaPolicy::Remove;
     if a.alpha == AlphaContent::Varying
         && !explicit_remove
-        && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p.format))
+        && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p))
     {
         if st == Subtype::PbrNormal {
             add(
@@ -1904,7 +1921,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     }
     // DECISIONS Note L: the analysis already classed near-opaque alpha as constant, so no LOSS-ALPHA-DATA above;
     // this only reports that the (noise) alpha is dropped. Under `data` the alpha is kept, so nothing is claimed.
-    if a.alpha_near_opaque && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p.format)) {
+    if a.alpha_near_opaque && (p.alpha.policy == AlphaPolicy::Remove || !stores_alpha(p)) {
         let min = crate::analyse::code8(a.channels[3].min);
         add(
             AlphaNearOpaque,

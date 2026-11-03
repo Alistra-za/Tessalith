@@ -2,7 +2,7 @@
 
 | Path | Upstream | Commit | Licence |
 |---|---|---|---|
-| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search and BC1 dual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
+| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut and BC1 alpha patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
 | ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patch 0001 | MIT (kernel.ispc modified; change notice at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18) with ISPC 1.31.0: `-O2 --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions` | — | Apache-2.0 |
@@ -19,7 +19,7 @@ Provenance of the first objects: the bc7e objects are byte-identical to the ones
 because the bench's copies embed the bench's absolute source path; same source and flags,
 but the files differ from the bench's.
 
-Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search, BC1 dual and BC4 guard cut patches at
+Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut and BC1 alpha patches at
 the end of this file).
 
 Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) changes bc7e. `bc7e/bc7e.ispc` is the pristine `bc7enc_rdo/bc7e.ispc` with that patch applied:
@@ -112,3 +112,17 @@ reference is `search(v, radius, Some(cut))` in `crates/encoders-sys/tests/suppor
 is byte-identical to the BC1 dual patch. Before this patch `rgbcx.cpp` had SHA-256
 `9e5245dcbbfbde3fbbc0472545a5dbe64ef76df9759c08feadc7a660749bd99f` and `rgbcx.h`
 `204c7d75e361fc22e700467b97f0f09c17fd6efebc527dbff1f1519036219ffd`.
+
+Patch "rgbcx BC1 alpha" (2026-11-02) applies on top of BC4 guard cut, marked `sdc patch (bc1 alpha, see README-VENDOR.md)`.
+`rgbcx.h` declares and `rgbcx.cpp` adds `encode_bc1_alpha(level, pDst, pPixels, transparent_mask)`, with its helper
+`bc1_alpha_find_sels`; no existing function changes. Bit i of the mask marks texel i transparent. Mask 0 calls
+`encode_bc1(level, pDst, pPixels, true, false)`, so the bytes equal the plain BC1 encode; mask 0xFFFF writes both
+endpoints 0 and every selector 3. Any other mask gives a 3-colour block (color0 <= color1). Its endpoints come from the
+fit of `try_3color_block_useblack` (principal axis, extreme texels, least-squares refits) run over the opaque texels
+instead of the non-black ones, then a greedy +-1 search over the six endpoint channels (at most 64 rounds). Opaque texels
+pick selector 0, 1 or 2 on the cBC1Dual error (`bc1_get_dual_palette`, `bc1_dual_err`), masked texels get selector 3,
+and the least-squares solve skips selector 3, so masked texels never steer the fit and an opaque texel never decodes
+transparent (opaque black is reached through an endpoint). The shim adds `sdc_bc1_encode_alpha`;
+`encoders_sys::bc1_encode_block_alpha` calls it at level 18. Before this patch `rgbcx.cpp` had SHA-256
+`d5d785fd7a8ad61cee47a8a7bc6c4ffc235bd98ff0dc59d80480ff8ca5c6933a` and `rgbcx.h`
+`c5defdaa3daf151116517a386cfb38145010b2490000976f524baf6a6dc97592`.

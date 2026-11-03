@@ -53,7 +53,7 @@ The thresholds are fixed; only `validation.mips` is a setting.
 | Mip quality | Each mip's PSNR (one value, with the error pooled over the channels that matter) against the encoder input is at least 30 dB. With `validation.mips = "smallest"`, only the smallest mip is checked. | `VAL-MIP-ERROR` | warning |
 | Opaque alpha | With `remove`, decoded alpha meets the guarantee: at least 254 for any BC7 file without `exact_opaque`, exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
 | Decoded 254 | Opaque alpha that decodes as 254 is reported for information. Community Shaders' complex-material gate is not affected by it. | `ALPHA-254` | info |
-| Cutout coverage | With `cutout` or `cutout_blend`, each mip's alpha coverage stays within 2 points of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
+| Cutout coverage | With `cutout`, `cutout_blend`, or `blend` as BC1 1-bit alpha, each mip's alpha coverage stays within 2 points of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
 | Complex `_m` margin | The smallest mip's alpha is at or above 247, close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
 | Complex `_m` grey | The smallest mip is grey and not black-with-height, so Community Shaders reads it as a plain env mask. | `VAL-M-GRAYSCALE` | warning |
 | Complex `_m` height | Large alpha areas at or below 4/255 or at or above 251/255 give no parallax. | `VAL-M-HEIGHT-CLIP` | warning |
