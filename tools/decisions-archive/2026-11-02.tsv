@@ -249,3 +249,6 @@ DT17	DT		back	FM		partial	2026-11-03		goes: the Pin button off for a cube; stays
 CO74	CO		back	FM		partial	2026-11-03		goes: CHK-RANGE in the generated prefix; stays: CHK-PARALLAX
 GE16	GE		back	FM		partial	2026-11-03		goes: the v2_jobs_poll.rs test claim; stays: the fix list
 FC¶- **Tests.** `sets_filter.rs`	FC		back	FM		partial	2026-11-03		goes: the range overlay tests; stays: the other tests
+CL19	CL		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of the end_export_with hook; stays: the cancel rule and its test
+GC11	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of row_builds; stays: the cache key and the build count
+GC2	GC		back	FM		partial	2026-11-03		goes: the #[doc(hidden)] wording of hold_rows_read; stays: the two full reads and the worker thread

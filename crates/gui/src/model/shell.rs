@@ -167,7 +167,7 @@ impl StatCache {
         self.get(p, now, false)
     }
 
-    /// Forget every answer (tests: the disk changed and the clock did not move).
+    /// Forget every answer (the disk changed and the clock did not move).
     pub fn clear(&mut self) {
         self.map.clear();
     }

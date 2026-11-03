@@ -739,7 +739,6 @@ impl AppModel {
     /// The export ended. After a clean export (none cancelled or failed), write the profiles of `p` (taken from
     /// `pending_xpmf` by the caller) and record their hashes (saved, like the complex-material record). Otherwise
     /// only add a note.
-    #[doc(hidden)]
     pub fn finish_xpmf(&mut self, p: Option<PendingXpmf>) {
         let Some(p) = p else {
             return;

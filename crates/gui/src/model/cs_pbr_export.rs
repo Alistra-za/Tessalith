@@ -244,7 +244,6 @@ pub fn finish(
 impl AppModel {
     /// The export ended: after a clean export write the CS files of `p` (taken from `pending_cs` by the caller) and
     /// record their hashes (saved, like the PGPatcher JSON's); otherwise only a note.
-    #[doc(hidden)]
     pub fn finish_cs_pbr(&mut self, p: Option<PendingCs>) {
         let Some(p) = p else {
             return;

@@ -3116,6 +3116,7 @@ dependencies = [
  "render3d",
  "rfd",
  "rusqlite",
+ "sdc-gui",
  "serde",
  "serde_json",
  "sha2",

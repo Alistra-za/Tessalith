@@ -138,6 +138,7 @@ pub(crate) struct TextureViewCache {
     /// The tiles and the helper rows, built together in one pass (one build per change).
     list: Option<(ListKey, Lists)>,
     counts: Option<(u64, FilterCounts)>,
+    #[cfg(feature = "test-hooks")]
     builds: u64,
 }
 
@@ -236,6 +237,7 @@ impl AppModel {
     }
 
     /// How many times the index list was built (tests: once per change, not per frame).
+    #[cfg(feature = "test-hooks")]
     pub fn visible_builds(&self) -> u64 {
         self.texture_cache.borrow().builds
     }
@@ -274,7 +276,10 @@ impl AppModel {
             (&a.set_key, &a.name).cmp(&(&b.set_key, &b.name))
         });
         let (tiles, helpers) = (Arc::new(tiles), Arc::new(helpers));
-        c.builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            c.builds += 1;
+        }
         c.list = Some((key, (tiles.clone(), helpers.clone())));
         (tiles, helpers)
     }

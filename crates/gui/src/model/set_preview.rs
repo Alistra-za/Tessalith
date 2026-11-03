@@ -422,6 +422,7 @@ pub struct Encoder {
     /// An export is running: nothing starts (02 §2.3).
     pub paused: bool,
     next_token: u64,
+    #[cfg(feature = "test-hooks")]
     hold: bool,
     /// A/B is in use: the user has flipped the mode once this session (kept across sets). Until then only the
     /// shown mode encodes.
@@ -583,6 +584,7 @@ impl Encoder {
             mode: PreviewMode::default(),
             paused: false,
             next_token: 0,
+            #[cfg(feature = "test-hooks")]
             hold: false,
             ab: false,
             scene_dirty: false,
@@ -619,31 +621,31 @@ impl Encoder {
     }
 
     /// Test seam: `kind` has the other mode's Fresh bytes.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn has_alt(&self, kind: SlotKind) -> bool {
         self.members.get(&kind).is_some_and(|m| m.alt.is_some())
     }
 
     /// Test seam: the generation of `kind`'s other-mode background encode (0 = none).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn alt_token_of(&self, kind: SlotKind) -> u64 {
         self.members.get(&kind).map_or(0, |m| m.alt_token)
     }
 
     /// Test seam: the generation of `kind`'s live encode (0 = none).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn token_of(&self, kind: SlotKind) -> u64 {
         self.members.get(&kind).map_or(0, |m| m.token)
     }
 
     /// Test seam: while held, `pump` does its bookkeeping but starts no worker, so every completion is `inject`ed.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn hold_workers(&mut self, on: bool) {
         self.hold = on;
     }
 
     /// Test seam: delivers a completion as a worker would, so tests control the order.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn inject(
         &self,
         kind: SlotKind,
@@ -655,7 +657,7 @@ impl Encoder {
     }
 
     /// Test seam: [`Encoder::inject`] for a completion produced under `mode`.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn inject_as(
         &self,
         kind: SlotKind,
@@ -785,6 +787,7 @@ impl Encoder {
             let cancel = CancelToken::default();
             mem.cancel = Some(cancel.clone());
             mem.state = EncState::Encoding(mem.state.shown().cloned());
+            #[cfg(feature = "test-hooks")]
             if self.hold {
                 continue;
             }
@@ -820,6 +823,7 @@ impl Encoder {
             mem.alt_token = token;
             let cancel = CancelToken::default();
             mem.alt_cancel = Some(cancel.clone());
+            #[cfg(feature = "test-hooks")]
             if self.hold {
                 continue;
             }
@@ -1870,7 +1874,7 @@ impl SetPreview {
     }
 
     /// Test seam: a query and a NIF-load completion carrying `token`, as a worker would send them.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn inject_stale(&self, token: u64, error: &str) {
         let _ = self.tx.send(SpMsg::Queried {
             token,
@@ -2675,7 +2679,7 @@ impl SetPreview {
     }
 
     /// Test seam: reads the MATO record's plugin with `r` instead of `std::fs::read`.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn set_plugin_reader(&mut self, r: PluginReader) {
         self.mato_reader = r;
     }

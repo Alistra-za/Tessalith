@@ -20,7 +20,9 @@ use rusqlite::OptionalExtension;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -516,7 +518,7 @@ pub struct MeshesModel {
     store_unsettled: bool,
     unsettled_before: bool,
     /// How often the visible list was built (tests pin the cache with it, rule 9.2).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub row_builds: u64,
     rows_cache: Option<RowsCache>,
     /// Note GH3: the opened texture folder (`AppModel.root`), set by the app each frame (`set_project_root`).
@@ -531,15 +533,15 @@ pub struct MeshesModel {
     /// The one pill read running (Note GH3 fix round 2) and the inputs it reads for.
     project_read: Option<(ProjectCache, Receiver<ProjectAnswer>)>,
     /// How often the textures' match set or the pill's NIF set was built (tests pin the cache with it).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub project_builds: u64,
     /// Tests: when set, each pill read waits on this lock before it reads (a held read).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub project_gate: Option<Arc<std::sync::Mutex<()>>>,
     /// Tests: the pill reads alive now, and the textures rev of each read started.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub project_alive: Arc<AtomicUsize>,
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub project_started: Vec<Option<u64>>,
     /// Copy id of the selected NIF row.
     pub selected_nif: Option<i64>,
@@ -688,6 +690,7 @@ impl MeshesModel {
             tex_filter: None,
             store_unsettled: false,
             unsettled_before: false,
+            #[cfg(feature = "test-hooks")]
             row_builds: 0,
             rows_cache: None,
             project_root: None,
@@ -696,9 +699,13 @@ impl MeshesModel {
             project_tex: None,
             project_cache: None,
             project_read: None,
+            #[cfg(feature = "test-hooks")]
             project_builds: 0,
+            #[cfg(feature = "test-hooks")]
             project_gate: None,
+            #[cfg(feature = "test-hooks")]
             project_alive: Arc::default(),
+            #[cfg(feature = "test-hooks")]
             project_started: vec![],
             selected_nif: None,
             selected_info: None,
@@ -1242,7 +1249,7 @@ impl MeshesModel {
     }
 
     /// Tests: a row read in flight that answers when the test sends on the returned channel.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn hold_rows_read(&mut self) -> Sender<RowsRead> {
         let (tx, rx) = channel();
         self.rows_rx = Some(rx);
@@ -1480,7 +1487,10 @@ impl MeshesModel {
         if self.project_tex.as_ref().is_some_and(|(r, _)| *r == rev) {
             return;
         }
-        self.project_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.project_builds += 1;
+        }
         let mut set = HashSet::new();
         for p in paths {
             let n = nif::path::canon_texture(p.as_bytes()).norm;
@@ -1564,7 +1574,10 @@ impl MeshesModel {
     /// NIF copies' paths. Else it lists the NIFs any copy of which names one of `project_tex` in a slot. With nothing
     /// to read the (empty) answer is on hand at once.
     fn start_project_read(&mut self, key: ProjectKey) {
-        self.project_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.project_builds += 1;
+        }
         let root = &key.0;
         let mods_dir = match &self.target {
             Some(ScanTarget::Mo2 { root, profile }) => {
@@ -1589,6 +1602,7 @@ impl MeshesModel {
             let tex = self.project_tex.as_ref().map(|(_, t)| t.clone());
             (None, tex.map(ProjectJob::Textures))
         };
+        #[cfg(feature = "test-hooks")]
         let rev = key.2;
         let c = ProjectCache {
             key,
@@ -1602,17 +1616,23 @@ impl MeshesModel {
             return;
         };
         let (tx, rx) = channel();
+        #[cfg(feature = "test-hooks")]
         let (gate, alive) = (self.project_gate.clone(), self.project_alive.clone());
-        alive.fetch_add(1, Ordering::SeqCst);
-        // Test hook: only a gated read (a test holds the gate) is recorded, so production never grows the list.
-        if self.project_gate.is_some() {
-            self.project_started.push(rev);
+        #[cfg(feature = "test-hooks")]
+        {
+            alive.fetch_add(1, Ordering::SeqCst);
+            // Only a gated read (a test holds the gate) is recorded.
+            if self.project_gate.is_some() {
+                self.project_started.push(rev);
+            }
         }
         std::thread::spawn(move || {
             let r = {
+                #[cfg(feature = "test-hooks")]
                 let _held = gate.as_ref().map(|g| g.lock());
                 read_project(&db, job)
             };
+            #[cfg(feature = "test-hooks")]
             alive.fetch_sub(1, Ordering::SeqCst);
             let _ = tx.send(r);
         });
@@ -1653,7 +1673,10 @@ impl MeshesModel {
         project_mod: Option<&str>,
         project: Option<&HashSet<String>>,
     ) -> Vec<usize> {
-        self.row_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.row_builds += 1;
+        }
         let needle = self.needle();
         let n = needle.as_bytes();
         let has = |hay: &str| {

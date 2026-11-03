@@ -644,7 +644,6 @@ fn read_facts(s: &Store, key: &TexKey) -> Result<SetFacts, String> {
 
 /// The non-LOD meshes of `read(cap)`; a full read of LOD meshes only is read again without the cap, so LOD shapes
 /// ahead of a static in the store's order never hide it.
-#[doc(hidden)]
 pub fn statics_of(
     cap: usize,
     read: impl Fn(usize) -> Result<Vec<MatchRow>, String>,

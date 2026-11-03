@@ -447,7 +447,6 @@ pub fn finish(
 impl AppModel {
     /// The export ended. After a clean export, write the files of `p` (taken from `pending_cm` by the caller) and
     /// record their hashes (saved, like the CS PBR record). Otherwise only add a note.
-    #[doc(hidden)]
     pub fn finish_cm_json(&mut self, p: Option<PendingCm>) {
         let Some(p) = p else {
             return;

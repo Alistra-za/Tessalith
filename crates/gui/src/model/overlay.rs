@@ -78,12 +78,21 @@ impl AppModel {
         item: &str,
         mask: Arc<UvMask>,
     ) -> Option<Arc<ColorImage>> {
-        self.uv_overlay_job_with(item, mask, uv_overlay_image)
+        self.start_uv_overlay(item, mask, uv_overlay_image)
     }
 
     /// `uv_overlay_job` with the image builder swapped (a test makes it slow or panicking).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn uv_overlay_job_with(
+        &mut self,
+        item: &str,
+        mask: Arc<UvMask>,
+        build: UvBuild,
+    ) -> Option<Arc<ColorImage>> {
+        self.start_uv_overlay(item, mask, build)
+    }
+
+    fn start_uv_overlay(
         &mut self,
         item: &str,
         mask: Arc<UvMask>,

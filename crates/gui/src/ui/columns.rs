@@ -482,14 +482,16 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
     if toggle {
         model.filter.hide_helpers = open;
     }
+    #[cfg(feature = "test-hooks")]
     ui.ctx()
         .data_mut(|d| d.insert_temp(egui::Id::new(HELPER_ROWS_DRAWN), drawn));
 }
 
 /// Where the helper rows laid out in the last frame are counted (tests: only the rows in view).
+#[cfg(feature = "test-hooks")]
 const HELPER_ROWS_DRAWN: &str = "helper-rows-drawn";
 
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn helper_rows_drawn(ctx: &egui::Context) -> usize {
     ctx.data(|d| d.get_temp(egui::Id::new(HELPER_ROWS_DRAWN)))
         .unwrap_or(0)

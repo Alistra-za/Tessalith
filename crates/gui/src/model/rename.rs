@@ -206,12 +206,14 @@ thread_local! {
 }
 
 /// How often this thread ran `plan_rename` (tests: the dialog plans once per change, not once per frame).
+#[cfg(feature = "test-hooks")]
 pub fn plan_calls() -> usize {
     PLANS.get()
 }
 
 /// F3b spec §4: every row of the dialog for `d`, with its checks. Pure: reads the model, writes nothing.
 pub fn plan_rename(m: &AppModel, d: &RenameDialog) -> RenamePlan {
+    #[cfg(feature = "test-hooks")]
     PLANS.set(PLANS.get() + 1);
     let re = match d.recipe.compile() {
         Ok(re) => re,

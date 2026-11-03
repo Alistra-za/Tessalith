@@ -899,6 +899,7 @@ pub struct Viewport3d {
     popup_settings: Option<CsSettings>,
     thread: Option<Sender<V3Cmd>>,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
+    #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
     tx: Sender<WorkerMsg>,
     rx: Receiver<WorkerMsg>,
@@ -971,6 +972,7 @@ impl Viewport3d {
             failed_hash: None,
             popup_settings: None,
             thread: None,
+            #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
             rx,
@@ -998,7 +1000,7 @@ impl Viewport3d {
     }
 
     /// Test seam: stands in for the render thread; the returned receiver gets the commands.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn attach_test_thread(&mut self) -> Receiver<V3Cmd> {
         let (t, r) = channel();
         self.thread = Some(t);
@@ -1007,7 +1009,7 @@ impl Viewport3d {
 
     /// Test seam: the next `ensure_thread` uses this channel instead of spawning the render loop, so its start-up
     /// commands are seen in order (`attach_test_thread` skips them).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn fake_render_thread(&mut self) -> Receiver<V3Cmd> {
         let (t, r) = channel();
         self.fake_thread = Some(t);
@@ -1015,17 +1017,17 @@ impl Viewport3d {
     }
 
     /// Test seam: the channel the render thread replies on (`poll` drains it).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn reply_sender_for_test(&self) -> Sender<WorkerMsg> {
         self.tx.clone()
     }
 
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn render_sent_for_test(&self) -> u64 {
         self.render_sent
     }
 
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn loaded_for_test(&self) -> Option<u64> {
         self.loaded
     }
@@ -1505,7 +1507,11 @@ impl Viewport3d {
         let (Some(shaders), Some(cache)) = (self.shaders.clone(), self.cache_dir.clone()) else {
             return false;
         };
-        let ctx = match self.fake_thread.take() {
+        #[cfg(feature = "test-hooks")]
+        let faked = self.fake_thread.take();
+        #[cfg(not(feature = "test-hooks"))]
+        let faked: Option<Sender<V3Cmd>> = None;
+        let ctx = match faked {
             Some(t) => t,
             None => {
                 let (ctx, crx) = channel();
@@ -2103,8 +2109,7 @@ impl Drop for Viewport3d {
 }
 
 /// Applies user CS settings (C11: a cbuffer rewrite, recompiles only when the defines change, never a reload) and
-/// writes the `settings` log line. The render thread calls it; public so a test can capture the line.
-#[doc(hidden)]
+/// writes the `settings` log line. The render thread calls it, and tests call it to capture the line.
 pub fn apply_settings(r: &mut Renderer, s: CsSettings) {
     let t0 = Instant::now();
     let hash: String = s.hash.chars().take(12).collect();

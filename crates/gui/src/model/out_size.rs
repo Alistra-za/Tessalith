@@ -69,11 +69,13 @@ pub fn estimate_job(src: (u32, u32), p: &Profile, cube: Option<&engine::cube::Cu
     }
 }
 
+#[cfg(feature = "test-hooks")]
 thread_local! {
     static HEADER_READS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Header reads `source_dims` made on this thread (tests: the UI thread must make none).
+#[cfg(feature = "test-hooks")]
 pub fn header_reads_on_this_thread() -> u32 {
     HEADER_READS.with(|c| c.get())
 }
@@ -97,6 +99,7 @@ pub fn human(bytes: u64) -> String {
 /// The source size of an image, from its header only, by the engine's reader (DDS, PSD, KRA/ORA and every
 /// `image` format). `None` for an unreadable file or one over MAX_DIM: that texture then shows no estimate.
 pub fn source_dims(path: &std::path::Path) -> Option<(u32, u32)> {
+    #[cfg(feature = "test-hooks")]
     HEADER_READS.with(|c| c.set(c.get() + 1));
     engine::load::image_size(path).ok()
 }

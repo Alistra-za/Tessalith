@@ -20,6 +20,7 @@ use eframe::egui;
 use engine::config::Target;
 use engine::sets::same_id;
 use serde_json::{json, Value};
+#[cfg(feature = "test-hooks")]
 use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -999,12 +1000,14 @@ fn section_entry(
     set_pending(ui, &owner, left);
 }
 
+#[cfg(feature = "test-hooks")]
 thread_local! {
     // Per thread: tests run side by side, each drawing on its own thread.
     static BUILDS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// How often this thread's editor rebuilt its JSON text and issues (tests: once per revision, not once per frame).
+#[cfg(feature = "test-hooks")]
 pub fn cache_builds() -> usize {
     BUILDS.get()
 }
@@ -1027,6 +1030,7 @@ fn built(ui: &egui::Ui, model: &AppModel) -> Built {
     {
         return b;
     }
+    #[cfg(feature = "test-hooks")]
     BUILDS.set(BUILDS.get() + 1);
     // Only the entries the file gets: the statics rule's dropped sets are left out, as export does (design §5.1).
     let entries = written_json_entries(model);

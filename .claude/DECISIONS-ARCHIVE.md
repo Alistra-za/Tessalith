@@ -1091,6 +1091,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Tests.** `tests/uv_coverage.rs::check_all_over_many_textures_holds_no_overlay_images` (40 textures: every answer cached, no `uv_overlay` for an item that is not expanded, then the expanded one's 512² image from a job) fails before and passes after. `check_all_polls_without_greying_advanced` and `the_ui_thread_never_reads_the_scan_db` now expect the image only after the job lands.
   - **Not measured.** The GUI's peak memory (record-mem.ps1) is still open, for CL42's reason: launching `tessalith.exe` reads and writes the user data folders.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **CL19 Summary rules (Task 3 fix round 1).**
+  - Only a completed export gets the line: no summary after a cancel (`BatchSummary::cancelled` not empty) and none after an `Err`. Pinned in `tests/export.rs` through `AppModel::end_export_with` (a `#[doc(hidden)]` hook, because `WorkerMsg` is private); a mutation that drops the gate fails the cancel test.
+  - Scope: once the export has rows, the line counts only the textures whose job has a row and the sets with such a member, not the whole project (an "Export selected" of one texture, Task 6, counts that texture). With no rows it covers the project.
+  - A texture counts once, whether its check rows are keyed by item (`At::Texture`) or by job (`At::File`, a Warn-mode CHK-LOW-DETAIL in Task 4): File keys are mapped back to their item.
+
 ## Note CI — NIF editing v2 Phase A (NIF team, 2026-10-20)
 
 ARCHIVED (superseded by Note GD5, 2026-10-29)
@@ -1671,6 +1677,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FB12, 2026-10-29)
 
 ARCHIVED (wording before the edit; superseded in part by Note GC19, 2026-10-29)
 - **GC14 Review fix 1: a row read never lands across a scan start.** `start()` drops a row read still out, because it may read the origins the scan disables; the lists on screen stay until the scan ends. A NIF a reload was holding is never selected while a scan runs; a scan that ends without completing (cancelled, failed, busy) looks for it in the lists on screen, and the next reload keeps holding it (`selected_nif.or(reselect)`). Test `a_row_read_held_across_a_scan_start_is_dropped_and_an_unfinished_scan_keeps_the_lists` ends the scan with Busy (a held `scan.lock`), the deterministic way to end one unfinished; a real cancel raced a three-NIF scan to completion.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **GC11 The visible list is cached (rule 9.1).** The key holds the row lists and the texture's users as `Arc`s compared with `Arc::ptr_eq` (held, so a freed list's address cannot come back under the cache), the picked mod's name, the chip and the search needle. The selection is not an input. `row_builds` (`#[doc(hidden)]`) counts builds; inputs changed in the same frame build once.
+
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **GC2 Two full reads replace `winning_nifs`.** `Store::winners()` (each path's game-winning copy, by path) and `Store::losers()` (every other copy, by path then mod), each with its origin's name. No schema change. Measured on 100k paths (`winners_read_time_on_100k_paths`, `#[ignore]`): 100-111 ms debug, 95-117 ms release, over the ~100 ms bar, so the rows are read on a worker thread from a read-only store after the store is set and after every scan or reload; the list says "Reading the scan…" until they land, "No scan yet." with no store. `MeshesModel::hold_rows_read` (`#[doc(hidden)]`) is the test seam that holds the read open.
 
 ## Note FB — GUI review C fixes and owner redesign (main team, 2026-10-29)
 

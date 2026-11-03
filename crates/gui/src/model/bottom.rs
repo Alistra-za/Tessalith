@@ -200,6 +200,7 @@ impl AppModel {
 /// (warnings, or checks for an engine `CHK-*` code). Cached (K9) under the views key plus
 /// what the asks and the File rows read; the build holds no `RefCell` borrow.
 pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
+    #[cfg(feature = "test-hooks")]
     m.problem_lookups.set(m.problem_lookups.get() + 1);
     let key = m.view_key();
     let inner = problems_inner(m);
@@ -214,6 +215,7 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
         }
     }
     let p = Arc::new(build_problems(m));
+    #[cfg(feature = "test-hooks")]
     m.problem_builds.set(m.problem_builds.get() + 1);
     let mut c = m.views.borrow_mut();
     if c.key.as_ref() != Some(&key) {
@@ -291,24 +293,24 @@ pub fn tile_ready(item: &super::items::TextureItem) -> bool {
     item.status == ItemStatus::Ready && !item.warnings.iter().any(counts_toward_badge)
 }
 
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn filtered_builds(m: &AppModel) -> u64 {
     m.filter_builds.get()
 }
 
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn problems_builds(m: &AppModel) -> u64 {
     m.problem_builds.get()
 }
 
 /// Every call to `problems()`, cached or not (A6).
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn problem_lookups(m: &AppModel) -> u64 {
     m.problem_lookups.get()
 }
 
 /// `AppModel::export_files` counts that were not served from the cache.
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn export_files_builds(m: &AppModel) -> u64 {
     m.export_files_builds.get()
 }
@@ -766,6 +768,7 @@ fn unreadable_folder(message: &str) -> Option<PathBuf> {
 /// The list narrowed by `f`: a set keeps its own rows and its members' rows; `Undecided` keeps the Decide rows.
 /// `None` is `problems(m)` itself, not a copy.
 pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
+    #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
     Arc::new(match f {

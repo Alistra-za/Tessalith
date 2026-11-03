@@ -16,16 +16,19 @@ pub const TILE_CAP: i32 = 16;
 /// `coverage_for`'s `Err` when `cancel` was set: never a texture's answer (K18).
 pub const CANCELLED: &str = "cancelled";
 
+#[cfg(feature = "test-hooks")]
 thread_local! {
     static UV_READS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Scan-DB opens by `winning_shapes` (so also `coverage_for`) and `scan_has_rows` on this thread (tests: the UI
 /// thread must make none).
+#[cfg(feature = "test-hooks")]
 pub fn uv_reads_on_this_thread() -> u32 {
     UV_READS.with(|c| c.get())
 }
 
+#[cfg(feature = "test-hooks")]
 fn count_read() {
     UV_READS.with(|c| c.set(c.get() + 1));
 }
@@ -446,6 +449,7 @@ pub struct ShapeRef {
 /// winners on their source copy, grouped per copy. LE meshes are skipped (the SE geometry reader refuses them), and
 /// so is a copy gone from the scan.
 pub fn winning_shapes(db: &Path, tex: &str) -> Result<Vec<ShapeRef>, String> {
+    #[cfg(feature = "test-hooks")]
     count_read();
     let store = Store::open_read_only(db).map_err(|e| e.to_string())?;
     // Indexed on `path.p`; every raw spelling of the slot (`Data\Textures\…`, `textures\…`) resolves to `tex` (Note CK).
@@ -476,6 +480,7 @@ pub fn winning_shapes(db: &Path, tex: &str) -> Result<Vec<ShapeRef>, String> {
 
 /// False for a missing, old-schema or empty scan (no enabled origins).
 pub fn scan_has_rows(db: &Path) -> bool {
+    #[cfg(feature = "test-hooks")]
     count_read();
     Store::open_read_only(db)
         .and_then(|s| s.mods())
@@ -624,7 +629,7 @@ pub struct UvState {
     stamp: super::cs_pbr::Stamp,
     /// Some item of the open folder has a colour sub-type (set in `refresh_checks`, read per frame by Advanced).
     pub(super) any_colour: bool,
-    #[doc(hidden)]
+    /// The coverage read; tests swap it (the production value is `coverage_for_with`).
     pub read: ReadFn,
 }
 
@@ -677,6 +682,7 @@ impl UvState {
         self.all.as_ref().map(|a| a.run)
     }
     /// The generation an answer must carry to land (tests inject answers).
+    #[cfg(feature = "test-hooks")]
     pub fn generation(&self) -> u64 {
         self.generation
     }

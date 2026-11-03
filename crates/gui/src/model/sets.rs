@@ -575,7 +575,7 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
 }
 
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
-#[doc(hidden)]
+#[cfg(feature = "test-hooks")]
 pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
@@ -607,6 +607,7 @@ fn sort_by_saved_order(views: &mut [SetView], order: &[String]) {
 
 /// Every set, in display order, with its slots, ownership and prefix.
 fn build_views(m: &AppModel) -> Vec<SetView> {
+    #[cfg(feature = "test-hooks")]
     m.view_builds.set(m.view_builds.get() + 1);
     let root = m.sets_root();
     let entries = m

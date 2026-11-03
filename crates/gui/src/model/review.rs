@@ -215,6 +215,7 @@ impl AppModel {
             }
         }
         let n = self.count_export_files();
+        #[cfg(feature = "test-hooks")]
         self.export_files_builds
             .set(self.export_files_builds.get() + 1);
         let mut c = self.views.borrow_mut();

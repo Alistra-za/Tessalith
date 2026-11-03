@@ -106,7 +106,9 @@ fn dds_rmaos(name: &str) -> String {
 #[derive(Default)]
 pub struct GenLookups {
     aliases: Option<(u64, Arc<BTreeMap<String, String>>)>,
+    #[cfg(feature = "test-hooks")]
     views: u32,
+    #[cfg(feature = "test-hooks")]
     alias_builds: u32,
 }
 
@@ -292,18 +294,25 @@ impl AppModel {
                 .map(|a| (a.alias.clone(), a.canonical.clone()))
                 .collect(),
         );
-        c.alias_builds += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            c.alias_builds += 1;
+        }
         c.aliases = Some((rev, a.clone()));
         a
     }
 
     /// The set `set` for the Generate path; counted (tests).
     fn gen_view(&self, set: &str) -> Option<SetView> {
-        self.gen_look.borrow_mut().views += 1;
+        #[cfg(feature = "test-hooks")]
+        {
+            self.gen_look.borrow_mut().views += 1;
+        }
         self.view_of(set)
     }
 
     /// (set lookups, alias map builds) on the Generate path so far (tests: Task 6 review M6).
+    #[cfg(feature = "test-hooks")]
     pub fn gen_lookups(&self) -> (u32, u32) {
         let c = self.gen_look.borrow();
         (c.views, c.alias_builds)
@@ -370,11 +379,13 @@ impl AppModel {
     }
 
     /// Header sizes kept for the offers (tests).
+    #[cfg(feature = "test-hooks")]
     pub fn gen_dims_len(&self) -> usize {
         self.gen_dims.borrow().len()
     }
 
     /// Forget every header size (tests: the disk changed and the clock did not move).
+    #[cfg(feature = "test-hooks")]
     pub fn clear_gen_dims(&self) {
         self.gen_dims.borrow_mut().clear();
     }
@@ -1448,6 +1459,7 @@ impl AppModel {
     }
 
     /// The opts of the last preview started (tests: the preview AO quality).
+    #[cfg(feature = "test-hooks")]
     pub fn gen_preview_opts(&self) -> Option<Opts> {
         self.gen.as_ref()?.previewed.clone()
     }

@@ -411,7 +411,7 @@ pub struct AppModel {
     /// DDS tile images the decoder refused, with the stamp it refused (not read again until the file changes).
     dds_thumbs_failed: std::collections::HashMap<PathBuf, SourceStamp>,
     /// Paths sent to `spawn_dds_thumbs` so far (tests: a re-plan reuses the cache).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub dds_thumb_requests: usize,
     /// The artist check results and what they were computed from (DECISIONS Note CL).
     pub(crate) check_state: checks::CheckState,
@@ -456,14 +456,20 @@ pub struct AppModel {
     pub bottom: bottom::BottomPanel,
     /// Review (R1): open while `Some`; it holds only what the user answered.
     pub review: Option<review::Review>,
+    #[cfg(feature = "test-hooks")]
     pub(crate) problem_builds: std::cell::Cell<u64>,
     /// Final fix I2: whole `sets::build_views` builds (a splice is not one; see `sets::view_builds`).
+    #[cfg(feature = "test-hooks")]
     pub(crate) view_builds: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
     pub(crate) filter_builds: std::cell::Cell<u64>,
     /// Task 6: `bottom::problems` calls and `export_files` builds (see `bottom::problem_lookups`).
+    #[cfg(feature = "test-hooks")]
     pub(crate) problem_lookups: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
+    #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
     /// Item 22: per-item DDS sizes by plan revision.
     pub sizes: out_size::SizeCache,
@@ -648,9 +654,9 @@ pub struct AppModel {
     landed_sig: Option<u64>,
     /// Tests: `Partial` and `Planned` messages are parked (`take_held`) instead of handled, so a test can deliver
     /// them in the order it wants.
-    // Exists for tests only (crates/gui/tests/fast_replan.rs).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    #[cfg(feature = "test-hooks")]
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
@@ -739,6 +745,7 @@ impl AppModel {
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
             dds_thumbs_failed: Default::default(),
+            #[cfg(feature = "test-hooks")]
             dds_thumb_requests: 0,
             check_state: Default::default(),
             inputs_rev: 0,
@@ -767,11 +774,17 @@ impl AppModel {
             messages: Default::default(),
             bottom: Default::default(),
             review: None,
+            #[cfg(feature = "test-hooks")]
             problem_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
             view_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
             filter_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
             problem_lookups: Default::default(),
+            #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
             rnm_preview: Default::default(),
@@ -864,7 +877,9 @@ impl AppModel {
             plan_files: Default::default(),
             plan_sig: (0, 0),
             landed_sig: None,
+            #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
+            #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
             opening: None,
@@ -1359,15 +1374,13 @@ impl AppModel {
     }
 
     /// Tests: the `Partial` and `Planned` messages parked while `hold_plan_results` is on, in arrival order.
-    // Exists for tests only (crates/gui/tests/fast_replan.rs).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn take_held(&mut self) -> Vec<WorkerMsg> {
         std::mem::take(&mut self.held)
     }
 
     /// Tests: handle one parked message now, without opening the channel (a message arriving meanwhile stays parked).
-    // Exists for tests only (crates/gui/tests/fast_replan.rs, ui_smoke.rs).
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn handle_held(&mut self, msg: WorkerMsg) {
         self.handle(msg);
     }
@@ -1524,6 +1537,7 @@ impl AppModel {
                 WorkerMsg::DdsThumb { path, stamp, thumb } => {
                     thumbs_landed |= self.dds_thumb_landed(path, stamp, thumb)
                 }
+                #[cfg(feature = "test-hooks")]
                 msg @ (WorkerMsg::Partial { .. } | WorkerMsg::Planned { .. })
                     if self.hold_plan_results =>
                 {
@@ -1835,7 +1849,7 @@ impl AppModel {
     }
 
     /// Tests: end the export with a made-up result (`WorkerMsg` is private), as the worker's `ExportDone` would.
-    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
     pub fn end_export_with(&mut self, result: Result<engine::api::BatchSummary, String>) {
         self.export_ended(result);
     }
@@ -2692,7 +2706,10 @@ impl AppModel {
         if ask.is_empty() {
             return;
         }
-        self.dds_thumb_requests += ask.len();
+        #[cfg(feature = "test-hooks")]
+        {
+            self.dds_thumb_requests += ask.len();
+        }
         self.dds_thumbs_asked.extend(ask.iter().cloned());
         spawn_dds_thumbs(self.tx.clone(), ask);
     }
@@ -2794,11 +2811,13 @@ impl AppModel {
     }
 
     /// True while a scan-database read is in flight (tests).
+    #[cfg(feature = "test-hooks")]
     pub fn votes_pending(&self) -> bool {
         self.votes_pending.is_some()
     }
 
     /// The plan generation, bumped once per `replan` (tests: one plan per bulk apply).
+    #[cfg(feature = "test-hooks")]
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -2808,6 +2827,7 @@ impl AppModel {
     }
 
     /// Tests: bumped whenever `last_inputs` changes, and per landed full plan (the checks' count).
+    #[cfg(feature = "test-hooks")]
     pub fn plan_marks(&self) -> (u64, u64) {
         (self.inputs_rev, self.check_state.plans_applied)
     }

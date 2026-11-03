@@ -933,6 +933,7 @@ fn pill(
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
 ) -> PillOut {
+    #[cfg(feature = "test-hooks")]
     model.set_cards_drawn.set(model.set_cards_drawn.get() + 1);
     // A member's slot menu, not the pill's, answers a right-click on that member.
     let mut member_menu = false;

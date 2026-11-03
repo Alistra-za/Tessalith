@@ -48,7 +48,14 @@ image.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation"] }
 
+[features]
+# Test seams and the counters they read (DECISIONS Note FM27). Off by default and never enabled by a release build; the
+# dev-dependency below turns it on for `cargo test` and `--all-targets` (resolver 2 keeps dev-dependency features out of
+# `cargo build`). The engine does the same.
+test-hooks = []
+
 [dev-dependencies]
+sdc-gui = { path = ".", features = ["test-hooks"] }
 egui_kittest = { version = "=0.36.2", features = ["wgpu"] }
 tempfile.workspace = true
 walkdir.workspace = true
