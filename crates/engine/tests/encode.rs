@@ -65,6 +65,30 @@ fn sizes_per_format_including_sub_block_levels() {
     assert_eq!(encode(&hdr(30), 6, 5, &p).len(), 4 * 16);
 }
 
+/// Note FM37: a Gray encode of an RGB source writes the red channel, as BC4 and as R8.
+#[test]
+fn a_gray_encode_of_an_rgb_source_writes_red() {
+    let src = Rgba32F::new(4, 4, [200.0 / 255.0, 10.0 / 255.0, 50.0 / 255.0, 1.0]);
+    for fmt in [Format::Bc4, Format::R8] {
+        let mut p = profile(Subtype::Gray);
+        p.format = fmt;
+        assert_eq!(p.channels.grayscale_source, GraySource::R);
+        let work = preprocess(src.clone(), &p);
+        let chain = build_chain(&work, &p);
+        let input = to_encoder_input(&chain[0], &work, &p);
+        let out = encode(&input, 4, 4, &p);
+        let mut dec = [0u8; 16];
+        match fmt {
+            Format::Bc4 => bcdec_rs::bc4(&out, &mut dec, 4, false),
+            _ => dec.copy_from_slice(&out),
+        }
+        assert!(
+            dec.iter().all(|&v| v.abs_diff(200) <= 1),
+            "{fmt:?}: {dec:?}"
+        );
+    }
+}
+
 #[test]
 fn sub_block_levels_pad_by_edge_replication() {
     // A 1x1 level must encode exactly like the same colour filling a whole block.

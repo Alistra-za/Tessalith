@@ -297,7 +297,8 @@
         "complex_grass",
         "cubemap",
         "projected_noise",
-        "detail_normal"
+        "detail_normal",
+        "gray"
       ],
       "type": "string"
     },

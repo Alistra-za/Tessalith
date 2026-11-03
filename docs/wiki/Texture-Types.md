@@ -89,7 +89,7 @@ You can add your own suffixes through a preset's `suffix_aliases`. See [Presets 
 
 ## Sub-types
 
-There are 32 sub-types in five categories.
+There are 33 sub-types in five categories.
 
 | Sub-type | Category | Default format | Tag (`cs`) | Default alpha | Notes |
 |---|---|---|---|---|---|
@@ -116,6 +116,7 @@ There are 32 sub-types in five categories.
 | `projected_noise` | Grayscale | BC4 | UNORM | remove | `_noise`: a landscape set's projected-noise map for an XPMF profile. |
 | `msn_specular` | Grayscale | BC4 | UNORM | remove | `_s` beside an `_msn`. |
 | `skin_sk` | Grayscale | BC4 | UNORM | remove | `cs` Advanced skin; red channel only. |
+| `gray` | Grayscale | BC4 | UNORM | remove | A plain grey map you pick on the file; no suffix, scan or shader suggests it. BC4 or R8 only. Reads the red channel unless [`channels.grayscale_source`](Project-Config-Fields.md#channels) names another. <!-- D:FM37 --> |
 | `complex_material` | MixedPacked | BC7 | UNORM | data, exact opaque | Complex `_m`. Under every target. |
 | `rmaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |
 | `skin_rfaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |

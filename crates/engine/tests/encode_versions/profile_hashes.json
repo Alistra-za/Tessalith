@@ -47,6 +47,10 @@
     "sha256": "22b0e67c33363fab95854cda50e7d751410caacf10a83c5166b3a9c5a6683b5d",
     "subtype": "glow"
   },
+  "cs-compact/cs/gray": {
+    "sha256": "30e7280bd035972073238f3efb825da9882bd8220d7854296da80b5a0905bf64",
+    "subtype": "gray"
+  },
   "cs-compact/cs/hdr_sky": {
     "sha256": "f250f2d242ced67dd649be0584b27205e8de76b163138821e92ca8c707edfb32",
     "subtype": "hdr_sky"
@@ -174,6 +178,10 @@
   "cs-compact/vanilla/glow": {
     "sha256": "c228b4937f1580986151e9b98081f8ecb06f77f2987f7f63acb764efe1adfd3e",
     "subtype": "glow"
+  },
+  "cs-compact/vanilla/gray": {
+    "sha256": "10692b62c85a6751dcf1f6387fed8584ec0da77c7ee53a27ba26b068584b5ccb",
+    "subtype": "gray"
   },
   "cs-compact/vanilla/hdr_sky": {
     "sha256": "04455f14f5aaedd86933e515aaeec419a9e124fed760f9cf3060c9aa825f4fc2",
@@ -303,6 +311,10 @@
     "sha256": "49415b08f489d5ea0c9fc3528e58915db1e6606c37f3e33235a6c5f81ec86e70",
     "subtype": "glow"
   },
+  "cs-quality/cs/gray": {
+    "sha256": "3d9a6e4ae9678f2b28be2b1d05f3067d85afe0d48d51db0f3a6c86170ad0bd72",
+    "subtype": "gray"
+  },
   "cs-quality/cs/hdr_sky": {
     "sha256": "117a2ca19ce2a5a7c9ed348cf64647cacd13cccf55fd067b3518bd9b569de865",
     "subtype": "hdr_sky"
@@ -430,6 +442,10 @@
   "cs-quality/vanilla/glow": {
     "sha256": "43734bc50a109f342c353d72dfc4eaa621149f7053cae316341f451424766d2f",
     "subtype": "glow"
+  },
+  "cs-quality/vanilla/gray": {
+    "sha256": "d332cb799854af3bb6cc7f356f68240a9f50d8cbcdcab05c24b088d4dc1787f5",
+    "subtype": "gray"
   },
   "cs-quality/vanilla/hdr_sky": {
     "sha256": "38e601e240a050ded7f949927b67cd2def1de8c00decea6a86981609bfbe6352",
@@ -559,6 +575,10 @@
     "sha256": "7e9c46aa2b7eb22cfb8b885dfbe85859f6706a9ac6574982d4aab7db07f25485",
     "subtype": "glow"
   },
+  "fast-preview/cs/gray": {
+    "sha256": "18bcd22d29b2cacf476e4e36a33a676b9b2593b71f8cd2637c9569552d098c0f",
+    "subtype": "gray"
+  },
   "fast-preview/cs/hdr_sky": {
     "sha256": "24faeacb9f4699eea8d710439bb1e06d8f013e795b35a94234d8a26db89b98c6",
     "subtype": "hdr_sky"
@@ -686,6 +706,10 @@
   "fast-preview/vanilla/glow": {
     "sha256": "a37246948443af11836605066a7dc28d3200687d1384611e546d211f6433c9b4",
     "subtype": "glow"
+  },
+  "fast-preview/vanilla/gray": {
+    "sha256": "361ae6db648322fd75f99dc03af20147017734a6d7929676f8fe09c3c200d950",
+    "subtype": "gray"
   },
   "fast-preview/vanilla/hdr_sky": {
     "sha256": "3774324b6f490d8a219c4b0d01abd6b9286c9ce99f044dc0b232b34e5dbbe7b8",
@@ -815,6 +839,10 @@
     "sha256": "49415b08f489d5ea0c9fc3528e58915db1e6606c37f3e33235a6c5f81ec86e70",
     "subtype": "glow"
   },
+  "sdc-base/cs/gray": {
+    "sha256": "3d9a6e4ae9678f2b28be2b1d05f3067d85afe0d48d51db0f3a6c86170ad0bd72",
+    "subtype": "gray"
+  },
   "sdc-base/cs/hdr_sky": {
     "sha256": "117a2ca19ce2a5a7c9ed348cf64647cacd13cccf55fd067b3518bd9b569de865",
     "subtype": "hdr_sky"
@@ -942,6 +970,10 @@
   "sdc-base/vanilla/glow": {
     "sha256": "43734bc50a109f342c353d72dfc4eaa621149f7053cae316341f451424766d2f",
     "subtype": "glow"
+  },
+  "sdc-base/vanilla/gray": {
+    "sha256": "d332cb799854af3bb6cc7f356f68240a9f50d8cbcdcab05c24b088d4dc1787f5",
+    "subtype": "gray"
   },
   "sdc-base/vanilla/hdr_sky": {
     "sha256": "38e601e240a050ded7f949927b67cd2def1de8c00decea6a86981609bfbe6352",
@@ -1071,6 +1103,10 @@
     "sha256": "22b0e67c33363fab95854cda50e7d751410caacf10a83c5166b3a9c5a6683b5d",
     "subtype": "glow"
   },
+  "vanilla-compact/cs/gray": {
+    "sha256": "30e7280bd035972073238f3efb825da9882bd8220d7854296da80b5a0905bf64",
+    "subtype": "gray"
+  },
   "vanilla-compact/cs/hdr_sky": {
     "sha256": "f250f2d242ced67dd649be0584b27205e8de76b163138821e92ca8c707edfb32",
     "subtype": "hdr_sky"
@@ -1198,6 +1234,10 @@
   "vanilla-compact/vanilla/glow": {
     "sha256": "c228b4937f1580986151e9b98081f8ecb06f77f2987f7f63acb764efe1adfd3e",
     "subtype": "glow"
+  },
+  "vanilla-compact/vanilla/gray": {
+    "sha256": "10692b62c85a6751dcf1f6387fed8584ec0da77c7ee53a27ba26b068584b5ccb",
+    "subtype": "gray"
   },
   "vanilla-compact/vanilla/hdr_sky": {
     "sha256": "04455f14f5aaedd86933e515aaeec419a9e124fed760f9cf3060c9aa825f4fc2",
@@ -1327,6 +1367,10 @@
     "sha256": "49415b08f489d5ea0c9fc3528e58915db1e6606c37f3e33235a6c5f81ec86e70",
     "subtype": "glow"
   },
+  "vanilla-quality/cs/gray": {
+    "sha256": "3d9a6e4ae9678f2b28be2b1d05f3067d85afe0d48d51db0f3a6c86170ad0bd72",
+    "subtype": "gray"
+  },
   "vanilla-quality/cs/hdr_sky": {
     "sha256": "117a2ca19ce2a5a7c9ed348cf64647cacd13cccf55fd067b3518bd9b569de865",
     "subtype": "hdr_sky"
@@ -1454,6 +1498,10 @@
   "vanilla-quality/vanilla/glow": {
     "sha256": "43734bc50a109f342c353d72dfc4eaa621149f7053cae316341f451424766d2f",
     "subtype": "glow"
+  },
+  "vanilla-quality/vanilla/gray": {
+    "sha256": "d332cb799854af3bb6cc7f356f68240a9f50d8cbcdcab05c24b088d4dc1787f5",
+    "subtype": "gray"
   },
   "vanilla-quality/vanilla/hdr_sky": {
     "sha256": "38e601e240a050ded7f949927b67cd2def1de8c00decea6a86981609bfbe6352",

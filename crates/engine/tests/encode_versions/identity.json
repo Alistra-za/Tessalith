@@ -62,6 +62,13 @@
     "subtype": "height",
     "width": 64
   },
+  "cov/textures/c/gray_r8.dds": {
+    "format": "R8",
+    "height": 64,
+    "payload_sha256": "7c42340d03ccc9d8a56572788201aaa33308e7a8436994befa216874557e8925",
+    "subtype": "gray",
+    "width": 64
+  },
   "cov/textures/c/height_half.dds": {
     "format": "Bc4",
     "height": 256,
@@ -214,6 +221,13 @@
     "height": 64,
     "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
     "subtype": "glow",
+    "width": 64
+  },
+  "textures/h/gray.dds": {
+    "format": "Bc4",
+    "height": 64,
+    "payload_sha256": "0f60a58fb63d552f916047557d0b4b25308089c0be02cbc66abd04c9a71fc12f",
+    "subtype": "gray",
     "width": 64
   },
   "textures/h/hdr_sky.dds": {
@@ -466,6 +480,13 @@
     "height": 64,
     "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
     "subtype": "glow",
+    "width": 64
+  },
+  "vanilla/textures/h/gray.dds": {
+    "format": "Bc4",
+    "height": 64,
+    "payload_sha256": "0f60a58fb63d552f916047557d0b4b25308089c0be02cbc66abd04c9a71fc12f",
+    "subtype": "gray",
     "width": 64
   },
   "vanilla/textures/h/height.dds": {

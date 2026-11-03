@@ -1523,7 +1523,8 @@
         "complex_grass",
         "cubemap",
         "projected_noise",
-        "detail_normal"
+        "detail_normal",
+        "gray"
       ],
       "type": "string"
     },
@@ -1627,6 +1628,9 @@
           "$ref": "#/$defs/PartialProfile"
         },
         "glow": {
+          "$ref": "#/$defs/PartialProfile"
+        },
+        "gray": {
           "$ref": "#/$defs/PartialProfile"
         },
         "hdr_sky": {

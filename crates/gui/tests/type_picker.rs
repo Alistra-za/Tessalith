@@ -119,6 +119,29 @@ fn type_picker_opens_at_its_anchor() {
     );
 }
 
+/// Note FM37: Gray is picked by hand from the Grayscale group, under both targets.
+#[test]
+fn gray_is_in_the_grayscale_group() {
+    for target in [Target::Cs, Target::Vanilla] {
+        let groups = sdc_gui::ui::settings_panel::offered_groups(target, false);
+        let (name, members) = groups
+            .iter()
+            .find(|(_, v)| v.contains(&Subtype::Gray))
+            .unwrap_or_else(|| panic!("{target:?}: Gray is in no group"));
+        assert_eq!(*name, "Grayscale maps", "{target:?}");
+        assert!(members.contains(&Subtype::Height), "{target:?}");
+    }
+    assert_eq!(subtype_label(Subtype::Gray), "gray");
+    // The picker lists it and a pick returns it.
+    let mut h = bare(10.0);
+    open(&mut h);
+    h.get_by_role(Role::TextInput).type_text("gray");
+    h.run();
+    h.get_by_label("gray").click();
+    h.run();
+    assert_eq!(h.state().picked, Some(Subtype::Gray));
+}
+
 /// Review C7 round 1: the Sub-type button keeps the old combo's gating. A read-only sdc.toml disables it (the
 /// panel's `add_enabled_ui(!read_only)`); `busy` never disabled the combo (only sliders defer their commit), so it
 /// stays enabled while a plan runs, like the other combos in the panel.

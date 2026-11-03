@@ -277,7 +277,7 @@ fn rnm_fixture(dir: &Path) {
 
 /// Byte-identity coverage the per-sub-type fixtures lack (identity.json only; encode_inputs.json does not pin it):
 /// opaque BC1, a BC1 1-bit alpha cutout, BC3 and BC7 colour with a cutout alpha (box mips) and with a blend alpha, a
-/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, a two-size `_rmaos` pack, an `_rmaos` pack read from G (and its R twin), plus BC4 and BC5. Returns the
+/// BC3 cutout at alpha.threshold 200, a BC3 cutout with the alpha-weighted tent, a two-size `_rmaos` pack, an `_rmaos` pack read from G (and its R twin), a Gray R8, plus BC4 and BC5. Returns the
 /// `[files]` overrides.
 fn coverage_fixture(dir: &Path) -> Vec<String> {
     let mut sets = vec![];
@@ -370,6 +370,8 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         &["subtype=diffuse", "format=bc3", "mips.filter=box"],
     );
     add("gray_bc4", rgb(64), &["subtype=height", "format=bc4"]);
+    // Note FM37: the Gray sub-type as R8, red read from an RGB source (its BC4 form is the forced `gray` fixture).
+    add("gray_r8", rgb(64), &["subtype=gray", "format=r8"]);
     // A normal cannot be BC5 (FMT-BC5-NORMAL), so BC5 is a two-channel map.
     add(
         "rg_bc5",
@@ -490,7 +492,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
             ComplexGrass => (format!("{id}.png"), grass64()),
             // These store no alpha: an alpha source is blocked by LOSS-ALPHA-DATA.
             PbrEmissive | Glow | SubsurfaceTint | BacklightTint | Msn | Envmask | Flow | Height
-            | MsnSpecular | GenericTwoChannel | SkinSk | ProjectedNoise => {
+            | MsnSpecular | GenericTwoChannel | SkinSk | ProjectedNoise | Gray => {
                 (format!("{id}.png"), rgb(64))
             }
             // DECISIONS DS8: a one-file cube needs a layout, so a 6:1 h-strip of 64-px faces.
@@ -632,6 +634,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "wide_bc3",
         "npot_1000_bc1",
         "height_half",
+        "gray_r8",
         "twosize_rmaos",
         "gpick_rmaos",
         "rpick_rmaos",

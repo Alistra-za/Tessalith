@@ -56,6 +56,9 @@ pub enum Subtype {
     // XPMF landscape maps (design 2026-10-31): `_noise` is a BC4 projected-noise map, `_detail` (landscape sets only) a detail normal.
     ProjectedNoise,
     DetailNormal,
+    // A plain grey map (Note FM37): BC4 or R8, read from the red channel unless `channels.grayscale_source` says
+    // otherwise. Picked by hand only: no suffix, suggestion or shader mapping.
+    Gray,
 }
 
 cfg_enum!(ColorContent, "lowercase" { Srgb, Linear });
@@ -529,7 +532,7 @@ impl Subtype {
         }
     }
 
-    pub const ALL: [Subtype; 32] = {
+    pub const ALL: [Subtype; 33] = {
         use Subtype::*;
         [
             Diffuse,
@@ -564,6 +567,7 @@ impl Subtype {
             Cubemap,
             ProjectedNoise,
             DetailNormal,
+            Gray,
         ]
     };
 
@@ -577,7 +581,7 @@ impl Subtype {
             Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | SkinWet | DetailNormal => {
                 Category::Normal
             }
-            Envmask | Height | MsnSpecular | SkinSk | ProjectedNoise => Category::Grayscale,
+            Envmask | Height | MsnSpecular | SkinSk | ProjectedNoise | Gray => Category::Grayscale,
             ComplexMaterial | Rmaos | SkinRfaos | Flow | GenericTwoChannel | GenericData
             | ComplexGrass => Category::MixedPacked,
             HdrSky => Category::Hdr,
@@ -1064,14 +1068,34 @@ mod tests {
     }
     #[test]
     fn subtype_all_order() {
-        assert_eq!(Subtype::ALL.len(), 32);
+        assert_eq!(Subtype::ALL.len(), 33);
         assert_eq!(
-            Subtype::ALL[Subtype::ALL.len() - 2..],
-            [Subtype::ProjectedNoise, Subtype::DetailNormal]
+            Subtype::ALL[Subtype::ALL.len() - 3..],
+            [
+                Subtype::ProjectedNoise,
+                Subtype::DetailNormal,
+                Subtype::Gray
+            ]
         );
-        assert_eq!(Subtype::ALL[Subtype::ALL.len() - 3], Subtype::Cubemap);
+        assert_eq!(Subtype::ALL[Subtype::ALL.len() - 4], Subtype::Cubemap);
         assert_eq!(Subtype::Cubemap.id(), "cubemap");
         assert_eq!(Subtype::Cubemap.category(), Category::Color);
+    }
+
+    #[test]
+    fn gray_is_a_grayscale_bc4_read_from_red() {
+        use crate::presets::PresetRegistry;
+        assert_eq!(Subtype::Gray.id(), "gray");
+        assert_eq!(Subtype::Gray.category(), Category::Grayscale);
+        let p = PresetRegistry::builtin()
+            .unwrap()
+            .profile("sdc-base", Target::Cs, Subtype::Gray)
+            .unwrap();
+        assert_eq!(p.format, Format::Bc4);
+        assert_eq!(p.color.tag, ColorTag::Unorm);
+        assert_eq!(p.color.content, ColorContent::Linear);
+        assert_eq!(p.alpha.policy, AlphaPolicy::Remove);
+        assert_eq!(p.channels.grayscale_source, GraySource::R);
     }
 
     #[test]

@@ -1510,6 +1510,10 @@ fn encoding_warnings(
                 .into(),
         );
     }
+    // Note FM37: a Gray map is one channel, so only the one-channel formats fit.
+    if st == Subtype::Gray && !matches!(format, Format::Bc4 | Format::R8) {
+        add(CfgInvalid, "gray is written as BC4 or R8".into());
+    }
     if st == Subtype::Cubemap
         && !(matches!(
             format,

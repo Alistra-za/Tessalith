@@ -55,7 +55,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::GenericTwoChannel
         | Subtype::SkinSk
         | Subtype::ProjectedNoise
-        | Subtype::DetailNormal => "2.0.0",
+        | Subtype::DetailNormal
+        | Subtype::Gray => "2.0.0",
     }
 }
 

@@ -47,6 +47,10 @@
     "sha256": "5c0d49986668124732a9c6f8d06771de86a2916319700dd4c5a64c00669cc522",
     "subtype": "glow"
   },
+  "textures/h/gray.dds": {
+    "sha256": "971d58cd6273478f752bbd4d72630ed1ef2ae0d92e3f5a55d959635d30bc4939",
+    "subtype": "gray"
+  },
   "textures/h/hdr_sky.dds": {
     "sha256": "6ee5a9a010669dae1ed373035b06d7f4d5c2d1b8ed969caaf88a8d6527e6110c",
     "subtype": "hdr_sky"
@@ -190,6 +194,10 @@
   "vanilla/textures/h/glow.dds": {
     "sha256": "c4242452a48eed9946cff389612028cff2435ca8314817cfb9160ab7ee30e9b3",
     "subtype": "glow"
+  },
+  "vanilla/textures/h/gray.dds": {
+    "sha256": "4f252e2d4876667d92d927499c35808bd98ee53e030c67e54b6bb3bbec54b266",
+    "subtype": "gray"
   },
   "vanilla/textures/h/height.dds": {
     "sha256": "817470ea5fe3396125a9ac039da3b83d3a11291c03035cd077b5a8fd96759f8f",

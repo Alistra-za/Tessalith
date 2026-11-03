@@ -110,6 +110,27 @@ fn owner_rules_hold() {
     }
 }
 
+/// Note FM37: a Gray map is BC4 or R8, linear UNORM, under every target, grey source or not.
+#[test]
+fn gray_allows_bc4_and_r8_only() {
+    use engine::policy::allowed_encodings_for;
+    for t in [Target::Cs, Target::Vanilla] {
+        for grey in [false, true] {
+            let mut a = allowed_encodings_for(Subtype::Gray, t, grey);
+            a.sort_by_key(|(f, _)| f.id());
+            assert_eq!(
+                a,
+                vec![
+                    (Format::Bc4, ColorTag::Unorm),
+                    (Format::R8, ColorTag::Unorm)
+                ],
+                "{t:?} grey={grey}: {}",
+                pairs(&a)
+            );
+        }
+    }
+}
+
 /// Trace-debug #31 (Note BQ): a grey `skin_wet` is judged as a greyscale map by `check_profile`, which accepts
 /// R8, RG8 and BC5; the picker offers them when told the map is grey, and nothing changes when it is not.
 #[test]

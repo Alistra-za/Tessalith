@@ -188,6 +188,24 @@ fn uncompressed_formats_are_offered_and_rgba16f_only_under_cs() {
     assert!(!formats(Target::Vanilla, Subtype::Diffuse).contains(&Format::Rgba16f));
 }
 
+/// Note FM37: a Gray map's Format dropdown lists BC4 and R8 only, whatever the target.
+#[test]
+fn the_gray_format_dropdown_has_two_entries() {
+    let reg = PresetRegistry::builtin().unwrap();
+    for t in [Target::Cs, Target::Vanilla] {
+        let o = encoding_options(t, &reg.base_profile(t, Subtype::Gray));
+        let formats: Vec<_> = o.iter().map(|((f, tag), _)| (*f, *tag)).collect();
+        assert_eq!(
+            formats,
+            [
+                (Format::Bc4, ColorTag::Unorm),
+                (Format::R8, ColorTag::Unorm)
+            ],
+            "{t:?}: {o:?}"
+        );
+    }
+}
+
 #[test]
 fn uncompressed_locks_explain_themselves() {
     let reg = engine::presets::PresetRegistry::builtin().unwrap();
