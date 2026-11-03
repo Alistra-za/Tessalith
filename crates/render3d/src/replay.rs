@@ -148,18 +148,7 @@ fn load_depth(dir: &Path, crop: [u32; 4], extras: &Value) -> Result<Option<Repla
     let enable = flag("depthEnable")?;
     let write = flag("depthWrite")?;
     let f = ds.get("depthFunc").and_then(Value::as_str).unwrap_or("");
-    // D3D11_COMPARISON_FUNC values; RenderDoc names Never/Always AlwaysFalse/AlwaysTrue.
-    let func = match f {
-        "AlwaysFalse" | "Never" => 1,
-        "Less" => 2,
-        "Equal" => 3,
-        "LessEqual" => 4,
-        "Greater" => 5,
-        "NotEqual" => 6,
-        "GreaterEqual" => 7,
-        "AlwaysTrue" | "Always" => 8,
-        _ => return Err(eerr(&format!("depthFunc {f:?} unknown"))),
-    };
+    let func = compare_func(f).ok_or_else(|| eerr(&format!("depthFunc {f:?} unknown")))?;
     // Validated first, then a disabled depth test passes everything and writes nothing.
     Ok(Some(if enable {
         ReplayDepth { d24s8, func, write }
@@ -452,6 +441,21 @@ fn split_semantic(s: &str) -> (String, u32) {
     (head.to_string(), s[head.len()..].parse().unwrap_or(0))
 }
 
+/// D3D11_COMPARISON_FUNC value of a RenderDoc compare name (it spells Never/Always as AlwaysFalse/AlwaysTrue).
+fn compare_func(name: &str) -> Option<i32> {
+    Some(match name {
+        "AlwaysFalse" | "Never" => 1,
+        "Less" => 2,
+        "Equal" => 3,
+        "LessEqual" => 4,
+        "Greater" => 5,
+        "NotEqual" => 6,
+        "GreaterEqual" => 7,
+        "AlwaysTrue" | "Always" => 8,
+        _ => return None,
+    })
+}
+
 fn sampler(v: &Value) -> Result<(u32, Sampler), String> {
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("");
     let f = |k: &str| v.get(k).and_then(Value::as_f64).map(|x| x as f32);
@@ -485,17 +489,8 @@ fn sampler(v: &Value) -> Result<(u32, Sampler), String> {
             x => return Err(format!("sampler {bind}: {k} {x:?}")),
         };
     }
-    let compare = match s("compare") {
-        "Never" => 1,
-        "Less" => 2,
-        "Equal" => 3,
-        "LessEqual" => 4,
-        "Greater" => 5,
-        "NotEqual" => 6,
-        "GreaterEqual" => 7,
-        "AlwaysTrue" => 8,
-        x => return Err(format!("sampler {bind}: compare {x:?}")),
-    };
+    let compare = compare_func(s("compare"))
+        .ok_or_else(|| format!("sampler {bind}: compare {:?}", s("compare")))?;
     let bad = |k: &str| format!("sampler {bind}: bad {k}");
     Ok((
         bind,
@@ -1485,6 +1480,25 @@ impl Renderer {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sampler_and_depth_accept_the_same_compare_names() {
+        for (n, v) in [
+            ("Never", 1),
+            ("AlwaysFalse", 1),
+            ("Less", 2),
+            ("Always", 8),
+            ("AlwaysTrue", 8),
+        ] {
+            assert_eq!(compare_func(n), Some(v), "{n}");
+        }
+        assert_eq!(compare_func("Sometimes"), None);
+        let mut s = serde_json::json!({"bind":0,"minify":"Point","magnify":"Point","mip":"Point","func":"Normal",
+            "addressU":"Wrap","addressV":"Wrap","addressW":"Wrap","compare":"Always","border":[0,0,0,0],
+            "minLOD":0,"maxLOD":1,"mipBias":0,"maxAniso":1});
+        assert_eq!(sampler(&s).unwrap().1.compare, 8);
+        s["compare"] = "AlwaysFalse".into();
+        assert_eq!(sampler(&s).unwrap().1.compare, 1);
+    }
     fn mesh(sems: &[&str]) -> ReplayMesh {
         ReplayMesh {
             inputs: sems.iter().map(|s| (s.to_string(), 0, 2, 0, 0)).collect(),
