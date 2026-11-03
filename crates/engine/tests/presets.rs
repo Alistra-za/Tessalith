@@ -818,6 +818,7 @@ fn a_bad_preset_file_names_its_first_problem() {
         assert!(p.contains(says), "{name}: {p}");
     }
 }
+
 /// Note AT: vanilla-compact halves a complex `_m` (BC7 with alpha), as cs-compact does.
 #[test]
 fn vanilla_compact_halves_a_complex_m() {

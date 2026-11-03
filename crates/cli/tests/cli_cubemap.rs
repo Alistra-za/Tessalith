@@ -166,6 +166,7 @@ fn validate_is_strict_about_cubemaps_by_default() {
         assert_eq!(w["severity"], "error", "{line}");
     }
 }
+
 #[test]
 fn cli_validate_flags_a_mipless_cube() {
     let dir = scratch("validate");

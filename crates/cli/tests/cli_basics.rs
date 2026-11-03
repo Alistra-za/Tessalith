@@ -65,28 +65,56 @@ fn version_lists_the_encoders() {
     let o = sdc().arg("--version").output().unwrap();
     assert_eq!(code(&o), 0);
     let out = text(&o.stdout);
-    for want in ["sdc 2.0.0", "bc7enc_rdo", "ispc"] {
-        assert!(out.contains(want), "{want}: {out}");
+    // The engine version, then one line per encoder; the hashes change, so only the labels are pinned.
+    let labels = [
+        "sdc 2.0.0",
+        "bc7enc_rdo ",
+        "ispc_texture_compressor ",
+        "ispc ",
+        "bc7e patch ",
+        "rgbcx patch ",
+    ];
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), labels.len(), "one line per label: {out}");
+    for (line, label) in lines.iter().zip(labels) {
+        assert!(line.starts_with(label), "{label:?} line: {out}");
     }
-    assert!(out.lines().count() >= 4, "one encoder per line: {out}");
 }
 
-/// FM: the verbs and flags that 2.0 removed are refused by name (exit 2, nothing on stdout).
+/// FM: the verbs and flags that 2.0 removed are refused with clap's own message (exit 2, nothing on stdout).
 #[test]
 fn removed_verbs_and_flags_are_refused() {
     let dir = std::env::temp_dir().join("sdc-removed-flags-none");
     let dds = dir.join("x.dds");
-    for (args, word) in [
-        (vec!["encoders"], "encoders"),
-        (vec!["patch-header", "--in-place"], "patch-header"),
-        (vec!["presets", "diff", "cs-quality", "cs-compact"], "diff"),
-        (vec!["presets", "export", "cs-quality"], "export"),
-        (vec!["presets", "validate", "x.toml"], "validate"),
-        (vec!["convert", "in", "--fill", "metallic=255"], "--fill"),
-        (vec!["convert", "in", "--sidecar"], "--sidecar"),
+    for (args, want) in [
+        (vec!["encoders"], "unrecognized subcommand 'encoders'"),
+        (
+            vec!["patch-header", "--in-place"],
+            "unrecognized subcommand 'patch-header'",
+        ),
+        (
+            vec!["presets", "diff", "cs-quality", "cs-compact"],
+            "unrecognized subcommand 'diff'",
+        ),
+        (
+            vec!["presets", "export", "cs-quality"],
+            "unrecognized subcommand 'export'",
+        ),
+        (
+            vec!["presets", "validate", "x.toml"],
+            "unrecognized subcommand 'validate'",
+        ),
+        (
+            vec!["convert", "in", "--fill", "metallic=255"],
+            "unexpected argument '--fill'",
+        ),
+        (
+            vec!["convert", "in", "--sidecar"],
+            "unexpected argument '--sidecar'",
+        ),
         (
             vec!["validate", "--strict-cubemaps", dds.to_str().unwrap()],
-            "--strict-cubemaps",
+            "unexpected argument '--strict-cubemaps'",
         ),
     ] {
         let o = sdc().args(&args).output().unwrap();
@@ -96,12 +124,13 @@ fn removed_verbs_and_flags_are_refused() {
             "{args:?}: usage errors write no stdout"
         );
         assert!(
-            text(&o.stderr).contains(word),
-            "{args:?} should name {word}: {}",
+            text(&o.stderr).contains(want),
+            "{args:?} should say {want}: {}",
             text(&o.stderr)
         );
     }
 }
+
 #[test]
 fn the_nvtt_flag_is_refused() {
     let o = sdc()

@@ -108,7 +108,6 @@ In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "
 
 BC3 is never used for compact output, because it is the same size as BC7.
 
-
 ### Built-in rules
 
 `sdc-base` contains two rules that every preset inherits: any file under an `interface` folder or a `sky` folder gets `mips.levels = "none"`.

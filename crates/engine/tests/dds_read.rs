@@ -1288,6 +1288,7 @@ fn a_bc1_dds_input_decodes_exactly() {
     let (img, _) = engine::load::load_image(&write("three.dds", three)).unwrap();
     assert!(img.px.iter().all(|p| *p == [0.0; 4]), "{:?}", &img.px[..2]);
 }
+
 #[test]
 fn cube_round_trips_through_the_reader() {
     for (fmt, hdr) in [

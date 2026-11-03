@@ -1237,6 +1237,7 @@ fn a_1x_dds_json_is_never_deleted() {
     assert!(!d.path().join("out/armor/iron.dds").exists());
     assert_eq!(std::fs::read_to_string(&side).unwrap(), record);
 }
+
 /// A 64 px BC1 DDS at `path`, written by the engine's writer.
 fn bc1_dds(path: &Path) {
     use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
