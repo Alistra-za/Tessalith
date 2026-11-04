@@ -243,6 +243,8 @@ struct TexEntry {
     /// A texture-set slot path the resolver did not return (a `LoadReport::missing_textures` line); never set for an
     /// RFAOS guess. Kept through swaps, so a dropped swap falls back to the missing-texture fill.
     missing: bool,
+    /// The resolver returned no file for the path (whatever `report_missing` was); a failed decode is not absent.
+    absent: bool,
 }
 
 impl TexEntry {
@@ -268,11 +270,12 @@ impl TexEntry {
         self.source.is_some() || self.encoded.is_some()
     }
 }
-/// Whether a cached entry answers a `texture()` request. A path cached as an absent Auto guess (empty, not
-/// `missing`) is loaded again when a slot or pick names it (`report_missing`), so the pick can bind a file that
-/// appeared since.
+
+/// Whether a cached entry answers a `texture()` request. A path the resolver found no file for and no request
+/// has reported yet (an absent Auto guess: `absent`, not `missing`) is loaded again when a slot or pick names it
+/// (`report_missing`), so the pick can bind a file that appeared since. A failed decode stays cached.
 fn reuse(e: &TexEntry, report_missing: bool) -> bool {
-    !(report_missing && !e.missing && !e.any())
+    !(report_missing && e.absent && !e.missing)
 }
 
 /// [`Renderer::draw_diag`]: PS defines, PS reflection, (register, DXGI format) of every bound SRV.
@@ -1090,6 +1093,7 @@ impl Renderer {
         };
         match textures(norm) {
             None => {
+                entry.absent = true;
                 entry.missing = report_missing;
                 if !rep.missing_textures.iter().any(|m| m == norm) {
                     rep.missing_textures.push(norm.to_string());
@@ -2806,10 +2810,17 @@ mod context_tests {
     /// Item 53: a pick reloads a path cached as an absent Auto guess; every other hit stays a hit.
     #[test]
     fn a_pick_reloads_an_absent_auto_guess() {
-        let guess = TexEntry::default();
+        let guess = TexEntry {
+            absent: true,
+            ..TexEntry::default()
+        };
+        // A file that was found but did not decode is empty too; reloading it would repeat its error line.
+        let failed_decode = TexEntry::default();
+        assert!(reuse(&failed_decode, true), "a failed decode stays cached");
         assert!(reuse(&guess, false), "an Auto guess re-asking stays cached");
         assert!(!reuse(&guess, true), "a pick reloads the absent guess");
         let listed = TexEntry {
+            absent: true,
             missing: true,
             ..TexEntry::default()
         };
