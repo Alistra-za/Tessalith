@@ -165,7 +165,11 @@ fn packed_member_bake_shift_uses_the_common_canvas_size() {
             .iter()
             .find(|j| j.pack.is_some())
             .expect("a packed rmaos");
-        assert!(packed.input.ends_with("iron_roughness.png"), "{:?}", packed.input);
+        assert!(
+            packed.input.ends_with("iron_roughness.png"),
+            "{:?}",
+            packed.input
+        );
         assert_eq!(
             packed.bake.as_ref().map(|b| b.shift),
             Some(shift),

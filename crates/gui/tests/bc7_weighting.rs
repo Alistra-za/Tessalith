@@ -402,7 +402,11 @@ fn bulk_linear_overrides_every_hidden_inherited() {
     for k in &keys {
         assert_eq!(row_value(&m, k), json!("linear"), "{k}");
         assert_eq!(encode_params(&m, k), (false, None), "{k}");
-        assert_eq!(own(&m, k), (Some(json!(false)), Some(json!("linear"))), "{k}");
+        assert_eq!(
+            own(&m, k),
+            (Some(json!(false)), Some(json!("linear"))),
+            "{k}"
+        );
     }
 }
 

@@ -966,7 +966,8 @@ fn the_auto_wet_guess_is_in_the_mesh_texture_map() {
             "textures/a/body_msn.dds".to_string(),
         ]
     };
-    let map = sdc_gui::model::meshes::texture_sources(&store, &[(4, slots()), (0, slots())]).unwrap();
+    let map =
+        sdc_gui::model::meshes::texture_sources(&store, &[(4, slots()), (0, slots())]).unwrap();
     assert!(
         matches!(
             map.get("textures/a/body_wet.dds"),

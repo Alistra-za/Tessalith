@@ -108,7 +108,11 @@ fn input_name_on_renamed_set_moves_its_entry() {
                 views.iter().map(|v| v.id.clone()).collect::<Vec<_>>()
             )
         });
-    assert!(v.settings.contains_key("specular_level"), "{:?}", v.settings);
+    assert!(
+        v.settings.contains_key("specular_level"),
+        "{:?}",
+        v.settings
+    );
     assert!(views.iter().all(|v| v.id != "landscape/rock02"));
 }
 
