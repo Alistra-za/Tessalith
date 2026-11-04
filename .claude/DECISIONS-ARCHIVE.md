@@ -182,3 +182,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FX, 2026-11-04)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FX, 2026-11-04)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
