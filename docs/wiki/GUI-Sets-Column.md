@@ -31,7 +31,7 @@ The **shader** combo under the first row takes the card's whole width. Under it 
 
 Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`remove` path or a borrow) out of `sdc-project.toml` as one undo step. When none of the set's files is left it offers **Delete set** instead. Each such line is also a row in Problems with the same button. A member's own chip has **Remove from set** in its menu too; a borrowed chip uses the slot's **Clear**. While `sdc-project.toml` is read-only they are off, and their hover says why.
 
-Members in no slot follow as plain thumbnails. The open set's card is highlighted. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name.
+Members in no slot follow as plain thumbnails. The open set's card is highlighted. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name, so the name is never shown as "…". The "Drop here to start a new set" hint wraps instead of being cut.
 
 The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", and Tab to it scrolls it into view. A context menu or shader list open on a card closes when the card scrolls away, and the scroll bar's thumb changes length as card heights are learned.
 
@@ -47,14 +47,14 @@ The filters combine. A filter only hides: the open set and a multi-selection sta
 
 - **Go to set** from the Problems tab on a hidden set selects it and leaves the filter on. A line under the filter then says "{id} is hidden by the Sets filter", with a **Clear filter** button.
 - When nothing matches, the column says "No sets match the filter (n hidden)" and offers **Clear filter**.
-- Dragging and **Move up** / **Move down** are off while any Sets filter is on ("Clear the filter to reorder sets, or use Move to…"). **Move to…** stays on, because it names the target number, and it counts a hidden set it passes.
+- Dragging and **Move up** / **Move down** are off while any Sets filter is on: the handle and the two entries are greyed out ("Clear the filter to reorder sets, or use Move to…"). **Move to…** stays on, because it names the target number, and it counts a hidden set it passes.
 - A set you create while a filter is on stays shown until the filter changes; the column says "1 new set shown".
 
 The pills and the shader are remembered in `gui.toml` with the window layout. The search text is not.
 
 ## Editing sets
 
-- **Drag a texture** from the Textures column onto a set to move it there, or onto empty space to start a new set. Dropping onto a slot that already holds a texture asks **Replace** or **Cancel**.
+- **Drag a texture** from the Textures column onto a set to move it there, or onto empty space to start a new set. Dropping onto a slot that already holds a texture asks **Replace** or **Cancel**. While you drag, a small thumbnail follows the pointer and the tile you took dims; tiles and member chips outline on hover, and more strongly while pressed.
 - **Drop a file from Explorer** on a slot row of the set editor to fill that slot, when the file is a texture of the open folder and its sub-type fits. Files are never copied.
 - **Share** lets a set borrow a texture from another set; **Duplicate** copies it into the set. Both ask before replacing a filled slot. A shared `_rmaos` is never variance-baked ([Variance bake](Texture-Packing.md#variance-bake)).
 - **Reorder** by dragging the **≡** handle, or with **Move up** / **Move down** in the set's menu. A drag reaches only the cards on screen: the wheel does not scroll during a drag, and the edge does not scroll by itself. For a long move use **Move to…** ([below](#move-to)).
@@ -81,7 +81,7 @@ The moved set scrolls into view and keeps the selection.
 Right-clicking a slot row in the set editor, or a member chip on a card, opens a menu for that slot:
 
 - The slot commands *From this set*, *Path* and *Clear*. Each is one undo step.
-- *From another set*: links the slot to a map of another set. The link writes that map's output path when it has one (a TruePBR set's packed output), otherwise the `textures\...` path its export writes (the source's folder with the output's name, so `leaf_normal.png` links as `leaf_n.dds`). A map with neither is greyed out. A link needs the same slot kind, so the shared slots (glow / skin_sk, coat / fuzz) never offer the other kind.
+- *From another set*: links the slot to a map of another set. The link writes that map's output path when it has one (a TruePBR set's packed output), otherwise the `textures\...` path its export writes (the source's folder with the output's name, so `leaf_normal.png` links as `leaf_n.dds`). A map with neither is greyed out, so a link never points at nothing. A link needs the same slot kind, so the shared slots (glow / skin_sk, coat / fuzz) never offer the other kind.
 - *Pin this slot (always use this file)* / *Unpin this slot* (hover: "Pinned slots refuse other files (sdc.toml pin)"). A pinned slot shows a lock icon and keeps its fill in Tessalith; the Slot commands window has a box per slot named *Pin slot N (always use this file)*, with "locked" on hover.
   - It refuses a drag in or out and the slot commands. Bulk edits skip it with the reason *slot locked*, or *slot locked in <set>* when the fill is borrowed from another set.
   - Automatic re-typing leaves it alone (Tessalith writes no sub-type into it). You can still change the texture's sub-type by hand.

@@ -10,7 +10,9 @@ Click **Open folder** on the start screen, choose **Open > Open folder…** in t
 
 ### The start screen
 
-With no folder open the window shows the **Open folder** button and the **Recent** list. The Textures and Sets columns and the Advanced drawer appear once a folder is open; the widths you dragged come back with it.
+With no folder open the window shows one large **Open folder** button in the middle, under the hint "Open a folder of source textures to begin." (after a cancelled open it reads "Opening cancelled"). Under the button is the **Recent** list; click a folder to open it. The last line is "Or drag a folder onto the window."
+
+The Textures and Sets columns and the Advanced drawer are not drawn until a folder is open (the bottom strip is), and the column eyes in the header are hidden. The widths you dragged are kept and come back with the first folder.
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
@@ -18,7 +20,7 @@ With no folder open the window shows the **Open folder** button and the **Recent
 
 The status bar shows a progress bar, "Analysing 1,234 / 5,000 files…".
 - The total is the files Tessalith will plan: DDS inputs it does not re-encode and duplicate outputs are left out. Files analysed in an earlier open count too, so the bar fills on a re-open. Packed outputs are assembled after the bar is full.
-- Thumbnails appear when the whole plan lands. Settings and bulk edit stay off until then. **Export** can be clicked and starts once the plan lands.
+- Thumbnails appear when the whole plan lands, not one by one (a DDS input Tessalith does not re-encode gets its tile image shortly after). Settings and bulk edit stay off until then. **Export** can be clicked and starts once the plan lands.
 - **Cancel** stops the open and returns to the folder you had before, with its selection and undo history (its Files tab starts fresh). If there was none, the window reads "Opening cancelled". A cancelled folder you had not opened before is left out of **Recent**.
 - The bar and **Cancel** show only while a folder opens. A re-plan after an edit shows its count as plain text.
 
@@ -43,11 +45,11 @@ The header is one row from about 1280 points of window width; in a narrower wind
 | Control | What it does |
 |---|---|
 | **Open** | A menu: **Open folder…**, then your last ten recent folders (or a greyed "No recent folders"). |
-| **Undo** / **Redo** | Up to 200 steps (**Ctrl+Z**, **Ctrl+Y**); hover for the step ("Undo: Format"). A long NIF step label is cut in a fixed-width slot, with the whole step on hover. The status line says "Undid: Format." until your next edit. Undoing back to the last save clears the unsaved dot. Redo of a **Duplicate** is refused, with the reason, when a file is at the copy's path. |
+| **Undo** / **Redo** | Up to 200 steps (**Ctrl+Z**, **Ctrl+Y**); hover for the step ("Undo: Format"). Each has a fixed-width slot: a long NIF step label is cut in the slot, with the whole step on hover, so the row does not move. The status line then says "Undid: Format." until your next edit, and the bulk panel's result line clears. Undoing back to the last save clears the unsaved dot. Redo of a **Duplicate** is refused, with the reason, when a file is at the copy's path. |
 | **MO2…** | The scan source: the MO2 instance (**Choose…**), its profiles, **Scan a folder…** and **Scan** / **Cancel**. Hover for the instance and profile. |
 | **Preset** | The preset the folder converts with: the Mode's default, or a built-in or user preset of this Mode; hover names the Mode. The Mode (the target) is set in the **Presets** tab ([Presets](GUI-Presets.md#presets)). Saved in `sdc.toml` as `preset`. Greyed out until a folder is open. Its last entry, **Presets…**, opens the preset creator. |
 | **Textures** / **Meshes** (tabs) | Switch views. |
-| **Textures**, **Sets** (eye toggles) | Show or hide each column. Textures view with a folder open only. |
+| **Textures**, **Sets** (eye toggles) | Show or hide each column: an open eye shows it, a struck-through eye hides it; hover says what a click does. Right after the view tabs, Textures view with a folder open only. |
 | **Export to ▾** | The export folder for this project, saved in `sdc-project.toml`. See [Export to](#export-to). |
 | **Save** (Ctrl+S) | Write `sdc.toml` and `sdc-project.toml`. |
 | **Export** | Convert the folder. See [Export](#export). |
@@ -109,11 +111,11 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Pin.** *Pin this slot (always use this file)* keeps a set slot's file as it is in Tessalith (saved in `sdc-project.toml`, never in the PGPatcher JSON).
 - **PGPatcher lock.** PGPatcher keeps the mesh's own texture in a slot ([Slot menus](GUI-Sets-Column.md#slot-menus)).
 - **Field lock.** A field that the target or the sub-type fixes, greyed with the reason (for example the format of a type that allows only one). Not the PGPatcher lock and not a pin.
-- **Half, Quarter, Eighth.** The Resize options. Each halving stops at the *Size floor*.
+- **Half, Quarter, Eighth.** The Resize options. Each halving stops at the *Size floor*. A setting for a texture or a sub-type, not an answer to a question.
 - **Set.** The textures that belong to one material: they share a name stem (and a PGPatcher JSON entry under Community Shaders).
 - **Helper.** A source file that is not a texture of its own: it fills a channel of another output, or blends into the normal. It is never written as a DDS.
 - **PGPatcher JSON.** The editor for the JSON PGPatcher reads, in the *PGPatcher JSON editor…* menu item and set button and in the tab or window title. *+ Add a delete section* adds a PGPatcher "delete" section.
 - **Drop the alpha anyway.** The acknowledgement button of a texture whose varying alpha the chosen format or setting discards, once its alpha type is confirmed: the export writes the texture without its alpha. Every other blocking warning keeps *Acknowledge*.
-- **Not exported yet.** What the Files tab says before the first export of the session.
+- **Not exported yet.** What the Files tab says before the first export of the session; the counts (*converted*, *up to date*, …) appear once there are files.
 - **Sub-type labels.** A sub-type reads as its id with spaces (*pbr albedo*); *Skin RFAOS* is the one name spelled out. The id (`skin_rfaos`) is on hover.
 - **One accent.** The window has one non-status colour (teal), for selection and the RNM outline. Red, amber and green are for status only.

@@ -109,7 +109,9 @@ A hard abort can leave temporary files in the output folders ([atomic writes](Va
 |---|---|
 | `input not found: <path>` | An input path does not exist. |
 | `<path> is a folder; give .dds files` | `validate` takes files, not folders. |
-| `--mem-budget '<s>': must be greater than 0 …`, `… use bytes or a G/M suffix`, `… not a valid size` | `0`; a unit other than `G` or `M` (`8Q`); a fractional number (`1.5G`). |
+| `--mem-budget '<s>': must be greater than 0 (omit the flag for the default, 50% of RAM)` | `--mem-budget 0`. |
+| `--mem-budget '<s>': use bytes or a G/M suffix` | A size ending in something other than a digit, `G` or `M`, such as `8Q`. |
+| `--mem-budget '<s>': not a valid size` | A number that is not a whole number, such as `1.5G`. |
 | `--allow <X>: unknown code` | A misspelt code. |
 | `--set '<s>': unknown field '<f>'` | A misspelt field name. |
 | `--set '<s>': unknown sub-type '<id>'` | A misspelt sub-type. |
