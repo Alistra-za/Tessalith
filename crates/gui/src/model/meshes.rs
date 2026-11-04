@@ -1809,7 +1809,7 @@ pub fn texture_source_calls() -> usize {
     TEXTURE_SOURCE_CALLS.with(std::cell::Cell::get)
 }
 
-/// [	exture_sources] for the tests (Note FO8: the Auto skin guesses are in the map).
+/// `texture_sources` for the tests (Note FO8: the Auto skin guesses are in the map).
 #[cfg(feature = "test-hooks")]
 pub fn texture_sources_for_test(
     store: &Store,
