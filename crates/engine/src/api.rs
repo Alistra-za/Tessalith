@@ -2212,6 +2212,12 @@ impl Engine {
             let Some(r) = r else {
                 // Cancelled before its sources were loaded: the recipe has no job (Note M11, ruling W7).
                 pack::plan::fail_report(&mut packed.reports, c, "cancelled".into());
+                packed.lost.extend(
+                    c.job
+                        .sources
+                        .iter()
+                        .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                );
                 cancelled.push(path);
                 continue;
             };
@@ -2224,6 +2230,12 @@ impl Engine {
                 Err(f) => {
                     let (stage, error) = failure(&output, f);
                     pack::plan::fail_report(&mut packed.reports, c, error.clone());
+                    packed.lost.extend(
+                        c.job
+                            .sources
+                            .iter()
+                            .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                    );
                     failed.push(FailedFile {
                         path,
                         output,
@@ -2233,6 +2245,16 @@ impl Engine {
                 }
             }
         }
+        // Backlog T17: the sources of failed or cancelled recipes end as not converted, once every job is known.
+        let lost: Vec<_> = packed
+            .lost
+            .iter()
+            .filter_map(|(s, k, p, _)| {
+                let f = files.iter().find(|f| f.path == *p)?;
+                Some((s.clone(), *k, p.clone(), f.output.clone()))
+            })
+            .collect();
+        pack::plan::end_lost_sources(&lost, &jobs, &failed, &cancelled, &mut skipped);
         // Note DY: each filled target is loaded, filled and analysed again, then re-resolved as 6c does, so alpha
         // policy, format, coverage and cutout all see the filled image. It runs before the derive step, so a target
         // a derive replaces loses its fill with it (Ruling 15). The filled analysis is cached in memory by both files'
@@ -2593,6 +2615,18 @@ impl Engine {
                 }
                 if let Some(pk) = &j.pack {
                     rels.extend(pk.sources.iter().filter_map(|s| rel_of_path(&s.path)));
+                }
+                // Backlog T18: a cube's faces, and its output stem (folder of the first face + the output's name).
+                if let Some(cj) = &j.cube {
+                    rels.extend(cj.sources.iter().filter_map(|s| rel_of_path(&s.path)));
+                    if let (Some(r), Some(stem)) = (rel_of_path(&j.input), j.output.file_stem()) {
+                        let dir = r.rsplit_once('/').map_or("", |(d, _)| d);
+                        rels.push(
+                            format!("{dir}/{}", stem.to_string_lossy())
+                                .trim_start_matches('/')
+                                .to_string(),
+                        );
+                    }
                 }
                 rels.extend(j.fill.iter().filter_map(|f| rel_of_path(&f.source.path)));
             }

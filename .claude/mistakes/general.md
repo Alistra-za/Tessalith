@@ -19,3 +19,4 @@ Format and rules: [README.md](README.md).
 
 - 2026-11-04 Restoring a source file from a scratch copy with Copy-Item kept the copy's older mtime, so cargo reused the stale mutated build and a GREEN run failed → after restoring, set the file's LastWriteTime to now (or restore with the Edit tool) before re-running cargo (`Copy-Item` during mutation checks)
 - 2026-11-04 rustfmt pushed a comment-only line far right because the line above ended in a trailing `// …` comment (it aligns it as a continuation) → make it a trailing comment on the next code line, or put code between them (`cargo fmt`, Rust test fixtures)
+- 2026-11-04 Bash and Monitor both failed with ENAMETOOLONG (uv_spawn) in a long session → use the PowerShell tool and read background task output files instead of Monitor (Bash/Monitor tools)

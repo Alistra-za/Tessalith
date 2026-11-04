@@ -602,7 +602,11 @@ fn live(area: Area, model: &AppModel, meshes_view: bool) -> bool {
                 && model.expanded.is_none()
                 && model.centre_front() == crate::model::CentreTab::Selection
         }
-        Area::Preview => !meshes_view && model.expanded.is_some(),
+        Area::Preview => {
+            !meshes_view
+                && model.expanded.is_some()
+                && model.centre_front() == crate::model::CentreTab::Selection
+        }
         Area::Dialogs | Area::View3d | Area::JsonEditor | Area::Problems => false,
     }
 }

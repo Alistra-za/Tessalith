@@ -356,10 +356,15 @@ fn read_as_target(
         found_in.pop();
     }
     let abs = crate::overrides::absolute_or_same(root).join(&with_ext);
-    let rel = abs
-        .strip_prefix(&found_in)
-        .map_err(|_| "the alias is outside the folder the file was found in".to_string())?
-        .to_path_buf();
+    // Backlog T19: component by component and case-insensitively (Windows paths), keeping the remainder's case.
+    let fold = |c: std::path::Component| c.as_os_str().to_string_lossy().to_lowercase();
+    let mut under = abs.components();
+    for c in found_in.components() {
+        if under.next().map(fold) != Some(fold(c)) {
+            return Err("the alias is outside the folder the file was found in".into());
+        }
+    }
+    let rel = under.as_path().to_path_buf();
     Ok(ReadAsTarget {
         project_rel: with_ext,
         game_path: game_path(&abs, &rel),

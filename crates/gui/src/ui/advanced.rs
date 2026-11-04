@@ -245,17 +245,27 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
 /// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one
 /// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
 /// The in-progress value of a drag, or of arrow keys on the focused box, is held in egui memory, so a caller that
-/// rebuilds `value` from the model each frame still gets the final value on release or when the box is left.
+/// rebuilds `value` from the model each frame still gets the final value on release or when the box is left. While
+/// `busy` (a re-plan is out) a settled value stays on show until the model hands it back (Backlog R2); `scope` (the
+/// texture or set the box edits) keys the held values, so they never show in another item's box. The match with what
+/// came in is exact `f64` equality: a caller whose model rounds the value would hold it until the plan is idle.
 pub(super) fn settled_drag<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut T,
     speed: f64,
     range: std::ops::RangeInclusive<T>,
     name: &str,
+    busy: bool,
+    scope: &str,
 ) -> bool {
-    let id = ui.next_auto_id().with("settled_drag");
+    let id = ui.next_auto_id().with(("settled_drag", scope));
+    let sent_id = id.with("sent");
     let came_in = value.to_f64();
-    if let Some(held) = ui.data(|d| d.get_temp::<f64>(id)) {
+    // Backlog R2: a settled value stays on show until the re-plan hands it back (or the plan is idle).
+    let sent = ui
+        .data(|d| d.get_temp::<f64>(sent_id))
+        .filter(|s| *s != came_in && busy);
+    if let Some(held) = ui.data(|d| d.get_temp::<f64>(id)).or(sent) {
         *value = T::from_f64(held);
     }
     let r = ui.add(
@@ -277,7 +287,17 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     }
     let settled =
         r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus());
-    settled && v != came_in
+    let out = settled && v != came_in;
+    ui.data_mut(|d| match (out, sent) {
+        (true, _) => {
+            d.insert_temp(sent_id, v);
+        }
+        (false, Some(s)) => {
+            d.insert_temp(sent_id, s);
+        }
+        (false, None) => d.remove::<f64>(sent_id),
+    });
+    out
 }
 
 fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
@@ -540,10 +560,10 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             ui.weak("Select a texture to edit its mip level count.");
             return;
         };
-        let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
-        let why = model.toml_read_only_reason();
+        // Backlog T32 (Note FK): off while a plan is pending, as the settings panel's rows are.
+        let why = model.fix_off();
         let f = levels_view(model.target, &job);
-        ui.add_enabled_ui(!read_only, |ui| {
+        ui.add_enabled_ui(why.is_none(), |ui| {
             egui::Grid::new(("advanced-mips", &key))
                 .num_columns(3)
                 .show(ui, |ui| {
@@ -576,10 +596,9 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
             ui.weak("Select a texture to edit its encoder and header fields.");
             return;
         };
-        let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
         let busy = model.edit_busy();
-        let why = model.toml_read_only_reason();
-        ui.add_enabled_ui(!read_only, |ui| {
+        let why = model.fix_off();
+        ui.add_enabled_ui(why.is_none(), |ui| {
             egui::Grid::new(("advanced-fields", &key))
                 .num_columns(3)
                 .show(ui, |ui| {

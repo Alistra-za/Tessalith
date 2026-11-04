@@ -792,3 +792,20 @@ fn arrow_then_enter_runs_the_highlight() {
         "the second row, Export, ran"
     );
 }
+
+/// Backlog T22: with a docked Presets tab in front, the preview keys do not run on the hidden preview.
+#[test]
+fn preview_keys_wait_while_a_docked_view_is_in_front() {
+    use sdc_gui::model::CentreTab;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ten(d.path());
+    m.expand(&k(2));
+    m.open_presets();
+    assert_eq!(m.centre_front(), CentreTab::Presets);
+    let mut h = keys_only(m);
+    press(&mut h, Modifiers::NONE, Key::CloseBracket);
+    press(&mut h, Modifiers::NONE, Key::Num2);
+    assert_eq!(h.state().1, None, "no preview action ran");
+    assert_eq!(h.state().0.expanded, Some(k(2)));
+    assert_eq!(h.state().0.centre_front(), CentreTab::Presets);
+}

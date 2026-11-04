@@ -476,3 +476,68 @@ fn default_folder_names_follow_the_project_name() {
     e.names.cm = Some("Iron Lite".into());
     assert_eq!(e.folder_names("Iron")[2], "Iron Lite");
 }
+
+/// Backlog T17: a recipe that fails on one source ends its other sources too, and their `[files]` keys still
+/// name planned files.
+#[test]
+fn a_failed_recipe_ends_every_source_and_keeps_their_keys_matched() {
+    let d = fixture("[files.\"landscape/rock01_ao.png\"]\nalpha.threshold = 100\n");
+    std::fs::write(
+        d.path().join("in/landscape/rock01_roughness.png"),
+        b"not a png",
+    )
+    .unwrap();
+    let (p, ev) = plan_events(req(&d));
+    let p = p.unwrap();
+    let discovered: Vec<&str> = ev
+        .iter()
+        .filter(|e| matches!(e.kind, EventKind::FileDiscovered { .. }))
+        .filter_map(|e| e.path.as_deref())
+        .filter(|p| p.contains("rock01_"))
+        .collect();
+    assert_eq!(discovered.len(), 4, "{discovered:?}");
+    assert!(!ev
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::CfgFileUnmatched)));
+    let mut run = p;
+    run.request.dry_run = true;
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let s = Engine::new()
+        .unwrap()
+        .run(run, &rep, &CancelToken::default())
+        .unwrap();
+    let end = sink.take();
+    for path in &discovered {
+        let ended = ev.iter().chain(&end).any(|e| {
+            e.path.as_deref() == Some(*path)
+                && matches!(
+                    e.kind,
+                    EventKind::FileFailed { .. }
+                        | EventKind::FileSkipped { .. }
+                        | EventKind::FileDone { .. }
+                        | EventKind::FilePlanned { .. }
+                )
+        });
+        assert!(ended, "no terminal event for {path}");
+    }
+    // The counts add up: the corrupt source is the one failure, the good one one intentional skip, each ended once.
+    assert_eq!(s.failed, 1, "{s:?}");
+    // A dry run counts every planned file as skipped; only the recipe's good source is the intentional one.
+    assert_eq!(s.skipped_intentional, 1, "{s:?}");
+    for tail in ["rock01_roughness.png", "rock01_ao.png"] {
+        let n = end
+            .iter()
+            .filter(|e| {
+                e.path.as_deref().is_some_and(|p| p.ends_with(tail))
+                    && matches!(
+                        e.kind,
+                        EventKind::FileFailed { .. }
+                            | EventKind::FileSkipped { .. }
+                            | EventKind::FileDone { .. }
+                    )
+            })
+            .count();
+        assert_eq!(n, 1, "{tail}");
+    }
+}
