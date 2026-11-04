@@ -1492,3 +1492,28 @@ fn undo_click_commits_the_field_first() {
         Some(&serde_json::json!(0.3))
     );
 }
+
+/// Backlog L16: a focused box scans the path list once per changed text, not four times a frame.
+#[test]
+fn a_focused_box_scans_the_paths_once_per_text() {
+    let (_d, mut h) = harness();
+    focus(&mut h);
+    clear_and_type(&mut h, "roc");
+    h.run();
+    let n = sdc_gui::ui::input_name::scans();
+    for _ in 0..5 {
+        h.step();
+    }
+    assert_eq!(
+        sdc_gui::ui::input_name::scans(),
+        n,
+        "idle frames scan nothing"
+    );
+    h.input_mut().events.push(egui::Event::Text("k".into()));
+    h.run();
+    assert_eq!(
+        sdc_gui::ui::input_name::scans(),
+        n + 1,
+        "one scan for one keystroke"
+    );
+}

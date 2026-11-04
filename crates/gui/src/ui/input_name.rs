@@ -29,6 +29,38 @@ const MIN_W: f32 = 160.0;
 /// What the box needs besides its text: its margins, the ▾ and the spacing between them.
 const CHROME: f32 = 44.0;
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SCANS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Path-list scans this thread made for the box (tests: one per changed text, not four per frame).
+#[cfg(feature = "test-hooks")]
+pub fn scans() -> u32 {
+    SCANS.get()
+}
+
+/// The ghost and the live rows of `text`, scanned once per (path list, text). Backlog L16: the box asked four times a
+/// frame. The cache holds the list's `Arc`, so a new list can never be mistaken for the old one by its address.
+type Scanned = (Option<String>, Vec<String>);
+fn scan(ui: &egui::Ui, edit_id: egui::Id, paths: &Arc<Vec<String>>, text: &str) -> Arc<Scanned> {
+    type Cached = (Arc<Vec<String>>, String, Arc<Scanned>);
+    let id = egui::Id::new(("input-name-scan", edit_id));
+    if let Some((p, t, r)) = ui.data(|d| d.get_temp::<Cached>(id)) {
+        if Arc::ptr_eq(&p, paths) && t == text {
+            return r;
+        }
+    }
+    #[cfg(feature = "test-hooks")]
+    SCANS.set(SCANS.get() + 1);
+    let r = Arc::new((
+        completion(paths, text),
+        live_rows(paths, text, segment_start(text), LIVE_ROWS),
+    ));
+    ui.data_mut(|d| d.insert_temp(id, (paths.clone(), text.to_string(), r.clone())));
+    r
+}
+
 /// A padlock centred on `c`: a filled body under a shackle (the PGPatcher lock on a slot card).
 pub(super) fn paint_lock(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
     let body = egui::Rect::from_center_size(c + egui::vec2(0.0, 1.5), egui::vec2(9.0, 6.0));
@@ -384,7 +416,9 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                 live.sel = None;
             }
         }
-        let mut ghost = focused.then(|| completion(&paths, &text)).flatten();
+        let mut ghost = focused
+            .then(|| scan(ui, edit_id, &paths, &text).0.clone())
+            .flatten();
         if ghost.is_some() {
             let mut state = egui::TextEdit::load_state(ui.ctx(), edit_id).unwrap_or_default();
             let at_end = state
@@ -407,7 +441,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             };
             if let Some(t) = took {
                 text.push_str(&t);
-                ghost = completion(&paths, &text);
+                ghost = scan(ui, edit_id, &paths, &text).0.clone();
                 let end = CCursor::new(text.chars().count());
                 state.cursor.set_char_range(Some(CCursorRange::one(end)));
                 state.store(ui.ctx(), edit_id);
@@ -492,7 +526,10 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             ui.data_mut(|d| d.remove::<Option<usize>>(anchor_id));
         }
         // The ghost follows the text as edited this frame (review fix): drawn after the edit, not from last frame's.
-        ghost = r.has_focus().then(|| completion(&paths, &text)).flatten();
+        ghost = r
+            .has_focus()
+            .then(|| scan(ui, edit_id, &paths, &text).0.clone())
+            .flatten();
         if let Some(g) = ghost.as_ref() {
             let at = out.galley_pos + egui::vec2(out.galley.rect.width(), 0.0);
             ui.painter().with_clip_rect(out.text_clip_rect).text(
@@ -533,7 +570,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
         }
         // AO4: the live list follows the text while the box has focus; FI17: under the folder before the last segment.
         let rows = if r.has_focus() || r.lost_focus() {
-            live_rows(&paths, &text, segment_start(&text), LIVE_ROWS)
+            scan(ui, edit_id, &paths, &text).1.clone()
         } else {
             vec![]
         };
