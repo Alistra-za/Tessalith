@@ -8,6 +8,10 @@ use super::{
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+/// How long `review_json` reuses its read of the JSON files. Tests expire it with `expire_review_json` instead of
+/// sleeping past it.
+pub const REVIEW_JSON_TTL: Duration = Duration::from_secs(1);
+
 /// Note FB1: the gate's reason, and the Blockers row's text, while no export folder is chosen.
 pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
@@ -96,12 +100,18 @@ impl AppModel {
         self.show_tab(BottomTab::Review);
     }
 
-    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for 1 s, since
+    /// Tests: end `review_json`'s cache now, as `REVIEW_JSON_TTL` passing would.
+    #[cfg(feature = "test-hooks")]
+    pub fn expire_review_json(&self) {
+        self.review_json_cache.take();
+    }
+
+    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for `REVIEW_JSON_TTL`, since
     /// Review draws it every frame and it reads the files (AG128).
     pub fn review_json(&self) -> Vec<JsonLine> {
         let key = self.view_key();
         if let Some((k, at, lines)) = &*self.review_json_cache.borrow() {
-            if *k == key && at.elapsed() < Duration::from_secs(1) {
+            if *k == key && at.elapsed() < REVIEW_JSON_TTL {
                 return lines.clone();
             }
         }

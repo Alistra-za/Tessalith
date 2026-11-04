@@ -505,6 +505,9 @@ pub struct AppModel {
     pub(crate) problem_lookups: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
+    /// Backlog L54: worker replies `poll` dropped for an old generation or token (see `stale_replies_dropped`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) stale_drops: std::cell::Cell<u32>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
     #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
@@ -821,6 +824,8 @@ impl AppModel {
             problem_lookups: Default::default(),
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            stale_drops: Default::default(),
             #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
@@ -1594,6 +1599,33 @@ impl AppModel {
         changed
     }
 
+    /// A plan, source or encode reply for an older generation or token was dropped (tests count these, L54).
+    pub(super) fn note_stale_drop(&self) {
+        #[cfg(feature = "test-hooks")]
+        self.stale_drops.set(self.stale_drops.get() + 1);
+    }
+
+    /// Tests: how many stale plan, source and encode replies `poll` has dropped.
+    #[cfg(feature = "test-hooks")]
+    pub fn stale_replies_dropped(&self) -> u32 {
+        self.stale_drops.get()
+    }
+
+    /// Tests: poll until one more stale reply has been dropped, or `timeout` passes. False on a timeout.
+    #[cfg(feature = "test-hooks")]
+    pub fn poll_until_stale_drop(&mut self, timeout: Duration) -> bool {
+        let base = self.stale_drops.get();
+        let end = Instant::now() + timeout;
+        while self.stale_drops.get() == base {
+            if Instant::now() >= end {
+                return false;
+            }
+            self.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+
     fn handle(&mut self, msg: WorkerMsg) {
         match msg {
             WorkerMsg::PlanProgress {
@@ -1625,7 +1657,7 @@ impl AppModel {
                     Err(f) => self.plan_failed(f),
                 }
             }
-            WorkerMsg::Planned { .. } => {}
+            WorkerMsg::Planned { .. } => self.note_stale_drop(),
             WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
             WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
