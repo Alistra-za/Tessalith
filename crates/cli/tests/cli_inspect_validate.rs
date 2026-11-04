@@ -1194,3 +1194,26 @@ fn validate_json_with_closed_stderr_exits_1_and_checks_all_files() {
     assert_eq!(st.code(), Some(1), "{out}");
     assert_eq!(out.lines().count(), 2, "{out}");
 }
+
+#[test]
+fn convert_logs_the_set_shader_warnings() {
+    let d = tempfile::tempdir().unwrap();
+    let a = d.path().join("in/textures/a");
+    std::fs::create_dir_all(&a).unwrap();
+    ImageBuffer::from_fn(16, 16, |_, _| Rgb([120u8, 90, 60]))
+        .save(a.join("wall.png"))
+        .unwrap();
+    ImageBuffer::from_fn(16, 16, |_, _| Rgb([128u8, 128, 255]))
+        .save(a.join("wall_n.png"))
+        .unwrap();
+    let o = sdc()
+        .args(["convert", "--accept-suggestions", "high", "--recursive"])
+        .args(["--target", "vanilla", "--set", "set:wall.shader=glow"])
+        .arg("-o")
+        .arg(d.path().join("out"))
+        .arg(d.path().join("in"))
+        .output()
+        .unwrap();
+    let err = text(&o.stderr);
+    assert!(err.contains("wall: SHADER-MISSING-MAP"), "{err}");
+}

@@ -53,6 +53,23 @@ impl EventSink for HumanSink {
                     w.message
                 ))
             }
+            // A set's SHADER-* warnings, as `inspect` lists them; the set takes the file's place.
+            EventKind::SetResolved { warnings, .. } => {
+                let set = ev.set.as_deref().unwrap_or("");
+                let lines: Vec<String> = warnings
+                    .iter()
+                    .filter(|w| w.severity >= Severity::Warning)
+                    .map(|w| {
+                        format!(
+                            "{:<5} {set}: {} {}",
+                            format!("{:?}", w.severity).to_lowercase(),
+                            w.code.as_str(),
+                            w.message
+                        )
+                    })
+                    .collect();
+                (!lines.is_empty()).then(|| lines.join("\n"))
+            }
             EventKind::BatchDone {
                 converted,
                 up_to_date,
