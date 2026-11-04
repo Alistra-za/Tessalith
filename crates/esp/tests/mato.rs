@@ -323,6 +323,9 @@ fn the_last_edid_names_the_record_as_the_scan_does() {
     let p = mato_plugin(&[r]);
     assert_eq!(mato_data(&p, "Snow"), Some(distinct()));
     assert_eq!(mato_data(&p, "Other"), None);
+    let f = esp::parse("x.esp", &p);
+    assert_eq!(f.records[0].edid.as_deref(), Some("Snow"));
+    assert_eq!(f.records[0].payload.mato_flags, Some(DISTINCT_FLAGS));
 }
 
 #[test]
@@ -336,5 +339,9 @@ fn a_good_data_then_a_short_data_gives_none_like_the_scan() {
             sub(b"DATA", &data48()[..40]),
         ],
     );
-    assert_eq!(mato_data(&mato_plugin(&[r]), "Snow"), None);
+    let p = mato_plugin(&[r]);
+    assert_eq!(mato_data(&p, "Snow"), None);
+    let f = esp::parse("x.esp", &p);
+    assert_eq!(f.records[0].edid.as_deref(), Some("Snow"));
+    assert_eq!(f.records[0].payload.mato_flags, None);
 }
