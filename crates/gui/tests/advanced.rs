@@ -513,3 +513,50 @@ fn drawer_texture_rows_wait_for_the_plan() {
         "a drawer row is enabled during a plan: {combos:?}"
     );
 }
+
+/// Backlog T32 (second half): the pending plan's wait reason is on the disabled row, and once the plan lands a pick
+/// of None is written (it was dropped as "unchanged" against the stale view).
+#[test]
+fn drawer_resize_pick_waits_for_the_plan_then_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = leaf_model(d.path());
+    model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(400.0, 1400.0))
+        .build_ui_state(
+            |ui, model: &mut AppModel| {
+                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
+                sdc_gui::ui::advanced::body(ui, model, &mut state);
+            },
+            model,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run_steps(3);
+    // The Resize combo is the one showing `value` (its accessible text is its value).
+    let resize = |h: &Harness<'_, AppModel>, value: &str| {
+        h.query_all_by_role(Role::ComboBox)
+            .find(|n| n.accesskit_node().value().as_deref() == Some(value))
+            .unwrap_or_else(|| panic!("no combo showing {value}"))
+            .rect()
+            .center()
+    };
+    h.hover_at(resize(&h, "None"));
+    h.run();
+    h.get_by_label("Wait for the plan to finish");
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(3);
+    h.query_all_by_role(Role::ComboBox)
+        .find(|n| n.accesskit_node().value().as_deref() == Some("Half"))
+        .expect("the Resize combo shows the landed Half")
+        .click();
+    h.run();
+    h.get_by_label("None").click();
+    h.run_steps(3);
+    let own = h
+        .state()
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value("landscape/leaf.png", "resize");
+    assert_eq!(own, Some(serde_json::json!("none")));
+}

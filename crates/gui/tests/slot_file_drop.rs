@@ -310,7 +310,8 @@ fn a_drop_under_a_modal_is_ignored() {
     let other = tempfile::tempdir().unwrap();
     let outside = other.path().join("brick.png");
     std::fs::write(&outside, b"x").unwrap();
-    for pending in [false, true] {
+    // A Rename prompt with typed text, an error dialog, and the Slot commands dialog.
+    for modal in 0..3 {
         let d = tempfile::tempdir().unwrap();
         let mut m = pbr_opened(d.path());
         let key = set_views(&m)
@@ -322,10 +323,15 @@ fn a_drop_under_a_modal_is_ignored() {
         let root = m.root.clone();
         let mut h = harness(m);
         h.run();
-        if pending {
-            h.state_mut().1.drops.pending = Some(Pending::Refused("busy".into()));
-        } else {
-            h.state_mut().0.dialog = Some(Dialog::Error("busy".into()));
+        let rename = Pending::Rename {
+            id: LEAF.into(),
+            text: "typed".into(),
+            error: None,
+        };
+        match modal {
+            0 => h.state_mut().1.drops.pending = Some(rename.clone()),
+            1 => h.state_mut().0.dialog = Some(Dialog::Error("busy".into())),
+            _ => h.state_mut().1.slot_cmds.open = Some(LEAF.into()),
         }
         h.run();
         // Over a slot (the outside file would raise a refusal) and over empty space (it would open the folder).
@@ -337,19 +343,25 @@ fn a_drop_under_a_modal_is_ignored() {
             .push(std::sync::Arc::new(Dropped(other.path().to_path_buf())));
         h.run();
         let (m, st) = (&h.state().0, &h.state().1);
-        assert!(
-            st.drops.slot_note.is_none(),
-            "pending {pending}: no slot note"
-        );
-        assert_eq!(m.root, root, "pending {pending}: the folder stays open");
-        if pending {
-            assert_eq!(st.drops.pending, Some(Pending::Refused("busy".into())));
-        } else {
-            assert_eq!(m.dialog, Some(Dialog::Error("busy".into())));
-            assert!(
-                st.drops.pending.is_none(),
-                "no refusal raised under the dialog"
-            );
+        assert!(st.drops.slot_note.is_none(), "modal {modal}: no slot note");
+        assert_eq!(m.root, root, "modal {modal}: the folder stays open");
+        match modal {
+            0 => assert_eq!(
+                st.drops.pending,
+                Some(rename),
+                "the Rename prompt and its text stay"
+            ),
+            1 => {
+                assert_eq!(m.dialog, Some(Dialog::Error("busy".into())));
+                assert!(
+                    st.drops.pending.is_none(),
+                    "no prompt raised under the dialog"
+                );
+            }
+            _ => {
+                assert_eq!(st.slot_cmds.open.as_deref(), Some(LEAF));
+                assert!(m.dialog.is_none() && st.drops.pending.is_none());
+            }
         }
     }
 }

@@ -1467,4 +1467,28 @@ fn undo_click_commits_the_field_first() {
         None,
         "the typed name was undone"
     );
+    // The older step is untouched: had the typed text been dropped, Undo would have undone this one instead.
+    let spec = |m: &AppModel| {
+        json_entries(m)
+            .into_iter()
+            .find(|(v, _)| v.id == ROCK_SET)
+            .and_then(|(v, _)| v.settings.get("specular_level").cloned())
+    };
+    assert_eq!(spec(m), Some(serde_json::json!(0.3)));
+    // And Redo brings the typed name back, so it was committed (not lost) before the undo.
+    h.state_mut().0.redo();
+    settle(&mut h);
+    let m = &h.state().0;
+    assert_eq!(
+        m.input_name_of("landscape/rock02").as_deref(),
+        Some("textures/landscape/rock02")
+    );
+    let renamed = json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.id == "landscape/rock02")
+        .expect("the set under its new name");
+    assert_eq!(
+        renamed.0.settings.get("specular_level"),
+        Some(&serde_json::json!(0.3))
+    );
 }
