@@ -381,6 +381,30 @@ fn relative_to_and_floor_say_they_do_nothing_without_a_resize() {
     assert_eq!(h.query_all_by_label(NONE).count(), 0);
 }
 
+/// Final review (GUI M3): a cube's Resize, Relative to and Size floor say Face size sizes it, whatever Resize holds;
+/// other fields and a 2D map with a resize say nothing.
+#[test]
+fn a_cubes_resize_rows_say_face_size_sizes_it() {
+    use engine::config::{ResizeMode, Subtype};
+    use sdc_gui::model::fields::no_effect_reason;
+    const CUBE: &str = "no effect on a cubemap: Face size sizes it";
+    let d = tempfile::tempdir().unwrap();
+    let m = opened(d.path());
+    let mut p = m.item("up.png").unwrap().job.clone().unwrap().profile;
+    p.resize = ResizeMode::Half;
+    for f in ["resize", "resize_relative_to", "resize_floor", "mips"] {
+        assert_eq!(no_effect_reason(&p, f), None, "2D {f}");
+    }
+    p.subtype = Subtype::Cubemap;
+    for mode in [ResizeMode::Half, ResizeMode::None] {
+        p.resize = mode;
+        for f in ["resize", "resize_relative_to", "resize_floor"] {
+            assert_eq!(no_effect_reason(&p, f), Some(CUBE), "{mode:?} {f}");
+        }
+        assert_eq!(no_effect_reason(&p, "mips"), None);
+    }
+}
+
 /// The Advanced drawer has a Size floor row showing the default, then the texture's own value; Clear removes the key.
 #[test]
 fn the_size_floor_row_follows_resize_and_clear_removes_it() {

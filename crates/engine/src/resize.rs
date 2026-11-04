@@ -114,7 +114,6 @@ pub(crate) fn plan_references(
             let p = &j.profile;
             let n = p.resize_relative_to.slot()?;
             // A cube is sized by `cubemap.face_size`, as `target_dims` says (ruling FR-c).
-            // A cube is sized by `cubemap.face_size`, as `target_dims` says (ruling FR-c).
             if p.resize.is_none()
                 || p.subtype == Subtype::Cubemap
                 || p.subtype.txst_slot() == Some(n)
