@@ -900,6 +900,44 @@ fn derive_sets_applies_a_cavity_maps_helper_invert() {
             [90, 90, 90, 255],
         );
     });
+    png(
+        &m.join("textures/pbr/arm/steel_curves.png"),
+        16,
+        16,
+        [90, 90, 90, 255],
+    );
+    let curves = |sel: &str| {
+        let mut r = request(&m, &loc.join("Mod PBR"));
+        r.overrides.push(parse_set(sel).unwrap());
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                r,
+                &Reporter::new(Arc::new(NullSink), "t"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        derive_sets(&p, &BTreeSet::new()).0[0]
+            .curves
+            .clone()
+            .expect("curves map")
+    };
+    // `helper.read` on the curves map picks its channel; the plain curves map has none.
+    assert!(matches!(
+        curves("file:**/steel_curves.png.helper.read=g"),
+        engine::pack::ChannelSource::Source {
+            channel: Some(1),
+            ..
+        }
+    ));
+    assert!(matches!(
+        curves("file:**/steel_curves.png.helper.invert=true"),
+        engine::pack::ChannelSource::Source {
+            invert: true,
+            channel: None,
+            ..
+        }
+    ));
     let cavity = |invert: bool| {
         let mut r = request(&m, &loc.join("Mod PBR"));
         if invert {

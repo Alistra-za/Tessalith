@@ -877,8 +877,16 @@ mod tests {
                 .map(|(x, y)| (x - y).abs())
                 .sum::<f32>()
                 / a.px.len() as f32;
-        // Measured 0.0001; the bound leaves room for the resampler, not for a slope bias.
         assert!(mean < 0.001, "mean abs height difference {mean}");
+        // The height is range-normalised, which would hide a uniform slope shrink: compare the slopes the solve
+        // starts from (the resampled normal against the true one), so a bias in `to_pot` shows.
+        let up = to_pot(&torus_n(1000, 1000)).expect("1000 is not a power of two");
+        let (s, t) = (slopes(&up, Directx), slopes(&torus_n(1024, 1024), Directx));
+        let mean_abs = |v: &[f64]| v.iter().map(|x| x.abs()).sum::<f64>() / v.len() as f64;
+        // A torus normal holds per-pixel slopes, so the 1000 px one is 1024/1000 steeper per pixel than the 1024 px
+        // one; resampling must keep exactly that (measured 1.0238 against 1.024).
+        let ratio = mean_abs(&s.p) / mean_abs(&t.p);
+        assert!((ratio - 1.024).abs() < 0.003, "mean |p| ratio {ratio}");
     }
 
     #[test]
