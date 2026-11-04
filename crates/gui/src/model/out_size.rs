@@ -128,6 +128,10 @@ pub struct SizeCache {
     pub reader: Option<DimsReader>,
     /// Rebuilds so far (tests).
     pub builds: u32,
+    /// `size_total` calls so far (tests: the header sums the selection once per change, not once per frame).
+    pub totals: u32,
+    /// Bumped when dims land or the folder is forgotten: a cached total keyed on it follows the sizes.
+    landed: u64,
 }
 
 impl SizeCache {
@@ -151,6 +155,7 @@ impl SizeCache {
         self.sizes.clear();
         self.folder = None;
         self.rev = None;
+        self.landed += 1;
     }
 
     /// Size results kept (tests).
@@ -226,6 +231,7 @@ impl AppModel {
 
     /// Total file bytes over `keys` and how many had no estimate (a source the header reader cannot size).
     pub fn size_total(&mut self, keys: &[String]) -> (u64, usize) {
+        self.sizes.totals += 1;
         let mut c = std::mem::take(&mut self.sizes);
         let t = c.total(self, keys.iter().map(String::as_str));
         self.sizes = c;
@@ -315,7 +321,13 @@ impl AppModel {
         // Estimates built without them are rebuilt.
         c.rev = None;
         c.folder = None;
+        c.landed += 1;
         self.kick_dims();
+    }
+
+    /// Changes whenever sizes land; part of the key of the cached VRAM text.
+    pub fn sizes_rev(&self) -> u64 {
+        self.sizes.landed
     }
 
     /// AG127: the files of a panicked job are asked again once, at the next plan; a second panic leaves them

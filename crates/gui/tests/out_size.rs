@@ -168,6 +168,42 @@ fn headers_are_read_on_a_worker_and_the_totals_follow() {
     assert_eq!(header_reads_on_this_thread(), before);
 }
 
+/// Backlog L15: the header's VRAM line is summed when the selection or the sizes change, not once per frame, and it
+/// follows a dims job that lands with the selection unchanged.
+#[test]
+fn the_header_vram_line_is_cached_and_follows_landing_dims() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.session = Some(support::session());
+    m.invalidate_views();
+    m.select_item("landscape/rock01.png");
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            |ui, model: &mut sdc_gui::model::AppModel| sdc_gui::ui::draw(ui, model),
+            m,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.step();
+    assert!(h
+        .query_all_by_label_contains("unsized")
+        .any(|n| format!("{n:?}").contains("VRAM")));
+    let totals = h.state().sizes.totals;
+    for _ in 0..5 {
+        h.step();
+    }
+    assert_eq!(h.state().sizes.totals, totals, "no re-sum per frame");
+    // The header job lands; the selection is unchanged.
+    settle(h.state_mut());
+    h.step();
+    h.step();
+    assert!(
+        h.query_all_by_label_contains("unsized").next().is_none(),
+        "the line followed the landed sizes"
+    );
+}
+
 fn panics(_: &std::path::Path) -> Option<(u32, u32)> {
     panic!("header reader blew up")
 }
