@@ -1809,6 +1809,15 @@ pub fn texture_source_calls() -> usize {
     TEXTURE_SOURCE_CALLS.with(std::cell::Cell::get)
 }
 
+/// [	exture_sources] for the tests (Note FO8: the Auto skin guesses are in the map).
+#[cfg(feature = "test-hooks")]
+pub fn texture_sources_for_test(
+    store: &Store,
+    paths: &[(u32, Vec<String>)],
+) -> Result<HashMap<String, FileSource>, ScanError> {
+    texture_sources(store, paths)
+}
+
 /// The skin shape's Auto texture guesses the resolver must be able to find: the RFAOS candidates and the wetness
 /// ones (Note GN1; render3d resolves them only through the texture map). Empty for a shape that is not skin.
 pub(crate) fn skin_map_guesses(ty: u32, normal: &str, specular: &str) -> Vec<String> {
@@ -1820,7 +1829,7 @@ pub(crate) fn skin_map_guesses(ty: u32, normal: &str, specular: &str) -> Vec<Str
 /// Where the game's copy of each texture is, for shapes given as (shader type, slot paths; "" = empty): every slot
 /// path the store has, then the skin RFAOS and wetness guesses ([`skin_map_guesses`]), those optional: a failed read
 /// is quiet. The first entry for a path wins.
-pub fn texture_sources(
+fn texture_sources(
     store: &Store,
     paths: &[(u32, Vec<String>)],
 ) -> Result<HashMap<String, FileSource>, ScanError> {

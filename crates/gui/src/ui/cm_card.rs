@@ -127,7 +127,7 @@ fn drag(ui: &mut egui::Ui, x: &mut f64) -> bool {
     ui.add(
         egui::DragValue::new(x)
             .range(0.0..=f64::INFINITY)
-            .clamp_existing_to_range(false) // Note FO3: a stored negative shows as it is
+            .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
             .speed(0.01),
     )
     .changed()

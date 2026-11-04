@@ -819,7 +819,7 @@ pub(crate) fn control(
                         .add(
                             egui::DragValue::new(&mut rgb[i])
                                 .range(0.0..=RGB_MAX)
-                                .clamp_existing_to_range(false) // Note FO3
+                                .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
                                 .speed(0.005)
                                 .fixed_decimals(3),
                         )

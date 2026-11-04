@@ -113,6 +113,11 @@ fn input_name_on_renamed_set_moves_its_entry() {
         "{:?}",
         v.settings
     );
+    assert!(
+        views.iter().all(|v| v.missing.is_empty()),
+        "no entry reports NoFilesLeft or a stale edit: {:?}",
+        views.iter().map(|v| &v.missing).collect::<Vec<_>>()
+    );
     assert!(views.iter().all(|v| v.id != "landscape/rock02"));
 }
 

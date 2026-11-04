@@ -955,28 +955,32 @@ fn a_float_edit_makes_no_store_query() {
 #[test]
 fn the_auto_wet_guess_is_in_the_mesh_texture_map() {
     let d = files(false);
+    // body_wet derives from slot 7 (`body_s`), head_wet from slot 1 (`head_msn`).
     put(d.path(), "mods/A/textures/a/body_wet.dds", Some(b"dds"));
+    put(d.path(), "mods/A/textures/a/head_wet.dds", Some(b"dds"));
     let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
     m.procs = sdc_gui::model::meshes::no_procs;
     scan_and_select(&mut m, d.path());
     let store = modscan::store::Store::open_read_only(&d.path().join("scan.db")).unwrap();
     let slots = || {
-        vec![
-            "textures/a/body.dds".to_string(),
-            "textures/a/body_msn.dds".to_string(),
-        ]
+        let mut v = vec![String::new(); 8];
+        v[0] = "textures/a/head.dds".into();
+        v[1] = "textures/a/head_msn.dds".into();
+        v[7] = "textures/a/body_s.dds".into();
+        v
     };
-    let map =
-        sdc_gui::model::meshes::texture_sources(&store, &[(4, slots()), (0, slots())]).unwrap();
-    assert!(
-        matches!(
-            map.get("textures/a/body_wet.dds"),
-            Some(sdc_gui::model::viewport3d::FileSource::Optional(_))
-        ),
-        "the _wet guess of the type-4 shape is an optional source"
-    );
+    let map = sdc_gui::model::meshes::texture_sources_for_test(&store, &[(4, slots())]).unwrap();
+    for wet in ["textures/a/body_wet.dds", "textures/a/head_wet.dds"] {
+        assert!(
+            matches!(
+                map.get(wet),
+                Some(sdc_gui::model::viewport3d::FileSource::Optional(_))
+            ),
+            "{wet}: the guess of the type-4 shape is an optional source"
+        );
+    }
     // Control: a plain shape (type 0) gets no guess.
-    let map = sdc_gui::model::meshes::texture_sources(&store, &[(0, slots())]).unwrap();
+    let map = sdc_gui::model::meshes::texture_sources_for_test(&store, &[(0, slots())]).unwrap();
     assert!(!map.contains_key("textures/a/body_wet.dds"));
 }
 

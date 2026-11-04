@@ -191,7 +191,11 @@ fn a_mislabelled_pack_source_is_sized_by_content() {
             .save_with_format(p, ext)
             .unwrap();
     };
-    sized("textures/pbr/iron_roughness.png", 32, image::ImageFormat::Png);
+    sized(
+        "textures/pbr/iron_roughness.png",
+        32,
+        image::ImageFormat::Png,
+    );
     sized("textures/pbr/iron_ao.jpg", 64, image::ImageFormat::Png);
     let (p, _) = plan(req(d.path(), &[]));
     let packed = p

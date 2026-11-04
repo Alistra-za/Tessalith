@@ -57,16 +57,18 @@ fn a_draw_keeps_an_out_of_range_template_value() {
         .key;
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_set(&key);
-    let steps = model.history.undo.len();
+    let (steps, dirty) = (model.history.undo.len(), model.is_dirty());
     let mut h = tall(model);
     h.run();
     h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
     for _ in 0..3 {
         h.run();
     }
-    assert!(has(&h, "density"), "the glint rows are drawn");
+    let label = sdc_gui::model::cs_pbr::field_label("densityRandomization");
+    assert!(has(&h, label), "the glint row {label} is drawn");
     let m = h.state();
     assert_eq!(m.history.undo.len(), steps, "a draw is not an edit");
+    assert_eq!(m.is_dirty(), dirty, "a draw does not dirty the project");
     let entries: Vec<_> = sdc_gui::model::pbr_export::json_entries(m)
         .into_iter()
         .map(|(_, e)| e)

@@ -84,7 +84,7 @@ fn field_row(
             let r = ui.add(
                 egui::DragValue::new(&mut x)
                     .range(lo..=hi)
-                    .clamp_existing_to_range(false) // Note FO3
+                    .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
                     .speed(0.01)
                     .max_decimals(4),
             );
