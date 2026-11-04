@@ -15,7 +15,14 @@ version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
 - `cs-compact` and `vanilla-compact` halve `projected_noise`, `detail_normal` and `gray` like the other data maps (larger
   side above 512).
 - `vanilla-compact` sets `encoder.perceptual = true` in its two BC1 colour rules (luma-weighted BC1), so those outputs
-  change; its data maps and BC7 colour do not.
+  change; its data maps do not.
+- `vanilla-quality` sets `encoder.perceptual = true` in its `diffuse`, `glow` and `skin_albedo` tables, and
+  `vanilla-compact` inherits them. Those sub-types are perceptual in BC1, BC3 and BC7, so a vanilla diffuse or glow
+  re-encodes once; a file whose alpha is `data` is not perceptual (the preset's value drops out). `skin_albedo` is
+  CS-only, so the table has no effect under `vanilla`. `cs-quality`, `cs-compact` and `fast-preview` do not change.
+- No preset sets the BC6H effort. The engine encodes a BC6H file at `slowest` (the peak-preserving mode) when no layer
+  above `sdc-base` chose the effort, so every preset's BC6H output changes and `fast-preview` keeps `fast`.
+- `vanilla-compact`'s description says its BC1 colour is perceptual.
 
 ## 2026-10-28 — sdc 1.1.0 (sdc-base 1.2.0)
 

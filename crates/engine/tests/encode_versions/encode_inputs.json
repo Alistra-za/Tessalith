@@ -52,7 +52,7 @@
     "subtype": "gray"
   },
   "textures/h/hdr_sky.dds": {
-    "sha256": "6ee5a9a010669dae1ed373035b06d7f4d5c2d1b8ed969caaf88a8d6527e6110c",
+    "sha256": "ae9bf4fd2e15f816dccb48a83f1d72cfbdd8c0219b38fc0db52acb978771faac",
     "subtype": "hdr_sky"
   },
   "textures/h/height.dds": {
@@ -176,7 +176,7 @@
     "subtype": "detail_normal"
   },
   "vanilla/textures/h/diffuse.dds": {
-    "sha256": "ff7ef5502a915aeb277865c74d445b704cd711e7cd4dd543caa2cc7421973ec0",
+    "sha256": "98ef162a00e2f829345cae10f85243854280fc2e713273d5de1984010a0553cf",
     "subtype": "diffuse"
   },
   "vanilla/textures/h/envmask.dds": {
@@ -192,7 +192,7 @@
     "subtype": "generic_two_channel"
   },
   "vanilla/textures/h/glow.dds": {
-    "sha256": "c4242452a48eed9946cff389612028cff2435ca8314817cfb9160ab7ee30e9b3",
+    "sha256": "2e3750f3572c7700bec7b57aefbd1318e71d7e33b870794768268cfede627c8a",
     "subtype": "glow"
   },
   "vanilla/textures/h/gray.dds": {
@@ -236,7 +236,7 @@
     "subtype": "ui_sky"
   },
   "vanilla/textures/pbr/rock.dds": {
-    "sha256": "30e7a30543ee8c60ef2deeaa90aa09ad8e6b27639819458be1a5db7aaa55c618",
+    "sha256": "096ffcbba40badb881d180d18a4851710149d810fe4bc8653a866983a180c2c2",
     "subtype": "diffuse"
   },
   "vanilla/textures/pbr/rock_n.dds": {
@@ -244,7 +244,7 @@
     "subtype": "normal"
   },
   "vanilla/textures/rnm/iron.dds": {
-    "sha256": "03925d22d8051c144aa4cafa9bbed8ce395e465d37dd088fa7e34c255f25bd4c",
+    "sha256": "95d4651f61ff937a0c66e2ad5f9ad4a69053295592561723cc28d0c63aba969b",
     "subtype": "diffuse"
   },
   "vanilla/textures/rnm/iron_n.dds": {

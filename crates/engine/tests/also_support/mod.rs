@@ -73,6 +73,10 @@ pub fn request(m: &Path, out: &Path) -> BatchRequest {
     r.recursive = true;
     r.accept = AcceptSuggestions::High;
     r.jobs = 2;
+    // FM43: the vanilla presets encode a diffuse perceptually, so a plain set is copied from the PBR folder only when
+    // the cs phase does too.
+    r.overrides
+        .push(engine::overrides::parse_set("subtype:diffuse.encoder.perceptual=true").unwrap());
     r.set_shaders = BTreeMap::from([
         ("textures/landscape/dirt".to_string(), Shader::PbrLandscape),
         (

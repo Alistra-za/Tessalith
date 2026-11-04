@@ -328,10 +328,15 @@ fn dark_ramp(w: u32, alpha: u8) -> DynamicImage {
 fn vanilla_diffuse_bc7_unorm_no_srgb_full_chain() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/rock/rock.png", rgb(64));
+    // FM43: vanilla diffuse is perceptual, and on this smooth gradient its 8x8 and 4x4 mips fall under the RGB PSNR
+    // floor (VAL-MIP-ERROR), so the "clean fixture" check runs with the flag off.
     let o = convert(
         d.path(),
         Target::Vanilla,
-        &["file:**/rock.png.subtype=diffuse"],
+        &[
+            "file:**/rock.png.subtype=diffuse",
+            "file:**/rock.png.encoder.perceptual=false",
+        ],
         &[],
     );
     assert_eq!(
@@ -652,7 +657,13 @@ fn vanilla_complex_m_is_bc7_and_nothing_is_srgb() {
 fn vanilla_g_is_glow_and_m_with_alpha_is_envmask_with_loss() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/pbr/lamp_g.png", rgb(64));
-    let o = convert(d.path(), Target::Vanilla, &[], &[]);
+    // Perceptual off: a glow is perceptual under vanilla-quality (FM43), which this gradient's small mips do not pass.
+    let o = convert(
+        d.path(),
+        Target::Vanilla,
+        &["encoder.perceptual=false"],
+        &[],
+    );
     assert_eq!(
         (o.summary.converted, o.summary.exit_code()),
         (1, 0),
@@ -2187,10 +2198,14 @@ fn exr_and_radiance_hdr_float_emissives_are_bc6h() {
 fn bmp_diffuse_is_bc7_unorm() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/a/rock.bmp", rgb(64));
+    // Perceptual off: see vanilla_diffuse_bc7_unorm_no_srgb_full_chain (FM43).
     let o = convert(
         d.path(),
         Target::Vanilla,
-        &["file:**/rock.bmp.subtype=diffuse"],
+        &[
+            "file:**/rock.bmp.subtype=diffuse",
+            "file:**/rock.bmp.encoder.perceptual=false",
+        ],
         &[],
     );
     assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
@@ -3700,7 +3715,8 @@ fn vanilla_compact_opaque_diffuse_is_bc1() {
     );
 }
 
-/// FM42: vanilla-compact's two BC1 colour rules turn perceptual on; a data map and BC7 colour keep it off.
+/// FM42: vanilla-compact's two BC1 colour rules turn perceptual on; a data map keeps it off (FM43: a BC7 diffuse is
+/// perceptual through vanilla-quality's table).
 #[test]
 fn vanilla_compact_bc1_colour_is_perceptual_and_data_is_not() {
     let d = tempfile::tempdir().unwrap();
@@ -3727,11 +3743,13 @@ fn vanilla_compact_bc1_colour_is_perceptual_and_data_is_not() {
     };
     assert_eq!(get("a/wall.png"), ("bc1".into(), true));
     assert!(!get("a/wall_n.png").1);
-    assert_eq!(get("b/glass.png"), ("bc7".into(), false));
+    // A diffuse is perceptual in BC7 too (FM43), as it is in BC1.
+    assert_eq!(get("b/glass.png"), ("bc7".into(), true));
     assert!(!planned(&o, "a/wall.png")
         .to_string()
         .contains("FMT-PERCEPTUAL-DATA"));
-    // Every vanilla sub-type the rules name takes perceptual BC1 without FMT-PERCEPTUAL-DATA.
+    // Every vanilla sub-type the rules name takes perceptual BC1 without FMT-PERCEPTUAL-DATA; the CS-only ones
+    // (pbr_albedo, pbr_subsurface, pbr_fuzz, skin_albedo) are skipped, as they are unavailable under vanilla.
     let sts = [
         "diffuse",
         "glow",
@@ -3768,6 +3786,181 @@ fn vanilla_compact_bc1_colour_is_perceptual_and_data_is_not() {
         planned(&o, "a/wall.png")["profile"]["encoder"]["perceptual"],
         false
     );
+}
+
+/// FM43: BC6H encodes at `slowest` (the peak-preserving mode, `bc6h_level`) where no layer above the hidden base chose
+/// the effort: a float emissive, `hdr_sky`, and any file whose format is forced to BC6H. The resolve step keys on the
+/// final format, so an LDR emissive (BC7 by the HDR choice) and every other format keep `veryslow`, and the BC4/BC5
+/// radius and `perceptual` are untouched.
+#[test]
+fn bc6h_subtypes_default_to_the_peak_mode() {
+    use engine::encode::bc6h_level;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/pbr/lamp_g.tif", hdr_emissive());
+    put(d.path(), "textures/a/dome.tif", hdr_emissive());
+    put(d.path(), "textures/a/wall.png", rgb(64));
+    put(d.path(), "textures/pbr/ldr_g.png", rgb(64));
+    for preset in ["cs-quality", "cs-compact"] {
+        let o = plan_preset(
+            d.path(),
+            Target::Cs,
+            preset,
+            &[
+                "file:**/dome.tif.subtype=hdr_sky",
+                "file:**/ldr_g.png.subtype=pbr_emissive",
+            ],
+        );
+        let diffuse = planned(&o, "wall.png");
+        for name in ["lamp_g.tif", "dome.tif"] {
+            let j = planned(&o, name);
+            let e = &j["profile"]["encoder"];
+            assert_eq!(j["profile"]["format"], "bc6h_uf16", "{preset} {name}");
+            assert_eq!(e["effort"], "slowest", "{preset} {name}");
+            assert_eq!(
+                bc6h_level(engine::config::Effort::Slowest),
+                encoders_sys::Bc6hLevel::VeryslowPeak
+            );
+            // Nothing else in the encoder table moves.
+            assert_eq!(e["perceptual"], false, "{preset} {name}");
+            assert_eq!(
+                e["bc45_search_radius"], diffuse["profile"]["encoder"]["bc45_search_radius"],
+                "{preset} {name}"
+            );
+        }
+        let ldr = planned(&o, "ldr_g.png");
+        assert_eq!(ldr["profile"]["format"], "bc7", "{preset}");
+        assert_eq!(ldr["profile"]["encoder"]["effort"], "veryslow", "{preset}");
+        assert_eq!(diffuse["profile"]["encoder"]["effort"], "veryslow");
+    }
+    // A format forced to BC6H on another sub-type gets the same default (a rule cannot match a resolved format).
+    let o = plan_preset(
+        d.path(),
+        Target::Cs,
+        "cs-quality",
+        &["file:**/wall.png.format=bc6h_uf16"],
+    );
+    let j = planned(&o, "wall.png");
+    assert_eq!(
+        (
+            j["profile"]["format"].as_str(),
+            j["profile"]["encoder"]["effort"].as_str()
+        ),
+        (Some("bc6h_uf16"), Some("slowest"))
+    );
+}
+
+/// FM43: `veryslow` stays selectable: set on the texture, by a config or on the CLI it is kept, and fast-preview's own
+/// effort (a built-in preset above the base) is kept too.
+#[test]
+fn an_explicit_veryslow_on_bc6h_stays_veryslow() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/pbr/lamp_g.tif", hdr_emissive());
+    let effort = |preset: &str, sets: &[&str]| {
+        let o = plan_preset(d.path(), Target::Cs, preset, sets);
+        let j = planned(&o, "lamp_g.tif");
+        assert_eq!(j["profile"]["format"], "bc6h_uf16");
+        j["profile"]["encoder"]["effort"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(effort("cs-quality", &[]), "slowest");
+    for set in [
+        "file:**/lamp_g.tif.encoder.effort=veryslow",
+        "encoder.effort=veryslow",
+    ] {
+        assert_eq!(effort("cs-quality", &[set]), "veryslow", "{set}");
+    }
+    assert_eq!(effort("cs-quality", &["encoder.effort=fast"]), "fast");
+    assert_eq!(effort("fast-preview", &[]), "fast");
+}
+
+/// FM43 (owner, 2026-11-03): under the vanilla quality and compact presets a diffuse and a glow are perceptual whether
+/// they resolve to BC1, BC3 or BC7, with no FMT-PERCEPTUAL-DATA. Data alpha turns the preset's value off instead of
+/// blocking the file; an explicit `perceptual = true` with data alpha is still refused.
+#[test]
+fn vanilla_colour_types_are_perceptual_on_bc1_bc3_and_bc7() {
+    let d = tempfile::tempdir().unwrap();
+    let st_of = ["diffuse", "glow"];
+    for st in st_of {
+        put(d.path(), &format!("textures/s/{st}.png"), rgb(64));
+        put(
+            d.path(),
+            &format!("textures/v/{st}.png"),
+            rgba(64, |x, y| [90, 120, 200, ((x + y) * 2) as u8]),
+        );
+    }
+    for preset in ["vanilla-quality", "vanilla-compact"] {
+        for fmt in ["bc1", "bc3", "bc7"] {
+            let mut sets: Vec<String> = vec![];
+            for st in st_of {
+                sets.push(format!("file:**/s/{st}.png.subtype={st}"));
+                sets.push(format!("file:**/s/{st}.png.format={fmt}"));
+            }
+            let sets: Vec<&str> = sets.iter().map(String::as_str).collect();
+            let o = plan_preset(d.path(), Target::Vanilla, preset, &sets);
+            for st in st_of {
+                let j = planned(&o, &format!("s/{st}.png"));
+                let what = format!("{preset} {st} {fmt}");
+                assert_eq!(j["profile"]["format"], fmt, "{what}");
+                assert_eq!(j["profile"]["encoder"]["perceptual"], true, "{what}");
+                assert!(!j.to_string().contains("FMT-PERCEPTUAL-DATA"), "{what}");
+                assert_eq!(j["status"]["state"], "ready", "{what}: {}", j["status"]);
+            }
+        }
+        // Data alpha on a colour type: the preset's perceptual yields instead of raising an Error.
+        let data = [
+            "file:**/v/diffuse.png.alpha.policy=data",
+            "file:**/v/glow.png.alpha.policy=data",
+            "file:**/v/glow.png.subtype=glow",
+            "file:**/v/diffuse.png.subtype=diffuse",
+        ];
+        let o = plan_preset(d.path(), Target::Vanilla, preset, &data);
+        for st in st_of {
+            let j = planned(&o, &format!("v/{st}.png"));
+            assert_eq!(j["profile"]["alpha"]["policy"], "data", "{preset} {st}");
+            assert_eq!(
+                j["profile"]["encoder"]["perceptual"], false,
+                "{preset} {st}"
+            );
+            assert!(
+                !j.to_string().contains("FMT-PERCEPTUAL-DATA"),
+                "{preset} {st}"
+            );
+        }
+        let mut explicit = data.to_vec();
+        explicit.push("file:**/v/diffuse.png.encoder.perceptual=true");
+        let o = plan_preset(d.path(), Target::Vanilla, preset, &explicit);
+        let j = planned(&o, "v/diffuse.png");
+        assert_eq!(j["profile"]["encoder"]["perceptual"], true, "{preset}");
+        assert!(
+            j.to_string().contains("FMT-PERCEPTUAL-DATA"),
+            "{preset}: an explicit value is kept and reported"
+        );
+    }
+}
+
+/// FM43: the CS presets and fast-preview leave a diffuse's perceptual flag off.
+#[test]
+fn cs_quality_diffuse_is_not_perceptual() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/wall.png", rgb(64));
+    for fmt in ["bc1", "bc3", "bc7"] {
+        for preset in ["cs-quality", "cs-compact", "fast-preview"] {
+            let o = plan_preset(
+                d.path(),
+                Target::Cs,
+                preset,
+                &[&format!("file:**/wall.png.format={fmt}")],
+            );
+            let j = planned(&o, "wall.png");
+            assert_eq!(j["profile"]["format"], fmt, "{preset}");
+            assert_eq!(
+                j["profile"]["encoder"]["perceptual"], false,
+                "{preset} {fmt}"
+            );
+        }
+    }
 }
 
 #[test]

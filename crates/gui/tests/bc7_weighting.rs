@@ -276,6 +276,32 @@ fn perceptual_keeps_its_lock_and_the_row_is_bc7_only() {
     );
 }
 
+/// FM43: a BC6H texture shows Effort `Slowest` (the default), and the dropdown still lists `Veryslow` and `Slowest`.
+#[test]
+fn the_bc6h_effort_dropdown_still_offers_veryslow() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    m.set_field(ROCK, "subtype", json!("hdr_sky"));
+    idle(&mut m);
+    let p = m.item(ROCK).unwrap().job.clone().unwrap().profile;
+    assert_eq!(p.format, Format::Bc6hUf16);
+    m.select_item(ROCK);
+    let mut h = harness(m);
+    h.run();
+    // The Effort combo has no accessible name of its own (its row label is a neighbour); a combo's text is its value.
+    {
+        let combos: Vec<_> = h
+            .query_all_by_role(Role::ComboBox)
+            .filter(|n| n.accesskit_node().value().as_deref() == Some("Slowest"))
+            .collect();
+        assert_eq!(combos.len(), 1, "the Effort combo shows Slowest");
+        combos[0].click();
+    }
+    h.run();
+    h.get_by_label("Veryslow");
+    assert!(h.query_all_by_label("Slowest").count() >= 1);
+}
+
 /// FM42: on BC1 and BC3 the BC7 weighting row is hidden and a Perceptual tick edits `encoder.perceptual`; on BC7 the
 /// tick is hidden (the dropdown has Perceptual). The tick keeps the colour-without-data-alpha lock.
 #[test]

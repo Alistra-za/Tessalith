@@ -822,6 +822,21 @@ fn layered_profile_with(
     // The skin_wet height form is a grayscale map: R is taken and copied to RGB in Preprocess.
     profile.category = category_of(st, profile.format, f.analysis.grayscale);
     emissive_hdr_choice(ctx, &mut profile, &mut prov, f);
+    // Note FM43: BC6H encodes in the peak-preserving mode unless a layer above the hidden base chose the effort.
+    // Runs on the final format, so an LDR emissive that fell back to BC7 keeps the base effort.
+    if profile.format == Format::Bc6hUf16
+        && matches!(prov.get("encoder.effort"), None | Some(Provenance::Builtin))
+    {
+        profile.encoder.effort = Effort::Slowest;
+    }
+    // Note FM43: a built-in preset's `perceptual` default (vanilla diffuse) yields to data alpha, which would refuse it
+    // (FMT-PERCEPTUAL-DATA); an explicit `perceptual = true` is kept and reported.
+    if profile.encoder.perceptual
+        && profile.alpha.policy == AlphaPolicy::Data
+        && !field_explicit(ctx, &prov, "encoder.perceptual")
+    {
+        profile.encoder.perceptual = false;
+    }
     float_source_is_linear(&mut profile, &mut prov, f);
     // Spec §3.2, §5.4: a stated OpenGL convention is flipped to DirectX in Preprocess (Task 28 reads flip_green). An
     // explicit `flip_green` wins; `resolve_decided` reports a contradiction as CFG-GREEN-CONFLICT (carried fix 4).

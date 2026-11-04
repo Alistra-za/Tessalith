@@ -3,4 +3,13 @@ id = "vanilla-quality"
 version = "2.0.0"
 base = "sdc-base"
 target = "vanilla"
-description = "Vanilla – Quality: Bethesda shaders; no _SRGB, no BC6H."
+description = "Vanilla – Quality: Bethesda shaders; no _SRGB, no BC6H; perceptual diffuse and glow."
+
+# Diffuse, glow and skin albedo are perceptual in BC1, BC3 and BC7 (Note FM43). Data alpha turns it off at resolve;
+# vanilla-compact inherits these tables. skin_albedo is CS-only, so it has no effect under the vanilla target.
+[subtypes.diffuse]
+encoder = { perceptual = true }
+[subtypes.glow]
+encoder = { perceptual = true }
+[subtypes.skin_albedo]
+encoder = { perceptual = true }

@@ -1309,3 +1309,29 @@ fn the_export_zip_key_is_named() {
         assert!(e.contains(code), "{e}");
     }
 }
+
+/// FM43: the vanilla quality and compact presets mark diffuse, glow and skin albedo perceptual; the sub-type's partial
+/// `encoder` table merges into the base one (effort and the BC4/BC5 radius stay). Other colour types, the data maps
+/// and every other built-in preset stay off. (`profile` does not run the resolve step that drops it for data alpha.)
+#[test]
+fn the_vanilla_presets_mark_three_colour_types_perceptual() {
+    let r = PresetRegistry::builtin().unwrap();
+    for id in ["vanilla-quality", "vanilla-compact"] {
+        for st in Subtype::ALL {
+            let p = r.profile(id, Target::Cs, st).unwrap();
+            let on = matches!(st, Subtype::Diffuse | Subtype::Glow | Subtype::SkinAlbedo);
+            assert_eq!(p.encoder.perceptual, on, "{id} {st:?}");
+            assert_eq!(p.encoder.effort, Effort::Veryslow, "{id} {st:?}");
+        }
+    }
+    let d = r
+        .profile("vanilla-compact", Target::Cs, Subtype::Diffuse)
+        .unwrap();
+    assert_eq!(d.encoder.bc45_search_radius, SearchRadius::Fast);
+    for id in ["sdc-base", "cs-quality", "cs-compact", "fast-preview"] {
+        for st in Subtype::ALL {
+            let p = r.profile(id, Target::Cs, st).unwrap();
+            assert!(!p.encoder.perceptual, "{id} {st:?}");
+        }
+    }
+}

@@ -478,7 +478,7 @@
   "vanilla/textures/h/diffuse.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "98e67f9f535fa7ee5c251ae3422c9801f1b3362d4d7551dc2e64222e2dd73188",
+    "payload_sha256@avx2": "bee630a5ff87b3d49b4f101ab3a00f25e2948bbfccbf481720f21e1c3f5606b8",
     "subtype": "diffuse",
     "width": 64
   },
@@ -506,7 +506,7 @@
   "vanilla/textures/h/glow.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "6b569374d580167419edf95aaa938d56b0b8c325840e3558c7ef76df3253cccf",
     "subtype": "glow",
     "width": 64
   },
@@ -583,7 +583,7 @@
   "vanilla/textures/pbr/rock.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 16,
-    "payload_sha256@avx2": "f9ab97b99f7cf87178e15cd450b5b853eb49289d999414eda49fefe97b83d124",
+    "payload_sha256@avx2": "9fdcdb4b306aa47b1d72914538c3cadb8c77c80b1087eb82a0020921e63f5589",
     "subtype": "diffuse",
     "width": 16
   },
@@ -597,7 +597,7 @@
   "vanilla/textures/rnm/iron.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 32,
-    "payload_sha256@avx2": "0cd6a481e8407e98e33a4075a2ef7629b2a097b3bdcd84bdcfae594bd7afba27",
+    "payload_sha256@avx2": "69520166778e059399ff124e73b8c4316ae2b08ad9d608b03882283c06ce8168",
     "subtype": "diffuse",
     "width": 32
   },

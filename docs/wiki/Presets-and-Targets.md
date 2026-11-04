@@ -83,7 +83,7 @@ A shader the target does not have falls back to `default`, with `SHADER-UNAVAILA
 |---|---|---|---|
 | `cs-quality` | 2.0.0 | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
 | `cs-compact` | 2.0.0 | `cs` | Smaller files. BC1 for opaque colour maps at full size; every other listed sub-type at half size when its larger side is above 512 (256 for height); BC4/BC5 search radius `fast`. |
-| `vanilla-quality` | 2.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. |
+| `vanilla-quality` | 2.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. `diffuse` and `glow` use perceptual encoding in BC1, BC3 and BC7. <!-- D:FM43 --> |
 | `vanilla-compact` | 2.0.0 | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
 | `fast-preview` | 2.0.0 | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. For checking a mod quickly, not for release. |
 
@@ -106,7 +106,7 @@ In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "
 2. Every other listed sub-type gets `resize = "half"`: both sides halve while the larger side stays at or above 512, or 256 for `height` ([`resize_floor`](Project-Config-Fields.md#format-and-size)). Emissive and HDR sky are not resized.
 3. `encoder.bc45_search_radius = "fast"`.
 
-`vanilla-compact` also sets [`encoder.perceptual`](Project-Config-Fields.md#encoder) on those BC1 colour maps, and only there.
+`vanilla-compact` also sets [`encoder.perceptual`](Project-Config-Fields.md#encoder) on those BC1 colour maps.
 
 Compact output never uses BC3, which is the same size as BC7.
 

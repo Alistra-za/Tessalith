@@ -2386,6 +2386,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Left alone.** `cs-compact` and `vanilla-compact` do not halve a Gray map (their `resize = "half"` rows list the existing grayscale types); that is a preset edit for the release task.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Presets.** `vanilla-compact` sets `encoder.perceptual = true` in its two BC1 colour `[[rules]]` only, not in `[defaults]` (data types would hit `FMT-PERCEPTUAL-DATA`, and BC7 colour would change). `cs-compact` and the other presets stay off. The preset version stays "2.0.0" (2.0 is unreleased); `docs/presets-changelog.md` has a line in its 2.0.0 entry. The `rgbcx_patch` tag gains `+bc1-perceptual`, so a 2.0 manifest from before this change re-encodes its BC1 to BC5 outputs once.
+
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)
