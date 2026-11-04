@@ -1600,3 +1600,20 @@ fn an_rgb8_dx10_header_is_refused() {
         })
     );
 }
+
+/// Backlog T13: a legacy cube whose caps2 lists some faces only is a partial cube, even when its data is sized
+/// for the faces it lists.
+#[test]
+fn a_legacy_partial_cube_is_reported_as_one() {
+    let b = raw_file(
+        (4, 4, 1),
+        (0x4, *b"DXT1", 0, [0; 4]),
+        0x200 | 0x400, // +X only
+        None,
+        &[0u8; 8],
+    );
+    match read_dds(&b).unwrap_err() {
+        DdsError::Unsupported(m) => assert!(m.contains("partial cube"), "{m}"),
+        e => panic!("expected Unsupported, got {e:?}"),
+    }
+}
