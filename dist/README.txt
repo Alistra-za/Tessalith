@@ -41,7 +41,7 @@ Help
 ----
   Documentation, known issues and bug reports:
     https://github.com/Alistra-za/Tessalith
-    Wiki pages: Known-Issues, Troubleshooting, GUI-Guide, CLI-Reference
+    Wiki pages: Troubleshooting (with the known issues), GUI-Guide, CLI-Reference
   If the GUI crashes, attach the newest file in
     %LOCALAPPDATA%\sdc\logs\
   to your report.

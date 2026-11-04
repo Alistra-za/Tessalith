@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 606" width="780" height="606" role="img" aria-labelledby="t d">
 <title id="t">Encoders compared by format, PSNR</title>
-<desc id="d">Bar chart of PSNR in dB, grouped by format (BC1 RGB, BC3 premultiplied, BC4, BC5 RG, BC6H multi-exposure), one bar per encoder, with the encoder shown by a stripe pattern. rgbcx is best on BC1 (39.85), BC3 (49.20), BC4 (45.59) and BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator BC6H values were not measured. texconv CPU is last or near last. The Tessalith default encoder per format (rgbcx for BC1 to BC5, Intel ISPC for BC6H) has an outline and a bold label.</desc>
+<desc id="d">Bar chart of PSNR in dB, grouped by format (BC1 RGB, BC3 premultiplied, BC4, BC5 RG, BC6H multi-exposure), one bar per encoder, with the encoder shown by a stripe pattern. Of the encoders charted, rgbcx is best on BC1 (39.85), BC3 (49.20), BC4 (45.59) and BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator BC6H values were not measured. texconv CPU is last or near last. The Tessalith default encoder per format (rgbcx for BC1 to BC5, Intel ISPC for BC6H) has an outline and a bold label.</desc>
 <style>
 svg{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
 --ink:#1f2328;--mute:#59636e;--grid:#d1d9e0;--bg:#ffffff;--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#6250d6;--c4:#e87ba4;}

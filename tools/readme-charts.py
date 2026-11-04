@@ -255,7 +255,7 @@ def chart_formats():
               "is in the wiki (Research).", "s")
     desc = ("Bar chart of PSNR in dB, grouped by format (BC1 RGB, BC3 premultiplied, BC4, BC5 RG, BC6H "
             "multi-exposure), one bar per encoder, with the encoder shown by a stripe pattern. "
-            "rgbcx is best on BC1 (39.85), BC3 (49.20), BC4 (45.59) and BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator "
+            "Of the encoders charted, rgbcx is best on BC1 (39.85), BC3 (49.20), BC4 (45.59) and BC5 (47.03). Intel ISPC is best on BC6H (50.38). rgbcx and Compressonator "
             "BC6H values were not measured. texconv CPU is last or near last. The Tessalith default encoder per format "
             "(rgbcx for BC1 to BC5, Intel ISPC for BC6H) has an outline and a bold label.")
     return svg(780, bot + 58, "Encoders compared by format, PSNR", desc, defs + b)

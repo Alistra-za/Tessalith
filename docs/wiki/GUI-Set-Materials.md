@@ -67,4 +67,4 @@ Community Shaders draws grass with its own shader, which reads only the albedo, 
 - The TruePBR settings of a PBR grass set show only what grass reads: roughness scale, specular level, subsurface (Standard or Foliage, on automatically when the set has an `_s`), matching, vertex colours, locks and slots. The JSON editor shows the same grass view, and its **+ key** menu does not offer the hidden keys. Other keys the set already has stay in `sdc-project.toml` and come back if you switch the set to PBR, but they are not exported.
 - PBR grass meshes need PGPatcher 2.1.0 or later to be patched.
 - `PBR-GRASS-DETECT` on the albedo means its bottom-left texel looks like a complex-grass normal, so Community Shaders' grass shadow pass would cut the shadows wrong; change that texel. The check covers single-file albedos only: a packed albedo gets no note.
-- The 3D preview draws PBR grass with the object PBR shader and says so, and does not claim UV scale applies ([Known issues](Known-Issues.md)).
+- The 3D preview draws PBR grass with the object PBR shader and says so, and does not claim UV scale applies ([Known issues](Troubleshooting.md#known-issues)).

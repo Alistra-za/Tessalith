@@ -64,7 +64,7 @@ Each format uses the encoder that measured best. The numbers behind the charts a
 
 ### Other formats
 
-![Bar chart of PSNR in dB grouped by format (BC1, BC3, BC4, BC5, BC6H), one striped bar per encoder. rgbcx is best on BC1, BC3, BC4 and BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
+![Bar chart of PSNR in dB grouped by format (BC1, BC3, BC4, BC5, BC6H), one striped bar per encoder. Of the encoders charted, rgbcx is best on BC1, BC3, BC4 and BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
 
 Footnotes and per-image counts: [Research](docs/wiki/Research.md#other-formats-best-encoders-per-format).
 
@@ -93,7 +93,7 @@ The exe is unsigned, so Windows SmartScreen may warn on first run ([Installation
 ## More
 
 - Settings, presets, the scan database, logs and per-folder files: [Installation](docs/wiki/Installation.md#where-tessalith-keeps-its-files).
-- [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
+- [Known issues](docs/wiki/Troubleshooting.md#known-issues) and the [CHANGELOG](CHANGELOG.md).
 - Design records: [.claude/DECISIONS.md](.claude/DECISIONS.md), [docs/presets-changelog.md](docs/presets-changelog.md) and the research pages in [docs/research/](docs/research/README.md).
 
 ## Documentation

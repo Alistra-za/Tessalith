@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/Alistra-za/Tessalith/discussions
     about: How do I...? Is this expected? Feature ideas. (Enable Discussions in the repo settings.)
   - name: Known issues
-    url: https://github.com/Alistra-za/Tessalith/blob/main/docs/wiki/Known-Issues.md
+    url: https://github.com/Alistra-za/Tessalith/blob/main/docs/wiki/Troubleshooting.md#known-issues
     about: Check here before reporting a crash or a slow batch.

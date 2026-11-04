@@ -57,5 +57,4 @@ Help
 
 - [Troubleshooting](Troubleshooting.md)
 - [Diagnostic codes](Diagnostic-Codes.md)
-- [Known issues](Known-Issues.md)
 - [FAQ](FAQ.md)

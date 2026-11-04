@@ -14,7 +14,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
@@ -29,7 +29,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - vfs: AV, BP, BU, CV
 - esp: GG, GO
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM
 
@@ -143,7 +143,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Coverage preservation passes exactly `k = round(p·n)` texels on every level ≥ 1: those above the k-th largest alpha plus enough ties, split in a deterministic hierarchical Bayer order (no RNG; owner asked for the dither). `k = 0`, or a level with no positive alpha, keeps the box alpha; zero alpha is never raised. Remapped texels sit at least 2 codes clear of the threshold, saturating at the range ends (`alpha.threshold` 1–254). [R13]
 - A hair diffuse's default layer sets `alpha.policy = cutout`, so a user's `mips.filter = kaiser` or `mitchell` on it is `CFG-INVALID` at sub-type or file scope and falls back to box with `CFG-FILTER-IGNORED` when unscoped. [S-mips-0, S-mips-2, S-mips-13]
 - OPEN: match a resized mip 0's coverage to the source's. [S-mips-8]
-- OPEN: `resize` upscaling (`pot-up`, `pot-nearest`). [S]
 - OPEN: the 13 GiB box peak at 16K and the single-threaded per-channel `powf` in Preprocess. [S-mips-11]
 - OPEN: the complex-material gloss mip is the mean of gloss, not of α ("average α if banding shows"). [CL40]
 
@@ -969,3 +968,11 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
   - **GUI.** A **Relative to** Advanced texture field after Resize ("Own size", then "Slot N · <slot name>" by `sets::slot_name`), and a preset-editor row under *Resize & mips*. It is never locked, like Size floor (FM29), so Copy settings carries it with `resize`.
   - **Pins.** No arm moves (all 2.0.0). `identity.json`: two new keys, `cov/textures/c/relhalf.dds` (64 px diffuse) and `cov/textures/c/relhalf_n.dds` (128 px normal, `half`, floor 16, `slot1` → 32 px); no existing key changes. `profile_hashes.json`: the 25 sub-types under `cs-compact` and `vanilla-compact` for both targets (100 keys), re-pinned by hand (T28C-d).
   - **Tests.** `engine/tests/resize_relative.rs` (14: halves a full-size normal and writes it, keeps an already halved one, never enlarges, keeps the aspect, slot 4, no map and two maps in the slot fall back to own size, a lone compact normal halves 2048 → 1024 with the Info, own slot is self, `none` ignores the reference, `self` is byte-identical, `resize_reference` is not a setting, packed map sized from its sources, compact presets, slot words); `resize::a_self_jobs_dim_resized_is_left_alone`; `presets::compact_and_fast_preview_resolve_as_designed`; GUI `resize_field::{the_size_row_offers_relative_to_slots, the_engine_slot_table_matches_the_slot_cards}`, `advanced`. The lone-map compact tests (`golden::{compact_2048_normal_plans_1024, compact_1024x512_plans_512x256}`, `cli_convert::cs_compact_writes_bc1_colour_and_half_size_normals`) pass unchanged.
+- **FM45 Final review fixes (main team, 2026-11-03; rulings FR-a to FR-e).**
+  - **Removed keys, all at once (FR-a).** `migrate::removed_in` and `removed_set` list every hit, one per line in key order (an `allow` list gets one line per removed code; per key the first `REMOVED` row still wins, so `nvtt` names the value), at most 10 lines and then `and N more`; a single hit reads as before. `sdc` reports every bad `--set` and `--allow` in one error, and the GUI banner keeps the list one key per line. No auto-remove: some removed keys change output (`drop_top_mip`, `pot-down`), and nothing may change output silently. Tests `migrate::every_removed_key_is_listed_in_one_error` (20 `[files]` hits plus two other keys), `cli_basics::every_removed_set_and_allow_is_named_at_once`, GUI `project::every_removed_key_of_a_1x_project_is_named_at_once`.
+  - **Skipped user presets (FR-b).** Every CFG-PRESET-SKIPPED file that is not an alias clash gets a Warning row "Preset file <name> was skipped: <reason>" with Open folder (the reason's first line; the hover has the file and all of it). When the project's missing preset is named after a skipped file (its stem, ASCII case folded), the Blocks row and Review's refusal read "Preset <id> was skipped: <reason>" instead of "is not installed"; Choose preset stays. `bottom::skipped_reason` strips the engine's `preset parse error: <file>: ` lead-in (a `shortcut:`, it parses the message). Test `presets_creator::a_skipped_user_preset_names_its_reason`.
+  - **Cubes ignore `resize_relative_to` (FR-c).** `resize::plan_references` reads no slot for a `cubemap`, since `target_dims` leaves a cube to `cubemap.face_size`, so no RESIZE-NO-REFERENCE claims a resize that never happens. Test `cube::a_cube_ignores_resize_relative_to`. The GUI says "no effect on a cubemap" on a cube's Resize rows and "no effect while Resize is None" on Relative to and Size floor (`fields::no_effect_reason`), in place of the provenance; the rows stay unlocked (FM44).
+  - **Pin record (FR-c).** `identity.json` key `cov/textures/c/cutout_bc3_t200.dds` was re-pinned by hand in ac5e4fff: its fixture changed from `rgba64()` to `rgba_near_cut()`, alpha near the cutoff, so threshold 200 changes its bytes (`t200_pins_the_cutoff`); no encoder byte changed. `encode_inputs.json` was rewritten in b9a8bb1c (all 61 keys): each key hashes its encode input, which lost the removed `validation.*` fields (FM16). Neither changes a 1.x output.
+  - **GUI.** The preset editor has a Perceptual box for BC1, BC3 and BC7 with the texture panel's lock; the closed Relative to combo shows "Slot N", with the slot's name in the list and on hover (it held the Advanced drawer about 90 px past its edge); the 1-bit alpha box is named for AccessKit; the alpha dropdowns of Problems and Review are named "Problems alpha type: …" and "Review alpha type: …" (the texture panel keeps "Alpha type: …"); the FMT-BC1-ALPHA sentence offers 1-bit alpha only for see-through alpha.
+  - **Schema.** `resize_floor` is `1..=16384` in the schemas, as the loader checks. `[defaults] packing.fill` still validates in the schema: the `[defaults]`, sub-type and `[files]` tables share one partial profile, so refusing it there needs a definition of its own. The loader refuses it (FM16).
+  - **Docs.** CHANGELOG: the `--strict-cubemaps` and 2D cube-check lines go (a 2D `_e` file fails validation, as in 1.1.0), the power-of-two rule is the 95 % / 85 % one, the byte-change, vanilla perceptual and compact height lines give the final state, and the FM12 event change is listed. The Known issues page is a section of Troubleshooting. The broken `CHANGELOG.md#unreleased` anchor in `GUI-NIF-Edit.md` is the NIF team's (HANDOFF line, FR-d).
