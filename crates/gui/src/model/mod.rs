@@ -595,8 +595,6 @@ pub struct AppModel {
     nif_export_queued: bool,
     /// Note FC5: the run has ended; `take_nif_export_due` hands it to `app.rs` once.
     nif_export_due: bool,
-    /// Note CN: the running (or last) export is an Also export (`run_also`).
-    also_pass: bool,
     /// Note CN: the last Also export's phase error (CN56), so its end is logged as an error, not a success.
     also_error: Option<String>,
     /// Note CN: the three folders the last Also export wrote (`also_file`).
@@ -830,7 +828,6 @@ impl AppModel {
             nif_diff_request: None,
             nif_export_queued: false,
             nif_export_due: false,
-            also_pass: false,
             also_error: None,
             also_written: None,
             also_reply: None,
@@ -1735,18 +1732,16 @@ impl AppModel {
         if self.also_reply.is_some() {
             self.also_cancel = token;
         }
-        if self.also_pass {
-            // Note CN: every row ends, whatever ended the export (a refusal or plan error leaves planned rows with no
-            // `BatchDone`; a cancelled copy has no event).
-            let why = match &result {
-                Err(e) => Some(e.clone()),
-                Ok(s) => (!cancelled && s.cancelled.is_empty())
-                    .then(|| self.also_error.clone())
-                    .flatten(),
-            };
-            let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
-            self.export.end_unfinished(cancelled, why.as_deref());
-        }
+        // Note CN: every row ends, whatever ended the export (a refusal or plan error leaves planned rows with no
+        // `BatchDone`; a cancelled copy has no event). Note FP2 (T25): a plain export too (`also_error` is None).
+        let why = match &result {
+            Err(e) => Some(e.clone()),
+            Ok(s) => (!cancelled && s.cancelled.is_empty())
+                .then(|| self.also_error.clone())
+                .flatten(),
+        };
+        let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
+        self.export.end_unfinished(cancelled, why.as_deref());
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
         }
@@ -2237,7 +2232,6 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         let also = self.also_on();
-        self.also_pass = also;
         self.also_error = None;
         self.also_written = None;
         // Final review I2: dropping an earlier export's sender releases its worker (no extra file).
