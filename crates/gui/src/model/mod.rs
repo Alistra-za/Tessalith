@@ -3811,6 +3811,11 @@ impl AppModel {
         if now != self.read_only_flags {
             self.read_only_flags = now;
             self.invalidate_views();
+            // Note FP5 (T31): Review's cached check follows the flag, or Export stays disabled after it is cleared.
+            let unwritable = self.also_toml_unwritable();
+            if let Some(r) = self.review.as_mut() {
+                r.toml_unwritable = unwritable;
+            }
         }
     }
 

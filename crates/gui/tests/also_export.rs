@@ -1314,3 +1314,26 @@ fn a_tick_makes_the_header_read_review() {
         m.header_export_text()
     );
 }
+
+/// Backlog T31 (Note FP5): clearing the read-only flag from the app refreshes Review's cached `sdc.toml` check, so
+/// Export is not left disabled with a reason that no longer holds.
+#[test]
+fn clearing_the_read_only_flag_reopens_reviews_export() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    m.save().unwrap();
+    let path = sdc_toml(&m);
+    let mut p = std::fs::metadata(&path).unwrap().permissions();
+    p.set_readonly(true);
+    std::fs::set_permissions(&path, p).unwrap();
+    // An unsaved edit: the flag is cleared without a reload, and Save writes it.
+    m.set_field(&m.items[0].key.clone(), "format", serde_json::json!("bc7"));
+    idle(&mut m);
+    m.open_review();
+    assert!(m.review_gate().is_err());
+    m.clear_read_only_flag(&path).unwrap();
+    m.save().unwrap();
+    idle(&mut m);
+    assert_eq!(m.review_gate().map(|_| ()), Ok(()));
+}
