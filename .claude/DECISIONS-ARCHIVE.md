@@ -200,3 +200,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP, FU, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT
