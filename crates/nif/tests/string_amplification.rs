@@ -18,8 +18,7 @@ fn bytes_0x80(n: &Nif) -> Vec<u8> {
     b
 }
 
-/// 2000 zero-size BSTriShape blocks all start at the footer, whose root count 30 reads as the name index:
-/// entry 30 is the large string. Footer: 30 zero roots.
+/// 2000 BSTriShape blocks all name string-table entry 30, the large string.
 #[test]
 fn scan_shares_one_string_across_many_shape_names() {
     let mut n = Nif::new(100);
@@ -28,9 +27,8 @@ fn scan_shares_one_string_across_many_shape_names() {
     }
     assert_eq!(n.string(&"x".repeat(BIG)), 30);
     for _ in 0..2000 {
-        n.block("BSTriShape", vec![]);
+        n.block("BSTriShape", builder::scenes::bstri_named(30, -1, -1));
     }
-    n.roots = vec![0; 30];
     let s = nif::scan::scan(&bytes_0x80(&n)).unwrap();
     assert_eq!(s.shapes.len(), 2000);
     let ptrs: BTreeSet<_> = s

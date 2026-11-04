@@ -87,7 +87,32 @@ pub fn decode_head_at(
     block: usize,
     kind: ShapeKind,
 ) -> Result<(ShapeHead, RefAt), NifError> {
-    let mut c = Cursor::new(b, h.offsets()[block]);
+    let start = h.offsets()[block];
+    // Reads stay inside the block; offsets stay absolute, so a read past its end is a `BlockSize` error.
+    let end = start + h.sizes[block] as usize;
+    let b = b.get(..end).ok_or_else(|| NifError::Truncated {
+        at: b.len(),
+        need: end - b.len(),
+    })?;
+    head_in(h, b, kind, start).map_err(|e| match e {
+        NifError::Truncated { at, need } => NifError::BlockSize {
+            block: block as u32,
+            kind: crate::text::lossy(h.kind(block)),
+            declared: h.sizes[block],
+            consumed: u32::try_from(at.saturating_add(need).saturating_sub(start))
+                .unwrap_or(u32::MAX),
+        },
+        e => e,
+    })
+}
+
+fn head_in(
+    h: &Header,
+    b: &[u8],
+    kind: ShapeKind,
+    start: usize,
+) -> Result<(ShapeHead, RefAt), NifError> {
+    let mut c = Cursor::new(b, start);
     let name = h.name_arc(c.i32()?).filter(|s| !s.is_empty());
     let n = c.u32()? as usize;
     c.skip(4 * n)?;

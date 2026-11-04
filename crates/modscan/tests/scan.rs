@@ -795,3 +795,21 @@ fn tainted_run_does_not_keep_previous_winners() {
     assert_eq!(nifs.len(), 1);
     assert_eq!(nifs[0].overridden_by, None, "{:?}", nifs[0]);
 }
+
+/// Trace 2026-11-04 #52: an SSE file with an implausible block count is a failed parse, not a non-Skyrim file.
+#[test]
+fn too_many_blocks_on_an_sse_file_is_a_failure_not_not_skyrim() {
+    let d = instance_fixture("+A\n");
+    let mut b = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../nif/tests/fixtures/TestNifFile_Skinned_SE.nif"
+    ))
+    .unwrap();
+    let at = nif::header::Header::parse(&b).unwrap().nblocks_at;
+    b[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    put(d.path(), "mods/A/meshes/huge.nif", Some(&b));
+    let (_, r) = go(&d, vec![]);
+    assert_eq!(r.not_skyrim, 0);
+    assert_eq!(r.problems.len(), 1, "{:?}", r.problems);
+    assert!(r.problems[0].1.contains("block count"), "{:?}", r.problems);
+}

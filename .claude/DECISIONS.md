@@ -25,10 +25,10 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, GQ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
-- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
+- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
-- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP
+- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM
@@ -987,3 +987,5 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ6** The preview compiles the user's Game Gamma: `preview_defines` adds `CS_GAME_GAMMA=<f32 to 9 decimals>` (CS's own form, `1.600000024`) only when Linear Lighting is on (the shaders read it only under `ENABLE_LL`, TransferFunctions.hlsli) and `"Linear Lighting".gameGamma` is a usable value other than 1.6, so default users and LL-off users keep their defines and program keys; the Lighting programs and the composite share it through the feature list, and `settings_define` treats it as a settings define. `ENABLE_ACESCG` stays uncompiled (shortcut: the readback has no ACEScg conversion). A non-UTF-8 Info.ini is now a note with the Features-ini fallback, like an unreadable one, not a parse failure that kept the old settings.
 - **GQ7** A skin-card pick (any `report_missing` request) reloads a path the texture cache holds as an absent Auto guess (the resolver found no file, and no request reported it missing): `reuse(entry, report_missing)` gates the cache hit in `Renderer::texture`. Before, the pick bound the cached nothing even after the file appeared, until the cache was cleared. An entry already listed as missing, one with a texture, or one whose file failed to decode (its error line is not repeated) stays cached.
 - **GQ8** `esp::mato_data` takes the last EDID and the last DATA of a record, as the scan (`records::read`) does, so a name the scan stored finds its record (a good DATA followed by a short one gives None in both). The orbit pitch clamps to +-1.52 rad, below asin(0.999) where the view's up vector switches; the pan basis is unchanged.
+- **GQ9** `decode_head_at` reads inside its block: the cursor is bounded to the declared block end, so a head that runs past its declared size reports `BlockSize` (block, kind, declared, bytes needed; a scan problem for that block, not "file ends early") instead of taking its shader and alpha refs from the next block. The header gives an implausible block count its own `NifError::TooManyBlocks` (modscan now stores such a file as a failed parse, not `not_skyrim`) and a type index past the type list `NifError::BadTypeIndex` naming the block; no modscan schema change.
+- **GQ10** Gate fix for GQ9: the render3d `skipped_shape_messages_use_a_short_label` fixture had zero-size blocks that relied on the head reading past its block into the footer; each block now carries its own 116-byte head, so the test still skips 2000 shapes under the bounded read.

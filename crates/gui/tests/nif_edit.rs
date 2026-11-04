@@ -727,6 +727,28 @@ fn slot_labels_follow_shader_type_and_flags() {
 /// decodes to three bytes). The shape cards keep the one shared name, not a copy per card.
 #[test]
 fn shape_cards_share_one_name_across_many_shapes() {
+    // a BSTriShape head naming string 30 (the large one), shader and alpha refs -1: 112 bytes
+    const HEAD: [u8; 112] = {
+        let mut h = [0u8; 112];
+        h[0] = 30; // name
+        h[8] = 0xFF; // controller -1
+        h[9] = 0xFF;
+        h[10] = 0xFF;
+        h[11] = 0xFF;
+        h[12] = 14; // flags
+                    // translation 12, rotation 36 and scale 4 stay zero; collision -1 at 16 + 52
+        h[68] = 0xFF;
+        h[69] = 0xFF;
+        h[70] = 0xFF;
+        h[71] = 0xFF;
+        // bounding sphere 16 at 72..88; skin, shader, alpha refs -1 at 88..100
+        let mut i = 88;
+        while i < 100 {
+            h[i] = 0xFF;
+            i += 1;
+        }
+        h
+    };
     let mut b = b"Gamebryo File Format, Version 20.2.0.7\n".to_vec();
     b.extend(0x1402_0007u32.to_le_bytes());
     b.push(1);
@@ -738,7 +760,9 @@ fn shape_cards_share_one_name_across_many_shapes() {
     b.extend(10u32.to_le_bytes());
     b.extend(b"BSTriShape");
     b.extend([0u8; 2 * 2000]); // type indices
-    b.extend([0u8; 4 * 2000]); // sizes: every block starts at the footer
+    for _ in 0..2000 {
+        b.extend((HEAD.len() as u32).to_le_bytes()); // sizes
+    }
     b.extend(31u32.to_le_bytes());
     b.extend(100_000u32.to_le_bytes());
     for k in 0..30 {
@@ -748,7 +772,10 @@ fn shape_cards_share_one_name_across_many_shapes() {
     b.extend(100_000u32.to_le_bytes());
     b.extend(vec![0x80u8; 100_000]);
     b.extend(0u32.to_le_bytes()); // groups
-    b.extend(30u32.to_le_bytes()); // footer: 30 roots, read as name index 30
+    for _ in 0..2000 {
+        b.extend(&HEAD);
+    }
+    b.extend(30u32.to_le_bytes()); // footer: 30 roots
     b.extend([0u8; 4 * 30]);
     let cards = modscan::store::shape_views(&nif::scan::scan(&b).unwrap());
     assert_eq!(cards.len(), 2000);

@@ -1,6 +1,6 @@
 mod builder;
 use builder::scenes::{avobj, bstri, lsp, net, texset};
-use builder::Nif;
+use builder::{Nif, W};
 use nif::scan::{scan, Shader};
 use nif::shape_head::ShapeKind;
 
@@ -213,4 +213,24 @@ fn a_bad_texture_set_ref_is_reported_once_per_shape() {
         s.problems,
         vec!["block 0: texture set ref 99 out of range"; 3]
     );
+}
+
+/// Trace 2026-11-04 #51: a head whose declared size ends before its shader ref reads nothing from the next block.
+#[test]
+fn a_shape_head_never_reads_past_its_block() {
+    let mut n = Nif::new(100);
+    // the head stops after the skin ref: no shader or alpha ref inside this block
+    n.block("BSTriShape", avobj(net(-1)).fs(&[0.0; 4]).i32(-1).0);
+    // the next block's first bytes read as a ref to the real shader below and no alpha
+    n.block("NiNode", W::default().i32(2).i32(-1).raw(&[0u8; 8]).0);
+    n.block("BSLightingShaderProperty", lsp(0, -1));
+    let s = scan(&n.bytes()).unwrap();
+    assert!(s.shapes.is_empty(), "{:?}", s.shapes);
+    assert_eq!(s.problems.len(), 1, "{:?}", s.problems);
+    let p = &s.problems[0];
+    assert!(
+        p.starts_with("block 0 (") || p.starts_with("block 0:"),
+        "{p}"
+    );
+    assert!(p.contains("declared") && p.contains("decodes as"), "{p}");
 }
