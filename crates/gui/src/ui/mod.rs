@@ -78,14 +78,14 @@ fn centre_id() -> egui::Id {
     egui::Id::new("centre-rect")
 }
 
-/// A9: the area under the header and the scan row as of the last frame (K7: the Meshes view has no CentralPanel
-/// of ours, so it writes the same rect).
+/// A9: the centre's rect as of the last frame: the CentralPanel's in the Sets view, the area under the header and
+/// the scan row in the Meshes view (K7: it has no CentralPanel of ours).
 pub fn centre_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     ctx.data(|d| d.get_temp(centre_id()))
 }
 
-/// Call just before `bottom::draw`.
-pub fn record_below_header(ui: &egui::Ui) {
+/// Call just before `bottom::draw`: the area under the header (the Sets view's CentralPanel overwrites it later).
+pub fn record_centre_rect(ui: &egui::Ui) {
     let r = ui.available_rect_before_wrap();
     ui.ctx().data_mut(|d| d.insert_temp(centre_id(), r));
 }
@@ -146,7 +146,7 @@ pub fn draw_with_scan(
         header::draw(ui, model, None);
     }
     // A9: what is left under the header and the scan row, for windows that must not cover them.
-    record_below_header(ui);
+    record_centre_rect(ui);
     // Under the header and the scan row, before the columns (R7).
     bottom::draw(ui, model, &mut state.drawer, false);
     // Note FB7: a new selection (or preview) brings the selection back to the front of the centre.
