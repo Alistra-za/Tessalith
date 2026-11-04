@@ -236,11 +236,11 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
 }
 
 /// The job's size after its resize, its input sized by content (`load::image_size`, as Load reads it), not by
-/// extension. `None` when the size cannot be read.
+/// extension. A packed job starts from the common canvas its sources are enlarged to (Note FM30, FO5), as the run
+/// does. `None` when the size cannot be read.
 fn post_resize_dims(j: &ResolvedJob) -> Option<(u32, u32)> {
-    crate::load::image_size(&j.input)
-        .ok()
-        .map(|d| target_dims(d, &j.profile))
+    let own = crate::load::image_size(&j.input).ok();
+    crate::api::job_dims(j, own).map(|d| target_dims(d, &j.profile))
 }
 
 /// Bake every member from the `_n` at `n`. Returns whether any member bakes.
