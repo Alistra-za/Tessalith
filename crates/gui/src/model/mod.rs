@@ -1904,7 +1904,8 @@ impl AppModel {
             return true;
         }
         let blocks = pbr_export::export_blocks(self);
-        if !blocks.is_empty() {
+        // Note FO2: a missing preset would export with the fallback; Review's gate lists it and keeps Export off.
+        if !blocks.is_empty() || self.missing_preset_text().is_some() {
             self.open_review();
             return true;
         }
