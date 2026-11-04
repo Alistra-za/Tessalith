@@ -616,6 +616,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         })
     });
     let gate = m.review_gate();
+    // Note FP8 (T30): the gate also refuses for a missing preset and a read-only `sdc.toml`, so they are blockers.
+    let preset_row = m.missing_preset_text();
+    let toml_row = m.toml_read_only_reason();
     let nif_folder = m.export_folder_chosen();
     let folder_chosen = nif_folder.is_some();
     let json = m.review_json();
@@ -738,7 +741,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         }
                         Err(why) => {
                             ui.add_enabled(false, button).on_disabled_hover_text(why);
-                            ui.colored_label(RED, why);
+                            // Note FP8: the Blockers column already lists these two reasons.
+                            let listed = toml_row.as_deref() == Some(why.as_str())
+                                || preset_row.as_ref().is_some_and(|(t, _)| t == why);
+                            if !listed {
+                                ui.colored_label(RED, why);
+                            }
                         }
                     }
                     // Note FL: the rows may be an edit's partial plan; a click waits for the full plan (rule 7.2).
@@ -751,9 +759,6 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         });
     // Note FB4: the missing export folder counts, because the gate enforces it; Note FC5: so does an unanswered
     // overwrite question.
-    // Note FP8 (T30): the gate also refuses for a missing preset and a read-only `sdc.toml`, so they are blockers too.
-    let preset_row = m.missing_preset_text();
-    let toml_row = m.toml_read_only_reason();
     let blockers = blocks.len()
         + usize::from(!folder_chosen)
         + usize::from(preset_row.is_some())

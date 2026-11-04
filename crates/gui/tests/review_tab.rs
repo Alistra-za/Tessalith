@@ -301,8 +301,8 @@ fn review_export_is_disabled_with_the_reason_while_read_only() {
     h.run();
     let text = h.state().review_button_text();
     assert!(disabled(&h, &text));
-    // Note FP8: one beside the button, one as a Blockers row.
-    assert_eq!(h.query_all_by_label(&reason).count(), without + 2);
+    // Note FP8: the Blockers row says it; the text beside the button does not repeat it.
+    assert_eq!(h.query_all_by_label(&reason).count(), without + 1);
 }
 
 #[test]
