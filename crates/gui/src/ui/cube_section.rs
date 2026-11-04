@@ -609,9 +609,6 @@ mod tests {
     #[test]
     fn num_commits_a_typed_value_and_an_arrow_key_once() {
         assert_eq!(typed(cube_num, Role::SpinButton, "5"), vec![5.0]);
-        assert_eq!(
-            arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp),
-            [0.1]
-        );
+        assert_eq!(arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp), [0.1]);
     }
 }

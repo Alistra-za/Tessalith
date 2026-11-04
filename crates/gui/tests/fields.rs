@@ -582,7 +582,10 @@ fn value_of_agrees_with_the_field_views() {
         if view.field == "format" {
             continue;
         }
-        if doc.pointer(&format!("/{}", key.replace('.', "/"))).is_none() {
+        if doc
+            .pointer(&format!("/{}", key.replace('.', "/")))
+            .is_none()
+        {
             unserialised += 1;
         }
         assert_eq!(

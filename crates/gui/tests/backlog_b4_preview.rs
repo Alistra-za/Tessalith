@@ -198,5 +198,9 @@ fn a_dds_preview_decodes_eagerly_only_when_the_cpu_path_is_certain() {
     std::fs::write(&bc, dds_bytes(&dd, &[vec![0u8; 128]]).unwrap()).unwrap();
     let out = dds_preview(&bc, 4096).unwrap();
     assert_eq!(out.decoded.len(), 1);
-    assert_eq!(out.decoded.decoded_count(), 0, "BC1 on a multiple of 4: lazy");
+    assert_eq!(
+        out.decoded.decoded_count(),
+        0,
+        "BC1 on a multiple of 4: lazy"
+    );
 }
