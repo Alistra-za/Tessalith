@@ -343,6 +343,9 @@ pub struct FailedFile {
     pub output: PathBuf,
     pub stage: Stage,
     pub error: String,
+    /// The key of the set the file belongs to, filled once the sets are final (`None` while planning and for a
+    /// file in no set).
+    pub set: Option<String>,
 }
 
 /// Why planning produced no job for a file: its Load failed, or it panicked at the stage it had entered.
@@ -1736,6 +1739,7 @@ impl Engine {
                             output: files[i].output.clone(),
                             stage: Stage::Load,
                             error: "re-encoding would overwrite the source DDS: choose another output folder".into(),
+                            set: None,
                         });
                         continue;
                     }
@@ -1904,6 +1908,7 @@ impl Engine {
                         output,
                         stage: Stage::Load,
                         error: e.to_string(),
+                        set: None,
                     });
                 }
                 Err(PlanFailure::Panic(stage, error)) => failed.push(FailedFile {
@@ -1911,6 +1916,7 @@ impl Engine {
                     output,
                     stage,
                     error,
+                    set: None,
                 }),
                 Err(PlanFailure::Pack(_)) => unreachable!("pass 1 never assembles"),
             }
@@ -2075,6 +2081,7 @@ impl Engine {
                     output: f.output.clone(),
                     stage: Stage::Resolve,
                     error: format!("internal error: {}", panic_message(&*p)),
+                    set: None,
                 }),
             }
         }
@@ -2241,6 +2248,7 @@ impl Engine {
                         output,
                         stage,
                         error,
+                        set: None,
                     });
                 }
             }
@@ -2382,6 +2390,7 @@ impl Engine {
                         output,
                         stage,
                         error,
+                        set: None,
                     });
                     gone.insert(ji);
                 }
@@ -2478,6 +2487,7 @@ impl Engine {
                             output: c.input.output.clone(),
                             stage,
                             error,
+                            set: None,
                         });
                     }
                 }
@@ -2787,6 +2797,18 @@ impl Engine {
                 .filter(|(h, ..)| !ended.contains(h.as_path()) && seen.insert(h.clone()))
                 .collect()
         };
+        // Note FV1: a failed file's set, from the final sets (joins and `[sets]` edits applied).
+        let set_of: BTreeMap<&Path, &str> = sets
+            .iter()
+            .flat_map(|s| {
+                s.members
+                    .iter()
+                    .map(move |&i| (files[i].path.as_path(), s.key.as_str()))
+            })
+            .collect();
+        for f in &mut failed {
+            f.set = set_of.get(f.path.as_path()).map(|k| k.to_string());
+        }
         let plan = Plan {
             request: req.clone(),
             registry: registry.clone(),

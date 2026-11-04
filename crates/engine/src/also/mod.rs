@@ -264,21 +264,10 @@ pub fn derive_sets(
         .map(|id| crate::sets::set_key(root, id))
         .collect();
     let (mut out, mut drop, mut notes) = (vec![], vec![], vec![]);
-    // Backlog T26: a member that failed to load has no job, so its set is found by the grouping rule (output folder
-    // + base name). shortcut: a set joined by a `[sets]` edit or a helper/`_wet` join is not matched; upgrade by
-    // recording the set key on `FailedFile` at plan time.
-    let mut failed_in: BTreeMap<String, usize> = BTreeMap::new();
-    for f in &pbr.failed {
-        let stem = f.path.file_stem().unwrap_or_default().to_string_lossy();
-        let base = crate::group::split_suffix_with(&stem, pbr.registry.alias_table()).base;
-        let dir = f
-            .output
-            .parent()
-            .map(crate::group::fold)
-            .unwrap_or_default();
-        *failed_in
-            .entry(format!("{dir}/{}", base.to_lowercase()))
-            .or_default() += 1;
+    // Backlog T26: a member that failed to load has no job; `FailedFile::set` names its set (final sets).
+    let mut failed_in: BTreeMap<&str, usize> = BTreeMap::new();
+    for set in pbr.failed.iter().filter_map(|f| f.set.as_deref()) {
+        *failed_in.entry(set).or_default() += 1;
     }
     for (key, pick) in &pbr.shaders {
         if !pick.shader.is_pbr_family() {
@@ -311,7 +300,7 @@ pub fn derive_sets(
             });
             continue;
         }
-        if let Some(&n) = failed_in.get(key) {
+        if let Some(&n) = failed_in.get(key.as_str()) {
             drop.extend(members);
             notes.push(SetNote {
                 id,

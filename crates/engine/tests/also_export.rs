@@ -857,6 +857,37 @@ fn derive_sets_leaves_out_a_set_with_a_failed_member() {
     );
 }
 
+/// Backlog T26 (review): a set renamed by a `[sets]` edit is found through the final sets, not by file name.
+#[test]
+fn derive_sets_finds_a_renamed_set_with_a_failed_member() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        std::fs::write(m.join("textures/pbr/arm/steel_rmaos.png"), b"not a png").unwrap();
+    });
+    let mut r = request(&m, &loc.join("Mod PBR"));
+    r.set_edits.push(engine::sets::SetEdit::Rename {
+        from: "textures/pbr/arm/steel".into(),
+        to: "textures/pbr/arm/iron".into(),
+    });
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(Arc::new(NullSink), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    assert_eq!(p.failed.len(), 1, "{:?}", p.failed);
+    let (sets, _, notes) = derive_sets(&p, &BTreeSet::new());
+    assert!(
+        sets.is_empty(),
+        "{:?}",
+        sets.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, "textures/pbr/arm/iron");
+}
+
 /// Backlog T27: `helper.invert` on a raw cavity map reaches the derived set's cavity source.
 #[test]
 fn derive_sets_applies_a_cavity_maps_helper_invert() {
