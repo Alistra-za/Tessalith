@@ -38,8 +38,7 @@ def default_files(root):
     out += sorted((r / "docs/wiki").glob("*.md"))
     out += sorted((r / "docs/research").glob("*.md"))
     out += sorted((r / "docs").glob("*-plugin.md"))
-    # 2026-10-early-spikes.md holds records moved verbatim from DECISIONS.md (§7): never edited, so never deduplicated.
-    return [p for p in out if p.exists() and p.name not in ("_Sidebar.md", "2026-10-early-spikes.md")]
+    return [p for p in out if p.exists() and p.name != "_Sidebar.md"]
 
 
 def content_words(s):

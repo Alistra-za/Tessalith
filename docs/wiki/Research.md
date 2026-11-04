@@ -104,5 +104,5 @@ On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 
 
 ## Studies
 
-- How the benchmark encodes score on SSIM and VIF, besides PSNR: [SSIM and VIF on the encoder benchmark](../research/encoder-benchmark.md#bc7-on-ssim-and-vif-2026-10-21).
+- How the benchmark encodes score on SSIM and VIF, besides PSNR: [SSIM and VIF on the encoder benchmark](../research/encoder-benchmark.md#ssim-and-vif-rescoring-2026-10-21).
 - Whether a weighted BC7 can replace BC3 for delicate alpha: [BC3 against BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21).

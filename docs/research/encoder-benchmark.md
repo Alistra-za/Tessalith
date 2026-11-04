@@ -63,12 +63,19 @@ In the tables, Δ is A minus B, so a positive number means A is better. For angl
 - Metrics are PSNR in 8-bit code values, box-window SSIM, angular error, mPSNR and RMSLE. No perceptual metric such as SSIMULACRA2 was used.
 - Only mip 0 was scored. Normal-map scores are pure angle, without shading.
 - <a id="perceptual-metrics-on-linear-data"></a>**Perceptual weighting fits colour only.** Luma metrics, SSIM and VIF on luma, and bc7e's perceptual mode all weight error the way the eye sees colour. Normals, masks, height and packed data are linear values where luma means nothing, so those sets are scored per channel or by angle, and a perceptual encoder row on them measures the damage the weighting does.
-- **SSIM and VIF rescoring (scored 2026-10-21, commit dbf54808).** It rescores the existing benchmark encodes with Gaussian SSIM and multi-scale VIFp, and compares the same pairs as the round 3 confidence-interval study. Nothing was re-encoded. SSIM uses an 11×11 Gaussian window (σ 1.5); VIFp uses 4 scales (windows 17, 9, 5, 3). Colour sets are scored on Rec.709 luma (cutout on visible luma, smooth alpha on premultiplied luma). Masks use R, normals use the stored R and G, data uses R, G and B, and alpha is scored on its own. Both metrics are on the 0 to 255 scale. SSIM and VIF are not defined for HDR without a tonemapping choice, so BC6H is not scored. These are the study's mean differences with a verdict from its 95% intervals (t and family-cluster). The tables drop most confidence intervals and show one only where the study printed it in the table. ΔSSIM is ×10³ and ΔVIF is ×10². W/L counts images won and lost by A. **Bold** marks a verdict that differs from the PSNR or angle verdict.
 - The new images all come from ambientCG and Poly Haven: mostly procedural PBR textures, not hand-painted or UI art.
 - The smooth-alpha set covers only 15 material families (31 of its 100 images are road-line decals), so its family intervals are wide.
 - Timings come from single runs on one machine. Round 3 timings are not comparable with rounds 1 and 2.
 
-**SSIM and VIF overall.** Of 55 paired comparisons, SSIM gives the same verdict as PSNR on 46 and VIF on 47. Most disagreements come from channel weighting: on colour, SSIM and VIF see luma only, so they side with luma PSNR. Where there is no luma step (masks, normals, data) the three metrics agree almost perfectly.
+#### SSIM and VIF rescoring (2026-10-21)
+
+The round 3 encodes were rescored with Gaussian SSIM and multi-scale VIFp (commit dbf54808), on the same pairs as the round 3 confidence-interval study. Nothing was re-encoded. SSIM uses an 11×11 Gaussian window (σ 1.5); VIFp uses 4 scales (windows 17, 9, 5, 3). Colour sets are scored on Rec.709 luma (cutout on visible luma, smooth alpha on premultiplied luma). Masks use R, normals use the stored R and G, data uses R, G and B, and alpha is scored on its own. Both metrics are on the 0 to 255 scale. SSIM and VIF are not defined for HDR without a tonemapping choice, so BC6H is not scored.
+
+The format sections carry the results as extra columns: ΔSSIM ×10³ and ΔVIF ×10², each the study's mean difference with images won and lost by A (W/L), and a confidence interval only where the study printed one. **Bold** marks a value whose verdict (from the 95% t and family-cluster intervals) differs from the PSNR or angle verdict.
+
+Of 55 paired comparisons, SSIM gives the same verdict as PSNR on 46 and VIF on 47. Most disagreements come from channel weighting: on colour, SSIM and VIF see luma only, so they side with luma PSNR. Where there is no luma step (masks, normals, data) the three metrics agree almost perfectly.
+
+Not scored: Compressonator q1.0 on round 3 colour, cutout and alpha (never encoded; only 4 to 7 round 1 images exist), Compressonator on the round 2 sets, Compressonator and texconv CPU on the packed and stray sets, texconv CPU outside real colour (2 to 5 old images), the synthetic gradient sets and the round 1 variants round 3 dropped. texconv CPU on normal + height lacks 40 of 96 images, so its ranks use the 60 images where all variants exist.
 
 ## The format matters more than the encoder
 
@@ -154,26 +161,28 @@ What the review could not answer, and the benchmark below measured:
 
 ### BC7 on opaque colour
 
-Round 3, `rgb_real`, n = 99, against bc7e level 6 (`-u6`):
+Round 3, `rgb_real`, n = 99, against bc7e level 6 (`-u6`); the luma, SSIM and VIF columns are the [2026-10-21 rescoring](#ssim-and-vif-rescoring-2026-10-21):
 
-| Encoder | Mean Δ RGB (dB) [95% CI] | Median | Images won | Round 1 (n = 7) |
-|---|---|---|---|---|
-| bc7e u5 | +0.03 [+0.01, +0.05] | +0.02 | 70/99 | +0.01 |
-| bc7e u4 | −0.40 [−0.44, −0.36] | −0.38 | 0/99 | −0.39 |
-| NVTT Production | −0.27 [−0.51, −0.02] | −0.03 | 32/99 | −0.32 |
-| ISPC slow | −0.44 [−0.50, −0.38] | −0.36 | 0/99 | −0.59 |
-| ISPC basic | −0.59 [−0.70, −0.49] | −0.43 | 0/99 | −0.75 |
-| NVTT Normal (GPU) | −1.36 [−1.69, −1.02] | −0.92 | 0/99 | −1.42 |
-| texconv `-bc x` | −1.47 [−1.77, −1.17] | −0.96 | 0/99 | −1.58 |
-| texconv GPU | −1.76 [−1.99, −1.54] | −1.55 | 0/99 | −1.76 |
-| bc7e u6 perceptual, RGB PSNR | −1.05 [−1.18, −0.91] | −1.07 | 5/99 | −1.03 |
-| bc7e u6 perceptual, luma PSNR | +3.69 [+3.31, +4.06] | +3.41 | 99/99 | +4.77 |
-| Compressonator `-Quality 1.0` | not re-measured | | 4/7 | −0.16 |
+| Encoder | Mean Δ RGB (dB) [95% CI] | Median | Images won | Round 1 (n = 7) | Luma Δ (dB) | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|---|---|
+| bc7e u5 | +0.03 [+0.01, +0.05] | +0.02 | 70/99 | +0.01 | −0.06 | **−0.058** [−0.070, −0.047] (14/85) | **−0.10** [−0.13, −0.08] (14/85) |
+| bc7e u4 | −0.40 [−0.44, −0.36] | −0.38 | 0/99 | −0.39 | −0.45 | −0.27 (0/99) | −0.54 (0/99) |
+| NVTT Production | −0.27 [−0.51, −0.02] | −0.03 | 32/99 | −0.32 | −0.52 | −0.180 [−0.215, −0.144] (18/81) | −0.46 [−0.55, −0.37] (10/89) |
+| ISPC slow | −0.44 [−0.50, −0.38] | −0.36 | 0/99 | −0.59 | −0.58 | −0.28 (2/97) | −0.49 (7/92) |
+| ISPC basic | −0.59 [−0.70, −0.49] | −0.43 | 0/99 | −0.75 | −0.77 | −0.32 (2/97) | −0.62 (6/93) |
+| NVTT Normal (GPU) | −1.36 [−1.69, −1.02] | −0.92 | 0/99 | −1.42 | −1.83 | −0.80 (0/99) | −1.74 (0/99) |
+| texconv `-bc x` | −1.47 [−1.77, −1.17] | −0.96 | 0/99 | −1.58 | −1.95 | −0.98 (0/99) | −2.05 (0/99) |
+| texconv GPU | −1.76 [−1.99, −1.54] | −1.55 | 0/99 | −1.76 | −2.10 | −1.23 (0/99) | −2.40 (0/99) |
+| bc7e u6 perceptual, RGB PSNR | −1.05 [−1.18, −0.91] | −1.07 | 5/99 | −1.03 | next row | **+1.63** [+1.32, +1.93] (99/0) | **+3.10** [+2.63, +3.56] (99/0) |
+| bc7e u6 perceptual, luma PSNR | +3.69 [+3.31, +4.06] | +3.41 | 99/99 | +4.77 | | | |
+| Compressonator `-Quality 1.0` | not re-measured | | 4/7 | −0.16 | −0.24 (n = 7) | −0.12 (2/5) | −0.16 (2/5) |
 
-- **bc7e level 5 equals level 6.** It is at least as good on average and 1.5× faster.
-- **NVTT Production is a practical tie on typical textures** (median −0.03 dB). Its mean is lower because of a few near-flat images where both encoders are far below one code value.
-- **Perceptual mode trades RGB for luma:** about −1 dB RGB PSNR for +3.7 dB luma PSNR.
-- **texconv is the weakest BC7 encoder at every setting.** `-bc x` (modes 0 and 2 on) adds only +0.04 dB.
+![Two bar charts of the SSIM and VIF difference against bc7e u6 on 99 real colour textures. bc7e perceptual is the only encoder above zero, at plus 1.63 SSIM and plus 3.10 VIF. The other encoders are at or below u6, and texconv GPU is furthest below at minus 2.40 VIF.](../img/encoder-ssim-vif.svg)
+
+- **bc7e level 5 equals level 6 on RGB PSNR.** It is at least as good on average and 1.5× faster. SSIM and VIF prefer u6 on 85 of 99 images, as does luma PSNR: the u5 edge is in chroma.
+- **NVTT Production is a practical tie on typical textures** (median −0.03 dB). Its mean is lower because of a few near-flat images where both encoders are far below one code value. On luma the gap is twice the RGB gap, and SSIM and VIF favour bc7e on 81 and 89 of 99 images.
+- **Perceptual mode trades RGB for luma:** about −1 dB RGB PSNR for +3.7 dB luma PSNR. It wins every image on SSIM and VIF, which makes it the best BC7 encoder on opaque colour by those metrics; its RGB cost is chroma error they cannot see.
+- **texconv is the weakest BC7 encoder at every setting.** `-bc x` (modes 0 and 2 on) adds only +0.04 dB, and SSIM and VIF call it a tie (49/42 images).
 
 Speed, round 1, file-to-file time for a 1-Mpix texture (start-up cost subtracted):
 
@@ -208,22 +217,23 @@ NVTT Production and Compressonator spend their much longer time fitting the ramp
 
 ### BC7 with alpha
 
-Round 3, n = 100, against bc7e u6:
+Round 3, n = 100, against bc7e u6 (on the coverage row, SSIM and VIF score the alpha channel):
 
-| Set, metric | Encoder | Mean Δ [95% CI] | Median | Wins | Verdict |
-|---|---|---|---|---|---|
-| Cutout, visible RGB PSNR (dB) | NVTT Production | −0.14 [−0.19, −0.08] | −0.06 | 29/100 | bc7e better, by a small margin |
-| Cutout, coverage error (points) | NVTT Production | +0.005 [+0.001, +0.009] | +0.001 | 66/100 | negligible either way |
-| Smooth alpha, premultiplied PSNR (dB) | NVTT Production | −0.06 [−0.15, +0.02] | −0.07 | 42/100 | tie |
-| Smooth alpha, premultiplied PSNR (dB) | ISPC slow | −0.58 [−0.65, −0.50] | −0.50 | 1/100 | bc7e better |
-| Smooth alpha, premultiplied PSNR (dB) | texconv `-bc x` | −2.04 [−2.31, −1.78] | −1.74 | 1/100 | bc7e better |
-| Packed, RGB PSNR (dB) | NVTT Production | +0.04 [−0.00, +0.09] | +0.04 | 69/100 | tie |
-| Packed, alpha PSNR (dB) | NVTT Production | +0.27 [−0.05, +0.59] | +0.06 | 73/100 | tie, leaning NVTT |
-| Packed, RGB PSNR (dB) | bc7e u6 perceptual | −2.89 [−3.07, −2.70] | −2.81 | 0/100 | perceptual is wrong here |
+| Set, metric | Encoder | Mean Δ [95% CI] | Median | Wins | Verdict | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|---|---|
+| Cutout, visible RGB PSNR (dB) | NVTT Production | −0.14 [−0.19, −0.08] | −0.06 | 29/100 | bc7e better, by a small margin | −0.088 (16/84) | −0.32 (10/90) |
+| Cutout, coverage error (points) | NVTT Production | +0.005 [+0.001, +0.009] | +0.001 | 66/100 | negligible either way | +1.35 (99/1) | +0.33 (82/18) |
+| Smooth alpha, premultiplied PSNR (dB) | NVTT Production | −0.06 [−0.15, +0.02] | −0.07 | 42/100 | tie | +0.13 [+0.04, +0.22], cluster [−0.17, +0.39] (49/51) | −0.06 (43/57) |
+| Smooth alpha, premultiplied PSNR (dB) | ISPC slow | −0.58 [−0.65, −0.50] | −0.50 | 1/100 | bc7e better | −0.49 (2/98) | −0.45 (6/94) |
+| Smooth alpha, premultiplied PSNR (dB) | texconv `-bc x` | −2.04 [−2.31, −1.78] | −1.74 | 1/100 | bc7e better | −0.91 (4/96) | −2.42 (2/98) |
+| Packed, RGB PSNR (dB) | NVTT Production | +0.04 [−0.00, +0.09] | +0.04 | 69/100 | tie | −0.006 (41/59) | −0.12 (26/74) |
+| Packed, alpha PSNR (dB) | NVTT Production | +0.27 [−0.05, +0.59] | +0.06 | 73/100 | tie, leaning NVTT | **+0.28** [+0.15, +0.42] (70/30) | +0.04 (62/38) |
+| Packed, RGB PSNR (dB) | bc7e u6 perceptual | −2.89 [−3.07, −2.70] | −2.81 | 0/100 | bc7e u6 better | −3.84 (16/84) | −4.58 (13/87) |
 
 - On cutouts every BC7 encoder kept the coverage error (texels flipping across alpha 128) at 0.05 to 0.13% in round 1.
 - Compressonator was measured only in round 1 (n = 4 to 5): −1.50 dB on smooth alpha and −0.47 dB on cutouts. It used modes 4 and 5 in **0.0%** of blocks at every setting, where bc7e used them in 47% of alpha blocks and NVTT Production in 48%.
 - Perceptual mode weights alpha at 256 against luma at 128, so with data in alpha it spends bits on alpha at the cost of colour.
+
 From the review:
 - An all-255 alpha costs nothing if the encoder classifies blocks one by one. bc7e, ISPC TC, DirectXTex and Compressonator all do.
 - Stray alpha is the trap. bc7e sends any block whose lowest alpha is below 255 to its alpha path. A "nearly opaque" texture with alpha 254 loses modes 0 to 3 in those blocks. The review's advice was to strip or snap near-opaque alpha before encoding.
@@ -244,7 +254,7 @@ Opaque images where 2% of texels have alpha 250, compared with the same encoder 
 | Compressonator `-Quality 1.0` | −5.19 | −17.21 |
 
 - Stray alpha costs about 1 dB on real textures and up to 17 dB on smooth ones, because blocks with alpha below 255 lose modes 0 to 3.
-- NVTT's `-noalpha` does not strip the alpha. In round 3 it helped on 98 of 100 images (+0.58 dB [+0.50, +0.65]) but only partly.
+- NVTT's `-noalpha` does not strip the alpha. In round 3 it helped on 98 of 100 images (+0.58 dB [+0.50, +0.65]; SSIM +0.33 ×10³ and VIF +0.65 ×10², 98/0) but only partly.
 - The only complete fix is to set alpha to 255, or drop the channel, before encoding.
 
 #### "Opaque" BC7 is not always alpha 255
@@ -259,37 +269,65 @@ Even on RGB-only input, some encoders decode alpha as 254 in some mode-6 blocks:
 | Compressonator `-Quality 1.0` | 1.1% |
 | NVTT Production | 0.0% |
 
-Mode 6 stores alpha in 7 bits plus a p-bit shared with RGB, so alpha 255 needs that p-bit set to 1. bc7e's opaque path picks the p-bit for RGB only. This matters only where something reads the alpha of an "opaque" texture, which in Skyrim is the `_m` environment mask ([Skyrim texture rules](design-overview.md#skyrim-texture-rules)). The cost of forcing 255 is in spikes S5 and S5b ([early records](2026-10-early-spikes.md#spike-s5--smallest-mip-alpha-check-and-exact-opaque-alpha-cost-2026-10-09)).
+Mode 6 stores alpha in 7 bits plus a p-bit shared with RGB, so alpha 255 needs that p-bit set to 1. bc7e's opaque path picks the p-bit for RGB only. This matters only where something reads the alpha of an "opaque" texture, which in Skyrim is the `_m` environment mask ([Skyrim texture rules](design-overview.md#skyrim-texture-rules)).
+
+#### Forcing alpha 255: spikes S5, S5b and S6 (2026-10-08 and 09)
+
+Two ways to force 255 were measured with bc7e u5 at mip 0 on `rgb_real`, `rgb_grad`, `stray_real` and `stray_grad` (18 images, alpha set to 255 as `remove` does), against plain u5. The pass limit, a per-set mean RGB loss of at most 0.05 dB, was missed by both and not loosened.
+
+| Mean Δ RGB PSNR (dB) | `rgb_real` | `rgb_grad` | `stray_real` | `stray_grad` | Worst image |
+|---|---|---|---|---|---|
+| Native patch 0001, p-bits chosen with the RGB fit (S5) | −0.515 | −1.020 | −0.078 | −0.382 | `subtle_dark` −5.166 (84.01 → 78.85) |
+| Byte patch after encoding: mode-6 alpha endpoints 127, both p-bits 1 (S5b) | −2.696 | −8.410 | −1.015 | −4.899 | `subtle_dark` −28.15 (84.01 → 55.86); Metal049A −7.76 |
+
+- Both give alpha 255 on every texel of all 18 images, and the native patch is better on every image. With its flag off, the native patch is bit-identical to upstream on 39 of 39 images.
+- The native patch still costs RGB because, with both p-bits 1, mode-6 endpoints can only take odd 8-bit values (7-bit precision). bc7e re-fits under that constraint and falls back to modes 1 to 5 where they win, so the loss is the constraint itself. The byte patch moves every p = 0 endpoint up one code without a re-fit, on the 11 to 99% of blocks per image that use mode 6. Near-lossless images and dark gradients lose most.
+- With perceptual mode off, opaque noise can also pick mode 4 with rotation 1 to 3, which decodes alpha 239 to 255. The encode stage fixes every all-255 block of that kind losslessly (rotated slot endpoints set to the maximum, RGB bit-identical), with or without the flag and under any alpha policy (Note A).
+- Full chain (S5): with the flag off, alpha stays at 254 or more at every mip down to 1×1. The 254 share is 0% at 1×1 but 100% at 2×2 on Metal049A, 4×2 on PaintedPlaster017 and 4×4 on `subtle_dark`. With the flag on, and in BC1, alpha is 255 at every mip. The engine path reproduced the bench's bc7e u5 mip-0 bytes on 39 of 39 BC7 images and 14 of 14 under `remove`, and its quantised level equals the PNG's 8-bit RGBA on 53 of 53.
+- The smallest-mip alpha check (`engine::validate::alpha`) agrees with Note C on bc7e u6 (Bricks104 254 share 20.96%, Note C 21.0%) and with NVTT (0%).
+- **Spike S6, real `_m` with the flag off.** 28 plain `_m` from 28 of the owner's mods were decoded to PNG and converted as BC7 with `alpha.policy = remove` and `alpha.exact_opaque = false`. The share of decoded mip-0 alpha ≠ 255 ran from 1.57% to 57.95%, about 27% on average; 7 of 28 files were at 40% or more (worst `frozenmarshice_m` 57.95%, `hair_acc_m` 57.19%, `Dibella_m` 51.02%).
+
+The per-image output is in the bench's `exact-opaque-native`, `exact-opaque-bytepatch` and `full-chain` gates (branch `bench`).
 
 ### BC7 for linear data
 
 Round 3, n = 100, against NVTT Production:
 
-| Set | Encoder | Mean Δ (dB) [95% CI] | Median | Wins |
-|---|---|---|---|---|
-| Data, opaque | bc7e u6 | −0.56 [−0.94, −0.18] | −0.30 | 4/100 |
-| Data, opaque | ISPC slow | −0.74 [−1.19, −0.30] | −0.42 | 0/100 |
-| Data, opaque | texconv GPU | −4.25 [−4.88, −3.62] | −3.44 | 0/100 |
-| Data, opaque | bc7e u6 perceptual against linear | −2.37 [−2.72, −2.01] | −2.09 | 0/100 |
-| Data + alpha, RGB | bc7e u6 | −0.27 [−0.38, −0.17] | −0.20 | 2/100 |
-| Data + alpha, alpha | bc7e u6 | −0.32 [−0.43, −0.22] | −0.19 | 18/100 |
-| Data + alpha, RGB | texconv GPU | −3.26 [−3.54, −2.98] | −2.93 | 0/100 |
+| Set | Encoder | Mean Δ (dB) [95% CI] | Median | Wins | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|---|
+| Data, opaque | bc7e u6 | −0.56 [−0.94, −0.18] | −0.30 | 4/100 | −0.97 (3/97) | **−0.70**, cluster [−1.47, +0.11] (8/92) |
+| Data, opaque | ISPC slow | −0.74 [−1.19, −0.30] | −0.42 | 0/100 | −1.28 (0/100) | −0.95 (2/98) |
+| Data, opaque | texconv GPU | −4.25 [−4.88, −3.62] | −3.44 | 0/100 | −16.8 (0/100) | −9.96 (2/98) |
+| Data, opaque | bc7e u6 perceptual against linear | −2.37 [−2.72, −2.01] | −2.09 | 0/100 | −8.45 (5/95) | −4.59 (3/97) |
+| Data + alpha, RGB | bc7e u6 | −0.27 [−0.38, −0.17] | −0.20 | 2/100 | −1.27 (4/96) | −0.62 (8/92) |
+| Data + alpha, alpha | bc7e u6 | −0.32 [−0.43, −0.22] | −0.19 | 18/100 | −2.17 (21/79) | −0.89 (18/82) |
+| Data + alpha, RGB | texconv GPU | −3.26 [−3.54, −2.98] | −2.93 | 0/100 | −32.2 (0/100) | −10.7 (1/99) |
 
 - NVTT Production is the best BC7 encoder for linear data, on both RGB and alpha, but only by a few tenths of a dB over bc7e, at roughly 40 to 60× the time (round 2).
-- Perceptual mode is wrong for data: it favours green at the cost of red and blue.
 - In round 2, separate BC4 masks (about 49.8 dB) beat three maps sharing one BC7 (about 42.8 dB), at 1.5× the memory.
 
-BC7 on normal maps is in [Normal maps: BC5 against BC7](#normal-maps-bc5-against-bc7).
+### BC7 on normal maps
+
+Mean angle with the stored Z in round 3 (100 images), sign flipped so + favours A. BC7 against BC5 is in [Normal maps: BC5 against BC7](#normal-maps-bc5-against-bc7).
+
+| Comparison | Mean Δ [95% CI] | Median | Wins | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|
+| bc7e u6 against NVTT Production | −0.051° [−0.058, −0.044] | −0.044° | 3/100 | −1.29 (2/95) | −0.71 (9/88) |
+| Perceptual against linear bc7e u6 | −0.363° [−0.441, −0.284] | −0.257° | 10/100 | −12.1 (13/87) | −4.40 (30/70) |
+| Normal + height: bc7e u6 against NVTT, angle | −0.061° [−0.071, −0.051] | −0.052° | 7/100 | −1.77 (11/89) | −0.78 (12/88) |
+| Normal + height: bc7e u6 against NVTT, height PSNR | −0.26 dB [−0.33, −0.18] | −0.17 dB | 15/100 | −4.16 (9/91) | −0.62 (23/77) |
+
+NVTT Production is slightly better than bc7e on BC7 normals, on angle and on height.
 
 ### Perceptual mode
 
 - bc7e's perceptual mode measures error in a scaled YCbCr space (default weights Y 128, Cr 64, Cb 16, A 256) and also skips modes 4 and 5 on opaque blocks.
 - It helps sRGB colour on luma metrics (Geldreich reports up to 2 dB in luma terms).
-- On normals, packed data and masks it does harm ([why](#perceptual-metrics-on-linear-data)). DirectXTex's documentation also says to use uniform weighting when RGB holds other data. The measured costs are in the tables above: −2.89 dB RGB on packed alpha, −2.37 dB on data, −0.363° on normals.
+- Its cost on linear data ([why](#perceptual-metrics-on-linear-data)) is in the tables above: −2.89 dB RGB on packed alpha, −2.37 dB on data, where it favours green at the cost of red and blue, and −0.363° on normals. DirectXTex's documentation also says to use uniform weighting when RGB holds other data.
 
 ### BC7 at the `max` level (2026-10-31)
 
-`bc7e_max` is Tessalith's `Bc7Level::Max` (bc7e patch 0002, [bc7e tuning](bc7e-tuning.md)), run on every BC7 image of all three rounds through `sdc-bench encode-one --format bc7 --level max`. It writes the bytes the engine writes: it calls `engine::encode::encode_level` with the default preset's profile at effort `max` (perceptual off, no exact-opaque flag, no custom weights, `presets/sdc-base.toml`), so the lossless rotated-block alpha fix is included. The source PNG goes in unchanged and the output goes through the same decoder and scorer as every other encoder. On these 925 images the fix changed one block in one file (a mode-4 block in `data_real`, whose alpha is not scored); at `max` bc7e already writes opaque alpha in rotated blocks, so every score equals raw bc7e Max.
+`bc7e_max` is Tessalith's `Bc7Level::Max` (bc7e patch 0002, [bc7e tuning](bc7e-tuning.md)), run on every BC7 image of all three rounds through `sdc-bench encode-one --format bc7 --level max` and scored like every other encoder. That calls `engine::encode::encode_level` with the default preset's profile at effort `max` (perceptual off, no exact-opaque flag, no custom weights), so it writes the engine's bytes, rotated-block alpha fix included. At `max` bc7e already writes opaque alpha in rotated blocks: the fix changed one block in 925 images (a mode-4 block in `data_real`, whose alpha is not scored), so every score equals raw bc7e Max.
 
 Round 3, mean Δ of `bc7e_max` against the other encoder [95% t-interval], wins out of n (+ = `max` better; angles in degrees, sign flipped):
 
@@ -313,66 +351,6 @@ Round 3, mean Δ of `bc7e_max` against the other encoder [95% t-interval], wins 
 
 The full per-set tables for all three rounds (including bc7e u6 perceptual, and the seconds) are in the bench folder, `results/summary_maxpeak.md` (`scripts/analyze_maxpeak.py`) and `results/summary_engine_bytes.md` (`scripts/analyze_engine_bytes.py`).
 
-### BC7 on SSIM and VIF (2026-10-21)
-
-| Round 3 said (PSNR) | SSIM / VIF say | Why |
-|---|---|---|
-| bc7e u5 ≥ u6, +0.03 dB RGB | **u6 better** on 85 of 99 images (both metrics) | Luma PSNR also favours u6 (−0.06 dB). The u5 edge is in chroma. |
-| NVTT Production vs bc7e u6: −0.27 dB, but a tie on typical images (median −0.03) | **bc7e better on 81/99 (SSIM) and 89/99 (VIF)**, tight CIs | The luma gap is −0.52 dB, twice the RGB gap. On the structure that SSIM and VIF see, bc7e's lead is real and consistent. |
-| bc7e perceptual costs −1.05 dB RGB | **Perceptual wins on 99/99** (SSIM and VIF), the best BC7 encoder on opaque colour by both | The luma-weighted encoder wins luma-weighted metrics. Its RGB cost is chroma error that SSIM_Y and VIF_Y cannot see. |
-
-![Two bar charts of the SSIM and VIF difference against bc7e u6 on 99 real colour textures. bc7e perceptual is the only encoder above zero, at plus 1.63 SSIM and plus 3.10 VIF. The other encoders are at or below u6, and texconv GPU is furthest below at minus 2.40 VIF.](../img/encoder-ssim-vif.svg)
-
-Opaque colour (99 images; B = bc7e u6 unless noted):
-
-| A vs B | PSNR Δ dB (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF verdict | Luma PSNR Δ (verdict) |
-|---|---|---|---|---|---|
-| bc7e u5 | +0.03 (A) | −0.058 [−0.070, −0.047] (14/85) | −0.10 [−0.13, −0.08] (14/85) | **B / B** | −0.06 (B) |
-| bc7e u4 | −0.40 (B) | −0.27 (0/99) | −0.54 (0/99) | B / B | −0.45 (B) |
-| NVTT Production | −0.27 (B) | −0.180 [−0.215, −0.144] (18/81) | −0.46 [−0.55, −0.37] (10/89) | B / B | −0.52 (B) |
-| ISPC slow | −0.44 (B) | −0.28 (2/97) | −0.49 (7/92) | B / B | −0.58 (B) |
-| ISPC basic | −0.59 (B) | −0.32 (2/97) | −0.62 (6/93) | B / B | −0.77 (B) |
-| NVTT Normal GPU | −1.36 (B) | −0.80 (0/99) | −1.74 (0/99) | B / B | −1.83 (B) |
-| texconv `-bc x` | −1.47 (B) | −0.98 (0/99) | −2.05 (0/99) | B / B | −1.95 (B) |
-| texconv GPU | −1.76 (B) | −1.23 (0/99) | −2.40 (0/99) | B / B | −2.10 (B) |
-| texconv `-bc x` vs default | +0.04 (A) | +0.006 (49/42) | −0.00 (49/42) | **tie / tie** | +0.01 (tie) |
-| bc7e u6 perceptual (round-3 metric: luma PSNR) | +3.69 (A) | +1.63 [+1.32, +1.93] (99/0) | +3.10 [+2.63, +3.56] (99/0) | A / A | +3.69 (A) |
-| bc7e u6 perceptual (round-3 metric: RGB PSNR) | −1.05 (B) | same as above | same as above | **A / A** | +3.69 (A) |
-| Compressonator q1.0 (n = 7 only) | −0.16 (tie) | −0.12 (2/5) | −0.16 (2/5) | tie / tie | −0.24 (tie) |
-
-With alpha:
-
-| Set, metric | A vs B | PSNR Δ (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF |
-|---|---|---|---|---|---|
-| Cutout, visible colour | NVTT Prod vs bc7e u6 | −0.14 (B) | −0.088 (16/84) | −0.32 (10/90) | B / B |
-| Cutout, alpha (coverage error in round 3) | NVTT Prod vs bc7e u6 | +0.005 pp (A) | +1.35 (99/1) | +0.33 (82/18) | A / A |
-| Smooth, premultiplied | NVTT Prod vs bc7e u6 | −0.06 (tie) | +0.13 [+0.04, +0.22], cluster [−0.17, +0.39] (49/51) | −0.06 (43/57) | tie / tie |
-| Smooth, premultiplied | ISPC slow vs bc7e u6 | −0.58 (B) | −0.49 (2/98) | −0.45 (6/94) | B / B |
-| Smooth, premultiplied | texconv `-bc x` vs bc7e u6 | −2.04 (B) | −0.91 (4/96) | −2.42 (2/98) | B / B |
-| Packed, RGB | NVTT Prod vs bc7e u6 | +0.04 (tie) | −0.006 (41/59) | −0.12 (26/74) | tie / tie |
-| Packed, A | NVTT Prod vs bc7e u6 | +0.27 (tie) | +0.28 [+0.15, +0.42] (70/30) | +0.04 (62/38) | **A** / tie |
-| Packed, RGB | bc7e perceptual vs u6 | −2.89 (B) | −3.84 (16/84) | −4.58 (13/87) | B / B |
-| Stray, RGB | NVTT `-noalpha` vs default | +0.58 (A) | +0.33 (98/0) | +0.65 (98/0) | A / A |
-
-Linear data (B = NVTT Production):
-
-| Set | A | PSNR Δ dB (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF |
-|---|---|---|---|---|---|
-| Data, opaque | bc7e u6 | −0.56 (B) | −0.97 (3/97) | −0.70, cluster [−1.47, +0.11] (8/92) | B / **tie** |
-| Data, opaque | ISPC slow | −0.74 (B) | −1.28 (0/100) | −0.95 (2/98) | B / B |
-| Data, opaque | texconv GPU | −4.25 (B) | −16.8 (0/100) | −9.96 (2/98) | B / B |
-| Data, opaque | bc7e perceptual vs linear | −2.37 (B) | −8.45 (5/95) | −4.59 (3/97) | B / B |
-| Data + alpha, RGB | bc7e u6 | −0.27 (B) | −1.27 (4/96) | −0.62 (8/92) | B / B |
-| Data + alpha, A | bc7e u6 | −0.32 (B) | −2.17 (21/79) | −0.89 (18/82) | B / B |
-| Data + alpha, RGB | texconv GPU | −3.26 (B) | −32.2 (0/100) | −10.7 (1/99) | B / B |
-
-Not scored on SSIM and VIF (BC6H aside):
-- BC7 Compressonator q1.0 on round 3 colour, cutout and alpha: the encodes were never made, so only 4 to 7 old images exist.
-- BC7 Compressonator and texconv CPU on packed and stray sets, and Compressonator on round 2 sets: skipped in round 3.
-- texconv CPU on normal + height: 40 of 96 images missing, so those ranks use the 60 images where all variants exist.
-- Synthetic gradient sets and the round 1 variants that round 3 dropped: same scope as round 3.
-- texconv CPU outside real colour: only 2 to 5 old images.
-
 ## BC1 and BC3
 
 ### Published measurements
@@ -394,17 +372,19 @@ From Aras's 2020 DXTC data (same images and metric as his BC7 test):
 
 Round 3, n = 100:
 
-| Comparison | Mean Δ (dB) [95% CI] | Median | Wins |
-|---|---|---|---|
-| BC1: NVTT `-highest` against rgbcx L18 `-r` (encoded for the rounding decoder) | −0.11 [−0.19, −0.03] | −0.02 | 4/100 |
-| BC1: NVTT `-highest` against rgbcx L18 (default rounding) | +0.19 [−0.01, +0.40] | +0.06 | 97/100 |
-| BC1: rgbcx L18 `-r` against default rgbcx L18 | +0.30 [+0.09, +0.52] | | 100/100 |
-| BC1: Compressonator against rgbcx L18 | −0.49 [−0.56, −0.42] | −0.47 | 4/100 |
-| BC1: texconv against rgbcx L18 | −2.13 [−2.49, −1.77] | −1.60 | 0/100 |
-| BC3 premultiplied: NVTT `-highest` against rgbcx L18 `-r` | +0.09 [−0.04, +0.21] | −0.14 | 38/100 |
-| BC3 premultiplied: ISPC against rgbcx L18 `-r` | −1.18 [−1.30, −1.07] | −1.02 | 0/100 |
+| Comparison | Mean Δ (dB) [95% CI] | Median | Wins | Luma Δ (dB) | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|---|
+| BC1: NVTT `-highest` against rgbcx L18 `-r` (encoded for the rounding decoder) | −0.11 [−0.19, −0.03] | −0.02 | 4/100 | −0.10 | **−0.035** (58/42) | **+0.09** (68/32) |
+| BC1: NVTT `-highest` against rgbcx L18 (default rounding) | +0.19 [−0.01, +0.40] | +0.06 | 97/100 | +0.31 | **+0.49** (93/7) | **+0.72** (91/9) |
+| BC1: rgbcx L18 `-r` against default rgbcx L18 | +0.30 [+0.09, +0.52] | | 100/100 | +0.41 | +0.53 (95/5) | +0.63 (93/7) |
+| BC1: Compressonator against rgbcx L18 | −0.49 [−0.56, −0.42] | −0.47 | 4/100 | −0.49 | −2.43 (8/92) | −1.42 (9/91) |
+| BC1: texconv against rgbcx L18 | −2.13 [−2.49, −1.77] | −1.60 | 0/100 | −0.17 | **+0.68** [−0.71, +2.06] (55/45) | **+2.88** [+0.41, +5.34], cluster [+1.00, +5.63] (55/45) |
+| BC3 premultiplied: NVTT `-highest` against rgbcx L18 `-r` | +0.09 [−0.04, +0.21] | −0.14 | 38/100 | | −0.07 (36/64) | +0.08 (38/62) |
+| BC3 premultiplied: Compressonator against rgbcx L18 `-r` | −0.45 (a tie: the cluster interval spans 0) | | | | **−0.55**, cluster [−1.04, −0.21] (20/80) | −1.04, cluster [−2.12, +0.02] (24/76) |
+| BC3 premultiplied: ISPC against rgbcx L18 `-r` | −1.18 [−1.30, −1.07] | −1.02 | 0/100 | | −0.83 (0/100) | −1.84 (0/100) |
 
 - rgbcx at level 18 is the best BC1 and BC3 encoder when it is told which decoder rounding to expect. The decoder model matters more than the choice between the top encoders.
+- SSIM and VIF rank texconv's default BC1 first, although it is 2.13 dB behind on RGB: it is perceptually weighted (its `-bc u` uniform variant ranks last), and on luma PSNR it already ties.
 - On cutouts, BC1's 1-bit alpha keeps coverage exact but the visible RGB was **6.5 dB (NVTT) to 11.9 dB (Compressonator) worse than BC7** in round 1, and the anti-aliased edges are lost.
 - BC3 alpha is a BC4 block; its rows are in [BC3, BC4 and BC5](#bc3-bc4-and-bc5-tessaliths-encoder-against-the-others) and the [BC4-family study](bc4-family.md).
 
@@ -440,24 +420,6 @@ The weighting moves error out of luma into chroma, and both luma metrics use the
 
 BC1 is scored under the bench decoder (`bcdecode.exe`), and the base run uses the Ideal model the engine encoded for. The weighted-vs-unweighted comparison shares that decoder, so the Δs stand. Absolute values are 0.01 dB from the bench's own `bc1_rgbcx_L18` row (39.413 vs 39.424 dB), since bc7enc's CLI flags differ slightly.
 
-### BC1 and BC3 on SSIM and VIF (2026-10-21)
-
-| Format | A vs B | PSNR Δ dB (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF | Luma PSNR |
-|---|---|---|---|---|---|---|
-| BC1 | NVTT `-highest` vs rgbcx L18 | +0.19 (tie) | +0.49 (93/7) | +0.72 (91/9) | **A / A** | +0.31 (A) |
-| BC1 | NVTT `-highest` vs rgbcx L18 `-r` | −0.11 (B) | −0.035 (58/42) | +0.09 (68/32) | **tie / tie** | −0.10 (tie) |
-| BC1 | rgbcx `-r` vs default | +0.30 (A) | +0.53 (95/5) | +0.63 (93/7) | A / A | +0.41 (A) |
-| BC1 | Compressonator q1 vs rgbcx L18 | −0.49 (B) | −2.43 (8/92) | −1.42 (9/91) | B / B | −0.49 (B) |
-| BC1 | texconv vs rgbcx L18 | −2.13 (B) | +0.68 [−0.71, +2.06] (55/45) | +2.88 [+0.41, +5.34], cluster [+1.00, +5.63] (55/45) | **tie / A** | −0.17 (tie) |
-| BC3 premul | NVTT `-highest` vs rgbcx `-r` | +0.09 (tie) | −0.07 (36/64) | +0.08 (38/62) | tie / tie | — |
-| BC3 premul | Compressonator q1 vs rgbcx `-r` | −0.45 (tie: cluster CI spans 0) | −0.55, cluster [−1.04, −0.21] (20/80) | −1.04, cluster [−2.12, +0.02] (24/76) | **B** / tie | — |
-| BC3 premul | ISPC vs rgbcx `-r` | −1.18 (B) | −0.83 (0/100) | −1.84 (0/100) | B / B | — |
-
-| Round 3 said (PSNR) | SSIM / VIF say | Why |
-|---|---|---|
-| BC1: texconv −2.13 dB vs rgbcx L18 | SSIM tie, **VIF: texconv better** (+0.029, 55/45); texconv is the top BC1 encoder in the SSIM/VIF means | Default texconv BC1 is perceptually weighted (the `-bc u` uniform variant ranks last). Luma PSNR is already a tie (−0.17 dB). |
-| BC1: NVTT `-highest` vs rgbcx `-r`: rgbcx better by −0.11 dB | Tie on both (VIF leans NVTT, 68/32) | A small RGB difference. On luma it is also a tie. |
-
 ## BC4 and BC5
 
 The review found no cross-encoder BC4/BC5 benchmark and expected competent encoders to converge, because BC4 is a one-dimensional fit. The benchmark showed otherwise. Published advice puts tangent-space normals in BC5 with Z rebuilt in the shader, which does not apply to Skyrim ([Skyrim texture rules](design-overview.md#skyrim-texture-rules)).
@@ -466,13 +428,13 @@ The review found no cross-encoder BC4/BC5 benchmark and expected competent encod
 
 Round 3, n = 99, against bc7enc_rdo's rgbcx BC4 (`-4`), bench decoder:
 
-| Encoder | Mean Δ (dB) [95% CI] | Median | Wins |
-|---|---|---|---|
-| rgbcx with search radius 10 (`-hr10`) | +0.13 [+0.07, +0.20] | +0.05 | 98/99 |
-| NVTT `-highest` | −1.29 [−1.76, −0.83] | −0.89 | 10/99 |
-| Compressonator | −1.16 [−1.56, −0.76] | −0.81 | 13/99 |
-| ISPC | −2.98 [−3.69, −2.26] | −2.10 | 0/99 |
-| texconv | −2.93 [−3.69, −2.17] | −1.99 | 1/99 |
+| Encoder | Mean Δ (dB) [95% CI] | Median | Wins | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|
+| rgbcx with search radius 10 (`-hr10`) | +0.13 [+0.07, +0.20] | +0.05 | 98/99 | +0.037 (93/5) | +0.14 (98/0) |
+| NVTT `-highest` | −1.29 [−1.76, −0.83] | −0.89 | 10/99 | −0.80 | −0.94 |
+| Compressonator | −1.16 [−1.56, −0.76] | −0.81 | 13/99 | −0.66 | −0.83 |
+| ISPC | −2.98 [−3.69, −2.26] | −2.10 | 0/99 | −1.88 | −2.75 |
+| texconv | −2.93 [−3.69, −2.17] | −1.99 | 1/99 | −1.45 | −2.13 |
 
 The encoder matters more for BC4 than its reputation suggests. In round 2, ISPC and texconv could not reproduce a binary metalness map exactly and lost 6 to 8 dB on smooth gradients.
 
@@ -499,30 +461,26 @@ The first run found that a wider search could make results worse (BC5 at radius 
 
 ### Normal maps: BC5 against BC7
 
-Round 3, n = 100, angular error (+ means A has less error):
+Round 3, n = 100, angular error (+ means A has less error). The BC7-only rows are in [BC7 on normal maps](#bc7-on-normal-maps).
 
-| Comparison | Mean Δ [95% CI] | Median | Wins |
-|---|---|---|---|
-| BC7 (NVTT Production) against BC5 (rgbcx), both with Z rebuilt | −0.56° [−0.64, −0.49] | −0.52° | 3/100 |
-| BC5: Compressonator against rgbcx | −0.039° [−0.049, −0.029] | −0.041° | 12/100 |
-| BC5: NVTT `-highest` against rgbcx | −0.063° [−0.070, −0.056] | −0.070° | 3/100 |
-| BC5: ISPC against rgbcx | −0.141° [−0.163, −0.120] | −0.143° | 9/100 |
-| BC5: texconv against rgbcx | −0.144° [−0.160, −0.127] | −0.151° | 5/100 |
-| BC7: bc7e u6 against NVTT Production (stored Z) | −0.051° [−0.058, −0.044] | −0.044° | 3/100 |
-| BC7: perceptual against linear bc7e u6 | −0.363° [−0.441, −0.284] | −0.257° | 10/100 |
-| Normal + height: bc7e u6 against NVTT, angle | −0.061° [−0.071, −0.051] | −0.052° | 7/100 |
-| Normal + height: bc7e u6 against NVTT, height PSNR | −0.26 dB [−0.33, −0.18] | −0.17 dB | 15/100 |
+| Comparison | Mean Δ [95% CI] | Median | Wins | ΔSSIM ×10³ (W/L) | ΔVIF ×10² (W/L) |
+|---|---|---|---|---|---|
+| BC7 (NVTT Production) against BC5 (rgbcx), both with Z rebuilt | −0.56° [−0.64, −0.49] | −0.52° | 3/100 | −17.8 (1/96) | −16.5 (2/95) |
+| BC5: Compressonator against rgbcx | −0.039° [−0.049, −0.029] | −0.041° | 12/100 | −0.63 (7/90) | −0.77 (9/88) |
+| BC5: NVTT `-highest` against rgbcx | −0.063° [−0.070, −0.056] | −0.070° | 3/100 | −0.78 (2/95) | −1.02 (4/93) |
+| BC5: ISPC against rgbcx | −0.141° [−0.163, −0.120] | −0.143° | 9/100 | −2.12 | −3.13 |
+| BC5: texconv against rgbcx | −0.144° [−0.160, −0.127] | −0.151° | 5/100 | −1.48 | −2.33 |
+| BC5: rgbcx `-hr10` against rgbcx | +0.007° | | | +0.064 (92/5) | +0.17 (97/0) |
 
 - **When the shader rebuilds Z, BC5 is the better normal format** at the same 8 bits per texel. BC5 gives X and Y two independent channels; BC7 shares endpoints across X, Y and Z.
-- Round 2 had compared BC7's stored Z with BC5's rebuilt Z. That method is biased, because many ambientCG normal maps are not unit length: rebuilding Z from the source's own XY already differs by 0.43° on average for the round-2 maps and 1.47° for the new ones. The fair test rebuilds Z for both.
-- **For BC7 normals, NVTT Production is slightly better than bc7e**, and perceptual mode is always wrong for normals.
+- Round 2 had compared BC7's stored Z with BC5's rebuilt Z. That method is biased, because many ambientCG normal maps are not unit length: rebuilding Z from the source's own XY already differs by 0.43° on average for the round-2 maps and 1.47° for the new ones. The fair test rebuilds Z for both. Scored the round-2 way, the round 3 pair is a tie (+0.10°), while SSIM and VIF, which see only R and G, give the BC5 lead above.
 - **Skyrim's shaders do not rebuild Z.** They read the blue channel directly, so the BC5 result does not apply to a Skyrim `_n` ([Skyrim texture rules](design-overview.md#skyrim-texture-rules)).
 
 ### BC3, BC4 and BC5: Tessalith's encoder against the others
 
-`sdc rgbcx (rounded)` (CSV ids `sdc_bc3_rounded`, `sdc_bc4_rounded`, `sdc_bc5_rounded`) is the engine's own BC3, BC4 and BC5 encode, through `sdc-bench encode-one --format bc3|bc4|bc5 --level default` (`engine::encode::encode_level`), re-run on 2026-11-01 with the build of branch `research/bc4-family` (a3785aef, engine 1.2.0). That is the vendored rgbcx with the round-to-nearest BC4 model (DECISIONS T13) and the BC4 block search (DECISIONS Note FJ, [BC4-family block search](bc4-family.md)), level 18, BC4/BC5 search radius 5, the default preset's settings. BC4 uses a `height` profile, BC5 a `flow` profile. BC3 has no built-in sub-type, so it is a `diffuse` profile with the format set to BC3, as a user override would set it; its colour is encoded for the BC1 model of the time (`ideal`). The rows ran on every set that has BC3, BC4 or BC5 rows, in all three rounds.
+`sdc rgbcx (rounded)` (CSV ids `sdc_bc3_rounded`, `sdc_bc4_rounded`, `sdc_bc5_rounded`) is the engine's own encode through `sdc-bench encode-one --format bc3|bc4|bc5 --level default`, re-run on 2026-11-01 with branch `research/bc4-family` (a3785aef, engine 1.2.0) on every BC3, BC4 and BC5 set of all three rounds. That is the vendored rgbcx with the round-to-nearest BC4 model (DECISIONS T13) and the BC4 block search (Note FJ, [BC4-family block search](bc4-family.md)), level 18, search radius 5. BC4 uses a `height` profile and BC5 a `flow` profile; BC3, which has no built-in sub-type, is a `diffuse` profile set to BC3 as a user override would, with colour encoded for the BC1 model of the time (`ideal`).
 
-Every row in the [BC1 and BC3](#bc1-and-bc3-benchmark), [BC4](#bc4-single-channel-masks) and [BC5](#normal-maps-bc5-against-bc7) tables above was scored with the bench's floor decoder ([why it matters](#bench-decoder-floors-bc4)). Those upstream rows (`bc3_rgbcx_*`, `bc4_rgbcx*`, `bc5_rgbcx*`) also use level 18 and radius 5 (bc7enc's default; `-hr10` is radius 10), so against Tessalith's rows the differences are the decoder model and the BC4 block search. Every BC3, BC4 and BC5 output was therefore scored twice: with the bench decoder (**floor**), and with the same files decoded with bcdec's round-to-nearest weights (**round**, `scripts/rescore_rounded.py`). BC3 colour is decoded as IdealRound4 in both.
+The upstream rows above (`bc3_rgbcx_*`, `bc4_rgbcx*`, `bc5_rgbcx*`) also use level 18 and radius 5 (`-hr10` is radius 10), so the differences are the decoder model and the block search. Because the bench decoder floors BC4 interpolants ([why it matters](#bench-decoder-floors-bc4)), every BC3, BC4 and BC5 output was scored twice: with that decoder (**floor**) and with bcdec's round-to-nearest weights (**round**, `scripts/rescore_rounded.py`). BC3 colour is decoded as IdealRound4 in both.
 
 Round 3, mean Δ of `sdc rgbcx (rounded)` against the other encoder [95% t-interval], wins/losses (+ = Tessalith better):
 
@@ -562,28 +520,6 @@ Round 3, mean Δ of `sdc rgbcx (rounded)` against the other encoder [95% t-inter
 - Speed: the old-against-new end-to-end times, measured alternately per image, are in the [BC4-family study](bc4-family.md#shipped-end-to-end-and-bench-re-run-2026-11-01). A ratio to bc7enc's CLI from the bench's separate runs is not given: they ran under different machine load.
 
 Per-set tables for all three rounds, with the mean of each variant under both decoders and the seconds, are in `results/summary_engine_bytes.md`; the change against the 2026-10-31 rows is in `results/summary_bc4_rerun.md` (`tools/compare_prev_sdc.py`).
-
-### BC4 family: SSIM and VIF scores (2026-10-21)
-
-| Format | A vs B | PSNR Δ dB (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF |
-|---|---|---|---|---|---|
-| BC4 | `-hr10` vs rgbcx | +0.13 (A) | +0.037 (93/5) | +0.14 (98/0) | A / A |
-| BC4 | NVTT `-highest` / Compressonator / ISPC / texconv vs rgbcx | −1.29 / −1.16 / −2.98 / −2.93 (all B) | −0.80 / −0.66 / −1.88 / −1.45 | −0.94 / −0.83 / −2.75 / −2.13 | all B / B |
-
-Normals, stored R and G only:
-
-| A vs B | Angle Δ° (verdict) | ΔSSIM×10³ (W/L) | ΔVIF×10² (W/L) | SSIM / VIF |
-|---|---|---|---|---|
-| BC5 Compressonator vs bc7enc_rdo | −0.039 (B) | −0.63 (7/90) | −0.77 (9/88) | B / B |
-| BC5 NVTT `-highest` vs bc7enc_rdo | −0.063 (B) | −0.78 (2/95) | −1.02 (4/93) | B / B |
-| BC5 `-hr10` vs default | +0.007 (A) | +0.064 (92/5) | +0.17 (97/0) | A / A |
-| BC5 ISPC / texconv vs bc7enc_rdo | −0.141 / −0.144 (B) | −2.12 / −1.48 | −3.13 / −2.33 | B / B |
-| **BC7 NVTT Prod vs BC5 bc7enc_rdo** (round 3: both with Z rebuilt) | −0.56 (B) | −17.8 (1/96) | −16.5 (2/95) | B / B |
-| Same pair, round-2 biased method (BC7 stored Z) | +0.10 (tie) | −17.8 | −16.5 | **B / B** |
-| BC7 bc7e u6 vs NVTT Prod | −0.051 (B) | −1.29 (2/95) | −0.71 (9/88) | B / B |
-| BC7 perceptual vs linear bc7e u6 | −0.363 (B) | −12.1 (13/87) | −4.40 (30/70) | B / B |
-| Normal + height: bc7e u6 vs NVTT, R,G | −0.061 (B) | −1.77 (11/89) | −0.78 (12/88) | B / B |
-| Normal + height: bc7e u6 vs NVTT, height A | −0.26 dB (B) | −4.16 (9/91) | −0.62 (23/77) | B / B |
 
 ## BC6H (HDR)
 
@@ -645,21 +581,38 @@ Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `
 
 ## Other findings
 
-- **Rate-distortion optimisation (RDO) always costs quality.** In one published bc7enc_rdo run, PSNR fell from 42.25 dB with no RDO to 41.77 at λ = 0.1, 39.51 at λ = 1 and 29.18 at λ = 20. RDO only shrinks the file after LZ compression (inside an archive, for example). It never reduces the DDS size or GPU memory.
-- **DDS container rules.**
-  - BC6H, BC7, any `_SRGB` format and arrays need the DX10 header. BC1 to BC3 are most compatible with legacy FourCCs.
-  - BC4 and BC5 have ambiguous legacy names (`ATI1`/`BC4U`, `ATI2`/`BC5U`).
-  - bc7enc_rdo never writes `_SRGB` formats and makes no mipmaps, so any tool that uses its encoders has to write the DDS file itself.
-- **Settings that change nothing.**
-  - NVTT 3 BC7: `-fast` and the default give byte-identical output, and so do `-production` and `-highest` (39 of 39 files). The same holds for BC6H `-production` and `-highest`.
-  - NVTT's GPU and CPU paths at Normal give different bytes but the same quality (±0.01 dB).
-  - NVTT's `-normal` flag does not change the compressed data. It only sets the non-standard `DDPF_NORMAL` header flag.
-  - Compressonator BC6H `-Quality 0.05` and `1.0` give the same metrics, at 14× the time.
-- **Not re-measured.** Round 3 was paused to free the CPU. These claims rest on the small round-1 and round-2 sets only:
-  - Compressonator `-Quality 1.0` on BC7 (opaque, cutout, smooth alpha, data, normals, stray alpha) and on BC6H.
-  - Smooth gradients, speed and the mode-usage counts.
+### Rate-distortion optimisation
 
-Maintenance status (October 2026):
+RDO always costs quality. In one published bc7enc_rdo run, PSNR fell from 42.25 dB with no RDO to 41.77 at λ = 0.1, 39.51 at λ = 1 and 29.18 at λ = 20. RDO only shrinks the file after LZ compression (inside an archive, for example). It never reduces the DDS size or GPU memory.
+
+### DDS container rules
+
+- BC6H, BC7, any `_SRGB` format and arrays need the DX10 header. BC1 to BC3 are most compatible with legacy FourCCs.
+- BC4 and BC5 have ambiguous legacy names (`ATI1`/`BC4U`, `ATI2`/`BC5U`).
+- bc7enc_rdo never writes `_SRGB` formats and makes no mipmaps, so any tool that uses its encoders has to write the DDS file itself.
+
+### Settings that change nothing
+
+- NVTT 3 BC7: `-fast` and the default give byte-identical output, and so do `-production` and `-highest` (39 of 39 files). The same holds for BC6H `-production` and `-highest`.
+- NVTT's GPU and CPU paths at Normal give different bytes but the same quality (±0.01 dB).
+- NVTT's `-normal` flag does not change the compressed data. It only sets the non-standard `DDPF_NORMAL` header flag.
+- Compressonator BC6H `-Quality 0.05` and `1.0` give the same metrics, at 14× the time.
+
+### Not re-measured in round 3
+
+Round 3 was paused to free the CPU. These claims rest on the small round-1 and round-2 sets only:
+- Compressonator `-Quality 1.0` on BC7 (opaque, cutout, smooth alpha, data, normals, stray alpha) and on BC6H.
+- Smooth gradients, speed and the mode-usage counts.
+
+### NVTT per-level feeding: spikes S7 and S7b (2026-10-09 and 13)
+
+Tessalith 1.x could hand BC7 and BC6H to the user's own NVTT 3.2.5 `nvcompress` (removed in 2.0, Note FM14). These spikes checked that the engine can build the mip chain itself and feed NVTT one level at a time.
+- One `nvcompress -nomips` process per level works to 1×1 (33 levels on the first 3 `rgb_real` and first 3 `hdr_real` images). Mip 0 matched the bench's direct `nvtt_production` and `bc6_nvtt_production` rows exactly (Δ 0.0000 dB), and BC6H payloads were `BC6H_UF16` of exactly `ceil(w/4)*ceil(h/4)*16` bytes.
+- BC7 and BC6H Production run on the CPU even with CUDA available, and `-nocuda` gives byte-identical output (33 of 33 BC6H levels). The fixed cost of about 0.14 s per process is CUDA context creation; with `-nocuda` a tiny level takes 0.015 s. BC7 Production is slow: mip 0 of a 1 Mpix image took 14 to 27 s, about 13 cores busy.
+- Uncompressed DDS input works only with a legacy header. nvcompress reads DX10 B8G8R8A8 and RGBA16F as garbage (RGB PSNR 5.05 dB); a legacy BGRA header, or FourCC 113 for RGBA16F, gives a payload byte-identical to the PNG feed.
+- The no-argument run exits 1, and a truncated input exits 1 with no output.
+
+### Encoder maintenance (October 2026)
 
 | Encoder | Status |
 |---|---|
@@ -677,17 +630,17 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 - **Correct format first.** The design ranks correct format and tag per map type first, then correct mips, then the best encoder at a practical speed ([Design overview](design-overview.md)).
 - **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H**, vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
 - **bc7e at `veryslow` (level 5) is the default BC7 level.** Level 5 matches level 6 at 1.5× the speed. Level 4 is not offered, because level 3 beats it on gradients. The levels are in [`crates/engine/src/encode.rs`](../../crates/engine/src/encode.rs) and the default in [`presets/sdc-base.toml`](../../presets/sdc-base.toml). The `fast-preview` preset uses `fast`.
-- **The vendored encoders reproduce the bench.** Spike S3 matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB, 39 of 39 block payloads byte-identical) and rgbcx BC4 bit for bit ([early records](2026-10-early-spikes.md#spike-s3--workspace-links-vendored-encoders-and-reproduces-the-bench-2026-10-08)).
+- <a id="vendored-encoders-reproduce-the-bench"></a>**The vendored encoders reproduce the bench.** Spike S3 (2026-10-08) built the workspace without ISPC on the path and matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB against 50.977, largest per-image Δ 0.000000 dB over all 10 BC7 sets, 39 of 39 block payloads byte-identical) and rgbcx BC4 on `mask_real` (7 of 7 bit-exact). The Phase 0 gates (2026-10-09) added rgbcx BC1, BC3, BC4 and BC5 bit-exact (14, 25, 12 and 11 images; transparent black off on 14 of 14), ISPC BC6H `veryslow` at 51.4995 dB with 8 of 8 payloads byte-identical, and ISPC objects that regenerate byte for byte.
 - **rgbcx runs at level 18, its highest.** BC1 and the colour half of BC3 encode with rgbcx Dual, which scores NVIDIA and AMD decoder error together; there is no decoder setting (Note FM17). BC3 is never picked to save space, because it is the same size as BC7.
 - **BC4/BC5 search radius 5 is the default; radius 4 is the `fast` setting** used by the compact and preview presets; radius 10 is `max` ([`crates/encoders-sys/src/rgbcx.rs`](../../crates/encoders-sys/src/rgbcx.rs)). rgbcx is patched to round its BC4 palette like the decoder, and to search each BC4 block further for BC4, both BC5 channels and BC3 alpha ([BC4-family block search](bc4-family.md)). The patches and their tests are in [`README-VENDOR.md`](../../crates/encoders-sys/vendor/README-VENDOR.md).
 - **Normals are BC7, not BC5**, because Skyrim does not rebuild Z. BC4 or BC5 on a normal map is the blocking warning `FMT-BC5-NORMAL`. BC5 is the default only for `_flow` and the user-picked `generic_two_channel`.
 - **Perceptual mode is off by default** and refused for anything but colour without data in alpha (`FMT-PERCEPTUAL-DATA`, [`crates/engine/src/policy.rs`](../../crates/engine/src/policy.rs)). No RDO.
 - **BC1 alpha is opt-in** (`encoder.bc1_alpha`, Note FM20), because BC1's 1-bit alpha loses anti-aliased edges and RGB quality against BC7.
 - **The `remove` alpha policy drops the alpha channel before mips and encoding.** Source alpha whose lowest value is 251 or more is treated as opaque ([DECISIONS](../../.claude/DECISIONS.md) Note L), and so is alpha whose texels below 251 are fewer than 0.1 % of the image with no connected group over 16 texels (Note FM34; the survey behind it is in [Mipmaps, normal maps and alpha coverage](mipmaps-and-alpha.md#result-6-a-few-low-alpha-texels-are-noise-a-cutout-is-not)).
-- **Exact alpha 255 where alpha is read.** The encode stage always applies a lossless fix to BC7 mode-4/5 blocks whose input alpha is 255. With `alpha.exact_opaque` on, a patched bc7e restricts mode-6 p-bits to 1 so alpha decodes to exactly 255. Spike S5 measured the RGB cost of that constraint at −0.515 dB on `rgb_real` and −1.020 dB on `rgb_grad`, too much to turn on everywhere, so it is on by default only for `_m` and environment masks. Spike S6 found 7 of 28 real `_m` files with 40% or more of their alpha off 255 without it, so turning it off on a BC7 `_m` is the blocking code `ALPHA-EXACT-OFF-M` ([DECISIONS](../../.claude/DECISIONS.md) Notes A and D; [`crates/encoders-sys/src/bc7_fixup.rs`](../../crates/encoders-sys/src/bc7_fixup.rs)).
+- **Exact alpha 255 where alpha is read.** The encode stage always applies a lossless fix to BC7 mode-4/5 blocks whose input alpha is 255. With `alpha.exact_opaque` on, a patched bc7e restricts mode-6 p-bits to 1 so alpha decodes to exactly 255. Its RGB cost is too high to turn on everywhere ([spikes S5 and S6](#forcing-alpha-255-spikes-s5-s5b-and-s6-2026-10-08-and-09)), so it is on by default only for `_m` and environment masks (owner, Phase 0), and turning it off on a BC7 `_m` is the blocking code `ALPHA-EXACT-OFF-M`; BC4 and BC3 `_m` never raise it ([DECISIONS](../../.claude/DECISIONS.md) Notes A and D; [`crates/encoders-sys/src/bc7_fixup.rs`](../../crates/encoders-sys/src/bc7_fixup.rs)).
 - **BC6H is used only under the `cs` target** (vanilla has no BC6H path), for `hdr_sky` and for a `pbr_emissive` whose source is a float image that peaks above 1.0. Validation warns when the decoded peak ratio falls below 0.8 (`VAL-BC6H-PEAK`).
 - **Tessalith writes its own DDS headers** ([`crates/engine/src/dds.rs`](../../crates/engine/src/dds.rs)): DX10 for BC6H, BC7 and every `_SRGB` format, legacy FourCC for BC1/BC3 UNORM under the `auto` header setting, and `ATI1`/`ATI2` never.
-- **NVTT was an opt-in quality option for BC7 and BC6H in 1.x, at Production only, run as the user's own `nvcompress.exe`; 2.0 removed it** (Note FM14). The per-level feeding it used is in spikes S7 and S7b ([early records](2026-10-early-spikes.md#spike-s7--nvtt-per-mip-feeding-2026-10-09)).
+- **NVTT was an opt-in quality option for BC7 and BC6H in 1.x, at Production only, run as the user's own `nvcompress.exe`; 2.0 removed it** (Note FM14). The per-level feeding it used is in [spikes S7 and S7b](#nvtt-per-level-feeding-spikes-s7-and-s7b-2026-10-09-and-13).
 - **The bench and its gates** (parity, exact-opaque, `radius45` for the search radius) live on branch `bench` (Note FM8).
 
 ## Sources

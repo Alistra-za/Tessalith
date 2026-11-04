@@ -10,7 +10,7 @@ import argparse, csv, pathlib, re, subprocess, sys, tempfile
 DEC = ".claude/DECISIONS.md"
 ARC = ".claude/DECISIONS-ARCHIVE.md"
 DEC_BEFORE_MOVE = "docs/" + "DECISIONS.md"  # where a --base before the move into .claude/ holds it
-RES = "docs/research/2026-10-early-spikes.md"
+RESEARCH = "docs/research"  # a `research` row is moved by hand into its format's page there (DOCUMENTATION.md)
 
 
 MOVED = ("archive-item", "archive-note")
@@ -126,9 +126,6 @@ def write_doc(p, lines, nl):
 ARC_HEAD = ["# DECISIONS archive", "",
             "Rulings here are **not in force**. They moved verbatim from DECISIONS.md under their original IDs "
             "(docs/DOCUMENTATION.md §7). Never cite one as a reason for current behaviour.", ""]
-RES_HEAD = ["# Early spikes and phase records (2026-10)", "",
-            "Written 2026-10-31 (commit a48ed8cf): moved verbatim from DECISIONS.md (docs/DOCUMENTATION.md §7). "
-            "Measurement and process records of 2026-10-08 to 2026-10-13, not rulings.", ""]
 
 
 def add_block(doc, heading, block):
@@ -155,11 +152,8 @@ def apply(root, rows):
     root = pathlib.Path(root)
     live, nl = read_doc(root / DEC)
     arc, anl = read_doc(root / ARC)
-    res, rnl = read_doc(root / RES)
     if not arc or arc == [""]:
         arc, anl = list(ARC_HEAD), nl
-    if not res or res == [""]:
-        res, rnl = list(RES_HEAD), nl
     moved_sections = {r["id"] for r in rows if r["class"] in ("research", "archive-note") and is_section(r)}
     found = []
     for r in rows:
@@ -169,27 +163,17 @@ def apply(root, rows):
             raise LookupError2(f"{r['id']}: its section is moved whole ({r['id'].split('¶')[0]})")
         sp = find_span(live, r)
         if sp is None:
-            if r["class"] == "research":
-                if section_range(res, r["id"]) is None:
-                    raise LookupError2(f"{r['id']}: not in DECISIONS.md nor in {RES}")
-            elif not archived_already(arc, r):
+            if r["class"] != "research" and not archived_already(arc, r):
                 raise LookupError2(f"{r['id']}: not found in DECISIONS.md and not archived")
             continue
+        if r["class"] == "research":
+            raise LookupError2(f"{r['id']}: a research row is moved by hand into its format's page under {RESEARCH}")
         found.append((sp, r))
     found.sort(key=lambda x: x[0][0])
     for (a, b), (c, d) in zip([f[0] for f in found], [f[0] for f in found][1:]):
         if c < b:
             raise LookupError2(f"overlapping spans at lines {a + 1} and {c + 1}")
     for (a, b), r in found:
-        if r["class"] == "research":
-            block = live[a:b]
-            while block and not block[-1].strip():
-                block.pop()
-            if section_range(res, r["id"]) is None:
-                if res[-1].strip():
-                    res.append("")
-                res.extend([*block, ""])
-            continue
         if is_section(r):  # archive-note: heading, ARCHIVED line, body
             body = live[a + 1:b]
             while body and not body[0].strip():
@@ -210,8 +194,6 @@ def apply(root, rows):
             del live[a:b]
     write_doc(root / DEC, live, nl)
     write_doc(root / ARC, arc, anl)
-    if len(res) > len(RES_HEAD):
-        write_doc(root / RES, res, rnl)
 
 
 def archived_already(arc, r):
@@ -411,10 +393,16 @@ def self_test():
         before = ((root / DEC).read_bytes(), (root / ARC).read_bytes())
         apply(root, ROWS)
         ok("a second --apply changes nothing", before == ((root / DEC).read_bytes(), (root / ARC).read_bytes()))
-        res = (root / RES).read_text(encoding="utf-8") if (root / RES).exists() else ""
+        res = ""
         ok("--check passes", check(FIXTURE, live, arc, res, ROWS) == [])
         hand = live.replace("- **H3 Next.** x\n", "")
         ok("a hand-deleted live line fails --check", any("H3 Next" in f for f in check(FIXTURE, hand, arc, res, ROWS)))
+        try:
+            apply(root, [{"id": "H3", "note": "H", "class": "research"}])
+            refused = False
+        except LookupError2:
+            refused = True
+        ok("a research row still in DECISIONS.md is refused, nothing written", refused and (root / DEC).read_bytes() == before[0])
         ok("a prose row moves under its note with the ARCHIVED line",
            "The GUI reads every set" not in live and "indented under the prose line" not in live
            and "ARCHIVED (superseded by Note HB1, 2026-10-29)\nThe GUI reads every set from the project. (superseded by HB1)\n  - indented under the prose line." in arc)
@@ -470,7 +458,8 @@ def main():
                 old = git("show", f"{a.base}:{DEC}")
             except subprocess.CalledProcessError:
                 old = git("show", f"{a.base}:{DEC_BEFORE_MOVE}")
-            fails = check(old, text(DEC), text(ARC), text(RES), read_table(table))
+            research = "\n".join(p.read_text(encoding="utf-8") for p in sorted((root / RESEARCH).glob("*.md")))
+            fails = check(old, text(DEC), text(ARC), research, read_table(table))
         else:
             # The DECISIONS files and the mistakes log are prose, not code with comments.
             diff = git("diff", "-U0", "--no-color", a.base, "--", "crates", "tools", ".claude",
