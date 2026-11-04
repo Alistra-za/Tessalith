@@ -1,16 +1,9 @@
 use image::{ImageBuffer, Luma, Rgb, Rgba};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
-fn sdc() -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_sdc"));
-    // Keep the developer's real user config out of the tests.
-    c.env(
-        "APPDATA",
-        std::env::temp_dir().join("sdc-test-appdata-none"),
-    );
-    c
-}
+mod common;
+use common::sdc;
 
 fn code(o: &Output) -> i32 {
     o.status.code().expect("sdc was killed by a signal")
@@ -28,8 +21,8 @@ fn alpha254_dds(root: &Path) -> PathBuf {
         // A 255..252 alpha ramp every 4 columns: BC7 decodes about 39 % of mip 0 to exactly 254.
         Rgba([x as u8 * 4, y as u8 * 8, 90, 255 - (x % 4) as u8])
     })
-        .save(src.join("rock.png"))
-        .unwrap();
+    .save(src.join("rock.png"))
+    .unwrap();
     let out = root.join("out");
     let o = sdc()
         .args(["convert", "--accept-suggestions", "high"])

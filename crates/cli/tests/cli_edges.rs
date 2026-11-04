@@ -9,14 +9,8 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn sdc() -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_sdc"));
-    c.env(
-        "APPDATA",
-        std::env::temp_dir().join("sdc-test-appdata-none"),
-    );
-    c
-}
+mod common;
+use common::sdc;
 
 fn img(p: &Path) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
