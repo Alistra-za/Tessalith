@@ -689,7 +689,7 @@ fn review_has_no_half_size_or_stale_group() {
     ]);
     m.open_review();
     let mut h = Harness::builder()
-        .with_size(egui::vec2(1500.0, 900.0))
+        .with_size(egui::vec2(1500.0, 1300.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
@@ -698,7 +698,7 @@ fn review_has_no_half_size_or_stale_group() {
     let expected: Vec<&str> = vec![
         "1 DDS file",
         "Accept all suggestions",
-        "Acknowledge for this texture",
+        "Acknowledge",
         "Also export as",
         "Also folders go in",
         "Also folders go in: <tmp>\\export",
@@ -719,14 +719,15 @@ fn review_has_no_half_size_or_stale_group() {
         "Problems (8)",
         "Recipe settings are in Advanced",
         "Review",
+        "Set type: landscape diffuse ✓",
+        "Set type: landscape normal ✓",
+        "Set type…",
         "Skip these sets",
         "This texture is too small for its format — use a bigger image",
         "Undecided (4)",
         "Vanilla",
         "Vanilla folder name",
         "What will be written",
-        "landscape diffuse",
-        "landscape normal",
         "landscape/rock01",
         "leaf.png",
         "meshes\\a.nif · My Mod · written to <tmp>\\export",
@@ -735,7 +736,6 @@ fn review_has_no_half_size_or_stale_group() {
         "rock01.png",
         "rock01_normal.png",
         "▼",
-        "✓",
     ];
     assert_eq!(got, expected, "{got:#?}");
 }

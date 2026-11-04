@@ -1,9 +1,9 @@
 //! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
 //! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
-use super::settings_panel::{alpha_dropdown, offered_groups, subtype_label, unclear_layouts};
+use super::settings_panel::{alpha_dropdown, subtype_label, unclear_layouts};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::code_text::{ack_label, ack_label_for_texture, alpha_confirm_text, code_line};
+use crate::model::code_text::{ack_label, alpha_confirm_text, code_line};
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
@@ -64,81 +64,28 @@ pub fn undecided_row(
     off: Option<&str>,
 ) -> Option<RowPick> {
     let item = model.item(key)?;
-    let fallback = item.job.as_ref().map(|j| j.profile.subtype);
-    let question = model.subtype_question(key);
-    let why = off.unwrap_or_default();
     let mut pick = None;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui.link(&item.name).clicked() {
             pick = Some(RowPick::Select(key.to_string()));
         }
-        let Some(suggested) = question else {
-            return;
-        };
-        let Some(default) = suggested.or(fallback) else {
-            return;
-        };
-        ui.add_enabled_ui(off.is_none(), |ui| {
-            let id = egui::Id::new(("undecided-row", key));
-            let mut chosen: Subtype = ui.data(|d| d.get_temp(id)).unwrap_or(default);
-            egui::ComboBox::from_id_salt(id)
-                .selected_text(subtype_label(chosen))
-                .show_ui(ui, |ui| {
-                    let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
-                    for (heading, members) in offered_groups(model.target, grass) {
-                        ui.label(egui::RichText::new(heading).weak());
-                        for st in members {
-                            ui.selectable_value(&mut chosen, st, subtype_label(st))
-                                .on_hover_text(st.id());
-                        }
-                    }
-                })
-                .response
-                .on_disabled_hover_text(why);
-            ui.data_mut(|d| d.insert_temp(id, chosen));
-            if ui
-                .button("\u{2713}")
-                .on_hover_text("Decide this texture")
-                .on_disabled_hover_text(why)
-                .clicked()
-            {
-                pick = Some(RowPick::Decide(key.to_string(), chosen));
-            }
-        });
-    });
-    // The questions that are not a sub-type: a small fixed set of choices each, answered inline.
-    ui.add_enabled_ui(off.is_none(), |ui| {
+        // The sentences a Problems row words itself (Note FB8: the code on hover; Note FM35: the alpha line).
         for d in &item.decisions {
-            ui.horizontal_wrapped(|ui| match d {
-                // Note FM35: one line and one dropdown on the resolved type.
+            match d {
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
                         ui.label(alpha_confirm_text(shown));
-                        let id = egui::Id::new(("undecided-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why, "Review") {
-                            pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
-                        }
                     }
                 }
                 Decision::Acknowledge(code) => {
-                    // Note FB8: the sentence, with the code on its hover.
                     ui.label(code_line(*code)).on_hover_text(code.as_str());
-                    if ui
-                        .button(ack_label_for_texture(*code))
-                        .on_hover_text(code_line(*code))
-                        .on_disabled_hover_text(why)
-                        .clicked()
-                    {
-                        pick = Some(RowPick::Answer(key.to_string(), Answer::Acknowledge(*code)));
-                    }
                 }
-                Decision::CubeLayout => {
-                    if let Some(p) = layout_menu(ui, key, why) {
-                        pick = Some(p);
-                    }
-                }
-                Decision::Subtype { .. } => {}
-            });
+                Decision::CubeLayout | Decision::Subtype { .. } => {}
+            }
+        }
+        // Backlog L64: the buttons are the Problems row's, so both surfaces offer the same fixes.
+        if let Some(p) = fix_buttons(ui, model, key, off) {
+            pick = Some(p);
         }
     });
     pick
