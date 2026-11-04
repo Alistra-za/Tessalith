@@ -803,6 +803,21 @@ impl SetsDoc {
             .expect("just made")
     }
 
+    /// The table of set `id`, if it has one (ids compare case-insensitively).
+    fn table(&self, id: &str) -> Option<&Table> {
+        let lower = fold_id(id);
+        self.f
+            .doc
+            .get("sets")?
+            .as_array_of_tables()?
+            .iter()
+            .find(|t| {
+                t.get("id")
+                    .and_then(Item::as_str)
+                    .is_some_and(|s| fold_id(s) == lower)
+            })
+    }
+
     /// The table of set `id`, created at the end when missing (ids compare case-insensitively).
     fn table_mut(&mut self, id: &str) -> &mut Table {
         let lower = fold_id(id);
@@ -1128,19 +1143,7 @@ impl SetsDoc {
             return;
         }
         // Clearing a set with no table changes nothing (no table, no dirty, no undo step).
-        let lower = fold_id(id);
-        let has_table = self
-            .f
-            .doc
-            .get("sets")
-            .and_then(Item::as_array_of_tables)
-            .is_some_and(|ts| {
-                ts.iter().any(|t| {
-                    t.get("id")
-                        .and_then(Item::as_str)
-                        .is_some_and(|s| fold_id(s) == lower)
-                })
-            });
+        let has_table = self.table(id).is_some();
         if shader.is_none() && !has_table {
             return;
         }
@@ -1167,22 +1170,12 @@ impl SetsDoc {
         if self.read_only() {
             return;
         }
-        let lower = fold_id(id);
-        let has_table = self
-            .f
-            .doc
-            .get("sets")
-            .and_then(Item::as_array_of_tables)
-            .is_some_and(|ts| {
-                ts.iter().any(|t| {
-                    t.get("id")
-                        .and_then(Item::as_str)
-                        .is_some_and(|s| fold_id(s) == lower)
-                })
-            });
-        if name.is_none() && !has_table {
+        let old = self.table(id).map(|t| t.get("output_name").and_then(Item::as_str));
+        if name.is_none() && old.is_none() {
             return;
         }
+        // An equal write is no edit (L55): the set has a table and already holds this name (or none).
+        let same = old == Some(name);
         let t = self.table_mut(id);
         match name {
             Some(n) => {
@@ -1192,7 +1185,9 @@ impl SetsDoc {
                 t.remove("output_name");
             }
         }
-        self.f.touch();
+        if !same {
+            self.f.touch();
+        }
     }
 
     /// Set (or with `None` remove) JSON setting `key` (a dotted schema path) of set `id`. On a set with a texture-set
@@ -1671,5 +1666,18 @@ mod tests {
             assert!(s.is_dirty(), "{what}");
             assert_eq!(*s.entries(), s.parse_entries(), "{what}");
         }
+    }
+
+    /// Backlog L55: writing the output name a set already has is no edit (no revision bump, no dirty flag).
+    #[test]
+    fn an_equal_output_name_write_is_no_edit() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = SetsDoc::open(d.path());
+        s.restore("[[sets]]\nid = \"a/x\"\noutput_name = \"same\"\n");
+        let (rev, dirty) = (s.rev(), s.is_dirty());
+        s.set_output_name("a/x", Some("same"));
+        assert_eq!((s.rev(), s.is_dirty()), (rev, dirty));
+        s.set_output_name("a/x", Some("other"));
+        assert_ne!(s.rev(), rev, "a different name is an edit");
     }
 }
