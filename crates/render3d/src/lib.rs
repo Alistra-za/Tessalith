@@ -268,6 +268,13 @@ impl TexEntry {
         self.source.is_some() || self.encoded.is_some()
     }
 }
+/// Whether a cached entry answers a `texture()` request. A path cached as an absent Auto guess (empty, not
+/// `missing`) is loaded again when a slot or pick names it (`report_missing`), so the pick can bind a file that
+/// appeared since.
+fn reuse(e: &TexEntry, report_missing: bool) -> bool {
+    !(report_missing && !e.missing && !e.any())
+}
+
 /// [`Renderer::draw_diag`]: PS defines, PS reflection, (register, DXGI format) of every bound SRV.
 pub type DrawDiag = (
     Vec<(String, String)>,
@@ -1068,7 +1075,11 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) -> TexSlot {
-        if let Some(e) = self.tex_cache.get(norm) {
+        if let Some(e) = self
+            .tex_cache
+            .get(norm)
+            .filter(|e| reuse(e, report_missing))
+        {
             return e.current().map(|t| (t.srv.clone(), t.kind));
         }
         let v = self.load_variant;
@@ -2791,6 +2802,23 @@ fn glint_noise_or_fallback<T>(
 #[cfg(test)]
 mod context_tests {
     use super::*;
+
+    /// Item 53: a pick reloads a path cached as an absent Auto guess; every other hit stays a hit.
+    #[test]
+    fn a_pick_reloads_an_absent_auto_guess() {
+        let guess = TexEntry::default();
+        assert!(reuse(&guess, false), "an Auto guess re-asking stays cached");
+        assert!(!reuse(&guess, true), "a pick reloads the absent guess");
+        let listed = TexEntry {
+            missing: true,
+            ..TexEntry::default()
+        };
+        assert!(
+            reuse(&listed, true),
+            "an already-listed missing path stays cached"
+        );
+        assert!(reuse(&listed, false));
+    }
 
     /// Final review M4: a glint-noise upload that fails leaves the shape on the old 1x1 default and is logged once;
     /// a lost device still fails so the GUI rebuilds. (Tested on the decision itself: no seam makes the real upload fail.)
