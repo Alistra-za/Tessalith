@@ -269,18 +269,28 @@ fn decode_chain(
 pub fn decode_levels(r: &PreviewResult) -> Vec<Vec<[f32; 4]>> {
     let s = &r.source;
     let fmt = r.format.pixel_format(r.srgb);
-    if r.faces != 6 {
-        return decode_chain(fmt, &s.dims, s.first_level, &r.levels);
+    decode_faces(fmt, &s.dims, s.first_level, &r.levels, r.faces)
+}
+
+/// [`decode_chain`] for one face, or for six face-major chains laid out as one cross per mip.
+fn decode_faces(
+    fmt: DdsPixelFormat,
+    dims: &[(u32, u32)],
+    first_level: usize,
+    levels: &[Vec<u8>],
+    faces: u8,
+) -> Vec<Vec<[f32; 4]>> {
+    if faces != 6 {
+        return decode_chain(fmt, dims, first_level, levels);
     }
-    let per_face = r.levels.len() / 6;
-    let faces: Vec<_> = r
-        .levels
+    let per_face = levels.len() / 6;
+    let faces: Vec<_> = levels
         .chunks(per_face.max(1))
-        .map(|f| decode_chain(fmt, &s.dims, s.first_level, f))
+        .map(|f| decode_chain(fmt, dims, first_level, f))
         .collect();
     (0..per_face)
         .map(|i| {
-            let size = s.dims[s.first_level + i].0;
+            let size = dims[first_level + i].0;
             let refs = std::array::from_fn(|f| faces[f][i].as_slice());
             cube_cross::cross_image(refs, size).2
         })
@@ -320,12 +330,16 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
             "{w}x{h} (the smallest mip) is above the preview limit of {max}"
         ));
     }
-    let levels: Vec<Vec<u8>> = f.levels[first_level..]
-        .iter()
+    // T16: a cube keeps all six faces' levels from `first_level` (face-major), so the cross builds (Note DT16).
+    let faces: u8 = if f.is_cubemap { 6 } else { 1 };
+    let per_face = f.levels.len();
+    let surfaces = f.surfaces();
+    let levels: Vec<Vec<u8>> = (0..usize::from(faces))
+        .flat_map(|face| surfaces[face * per_face + first_level..(face + 1) * per_face].iter())
         .map(|(_, _, r)| f.data[r.clone()].to_vec())
         .collect();
     // Decoded as the file's own layout: for a format sdc never writes, `format` above is only the display kind.
-    let decoded = decode_chain(f.format, &dims, first_level, &levels);
+    let decoded = decode_faces(f.format, &dims, first_level, &levels, faces);
     let result = PreviewResult {
         source: SourcePreview {
             first_level,
@@ -334,7 +348,7 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         },
         format,
         srgb,
-        faces: 1,
+        faces,
         levels,
         validation: Default::default(),
         warnings: vec![],
@@ -494,6 +508,8 @@ impl AppModel {
                 if self.preview.profile_sig.is_some() {
                     self.preview_open(&key);
                 } else {
+                    // T15: the reason may have changed since the preview opened.
+                    self.preview.source = SourceState::Failed(why.to_string());
                     self.set_base_notice(Some(why.to_string()));
                 }
             }
