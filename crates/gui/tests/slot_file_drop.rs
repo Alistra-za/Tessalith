@@ -337,13 +337,19 @@ fn a_drop_under_a_modal_is_ignored() {
             .push(std::sync::Arc::new(Dropped(other.path().to_path_buf())));
         h.run();
         let (m, st) = (&h.state().0, &h.state().1);
-        assert!(st.drops.slot_note.is_none(), "pending {pending}: no slot note");
+        assert!(
+            st.drops.slot_note.is_none(),
+            "pending {pending}: no slot note"
+        );
         assert_eq!(m.root, root, "pending {pending}: the folder stays open");
         if pending {
             assert_eq!(st.drops.pending, Some(Pending::Refused("busy".into())));
         } else {
             assert_eq!(m.dialog, Some(Dialog::Error("busy".into())));
-            assert!(st.drops.pending.is_none(), "no refusal raised under the dialog");
+            assert!(
+                st.drops.pending.is_none(),
+                "no refusal raised under the dialog"
+            );
         }
     }
 }

@@ -1458,6 +1458,13 @@ fn undo_click_commits_the_field_first() {
     press_release(&mut h, p, false);
     settle(&mut h);
     let m = &h.state().0;
-    assert!(m.can_redo(), "the committed name step was undone, so Redo holds it");
-    assert_eq!(m.input_name_of("landscape/rock02"), None, "the typed name was undone");
+    assert!(
+        m.can_redo(),
+        "the committed name step was undone, so Redo holds it"
+    );
+    assert_eq!(
+        m.input_name_of("landscape/rock02"),
+        None,
+        "the typed name was undone"
+    );
 }
