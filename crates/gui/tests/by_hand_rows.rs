@@ -297,10 +297,10 @@ fn every_subtype_combo_offers_complex_grass_only_in_a_grass_context() {
     assert!(lists(&job), "no textures ancestor");
 }
 
-/// Note FC14 (final review, X3 drawn): Review's Undecided combo on a grass file with no `textures` ancestor lists
+/// Note FC14 (final review, X3 drawn): Review's Undecided type picker on a grass file with no `textures` ancestor lists
 /// Complex grass when opened.
 #[test]
-fn the_review_undecided_combo_offers_complex_grass_on_the_grass_fixture() {
+fn the_review_undecided_picker_offers_complex_grass_on_the_grass_fixture() {
     use engine::config::Subtype;
     use sdc_gui::ui::settings_panel::subtype_label;
     let e = tempfile::tempdir().unwrap();
@@ -329,7 +329,7 @@ fn the_review_undecided_combo_offers_complex_grass_on_the_grass_fixture() {
     h.state_mut().open_review();
     h.run();
     let grass = subtype_label(Subtype::ComplexGrass);
-    assert!(h.query_by_label(&grass).is_none(), "closed combo");
+    assert!(h.query_by_label(&grass).is_none(), "closed picker");
     h.get_by_label_contains(&format!("Undecided ({})", 1));
     // Backlog L64: the row's picker is the Problems row's: `Set type…` (the ▾ of an accept button carries that name).
     {
@@ -341,7 +341,7 @@ fn the_review_undecided_combo_offers_complex_grass_on_the_grass_fixture() {
     h.run();
     assert!(
         h.query_by_label(&grass).is_some(),
-        "the open combo lists {grass}"
+        "the open picker lists {grass}"
     );
 }
 

@@ -185,10 +185,14 @@ fn the_header_vram_line_is_cached_and_follows_landing_dims() {
             m,
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let line = |h: &egui_kittest::Harness<'static, sdc_gui::model::AppModel>| {
+        use egui_kittest::kittest::NodeT;
+        let n = h.get_by_label_contains("≈ VRAM: selection ");
+        let a = n.accesskit_node();
+        a.label().or_else(|| a.value()).unwrap_or_default()
+    };
     h.step();
-    assert!(h
-        .query_all_by_label_contains("unsized")
-        .any(|n| format!("{n:?}").contains("VRAM")));
+    assert!(line(&h).contains("unsized"), "{}", line(&h));
     let totals = h.state().sizes.totals;
     for _ in 0..5 {
         h.step();
@@ -199,8 +203,9 @@ fn the_header_vram_line_is_cached_and_follows_landing_dims() {
     h.step();
     h.step();
     assert!(
-        h.query_all_by_label_contains("unsized").next().is_none(),
-        "the line followed the landed sizes"
+        !line(&h).contains("unsized"),
+        "the line followed the landed sizes: {}",
+        line(&h)
     );
 }
 

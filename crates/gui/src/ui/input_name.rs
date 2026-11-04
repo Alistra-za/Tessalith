@@ -41,7 +41,8 @@ pub fn scans() -> u32 {
 }
 
 /// The ghost and the live rows of `text`, scanned once per (path list, text). Backlog L16: the box asked four times a
-/// frame. The cache holds the list's `Arc`, so a new list can never be mistaken for the old one by its address.
+/// frame. The cache holds the list's `Arc`, so a new list can never be mistaken for the old one by its address (the
+/// old list stays alive in egui's temp memory until the next scan replaces it).
 type Scanned = (Option<String>, Vec<String>);
 fn scan(ui: &egui::Ui, edit_id: egui::Id, paths: &Arc<Vec<String>>, text: &str) -> Arc<Scanned> {
     type Cached = (Arc<Vec<String>>, String, Arc<Scanned>);

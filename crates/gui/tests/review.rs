@@ -689,7 +689,7 @@ fn review_has_no_half_size_or_stale_group() {
     ]);
     m.open_review();
     let mut h = Harness::builder()
-        .with_size(egui::vec2(1500.0, 1300.0))
+        .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
@@ -698,7 +698,7 @@ fn review_has_no_half_size_or_stale_group() {
     let expected: Vec<&str> = vec![
         "1 DDS file",
         "Accept all suggestions",
-        "Acknowledge",
+        "Acknowledge for this texture",
         "Also export as",
         "Also folders go in",
         "Also folders go in: <tmp>\\export",

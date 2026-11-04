@@ -251,24 +251,11 @@ fn the_subtype_dropdowns_offer_skin_rfaos() {
     h.run();
     h.run();
     // Backlog L64: Review's rows open the shared `Set type…` picker, not a combo.
-    let openers: Vec<_> = h
-        .query_all_by_label("Set type…")
-        .map(|n| n.rect())
-        .collect();
-    assert!(!openers.is_empty(), "Review: a type picker");
+    let openers = h.query_all_by_label("Set type…").count();
+    assert!(openers > 0, "Review: a type picker");
     let mut seen = false;
-    for r in openers {
-        h.input_mut()
-            .events
-            .push(egui::Event::PointerMoved(r.center()));
-        for pressed in [true, false] {
-            h.input_mut().events.push(egui::Event::PointerButton {
-                pos: r.center(),
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            });
-        }
+    for i in 0..openers {
+        h.query_all_by_label("Set type…").nth(i).unwrap().click();
         h.run();
         h.run();
         assert_eq!(

@@ -3,7 +3,7 @@
 use super::settings_panel::{alpha_dropdown, subtype_label, unclear_layouts};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::code_text::{ack_label, alpha_confirm_text, code_line};
+use crate::model::code_text::{ack_label, ack_label_for_texture, alpha_confirm_text, code_line};
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
@@ -55,8 +55,9 @@ fn layout_menu(ui: &mut egui::Ui, key: &str, why: &str) -> Option<RowPick> {
     pick
 }
 
-/// One undecided texture's controls: name link, sub-type combo + ✓ when it asks its sub-type, the alpha dropdown,
-/// "Acknowledge for this texture". The controls are disabled with `off` as hover; the name link always selects.
+/// One undecided texture's row: the name link and the Problems row's fix buttons on one line (`Set type: X ✓ ▾`, the
+/// alpha dropdown, "Acknowledge for this texture"), then the sentences of its questions on a wrapped line of their own
+/// when it has any. The buttons are disabled with `off` as hover; the name link always selects.
 pub fn undecided_row(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -65,33 +66,40 @@ pub fn undecided_row(
 ) -> Option<RowPick> {
     let item = model.item(key)?;
     let mut pick = None;
-    // The name and its sentences wrap; the buttons get a line of their own, since a wrapped layout squeezes a button
-    // word by word instead of moving it down.
-    ui.horizontal_wrapped(|ui| {
+    // Backlog L64: the buttons are the Problems row's, so both surfaces offer the same fixes. They stay on the name's
+    // line (a wrapped layout would squeeze a button word by word), so a row is one line tall unless it has a sentence.
+    ui.horizontal(|ui| {
         if ui.link(&item.name).clicked() {
             pick = Some(RowPick::Select(key.to_string()));
         }
-        // The sentences a Problems row words itself (Note FB8: the code on hover; Note FM35: the alpha line).
-        for d in &item.decisions {
-            match d {
-                Decision::AlphaMeaning => {
-                    if let Some(shown) = alpha_asked(item) {
-                        ui.label(alpha_confirm_text(shown));
-                    }
-                }
-                Decision::Acknowledge(code) => {
-                    ui.label(code_line(*code)).on_hover_text(code.as_str());
-                }
-                Decision::CubeLayout | Decision::Subtype { .. } => {}
-            }
-        }
-    });
-    // Backlog L64: the buttons are the Problems row's, so both surfaces offer the same fixes.
-    ui.horizontal(|ui| {
         if let Some(p) = fix_buttons_on(ui, model, key, off, "Review") {
             pick = Some(p);
         }
     });
+    // The sentences a Problems row words itself (Note FB8: the code on hover; Note FM35: the alpha line).
+    let sentences: Vec<(String, Option<&str>)> = item
+        .decisions
+        .iter()
+        .filter_map(|d| match d {
+            Decision::AlphaMeaning => {
+                alpha_asked(item).map(|shown| (alpha_confirm_text(shown).to_string(), None))
+            }
+            Decision::Acknowledge(code) => {
+                Some((code_line(*code).to_string(), Some(code.as_str())))
+            }
+            Decision::CubeLayout | Decision::Subtype { .. } => None,
+        })
+        .collect();
+    if !sentences.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            for (text, hover) in &sentences {
+                let r = ui.label(text);
+                if let Some(h) = hover {
+                    r.on_hover_text(*h);
+                }
+            }
+        });
+    }
     pick
 }
 
@@ -197,7 +205,11 @@ fn fix_buttons_on(
                 }
                 Decision::Acknowledge(code) => {
                     if ui
-                        .button(ack_label(*code))
+                        .button(if surface == "Review" {
+                            ack_label_for_texture(*code)
+                        } else {
+                            ack_label(*code).to_string()
+                        })
                         .on_hover_text(code_line(*code))
                         .on_disabled_hover_text(why)
                         .clicked()
