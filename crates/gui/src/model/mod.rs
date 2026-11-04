@@ -1856,6 +1856,16 @@ impl AppModel {
         self.export_ended(result);
     }
 
+    /// Tests: the state `plan_failed` leaves while the retry plan without a rejected `sdc.toml` is still running: the
+    /// file blamed (its unsaved edits stashed) and the blame tentative.
+    #[cfg(feature = "test-hooks")]
+    pub fn blame_sdc_toml_while_retrying(&mut self, message: &str) {
+        if let Some(p) = self.project.as_mut() {
+            p.set_error(message);
+            self.ignored_by_plan = true;
+        }
+    }
+
     /// An export waits for a plan to land (Export clicked while planning, or a Continue after a re-plan).
     pub fn export_queued(&self) -> bool {
         self.export_after_plan || self.continue_after_plan.is_some()

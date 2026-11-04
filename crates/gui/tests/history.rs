@@ -366,8 +366,8 @@ fn a_step_recorded_while_sdc_toml_is_blamed_keeps_its_text() {
     m.undo();
     assert!(m.wait_idle(wait));
     assert!(!m.project.as_ref().unwrap().read_only(), "undone");
+    // Both redos before the plan lands: the second restores its step's text over a document not yet blamed again.
     m.redo();
-    assert!(m.wait_idle(wait));
     m.redo();
     assert!(m.wait_idle(wait));
     // Redone, the engine rejects the value again, so the text is the stashed one.
@@ -395,12 +395,8 @@ fn save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits() {
         .key
         .clone();
     m.set_field(&item, "alpha.threshold", json!(1000));
-    // Poll until the engine's rejection blames the file; its retry plan is still running then.
-    let start = std::time::Instant::now();
-    while !m.project.as_ref().unwrap().read_only() {
-        assert!(start.elapsed().as_secs() < 60, "never rejected");
-        m.poll();
-    }
+    // The state while the retry plan is still running (held, not raced).
+    m.blame_sdc_toml_while_retrying("rejected");
     let stashed = m.project.as_ref().unwrap().stashed_edits();
     let Some(stashed) = stashed else {
         panic!("the retry plan landed before the test could act");
@@ -409,6 +405,11 @@ fn save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits() {
     let toml = m.root.clone().unwrap().join("sdc.toml");
     let other = d.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    m.resolve_open_unsaved(other, true);
+    assert!(m.save().is_ok(), "Save succeeded");
     assert_eq!(std::fs::read_to_string(&toml).unwrap_or_default(), stashed);
+    assert!(!m.is_dirty(), "nothing left unsaved");
+    // The dialog's Save then goes on to open the other folder.
+    m.resolve_open_unsaved(other.clone(), true);
+    assert_eq!(m.dialog, None);
+    assert_eq!(m.root.as_deref(), Some(other.as_path()));
 }
