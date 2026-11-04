@@ -736,7 +736,7 @@ pub fn draw(
                         Status::Ready
                     },
                     look,
-                    &sel_items,
+                    sel_items,
                     &mut acts,
                 );
                 resized |= (out.rect.height() - h).abs() > 0.5;
