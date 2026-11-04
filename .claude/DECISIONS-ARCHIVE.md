@@ -161,3 +161,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- PGPatcher complex-material JSON is `<job output>.json` under the export root, validated against the vendored schema, written only after an export with no failures; problems get a note. No `_m.json` importer; an `_m.json` Tessalith did not write is never overwritten; `disabled` round-trips. [AT3, GE13]
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS

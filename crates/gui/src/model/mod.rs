@@ -20,6 +20,7 @@ pub mod history;
 pub mod input_name;
 pub mod inspector;
 pub mod items;
+mod json_finish;
 pub mod known_paths;
 pub mod labels;
 pub mod marker;
@@ -597,6 +598,9 @@ pub struct AppModel {
     nif_export_due: bool,
     /// Note CN: the last Also export's phase error (CN56), so its end is logged as an error, not a success.
     also_error: Option<String>,
+    /// Note FW1: the phases the last Also export ran, each with whether it had failed files or an error. Empty for a
+    /// plain export. The CM and XPMF JSON read their own phase here.
+    also_phases: Vec<(engine::also::Phase, bool)>,
     /// Note CN: the three folders the last Also export wrote (`also_file`).
     also_written: Option<[PathBuf; 3]>,
     /// Final review I2: the Also worker waits on this for the files the JSON finishers wrote into the PBR folder.
@@ -829,6 +833,7 @@ impl AppModel {
             nif_export_queued: false,
             nif_export_due: false,
             also_error: None,
+            also_phases: Vec::new(),
             also_written: None,
             also_reply: None,
             also_json: Vec::new(),
@@ -1856,6 +1861,12 @@ impl AppModel {
         self.export_ended(result);
     }
 
+    /// Tests: hand the model an Also export's summary, as the worker's `AlsoFinished` does.
+    #[cfg(feature = "test-hooks")]
+    pub fn also_finished_with(&mut self, s: engine::also::AlsoSummary) {
+        self.also_finished(s);
+    }
+
     /// Tests: the state `plan_failed` leaves while the retry plan without a rejected `sdc.toml` is still running: the
     /// file blamed (its unsaved edits stashed) and the blame tentative.
     #[cfg(feature = "test-hooks")]
@@ -2245,6 +2256,7 @@ impl AppModel {
         };
         let also = self.also_on();
         self.also_error = None;
+        self.also_phases.clear();
         self.also_written = None;
         // Final review I2: dropping an earlier export's sender releases its worker (no extra file).
         self.also_reply = None;

@@ -740,44 +740,36 @@ impl AppModel {
     /// `pending_xpmf` by the caller) and record their hashes (saved, like the complex-material record). Otherwise
     /// only add a note.
     pub fn finish_xpmf(&mut self, p: Option<PendingXpmf>) {
-        let Some(p) = p else {
-            return;
-        };
-        let ok = self.export.error.is_none()
-            && self
-                .export
-                .summary
-                .as_ref()
-                .is_some_and(|s| s.cancelled.is_empty() && s.failed == 0);
-        if !ok {
-            if p.folders().any(|f| !f.files.is_empty()) {
-                self.export
-                    .notes
-                    .push("XPMF profiles not written: the export did not finish".into());
-            }
-            return;
-        }
-        let recorded = match self.sets_doc.as_ref() {
-            Some(d) => d.xpmf_shas(),
-            None => return,
-        };
-        let shas = finish(&p, &recorded, &mut self.export.notes);
-        for f in p.folders() {
-            self.also_json
-                .extend(super::also::current_files(&f.root, &f.files));
-        }
-        if shas == recorded {
-            return;
-        }
-        let Some(d) = self.sets_doc.as_mut() else {
-            return;
-        };
-        let was_dirty = d.is_dirty();
-        let side = d.set_xpmf_shas(shas);
-        if d.read_only() {
-            self.export.notes.push(super::sidecar_only_note(&side));
-            return;
-        }
-        self.save_hash_record(was_dirty);
+        self.finish_guarded(p);
+    }
+}
+
+impl super::json_finish::Guarded for PendingXpmf {
+    const NAME: &'static str = "XPMF profiles";
+    // Note FW1: the PBR phase wrote the profiles' textures; the Vanilla copies skip a profile whose texture is missing.
+    const GATE: Option<engine::also::Phase> = Some(engine::also::Phase::Pbr);
+    fn has_files(&self) -> bool {
+        self.folders().any(|f| !f.files.is_empty())
+    }
+    fn recorded(d: &crate::sets_doc::SetsDoc) -> BTreeMap<String, String> {
+        d.xpmf_shas()
+    }
+    fn write(
+        &self,
+        recorded: &BTreeMap<String, String>,
+        notes: &mut Vec<String>,
+    ) -> BTreeMap<String, String> {
+        finish(self, recorded, notes)
+    }
+    fn current(&self) -> Vec<PathBuf> {
+        self.folders()
+            .flat_map(|f| super::also::current_files(&f.root, &f.files))
+            .collect()
+    }
+    fn record(
+        d: &mut crate::sets_doc::SetsDoc,
+        shas: &BTreeMap<String, String>,
+    ) -> std::io::Result<()> {
+        d.set_xpmf_shas(shas.clone())
     }
 }
