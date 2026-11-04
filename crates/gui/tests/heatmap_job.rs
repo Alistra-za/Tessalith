@@ -42,7 +42,8 @@ fn model_with_result() -> AppModel {
         decoded: vec![
             vec![[0.5, 0.5, 0.5, 1.0], [0.53, 0.5, 0.5, 1.0]],
             vec![[0.6, 0.5, 0.5, 1.0]],
-        ],
+        ]
+        .into(),
     };
     m.preview.encoded = EncodedState::Done(Arc::new(out));
     m.view.heatmap = true;

@@ -16,10 +16,10 @@ fn a_cube_preview_decodes_a_cross_per_mip() {
         (out.result.faces, out.result.levels.len(), out.decoded.len()),
         (6, 30, 5)
     );
-    assert_eq!(out.decoded[0].len(), 64 * 48);
-    assert_eq!(out.decoded[4].len(), 4 * 3);
+    assert_eq!(out.decoded_mip(0).unwrap().len(), 64 * 48);
+    assert_eq!(out.decoded_mip(4).unwrap().len(), 4 * 3);
     // +X sits in cell (2, 1) of the cross, red; -X in cell (0, 1), grey.
-    let at = |col: usize, row: usize| out.decoded[0][(row * 16 + 8) * 64 + col * 16 + 8];
+    let at = |col: usize, row: usize| out.decoded_mip(0).unwrap()[(row * 16 + 8) * 64 + col * 16 + 8];
     assert!(at(2, 1)[0] > 0.9 && at(2, 1)[1] < 0.1, "+X is red");
     assert!(at(0, 1)[1] > 0.1, "-X is grey");
     assert_eq!(at(0, 0), [0.0; 4], "a corner cell is empty");
@@ -32,7 +32,7 @@ fn a_cube_preview_keeps_its_cross_within_the_cap() {
     assert_eq!(out.result.source.first_level, 1);
     assert_eq!(out.decoded.len(), 4, "mips 8, 4, 2, 1");
     assert_eq!(
-        out.decoded[0].len(),
+        out.decoded_mip(0).unwrap().len(),
         32 * 24,
         "the whole cross fits the cap"
     );

@@ -371,8 +371,8 @@ impl PreviewRenderer {
         };
         let levels: Vec<(u32, u32, &[[f32; 4]])> = dims
             .iter()
-            .zip(&out.decoded)
-            .map(|(&(w, h), px)| (w, h, px.as_slice()))
+            .enumerate()
+            .map_while(|(i, &(w, h))| Some((w, h, out.decoded_mip(i)?)))
             .collect();
         match upload::rgba16f_chain(&rs.device, &rs.queue, "preview decoded", &levels) {
             Some((texture, _)) => {

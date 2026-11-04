@@ -440,7 +440,8 @@ fn cube_preview_draws_a_cross() {
     // 64-px faces: six chains of 7 mips, one 4x3-face cross decoded per mip.
     assert_eq!((out.result.faces, out.result.levels.len()), (6, 42));
     assert_eq!(out.decoded.len(), 7);
-    for (i, d) in out.decoded.iter().enumerate() {
+    for i in 0..out.decoded.len() {
+        let d = out.decoded_mip(i).unwrap();
         let face = 64usize >> i;
         assert_eq!(d.len(), 4 * face * 3 * face, "mip {i}");
     }
@@ -694,7 +695,7 @@ fn the_source_face_selector_shows_the_processed_face_of_its_cell() {
         panic!("not encoded")
     };
     let (col, row) = engine::cube::layout::HCROSS[2];
-    let cell = out.decoded[0][(row as usize * 16 + 8) * 64 + col as usize * 16 + 8][0];
+    let cell = out.decoded_mip(0).unwrap()[(row as usize * 16 + 8) * 64 + col as usize * 16 + 8][0];
     assert!((cell - face2).abs() < 0.03, "cell {cell} vs source {face2}");
 }
 

@@ -220,7 +220,7 @@ fn encoded(format: Format, w: u32, h: u32, block: &[u8], decoded: [f32; 4]) -> P
             warnings: vec![],
             normal_len: vec![],
         },
-        decoded: vec![vec![decoded; (w * h) as usize]],
+        decoded: vec![vec![decoded; (w * h) as usize]].into(),
     }
 }
 
@@ -511,7 +511,7 @@ fn an_srgb_colour_source_shows_like_its_lossless_encode() {
         "{}",
         worst(left.px, right.px) * 255.0
     );
-    assert!(worst(&src.levels[0].px, &out.decoded[0]) <= 1.0 / 255.0);
+    assert!(worst(&src.levels[0].px, &out.decoded_mip(0).unwrap()) <= 1.0 / 255.0);
     let Some(rs) = render_state() else { return };
     let mut r = PreviewRenderer::new(rs);
     assert!(r.set_source(rs, src));

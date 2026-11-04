@@ -109,12 +109,12 @@ fn a_cube_dds_previews_all_six_faces() {
     let out = dds_preview(&cube_file(d.path(), 8, 1), 4096).unwrap();
     assert_eq!(out.result.faces, 6);
     // The cross is 4 x 3 faces wide and high.
-    assert_eq!(out.decoded[0].len(), 12 * 64);
+    assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 64);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded[0]).contains(&r),
+            reds(&out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded[0])
+            reds(&out.decoded_mip(0).unwrap())
         );
     }
 }
@@ -126,12 +126,12 @@ fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
     let out = dds_preview(&cube_file(d.path(), 8, 4), 4).unwrap();
     assert_eq!(out.result.source.first_level, 1);
     assert_eq!(out.result.levels.len(), 6 * 3);
-    assert_eq!(out.decoded[0].len(), 12 * 16);
+    assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 16);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded[0]).contains(&r),
+            reds(&out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded[0])
+            reds(&out.decoded_mip(0).unwrap())
         );
     }
 }

@@ -31,6 +31,11 @@ fn encoding_is_off_by_default_and_encode_now_encodes_once() {
     };
     assert_eq!(out.result.source.first_level, 0);
     assert_eq!(out.decoded.len(), out.result.levels.len());
+    // L12: with the heatmap off nothing decodes until a readout reads a mip.
+    assert!(!m.view.heatmap);
+    assert_eq!(out.decoded.decoded_count(), 0);
+    m.preview_texel(0, (0, 0));
+    assert_eq!(out.decoded.decoded_count(), 1);
 }
 
 #[test]
@@ -293,7 +298,7 @@ fn uncompressed_dds_inputs_preview_from_the_cpu_decode() {
         let EncodedState::Done(out) = &m.preview.encoded else {
             panic!("{name}: {:?}", m.preview.encoded)
         };
-        let px = out.decoded[0][0];
+        let px = out.decoded_mip(0).unwrap()[0];
         for c in 0..4 {
             assert!((px[c] * 255.0 - want[c]).abs() < 0.5, "{name} c{c}: {px:?}");
         }
@@ -383,7 +388,7 @@ fn a_bc6h_tile_is_tone_mapped() {
     bc6h_dds(&p, 548);
     let out = dds_preview(&p, 64).unwrap();
     assert!(out.result.format.is_hdr());
-    let x = out.decoded[0][0][0];
+    let x = out.decoded_mip(0).unwrap()[0][0];
     assert!(x > 1.5 && x.is_finite(), "decoded {x}");
     let m = x / (1.0 + x);
     let want = 255.0 * (1.055 * m.powf(1.0 / 2.4) - 0.055);

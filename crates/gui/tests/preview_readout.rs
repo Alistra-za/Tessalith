@@ -42,7 +42,7 @@ fn out(
             warnings: vec![],
             normal_len: vec![],
         },
-        decoded: dec,
+        decoded: dec.into(),
     }
 }
 

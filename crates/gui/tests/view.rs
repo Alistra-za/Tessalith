@@ -123,7 +123,7 @@ fn preview_out(
             warnings: vec![],
             normal_len,
         },
-        decoded: vec![],
+        decoded: Default::default(),
     }
 }
 
