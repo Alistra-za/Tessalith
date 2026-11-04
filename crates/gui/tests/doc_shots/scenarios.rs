@@ -38,7 +38,9 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("advanced_texture_fields", advanced_texture_fields),
     ("problems_tab", problems_tab),
     ("messages_tab", messages_tab),
+    ("filter_popup", filter_popup),
     ("tile_menu", tile_menu),
+    ("texture_panel", texture_panel),
     ("members_of_kind", members_of_kind),
     ("set_card_menu", set_card_menu),
     ("member_menu", member_menu),
@@ -605,10 +607,27 @@ fn messages_tab(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
+/// GUI-Textures-Column: the Filter ▾ popup.
+fn filter_popup(dir: &Path) -> Frame {
+    let mut h = opened_with(dir, |_| {});
+    let r = reveal(&mut h, |h| node(h, "Filter ▾").click());
+    let b = node(&h, "Filter ▾").rect();
+    shot(&mut h, r.union(b))
+}
+
 /// GUI-Textures-Column: a tile's right-click menu.
 fn tile_menu(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall.png"));
     let r = reveal(&mut h, |h| node(h, "stonewall.png").click_secondary());
+    shot(&mut h, r)
+}
+
+/// GUI-Texture-Panel: the settings of a diffuse with cut-out alpha.
+fn texture_panel(dir: &Path) -> Frame {
+    let mut h = opened_with(dir, |_| {});
+    let r = reveal(&mut h, |h| {
+        h.state_mut().model.select_item("plants/fern.png")
+    });
     shot(&mut h, r)
 }
 

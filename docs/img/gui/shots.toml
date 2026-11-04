@@ -84,10 +84,22 @@ scenario = "messages_tab"
 used_by = ["GUI-Bottom-Tabs.md"]
 
 [[shot]]
+id = "filter-popup"
+page = "GUI-Textures-Column"
+scenario = "filter_popup"
+used_by = ["GUI-Textures-Column.md"]
+
+[[shot]]
 id = "tile-menu"
 page = "GUI-Textures-Column"
 scenario = "tile_menu"
 used_by = ["GUI-Textures-Column.md"]
+
+[[shot]]
+id = "texture-panel"
+page = "GUI-Texture-Panel"
+scenario = "texture_panel"
+used_by = ["GUI-Texture-Panel.md"]
 
 [[shot]]
 id = "members-of-kind"

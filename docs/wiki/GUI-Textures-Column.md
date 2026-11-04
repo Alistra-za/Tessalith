@@ -24,6 +24,8 @@ After the pills comes **Filter ▾**, a popup with four combos:
 
 The button reads **Filter (k) ▾** while k of the three filter combos are set. Sort is not a filter and is not counted.
 
+![The Filter popup.](../img/gui/GUI-Textures-Column/filter-popup.png)
+
 All filters and the search box combine: a texture shows only if it passes every one.
 
 When the filters hide every texture, the column says "No textures match the filters (N hidden)" and offers **Clear filters**. It resets the pills, the combos and the search, and keeps the sort and the tile size. A multi-selection keeps the textures a filter hides, and the heading says how many ("4 hidden by filter").
