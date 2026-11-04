@@ -318,22 +318,12 @@ fn the_review_undecided_combo_offers_complex_grass_on_the_grass_fixture() {
     m.project.as_mut().unwrap().clear_file_value(key, "subtype");
     m.replan();
     assert!(m.wait_idle(WAIT));
-    let default = m
-        .subtype_question(key)
-        .map(|s| {
-            s.or(m
-                .item(key)
-                .and_then(|i| i.job.as_ref())
-                .map(|j| j.profile.subtype))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "the grass file asks its sub-type: {:?} {:?}",
-                m.item(key).map(|i| (&i.status, &i.decisions)),
-                m.items.iter().map(|i| &i.key).collect::<Vec<_>>()
-            )
-        })
-        .expect("a default");
+    assert!(
+        m.subtype_question(key).is_some(),
+        "the grass file asks its sub-type: {:?} {:?}",
+        m.item(key).map(|i| (&i.status, &i.decisions)),
+        m.items.iter().map(|i| &i.key).collect::<Vec<_>>()
+    );
     m.open_review();
     let mut h = harness(m);
     h.state_mut().open_review();
@@ -341,16 +331,12 @@ fn the_review_undecided_combo_offers_complex_grass_on_the_grass_fixture() {
     let grass = subtype_label(Subtype::ComplexGrass);
     assert!(h.query_by_label(&grass).is_none(), "closed combo");
     h.get_by_label_contains(&format!("Undecided ({})", 1));
-    // A combo's accessible text is its value.
-    let want = subtype_label(default);
+    // Backlog L64: the row's picker is the Problems row's: `Set type…` (the ▾ of an accept button carries that name).
     {
-        let mut combos = h.query_all_by_role(Role::ComboBox).filter(|n| {
-            use egui_kittest::kittest::NodeT;
-            n.accesskit_node().value().as_deref() == Some(want.as_str())
-        });
-        let combo = combos.next().expect("the row's sub-type combo");
-        assert!(combos.next().is_none(), "one {want} combo");
-        combo.click();
+        let mut openers = h.query_all_by_label("Set type…");
+        let opener = openers.next().expect("the row's type picker");
+        assert!(openers.next().is_none(), "one picker");
+        opener.click();
     }
     h.run();
     assert!(
