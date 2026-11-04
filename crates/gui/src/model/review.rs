@@ -8,6 +8,10 @@ use super::{
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+/// How long `review_json` reuses its read of the JSON files. Tests expire it with `expire_review_json` instead of
+/// sleeping past it.
+pub const REVIEW_JSON_TTL: Duration = Duration::from_secs(1);
+
 /// Note FB1: the gate's reason, and the Blockers row's text, while no export folder is chosen.
 pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
@@ -96,12 +100,18 @@ impl AppModel {
         self.show_tab(BottomTab::Review);
     }
 
-    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for 1 s, since
-    /// Review draws it every frame and it reads the files (AG128).
+    /// Tests: end `review_json`'s cache now, as `REVIEW_JSON_TTL` passing would.
+    #[cfg(feature = "test-hooks")]
+    pub fn expire_review_json(&self) {
+        self.review_json_cache.take();
+    }
+
+    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
+    /// `REVIEW_JSON_TTL`, since Review draws it every frame and it reads the files (AG128).
     pub fn review_json(&self) -> Vec<JsonLine> {
         let key = self.view_key();
         if let Some((k, at, lines)) = &*self.review_json_cache.borrow() {
-            if *k == key && at.elapsed() < Duration::from_secs(1) {
+            if *k == key && at.elapsed() < REVIEW_JSON_TTL {
                 return lines.clone();
             }
         }
@@ -202,31 +212,18 @@ impl AppModel {
     /// Cached like `bottom::problems` (Review and the header read it every frame): `items` is only replaced
     /// together with `invalidate_views`, which changes the view key.
     pub fn export_files(&self) -> usize {
-        let key = self.view_key();
         let inner = super::bottom::problems_inner(self);
-        {
-            let c = self.views.borrow();
-            if c.key.as_ref() == Some(&key) {
-                if let Some((k, n)) = c.export_files {
-                    if k == inner {
-                        return n;
-                    }
-                }
-            }
-        }
-        let n = self.count_export_files();
-        #[cfg(feature = "test-hooks")]
-        self.export_files_builds
-            .set(self.export_files_builds.get() + 1);
-        let mut c = self.views.borrow_mut();
-        if c.key.as_ref() != Some(&key) {
-            *c = super::ViewCache {
-                key: Some(key),
-                ..Default::default()
-            };
-        }
-        c.export_files = Some((inner, n));
-        n
+        super::cached(
+            self,
+            |c| c.export_files.filter(|(k, _)| *k == inner).map(|(_, n)| n),
+            |c, n| c.export_files = Some((inner, n)),
+            || {
+                #[cfg(feature = "test-hooks")]
+                self.export_files_builds
+                    .set(self.export_files_builds.get() + 1);
+                self.count_export_files()
+            },
+        )
     }
 
     fn count_export_files(&self) -> usize {

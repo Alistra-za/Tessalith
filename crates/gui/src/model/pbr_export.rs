@@ -6,9 +6,9 @@ use super::sets::{
     engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
     set_views, SetView, SlotFill, SlotKind,
 };
-use super::{AppModel, ViewCache};
+use super::AppModel;
 use crate::pgp::prefix::{
-    check_json_path, check_rel_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
+    check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
     subsurface_pitfalls,
 };
 use crate::pgp::settings::{blocked_by, feature_key, feature_on, Feature, Settings, FEATURE_KEYS};
@@ -154,33 +154,11 @@ pub(crate) fn file_name_problem(what: &str, name: &str) -> Option<String> {
     if name.trim().is_empty() {
         return bad("empty");
     }
-    if name.contains(['\\', '/']) {
-        return bad("must be a single file name, not a path");
-    }
-    if name == ".." || name.contains("..") {
+    if name.contains("..") {
         return bad("must not contain '..'");
     }
-    if name.ends_with('.') || name.ends_with(' ') {
-        return bad("must not end in a dot or a space");
-    }
-    if check_rel_path(name, "JSON name").is_err() {
-        return bad("contains a character Windows does not allow in names");
-    }
-    let stem = name
-        .split('.')
-        .next()
-        .unwrap_or("")
-        .trim_end()
-        .to_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || ["COM", "LPT"].iter().any(|p| {
-            stem.strip_prefix(p)
-                .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
-        });
-    if reserved {
-        return bad("is a name Windows reserves for a device");
-    }
-    None
+    // Note FW: separators, a trailing dot or space, forbidden characters and device names are `check_file_name`'s.
+    check_file_name(name, what).err().map(|e| e.0)
 }
 
 /// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
@@ -243,7 +221,7 @@ const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [
 ];
 
 fn has(v: &SetView, s: SlotKind) -> bool {
-    !matches!(v.slots.get(&s), None | Some(SlotFill::Empty))
+    v.slots.get(&s).is_some_and(SlotFill::is_filled)
 }
 
 /// The "feature is on but its texture is missing" blocks of one PBR set; `has` says whether a slot is filled.
@@ -288,27 +266,13 @@ pub fn missing_texture_texts(
 
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
 /// set views (audit 7, DECISIONS Note Y7).
-pub fn export_blocks(m: &AppModel) -> Vec<ExportIssue> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some(b) = &c.blocks {
-                return (**b).clone();
-            }
-        }
-    }
-    // No borrow is held here: `build_blocks` reads the cached views.
-    let b = Arc::new(build_blocks(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.blocks = Some(b.clone());
-    (*b).clone()
+pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+    super::cached(
+        m,
+        |c| c.blocks.clone(),
+        |c, b| c.blocks = Some(b),
+        || Arc::new(build_blocks(m)),
+    )
 }
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
@@ -486,7 +450,10 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
 
 /// What Review asks to acknowledge: the photo crops (project-wide), then the pitfalls of every PBR set.
 pub fn export_asks(m: &AppModel) -> Vec<ExportIssue> {
-    photo_crops(m).into_iter().chain(set_asks(m)).collect()
+    photo_crops(m)
+        .into_iter()
+        .chain(set_asks(m).iter().cloned())
+        .collect()
 }
 
 /// Note FC12 (supersedes DS26's "no warning"): a single photo taller than wide keeps only its middle `w` rows when it
@@ -511,29 +478,19 @@ fn photo_crops(m: &AppModel) -> Vec<ExportIssue> {
 
 /// The PBR sets' pitfalls. Cached like `export_blocks`, plus `evidence_rev` (the known texture paths and the mesh
 /// tree flags it reads).
-fn set_asks(m: &AppModel) -> Vec<ExportIssue> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some((rev, a)) = &c.asks {
-                if *rev == m.evidence_rev {
-                    return (**a).clone();
-                }
-            }
-        }
-    }
-    // No borrow is held here: the build reads the cached views.
-    let a = Arc::new(build_asks(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.asks = Some((m.evidence_rev, a.clone()));
-    (*a).clone()
+fn set_asks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+    let rev = m.evidence_rev;
+    super::cached(
+        m,
+        |c| {
+            c.asks
+                .as_ref()
+                .filter(|(r, _)| *r == rev)
+                .map(|(_, a)| a.clone())
+        },
+        |c, a| c.asks = Some((rev, a)),
+        || Arc::new(build_asks(m)),
+    )
 }
 
 fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
@@ -630,12 +587,10 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
     let deps = |v: &SetView| -> Vec<String> {
         v.slots
             .values()
-            .filter_map(|f| match f {
-                SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => m
-                    .item(item)
+            .filter_map(|f| {
+                m.item(f.item()?)
                     .map(|i| i.job_key.clone())
-                    .filter(|j| !j.is_empty()),
-                SlotFill::Empty => None,
+                    .filter(|j| !j.is_empty())
             })
             .collect()
     };
@@ -864,12 +819,35 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
             to.push(i.text);
         }
     };
-    for i in export_blocks(m) {
+    for i in export_blocks(m).iter().cloned() {
         place(i, true);
     }
     // The photo crops are not the JSON's: the sets' pitfalls only.
-    for i in set_asks(m) {
+    for i in set_asks(m).iter().cloned() {
         place(i, false);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_name_problem;
+    use crate::pgp::prefix::check_file_name;
+
+    /// Backlog L8: the JSON-name check and `check_file_name` refuse the same device names, trailing dots and spaces
+    /// and separators, with the same wording.
+    #[test]
+    fn both_file_name_checks_refuse_the_same_names() {
+        for bad in [
+            "CON", "nul", "Com1", "lpt9.txt", "name.", "name ", "a/b", r"a\b", "a:b",
+        ] {
+            let a = file_name_problem("x", bad).unwrap_or_else(|| panic!("{bad:?} passes"));
+            let b = check_file_name(bad, "x").unwrap_err().0;
+            assert_eq!(a, b, "{bad:?}");
+        }
+        for good in ["textures", "My Pack", "com10", "console"] {
+            assert_eq!(file_name_problem("x", good), None, "{good:?}");
+            assert!(check_file_name(good, "x").is_ok(), "{good:?}");
+        }
+    }
 }

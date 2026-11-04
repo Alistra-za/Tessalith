@@ -624,8 +624,8 @@ impl SetsDoc {
         self.shas(XPMF_SHA)
     }
 
-    pub fn set_xpmf_shas(&mut self, shas: BTreeMap<String, String>) -> std::io::Result<()> {
-        self.record_shas(XPMF_SHA, &shas)
+    pub fn set_xpmf_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
+        self.record_shas(XPMF_SHA, shas)
     }
 
     pub fn copy_shas(&self) -> BTreeMap<String, String> {

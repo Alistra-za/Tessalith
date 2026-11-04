@@ -170,8 +170,10 @@ fn a_result_for_a_collapsed_texture_is_dropped() {
     m.encode_now();
     m.collapse();
     assert!(!m.busy(), "collapsing cancels the work");
-    std::thread::sleep(Duration::from_millis(500));
-    m.poll();
+    assert!(
+        m.poll_until_stale_drop(StaleKind::Encode, Duration::from_secs(30)),
+        "the collapsed texture's reply never came"
+    );
     assert_eq!(m.preview.item, None);
     assert!(matches!(m.preview.encoded, EncodedState::NotEncoded));
 }

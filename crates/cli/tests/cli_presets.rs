@@ -1,14 +1,7 @@
 use std::process::Command;
 
-fn sdc() -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_sdc"));
-    // Keep the developer's real user config out of the tests.
-    c.env(
-        "APPDATA",
-        std::env::temp_dir().join("sdc-test-appdata-none"),
-    );
-    c
-}
+mod common;
+use common::sdc;
 
 #[test]
 fn presets_list_and_show() {

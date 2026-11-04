@@ -1125,3 +1125,63 @@ fn cm_json_keeps_disabled() {
     assert_eq!(validate_cm(&json!({"disabled": true})), Ok(()));
     assert!(validate_cm(&json!({"disabled": 1})).is_err());
 }
+
+/// Note FW1 (T24): feeds the model an Also export's per-phase counts, as the worker's `AlsoFinished` does.
+fn also_phases(m: &mut AppModel, phases: &[(engine::also::Phase, u32)]) {
+    let phases = phases
+        .iter()
+        .map(|(p, failed)| {
+            let b = engine::api::BatchSummary {
+                failed: *failed,
+                ..Default::default()
+            };
+            (*p, b)
+        })
+        .collect();
+    m.also_finished_with(engine::also::AlsoSummary {
+        phases,
+        copied: 0,
+        sets: vec![],
+        folders: Default::default(),
+        notes: vec![],
+        cancelled_after: None,
+        error: None,
+    });
+}
+
+/// T24: one failed Vanilla file fails the combined summary, but the PBR folder's `_m.json` is its own phase's.
+#[test]
+fn a_failed_vanilla_file_does_not_hold_back_the_cm_json() {
+    use engine::also::Phase::*;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path(), Target::Cs);
+    export_and_wait(&mut m);
+    let iron = set_id(&m, "m/iron");
+    m.set_cm_export(&iron, true);
+    let p = prepare(&m).unwrap();
+    also_phases(&mut m, &[(Pbr, 0), (Vanilla, 1), (Cm, 0)]);
+    m.export.summary.as_mut().unwrap().failed = 1;
+    m.finish_cm_json(Some(p));
+    assert!(out(&m, "m/iron_m.json").is_file(), "{}", notes(&m));
+}
+
+/// T24: a failure in the CM phase itself skips the JSON, and the note names that phase.
+#[test]
+fn a_failed_cm_phase_skips_the_cm_json_and_names_cm() {
+    use engine::also::Phase::*;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path(), Target::Cs);
+    export_and_wait(&mut m);
+    let iron = set_id(&m, "m/iron");
+    m.set_cm_export(&iron, true);
+    let p = prepare(&m).unwrap();
+    also_phases(&mut m, &[(Pbr, 0), (Vanilla, 0), (Cm, 1)]);
+    m.export.summary.as_mut().unwrap().failed = 1;
+    m.finish_cm_json(Some(p));
+    assert!(!out(&m, "m/iron_m.json").exists());
+    assert!(
+        notes(&m).contains("Complex material JSON not written: the CM phase failed"),
+        "{}",
+        notes(&m)
+    );
+}

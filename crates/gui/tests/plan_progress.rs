@@ -3,7 +3,7 @@ mod support;
 
 use sdc_gui::model::export::{ETA_MIN_FILES, ETA_MIN_TIME};
 use sdc_gui::model::meshes::MeshesModel;
-use sdc_gui::model::{plan_bar_text, AppModel};
+use sdc_gui::model::{plan_bar_text, AppModel, StaleKind};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::{PlanFailure, WorkerMsg};
 use std::time::{Duration, Instant};
@@ -110,8 +110,10 @@ fn cancel_with_no_previous_folder_shows_the_empty_state_note() {
     assert!(!m.busy());
     assert_eq!(m.empty_hint(), "Opening cancelled");
     // The cancelled worker still reports; its generation is stale and nothing lands.
-    std::thread::sleep(Duration::from_millis(500));
-    m.poll();
+    assert!(
+        m.poll_until_stale_drop(StaleKind::Plan, Duration::from_secs(30)),
+        "the cancelled plan's reply never came"
+    );
     assert_eq!(m.root, None);
     assert!(m.items.is_empty());
     assert_eq!(m.plan_progress, None);

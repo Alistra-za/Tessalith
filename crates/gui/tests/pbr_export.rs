@@ -14,7 +14,18 @@ fn idle(m: &mut sdc_gui::model::AppModel) {
 fn a_clean_project_has_no_blocks() {
     let d = tempfile::tempdir().unwrap();
     let m = pbr_ready(d.path());
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
+}
+
+/// Backlog L9: the model's own readers get the stored list, not a copy of it.
+#[test]
+fn the_cached_blocks_are_handed_out_without_a_copy() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    m.set_json_value("landscape/rock01", "emissive", Some(json!(true)));
+    let (a, b) = (export_blocks(&m), export_blocks(&m));
+    assert!(!a.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&a, &b));
 }
 
 #[test]
@@ -182,7 +193,7 @@ fn a_borrowed_slot_is_written_as_the_owners_output_path() {
 }
 
 fn texts(m: &sdc_gui::model::AppModel) -> Vec<String> {
-    export_blocks(m).into_iter().map(|i| i.text).collect()
+    export_blocks(m).iter().map(|i| i.text.clone()).collect()
 }
 
 #[test]
@@ -289,14 +300,14 @@ fn non_pbr_sets_and_vanilla_skip_the_pbr_checks() {
     let mut m = pbr_ready(d.path());
     // leaf is not a PBR set: a feature with no texture is not a block there.
     m.set_json_value("landscape/leaf", "emissive", Some(json!(true)));
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     // Vanilla: even a PBR set is not checked, and nothing asks.
     m.set_json_value("landscape/rock01", "emissive", Some(json!(true)));
     m.set_json_value("landscape/rock01", "match8", Some(json!(r"x\leaf_s.dds")));
     assert!(!export_blocks(&m).is_empty());
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     assert_eq!(export_asks(&m), vec![]);
     assert!(json_entries(&m).is_empty());
 }
@@ -318,7 +329,7 @@ fn the_json_name_must_be_one_usable_file_name() {
     }
     for good in ["textures", "My Pack", "com10", "console"] {
         m.sets_doc.as_mut().unwrap().set_json_name(Some(good));
-        assert_eq!(export_blocks(&m), vec![], "{good:?} should be fine");
+        assert_eq!(*export_blocks(&m), vec![], "{good:?} should be fine");
     }
 }
 
@@ -329,7 +340,7 @@ fn the_json_name_is_not_checked_when_there_is_nothing_to_write() {
     let mut m = opened(d.path());
     assert!(set_views(&m).iter().all(|v| !v.pbr));
     m.sets_doc.as_mut().unwrap().set_json_name(Some("CON"));
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
 }
 
 #[test]
@@ -357,7 +368,7 @@ fn a_borrow_whose_owner_is_blocked_is_reported_once_by_the_owners_block() {
     m.drop_choice(&rmaos, &id, DropChoice::Share);
     m.reorder_set("landscape/rock01", 0);
     idle(&mut m);
-    assert_eq!(export_blocks(&m), vec![], "the borrow resolves to rock01");
+    assert_eq!(*export_blocks(&m), vec![], "the borrow resolves to rock01");
     m.set_json_value("landscape/rock01", "rename", Some(json!(r"..\x")));
     idle(&mut m);
     let b = texts(&m);
@@ -902,7 +913,7 @@ fn a_sharing_set_ordered_first_owns_the_output_and_both_entries_point_at_it() {
             e.slots
         );
     }
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     export_and_wait(&mut m);
     let out = m.export_root().join("textures/pbr/landscape");
     assert!(out.join("leaf_rmaos.dds").exists());
@@ -974,7 +985,7 @@ fn a_skipped_dds_on_a_pbr_output_path_does_not_hold_it_back() {
         "the source DDS is skipped: {:?}",
         it.status
     );
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     export_and_wait(&mut m);
     assert!(m.dialog.is_none(), "{:?}", m.dialog);
     assert!(m
@@ -1058,7 +1069,7 @@ fn a_set_that_matches_nothing_asks_and_is_left_out_of_the_json() {
     let mut m = pbr_ready(d.path());
     m.set_json_value("landscape/rock01", "match1", Some(json!("")));
     idle(&mut m);
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     assert!(
         export_asks(&m).iter().any(
             |i| i.set_id == "landscape/rock01" && i.text.contains("this entry matches nothing")
@@ -1087,7 +1098,7 @@ fn a_pbr_grass_set_drops_the_keys_grass_ignores() {
         .any(|i| i.text.contains("emissive is on")));
     m.set_shader("landscape/rock01", Some(Shader::PbrGrass));
     idle(&mut m);
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     let rock = |m: &sdc_gui::model::AppModel| {
         json_entries(m)
             .into_iter()
@@ -1178,7 +1189,7 @@ fn a_pbr_grass_set_with_a_g_member_exports_no_emissive() {
         !entry.contains("emissive") && entry.contains("\"subsurface\": true"),
         "{text}"
     );
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
     let key = m
         .sets
         .iter()

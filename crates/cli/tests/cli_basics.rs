@@ -1,16 +1,9 @@
 use image::{ImageBuffer, Rgb};
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
-fn sdc() -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_sdc"));
-    // Keep the developer's real user config out of the tests.
-    c.env(
-        "APPDATA",
-        std::env::temp_dir().join("sdc-test-appdata-none"),
-    );
-    c
-}
+mod common;
+use common::sdc;
 
 fn code(o: &Output) -> i32 {
     o.status.code().expect("sdc was killed by a signal")

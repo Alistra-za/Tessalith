@@ -3,18 +3,7 @@
 use engine::session::Session;
 use sdc_gui::model::{AppModel, Dialog};
 use sdc_gui::{app::SdcApp, fonts, layout, render, settings};
-use std::path::PathBuf;
 use std::sync::Arc;
-
-/// `%APPDATA%\sdc\config.toml`, the CLI's user config.
-fn user_config_path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("config.toml"))
-}
-
-/// `%APPDATA%\sdc\presets`, the CLI's user presets folder (M6 Track D spec §3).
-fn user_presets_path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("presets"))
-}
 
 fn build_model() -> AppModel {
     let path = settings::settings_path();
@@ -32,8 +21,8 @@ fn build_model() -> AppModel {
                     .map(std::path::Path::new),
             );
             let mut m = AppModel::new(s, path, Arc::new(session));
-            m.user_config = user_config_path();
-            m.user_presets = user_presets_path();
+            m.user_config = engine::presets::user_config_path();
+            m.user_presets = engine::presets::user_presets_dir();
             m.scan_db = sdc_gui::model::meshes::default_store_path();
             m.shader_cache = sdc_gui::model::viewport3d::default_cache_dir();
             m

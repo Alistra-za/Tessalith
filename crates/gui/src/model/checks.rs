@@ -247,7 +247,7 @@ pub(crate) struct CheckState {
 }
 
 fn filled(slots: &std::collections::BTreeMap<SlotKind, SlotFill>, k: SlotKind) -> bool {
-    !matches!(slots.get(&k), None | Some(SlotFill::Empty))
+    slots.get(&k).is_some_and(SlotFill::is_filled)
 }
 
 impl AppModel {

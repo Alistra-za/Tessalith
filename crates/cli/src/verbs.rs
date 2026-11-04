@@ -4,7 +4,7 @@
 //! JSON (`inspect`: the plan's events and one `dds_info` object per DDS; `validate`: one `dds_validation`
 //! object per file) and `validate`'s human report moves to stderr.
 use crate::args::*;
-use crate::human::TeeSink;
+use crate::human::{skip_line, warning_line, TeeSink};
 use engine::api::{CancelToken, Engine, EngineError};
 use engine::codes::{Code, Warning};
 use engine::config::*;
@@ -24,7 +24,7 @@ use engine::reports::{
 };
 use engine::schemas::SchemaKind;
 use engine::suggest::{suggest, SuggestContext};
-use engine::validate::alpha::{alpha_stats, AlphaStats};
+use engine::validate::alpha::alpha_stats;
 use engine::validate::{validate, ValidationReport, ValidationSummary};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -147,47 +147,6 @@ fn pct(n: u64, of: u64) -> String {
     )
 }
 
-fn print_dds_info(v: &Value) {
-    out!("{}", v["path"].as_str().unwrap_or(""));
-    if let Some(e) = v["error"].as_str() {
-        out!("  cannot be read: {e}");
-        return;
-    }
-    let srgb = match v["srgb"].as_bool() {
-        Some(true) => " srgb",
-        Some(false) => " unorm",
-        None => "",
-    };
-    out!(
-        "  format {}{srgb}  {}x{}  {} mips  {} header  cubemap {}",
-        v["format"].as_str().unwrap_or(""),
-        v["width"],
-        v["height"],
-        v["mip_count"],
-        v["header"].as_str().unwrap_or(""),
-        v["cubemap"]
-    );
-    for issue in v["header_issues"].as_array().into_iter().flatten() {
-        out!("  header issue: {}", issue.as_str().unwrap_or(""));
-    }
-    for (i, m) in v["mips"].as_array().into_iter().flatten().enumerate() {
-        let alpha = match serde_json::from_value::<AlphaStats>(m["alpha"].clone()) {
-            Ok(a) => format!(
-                "  alpha min {} =255 {} =254 {} <254 {}",
-                a.min,
-                pct(a.eq255, a.pixels),
-                pct(a.eq254, a.pixels),
-                pct(a.below254, a.pixels)
-            ),
-            Err(_) => m["decode_error"]
-                .as_str()
-                .map(|e| format!("  decode failed: {e}"))
-                .unwrap_or_default(),
-        };
-        out!("  mip {i} {}x{}{alpha}", m["width"], m["height"]);
-    }
-}
-
 /// The serde string form of an enum value (`"bc7"`, `"high"`), as the JSON events carry it.
 macro_rules! tag {
     ($v:expr) => {
@@ -196,6 +155,49 @@ macro_rules! tag {
             _ => "-".to_string(),
         }
     };
+}
+
+fn print_dds_info(info: &DdsInfo) {
+    let h = match info {
+        DdsInfo::Unreadable(u) => {
+            out!("{}", u.path);
+            out!("  cannot be read: {}", u.error);
+            return;
+        }
+        DdsInfo::Info(h) => h,
+    };
+    out!("{}", h.path);
+    let srgb = match h.srgb {
+        Some(true) => " srgb",
+        Some(false) => " unorm",
+        None => "",
+    };
+    out!(
+        "  format {}{srgb}  {}x{}  {} mips  {} header  cubemap {}",
+        h.format,
+        h.width,
+        h.height,
+        h.mip_count,
+        tag!(&h.header),
+        h.cubemap
+    );
+    for issue in &h.header_issues {
+        out!("  header issue: {issue}");
+    }
+    for (i, m) in h.mips.iter().enumerate() {
+        let alpha = match (&m.alpha, &m.decode_error) {
+            (Some(a), _) => format!(
+                "  alpha min {} =255 {} =254 {} <254 {}",
+                a.min,
+                pct(a.eq255, a.pixels),
+                pct(a.eq254, a.pixels),
+                pct(a.below254, a.pixels)
+            ),
+            (None, Some(e)) => format!("  decode failed: {e}"),
+            (None, None) => String::new(),
+        };
+        out!("  mip {i} {}x{}{alpha}", m.width, m.height);
+    }
 }
 
 /// One compact line per RNM layer of a base normal: file, resolved strength, mask and AO source when used.
@@ -262,7 +264,7 @@ fn print_planned(job: &ResolvedJob) {
     out!("  status {state} {}", detail.join("; "));
     print_rnm(job);
     for w in &job.warnings {
-        out!("  {} {} {}", tag!(&w.severity), w.code.as_str(), w.message);
+        out!("  {}", warning_line(None, w));
     }
 }
 
@@ -276,15 +278,12 @@ fn print_event(ev: &EngineEvent) {
             kind: SkipKind::PackedSource,
             ..
         } => {}
-        EventKind::FileSkipped { code, reason, .. } => out!(
-            "{path}\n  skipped {}{reason}",
-            code.map(|c| format!("{} ", c.as_str())).unwrap_or_default()
-        ),
+        EventKind::FileSkipped { code, reason, .. } => {
+            out!("{path}\n  skipped {}", skip_line(*code, reason))
+        }
         EventKind::FileFailed { error, .. } => out!("{path}\n  cannot be read: {error}"),
         // A batch-level warning (CFG-PRESET-SKIPPED).
-        EventKind::Warning(w) => {
-            out!("{} {} {}", tag!(&w.severity), w.code.as_str(), w.message)
-        }
+        EventKind::Warning(w) => out!("{}", warning_line(None, w)),
         EventKind::SetResolved {
             recipes,
             shader,
@@ -297,7 +296,7 @@ fn print_event(ev: &EngineEvent) {
                 .unwrap_or_default();
             out!("set {}{shown}", ev.set.as_deref().unwrap_or(""));
             for w in warnings {
-                out!("  {} {} {}", tag!(&w.severity), w.code.as_str(), w.message);
+                out!("  {}", warning_line(None, w));
             }
             for r in recipes {
                 let status = serde_json::to_value(r.status)
@@ -327,15 +326,22 @@ fn print_event(ev: &EngineEvent) {
 /// '/'-separated and lower-case; `set` keys are lower-case already, `output` paths keep their case.
 fn strip_root(s: &str, root: &str) -> Option<String> {
     let norm = s.replace('\\', "/");
-    let n = root.chars().count();
-    let head: String = norm.chars().take(n).collect::<String>().to_lowercase();
-    let rest = if let Some(rest) = norm.strip_prefix(root) {
-        rest
-    } else if head == root {
-        &norm[norm.char_indices().nth(n).map_or(norm.len(), |(i, _)| i)..]
-    } else {
+    // `root` is the lower-cased form, which can be longer than the original ('İ' lowers to two chars), so
+    // grow the candidate prefix a char at a time and lower-case it as a whole string (a final 'Σ' lowers
+    // to 'ς', which a per-char lower-casing would miss) until it reaches the root's length.
+    let mut head = String::new();
+    let mut end = 0;
+    for c in norm.chars() {
+        if head.len() >= root.len() {
+            break;
+        }
+        end += c.len_utf8();
+        head = norm[..end].to_lowercase();
+    }
+    if head != root {
         return None;
-    };
+    }
+    let rest = &norm[end..];
     // Only whole components: `sdc-inspect-abc` is not under `sdc-inspect-ab`.
     if !rest.is_empty() && !rest.starts_with('/') {
         return None;
@@ -414,11 +420,10 @@ pub fn inspect(a: InspectArgs) -> Result<i32, EngineError> {
     for f in found.iter().filter(|f| f.kind == InputKind::Dds) {
         let info = dds_info(&f.path);
         unreadable += u32::from(matches!(info, DdsInfo::Unreadable(_)));
-        let v = serde_json::to_value(&info).unwrap_or(Value::Null);
         if json {
-            out!("{v}");
+            out!("{}", serde_json::to_value(&info).unwrap_or(Value::Null));
         } else {
-            print_dds_info(&v);
+            print_dds_info(&info);
         }
     }
     if !found.iter().any(|f| f.kind == InputKind::Image) {
@@ -817,7 +822,7 @@ fn policy_id(p: AlphaPolicy) -> String {
 pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
     let engine = Engine::new()?;
     let mut reg = engine.registry().clone();
-    if let Some(dir) = user_presets_dir() {
+    if let Some(dir) = engine::presets::user_presets_dir() {
         for w in reg.add_dir(&dir) {
             err!("{}: {}", w.code.as_str(), w.message);
         }
@@ -1008,6 +1013,18 @@ mod tests {
         assert_eq!(
             s("c:/users/x/temp/sdc-inspect-ab/a/rock_n").as_deref(),
             Some("a/rock_n")
+        );
+        // 'İ' lowers to two chars, so the root is longer than the path's own prefix.
+        let root_i = "c:/users/İbrahim/t".to_lowercase();
+        assert_eq!(
+            strip_root("C:\\Users\\İbrahim\\t\\a.dds", &root_i).as_deref(),
+            Some("a.dds")
+        );
+        // A word-final 'Σ' lower-cases to 'ς' only when the whole string is lowered.
+        let root_s = "c:/users/ΟΔΥΣΣΕΑΣ".to_lowercase();
+        assert_eq!(
+            strip_root("C:\\Users\\ΟΔΥΣΣΕΑΣ\\a.dds", &root_s).as_deref(),
+            Some("a.dds")
         );
         assert_eq!(s("in/rock_n.png"), None);
         assert_eq!(s("c:/users/x/temp/sdc-inspect-abc/a"), None);

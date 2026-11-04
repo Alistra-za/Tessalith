@@ -245,42 +245,34 @@ impl AppModel {
     /// The export ended: after a clean export write the CS files of `p` (taken from `pending_cs` by the caller) and
     /// record their hashes (saved, like the PGPatcher JSON's); otherwise only a note.
     pub fn finish_cs_pbr(&mut self, p: Option<PendingCs>) {
-        let Some(p) = p else {
-            return;
-        };
-        let ok = self.export.error.is_none()
-            && self
-                .export
-                .summary
-                .as_ref()
-                .is_some_and(|s| s.cancelled.is_empty());
-        if !ok {
-            if !p.files.is_empty() {
-                self.export
-                    .notes
-                    .push("CS PBR JSON not written: the export did not finish".into());
-            }
-            return;
-        }
-        let recorded = match self.sets_doc.as_ref() {
-            Some(d) => d.cs_pbr_shas(),
-            None => return,
-        };
-        let shas = finish(&p, &recorded, &mut self.export.notes);
-        self.also_json
-            .extend(super::also::current_files(&p.root, &p.files));
-        if shas == recorded {
-            return;
-        }
-        let Some(d) = self.sets_doc.as_mut() else {
-            return;
-        };
-        let was_dirty = d.is_dirty();
-        let side = d.set_cs_pbr_shas(&shas);
-        if d.read_only() {
-            self.export.notes.push(super::sidecar_only_note(&side));
-            return;
-        }
-        self.save_hash_record(was_dirty);
+        self.finish_guarded(p);
+    }
+}
+
+impl super::json_finish::Guarded for PendingCs {
+    const NAME: &'static str = "CS PBR JSON";
+    // Note FW1: cancel-only, as the PGPatcher JSON.
+    const GATE: Option<engine::also::Phase> = None;
+    fn has_files(&self) -> bool {
+        !self.files.is_empty()
+    }
+    fn recorded(d: &crate::sets_doc::SetsDoc) -> BTreeMap<String, String> {
+        d.cs_pbr_shas()
+    }
+    fn write(
+        &self,
+        recorded: &BTreeMap<String, String>,
+        notes: &mut Vec<String>,
+    ) -> BTreeMap<String, String> {
+        finish(self, recorded, notes)
+    }
+    fn current(&self) -> Vec<PathBuf> {
+        super::also::current_files(&self.root, &self.files)
+    }
+    fn record(
+        d: &mut crate::sets_doc::SetsDoc,
+        shas: &BTreeMap<String, String>,
+    ) -> std::io::Result<()> {
+        d.set_cs_pbr_shas(shas)
     }
 }

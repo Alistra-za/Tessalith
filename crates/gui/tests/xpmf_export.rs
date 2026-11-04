@@ -536,3 +536,78 @@ fn failed_export_writes_no_profile() {
     }
     assert!(m.sets_doc.as_ref().unwrap().xpmf_shas().is_empty());
 }
+
+/// Note FW1 (T24), the production flow: a real Also export where one Vanilla file fails (its folder is a file) still
+/// writes the PBR folder's profile, because the XPMF profile answers to the PBR phase.
+#[test]
+fn a_failed_vanilla_file_still_writes_the_pbr_folders_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_pbr_dir(d.path());
+    set_block_pbr(&mut m);
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    idle(&mut m);
+    let [pbr, van, _] = m.also_folders();
+    std::fs::create_dir_all(&van).unwrap();
+    std::fs::write(van.join("textures"), b"not a folder").unwrap();
+    export(&mut m);
+    let s = m.export.summary.as_ref().expect("the export ended");
+    assert!(
+        s.failed > 0,
+        "the Vanilla file did not fail: {s:?}; {}",
+        notes(&m)
+    );
+    assert!(pbr.join(FILE).is_file(), "{}", notes(&m));
+}
+
+/// Note FW1: a failed PBR phase (here fed to the model as the worker's `AlsoFinished` does) skips the profile and the
+/// note names the phase; so does an engine error in it.
+#[test]
+fn a_failed_pbr_phase_skips_the_profile_and_names_it() {
+    use engine::also::Phase::*;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    set_block(&mut m, Some(json!({"shelterFade": 40})));
+    export(&mut m);
+    let f = profile_path(&m);
+    std::fs::remove_file(&f).unwrap();
+    for error in [None, Some((Pbr, "boom".to_string(), 2))] {
+        let phases = [Pbr, Vanilla]
+            .into_iter()
+            .map(|p| {
+                let failed = u32::from(p == Pbr && error.is_none());
+                (
+                    p,
+                    engine::api::BatchSummary {
+                        failed,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        m.also_finished_with(engine::also::AlsoSummary {
+            phases,
+            copied: 0,
+            sets: vec![],
+            folders: Default::default(),
+            notes: vec![],
+            cancelled_after: None,
+            error,
+        });
+        m.export.notes.clear();
+        m.finish_xpmf(prepare(&m));
+        assert!(!f.exists());
+        assert!(
+            notes(&m).contains("XPMF profiles not written: the PBR phase failed"),
+            "{}",
+            notes(&m)
+        );
+    }
+}
+
+fn set_block_pbr(m: &mut AppModel) {
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_xpmf(PBR_ID, json!({"shelterFade": 40}).as_object().cloned());
+    idle(m);
+}

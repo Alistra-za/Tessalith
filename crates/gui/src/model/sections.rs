@@ -107,26 +107,12 @@ fn slot_paths(m: &AppModel, v: &SetView) -> Vec<(u8, String)> {
 /// in that slot, or its `path_contains` is in the set's diffuse path. A `nif_filter` narrows it to some meshes,
 /// which the hit says. Cached with the set views (REPORT #11).
 pub fn delete_hits(m: &AppModel) -> Arc<Vec<DeleteHit>> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some(h) = &c.hits {
-                return h.clone();
-            }
-        }
-    }
-    // No borrow is held here: `build_hits` reads the cached views.
-    let h = Arc::new(build_hits(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = super::ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.hits = Some(h.clone());
-    h
+    super::cached(
+        m,
+        |c| c.hits.clone(),
+        |c, h| c.hits = Some(h),
+        || Arc::new(build_hits(m)),
+    )
 }
 
 fn build_hits(m: &AppModel) -> Vec<DeleteHit> {

@@ -179,8 +179,7 @@ pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
 pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ctx {
     #[cfg(feature = "test-hooks")]
     CONTEXT_BUILDS.set(CONTEXT_BUILDS.get() + 1);
-    let filled =
-        |v: &SetView, s: SlotKind| !matches!(v.slots.get(&s), None | Some(SlotFill::Empty));
+    let filled = |v: &SetView, s: SlotKind| v.slots.get(&s).is_some_and(SlotFill::is_filled);
     let read_only = model.sets_read_only_reason();
     let own: Settings = v.as_ref().map(|v| v.settings.clone()).unwrap_or_default();
     let derived = v.as_ref().and_then(|v| v.derived_match.clone());

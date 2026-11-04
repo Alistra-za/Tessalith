@@ -87,7 +87,7 @@ fn build_sets_export_and_reexport_unchanged() {
     );
     m.set_json_value(&second, "parallax", Some(json!(false)));
     idle(&mut m);
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
 
     export(&mut m);
     let out = m.export_root();

@@ -1,5 +1,5 @@
 //! Concise human log on stderr (spec §8: human output on stderr; `--json` keeps stdout for JSON Lines only).
-use engine::codes::{Code, Severity};
+use engine::codes::{Code, Severity, Warning};
 use engine::events::{EngineEvent, EventKind, EventSink, SkipKind};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -18,9 +18,31 @@ impl Default for HumanSink {
     }
 }
 
+/// `severity CODE message`; with a `label` (a file or set) the severity is padded and the label leads:
+/// `warning label: CODE message`.
+pub fn warning_line(label: Option<&str>, w: &Warning) -> String {
+    // The serde form, as the JSON events carry it.
+    let sev = match serde_json::to_value(w.severity) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => "-".to_string(),
+    };
+    match label {
+        Some(l) => format!("{sev:<5} {l}: {} {}", w.code.as_str(), w.message),
+        None => format!("{sev} {} {}", w.code.as_str(), w.message),
+    }
+}
+
+/// `[CODE ]reason`, the tail of a skip line.
+pub fn skip_line(code: Option<Code>, reason: &str) -> String {
+    format!(
+        "{}{reason}",
+        code.map(|c| format!("{} ", c.as_str())).unwrap_or_default()
+    )
+}
+
 impl EventSink for HumanSink {
     fn emit(&self, ev: &EngineEvent) {
-        let path = ev.path.clone().unwrap_or_default();
+        let path = ev.path.as_deref().unwrap_or_default();
         let line = match &ev.kind {
             EventKind::FileDone { output, validation } => Some(format!(
                 "ok    {path} -> {output}{}",
@@ -35,10 +57,9 @@ impl EventSink for HumanSink {
                 kind: SkipKind::PackedSource,
                 ..
             } => None,
-            EventKind::FileSkipped { code, reason, .. } => Some(format!(
-                "skip  {path}: {}{reason}",
-                code.map(|c| format!("{} ", c.as_str())).unwrap_or_default()
-            )),
+            EventKind::FileSkipped { code, reason, .. } => {
+                Some(format!("skip  {path}: {}", skip_line(*code, reason)))
+            }
             EventKind::FileFailed { stage, error } => {
                 Some(format!("FAIL  {path} at {stage:?}: {error}"))
             }
@@ -46,12 +67,17 @@ impl EventSink for HumanSink {
             EventKind::Warning(w)
                 if w.severity >= Severity::Warning || w.code == Code::CfgFilterIgnored =>
             {
-                Some(format!(
-                    "{:<5} {path}: {} {}",
-                    format!("{:?}", w.severity).to_lowercase(),
-                    w.code.as_str(),
-                    w.message
-                ))
+                Some(warning_line(Some(path), w))
+            }
+            // A set's SHADER-* warnings, as `inspect` lists them; the set takes the file's place.
+            EventKind::SetResolved { warnings, .. } => {
+                let set = ev.set.as_deref().unwrap_or("");
+                let lines: Vec<String> = warnings
+                    .iter()
+                    .filter(|w| w.severity >= Severity::Warning)
+                    .map(|w| warning_line(Some(set), w))
+                    .collect();
+                (!lines.is_empty()).then(|| lines.join("\n"))
             }
             EventKind::BatchDone {
                 converted,

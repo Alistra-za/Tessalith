@@ -100,6 +100,27 @@ ARCHIVED (wording before the edit; superseded in part by Note FU, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note FU, 2026-11-04)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS
 
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FV, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP, FU, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP, FU
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX
+
+ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -215,3 +236,21 @@ ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FY, 2026-11-04)
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FX, 2026-11-04)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FX, 2026-11-04)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- PGPatcher complex-material JSON is `<job output>.json` under the export root, validated against the vendored schema, written only after an export with no failures; problems get a note. No `_m.json` importer; an `_m.json` Tessalith did not write is never overwritten; `disabled` round-trips. [AT3, GE13]
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS
+
+ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS

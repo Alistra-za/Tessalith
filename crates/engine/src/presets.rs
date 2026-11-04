@@ -26,6 +26,16 @@ pub fn default_preset_for(t: Target) -> &'static str {
     }
 }
 
+/// `%APPDATA%\sdc\config.toml`, the user config the CLI and the GUI share; `None` when APPDATA is unset.
+pub fn user_config_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("config.toml"))
+}
+
+/// `%APPDATA%\sdc\presets`, the user presets folder (M6 Track D spec §3); `None` when APPDATA is unset.
+pub fn user_presets_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("presets"))
+}
+
 const BUILTIN: [&str; 6] = [
     include_str!("../../../presets/sdc-base.toml"),
     include_str!("../../../presets/cs-quality.toml"),
