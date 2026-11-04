@@ -457,7 +457,7 @@ fn the_problems_row_names_the_type() {
     let mut h = harness(m);
     h.run();
     h.get_by_label(&format!("{LEAF}: {LEAF_LINE}"));
-    h.get_by_label("Alpha type: Cutout");
+    h.get_by_label("Problems alpha type: Cutout");
     assert!(h.query_by_label("Decide…").is_none());
 }
 
@@ -498,7 +498,12 @@ fn one_line_replaces_the_three_alpha_lines() {
     }
     // The row and the panel's box each say it once; the row's hover keeps the code.
     assert!(h.query_all_by_label_contains(LEAF_LINE).count() >= 2);
-    assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 2);
+    // Final review (GUI M5): one dropdown each, with distinct names.
+    assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 1);
+    assert_eq!(
+        h.query_all_by_label("Problems alpha type: Cutout").count(),
+        1
+    );
     let row = problems(h.state())
         .iter()
         .find(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide)
@@ -515,7 +520,7 @@ fn picking_a_type_in_the_row_writes_what_the_old_buttons_wrote() {
     let m = leaf_asks_its_alpha(d.path());
     let mut h = harness(m);
     h.run();
-    pick_alpha(&mut h, "Cutout", "Blend");
+    pick_alpha(&mut h, "Problems", "Cutout", "Blend");
     idle(&mut h);
     let doc = h.state().project.as_ref().unwrap();
     assert_eq!(

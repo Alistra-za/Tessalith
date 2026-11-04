@@ -4,14 +4,14 @@ use super::columns::RED;
 use super::settings_panel::{combo_for, options_of, subtype_label, Options};
 use crate::model::fields::{
     encoding_options, field_hidden, field_lock, filter_option_lock, format_label, is_cutout,
-    BC1_ALPHA_HOVER,
+    BC1_ALPHA_HOVER, PERCEPTUAL_HOVER,
 };
 use crate::model::presets::{
     is_data, layout, PresetsModel, Row, FAMILIES, FILL_ROLES, ORM_EXAMPLE, SWIZZLE_SOURCES,
 };
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::{MipFilter, Profile, Subtype, Target};
+use engine::config::{Format, MipFilter, Profile, Subtype, Target};
 use serde_json::{json, Value};
 
 /// The view's heading and tab name.
@@ -527,6 +527,16 @@ fn tree(
             for (f, l) in [("format", "Format"), ("encoder.effort", "Effort")] {
                 field_row(ui, pm, row, p, scope, f, l, acts);
             }
+            // Final review (GUI M2): vanilla-quality sets perceptual (FM42, FM43), so a copy can turn it off here.
+            if matches!(p.format, Format::Bc1 | Format::Bc3 | Format::Bc7) {
+                let tick = Tick {
+                    field: "encoder.perceptual",
+                    label: "Perceptual",
+                    hover: PERCEPTUAL_HOVER,
+                    get: |b| b.encoder.perceptual,
+                };
+                tick_row(ui, pm, row, p, scope, tick, acts);
+            }
         });
     });
     sub(ui, st, scope, "Resize & mips", |ui| {
@@ -770,22 +780,54 @@ fn bc1_alpha_row(
     scope: Scope,
     acts: &mut Vec<Act>,
 ) {
+    let tick = Tick {
+        field: "encoder.bc1_alpha",
+        label: "1-bit alpha",
+        hover: BC1_ALPHA_HOVER,
+        get: |b| b.encoder.bc1_alpha,
+    };
+    tick_row(ui, pm, row, p, scope, tick, acts);
+}
+
+/// A check box row of the preset editor.
+struct Tick {
+    field: &'static str,
+    label: &'static str,
+    hover: &'static str,
+    get: fn(&Profile) -> bool,
+}
+
+fn tick_row(
+    ui: &mut egui::Ui,
+    pm: &PresetsModel,
+    row: &Row,
+    p: &Profile,
+    scope: Scope,
+    t: Tick,
+    acts: &mut Vec<Act>,
+) {
     let st = row.subtype;
-    ui.label("1-bit alpha");
-    let mut v = p.encoder.bc1_alpha;
-    let r = ui.checkbox(&mut v, "").on_hover_text(BC1_ALPHA_HOVER);
+    ui.label(t.label);
+    let mut v = (t.get)(p);
+    let lock = field_lock(pm.target, p, t.field);
+    let r = ui.add_enabled(lock.is_none(), egui::Checkbox::new(&mut v, ""));
+    let r = match lock {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r.on_hover_text(t.hover),
+    };
     // The box has no text of its own, so name it for AccessKit.
     r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, "1-bit alpha")
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, t.label)
     });
     if r.changed() {
-        acts.push(set(st, scope, "encoder.bc1_alpha", json!(v)));
+        acts.push(set(st, scope, t.field, json!(v)));
     }
-    let on_off = |b: &Profile| if b.encoder.bc1_alpha { "on" } else { "off" }.to_string();
+    let on_off = |b: &Profile| if (t.get)(b) { "on" } else { "off" }.to_string();
     let (h, name) = hint_profile(row, scope);
     hint(ui, name, h.map(on_off));
-    reset(ui, own_value(pm, st, scope, "encoder.bc1_alpha"), || {
-        acts.push(clear(st, scope, "encoder.bc1_alpha"))
+    // ↺ stays reachable on a locked row, so an own value can always be cleared.
+    reset(ui, own_value(pm, st, scope, t.field), || {
+        acts.push(clear(st, scope, t.field))
     });
     ui.end_row();
 }

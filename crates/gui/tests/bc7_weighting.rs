@@ -346,6 +346,25 @@ fn the_perceptual_tick_shows_for_bc1() {
     assert_eq!(own(m, ROCK).0, Some(json!(true)));
     assert_eq!(encode_params(m, ROCK), (true, None));
     assert!(!ignored(m, ROCK));
+    // Final review (GUI M9): the row's ↺ clears only `encoder.perceptual`; the texture's own format stays.
+    let tick = h.get_by_role_and_label(Role::CheckBox, "Perceptual").rect();
+    h.query_all_by_label("↺")
+        .find(|n| (n.rect().center().y - tick.center().y).abs() < 4.0)
+        .expect("the Perceptual row's ↺")
+        .click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    let m = h.state();
+    assert_eq!(own(m, ROCK).0, None);
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(ROCK, "format")
+            .is_some(),
+        "the format override stays"
+    );
 }
 
 /// Fix round 1, M1: leaving BC7 drops the texture's own weighting, so no hidden value keeps warning.

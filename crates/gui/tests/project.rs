@@ -160,6 +160,23 @@ fn a_removed_key_opens_read_only_and_keeps_the_file() {
     );
 }
 
+/// Ruling FR-a: a 1.x project the GUI wrote in bulk names every removed key at once, not one per reload.
+#[test]
+fn every_removed_key_of_a_1x_project_is_named_at_once() {
+    let (_d, doc) = doc_with(
+        "[files.\"a.png\"]\ndrop_top_mip = true\n[files.\"b.png\"]\ndrop_top_mip = true\nresize = \"pot-down\"\n",
+    );
+    assert!(doc.read_only());
+    let e = doc.error().unwrap();
+    for k in [
+        "files.\"a.png\".drop_top_mip",
+        "files.\"b.png\".drop_top_mip",
+        "files.\"b.png\".resize",
+    ] {
+        assert!(e.contains(k), "{k}: {e}");
+    }
+}
+
 /// Note FM16: a project-wide `[defaults]` fill makes the file read-only; the hint says to delete the line by hand.
 #[test]
 fn a_project_wide_fill_opens_read_only_with_the_hint() {

@@ -146,7 +146,7 @@ fn every_decide_entry_has_a_hover() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Alpha type: Cutout").click();
+    h.get_by_label("Problems alpha type: Cutout").click();
     h.run();
     use engine::config::AlphaPolicy::*;
     for (entry, policy) in [

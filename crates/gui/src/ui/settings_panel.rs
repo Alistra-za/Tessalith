@@ -127,12 +127,14 @@ pub fn alpha_options() -> Options {
 
 /// Note FM35: the alpha question as one dropdown, open on `shown` (the resolved type). Picking an entry, the shown one
 /// too, is the answer; each entry's hover says what it does. `None` while nothing is picked. `why` is the hover while
-/// the dropdown is off.
+/// the dropdown is off. `place` starts the AccessKit name ("Problems alpha type: Cutout"), so the dropdowns of the
+/// texture panel (`""`), Problems and Review, which can be on screen together, have distinct names (rule 8.4).
 pub fn alpha_dropdown(
     ui: &mut egui::Ui,
     id: egui::Id,
     shown: AlphaPolicy,
     why: &str,
+    place: &str,
 ) -> Option<AlphaPolicy> {
     let mut picked = None;
     let r = egui::ComboBox::from_id_salt(id)
@@ -146,7 +148,10 @@ pub fn alpha_dropdown(
             }
         })
         .response;
-    let name = format!("Alpha type: {}", alpha_label(shown));
+    let name = match place {
+        "" => format!("Alpha type: {}", alpha_label(shown)),
+        p => format!("{p} alpha type: {}", alpha_label(shown)),
+    };
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), &name));
     if !why.is_empty() {
         r.on_disabled_hover_text(why);
@@ -393,10 +398,19 @@ pub(super) fn combo_for(
         egui::RichText::new("— not set").weak()
     } else {
         match options.iter().find(|(v, _)| v == current) {
+            // Rule 3.5: "Slot 8 · Back-light / specular" held the Advanced drawer ~90 px past its edge, so the
+            // closed combo shows "Slot 8"; the list and the hover keep the slot's name.
+            Some((_, l)) if field == "resize_relative_to" => {
+                egui::RichText::new(l.split(" · ").next().unwrap_or(l))
+            }
             Some((_, l)) => egui::RichText::new(l),
             None => egui::RichText::new(display_value(current)),
         }
     };
+    let full = (field == "resize_relative_to")
+        .then(|| options.iter().find(|(v, _)| v == current))
+        .flatten()
+        .map(|(_, l)| l.clone());
     let mut picked = None;
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(shown)
@@ -419,6 +433,10 @@ pub(super) fn combo_for(
             }
         })
         .response;
+    let r = match full {
+        Some(l) => r.on_hover_text(l),
+        None => r,
+    };
     (picked.filter(|v| v != current), r)
 }
 
@@ -589,21 +607,19 @@ pub(super) fn editor(
             (r.changed().then(|| json!(b)), r)
         }
         WEIGHTING => weighting_combo(ui, egui::Id::new((key, f.field)), target, job, f, mixed),
-        "encoder.bc1_alpha" => {
+        "encoder.bc1_alpha" | "encoder.perceptual" => {
+            let hover = if f.field == "encoder.bc1_alpha" {
+                BC1_ALPHA_HOVER
+            } else {
+                PERCEPTUAL_HOVER
+            };
             let mut b = f.value.as_bool().unwrap_or(false);
             let r = ui
                 .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
-                .on_hover_text(BC1_ALPHA_HOVER);
-            (r.changed().then(|| json!(b)), r)
-        }
-        "encoder.perceptual" => {
-            let mut b = f.value.as_bool().unwrap_or(false);
-            let r = ui
-                .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
-                .on_hover_text(PERCEPTUAL_HOVER);
-            // The box has no text of its own, so name it for AccessKit (FM42).
+                .on_hover_text(hover);
+            // The box has no text of its own, so it takes the row's label as its AccessKit name (FM42, rule 8.2).
             r.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), b, "Perceptual")
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), b, f.label)
             });
             (r.changed().then(|| json!(b)), r)
         }
@@ -702,6 +718,10 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         if cx.compact {
             ui.label("");
         } else if let Some(reason) = f.lock {
+            hint_label(ui, reason);
+        } else if let Some(reason) =
+            crate::model::fields::no_effect_reason(&cx.job.profile, f.field)
+        {
             hint_label(ui, reason);
         } else if let Some(why) = (f.field == "subtype")
             .then(|| auto_subtype_reason(cx.job))
@@ -952,7 +972,7 @@ fn decision_box(
                                 line.on_hover_text(m);
                             }
                             let id = egui::Id::new(("alpha-decision", cx.key));
-                            if let Some(p) = alpha_dropdown(ui, id, shown, "") {
+                            if let Some(p) = alpha_dropdown(ui, id, shown, "", "") {
                                 actions.push(Action::Decide(Answer::Alpha(p)));
                             }
                         }

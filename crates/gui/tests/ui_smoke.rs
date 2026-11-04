@@ -325,7 +325,7 @@ fn the_alpha_dropdown_writes_the_policy_and_the_reset_button_takes_it_back() {
     h.get_by_label("Alpha: Cutout (proposed) — confirm");
     h.get_by_label("Alpha type: Cutout");
     assert_eq!(h.query_all_by_label("Blend").count(), 0);
-    pick_alpha(&mut h, "Cutout", "Cutout");
+    pick_alpha(&mut h, "", "Cutout", "Cutout");
     settle(&mut h);
     let job = h
         .state()
@@ -401,7 +401,7 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
         (n.rect(), n.accesskit_node().is_disabled())
     };
     let (before, _) = alpha_combo(&h);
-    pick_alpha(&mut h, "Cutout", "Cutout");
+    pick_alpha(&mut h, "", "Cutout", "Cutout");
     assert!(h.state().busy(), "the answer's plan is in flight");
     assert!(h.state().partial_pending, "the answer's partial is out");
     assert!(dropdown(&h), "the dropdown is enabled");
@@ -479,7 +479,7 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
             .map(|j| j.profile.alpha.policy)
     };
     let mut full = vec![];
-    pick_alpha(&mut h, "Cutout", "Cutout");
+    pick_alpha(&mut h, "", "Cutout", "Cutout");
     assert!(
         h.state().fix_off().is_some(),
         "the first answer's partial is out"

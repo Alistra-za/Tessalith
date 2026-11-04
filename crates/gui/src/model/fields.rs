@@ -308,6 +308,20 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
     }
 }
 
+/// Why a field's value changes nothing for `p`, shown in place of its provenance (final review, GUI M3). The rows
+/// are never locked, so Copy settings still carries them (Note FM44).
+pub fn no_effect_reason(p: &Profile, field: &str) -> Option<&'static str> {
+    match field {
+        "resize" | "resize_relative_to" | "resize_floor" if p.subtype == Subtype::Cubemap => {
+            Some("no effect on a cubemap: Face size sizes it")
+        }
+        "resize_relative_to" | "resize_floor" if p.resize == ResizeMode::None => {
+            Some("no effect while Resize is None")
+        }
+        _ => None,
+    }
+}
+
 /// Hover text of the "Enable parallax" check box (DECISIONS AH2).
 pub const PARALLAX_HOVER: &str = "Off writes alpha 0: complex material on, parallax off";
 

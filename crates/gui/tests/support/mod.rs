@@ -211,10 +211,20 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
-/// Note FM35: open the alpha dropdown that shows `shown` and pick `entry` in it.
-pub fn pick_alpha<S>(h: &mut egui_kittest::Harness<'static, S>, shown: &str, entry: &str) {
+/// Note FM35: open the alpha dropdown that shows `shown` and pick `entry` in it. `place` names the dropdown as
+/// `alpha_dropdown` does: `""` (texture panel), `"Problems"` or `"Review"`.
+pub fn pick_alpha<S>(
+    h: &mut egui_kittest::Harness<'static, S>,
+    place: &str,
+    shown: &str,
+    entry: &str,
+) {
     use egui_kittest::kittest::Queryable;
-    h.get_by_label(&format!("Alpha type: {shown}")).click();
+    let name = match place {
+        "" => format!("Alpha type: {shown}"),
+        p => format!("{p} alpha type: {shown}"),
+    };
+    h.get_by_label(&name).click();
     h.run();
     h.get_by_label(entry).click();
     h.run();

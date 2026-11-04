@@ -226,7 +226,7 @@ fn a_problems_row_selects_its_texture_and_decides_in_place() {
     let alpha = |d: &Decision| matches!(d, Decision::AlphaMeaning);
     assert!(has(&h, "landscape/leaf.png", alpha));
     // Note FM35: the row's dropdown opens on the proposed type; picking an entry answers.
-    pick_alpha(&mut h, "Cutout", "Cutout");
+    pick_alpha(&mut h, "Problems", "Cutout", "Cutout");
     idle(&mut h);
     assert!(
         !has(&h, "landscape/leaf.png", alpha),
@@ -251,7 +251,7 @@ fn a_read_only_project_disables_the_fix_buttons_with_the_reason() {
     let mut h = harness(m);
     h.run();
     let mut seen = 0;
-    for label in ["Set type…", "Alpha type: Cutout", "Acknowledge"] {
+    for label in ["Set type…", "Problems alpha type: Cutout", "Acknowledge"] {
         for n in h.query_all_by_label(label) {
             seen += 1;
             assert!(n.accesskit_node().is_disabled(), "{label} is enabled");
@@ -563,7 +563,7 @@ fn at_1280x800_a_long_problems_row_keeps_its_buttons_on_screen() {
     for label in [
         "Go to set",
         "Set type…",
-        "Alpha type: Cutout",
+        "Problems alpha type: Cutout",
         "Acknowledge",
     ] {
         for n in h.query_all_by_label(label) {

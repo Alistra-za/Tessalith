@@ -115,7 +115,7 @@ pub fn undecided_row(
                     if let Some(shown) = alpha_asked(item) {
                         ui.label(alpha_confirm_text(shown));
                         let id = egui::Id::new(("undecided-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why) {
+                        if let Some(p) = alpha_dropdown(ui, id, shown, why, "Review") {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
                     }
@@ -223,7 +223,7 @@ pub fn fix_buttons(
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
                         let id = egui::Id::new(("problems-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why) {
+                        if let Some(p) = alpha_dropdown(ui, id, shown, why, "Problems") {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
                     }

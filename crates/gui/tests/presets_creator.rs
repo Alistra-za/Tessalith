@@ -408,6 +408,62 @@ fn a_deleted_preset_named_in_sdc_toml_falls_back_with_a_banner() {
         .any(|p| p.fix == Some(Fix::ChoosePreset)));
 }
 
+/// Ruling FR-b: a 1.x user preset with a removed key is skipped; Problems says so with the reason (one row per file,
+/// Open folder), and a project that names it reads "was skipped: <reason>", not "is not installed".
+#[test]
+fn a_skipped_user_preset_names_its_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, _| image::Rgb([x as u8, 10, 200]))
+        .save(root.join("a/box.png"))
+        .unwrap();
+    std::fs::write(root.join("sdc.toml"), "preset = \"oldy\"\n").unwrap();
+    let presets = d.path().join("presets");
+    std::fs::create_dir_all(&presets).unwrap();
+    std::fs::write(
+        presets.join("oldy.toml"),
+        "schema_version = 1\nid = \"oldy\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n[subtypes.diffuse]\nresize = \"pot-down\"\n",
+    )
+    .unwrap();
+    let mut m = sdc_gui::model::AppModel::new(
+        sdc_gui::settings::GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..Default::default()
+        },
+        None,
+        std::sync::Arc::new(engine::session::Session::new().unwrap()),
+    );
+    m.user_presets = Some(presets.clone());
+    m.open_folder(root);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_export_folder(d.path().join("export"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.missing_preset_id(), Some("oldy"));
+    use sdc_gui::model::bottom::{problems, Fix, Level};
+    let rows = problems(&m);
+    let why =
+        "subtypes.diffuse.resize: removed in 2.0; the power of two is automatic; delete the key";
+    let blocks = rows
+        .iter()
+        .find(|p| p.level == Level::Blocks && p.text.starts_with("Preset oldy was skipped: "))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    assert!(blocks.text.ends_with(why), "{}", blocks.text);
+    assert!(
+        !rows.iter().any(|p| p.text.contains("is not installed")),
+        "{rows:#?}"
+    );
+    let file = rows
+        .iter()
+        .find(|p| p.text == format!("Preset file oldy.toml was skipped: {why}"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    assert_eq!(
+        (file.level, file.fix.clone()),
+        (Level::Warning, Some(Fix::OpenFolder(presets)))
+    );
+    assert_eq!(m.review_gate(), Err(blocks.text.clone()));
+}
+
 #[test]
 fn a_startup_banner_survives_a_replan_until_dismissed() {
     let d = tempfile::tempdir().unwrap();

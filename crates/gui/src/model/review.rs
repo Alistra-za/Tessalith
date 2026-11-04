@@ -304,8 +304,8 @@ impl AppModel {
         }
         // Note FC1 (AM14): the plan ran on the fallback; exporting it would not be the project's preset (the CLI
         // exits 2 on the same file).
-        if let Some(id) = self.missing_preset_id() {
-            return Err(format!("Preset {id} is not installed"));
+        if let Some((text, _)) = self.missing_preset_text() {
+            return Err(text);
         }
         let n = pbr_export::export_blocks(self).len();
         if n > 0 {

@@ -130,6 +130,45 @@ fn the_one_bit_alpha_box_shows_for_a_bc1_row_only() {
     );
 }
 
+/// Final review (GUI M2): the preset editor has a Perceptual box in Compression for BC1, BC3 and BC7 (vanilla-quality
+/// sets it, FM42/FM43); ticking it sets `encoder.perceptual` and ↺ drops only that key.
+#[test]
+fn the_perceptual_box_sets_and_clears_the_field() {
+    use eframe::egui::accesskit::Role;
+    use engine::config::Subtype;
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.open_presets();
+    m.presets_model().select("cs-quality");
+    m.presets_model().duplicate();
+    m.presets_model()
+        .set_field(Subtype::Diffuse, "resize", serde_json::json!("half"));
+    let mut h = harness(m);
+    h.run();
+    collapse_pbr(&mut h);
+    h.get_by_label("diffuse — BC7 · linear").click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Perceptual")
+        .click();
+    h.run();
+    let field = |h: &mut egui_kittest::Harness<'_, AppModel>, f: &str| {
+        h.state_mut().presets_model().field(Subtype::Diffuse, f)
+    };
+    assert_eq!(
+        field(&mut h, "encoder.perceptual"),
+        Some(serde_json::json!(true))
+    );
+    // Two overrides, two ↺: click the one on the Perceptual row's line.
+    let tick = h.get_by_role_and_label(Role::CheckBox, "Perceptual").rect();
+    let reset = h
+        .query_all_by_label("↺")
+        .find(|n| (n.rect().center().y - tick.center().y).abs() < 4.0)
+        .expect("the Perceptual row's ↺");
+    reset.click();
+    h.run();
+    assert_eq!(field(&mut h, "encoder.perceptual"), None);
+    assert_eq!(field(&mut h, "resize"), Some(serde_json::json!("half")));
+}
+
 fn with_folder(dir: &std::path::Path) -> AppModel {
     let mut m = AppModel::placeholder(GuiSettings::default());
     m.user_presets = Some(dir.to_path_buf());

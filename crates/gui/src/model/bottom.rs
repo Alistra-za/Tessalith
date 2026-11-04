@@ -6,7 +6,7 @@ use crate::pgp::settings::Feature;
 use engine::codes::Code;
 use nif::fields::Field;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -334,15 +334,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     };
     let mut out = vec![];
     // Note FC1 (AM14): the plan runs on the fallback so the window is not empty, but the export waits for a preset.
-    if let Some(id) = m.missing_preset_id() {
+    if let Some((text, detail)) = m.missing_preset_text() {
         out.push(Problem {
             fix: Some(Fix::ChoosePreset),
-            ..row(
-                Level::Blocks,
-                At::Project,
-                format!("Preset {id} is not installed"),
-                None,
-            )
+            detail,
+            ..row(Level::Blocks, At::Project, text, None)
         });
     }
     // Note FC10 (P8): an unreadable `sdc-project.toml` is a red row with Open in editor and Reload; sets stay
@@ -558,7 +554,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         });
     }
     // Note FC10 (T8): a user preset skipped because another preset already declares its suffix aliases. Note FC14:
-    // the skipped one is whichever loads second, the original or its copy, so the row names both.
+    // the skipped one is whichever loads second, the original or its copy, so the row names both. Ruling FR-b: any
+    // other skipped file gets a row with its reason and Open folder.
     for (file, reason) in &m.skipped_user_presets {
         if let Some((id, other)) = alias_clash(reason) {
             out.push(Problem {
@@ -571,7 +568,21 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     None,
                 )
             });
+            continue;
         }
+        let path = Path::new(file);
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let why = skipped_reason(file, reason);
+        out.push(Problem {
+            fix: path.parent().map(|p| Fix::OpenFolder(p.to_path_buf())),
+            detail: Some(format!("{file}: {why}")),
+            ..row(
+                Level::Warning,
+                At::Project,
+                format!("Preset file {name} was skipped: {}", first_line(why)),
+                None,
+            )
+        });
     }
     out.extend(nif_rows(NifLevel::Warning, Level::Warning));
     // Artist checks (DECISIONS Note CL): listed, never "ready"-changing. CHK-GREEN-GUESS, the one Info result, is a
@@ -762,6 +773,25 @@ fn alias_clash(reason: &str) -> Option<(&str, &str)> {
         .1
         .strip_suffix('\'')?;
     Some((id, other))
+}
+
+/// Ruling FR-b: a CFG-PRESET-SKIPPED reason without the engine's `preset parse error: <file>: ` lead-in (the file is
+/// named once by `add_file` and again by `insert_toml`).
+/// shortcut: parses the engine's message, as `alias_clash` does; read a `data` field once the engine adds one.
+pub(crate) fn skipped_reason<'a>(file: &str, reason: &'a str) -> &'a str {
+    let mut r = reason
+        .strip_prefix("preset parse error: ")
+        .unwrap_or(reason);
+    let lead = format!("{file}: ");
+    while let Some(rest) = r.strip_prefix(lead.as_str()) {
+        r = rest;
+    }
+    r
+}
+
+/// The first line of a message; a removed-key list has one key per line (ruling FR-a).
+pub(crate) fn first_line(s: &str) -> &str {
+    s.lines().next().unwrap_or(s)
 }
 
 /// The folder that holds an IN-UNREADABLE entry: the engine writes `skipped: <path>: <error>` (engine `api.rs`,

@@ -27,8 +27,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel) {
     }
 }
 
-/// A dialog's list is at most this share of the window height, so the footer stays on screen (CE19; first used by
-/// the half-size box, which Note FC2 removed).
+/// A dialog's list is at most this share of the window height, so the footer stays on screen (CE19).
 pub const DIALOG_LIST_SHARE: f32 = 0.6;
 
 /// What the keys (and a click outside) did to a dialog this frame (item 4, DECISIONS AG11).

@@ -361,6 +361,26 @@ fn the_engine_slot_table_matches_the_slot_cards() {
     }
 }
 
+/// Final review (GUI M3): while Resize is None, Relative to and Size floor say they do nothing, in place of where
+/// their value came from; with a resize mode they show the provenance again.
+#[test]
+fn relative_to_and_floor_say_they_do_nothing_without_a_resize() {
+    use egui_kittest::kittest::Queryable;
+    const NONE: &str = "no effect while Resize is None";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.settings.advanced_open = true;
+    m.select_item("up.png");
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.query_all_by_label(NONE).count(), 2);
+    h.state_mut()
+        .set_field("up.png", "resize", serde_json::json!("half"));
+    assert!(h.state_mut().wait_idle(WAIT));
+    h.run();
+    assert_eq!(h.query_all_by_label(NONE).count(), 0);
+}
+
 /// The Advanced drawer has a Size floor row showing the default, then the texture's own value; Clear removes the key.
 #[test]
 fn the_size_floor_row_follows_resize_and_clear_removes_it() {

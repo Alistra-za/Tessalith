@@ -226,6 +226,52 @@ fn no_inspector_value_passes_the_drawer_edge() {
         assert!(checked > 10, "{width}: only {checked} labels checked");
     }
 }
+/// Final review (GUI M9), rule 3.5: no combo in the drawer ends past its edge, with the longest Relative to label
+/// ("Slot 8 · …") shown. Drawn alone, as `no_inspector_value_passes_the_drawer_edge` is.
+// shortcut: at the drawer's 260 px minimum every combo of the fields grid ends ~3 px past the edge (the label
+// column plus egui's combo width); pin 260 too once that grid gets exact-width combo slots.
+#[test]
+fn no_drawer_combo_passes_the_drawer_edge() {
+    for width in [280.0f32, 380.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut model = leaf_model(d.path());
+        model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
+        model.set_field(
+            "landscape/leaf.png",
+            "resize_relative_to",
+            serde_json::json!("slot8"),
+        );
+        assert!(model.wait_idle(Duration::from_secs(60)));
+        let mut h = Harness::builder()
+            .with_size(eframe::egui::vec2(width, 1400.0))
+            .build_ui_state(
+                |ui, model: &mut AppModel| {
+                    let mut state = sdc_gui::ui::advanced::AdvancedState::default();
+                    ui.allocate_ui(eframe::egui::vec2(width, 1400.0), |ui| {
+                        sdc_gui::ui::advanced::body(ui, model, &mut state);
+                    });
+                },
+                model,
+            );
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        let combos: Vec<_> = h.query_all_by_role(Role::ComboBox).collect();
+        assert!(
+            combos.iter().any(|n| n
+                .accesskit_node()
+                .value()
+                .is_some_and(|v| v.starts_with("Slot 8"))),
+            "{width}: the Relative to combo shows Slot 8"
+        );
+        let past: Vec<_> = combos
+            .iter()
+            .filter(|n| n.rect().max.x > width + 1.0)
+            .map(|n| (n.accesskit_node().value(), n.rect().max.x))
+            .collect();
+        assert!(past.is_empty(), "{width}: past the drawer edge: {past:?}");
+    }
+}
+
 #[test]
 fn the_inspector_names_the_texture() {
     let d = tempfile::tempdir().unwrap();

@@ -59,7 +59,8 @@ fn a_1x_gui_toml_still_loads() {
     std::fs::write(
         &p,
         format!(
-            "{}\nrecent = [\"C:/mods/a\"]\nlive_encode = true\n",
+            // Final review (GUI M9): the removed `[layout]` keys too.
+            "{}\nrecent = [\"C:/mods/a\"]\nlive_encode = true\n[layout]\nmeshes_view = true\nfilter_encoder = \"nvtt\"\npreview_layout = \"split\"\n",
             removed.join("\n")
         ),
     )
@@ -68,9 +69,13 @@ fn a_1x_gui_toml_still_loads() {
     assert_eq!(err, None);
     assert_eq!(s.recent, [std::path::PathBuf::from("C:/mods/a")]);
     assert!(s.live_encode);
+    assert!(s.layout.meshes_view, "the rest of [layout] still loads");
     s.save(&p).unwrap();
     let saved = std::fs::read_to_string(&p).unwrap();
-    for line in removed {
+    for line in removed
+        .into_iter()
+        .chain(["filter_encoder =", "preview_layout ="])
+    {
         let key = line.split(' ').next().unwrap();
         let kept = saved.lines().any(|l| l.starts_with(key));
         assert!(!kept, "{key} is dropped on save: {saved}");

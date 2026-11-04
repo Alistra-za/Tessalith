@@ -249,7 +249,11 @@ impl EngineInputs {
 }
 
 fn read_only_banner(error: &str) -> String {
-    format!("{error} — sdc.toml is ignored and the GUI is read-only until it is fixed and reloaded")
+    // A list of removed keys (ruling FR-a) keeps one key per line; the sentence goes under it.
+    let sep = if error.contains('\n') { "\n" } else { " — " };
+    format!(
+        "{error}{sep}sdc.toml is ignored and the GUI is read-only until it is fixed and reloaded"
+    )
 }
 
 /// `(evidence_rev, export.revision, export running)`.
@@ -3658,6 +3662,25 @@ impl AppModel {
     /// Note FC1 (AM14): the project's `preset` when it names no installed preset, as the last plan request found it.
     pub fn missing_preset_id(&self) -> Option<&str> {
         self.missing_preset_id.as_deref()
+    }
+
+    /// Ruling FR-b: the missing preset's row text and hover: "Preset X was skipped: <reason>" when a skipped user
+    /// preset file is named after it (the reason's first line; the hover has all of it), else "is not installed".
+    pub fn missing_preset_text(&self) -> Option<(String, Option<String>)> {
+        let id = self.missing_preset_id()?;
+        let skipped = self.skipped_user_presets.iter().find(|(f, _)| {
+            std::path::Path::new(f)
+                .file_stem()
+                .is_some_and(|s| s.eq_ignore_ascii_case(id))
+        });
+        Some(match skipped {
+            Some((f, r)) => {
+                let why = bottom::skipped_reason(f, r);
+                let text = format!("Preset {id} was skipped: {}", bottom::first_line(why));
+                (text, Some(format!("{f}: {why}")))
+            }
+            None => (format!("Preset {id} is not installed"), None),
+        })
     }
 
     /// Pick the project's preset (`None`: the target's default), one undo step, re-planned.
