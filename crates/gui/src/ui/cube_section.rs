@@ -40,8 +40,8 @@ fn all_cubes(model: &AppModel, key: &str) -> bool {
     })
 }
 
-/// A drag value that returns its value once per gesture (drag release or Enter), not every frame. The value in
-/// flight lives in `ui.data` under `id`; one already sent stays on show until the re-plan lands. The engine range
+/// A drag value that returns its value once per gesture (drag release or Enter), not every frame
+/// ([`super::advanced::held`]); one already sent stays on show until the re-plan lands. The engine range
 /// bounds the widget, but a value already outside it is shown as it is and never rewritten (ruling R2).
 #[allow(clippy::too_many_arguments)]
 fn num(
@@ -54,45 +54,25 @@ fn num(
     suffix: &str,
     name: &str,
 ) -> (Option<f64>, egui::Response) {
-    let mut pending: Option<(f64, bool)> = ui.data(|d| d.get_temp(id));
-    if pending.is_some_and(|(v, sent)| v == current || (sent && !busy)) {
-        pending = None;
-    }
-    let mut v = pending.map_or(current, |p| p.0);
-    let r = ui.add(
-        egui::DragValue::new(&mut v)
-            .range(range)
-            .clamp_existing_to_range(false)
-            .speed(speed)
-            .max_decimals(3)
-            .suffix(suffix),
-    );
-    r.widget_info(|| {
-        let mut i = egui::WidgetInfo::new(egui::WidgetType::DragValue);
-        i.enabled = r.enabled();
-        i.label = Some(name.to_string());
-        i.value = Some(v);
-        i
-    });
-    if r.changed() {
-        pending = Some((v, false));
-    }
-    let mut out = None;
-    let settled =
-        r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus());
-    if let Some((pv, false)) = pending {
-        if settled && pv != current {
-            out = Some(pv);
-            pending = Some((pv, true));
-        }
-    }
-    ui.data_mut(|d| match pending {
-        Some(p) => {
-            d.insert_temp(id, p);
-        }
-        None => d.remove::<(f64, bool)>(id),
-    });
-    (out, r)
+    super::advanced::held(ui, id, current, busy, true, |ui, v| {
+        let r = ui.add(
+            egui::DragValue::new(v)
+                .range(range)
+                .clamp_existing_to_range(false)
+                .speed(speed)
+                .max_decimals(3)
+                .suffix(suffix),
+        );
+        let x = *v;
+        r.widget_info(|| {
+            let mut i = egui::WidgetInfo::new(egui::WidgetType::DragValue);
+            i.enabled = r.enabled();
+            i.label = Some(name.to_string());
+            i.value = Some(x);
+            i
+        });
+        r
+    })
 }
 
 /// A colour button over raw 0..255 codes; the new codes once the picker's pointer is released.
@@ -602,5 +582,23 @@ fn faces(
         {
             put(field, Some(None));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::advanced::gesture::{arrow, typed, St};
+    use super::*;
+    use eframe::egui::accesskit::Role;
+
+    fn cube_num(ui: &mut egui::Ui, s: &mut St) {
+        let (done, _) = num(ui, false, egui::Id::new("n"), s.cur, 0.0..=10.0, 0.1, "", "exposure");
+        s.take(done);
+    }
+
+    #[test]
+    fn num_commits_a_typed_value_and_an_arrow_key_once() {
+        assert_eq!(typed(cube_num, Role::SpinButton, "5"), vec![5.0]);
+        assert_eq!(arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp).len(), 1);
     }
 }
