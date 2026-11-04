@@ -550,3 +550,28 @@ fn slot_textures_skip_disabled_effect_and_derived_shapes() {
         ["textures/d.dds", "textures/ok_n.dds"]
     );
 }
+
+/// Backlog T43: while the scan store is unsettled the original-textures read starts nothing, so no false "no mesh"
+/// is cached.
+#[test]
+fn no_original_textures_read_starts_while_the_scan_store_is_unsettled() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    db_with_set(&db, "x.dds", "y.dds");
+    m.scan_db = Some(db);
+    m.scan_store_unsettled = true;
+    m.ask_original_textures(SET, 2);
+    assert!(!m.used_by_pending(), "no read started");
+    // Long enough for a started read to land (the sibling test's reads land within milliseconds).
+    for _ in 0..30 {
+        m.poll();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(m.original_textures(SET, 2), Some(None), "nothing cached");
+    // Control: once the store is settled the same ask reads.
+    m.scan_store_unsettled = false;
+    m.ask_original_textures(SET, 2);
+    assert!(m.used_by_pending(), "a settled store reads");
+}

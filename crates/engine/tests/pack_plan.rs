@@ -245,6 +245,7 @@ fn a_recipe_cancelled_before_pass_2_is_reported_failed() {
     }
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "iron_roughness.png", 64, |x, _| x as u8 * 4);
+    put(d.path(), "iron_ao.png", 64, |_, y| y as u8 * 4);
     put(d.path(), "x.png", 16, |_, _| 128);
     put(d.path(), "zz_cancel_hook.png", 16, |_, _| 128);
     std::env::set_var("SDC_TEST_CANCEL_ON", "zz_cancel_hook.png");
@@ -263,6 +264,15 @@ fn a_recipe_cancelled_before_pass_2_is_reported_failed() {
     let r = &recipes(&ev)[0];
     assert_eq!(r.status, RecipeStatus::Failed);
     assert_eq!(r.reason.as_deref(), Some("cancelled"));
+    // Backlog T17: the recipe's other source ends as not converted, once.
+    let ao: Vec<_> = p
+        .skipped
+        .iter()
+        .filter(|s| s.path.ends_with("iron_ao.png"))
+        .collect();
+    assert_eq!(ao.len(), 1, "{:?} {:?}", p.skipped, p.cancelled);
+    assert_eq!(ao[0].code, Some(Code::DeriveNotConverted));
+    assert!(!p.cancelled.iter().any(|c| c.ends_with("iron_ao.png")));
 }
 
 fn prepacked(dir: &Path) {
@@ -647,4 +657,51 @@ fn a_reencoded_prepacked_dds_follows_packing_prefer() {
         p.jobs.iter().map(|j| &j.output).collect::<Vec<_>>()
     );
     assert!(codes(job(&p, "iron_rmaos.dds")).contains(&Code::PackConflict));
+}
+
+/// Backlog T17: `end_lost_sources` runs after every job is known, so a source another recipe packs, one a failure or
+/// cancel already ends, and one a skip already ends get nothing, and a lone source ends once however often it is listed.
+#[test]
+fn lost_sources_end_once_and_never_when_something_else_ends_them() {
+    use engine::pack::plan::end_lost_sources;
+    use engine::pack::RecipeKind;
+    use std::path::PathBuf;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_roughness.png", 64, |x, _| x as u8 * 4);
+    put(d.path(), "iron_ao.png", 64, |_, y| y as u8 * 4);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    let packed = p.jobs.iter().find(|j| j.pack.is_some()).unwrap();
+    let shared = packed.pack.as_ref().unwrap().sources[0].path.clone();
+    let (lone, cancelled, failed_path) = (
+        PathBuf::from("lone.png"),
+        PathBuf::from("cancelled.png"),
+        PathBuf::from("failed.png"),
+    );
+    let entry = |path: &PathBuf| {
+        (
+            "set".to_string(),
+            RecipeKind::Rmaos,
+            path.clone(),
+            PathBuf::from("out.dds"),
+        )
+    };
+    let lost = vec![
+        entry(&shared),
+        entry(&lone),
+        entry(&lone),
+        entry(&cancelled),
+        entry(&failed_path),
+    ];
+    let failed = vec![FailedFile {
+        path: failed_path,
+        output: PathBuf::new(),
+        stage: Stage::Load,
+        error: "x".into(),
+        set: None,
+    }];
+    let mut skipped = vec![];
+    end_lost_sources(&lost, &p.jobs, &failed, &[cancelled], &mut skipped);
+    let paths: Vec<&PathBuf> = skipped.iter().map(|s| &s.path).collect();
+    assert_eq!(paths, vec![&lone], "{skipped:?}");
+    assert_eq!(skipped[0].code, Some(Code::DeriveNotConverted));
 }

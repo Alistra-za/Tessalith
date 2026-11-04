@@ -116,12 +116,12 @@ A set can add detail normal maps that are blended into its base normal (`_n`, or
 
 Any of these can be prefixed `n_` or `cnr_` (for example `iron_cnr_bump.png`) to say which base it feeds. Without a prefix it feeds `_n`, or `_cnr` when the set has no `_n`. Override with `rnm.target` on the layer file. In a landscape set a plain `_detail` or `_detailnorm` file is the set's detail normal, not a layer ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)).
 
-The blend order is [`rnm.order`](Project-Config-Fields.md#rnm-normal-layers). The `bent` layer by default weights itself by occlusion read from a raw `_ao` map, the R channel of an `_orm`, or the B channel of `_rmaos`/`_rfaos`; supply normal AO (white = open), Tessalith inverts it.
+The blend order is [`rnm.order`](Project-Config-Fields.md#rnm-normal-layers). The `bent` layer by default weights itself by occlusion read from a raw `_ao` map, the R channel of an `_orm`, or the B channel of `_rmaos`/`_rfaos`; supply normal AO (white = open), Tessalith inverts it. A file's hand-set [`helper.role`](Project-Config.md#files) (`ao`, `orm` or `rmaos`) decides which it is before its name does, and any other role, `none` included, takes it out.
 
 How the layers are blended (code: `crates/engine/src/rnm/`):
 
 - **Method:** RNM for `_bump`, `_bump2`, `_detailnorm` and `_detailnorm2`. Bump layers are height maps: slopes taken from the mean of RGB become normals first.
-- **Bent:** `_bent` defaults to an AO blend: a renormalised linear mix weighted by strength × (1 − AO)^1.5 × mask. AO comes from `_ao` (R) or `_rmaos`/`_rfaos` (B). With no AO map the weight is uniform. `rnm.bent.mode = "detail"` blends it with RNM instead.
+- **Bent:** `_bent` defaults to an AO blend: a renormalised linear mix weighted by strength × (1 − AO)^1.5 × mask. AO comes from `_ao` (R), `_orm` (R) or `_rmaos`/`_rfaos` (B), or from the file whose `helper.role` you set to one of those. With no AO map the weight is uniform. `rnm.bent.mode = "detail"` blends it with RNM instead.
 - **Strength:** it scales the layer's slope (0 is flat, 1 is as authored). A mask's R channel scales it per texel. `rnm.order` moves the layers it lists to the front.
 - **Where:** into the set's `_n` or `_cnr`, after decode and green flip, before mips. Layers are resampled to the base size. Alpha is untouched, so `_cnr` coat roughness passes through. The TruePBR roughness bake reads the blended normal.
 - **Bent default assumption:** the defaults assume `_bent` is a high-to-low mesh bake from the same normal source. It then holds all the detail the normal has, and the mask only reduces the AO strength. When that is not true, mix it differently (see `rnm.bent.mode`).

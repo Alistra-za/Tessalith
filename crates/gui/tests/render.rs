@@ -205,6 +205,7 @@ fn near(got: [u8; 4], want: [u8; 4]) {
 fn encoded(format: Format, w: u32, h: u32, block: &[u8], decoded: [f32; 4]) -> PreviewOut {
     let blocks = (w.div_ceil(4) * h.div_ceil(4)) as usize;
     PreviewOut {
+        note: None,
         result: PreviewResult {
             source: SourcePreview {
                 first_level: 0,

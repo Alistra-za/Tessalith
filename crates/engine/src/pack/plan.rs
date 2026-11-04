@@ -198,6 +198,8 @@ pub struct PackPlan {
     /// Generated AO maps skipped `GEN-REPLACED` because a pre-packed image's B holds AO (Note CO103); the caller
     /// drops them from their sets, as step 3b does its losers.
     pub gen_replaced: Vec<PathBuf>,
+    /// Backlog T17: (set key, recipe, source, its output) of every source of a recipe pass 1 failed or cancelled; pass 2 adds its own.
+    pub lost: Vec<(String, RecipeKind, PathBuf, PathBuf)>,
 }
 
 /// Marks the report of `c` `Failed` with `reason`: pass 2 could not plan it (a load or assembly failure, a panic, or
@@ -217,6 +219,41 @@ pub fn fail_report(
     }
 }
 
+/// Backlog T17: a recipe that failed or was cancelled has no job, so its sources besides the one that carries the
+/// `file_failed` would get no terminal event. After pass 2, ends each of `lost` (set key, recipe, source, its output)
+/// as not converted unless a job reads it, or a failure, a cancel or a skip already ends it. Each source ends once.
+pub fn end_lost_sources(
+    lost: &[(String, RecipeKind, PathBuf, PathBuf)],
+    jobs: &[ResolvedJob],
+    failed: &[crate::api::FailedFile],
+    cancelled: &[PathBuf],
+    skipped: &mut Vec<SkippedFile>,
+) {
+    for (set_key, kind, path, output) in lost {
+        let ended = failed.iter().any(|f| &f.path == path)
+            || cancelled.contains(path)
+            || skipped.iter().any(|s| &s.path == path)
+            || jobs.iter().any(|j| {
+                j.pack
+                    .as_ref()
+                    .is_some_and(|p| p.sources.iter().any(|x| &x.path == path))
+            });
+        if ended {
+            continue;
+        }
+        skipped.push(SkippedFile {
+            path: path.clone(),
+            output: output.clone(),
+            set: Some(set_key.clone()),
+            code: Some(Code::DeriveNotConverted),
+            reason: format!(
+                "{} is not converted: its {} recipe failed",
+                name(path),
+                kind.suffix()
+            ),
+        });
+    }
+}
 /// The analysis pass 1 resolves a packed profile with: the packed image does not exist yet (DECISIONS Note M6).
 /// Pass 1 ignores rules that match on `alpha` (`layered_profile_placeholder`), so its alpha never decides anything.
 fn placeholder() -> (Analysis, SourceInfo) {
@@ -692,6 +729,7 @@ pub fn plan_packing(
         candidates: vec![],
         reports: BTreeMap::new(),
         gen_replaced: vec![],
+        lost: vec![],
     };
     let mut consumed: BTreeSet<PathBuf> = BTreeSet::new();
     let mut heads = vec![];
@@ -902,6 +940,14 @@ pub fn plan_packing(
                 report.status = RecipeStatus::Failed;
                 report.reason = Some(format!("source {} could not be read", name(bad)));
                 reports.push(report);
+                out.lost.extend(sources.iter().map(|p| {
+                    (
+                        set.key.clone(),
+                        recipe.kind,
+                        p.clone(),
+                        members[p].output.clone(),
+                    )
+                }));
                 consumed.extend(sources.iter().cloned());
                 continue;
             }
@@ -909,6 +955,14 @@ pub fn plan_packing(
                 report.status = RecipeStatus::Failed;
                 report.reason = Some("cancelled".into());
                 reports.push(report);
+                out.lost.extend(sources.iter().map(|p| {
+                    (
+                        set.key.clone(),
+                        recipe.kind,
+                        p.clone(),
+                        members[p].output.clone(),
+                    )
+                }));
                 consumed.extend(sources.iter().cloned());
                 continue;
             }

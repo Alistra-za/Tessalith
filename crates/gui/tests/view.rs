@@ -103,6 +103,7 @@ fn preview_out(
         min,
     };
     sdc_gui::model::preview::PreviewOut {
+        note: None,
         result: PreviewResult {
             source: SourcePreview {
                 first_level,

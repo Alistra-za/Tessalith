@@ -128,6 +128,7 @@ impl GuiSettings {
         ] {
             *p = p.take().filter(ok);
         }
+        s.render3d.shaders = s.render3d.shaders.take().filter(|f| ok(&f.root));
         let text = toml::to_string_pretty(&s).map_err(std::io::Error::other)?;
         engine::dds::write_atomic(path, text.as_bytes())?;
         Ok(unreadable.then_some(kept))

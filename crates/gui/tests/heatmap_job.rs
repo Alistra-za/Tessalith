@@ -17,6 +17,7 @@ fn model_with_result() -> AppModel {
         px: vec![[0.5, 0.5, 0.5, 1.0], [0.5, 0.5, 0.5, 1.0]],
     };
     let out = PreviewOut {
+        note: None,
         result: PreviewResult {
             source: SourcePreview {
                 first_level: 0,

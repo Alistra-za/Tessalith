@@ -210,3 +210,20 @@ fn a_user_config_cannot_hold_inputs() {
     };
     assert!(e.to_string().contains("[inputs] is only valid"), "{e}");
 }
+
+/// Backlog T19: a project config named in another case than the input folder (Windows paths do not care) still
+/// applies its aliases.
+#[cfg(windows)]
+#[test]
+fn an_alias_applies_when_root_and_input_differ_only_in_case() {
+    let d = fixture(WALL_N);
+    let mut r = req(&d);
+    let upper = d.path().join("in").to_string_lossy().to_uppercase();
+    r.project_config = Some(Path::new(&upper).join("sdc.toml"));
+    let (p, events) = plan_events(r);
+    assert!(warnings(&events, Code::InAliasInvalid).is_empty());
+    assert_eq!(
+        job(&p, "out/armor/wall_n.dds").profile.subtype,
+        Subtype::Normal
+    );
+}

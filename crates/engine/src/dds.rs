@@ -831,6 +831,12 @@ pub fn read_dds(bytes: &[u8]) -> Result<DdsFile, DdsError> {
     };
     let is_cubemap =
         caps2 & DDSCAPS2_CUBEMAP != 0 || dx10.is_some_and(|d| d.misc & DX10_MISC_CUBEMAP != 0);
+    // Backlog T13: a legacy cube that lists only some faces is a partial cube, not a truncated file.
+    if dx10.is_none() && is_cubemap && caps2 & DDSCAPS2_CUBE_ALLFACES != DDSCAPS2_CUBE_ALLFACES {
+        return Err(DdsError::Unsupported(format!(
+            "partial cube: caps2 {caps2:#x} does not list all six faces"
+        )));
+    }
     // A header count above the full chain is kept in `mip_count` for `check_header`, but only the chain that can
     // exist is laid out, so a hostile count cannot drive the loop or the length check.
     let chain = full_chain_len(width, height).min(mips as usize);

@@ -343,6 +343,9 @@ pub struct FailedFile {
     pub output: PathBuf,
     pub stage: Stage,
     pub error: String,
+    /// The key of the set the file belongs to, filled once the sets are final (`None` while planning and for a
+    /// file in no set).
+    pub set: Option<String>,
 }
 
 /// Why planning produced no job for a file: its Load failed, or it panicked at the stage it had entered.
@@ -1736,6 +1739,7 @@ impl Engine {
                             output: files[i].output.clone(),
                             stage: Stage::Load,
                             error: "re-encoding would overwrite the source DDS: choose another output folder".into(),
+                            set: None,
                         });
                         continue;
                     }
@@ -1904,6 +1908,7 @@ impl Engine {
                         output,
                         stage: Stage::Load,
                         error: e.to_string(),
+                        set: None,
                     });
                 }
                 Err(PlanFailure::Panic(stage, error)) => failed.push(FailedFile {
@@ -1911,6 +1916,7 @@ impl Engine {
                     output,
                     stage,
                     error,
+                    set: None,
                 }),
                 Err(PlanFailure::Pack(_)) => unreachable!("pass 1 never assembles"),
             }
@@ -2075,6 +2081,7 @@ impl Engine {
                     output: f.output.clone(),
                     stage: Stage::Resolve,
                     error: format!("internal error: {}", panic_message(&*p)),
+                    set: None,
                 }),
             }
         }
@@ -2212,6 +2219,12 @@ impl Engine {
             let Some(r) = r else {
                 // Cancelled before its sources were loaded: the recipe has no job (Note M11, ruling W7).
                 pack::plan::fail_report(&mut packed.reports, c, "cancelled".into());
+                packed.lost.extend(
+                    c.job
+                        .sources
+                        .iter()
+                        .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                );
                 cancelled.push(path);
                 continue;
             };
@@ -2224,15 +2237,32 @@ impl Engine {
                 Err(f) => {
                     let (stage, error) = failure(&output, f);
                     pack::plan::fail_report(&mut packed.reports, c, error.clone());
+                    packed.lost.extend(
+                        c.job
+                            .sources
+                            .iter()
+                            .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                    );
                     failed.push(FailedFile {
                         path,
                         output,
                         stage,
                         error,
+                        set: None,
                     });
                 }
             }
         }
+        // Backlog T17: the sources of failed or cancelled recipes end as not converted, once every job is known.
+        let lost: Vec<_> = packed
+            .lost
+            .iter()
+            .filter_map(|(s, k, p, _)| {
+                let f = files.iter().find(|f| f.path == *p)?;
+                Some((s.clone(), *k, p.clone(), f.output.clone()))
+            })
+            .collect();
+        pack::plan::end_lost_sources(&lost, &jobs, &failed, &cancelled, &mut skipped);
         // Note DY: each filled target is loaded, filled and analysed again, then re-resolved as 6c does, so alpha
         // policy, format, coverage and cutout all see the filled image. It runs before the derive step, so a target
         // a derive replaces loses its fill with it (Ruling 15). The filled analysis is cached in memory by both files'
@@ -2360,6 +2390,7 @@ impl Engine {
                         output,
                         stage,
                         error,
+                        set: None,
                     });
                     gone.insert(ji);
                 }
@@ -2456,6 +2487,7 @@ impl Engine {
                             output: c.input.output.clone(),
                             stage,
                             error,
+                            set: None,
                         });
                     }
                 }
@@ -2593,6 +2625,18 @@ impl Engine {
                 }
                 if let Some(pk) = &j.pack {
                     rels.extend(pk.sources.iter().filter_map(|s| rel_of_path(&s.path)));
+                }
+                // Backlog T18: a cube's faces, and its output stem (folder of the first face + the output's name).
+                if let Some(cj) = &j.cube {
+                    rels.extend(cj.sources.iter().filter_map(|s| rel_of_path(&s.path)));
+                    if let (Some(r), Some(stem)) = (rel_of_path(&j.input), j.output.file_stem()) {
+                        let dir = r.rsplit_once('/').map_or("", |(d, _)| d);
+                        rels.push(
+                            format!("{dir}/{}", stem.to_string_lossy())
+                                .trim_start_matches('/')
+                                .to_string(),
+                        );
+                    }
                 }
                 rels.extend(j.fill.iter().filter_map(|f| rel_of_path(&f.source.path)));
             }
@@ -2753,6 +2797,18 @@ impl Engine {
                 .filter(|(h, ..)| !ended.contains(h.as_path()) && seen.insert(h.clone()))
                 .collect()
         };
+        // Note FV1: a failed file's set, from the final sets (joins and `[sets]` edits applied).
+        let set_of: BTreeMap<&Path, &str> = sets
+            .iter()
+            .flat_map(|s| {
+                s.members
+                    .iter()
+                    .map(move |&i| (files[i].path.as_path(), s.key.as_str()))
+            })
+            .collect();
+        for f in &mut failed {
+            f.set = set_of.get(f.path.as_path()).map(|k| k.to_string());
+        }
         let plan = Plan {
             request: req.clone(),
             registry: registry.clone(),

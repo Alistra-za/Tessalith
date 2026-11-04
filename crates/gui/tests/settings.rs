@@ -332,3 +332,27 @@ fn a_non_unicode_path_does_not_stop_the_settings_saving() {
     assert_eq!(back.recent, [std::path::PathBuf::from("C:/a")]);
     assert!(back.meshes.folder.is_none());
 }
+
+/// Backlog T39: a shaders root that is not valid Unicode is left out of the file too, not failing every save.
+#[cfg(windows)]
+#[test]
+fn a_non_unicode_shaders_root_does_not_stop_the_settings_saving() {
+    use std::os::windows::ffi::OsStringExt;
+    let bad = std::path::PathBuf::from(std::ffi::OsString::from_wide(&[0x43, 0x3a, 0x5c, 0xD800]));
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let mut s = GuiSettings {
+        live_encode: true,
+        ..Default::default()
+    };
+    s.render3d.shaders = Some(render3d::locate::Fingerprint {
+        root: bad,
+        owner_mod: None,
+        hash: "h".into(),
+    });
+    s.save(&p).unwrap();
+    let (back, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert!(back.live_encode);
+    assert!(back.render3d.shaders.is_none());
+}
