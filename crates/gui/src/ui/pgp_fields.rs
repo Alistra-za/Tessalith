@@ -819,6 +819,7 @@ pub(crate) fn control(
                         .add(
                             egui::DragValue::new(&mut rgb[i])
                                 .range(0.0..=RGB_MAX)
+                                .clamp_existing_to_range(false) // Note FO3
                                 .speed(0.005)
                                 .fixed_decimals(3),
                         )

@@ -39,6 +39,42 @@ fn the_json_editor_leaves_out_a_set_the_statics_rule_drops() {
     assert!(has(&h, "1 set entry "));
 }
 
+/// Trace-debug 2026-11-04 #3 (Note FO3): drawing a card never rewrites a stored value outside its field range.
+#[test]
+fn a_draw_keeps_an_out_of_range_template_value() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = pbr_opened(d.path());
+    let id = "landscape/rock01";
+    model.set_shader(id, Some(engine::shader::Shader::Pbr));
+    model.add_cs_block(id, Kind::Txst);
+    model
+        .apply_cs_template(id, Kind::Txst, "LandscapeMountainSlab")
+        .unwrap();
+    let key = set_views(&model)
+        .into_iter()
+        .find(|v| v.id == id)
+        .unwrap()
+        .key;
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_set(&key);
+    let steps = model.history.undo.len();
+    let mut h = tall(model);
+    h.run();
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    for _ in 0..3 {
+        h.run();
+    }
+    assert!(has(&h, "density"), "the glint rows are drawn");
+    let m = h.state();
+    assert_eq!(m.history.undo.len(), steps, "a draw is not an edit");
+    let entries: Vec<_> = sdc_gui::model::pbr_export::json_entries(m)
+        .into_iter()
+        .map(|(_, e)| e)
+        .collect();
+    let text = sdc_gui::pgp::writer::to_text(&sdc_gui::pgp::writer::document(&entries));
+    assert!(text.contains("\"density_randomization\": 300.0"), "{text}");
+}
+
 #[test]
 fn the_section_shows_the_block_template_refusals_and_checks() {
     let d = tempfile::tempdir().unwrap();

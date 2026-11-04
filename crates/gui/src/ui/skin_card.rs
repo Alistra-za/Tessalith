@@ -84,6 +84,7 @@ fn field_row(
             let r = ui.add(
                 egui::DragValue::new(&mut x)
                     .range(lo..=hi)
+                    .clamp_existing_to_range(false) // Note FO3
                     .speed(0.01)
                     .max_decimals(4),
             );

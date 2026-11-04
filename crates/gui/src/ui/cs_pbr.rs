@@ -253,6 +253,9 @@ fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field) -> bool {
     ui.add(
         egui::DragValue::new(x)
             .range(f.range.0..=f.range.1)
+            // Note FO3 (V6): a stored value is shown as it is; the default clamp would rewrite it on draw.
+            // shortcut: an AccessKit SetValue then skips the range, upgrade by clamping what is written.
+            .clamp_existing_to_range(false)
             .speed(0.01),
     )
     .changed()
