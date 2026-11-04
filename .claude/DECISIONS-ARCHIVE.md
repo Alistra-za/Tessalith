@@ -116,3 +116,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FU, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FU, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP

@@ -20,11 +20,11 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP, FU
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP, FU
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1035,3 +1035,13 @@ Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debu
 - **FP6 Orphan notes go with a written JSON (T23).** The "the PGPatcher JSON is now ..." notes about an older file are kept only when the export writes the JSON (`Written`, or an Overwrite that wrote); an export that writes none (vanilla with a borrowed slot, a refused file) says nothing about it. Test `pbr_export::no_orphan_note_when_the_export_writes_no_json`.
 - **FP7 Save writes the edits a blame stashed (T38).** While the retry plan after a rejection is running (`tentative_edits()` is Some), `save()` writes the stashed text with `ProjectDoc::save_stashed` (same changed-on-disk check and atomic write), so Save in the Open, Close and Reload prompts keeps the user's edits. `sdc.toml` may then hold a config the engine rejects; it opens read-only with that message, as any rejected file does. Test `history::save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits`.
 - **FP8 Review's Blockers lists a missing preset and a read-only `sdc.toml` (T30).** Both refuse the gate, so both are blockers: a red row each in column 0 and in the count, the preset's row with `Choose preset…` (opens the header's Preset menu, as Problems' button does). Test `auto_accept::review_lists_a_missing_preset_as_a_blocker`.
+
+## Note FU — backlog batch B6: GUI per-frame cost (main team, 2026-11-04)
+
+Each item pins its cost with a counter or a call count, not only "tests stay green".
+
+- **FU1 The JSON editor builds a set's context only for an open entry (T33).** `pgp_fields::context_of(model, set, view)` takes the view the editor already holds; `set_entry` builds it after the `!open` return, and reads `active_matches` and `json_rename` once per entry. A folded entry costs nothing per frame. Test `json_errors::only_an_open_entry_builds_its_context` (test-hooks counter `pgp_fields::context_builds`).
+- **FU2 Review's Undecided row uses the Problems fix buttons (L64).** `undecided_row` keeps the name link and the sentences (alpha confirm line, acknowledgement line) and draws `fix_buttons` for the rest, so `Set type: X ✓`, the picker, the Alpha type dropdown and Acknowledge are one widget set on both surfaces. The row's own sub-type combo, ✓ and temp state are gone. Test `problems_accept::review_undecided_row_offers_the_problems_accept`.
+- **FU3 The bulk panel reads the re-encode split from the cached view (L14).** `BulkView.reencode` holds `reencode_split(keys)`, computed with the view. Test `bulk_ui::the_reencode_split_is_computed_with_the_bulk_view_not_per_frame`.
+- **FU4 The header's VRAM line and the selected sets come from the cached column stats (L15).** `ColumnStats` carries `sets` and `vram`; `StatsKey` has a sizes revision that moves when header dims land, so the text follows with the selection unchanged. Test `out_size::the_header_vram_line_is_cached_and_follows_landing_dims`.
+- **FU5 The input-name box scans the path list once per text (L16).** The ghost and the live rows are cached in egui memory by (the path list's `Arc`, the text); the cache holds the `Arc`, so a reused address cannot match. The match stays an ASCII case-insensitive prefix scan (the list's order is not sorted for it). Test `input_name_edit::a_focused_box_scans_the_paths_once_per_text`.
