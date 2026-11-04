@@ -279,6 +279,36 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
 }
 
+/// Get-or-build one slot of the view cache under the current view key (backlog L9). `get` reads the slot from a cache
+/// of this key (`None`: absent or stale), `put` stores a built value, and `build` runs with no `RefCell` borrow held
+/// (K9: it reads the same cell). A cache of another key is replaced whole before `put`.
+pub(crate) fn cached<T: Clone>(
+    m: &AppModel,
+    get: impl FnOnce(&ViewCache) -> Option<T>,
+    put: impl FnOnce(&mut ViewCache, T),
+    build: impl FnOnce() -> T,
+) -> T {
+    let key = m.view_key();
+    {
+        let c = m.views.borrow();
+        if c.key.as_ref() == Some(&key) {
+            if let Some(v) = get(&c) {
+                return v;
+            }
+        }
+    }
+    let v = build();
+    let mut c = m.views.borrow_mut();
+    if c.key.as_ref() != Some(&key) {
+        *c = ViewCache {
+            key: Some(key),
+            ..Default::default()
+        };
+    }
+    put(&mut c, v.clone());
+    v
+}
+
 #[derive(Clone, PartialEq)]
 pub(crate) struct ViewKey {
     items: u64,
@@ -1921,7 +1951,7 @@ impl AppModel {
             self.dialog = Some(Dialog::Error(problem));
             return true;
         }
-        let blocks = pbr_export::export_blocks(self);
+        let blocks = pbr_export::blocks(self);
         // Note FO2: a missing preset would export with the fallback; Review's gate lists it and keeps Export off.
         if !blocks.is_empty() || self.missing_preset_text().is_some() {
             self.open_review();

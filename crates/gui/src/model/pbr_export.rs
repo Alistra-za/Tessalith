@@ -6,7 +6,7 @@ use super::sets::{
     engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
     set_views, SetView, SlotFill, SlotKind,
 };
-use super::{AppModel, ViewCache};
+use super::AppModel;
 use crate::pgp::prefix::{
     check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
     subsurface_pitfalls,
@@ -267,26 +267,17 @@ pub fn missing_texture_texts(
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
 /// set views (audit 7, DECISIONS Note Y7).
 pub fn export_blocks(m: &AppModel) -> Vec<ExportIssue> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some(b) = &c.blocks {
-                return (**b).clone();
-            }
-        }
-    }
-    // No borrow is held here: `build_blocks` reads the cached views.
-    let b = Arc::new(build_blocks(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.blocks = Some(b.clone());
-    (*b).clone()
+    (*blocks(m)).clone()
+}
+
+/// `export_blocks` as the cached list itself (no copy): what the model's own readers use.
+pub fn blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+    super::cached(
+        m,
+        |c| c.blocks.clone(),
+        |c, b| c.blocks = Some(b),
+        || Arc::new(build_blocks(m)),
+    )
 }
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
@@ -464,7 +455,10 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
 
 /// What Review asks to acknowledge: the photo crops (project-wide), then the pitfalls of every PBR set.
 pub fn export_asks(m: &AppModel) -> Vec<ExportIssue> {
-    photo_crops(m).into_iter().chain(set_asks(m)).collect()
+    photo_crops(m)
+        .into_iter()
+        .chain(set_asks(m).iter().cloned())
+        .collect()
 }
 
 /// Note FC12 (supersedes DS26's "no warning"): a single photo taller than wide keeps only its middle `w` rows when it
@@ -489,29 +483,19 @@ fn photo_crops(m: &AppModel) -> Vec<ExportIssue> {
 
 /// The PBR sets' pitfalls. Cached like `export_blocks`, plus `evidence_rev` (the known texture paths and the mesh
 /// tree flags it reads).
-fn set_asks(m: &AppModel) -> Vec<ExportIssue> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some((rev, a)) = &c.asks {
-                if *rev == m.evidence_rev {
-                    return (**a).clone();
-                }
-            }
-        }
-    }
-    // No borrow is held here: the build reads the cached views.
-    let a = Arc::new(build_asks(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.asks = Some((m.evidence_rev, a.clone()));
-    (*a).clone()
+fn set_asks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+    let rev = m.evidence_rev;
+    super::cached(
+        m,
+        |c| {
+            c.asks
+                .as_ref()
+                .filter(|(r, _)| *r == rev)
+                .map(|(_, a)| a.clone())
+        },
+        |c, a| c.asks = Some((rev, a)),
+        || Arc::new(build_asks(m)),
+    )
 }
 
 fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
@@ -840,11 +824,11 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
             to.push(i.text);
         }
     };
-    for i in export_blocks(m) {
+    for i in blocks(m).iter().cloned() {
         place(i, true);
     }
     // The photo crops are not the JSON's: the sets' pitfalls only.
-    for i in set_asks(m) {
+    for i in set_asks(m).iter().cloned() {
         place(i, false);
     }
     out

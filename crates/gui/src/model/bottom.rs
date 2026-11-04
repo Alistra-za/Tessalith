@@ -205,31 +205,25 @@ impl AppModel {
 pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.problem_lookups.set(m.problem_lookups.get() + 1);
-    let key = m.view_key();
     let inner = problems_inner(m);
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some((k, p)) = &c.problems {
-                if *k == inner {
-                    return p.clone();
-                }
-            }
-        }
-    }
-    let p = Arc::new(build_problems(m));
-    #[cfg(feature = "test-hooks")]
-    m.problem_builds.set(m.problem_builds.get() + 1);
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = super::ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.problems = Some((inner, p.clone()));
-    c.flagged = None;
-    p
+    super::cached(
+        m,
+        |c| {
+            c.problems
+                .as_ref()
+                .filter(|(k, _)| *k == inner)
+                .map(|(_, p)| p.clone())
+        },
+        |c, p| {
+            c.problems = Some((inner, p));
+            c.flagged = None;
+        },
+        || {
+            #[cfg(feature = "test-hooks")]
+            m.problem_builds.set(m.problem_builds.get() + 1);
+            Arc::new(build_problems(m))
+        },
+    )
 }
 
 /// What `problems` is keyed on inside the view-key cell; `export_files` shares it.
@@ -367,7 +361,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             )
         });
     }
-    for b in pbr_export::export_blocks(m) {
+    for b in pbr_export::blocks(m).iter().cloned() {
         let at = if b.set_key.is_empty() {
             At::Project
         } else {

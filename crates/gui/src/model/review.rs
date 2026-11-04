@@ -202,31 +202,18 @@ impl AppModel {
     /// Cached like `bottom::problems` (Review and the header read it every frame): `items` is only replaced
     /// together with `invalidate_views`, which changes the view key.
     pub fn export_files(&self) -> usize {
-        let key = self.view_key();
         let inner = super::bottom::problems_inner(self);
-        {
-            let c = self.views.borrow();
-            if c.key.as_ref() == Some(&key) {
-                if let Some((k, n)) = c.export_files {
-                    if k == inner {
-                        return n;
-                    }
-                }
-            }
-        }
-        let n = self.count_export_files();
-        #[cfg(feature = "test-hooks")]
-        self.export_files_builds
-            .set(self.export_files_builds.get() + 1);
-        let mut c = self.views.borrow_mut();
-        if c.key.as_ref() != Some(&key) {
-            *c = super::ViewCache {
-                key: Some(key),
-                ..Default::default()
-            };
-        }
-        c.export_files = Some((inner, n));
-        n
+        super::cached(
+            self,
+            |c| c.export_files.filter(|(k, _)| *k == inner).map(|(_, n)| n),
+            |c, n| c.export_files = Some((inner, n)),
+            || {
+                #[cfg(feature = "test-hooks")]
+                self.export_files_builds
+                    .set(self.export_files_builds.get() + 1);
+                self.count_export_files()
+            },
+        )
     }
 
     fn count_export_files(&self) -> usize {
@@ -307,7 +294,7 @@ impl AppModel {
         if let Some((text, _)) = self.missing_preset_text() {
             return Err(text);
         }
-        let n = pbr_export::export_blocks(self).len();
+        let n = pbr_export::blocks(self).len();
         if n > 0 {
             return Err(format!("Fix {n} blocker{} first", plural(n)));
         }

@@ -298,48 +298,37 @@ pub struct CardValues {
 
 /// `CardValues` of set `set` (an id), cached with the set views (ui-rules §9.1): the card asks every frame.
 pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some((id, v)) = &c.xpmf_card {
-                if id == set {
-                    return v.clone();
-                }
-            }
-        }
-    }
-    // No borrow is held here: `views` fills the same cell.
-    let vs = views(m);
-    let none = || Err(format!("{set}: no such set"));
-    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    let v = std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
-        Some(e) => {
-            let profile = profile_in(m, &vs, e, false);
-            CardValues {
-                defaults: defaults_in(m, &vs, e, false),
-                refusal: profile
-                    .as_ref()
-                    .ok()
-                    .and_then(|doc| refusal(&vs, &entries, e, doc).err()),
-                profile,
-            }
-        }
-        None => CardValues {
-            defaults: none(),
-            profile: none(),
-            refusal: None,
+    super::cached(
+        m,
+        |c| {
+            let (id, v) = c.xpmf_card.as_ref()?;
+            (id == set).then(|| v.clone())
         },
-    });
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = super::ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.xpmf_card = Some((set.to_string(), v.clone()));
-    v
+        |c, v| c.xpmf_card = Some((set.to_string(), v)),
+        || {
+            let vs = views(m);
+            let none = || Err(format!("{set}: no such set"));
+            let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+            std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
+                Some(e) => {
+                    let profile = profile_in(m, &vs, e, false);
+                    CardValues {
+                        defaults: defaults_in(m, &vs, e, false),
+                        refusal: profile
+                            .as_ref()
+                            .ok()
+                            .and_then(|doc| refusal(&vs, &entries, e, doc).err()),
+                        profile,
+                    }
+                }
+                None => CardValues {
+                    defaults: none(),
+                    profile: none(),
+                    refusal: None,
+                },
+            })
+        },
+    )
 }
 
 /// Note GI10 (X10): the profile of the set with id `set` for the MATO preview, while the set has an `[sets.xpmf]`

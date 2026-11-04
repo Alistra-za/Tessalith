@@ -2,7 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::{AppModel, ViewCache};
+use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
     is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
@@ -554,25 +554,12 @@ fn mirrored_stem(item: &TextureItem) -> String {
 
 /// Every set, in display order (audit 7, DECISIONS Note Y7): built once per change of its inputs.
 pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some(v) = &c.views {
-                return v.clone();
-            }
-        }
-    }
-    let v = Arc::new(build_views(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.views = Some(v.clone());
-    v
+    super::cached(
+        m,
+        |c| c.views.clone(),
+        |c, v| c.views = Some(v),
+        || Arc::new(build_views(m)),
+    )
 }
 
 #[cfg(test)]

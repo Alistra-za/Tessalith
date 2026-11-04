@@ -17,6 +17,17 @@ fn a_clean_project_has_no_blocks() {
     assert_eq!(export_blocks(&m), vec![]);
 }
 
+/// Backlog L9: the model's own readers get the stored list, not a copy of it.
+#[test]
+fn the_cached_blocks_are_handed_out_without_a_copy() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    m.set_json_value("landscape/rock01", "emissive", Some(json!(true)));
+    let (a, b) = (blocks(&m), blocks(&m));
+    assert!(!a.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&a, &b));
+}
+
 #[test]
 fn a_feature_without_its_texture_blocks() {
     let d = tempfile::tempdir().unwrap();
