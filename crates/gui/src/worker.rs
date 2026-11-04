@@ -440,11 +440,14 @@ pub fn spawn_encode(
                         &cancel,
                     )
                     .map(|r| {
-                        Arc::new(PreviewOut {
-                            note: None,
-                            decoded: Decoded::of(&r),
-                            result: r,
-                        })
+                        Arc::new(
+                            PreviewOut {
+                                note: None,
+                                decoded: Decoded::of(&r),
+                                result: r,
+                            }
+                            .decode_if_cpu_path(),
+                        )
                     })
                     .map_err(|e| format!("{e:?}"))
             },

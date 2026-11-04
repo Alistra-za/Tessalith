@@ -177,3 +177,26 @@ fn an_array_dds_says_which_slice_it_shows() {
     .unwrap();
     assert!(dds_preview(&q, 4096).unwrap().note.is_none());
 }
+
+/// L12: a DDS preview decodes every mip on the worker when the upload must take the CPU path (uncompressed), and
+/// none when it is a BC file the GPU can take.
+#[test]
+fn a_dds_preview_decodes_eagerly_only_when_the_cpu_path_is_certain() {
+    let d = tempfile::tempdir().unwrap();
+    let raw = d.path().join("raw.dds");
+    let levels = vec![vec![9u8; 16 * 16 * 4], vec![9u8; 8 * 8 * 4]];
+    std::fs::write(
+        &raw,
+        dds_bytes(&desc(16, ResolvedHeader::Legacy), &levels).unwrap(),
+    )
+    .unwrap();
+    let out = dds_preview(&raw, 4096).unwrap();
+    assert_eq!(out.decoded.decoded_count(), 2, "uncompressed: eager");
+    let bc = d.path().join("bc1.dds");
+    let mut dd = desc(16, ResolvedHeader::Legacy);
+    dd.format = Format::Bc1;
+    std::fs::write(&bc, dds_bytes(&dd, &[vec![0u8; 128]]).unwrap()).unwrap();
+    let out = dds_preview(&bc, 4096).unwrap();
+    assert_eq!(out.decoded.len(), 1);
+    assert_eq!(out.decoded.decoded_count(), 0, "BC1 on a multiple of 4: lazy");
+}

@@ -278,7 +278,7 @@ pub struct Decoded {
 }
 
 impl Decoded {
-    /// `n` mips of `r`, none decoded yet: `fmt` is their layout.
+    /// `n` mips, none decoded yet: `fmt` is the layout of the encoded bytes.
     pub fn lazy(fmt: DdsPixelFormat, n: usize) -> Self {
         Self {
             fmt: Some(fmt),
@@ -331,6 +331,26 @@ impl PreviewOut {
             None => vec![],
         }))
     }
+
+    /// Decode every mip now when the upload will take the CPU path whatever the GPU says: a cube (a cross image),
+    /// an uncompressed layout, or a base mip that is not a multiple of 4. The worker calls this before the hand-off,
+    /// so the UI thread never decodes for such an upload (L12). A BC encode stays lazy: its upload is GPU-side where
+    /// the adapter supports BC, and a mip then decodes on its first readout or heatmap read.
+    /// shortcut: a worker that holds a mip's `OnceLock` (a heatmap job) makes a UI read of that mip wait for it;
+    /// upgrade by decoding the heatmap's mip before it is queued if that ever shows.
+    pub fn decode_if_cpu_path(self) -> Self {
+        let r = &self.result;
+        let base = r.source.dims.get(r.source.first_level);
+        if r.faces == 6
+            || !r.format.is_block()
+            || base.is_none_or(|(w, h)| w % 4 != 0 || h % 4 != 0)
+        {
+            for i in 0..self.decoded.len() {
+                self.decoded_mip(i);
+            }
+        }
+        self
+    }
 }
 
 /// [`decode_chain`] for mip `i` of one face, or for mip `i` of six face-major chains laid out as one cross.
@@ -349,6 +369,7 @@ fn decode_mip(fmt: DdsPixelFormat, r: &PreviewResult, i: usize) -> Vec<[f32; 4]>
     let refs = std::array::from_fn(|f| faces[f].as_slice());
     cube_cross::cross_image(refs, dims[first + i].0).2
 }
+
 /// A DDS input as stored: its mips within `max`, no source side (M3a spec §2.2).
 pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -427,7 +448,8 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         decoded: Decoded::lazy(own_layout, n),
         result,
         note,
-    })
+    }
+    .decode_if_cpu_path())
 }
 
 /// Whether a DDS stores float values that can pass 1: `Format::is_hdr` (BC6H UF16, RGBA16F) and RGBA32F, which has no
