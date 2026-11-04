@@ -234,7 +234,7 @@ impl Variant {
 }
 
 /// Both textures of one canonical path (`textures/…`) and the one the draws use. GPU textures are immutable, so a
-/// swap makes a new texture and SRV and rebinds. Both `None` = the resolver had nothing (kept so one load asks once).
+/// swap makes a new texture and SRV and rebinds. Both `None` = the resolver had nothing (`absent`) or the file did not decode (kept so one load asks once).
 #[derive(Clone, Default)]
 struct TexEntry {
     source: Option<textures::Texture>,
@@ -273,9 +273,11 @@ impl TexEntry {
 
 /// Whether a cached entry answers a `texture()` request. A path the resolver found no file for and no request
 /// has reported yet (an absent Auto guess: `absent`, not `missing`) is loaded again when a slot or pick names it
-/// (`report_missing`), so the pick can bind a file that appeared since. A failed decode stays cached.
+/// (`report_missing`), so the pick can bind a file that appeared since. A failed decode stays cached, and so does
+/// an absent entry a swap has since filled (`replace_texture` clones `absent`; `any()`). No pure test for that
+/// case: a `Texture` holds a D3D11 view.
 fn reuse(e: &TexEntry, report_missing: bool) -> bool {
-    !(report_missing && e.absent && !e.missing)
+    !(report_missing && e.absent && !e.missing && !e.any())
 }
 
 /// [`Renderer::draw_diag`]: PS defines, PS reflection, (register, DXGI format) of every bound SRV.
