@@ -598,8 +598,61 @@ fn pick_source_skips_the_edit_mod_and_pgpatcher_output() {
         copy(EDIT_MOD, 8, false),
         copy("A", 3, false),
     ];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
-    assert!(pick_source(&c[..2], m).is_none());
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
+    assert!(pick_source(&c[..2], m, NIF).is_none());
+}
+
+const NIF: &str = r"meshes\a.nif";
+
+/// Writes `<root>\.sdc\nif-edits\<path>.sdc-nifedit.toml`, as every Tessalith export folder does.
+fn write_doc(root: &Path, data_path: &str) {
+    let p = sdc_gui::model::meshes::edit_doc::doc_path(root, data_path).unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, "").unwrap();
+}
+
+fn copy_at(root: &Path, origin: &str, prio: i32) -> PathCopy {
+    PathCopy {
+        root: root.to_string_lossy().into_owned(),
+        ..copy(origin, prio, false)
+    }
+}
+
+/// Note GQ3 (extends GD28): any folder holding our edit document for this NIF is Tessalith's own export, never the source.
+#[test]
+fn pick_source_skips_a_folder_holding_our_edit_document_for_this_nif() {
+    let d = tempfile::tempdir().unwrap();
+    let (old, edit, real) = (
+        d.path().join("old"),
+        d.path().join("edit"),
+        d.path().join("A"),
+    );
+    write_doc(&old, NIF);
+    let c = [
+        copy_at(&old, "old export", 9),
+        copy_at(&edit, "edit", 8),
+        copy_at(&real, "A", 3),
+    ];
+    assert_eq!(
+        pick_source(&c, &edit, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
+    assert!(pick_source(&c[..1], &edit, NIF).is_none());
+}
+
+#[test]
+fn a_folder_with_our_edit_document_for_another_nif_is_still_a_source() {
+    let d = tempfile::tempdir().unwrap();
+    let (old, edit) = (d.path().join("old"), d.path().join("edit"));
+    write_doc(&old, r"meshes\other.nif");
+    let c = [copy_at(&old, "old", 9)];
+    assert_eq!(
+        pick_source(&c, &edit, NIF).map(|c| c.origin.as_str()),
+        Some("old")
+    );
 }
 
 /// Note GD28: the 1.x default edit mod (`mods\sdc NIF Edits`, CI3) holds Tessalith's own earlier output: it is never
@@ -607,12 +660,12 @@ fn pick_source_skips_the_edit_mod_and_pgpatcher_output() {
 #[test]
 fn the_legacy_edit_mod_is_never_the_source() {
     let c = [copy("SDC NIF Edits", 8, false), copy("A", 3, false)];
-    let src = |m: &str| pick_source(&c, Path::new(m)).map(|c| c.origin.clone());
+    let src = |m: &str| pick_source(&c, Path::new(m), NIF).map(|c| c.origin.clone());
     assert_eq!(src(""), Some("A".into()), "no folder chosen");
     assert_eq!(src(r"C:\I\mods\MyOut"), Some("A".into()), "another folder");
     let mut slash = c[0].clone();
     slash.root = r"C:\I/mods\sdc NIF Edits\".into();
-    assert!(pick_source(&[slash], Path::new("")).is_none());
+    assert!(pick_source(&[slash], Path::new(""), NIF).is_none());
 }
 
 /// Final review M2: Windows folder names ignore case, so `SDC NIF Edits` is still the edit mod.
@@ -621,7 +674,10 @@ fn the_edit_mod_is_matched_ignoring_case() {
     let m = Path::new(r"C:\I\mods\sdc NIF Edits");
     let other = "SDC NIF Edits";
     let c = [copy(other, 8, false), copy("A", 3, false)];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
     let mods = [
         mod_row("PGP", 9, true),
         mod_row(other, 5, false),
@@ -640,9 +696,12 @@ fn the_edit_mod_is_matched_across_separator_spelling() {
     let mut a = copy("A", 3, false);
     a.root = r"X:\Instance/mods\A".into();
     let c = [edit.clone(), a];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
     edit.root = r"X:\Instance/mods\sdc NIF Edits\".into();
-    assert!(pick_source(&[edit], m).is_none());
+    assert!(pick_source(&[edit], m, NIF).is_none());
 }
 
 #[test]
