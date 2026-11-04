@@ -333,12 +333,30 @@ fn the_size_row_offers_relative_to_slots() {
     assert_eq!(estimate((1024, 1024), &p).width, 256);
 }
 
-/// Note FM44: the engine's slot table agrees with the set editor's slot cards wherever a sub-type has a card.
+/// Note FM44: the engine's slot table agrees with the set editor's slot cards, both ways. The named sub-types have
+/// no card (the cubemap has no slot card; the others share a slot with a card's type), so only the engine has them.
 #[test]
 fn the_engine_slot_table_matches_the_slot_cards() {
+    use engine::config::Subtype::*;
+    let engine_only = [
+        (Cubemap, 5),
+        (Envmask, 6),
+        (ComplexMaterial, 6),
+        (SubsurfaceTint, 3),
+        (BacklightTint, 8),
+        (MsnSpecular, 8),
+    ];
     for st in engine::config::Subtype::ALL {
-        if let Some(k) = sdc_gui::model::sets::slot_kind(st) {
-            assert_eq!(k.slot_number(), st.txst_slot(), "{st:?}");
+        let gui = sdc_gui::model::sets::slot_kind(st).and_then(|k| k.slot_number());
+        match engine_only.iter().find(|(s, _)| *s == st) {
+            Some(&(_, n)) => {
+                assert_eq!(
+                    gui, None,
+                    "{st:?} now has a slot card: drop it from the list"
+                );
+                assert_eq!(st.txst_slot(), Some(n), "{st:?}");
+            }
+            None => assert_eq!(gui, st.txst_slot(), "{st:?}"),
         }
     }
 }

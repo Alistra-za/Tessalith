@@ -613,7 +613,6 @@ impl Subtype {
         }
     }
 
-    /// PBR colour data: the only sub-types that may carry `_SRGB` (cs only) [D#4, D#5].
     /// The 1-based texture-set slot this sub-type fills (Note FM44): the set editor's slot card where it has one
     /// (`gui::model::sets::slot_kind`, held equal by a gui test), else the vanilla TXST slot. `None` for maps that
     /// fill no slot.
@@ -633,6 +632,7 @@ impl Subtype {
         }
     }
 
+    /// PBR colour data: the only sub-types that may carry `_SRGB` (cs only) [D#4, D#5].
     pub fn is_pbr_color(self) -> bool {
         matches!(
             self,
@@ -989,9 +989,9 @@ pub struct Profile {
     /// by `resize`; it is never enlarged. Read only when `resize` is not `none`.
     #[serde(default, skip_serializing_if = "ResizeRelativeTo::is_own")]
     pub resize_relative_to: ResizeRelativeTo,
-    /// Written by the planner, not a setting: a config value is refused or replaced. The source size of the map
-    /// `resize_relative_to` names, or `[0, 0]` when the set has no single map in that slot (the map then keeps its
-    /// own size).
+    /// Written by the planner, not a setting (left out of the config and preset schemas): a config value is refused
+    /// or replaced. The source size of the map `resize_relative_to` names, or `[0, 0]` when the set has no single map
+    /// in that slot (the map is then resized from its own size).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resize_reference: Option<(u32, u32)>,
     pub encoder: EncoderSpec,

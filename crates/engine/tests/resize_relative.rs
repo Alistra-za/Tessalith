@@ -182,9 +182,10 @@ fn relative_to_slot4_uses_the_height_map() {
     assert_eq!(out(&p, "rock_n.png", (256, 256)), (64, 64));
 }
 
-/// No map in the slot, or two: the map keeps its own size, with RESIZE-NO-REFERENCE naming the slot.
+/// No map in the slot, or two: the map is resized from its own size, as `self` (ruling T28B-f), with
+/// RESIZE-NO-REFERENCE naming the slot.
 #[test]
-fn no_map_in_the_slot_keeps_own_size_with_info() {
+fn no_map_in_the_slot_falls_back_to_own_size_with_info() {
     let d = tempfile::tempdir().unwrap();
     let mut sets = files(
         d.path(),
@@ -200,7 +201,7 @@ fn no_map_in_the_slot_keeps_own_size_with_info() {
     sets.extend(relative("rock_n.png", "slot3"));
     let p = plan(d.path(), &sets);
     for (name, slot, maps) in [("rock_height.png", 5, 0), ("rock_n.png", 3, 2)] {
-        assert_eq!(out(&p, name, (256, 256)), (256, 256), "{name}");
+        assert_eq!(out(&p, name, (256, 256)), (128, 128), "{name}");
         let w = job(&p, name)
             .warnings
             .iter()
@@ -208,6 +209,11 @@ fn no_map_in_the_slot_keeps_own_size_with_info() {
             .unwrap_or_else(|| panic!("{name}: {:?}", codes(&p, name)));
         assert_eq!(w.severity, engine::codes::Severity::Info);
         assert!(w.message.contains(&format!("slot {slot}")), "{}", w.message);
+        assert!(
+            w.message.contains("resized from its own size"),
+            "{}",
+            w.message
+        );
         assert_eq!(w.data["slot"], slot);
         let sets: Vec<_> = p
             .jobs
@@ -215,8 +221,30 @@ fn no_map_in_the_slot_keeps_own_size_with_info() {
             .map(|j| (j.input.file_name().unwrap(), &j.set_key, j.profile.subtype))
             .collect();
         assert_eq!(w.data["maps"], maps, "{sets:?}");
-        assert!(!codes(&p, name).contains(&Code::DimResized), "{name}");
+        assert!(codes(&p, name).contains(&Code::DimResized), "{name}");
     }
+}
+
+/// Ruling T28B-f: under `cs-compact` a lone 2048 normal (no diffuse in its set) still halves to 1024, as in 1.x, and
+/// says it had no slot-1 map.
+#[test]
+fn compact_lone_normal_halves_its_own_size_with_info() {
+    let d = tempfile::tempdir().unwrap();
+    let sets = files(d.path(), &[("wall_n.png", "normal", 2048, 2048)]);
+    let mut r = request(d.path(), &sets);
+    r.preset = Some("cs-compact".into());
+    let rep = Reporter::new(Arc::new(VecSink::default()), new_batch_id());
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(
+        job(&p, "wall_n.png").profile.resize_relative_to,
+        ResizeRelativeTo::Slot1
+    );
+    assert_eq!(job(&p, "wall_n.png").profile.resize_reference, Some((0, 0)));
+    assert_eq!(out(&p, "wall_n.png", (2048, 2048)), (1024, 1024));
+    assert!(codes(&p, "wall_n.png").contains(&Code::ResizeNoReference));
 }
 
 /// A normal relative to slot 2 is relative to itself: the self rule, with no notice.

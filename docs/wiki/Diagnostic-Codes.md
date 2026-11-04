@@ -85,7 +85,7 @@ Every warning has a code and a severity:
 | `DIM-FLOW-SMALL` | warning | A `_flow` map is 32 px or smaller; Community Shaders ignores it. | Use 64 px or more. |
 | `DIM-RESIZED` | info | The input was resized, for example `1000x600 → 1024x512`. | |
 | `DIM-TOO-LARGE` | error | A side is too large ([limit](Texture-Types.md#input-formats)). | Downscale the source. |
-| `RESIZE-NO-REFERENCE` | info | [`resize_relative_to`](Project-Config-Fields.md#format-and-size) names a slot the set has no map in, or more than one, so the texture keeps its own size. The message names the slot. | Add the map, pick a slot the set fills, or set `self`. |
+| `RESIZE-NO-REFERENCE` | info | [`resize_relative_to`](Project-Config-Fields.md#format-and-size) names a slot the set has no map in, or more than one, so `resize` was applied to the texture's own size. The message names the slot. | Add the map, pick a slot the set fills, or set `self`. |
 
 ### Cubemaps
 

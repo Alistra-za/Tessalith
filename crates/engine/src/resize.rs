@@ -79,7 +79,7 @@ pub fn pot_exempt(p: &Profile) -> bool {
 /// `cubemap.face_size` (`cube::layout::face_size`), so its source keeps its size here. With a planned
 /// `resize_reference` (Note FM44) the map is instead halved, as `shrink` halves, while its longer side is above the
 /// reference's longer side after the same power-of-two step and `shrink`; `[0, 0]` (no single map in the slot)
-/// keeps it at its own size.
+/// falls back to the map's own size, as `self` (ruling T28B-f).
 pub fn target_dims(dims: (u32, u32), p: &Profile) -> (u32, u32) {
     if p.subtype == Subtype::Cubemap {
         return dims;
@@ -87,8 +87,7 @@ pub fn target_dims(dims: (u32, u32), p: &Profile) -> (u32, u32) {
     let pot = |d| if pot_exempt(p) { d } else { pot_dims(d) };
     let (mut w, mut h) = pot(dims);
     match p.resize_reference {
-        None => shrink((w, h), p.resize, p.resize_floor),
-        Some((0, _) | (_, 0)) => (w, h),
+        None | Some((0, _) | (_, 0)) => shrink((w, h), p.resize, p.resize_floor),
         Some(r) => {
             let (rw, rh) = shrink(pot(r), p.resize, p.resize_floor);
             while w.max(h) > rw.max(rh) && w.max(h) / 2 >= p.resize_floor {
@@ -102,7 +101,8 @@ pub fn target_dims(dims: (u32, u32), p: &Profile) -> (u32, u32) {
 /// Note FM44: sets every job's `resize_reference` from its `resize_relative_to`, once the plan's jobs are final.
 /// `source` is a job's source size (a packed or derived job's sources' common size). A slot is read only with a
 /// `resize` mode and when it is not the map's own slot (relative to itself is the self rule); with no single map in
-/// the slot the reference is `[0, 0]` and the job gets RESIZE-NO-REFERENCE. A changed size replaces DIM-RESIZED.
+/// the slot the reference is `[0, 0]`, the map is resized from its own size and gets RESIZE-NO-REFERENCE. A relative
+/// job's DIM-RESIZED is recomputed; a `self` job's warnings are left as `check_profile` made them.
 pub(crate) fn plan_references(
     jobs: &mut [crate::policy::ResolvedJob],
     source: impl Fn(&crate::policy::ResolvedJob) -> Option<(u32, u32)>,
@@ -142,7 +142,7 @@ pub(crate) fn plan_references(
                 Warning::new(
                     Code::ResizeNoReference,
                     format!(
-                        "resize_relative_to = \"slot{n}\": the set has {what} in slot {n}, so this map keeps its own size"
+                        "resize_relative_to = \"slot{n}\": the set has {what} in slot {n}, so this map was resized from its own size"
                     ),
                 )
                 .with_data(serde_json::json!({ "slot": n, "maps": maps })),
@@ -303,6 +303,60 @@ mod tests {
             *p = [rnd(), rnd(), rnd(), rnd()];
         }
         img
+    }
+
+    /// Note FM44: `plan_references` leaves a `self` job's warnings alone, even when its source size (a packed job's
+    /// common size, a cube's cell) differs from what `check_profile` measured; only a relative job's DIM-RESIZED is
+    /// recomputed.
+    #[test]
+    fn a_self_jobs_dim_resized_is_left_alone() {
+        use crate::codes::{Code, Warning};
+        let job = |st: Subtype, rel: ResizeRelativeTo| {
+            let mut profile = profile(st);
+            profile.resize = ResizeMode::Half;
+            profile.resize_floor = 16;
+            profile.resize_relative_to = rel;
+            crate::policy::ResolvedJob {
+                input: "a.png".into(),
+                output: "a.dds".into(),
+                game_path: "a".into(),
+                set_key: "x/a".into(),
+                profile,
+                provenance: Default::default(),
+                suggestions: vec![],
+                warnings: vec![
+                    Warning::new(Code::DimResized, "from check_profile"),
+                    Warning::new(Code::DimNpot, "after it"),
+                ],
+                status: crate::policy::JobStatus::Ready,
+                suffix_alias: None,
+                source: None,
+                pack: None,
+                bake: None,
+                rnm: None,
+                derive: None,
+                shader: None,
+                cube: None,
+                fill: None,
+            }
+        };
+        let mut jobs = vec![
+            job(Subtype::Rmaos, ResizeRelativeTo::Own),
+            job(Subtype::Normal, ResizeRelativeTo::Slot6),
+        ];
+        let before = jobs[0].warnings.clone();
+        plan_references(&mut jobs, |_| Some((2048, 2048)));
+        assert_eq!(jobs[0].warnings, before);
+        assert_eq!(jobs[0].profile.resize_reference, None);
+        // The relative job in the same pass is recomputed: its DIM-RESIZED now names the source size.
+        assert_eq!(jobs[1].profile.resize_reference, Some((2048, 2048)));
+        let dim: Vec<_> = jobs[1]
+            .warnings
+            .iter()
+            .filter(|w| w.code == Code::DimResized)
+            .collect();
+        assert_eq!(dim.len(), 1);
+        assert_ne!(dim[0].message, "from check_profile");
     }
 
     /// Note FM29 (spec B4): the long side rounds up within 5 %, the short side at its scale within 15 %.

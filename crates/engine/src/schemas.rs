@@ -186,6 +186,14 @@ pub fn partial_profile_schema(gen: &mut schemars::SchemaGenerator) -> schemars::
     gen.subschema_for::<Profile>();
     let mut defs = gen.definitions().clone();
     let name = partial_def(&mut defs, &prefix, "Profile");
+    // Note FM44: the planner writes `resize_reference`; a config or preset may not set it. The full `Profile`
+    // definition is only a by-product in these (config and preset) schemas, so it loses the key too.
+    for def in [name.as_str(), "Profile"] {
+        if let Some(Value::Object(props)) = defs.get_mut(def).and_then(|d| d.get_mut("properties"))
+        {
+            props.remove("resize_reference");
+        }
+    }
     *gen.definitions_mut() = defs;
     schemars::json_schema!({ "$ref": format!("{prefix}{name}") })
 }

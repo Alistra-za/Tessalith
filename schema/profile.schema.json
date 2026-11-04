@@ -903,7 +903,7 @@
       "type": "integer"
     },
     "resize_reference": {
-      "description": "Written by the planner, not a setting: a config value is refused or replaced. The source size of the map\n`resize_relative_to` names, or `[0, 0]` when the set has no single map in that slot (the map then keeps its\nown size).",
+      "description": "Written by the planner, not a setting (left out of the config and preset schemas): a config value is refused\nor replaced. The source size of the map `resize_relative_to` names, or `[0, 0]` when the set has no single map\nin that slot (the map is then resized from its own size).",
       "maxItems": 2,
       "minItems": 2,
       "prefixItems": [
