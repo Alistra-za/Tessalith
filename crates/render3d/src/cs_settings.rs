@@ -61,8 +61,9 @@ pub const PREVIEW_FEATURES: &[(&str, &str)] = &[
     ("DynamicCubemaps", "DYNAMIC_CUBEMAPS"),
 ];
 
-/// Reads and merges the settings. Absent files are skipped; a file that does not parse is skipped with a note
-/// and `parse_failed`, but its bytes still count in the hash.
+/// Reads and merges the settings. Absent files are skipped; a settings file that does not parse is skipped with a
+/// note and `parse_failed`, but its bytes still count in the hash. An Info.ini that is unreadable or not UTF-8 gives
+/// a note only (the Features inis stand in).
 pub fn read_settings(p: &SettingsPaths) -> CsSettings {
     let mut notes = vec![];
     let mut parse_failed = false;
@@ -115,6 +116,9 @@ pub fn read_settings(p: &SettingsPaths) -> CsSettings {
     }
 }
 
+/// The shaders' `CS_GAME_GAMMA` when none is passed (TransferFunctions.hlsli:7).
+const SHADER_GAME_GAMMA: f32 = 1.6;
+
 /// The feature defines for these settings (C8), sorted, so equal lists mean "defines unchanged".
 pub fn preview_defines(s: &CsSettings, features_on: bool) -> Vec<String> {
     if !features_on {
@@ -127,15 +131,17 @@ pub fn preview_defines(s: &CsSettings, features_on: bool) -> Vec<String> {
         .collect();
     if s.linear_lighting {
         out.push("ENABLE_LL".into());
-    }
-    // Only off the shaders' built-in 1.6, so default users keep today's defines. The files hold the f32; CS passes
-    // it to 9 decimals (`1.600000024`).
-    // shortcut: ENABLE_ACESCG is not compiled; the readback has no ACEScg conversion. Upgrade when a user reports ACEScg on.
-    if let Some(g) = setting(&s.merged, "Linear Lighting", "gameGamma").map(|g| g as f32) {
-        if g != 1.6 && g.is_finite() && g > 0.0 {
-            out.push(format!("CS_GAME_GAMMA={:.9}", f64::from(g)));
+        // The shaders read CS_GAME_GAMMA only under ENABLE_LL (TransferFunctions.hlsli:12-16), and only a value off
+        // their built-in one changes anything, so default users keep today's defines. The files hold the f32; CS
+        // passes it to 9 decimals (`1.600000024`).
+        if let Some(g) = setting(&s.merged, "Linear Lighting", "gameGamma").map(|g| g as f32) {
+            if g != SHADER_GAME_GAMMA && g.is_finite() && g > 0.0 {
+                out.push(format!("CS_GAME_GAMMA={:.9}", f64::from(g)));
+            }
         }
     }
+    // shortcut: ENABLE_ACESCG is not compiled; the readback has no ACEScg conversion. Upgrade when a user reports
+    // ACEScg on.
     out.sort();
     out
 }

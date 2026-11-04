@@ -297,8 +297,9 @@ fn dynamic_cubemaps_loaded_adds_the_define() {
     assert!(preview_defines(&s, false).is_empty());
 }
 
-/// Trace 2026-11-04 #45: a Game Gamma other than 1.6 compiles as CS_GAME_GAMMA (the f32 to 9 decimals, as CS
-/// passes it: the composite test's `1.600000024`); 1.6 (the files hold the f32) or no key adds nothing.
+/// Trace 2026-11-04 #45: with Linear Lighting on, a Game Gamma other than 1.6 compiles as CS_GAME_GAMMA (the f32
+/// to 9 decimals, as CS passes it: the composite test's `1.600000024`); 1.6 (the files hold the f32), no key, an
+/// unusable value or LL off adds nothing.
 #[test]
 fn game_gamma_from_settings_is_a_define() {
     let user = |json: &str| {
@@ -326,6 +327,26 @@ fn game_gamma_from_settings_is_a_define() {
             "{json}"
         );
     }
+    // Not a usable gamma (0, negative, past f32): the shaders keep their 1.6.
+    for g in ["0", "-1", "1e39"] {
+        let json = format!(r#"{{"Linear Lighting": {{"gameGamma": {g}}}}}"#);
+        assert_eq!(
+            preview_defines(&user(&json), true),
+            render3d::DEFAULT_FEATURES,
+            "{json}"
+        );
+    }
+    // Linear Lighting off: the shaders ignore CS_GAME_GAMMA, so the defines (and program keys) do not change.
+    assert_eq!(
+        preview_defines(
+            &user(r#"{"Linear Lighting": {"enableLinearLighting": 0, "gameGamma": 2.2}}"#),
+            true
+        ),
+        preview_defines(
+            &user(r#"{"Linear Lighting": {"enableLinearLighting": 0}}"#),
+            true
+        )
+    );
     // The owner-shaped fixture (gameGamma 1.600000023841858 in both files): no CS_GAME_GAMMA.
     let s = read_settings(&paths(true, true, true, None));
     assert!(!preview_defines(&s, true)
