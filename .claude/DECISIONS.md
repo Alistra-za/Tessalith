@@ -27,7 +27,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
 - vfs: AV, BP, BU, CV
-- esp: GG, GO
+- esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
@@ -986,3 +986,4 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ5** A set member edit in the set preview no longer pushes the whole scene: the member re-encodes and its new bytes are swapped in (`sync_textures`), as a cap change already was. Only a member the edit newly blocks pushes the scene, so the game's copy of its texture comes back: `Encoder::sync` sets `scene_dirty` and `SetPreview::check` takes it in the same frame. Before, every member edit pushed the scene again.
 - **GQ6** The preview compiles the user's Game Gamma: `preview_defines` adds `CS_GAME_GAMMA=<f32 to 9 decimals>` (CS's own form, `1.600000024`) only when Linear Lighting is on (the shaders read it only under `ENABLE_LL`, TransferFunctions.hlsli) and `"Linear Lighting".gameGamma` is a usable value other than 1.6, so default users and LL-off users keep their defines and program keys; the Lighting programs and the composite share it through the feature list, and `settings_define` treats it as a settings define. `ENABLE_ACESCG` stays uncompiled (shortcut: the readback has no ACEScg conversion). A non-UTF-8 Info.ini is now a note with the Features-ini fallback, like an unreadable one, not a parse failure that kept the old settings.
 - **GQ7** A skin-card pick (any `report_missing` request) reloads a path the texture cache holds as an absent Auto guess (the resolver found no file, and no request reported it missing): `reuse(entry, report_missing)` gates the cache hit in `Renderer::texture`. Before, the pick bound the cached nothing even after the file appeared, until the cache was cleared. An entry already listed as missing, one with a texture, or one whose file failed to decode (its error line is not repeated) stays cached.
+- **GQ8** `esp::mato_data` takes the last EDID and the last DATA of a record, as the scan (`records::read`) does, so a name the scan stored finds its record (a good DATA followed by a short one gives None in both). The orbit pitch clamps to +-1.52 rad, below asin(0.999) where the view's up vector switches; the pan basis is unchanged.

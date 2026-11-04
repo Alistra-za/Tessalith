@@ -312,3 +312,29 @@ fn a_windows_1252_edid_is_found_by_its_decoded_name() {
     );
     assert!(mato_data(&mato_plugin(&[r]), "Sn\u{f6}").is_some());
 }
+
+#[test]
+fn the_last_edid_names_the_record_as_the_scan_does() {
+    let r = rec(
+        b"MATO",
+        1,
+        &[edid("Other"), edid("Snow"), sub(b"DATA", &data48())],
+    );
+    let p = mato_plugin(&[r]);
+    assert_eq!(mato_data(&p, "Snow"), Some(distinct()));
+    assert_eq!(mato_data(&p, "Other"), None);
+}
+
+#[test]
+fn a_good_data_then_a_short_data_gives_none_like_the_scan() {
+    let r = rec(
+        b"MATO",
+        1,
+        &[
+            edid("Snow"),
+            sub(b"DATA", &data48()),
+            sub(b"DATA", &data48()[..40]),
+        ],
+    );
+    assert_eq!(mato_data(&mato_plugin(&[r]), "Snow"), None);
+}

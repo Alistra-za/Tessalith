@@ -62,8 +62,9 @@ pub fn mato_data(plugin: &[u8], edid: &str) -> Option<MatoData> {
 fn record(data: &[u8], edid: &str) -> Option<Option<MatoData>> {
     let (mut name, mut dat) = (None, None);
     each_sub(data, |sig, d| match &sig {
-        b"EDID" if name.is_none() => name = Some(d),
-        b"DATA" if dat.is_none() => dat = Some(d),
+        // The last EDID and DATA win, as in the scan (`records::read`).
+        b"EDID" => name = Some(d),
+        b"DATA" => dat = Some(d),
         _ => {}
     })
     .ok()?;

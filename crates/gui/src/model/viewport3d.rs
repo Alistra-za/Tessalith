@@ -332,7 +332,7 @@ impl Orbit {
     /// A drag of (dx, dy) points: right turns the model to the right, down tilts the view down.
     pub fn drag(&mut self, dx: f32, dy: f32) {
         self.yaw -= dx * 0.01;
-        self.pitch = (self.pitch + dy * 0.01).clamp(-1.55, 1.55);
+        self.pitch = (self.pitch + dy * 0.01).clamp(-1.52, 1.52); // below asin(0.999), where the view's up vector switches
     }
     /// A pan drag of (dx, dy) points (middle, or Shift+left): the model follows the cursor in the view plane, by an
     /// amount that grows with the camera distance.
