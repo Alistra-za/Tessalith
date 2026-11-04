@@ -832,7 +832,7 @@ fn layered_profile_with(
         && (!field_explicit(ctx, &prov, "encoder.perceptual")
             // Backlog T9: a built-in preset's own rule (`vanilla-compact#0`) is a default too.
             || matches!(prov.get("encoder.perceptual"),
-                Some(Provenance::Rule(src)) if ctx.registry.is_builtin(src.split('#').next().unwrap_or(src))))
+                Some(Provenance::Rule(src)) if ctx.registry.is_builtin(src.split_once('#').map_or(src.as_str(), |(id, _)| id))))
     {
         profile.encoder.perceptual = false;
     }

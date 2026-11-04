@@ -595,7 +595,7 @@ fn six_face_files_keys_and_the_stem_key_are_not_unmatched() {
         toml += &format!("[files.\"textures/a/chrome_e_{f}.png\"]\nalpha.threshold = 90\n");
     }
     std::fs::write(d.path().join("in/sdc.toml"), toml).unwrap();
-    let (_, ev) = plan_of(req(d.path(), &[], true));
+    let (p, ev) = plan_of(req(d.path(), &[], true));
     let unmatched: Vec<_> = ev
         .iter()
         .filter_map(|e| match &e.kind {
@@ -604,6 +604,7 @@ fn six_face_files_keys_and_the_stem_key_are_not_unmatched() {
         })
         .collect();
     assert!(unmatched.is_empty(), "{unmatched:?}");
+    assert!(p.jobs.iter().any(|j| j.cube.is_some()));
 }
 
 /// Ruling FR-c: `cubemap.face_size` sizes a cube, so `resize_relative_to` reads no slot and says nothing (no

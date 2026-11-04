@@ -521,5 +521,23 @@ fn a_failed_recipe_ends_every_source_and_keeps_their_keys_matched() {
         });
         assert!(ended, "no terminal event for {path}");
     }
-    assert_eq!(s.failed, 1);
+    // The counts add up: the corrupt source is the one failure, the good one one intentional skip, each ended once.
+    assert_eq!(s.failed, 1, "{s:?}");
+    // A dry run counts every planned file as skipped; only the recipe's good source is the intentional one.
+    assert_eq!(s.skipped_intentional, 1, "{s:?}");
+    for tail in ["rock01_roughness.png", "rock01_ao.png"] {
+        let n = end
+            .iter()
+            .filter(|e| {
+                e.path.as_deref().is_some_and(|p| p.ends_with(tail))
+                    && matches!(
+                        e.kind,
+                        EventKind::FileFailed { .. }
+                            | EventKind::FileSkipped { .. }
+                            | EventKind::FileDone { .. }
+                    )
+            })
+            .count();
+        assert_eq!(n, 1, "{tail}");
+    }
 }

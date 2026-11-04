@@ -1382,6 +1382,9 @@ fn defaults_tables_refuse_keys_that_would_do_nothing() {
         json!({ "resize": "half", "resize_floor": 1, "resize_reference": [2, 2] }),
         json!({}),
     ));
-    assert!(m.contains("'resize_reference'"), "{m}");
+    assert!(
+        m.contains("'resize_reference'") && m.contains("skews"),
+        "{m}"
+    );
     assert!(check(json!({ "resize": "half" }), json!({})).is_ok());
 }

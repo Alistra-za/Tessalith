@@ -2206,28 +2206,18 @@ impl Engine {
             PlanFailure::Pack(e) => (Stage::Load, e),
             PlanFailure::Panic(stage, e) => (stage, e),
         };
-        // Backlog T17: a failed or cancelled recipe ends its other sources as not converted, unless a job reads them.
-        let end_rest = |jobs: &[ResolvedJob],
-                        skipped: &mut Vec<SkippedFile>,
-                        c: &pack::plan::Candidate| {
-            for s in &c.job.sources[1..] {
-                let read = jobs.iter().any(|j| {
-                    j.pack
-                        .as_ref()
-                        .is_some_and(|p| p.sources.iter().any(|x| x.path == s.path))
-                });
-                if let (false, Some(f)) = (read, files.iter().find(|f| f.path == s.path)) {
-                    pack::plan::end_failed_source(skipped, &c.set_key, c.kind, &s.path, &f.output);
-                }
-            }
-        };
         for (c, r) in packed.candidates.iter().zip(pack_results) {
             let path = c.job.sources[0].path.clone();
             let output = c.virtual_input.output.clone();
             let Some(r) = r else {
                 // Cancelled before its sources were loaded: the recipe has no job (Note M11, ruling W7).
                 pack::plan::fail_report(&mut packed.reports, c, "cancelled".into());
-                end_rest(&jobs, &mut skipped, c);
+                packed.lost.extend(
+                    c.job
+                        .sources
+                        .iter()
+                        .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                );
                 cancelled.push(path);
                 continue;
             };
@@ -2240,7 +2230,12 @@ impl Engine {
                 Err(f) => {
                     let (stage, error) = failure(&output, f);
                     pack::plan::fail_report(&mut packed.reports, c, error.clone());
-                    end_rest(&jobs, &mut skipped, c);
+                    packed.lost.extend(
+                        c.job
+                            .sources
+                            .iter()
+                            .map(|s| (c.set_key.clone(), c.kind, s.path.clone(), PathBuf::new())),
+                    );
                     failed.push(FailedFile {
                         path,
                         output,
@@ -2250,6 +2245,16 @@ impl Engine {
                 }
             }
         }
+        // Backlog T17: the sources of failed or cancelled recipes end as not converted, once every job is known.
+        let lost: Vec<_> = packed
+            .lost
+            .iter()
+            .filter_map(|(s, k, p, _)| {
+                let f = files.iter().find(|f| f.path == *p)?;
+                Some((s.clone(), *k, p.clone(), f.output.clone()))
+            })
+            .collect();
+        pack::plan::end_lost_sources(&lost, &jobs, &failed, &cancelled, &mut skipped);
         // Note DY: each filled target is loaded, filled and analysed again, then re-resolved as 6c does, so alpha
         // policy, format, coverage and cutout all see the filled image. It runs before the derive step, so a target
         // a derive replaces loses its fill with it (Ruling 15). The filled analysis is cached in memory by both files'

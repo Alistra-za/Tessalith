@@ -1061,9 +1061,12 @@ pub fn check_chain(
         for (table, v) in each {
             for key in ["subtype", "target", "category", "resize_reference"] {
                 if v.get(key).is_some() {
-                    return Err(invalid(format!(
-                        "{at} {table}: '{key}' has no effect there; remove it"
-                    )));
+                    let why = if key == "resize_reference" {
+                        "the planner sets it itself and a hand-written value skews the size checks"
+                    } else {
+                        "it has no effect there"
+                    };
+                    return Err(invalid(format!("{at} {table}: '{key}': {why}; remove it")));
                 }
             }
         }

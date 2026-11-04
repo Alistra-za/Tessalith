@@ -2,7 +2,7 @@
 
 Every `sdc.toml` field with its values, default and meaning. A lookup page: how settings layer, rules and `[files]` are on [Project config](Project-Config.md).
 
-Every field can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`, a `[files]` entry, or with `--set`. Defaults are the built-in base preset's; a sub-type or preset may change them, as noted.
+Every field can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`, a `[files]` entry, or with `--set`, except `subtype`, `target`, `category` and `resize_reference` (see `subtype` below). Defaults are the built-in base preset's; a sub-type or preset may change them, as noted.
 
 ## Type and colour
 
