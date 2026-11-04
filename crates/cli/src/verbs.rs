@@ -4,7 +4,7 @@
 //! JSON (`inspect`: the plan's events and one `dds_info` object per DDS; `validate`: one `dds_validation`
 //! object per file) and `validate`'s human report moves to stderr.
 use crate::args::*;
-use crate::human::TeeSink;
+use crate::human::{skip_line, warning_line, TeeSink};
 use engine::api::{CancelToken, Engine, EngineError};
 use engine::codes::{Code, Warning};
 use engine::config::*;
@@ -262,7 +262,7 @@ fn print_planned(job: &ResolvedJob) {
     out!("  status {state} {}", detail.join("; "));
     print_rnm(job);
     for w in &job.warnings {
-        out!("  {} {} {}", tag!(&w.severity), w.code.as_str(), w.message);
+        out!("  {}", warning_line(None, w));
     }
 }
 
@@ -276,15 +276,12 @@ fn print_event(ev: &EngineEvent) {
             kind: SkipKind::PackedSource,
             ..
         } => {}
-        EventKind::FileSkipped { code, reason, .. } => out!(
-            "{path}\n  skipped {}{reason}",
-            code.map(|c| format!("{} ", c.as_str())).unwrap_or_default()
-        ),
+        EventKind::FileSkipped { code, reason, .. } => {
+            out!("{path}\n  skipped {}", skip_line(*code, reason))
+        }
         EventKind::FileFailed { error, .. } => out!("{path}\n  cannot be read: {error}"),
         // A batch-level warning (CFG-PRESET-SKIPPED).
-        EventKind::Warning(w) => {
-            out!("{} {} {}", tag!(&w.severity), w.code.as_str(), w.message)
-        }
+        EventKind::Warning(w) => out!("{}", warning_line(None, w)),
         EventKind::SetResolved {
             recipes,
             shader,
@@ -297,7 +294,7 @@ fn print_event(ev: &EngineEvent) {
                 .unwrap_or_default();
             out!("set {}{shown}", ev.set.as_deref().unwrap_or(""));
             for w in warnings {
-                out!("  {} {} {}", tag!(&w.severity), w.code.as_str(), w.message);
+                out!("  {}", warning_line(None, w));
             }
             for r in recipes {
                 let status = serde_json::to_value(r.status)
