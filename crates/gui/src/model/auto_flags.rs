@@ -22,6 +22,8 @@ fn add(
 }
 
 /// The keys the members switch on, each with why, in the order they were decided. `pbr` false (not a PBR set): none.
+/// Without scan evidence; the product reads [`auto_flags_for`] with [`hint`] (L57).
+#[cfg(feature = "test-hooks")]
 pub fn auto_flags(
     pbr: bool,
     slots: &BTreeMap<SlotKind, SlotFill>,
@@ -103,7 +105,9 @@ pub fn auto_flags_for(
     out
 }
 
-/// The explicit settings with the auto ones filled in where the key is unset.
+/// The explicit settings with the auto ones filled in where the key is unset (no scan evidence; the product passes
+/// [`hint`] to [`resolved_for`]).
+#[cfg(feature = "test-hooks")]
 pub fn resolved(pbr: bool, slots: &BTreeMap<SlotKind, SlotFill>, explicit: &Settings) -> Settings {
     resolved_for(pbr, slots, explicit, &SsHint::default())
 }

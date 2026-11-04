@@ -297,7 +297,12 @@ impl AppModel {
         let mut items: HashMap<String, Vec<Warning>> = HashMap::new();
         for v in views.iter().filter(|v| !v.key.is_empty()) {
             let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
-            let resolved = super::auto_flags::resolved(v.pbr, &v.slots, &v.settings);
+            let resolved = super::auto_flags::resolved_for(
+                v.pbr,
+                &v.slots,
+                &v.settings,
+                &super::auto_flags::hint(self, v),
+            );
             neutral.insert(v.key.as_str(), height_neutral(shader, &resolved));
             if matches!(shader, Some(Shader::Landscape | Shader::PbrLandscape))
                 && filled(&v.slots, SlotKind::Height)
