@@ -479,3 +479,37 @@ fn advanced_has_no_batch_or_preview_size_rows() {
     ];
     assert_eq!(labels, want);
 }
+
+/// Backlog T32: while a plan is pending the drawer's rows are off, like the settings panel's (Note FK), so a pick is
+/// not dropped as "unchanged" against the stale view.
+#[test]
+fn drawer_texture_rows_wait_for_the_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = leaf_model(d.path());
+    model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
+    assert!(model.fix_off().is_some(), "the edit left a plan in flight");
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(400.0, 1400.0))
+        .build_ui_state(
+            |ui, model: &mut AppModel| {
+                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
+                sdc_gui::ui::advanced::body(ui, model, &mut state);
+            },
+            model,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run_steps(3);
+    let combos: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| (n.accesskit_node().value(), n.accesskit_node().is_disabled()))
+        .collect();
+    // The rows show the stale view (Resize: None) until the plan lands, so every combo must be off meanwhile.
+    assert!(
+        combos.iter().any(|(v, _)| v.as_deref() == Some("None")),
+        "{combos:?}"
+    );
+    assert!(
+        combos.iter().all(|(_, off)| *off),
+        "a drawer row is enabled during a plan: {combos:?}"
+    );
+}

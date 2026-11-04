@@ -540,10 +540,10 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             ui.weak("Select a texture to edit its mip level count.");
             return;
         };
-        let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
-        let why = model.toml_read_only_reason();
+        // Backlog T32 (Note FK): off while a plan is pending, as the settings panel's rows are.
+        let why = model.fix_off();
         let f = levels_view(model.target, &job);
-        ui.add_enabled_ui(!read_only, |ui| {
+        ui.add_enabled_ui(why.is_none(), |ui| {
             egui::Grid::new(("advanced-mips", &key))
                 .num_columns(3)
                 .show(ui, |ui| {
@@ -576,10 +576,9 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
             ui.weak("Select a texture to edit its encoder and header fields.");
             return;
         };
-        let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
         let busy = model.edit_busy();
-        let why = model.toml_read_only_reason();
-        ui.add_enabled_ui(!read_only, |ui| {
+        let why = model.fix_off();
+        ui.add_enabled_ui(why.is_none(), |ui| {
             egui::Grid::new(("advanced-fields", &key))
                 .num_columns(3)
                 .show(ui, |ui| {
