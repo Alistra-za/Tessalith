@@ -254,6 +254,7 @@ enum Act {
     AlsoSet(Box<dyn FnOnce(&mut ExportConfig)>),
     AlsoLocation,
     ChooseExport,
+    ChoosePreset,
     Skip(String, bool),
     Recipe,
     GoTo(String),
@@ -750,7 +751,14 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         });
     // Note FB4: the missing export folder counts, because the gate enforces it; Note FC5: so does an unanswered
     // overwrite question.
-    let blockers = blocks.len() + usize::from(!folder_chosen) + m.unanswered_overwrites().len();
+    // Note FP8 (T30): the gate also refuses for a missing preset and a read-only `sdc.toml`, so they are blockers too.
+    let preset_row = m.missing_preset_text();
+    let toml_row = m.toml_read_only_reason();
+    let blockers = blocks.len()
+        + usize::from(!folder_chosen)
+        + usize::from(preset_row.is_some())
+        + usize::from(toml_row.is_some())
+        + m.unanswered_overwrites().len();
     let json_answer = review.json_answer.as_ref();
     let questions = json
         .iter()
@@ -784,6 +792,24 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         .on_disabled_hover_text(picker::BUSY_HOVER);
                     if r.clicked() {
                         act = Some(Act::ChooseExport);
+                    }
+                });
+            }
+            if let Some(why) = &toml_row {
+                ui.colored_label(RED, why);
+            }
+            if let Some((text, hover)) = &preset_row {
+                ui.horizontal_wrapped(|ui| {
+                    let l = ui.colored_label(RED, text);
+                    if let Some(h) = hover {
+                        l.on_hover_text(h);
+                    }
+                    // Rule 5.4: the visible text is the accessible name.
+                    let r = ui.button("Choose preset…");
+                    if r.on_hover_text("Open the Preset menu and pick an installed preset")
+                        .clicked()
+                    {
+                        act = Some(Act::ChoosePreset);
                     }
                 });
             }
@@ -893,6 +919,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::ChooseExport) => {
             model.pick_export_folder(ui.ctx());
         }
+        // The header's Preset menu opens on the request (as Problems' `Choose preset…` does).
+        Some(Act::ChoosePreset) => model.choose_preset = Some(ui.ctx().cumulative_pass_nr()),
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
         Some(Act::Recipe) => {
             super::advanced::open_recipe(ui.ctx());
