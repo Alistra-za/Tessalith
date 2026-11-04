@@ -570,7 +570,7 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
             }
         });
     // While a scan runs the store's winner tables are being rewritten: the selection waits for the result.
-    if let Some(c) = picked.filter(|_| !m.scanning()) {
+    if let Some(c) = picked.filter(|_| m.store_settled()) {
         m.select_nif(c);
     }
 }
@@ -589,7 +589,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Rule 3.5: the combo's width is a minimum, so it gets an exact slot.
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
     ui.allocate_ui(size, |ui| {
-        ui.add_enabled_ui(!m.scanning(), |ui| {
+        ui.add_enabled_ui(m.store_settled(), |ui| {
             egui::ComboBox::from_id_salt("meshes-mod-picker")
                 .selected_text(text)
                 .width(size.x)
@@ -1097,7 +1097,7 @@ fn shapes_column(ui: &mut egui::Ui, m: &mut MeshesModel) {
             m.error = Some(e);
         }
     }
-    if let Some(p) = clicked {
+    if let Some(p) = clicked.filter(|_| m.store_settled()) {
         m.show_users(&p);
     }
     match (pick, m.edit.is_some()) {

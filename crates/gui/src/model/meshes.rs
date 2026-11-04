@@ -794,6 +794,12 @@ impl MeshesModel {
         self.cancel.is_some()
     }
 
+    /// No scan runs and the store is not unsettled (a cancelled or failed scan left origins disabled): reads that
+    /// click-handlers start are meaningful only then (Notes GC14, GC15, GC19, GQ4).
+    pub fn store_settled(&self) -> bool {
+        !self.scanning() && !self.store_unsettled
+    }
+
     /// A scan phase reported `done` of `total` at `now`. Each newly done item is one finish for the phase's `Pace`;
     /// a new phase (or a count that went back) starts a fresh one, so its ETA waits for the `Pace` minimums again.
     pub fn scan_progressed(
@@ -864,6 +870,8 @@ impl MeshesModel {
         // Note GC14: a row read still out may read the origins this scan disables; its answer is dropped, and the
         // lists on screen stay until the scan ends.
         self.rows_rx = None;
+        // Note GQ4: so is a pill read still out (its answer would be the disabled store's).
+        self.project_read = None;
         self.progress = Some(("starting", 0, 0));
         self.status = "Scanning…".into();
         start_scan(source, db, self.procs, self.tx.clone(), cancel);
@@ -1022,6 +1030,7 @@ impl MeshesModel {
         self.refresh_doc_badges();
         self.refresh_placement();
         self.scan_ctrls.clear(); // the files may have changed too (T8)
+        self.ctrls_rx = None; // a read of the old file would land its lines (Note GQ4)
         self.read_rows();
         // The texture's users may have changed too.
         let tex = self.tex_filter.as_ref().map(|(t, _)| t.clone());
@@ -1574,6 +1583,10 @@ impl MeshesModel {
     }
 
     pub fn select_nif(&mut self, copy_id: i64) {
+        // Note GQ4: a scan running or left unfinished leaves the details unread (they would read disabled origins).
+        if !self.store_settled() {
+            return;
+        }
         self.clear_nif();
         self.selected_nif = Some(copy_id);
         self.selected_info = self.find_row(copy_id).cloned();
@@ -1661,6 +1674,14 @@ impl MeshesModel {
             let _ = tx.send(lines); // the page may have moved on: nobody listens
         });
         self.ctrls_rx = Some((copy, rx));
+    }
+
+    /// Tests: a Controllers read of `copy` in flight that answers when the test sends on the returned channel.
+    #[cfg(feature = "test-hooks")]
+    pub fn hold_ctrls_read(&mut self, copy: i64) -> Sender<HashMap<u32, String>> {
+        let (tx, rx) = channel();
+        self.ctrls_rx = Some((copy, rx));
+        tx
     }
 
     /// Takes a finished Controllers read (T8). True while one is still running, so the caller repaints.
