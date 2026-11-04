@@ -755,6 +755,6 @@ impl super::json_finish::Guarded for PendingXpmf {
         d: &mut crate::sets_doc::SetsDoc,
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
-        d.set_xpmf_shas(shas.clone())
+        d.set_xpmf_shas(shas)
     }
 }

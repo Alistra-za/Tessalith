@@ -698,7 +698,7 @@ impl AppModel {
 
     pub(super) fn on_source(&mut self, token: u64, result: Result<Arc<SourcePreview>, String>) {
         if self.preview.inflight_source.as_ref().map(|t| t.0) != Some(token) {
-            self.note_stale_drop();
+            self.note_stale_drop(super::StaleKind::Source);
             return;
         }
         self.preview.inflight_source = None;
@@ -713,7 +713,7 @@ impl AppModel {
 
     pub(super) fn on_encoded(&mut self, token: u64, result: Result<Arc<PreviewOut>, String>) {
         if self.preview.inflight_encode.as_ref().map(|t| t.0) != Some(token) {
-            self.note_stale_drop();
+            self.note_stale_drop(super::StaleKind::Encode);
             return;
         }
         self.preview.inflight_encode = None;

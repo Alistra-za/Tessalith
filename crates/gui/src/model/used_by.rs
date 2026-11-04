@@ -310,12 +310,12 @@ impl AppModel {
             .iter()
             .find(|v| engine::sets::same_id(&v.id, set))
             .cloned()?;
-        let diffuse = match v.slots.get(&super::sets::SlotKind::Diffuse)? {
-            super::sets::SlotFill::Own { item } | super::sets::SlotFill::Borrowed { item, .. } => {
-                item.clone()
-            }
-            super::sets::SlotFill::Empty => return None,
-        };
+        let diffuse = v
+            .slots
+            .get(&super::sets::SlotKind::Diffuse)?
+            .item()?
+            .to_string();
+
         let j = self.item(&diffuse)?.job.as_ref()?;
         let stem = j.output.file_stem()?.to_string_lossy().into_owned();
         Some((

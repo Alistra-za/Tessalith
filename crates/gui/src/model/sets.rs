@@ -255,6 +255,7 @@ impl SlotFill {
         }
     }
 
+    /// The slot holds a file (own or borrowed).
     pub fn is_filled(&self) -> bool {
         !matches!(self, Self::Empty)
     }
@@ -748,7 +749,7 @@ fn owns_of(v: &SetView, owners: &Ownership) -> Vec<SlotKind> {
         .filter_map(|((item, _), _)| {
             v.slots
                 .iter()
-                .find(|(_, f)| matches!(f, SlotFill::Own { item: i } | SlotFill::Borrowed { item: i, .. } if i == item))
+                .find(|(_, f)| f.item() == Some(item))
                 .map(|(k, _)| *k)
         })
         .collect()
@@ -1422,7 +1423,13 @@ impl AppModel {
         views(self).iter().find(|v| same_id(&v.id, id)).cloned()
     }
 
-    pub(super) fn set_of_item(&self, item: &str) -> Option<SetView> {
+    /// Tests: `set_of_item` (the lookup stays private).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_of_item_probe(&self, item: &str) -> Option<SetView> {
+        self.set_of_item(item)
+    }
+
+    fn set_of_item(&self, item: &str) -> Option<SetView> {
         views(self)
             .iter()
             .find(|v| v.members.iter().any(|k| k == item))

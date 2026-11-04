@@ -266,12 +266,7 @@ pub fn missing_texture_texts(
 
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
 /// set views (audit 7, DECISIONS Note Y7).
-pub fn export_blocks(m: &AppModel) -> Vec<ExportIssue> {
-    (*blocks(m)).clone()
-}
-
-/// `export_blocks` as the cached list itself (no copy): what the model's own readers use.
-pub fn blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
     super::cached(
         m,
         |c| c.blocks.clone(),
@@ -824,7 +819,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
             to.push(i.text);
         }
     };
-    for i in blocks(m).iter().cloned() {
+    for i in export_blocks(m).iter().cloned() {
         place(i, true);
     }
     // The photo crops are not the JSON's: the sets' pitfalls only.

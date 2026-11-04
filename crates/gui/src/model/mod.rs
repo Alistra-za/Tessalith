@@ -279,6 +279,14 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
 }
 
+/// The replies `poll` drops as stale, counted for tests (backlog L54).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaleKind {
+    Plan,
+    Source,
+    Encode,
+}
+
 /// Get-or-build one slot of the view cache under the current view key (backlog L9). `get` reads the slot from a cache
 /// of this key (`None`: absent or stale), `put` stores a built value, and `build` runs with no `RefCell` borrow held
 /// (K9: it reads the same cell). A cache of another key is replaced whole before `put`.
@@ -505,9 +513,9 @@ pub struct AppModel {
     pub(crate) problem_lookups: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
-    /// Backlog L54: worker replies `poll` dropped for an old generation or token (see `stale_replies_dropped`).
+    /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
     #[cfg(feature = "test-hooks")]
-    pub(crate) stale_drops: std::cell::Cell<u32>,
+    pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
     #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
@@ -1600,23 +1608,29 @@ impl AppModel {
     }
 
     /// A plan, source or encode reply for an older generation or token was dropped (tests count these, L54).
-    pub(super) fn note_stale_drop(&self) {
+    pub(super) fn note_stale_drop(&self, kind: StaleKind) {
         #[cfg(feature = "test-hooks")]
-        self.stale_drops.set(self.stale_drops.get() + 1);
+        {
+            let mut d = self.stale_drops.get();
+            d[kind as usize] += 1;
+            self.stale_drops.set(d);
+        }
+        #[cfg(not(feature = "test-hooks"))]
+        let _ = kind;
     }
 
-    /// Tests: how many stale plan, source and encode replies `poll` has dropped.
+    /// Tests: how many stale replies of `kind` `poll` has dropped.
     #[cfg(feature = "test-hooks")]
-    pub fn stale_replies_dropped(&self) -> u32 {
-        self.stale_drops.get()
+    pub fn stale_replies_dropped(&self, kind: StaleKind) -> u32 {
+        self.stale_drops.get()[kind as usize]
     }
 
-    /// Tests: poll until one more stale reply has been dropped, or `timeout` passes. False on a timeout.
+    /// Tests: poll until one more stale reply of `kind` has been dropped, or `timeout` passes. False on a timeout.
     #[cfg(feature = "test-hooks")]
-    pub fn poll_until_stale_drop(&mut self, timeout: Duration) -> bool {
-        let base = self.stale_drops.get();
+    pub fn poll_until_stale_drop(&mut self, kind: StaleKind, timeout: Duration) -> bool {
+        let base = self.stale_replies_dropped(kind);
         let end = Instant::now() + timeout;
-        while self.stale_drops.get() == base {
+        while self.stale_replies_dropped(kind) == base {
             if Instant::now() >= end {
                 return false;
             }
@@ -1657,7 +1671,7 @@ impl AppModel {
                     Err(f) => self.plan_failed(f),
                 }
             }
-            WorkerMsg::Planned { .. } => self.note_stale_drop(),
+            WorkerMsg::Planned { .. } => self.note_stale_drop(StaleKind::Plan),
             WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
             WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
@@ -1983,7 +1997,7 @@ impl AppModel {
             self.dialog = Some(Dialog::Error(problem));
             return true;
         }
-        let blocks = pbr_export::blocks(self);
+        let blocks = pbr_export::export_blocks(self);
         // Note FO2: a missing preset would export with the fallback; Review's gate lists it and keeps Export off.
         if !blocks.is_empty() || self.missing_preset_text().is_some() {
             self.open_review();
@@ -4418,7 +4432,7 @@ mod tests {
         let (id, item) = (v[0].id.clone(), v[0].members[0].clone());
         sets::SET_VIEWS_CLONES.with(|c| c.set(0));
         let _ = m.input_name_plan(&id, "textures/x/other");
-        let _ = m.set_of_item(&item);
+        let _ = m.set_of_item_probe(&item);
         assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
     }
 

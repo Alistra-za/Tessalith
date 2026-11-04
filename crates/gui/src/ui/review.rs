@@ -792,7 +792,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     }
                 });
             }
-            for b in &blocks {
+            for b in blocks.iter() {
                 ui.horizontal_wrapped(|ui| {
                     ui.colored_label(RED, &b.text);
                     // A project-wide issue has no set to go to.

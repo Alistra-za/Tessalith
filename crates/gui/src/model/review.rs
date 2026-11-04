@@ -106,8 +106,8 @@ impl AppModel {
         self.review_json_cache.take();
     }
 
-    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for `REVIEW_JSON_TTL`, since
-    /// Review draws it every frame and it reads the files (AG128).
+    /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
+    /// `REVIEW_JSON_TTL`, since Review draws it every frame and it reads the files (AG128).
     pub fn review_json(&self) -> Vec<JsonLine> {
         let key = self.view_key();
         if let Some((k, at, lines)) = &*self.review_json_cache.borrow() {
@@ -304,7 +304,7 @@ impl AppModel {
         if let Some((text, _)) = self.missing_preset_text() {
             return Err(text);
         }
-        let n = pbr_export::blocks(self).len();
+        let n = pbr_export::export_blocks(self).len();
         if n > 0 {
             return Err(format!("Fix {n} blocker{} first", plural(n)));
         }

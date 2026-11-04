@@ -633,8 +633,10 @@ pub fn draw(
             model.clear_sets_filter();
         }
     }
-    let blocked: std::collections::HashSet<String> =
-        export_blocks(model).into_iter().map(|i| i.set_id).collect();
+    let blocked: std::collections::HashSet<String> = export_blocks(model)
+        .iter()
+        .map(|i| i.set_id.clone())
+        .collect();
     // One fetch per frame: each drawn card asks `set_ready_in`, not `problems()` (Task 6).
     let flagged = crate::model::bottom::flagged(model);
     let mut acts = vec![];

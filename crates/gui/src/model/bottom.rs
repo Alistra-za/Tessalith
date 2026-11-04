@@ -361,7 +361,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             )
         });
     }
-    for b in pbr_export::blocks(m).iter().cloned() {
+    for b in pbr_export::export_blocks(m).iter().cloned() {
         let at = if b.set_key.is_empty() {
             At::Project
         } else {

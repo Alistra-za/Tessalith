@@ -166,7 +166,7 @@ fn a_result_for_a_collapsed_texture_is_dropped() {
     m.collapse();
     assert!(!m.busy(), "collapsing cancels the work");
     assert!(
-        m.poll_until_stale_drop(Duration::from_secs(30)),
+        m.poll_until_stale_drop(StaleKind::Encode, Duration::from_secs(30)),
         "the collapsed texture's reply never came"
     );
     assert_eq!(m.preview.item, None);

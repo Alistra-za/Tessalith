@@ -660,7 +660,7 @@ fn an_rfaos_set_is_a_skin_set_with_no_json_entry() {
         out.to_string_lossy().ends_with("rock01_rfaos.dds"),
         "{out:?}"
     );
-    assert_eq!(export_blocks(&m), vec![]);
+    assert_eq!(*export_blocks(&m), vec![]);
 }
 
 /// AG90 (owner, 2026-10-14, replaces final review C1): a skin set has no PGPatcher pitfalls or blocks, even with a
