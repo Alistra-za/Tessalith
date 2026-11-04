@@ -332,6 +332,10 @@ impl AppModel {
 
     /// Start the read of [`AppModel::original_textures`] on a worker, unless it is done or running.
     pub fn ask_original_textures(&mut self, set: &str, n: u8) {
+        // T43: a store a running or cancelled scan left empty would cache a false "no mesh".
+        if self.scan_store_unsettled {
+            return;
+        }
         let Some((db, tex)) = self.original_source(set) else {
             return;
         };

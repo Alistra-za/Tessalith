@@ -67,6 +67,27 @@ ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP
 
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FT, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -146,3 +167,18 @@ ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
 - The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16]
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO

@@ -148,10 +148,14 @@ impl AppModel {
             .strip_suffix(&d_cur_l)
             .ok_or("the diffuse's game path does not end with its file path")?
             .to_string();
-        let chosen = lower(chosen.trim());
+        let chosen = lower(chosen.trim()).replace('\\', "/");
         let chosen = super::known_paths::strip_dds(&chosen).trim_matches('/');
         if chosen.is_empty() {
             return Err("type or pick a path".into());
+        }
+        // T35: the set's own name in another case would only write a case-only alias.
+        if chosen == game {
+            return Err("the set already has this name".into());
         }
         let Some(new_base) = chosen.strip_prefix(prefix.as_str()) else {
             return Err(format!(
@@ -274,7 +278,11 @@ impl AppModel {
                 m.edit_docs(&label, None, true, |p, _| p.set_read_as(&r.key, alias));
             }
             if let Some((from, to)) = &plan.retarget {
-                m.edit_docs(&label, None, true, |_, d| d.retarget_auto(from, to));
+                m.edit_docs(&label, None, true, |p, d| {
+                    d.retarget_auto(from, to);
+                    // T34: the Also export opt-out follows the automatic id, as `rename_set` does.
+                    p.rename_skip_also(from, to);
+                });
             }
         });
         Ok(())

@@ -150,6 +150,7 @@ mod tests {
     fn a_stale_heatmap_panic_does_not_blank_the_current_job() {
         let mut m = bare_model();
         let out = Arc::new(preview::PreviewOut {
+            note: None,
             result: engine::session::PreviewResult {
                 source: engine::session::SourcePreview {
                     first_level: 0,

@@ -15,16 +15,16 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FV
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FV, FT
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FT, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1052,3 +1052,12 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **FV3 The RNM bent layer's AO follows a hand-set `helper.role` first (T40; supersedes W9 in part).** An image member whose `helper.role` is `ao`, `orm` or `rmaos` is that AO source (R, R, B); any other hand-set role, `none` included, takes the file out; a file with no hand-set role is read by its name as W9 and AL4 say. The order stays AO, `_orm`, `_rmaos`. `_n` bytes change only for a set with a hand-set role. Test `rnm_plan::a_hand_set_role_picks_the_bent_layers_ao_before_the_name`.
 - **FV4 A negative PSD layer count keeps merged transparency when the global layer mask length is missing (T28).** `merged_transparency` returns what it found instead of false. Test `psd::negative_count_survives_a_missing_global_mask_length`.
 - **FV5 An NPOT normal solved at its power of two is unchanged (R1; no fix).** The torus test came out green: 1000² against 1024² differ by a mean 0.0001 in height, and the resampled normal's mean slope is 1.0238 times the 1024² one's, against the 1.024 the per-pixel slope convention predicts, so `to_pot` keeps resampling the normal. The slope comparison is the pin, because the height is range-normalised and would hide a uniform slope bias (`from_normal::an_npot_torus_solves_like_its_power_of_two_twin`).
+
+## Note FT — backlog batch B4: gui model 2 (main team, 2026-11-04)
+
+- **FT1 An input rename moves the set's Also export opt-out (T34).** `set_input_name` calls `rename_skip_also` in the same edit as `retarget_auto`, as the set rename in `model/sets.rs` does, so `[export] skip` follows the new automatic id. Test `backlog_b4_input_name::an_input_rename_moves_the_skip_entry`.
+- **FT2 The set's own input name is refused in any case (T35).** `input_name_plan` reads `\` as `/` in the chosen path (a backslash path no longer fails the prefix check) and returns "the set already has this name" when it equals the diffuse's game path ignoring case and `.dds`, so no case-only alias is written and no undo step is taken. Test `backlog_b4_input_name::the_sets_current_name_in_another_case_is_refused`.
+- **FT3 A blocked item shows its current reason (T15).** When a re-plan leaves an item blocked for a different reason, `preview_after_plan` sets `preview.source` to the new `Failed(reason)` as well as the notice. Test `backlog_b4_preview::a_blocked_item_shows_its_new_reason`.
+- **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS (or an array of cubes) still shows its first slice, with the line `Array of N: only the first slice is shown` (`cube` for cubes) added to the preview notice through `PreviewOut::note`. A cut-off cube is an error, not a panic. Tests `backlog_b4_preview::a_cube_dds_previews_all_six_faces`, `a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels`, `a_truncated_cube_dds_is_an_error`, `an_array_dds_says_which_slice_it_shows`.
+- **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
+- **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.
