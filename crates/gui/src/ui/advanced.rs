@@ -246,7 +246,9 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
 /// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
 /// The in-progress value of a drag, or of arrow keys on the focused box, is held in egui memory, so a caller that
 /// rebuilds `value` from the model each frame still gets the final value on release or when the box is left. While
-/// `busy` (a re-plan is out) a settled value stays on show until the model hands it back (Backlog R2).
+/// `busy` (a re-plan is out) a settled value stays on show until the model hands it back (Backlog R2); `scope` (the
+/// texture or set the box edits) keys the held values, so they never show in another item's box. The match with what
+/// came in is exact `f64` equality: a caller whose model rounds the value would hold it until the plan is idle.
 pub(super) fn settled_drag<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -254,8 +256,9 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     range: std::ops::RangeInclusive<T>,
     name: &str,
     busy: bool,
+    scope: &str,
 ) -> bool {
-    let id = ui.next_auto_id().with("settled_drag");
+    let id = ui.next_auto_id().with(("settled_drag", scope));
     let sent_id = id.with("sent");
     let came_in = value.to_f64();
     // Backlog R2: a settled value stays on show until the re-plan hands it back (or the plan is idle).

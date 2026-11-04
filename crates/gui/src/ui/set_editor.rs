@@ -1262,6 +1262,7 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                         0..=255,
                         &name,
                         model.edit_busy(),
+                        key,
                     ) {
                         acts.push(Act::Fill(key.to_string(), role, Some(v)));
                     }
