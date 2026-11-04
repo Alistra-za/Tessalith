@@ -89,3 +89,18 @@ ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 - `settle` compiles the keys the pool already took; `set_material` evicts every texture-less missing entry and keeps decode-error entries; a replaced model load drops its queued shader compiles. [BT1, BT2, CX1, CV24]
+
+ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM

@@ -9,14 +9,14 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
-- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
@@ -1015,3 +1015,12 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ8** `esp::mato_data` takes the last EDID and the last DATA of a record, as the scan (`records::read`) does, so a name the scan stored finds its record (a good DATA followed by a short one gives None in both). The orbit pitch clamps to +-1.52 rad, below asin(0.999) where the view's up vector switches; the pan basis is unchanged.
 - **GQ9** `decode_head_at` reads inside its block: the cursor is bounded to the declared block end, so a head that runs past its declared size reports `BlockSize` (block, kind, declared, bytes needed; a scan problem for that block, not "file ends early") instead of taking its shader and alpha refs from the next block. The header gives an implausible block count its own `NifError::TooManyBlocks` (modscan now stores such a file as a failed parse, not `not_skyrim`) and a type index past the type list `NifError::BadTypeIndex` naming the block; no modscan schema change, so an existing store keeps its old `not_skyrim` answer for an unchanged file (rows are reused while size and mtime match) until the store is rebuilt: a modscan schema bump, a corrupt scan.db or a deleted one.
 - **GQ10** Gate fix for GQ9: the render3d `skipped_shape_messages_use_a_short_label` fixture had zero-size blocks that relied on the head reading past its block into the footer; each block now carries its own 116-byte head, so the test still skips 2000 shapes under the bounded read.
+
+## Note FQ — backlog batch B2: engine planning (main team, 2026-11-04)
+Fixes for trace-debug minors 17, 18, 9, 10, 11, 19 and 13 (owner delegated, 2026-11-04). No encoded byte changes.
+- **FQ1 A failed or cancelled packing recipe ends every source (T17).** Only the source that carries the `file_failed` ended before; each other source of the recipe now gets a `DERIVE-NOT-CONVERTED` skip ("<file> is not converted: its <recipe> recipe failed") unless a skip or another job already ends it, in pass 1 (`plan_packing`, a source failed to load or was cancelled) and in pass 2 (`api.rs`). The skip counts as intentional, so it does not make the batch partial beyond the failure that caused it, and it puts the source's `[files]` key among the planned files.
+- **FQ2 A six-file cube's faces and output stem are planned `[files]` keys (T18).** The unmatched-key collector reads `j.cube`: every face file, and the folder of the first face plus the output's name (`textures/cubemaps/chrome_e`), so `CFG-FILE-UNMATCHED` no longer flags five faces of a cube.
+- **FQ3 A built-in preset rule's `perceptual` is a default (T9; follows FM43).** At the FM43 drop of `perceptual` under `alpha.policy = data`, a value set by `Provenance::Rule` of a built-in preset (`vanilla-compact#0`) counts as not explicit, as the preset's own default does; `field_explicit` itself is unchanged. `vanilla-compact` with a user's `alpha.policy = data` on a colour map is Ready with `perceptual = false`, not FMT-PERCEPTUAL-DATA. A user rule or `--set perceptual` still wins and is reported.
+- **FQ4 `subtype`, `target`, `category` and `resize_reference` in a defaults table are load errors (T10, T11).** `check_chain` refuses them in `[defaults]` and `[subtypes.X]` of every preset and config, naming the table and the key and saying it has no effect there. Before, the first three were overwritten by `finish_profile` and a hand-written `resize_reference` skewed the DIM-* checks. The planner's own in-memory `resize_reference` (FM44) is not a parsed table and is not refused. The built-in presets keep their top-level `target`. CHANGELOG has the line; Project-Config-Fields no longer says `subtype` is accepted there.
+- **FQ5 An `[inputs]` alias is matched against the folder case-insensitively (T19).** `read_as_target` strips the folder the file was found in from the alias path component by component, ignoring case and keeping the remainder's case, so a project config named in another case than the input folder no longer gives IN-ALIAS-INVALID.
+- **FQ6 A legacy cube DDS that lists only some faces is a partial cube (T13).** `read_dds` returns `DdsError::Unsupported("partial cube: …")` for a header without DX10 whose `caps2` lacks any of the six face bits, before the length check, instead of "truncated DDS file".

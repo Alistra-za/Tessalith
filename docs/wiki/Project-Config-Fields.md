@@ -8,7 +8,7 @@ Every field can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`,
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `subtype` | a sub-type id | from the file name | Refused in a `subtype:` scoped `--set`. In `[defaults]` and `[subtypes]` it is accepted but has no effect. |
+| `subtype` | a sub-type id | from the file name | Refused in a `subtype:` scoped `--set`. In `[defaults]` and `[subtypes]` it is a load error, as are `target`, `category` and `resize_reference` there. |
 | `color.content` | `srgb`, `linear` | `linear`; `srgb` for colour sub-types | What the pixels mean. Affects mip filtering. On a `cubemap` it stays `srgb` but means the game's `pow(c, 1.6)` curve, not the sRGB curve. |
 | `color.tag` | `srgb`, `unorm`, `n/a` | `unorm`; `srgb` for PBR colour under `cs`; `n/a` for HDR | The DDS format's `_SRGB` flag. `n/a` for BC6H and RGBA16F. See [Presets and targets](Presets-and-Targets.md#srgb-tagging). |
 
