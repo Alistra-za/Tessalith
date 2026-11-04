@@ -171,8 +171,8 @@ fn an_rmaos_card_without_an_ao_source_has_an_ao_row_and_a_set_value_becomes_the_
     assert!(!channel(m, RMAOS, "pack.b").starts_with("fill:"));
 }
 
-/// Audit lead 2: typing 200 into a Fills box is one edit (one undo step, one re-plan), written when the box is
-/// left, not one per keystroke.
+/// Note FN2: typing 200 into a Fills box is one edit (one undo step), written when the box is left, not one per
+/// keystroke.
 #[test]
 fn typing_into_a_fill_box_is_one_edit() {
     use eframe::egui::{Event, Key, Modifiers};
@@ -207,6 +207,38 @@ fn typing_into_a_fill_box_is_one_edit() {
     settle(&mut h);
     assert_eq!(fill(h.state()), None, "one undo step");
     assert!(!h.state().can_undo(), "no earlier partial edit");
+}
+
+/// Note FN2: an arrow key on a focused Fills box changes the value, and leaving the box (Tab) writes it as one step.
+/// ArrowDown, since the AO fill starts at its maximum (255).
+#[test]
+fn an_arrow_key_on_a_fill_box_is_written_when_the_box_is_left() {
+    use eframe::egui::Key;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    h.run();
+    fn ao<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::SpinButton, "AO fill")
+    }
+    ao(&h).scroll_to_me();
+    h.run();
+    ao(&h).focus();
+    h.run();
+    h.key_press(Key::ArrowDown);
+    h.run();
+    h.key_press(Key::Tab);
+    settle(&mut h);
+    let fill = h
+        .state()
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(RMAOS, "packing.fill.ao");
+    assert_eq!(fill, Some(json!(254)));
+    assert_eq!(h.state().undo_label(), Some("Fill value"));
+    h.state_mut().undo();
+    settle(&mut h);
+    assert!(!h.state().can_undo(), "one undo step");
 }
 
 #[test]

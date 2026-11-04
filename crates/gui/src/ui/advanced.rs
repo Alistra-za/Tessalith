@@ -244,8 +244,8 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
 /// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed
 /// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one
 /// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
-/// The in-progress drag value is held in egui memory, so a caller that rebuilds `value` from the model each frame
-/// still gets the final dragged value on release, not the model's old one.
+/// The in-progress value of a drag, or of arrow keys on the focused box, is held in egui memory, so a caller that
+/// rebuilds `value` from the model each frame still gets the final value on release or when the box is left.
 pub(super) fn settled_drag<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -270,7 +270,7 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
         i.label = Some(name.to_string());
         i
     });
-    if r.dragged() {
+    if r.dragged() || (r.has_focus() && v != came_in) {
         ui.data_mut(|d| d.insert_temp(id, v));
     } else {
         ui.data_mut(|d| d.remove::<f64>(id));
