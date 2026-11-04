@@ -15,7 +15,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FT
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT
@@ -1031,9 +1031,9 @@ Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debu
 
 ## Note FT — backlog batch B4: gui model 2 (main team, 2026-11-04)
 
-- **FT1 An input rename moves the set's Also export opt-out (T34).** `set_input_name` calls `rename_skip_also` in the same edit as `retarget_auto`, as `rename_set` does (Note TA31), so `[export] skip` follows the new automatic id. Test `backlog_b4_input_name::an_input_rename_moves_the_skip_entry`.
-- **FT2 The set's own input name is refused in any case (T35).** `input_name_plan` returns "the set already has this name" when the chosen path equals the diffuse's game path ignoring case, `\` and `.dds`, so no case-only alias is written and no undo step is taken. Test `backlog_b4_input_name::the_sets_current_name_in_another_case_is_refused`.
+- **FT1 An input rename moves the set's Also export opt-out (T34).** `set_input_name` calls `rename_skip_also` in the same edit as `retarget_auto`, as the set rename in `model/sets.rs` does, so `[export] skip` follows the new automatic id. Test `backlog_b4_input_name::an_input_rename_moves_the_skip_entry`.
+- **FT2 The set's own input name is refused in any case (T35).** `input_name_plan` reads `\` as `/` in the chosen path (a backslash path no longer fails the prefix check) and returns "the set already has this name" when it equals the diffuse's game path ignoring case and `.dds`, so no case-only alias is written and no undo step is taken. Test `backlog_b4_input_name::the_sets_current_name_in_another_case_is_refused`.
 - **FT3 A blocked item shows its current reason (T15).** When a re-plan leaves an item blocked for a different reason, `preview_after_plan` sets `preview.source` to the new `Failed(reason)` as well as the notice. Test `backlog_b4_preview::a_blocked_item_shows_its_new_reason`.
-- **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS still shows slice 0 with no "slice 1 of N" notice: the notice needs a new `PreviewOut` field (seven test constructors), left as a question. Test `backlog_b4_preview::a_cube_dds_previews_all_six_faces`.
-- **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does, Wave 2 #6). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
+- **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS (or an array of cubes) still shows its first slice, with the line `Array of N: only the first slice is shown` (`cube` for cubes) added to the preview notice through `PreviewOut::note`. A cut-off cube is an error, not a panic. Tests `backlog_b4_preview::a_cube_dds_previews_all_six_faces`, `a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels`, `a_truncated_cube_dds_is_an_error`, `an_array_dds_says_which_slice_it_shows`.
+- **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
 - **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.

@@ -110,3 +110,6 @@ ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FT, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
