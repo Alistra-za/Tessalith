@@ -22,9 +22,9 @@ A PBR set under `cs` has the settings PGPatcher reads in the set editor's **Mate
 | CS PBR records | Community Shaders' PBR texture set and material object blocks ([Set materials](GUI-Set-Materials.md#community-shaders-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, Rename; UV and cubemap (Smooth angle, Auto UV, UV scale, Cubemap path); vertex colours and depth; Texture locks. Starts closed. |
 
-A small **PGPatcher JSON editor…** button beside the Material tab opens the [JSON editor](#the-json-editor).
+A **PGPatcher JSON editor…** button beside the Material tab opens the [JSON editor](#the-json-editor).
 
-**Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Glint / Fuzz "on" (or "off" while the card is kept, below), NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records". Click a title to open or close it.
+**Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Glint / Fuzz "on" (or "off" while the card is kept, below), NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records".
 
 - Coat, Emissive, Glint and Fuzz are listed only while their feature is on: ticking its box adds the group, open, and unticking removes it. If the feature is off but the JSON still holds its values, the group stays, reads "off", says "kept, not used" and shows the stored values, which you can edit or reset. They are not written to the JSON while the feature is off.
 - Parallax has no group: **Displacement scale** is a row of Material, under Roughness scale, while Parallax is on. Off with a stored value, the row stays with "kept, not used".
@@ -44,7 +44,7 @@ A small **PGPatcher JSON editor…** button beside the Material tab opens the [J
 - A project that stores both shows "Standard + Foliage (conflict)" and is not rewritten until you pick a mode.
 - Export asks first on a conflict, on Foliage for a set whose scanned meshes are not Tree Anim, and on Standard for a set whose scanned meshes are Tree Anim (these two need a scan).
 
-**Numbers.** Numbers cannot go below 0, and strengths, weights and opacities stay within 0–1. A typed value outside the range is clamped, and the box says "clamped to ≥ 0" or "clamped to 0–1". A value hand-edited in `sdc-project.toml` shows as it is, with the same note, and the JSON gets it clamped. The glint log density has no limit. Each number drags at its own speed and shows its own number of decimals: angles in half-degree steps, the specular levels in thousandths, the glint density randomisation in whole numbers. Keys whose useful values span a wide range (displacement, emissive scale, specular levels) speed up as their value grows.
+**Numbers.** Numbers cannot go below 0, and strengths, weights and opacities stay within 0–1. A typed value outside the range is clamped, and the box says "clamped to ≥ 0" or "clamped to 0–1". A value hand-edited in `sdc-project.toml` shows as it is, with the same note, and the JSON gets it clamped. The glint log density has no limit. Keys whose useful values span a wide range (displacement, emissive scale, specular levels) speed up as their value grows.
 
 **Colours.** Every colour input has a swatch that opens a colour square and a `#RRGGBB` box (the `#` is optional, case is ignored). The box commits on Enter or focus loss; invalid text gets a red outline and is not applied.
 

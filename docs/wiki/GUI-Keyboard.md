@@ -4,11 +4,11 @@ Every keyboard shortcut of the GUI and how the command palette finds actions, te
 
 ## Keyboard
 
-Press **F1** (or **?**) for the list of shortcuts, grouped by where they work. The sheet and the palette appear at once, without the fade a dialog opened with the mouse has, as does the path list when typing reopens it.
+Press **F1** (or **?**) for the list of shortcuts, grouped by where they work.
 
 ### Command palette
 
-Press **Ctrl+K** for the command palette. Type part of an action's, a texture's or a set's name: the letters in order are enough. Names that start with what you typed come first, then names that contain it. Up and Down move the highlight, Enter runs the highlighted action or selects the texture or set as a click does and scrolls its column to it, and Esc closes the palette. A new palette highlights nothing, and Enter does nothing until you type or move with the arrows (so it never starts Export by chance); the F1 sheet says so too.
+Press **Ctrl+K** for the command palette. Type part of an action's, a texture's or a set's name: the letters in order are enough. Names that start with what you typed come first, then names that contain it. Up and Down move the highlight, Enter runs the highlighted action or selects the texture or set as a click does and scrolls its column to it, and Esc closes the palette. A new palette highlights nothing, and Enter does nothing until you type or move with the arrows, so it never starts Export by chance.
 
 ![The command palette.](../img/gui/GUI-Keyboard/command-palette.png)
 
@@ -18,8 +18,7 @@ The palette offers the actions that make sense where you are (Open folder, Save,
 
 While a text field has the keyboard (the search box, a name, a number), the shortcuts leave it alone: only **Ctrl+K** opens the palette, **Ctrl+S** saves, and **Esc** leaves the field.
 
-- **Ctrl+S**, or a click on **Save**, **Export** or Review's **Export**, first ends the edit, then saves or exports. A field that commits when you leave it keeps what you typed: one key or one click does both.
-- A click on another texture or set in a column likewise commits the field before the selection changes, also for a quick tap.
+- **Ctrl+S**, or a click on **Save**, **Export** or Review's **Export**, first ends the edit (keeping what you typed in a field that commits when you leave it), then saves or exports. A click on another texture or set commits the field the same way.
 - Esc in a text field that commits when you leave it (a name, a match path, the JSON name) cancels the edit.
 - Undo and Redo work in the Textures and Meshes views.
 - A key does nothing while its action is off: Ctrl+S with nothing to save outside a text field, Ctrl+Z with nothing to undo.

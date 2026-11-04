@@ -14,7 +14,7 @@ In 2D the editor is one column that scrolls as a whole, like a texture's setting
 2. the slot rows at full width;
 3. two tabs: **Material** (**Set** on a vanilla set), which holds the material settings, and **Advanced**, the last tab, with the same sections as the [Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer).
 
-Nothing sits beside the slot rows, so nothing covers them at any window width. A row wider than the centre is cut at the window edge (it does not scroll sideways). The window-edge drawer is not drawn while the tabs are shown ([Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer) says when each is).
+Nothing sits beside the slot rows. A row wider than the centre is cut at the window edge. The window-edge drawer is not drawn while the tabs are shown ([Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer) says when each is).
 
 What the Material tab holds depends on the set: the [PGPatcher settings](GUI-PGPatcher-JSON.md#pgpatcher-settings) on a TruePBR set, or one of the cards on [Set materials](GUI-Set-Materials.md) (Advanced skin, PBR Landscape, CS PBR records, PBR grass).
 
@@ -41,13 +41,13 @@ A row has these columns:
 
 ![The menu Assign… opens on an empty slot.](../img/gui/GUI-Set-Editor/assign-menu.png)
 
-The File column takes the width the other columns leave, so the rows fill the centre. While a set is selected, the Textures and Sets columns give the centre at least 540 px, down to their own minimums, so the rows fit without clipping from a 1024 px window up.
+While a set is selected, the Textures and Sets columns give the centre at least 540 px, down to their own minimums.
 
 **Slot commands…** on a row offers *From this set*, *Path*, *Clear* and *Pin slot N* (the sdc pin), each one undo step. *From this set* is off, with "This set has no file for this slot", when the set has none. Right-click on a row opens the full [slot menu](GUI-Sets-Column.md#slot-menus), which also has *From another set*, the pin and the PGPatcher lock.
 
 ## Packed channel sources
 
-Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**; it is as narrow as the format combo, so a long name is cut, and the hover shows it whole. The list holds the set's greyscale helpers (any role but the RNM layers) and **Value**:
+Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**. The list holds the set's greyscale helpers (any role but the RNM layers) and **Value**:
 
 - Picking a helper makes it this channel's source: the channel is added to that helper's `helper.fills` and taken out of every other helper's list, as one undo step. The [helper panel](GUI-Helpers-RNM-and-Cubemaps.md#the-helper-panel)'s Fills list shows the same setting.
 - **Value** takes the channel out of every helper's list, so the channel uses its value fill: the row then shows the value box and its **Reset** after the picker (`packing.fill.*`). **Reset** removes the fill. Value is greyed out when the channel's file is not a helper ("<file> is not a helper; it feeds this channel by its name"), because no helper setting holds it.
@@ -55,9 +55,9 @@ Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each c
 
 ## Drop files from Explorer
 
-A file dropped on a slot row fills that slot, as one undo step, when it is a texture of the open folder and its sub-type belongs in that slot. It moves in the way a texture dragged from the Textures column does: a filled slot asks **Replace** or **Cancel**, a pinned slot refuses, and Share or Duplicate are not offered, so nothing is copied.
+A file dropped on a slot row fills that slot, as one undo step, when it is a texture of the open folder and its sub-type belongs in that slot. It behaves like a texture dragged from the Textures column: a filled slot asks **Replace** or **Cancel**, a pinned slot refuses, and nothing is copied.
 
-- A file outside the open folder is not copied either: the line under the rows says "brick.png is outside the open folder; files are never copied".
+- A file outside the open folder is refused: the line under the rows says "brick.png is outside the open folder; files are never copied".
 - Drop several files and only the first is used ("only the first file was used").
 - A file dropped anywhere else opens its folder.
 
@@ -67,4 +67,4 @@ The set's **Shader** dropdown lists the shaders the current Mode offers. The pic
 
 ## Path pickers
 
-The ▾ beside the input name box, and the ▾ beside a match path or a mesh path in the [JSON editor](GUI-PGPatcher-JSON.md#the-json-editor), open a list of known paths with a filter box. Clicking or typing inside it (the box, the list, its scroll bar) keeps it open; it closes on a pick, on Esc, or on a click outside.
+The ▾ beside the input name box, and the ▾ beside a match path or a mesh path in the [JSON editor](GUI-PGPatcher-JSON.md#the-json-editor), open a list of known paths with a filter box. It closes on a pick, on Esc, or on a click outside.

@@ -8,16 +8,14 @@ Rows come blockers first, then undecided textures, then warnings, then checks an
 
 ![The Problems tab.](../img/gui/GUI-Problems/problems-tab.png)
 
-Then come where it is (a texture, set or file you can click; "Project" for a problem that belongs to no file) and a sentence that names the action ("This alpha channel carries data the format would drop — choose what it means"). A row never prints a code: hover the sentence for the engine's own message and the code (`LOSS-ALPHA-DATA`), which is also what Troubleshooting and the `--allow` lists use. A problem with no sentence of its own shows the engine's message.
-
-A row is one line and does not wrap. The fix buttons sit at the panel's right edge and stay visible, and a sentence too long for the room left ends in an ellipsis.
+Then come where it is (a texture, set or file you can click; "Project" for a problem that belongs to no file) and a sentence that names the action ("This alpha channel carries data the format would drop — choose what it means"). A row never prints a code: hover the sentence for the engine's own message and the code (`LOSS-ALPHA-DATA`), which is what Troubleshooting and the `--allow` lists use. A problem with no sentence of its own shows the engine's message. A row is one line; the fix buttons stay at the panel's right edge, and a long sentence ends in an ellipsis.
 
 | Row | Fix in the row |
 |---|---|
 | A blocker the export would stop on, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …*, a texture that failed to plan | — |
 | *Undecided: sub-type; <the warning's sentence>* | The [type buttons](#deciding-in-problems) and **Acknowledge**. A question that is an acknowledgement shows its warning's sentence, for example "This texture is too small for its format — use a bigger image". |
-| *Alpha: Cutout (proposed) — confirm* | An **Alpha type** dropdown set to the proposed type. A row with only this question has no *Undecided:* prefix. <!-- D:FM35 --> |
+| *Alpha: Cutout (proposed) — confirm* | The **Alpha type** dropdown ([how it works](GUI-Texture-Panel.md#deciding)). A row with only this question has no *Undecided:* prefix. |
 | Export pitfalls, texture and set warnings | **Go to set** on a set's row. They are ordinary warnings: they never hold back Export or open Review. |
 | A file's export warnings, once the export has ended | Click the file to select it. |
 | Artist-check warnings ([Artist checks](GUI-Artist-Checks.md)) | A grey **check** dot that does not change "ready". A **Checks** pill narrows the list to them. |
@@ -25,7 +23,7 @@ A row is one line and does not wrap. The fix buttons sit at the panel's right ed
 
 Info rows never count against "ready", but the tab's number counts every row shown, these included. Each is something Tessalith changed for you that you may want back: a packing fill dropped because a helper now fills the channel, a format or tag reset when a texture's type changed, the types it set automatically. A `_curves`, `_curvature` or `_cavity` map no recipe reads is an info row too, with no button: "Read only by Also export; not written on its own".
 
-Each entry of the **Alpha type** dropdown has a hover that says what it does; the same dropdown is in Review and in a texture's settings. The row reads "(proposed)": the type is the image analysis's proposal, because a texture whose meshes decide its alpha is never asked.
+The **Alpha type** dropdown is also in Review and in a texture's settings. "(proposed)" is the image analysis's proposal; a texture whose meshes decide its alpha is never asked.
 
 ### What the GUI writes on its own
 
@@ -81,6 +79,6 @@ A set row keeps **Go to set** beside its fix. These buttons act only on their ow
 
 A click on a texture, set or file switches to the Textures view and selects it.
 
-The list opens narrowed when you arrive from a count: **N undecided** at the foot of the Textures column (*Undecided only ×*), a set's **⚠** badge, or the set editor's "N problems in this set — Show in Problems" line (*Set: name ×*). Click the chip to see everything. The **Checks** pill narrows to check rows (click again to see everything); with a set filter on, it narrows to that set's check rows and keeps the set.
+The list opens narrowed when you arrive from a count: **N undecided** at the foot of the Textures column (*Undecided only ×*), a set's **⚠** badge, or the set editor's "N problems in this set — Show in Problems" line (*Set: name ×*). Click the chip to see everything. The **Checks** pill narrows to check rows (click again to undo); with a set filter on, it narrows to that set's check rows and keeps the set.
 
-A green dot marks what is ready: a texture tile or a set with nothing to decide. The header **Export** button's own states are on [Review and Export](GUI-Review-and-Export.md#export).
+A green dot marks a texture tile or set with nothing to decide. The **Export** button's states are on [Review and Export](GUI-Review-and-Export.md#export).

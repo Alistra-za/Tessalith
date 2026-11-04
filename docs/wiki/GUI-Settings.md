@@ -28,10 +28,9 @@ The zoom, the selection and the open folder are not remembered.
 
 How `gui.toml` is written:
 - It is saved a couple of seconds after you change something, and when you close the window. Starting and closing without changing anything does not rewrite it.
-- If the saved window would be off every screen (a monitor was unplugged), it opens centred on the main screen. If only its title bar would be off the screen, it moves down so you can still drag it.
+- If the saved window would be off every screen (a monitor was unplugged), it opens centred on the main screen. If only its title bar would be off the screen, it moves down.
 - A value that makes no sense is ignored on its own; the rest of the file still applies. So is the key of a setting that no longer exists, and the next save leaves it out.
-- If you edit `gui.toml` while Tessalith runs, your edit is kept: the next save reads the file again and keeps every value Tessalith has not changed since its last save. A value both changed takes Tessalith's.
-- Recent folders merge folder by folder: a folder you removed by hand stays removed, one you added stays, and folders Tessalith added are kept.
+- If you edit `gui.toml` while Tessalith runs, the next save reads the file again and keeps every value Tessalith has not changed since its last save. A value both changed takes Tessalith's. Recent folders merge folder by folder: a folder you removed by hand stays removed, and one you added stays.
 - If `gui.toml` cannot be written, a warning says why, once per distinct error.
 - A `gui.toml` that does not parse is kept as `gui.toml.bad`, with a warning, before the new one is written.
 

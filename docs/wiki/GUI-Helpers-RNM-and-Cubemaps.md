@@ -16,7 +16,7 @@ Under the tiles, the Textures column has a **Helpers (n)** heading and one compa
 
 Click the **Helpers (n)** heading (▾ open, ▸ collapsed) to collapse or open the group. It is open by default, the choice is saved in `gui.toml`, and there is no heading when the project has no helpers.
 
-- Collapsing is not a filter: it does not count as hidden, and **Clear filters** leaves it alone.
+- Collapsing is not a filter: **Clear filters** leaves it alone.
 - Select all and the arrow keys never reach collapsed rows, and a Shift+click range skips them. A helper that stays selected inside a collapsed group is counted in the heading ("2 selected (1 in the collapsed Helpers group)").
 - Revealing a helper, for example from the palette (Ctrl+K), opens the group.
 - The search box and the other pills filter helper rows too.
@@ -40,7 +40,7 @@ The centre shows the helper's name, a link back to its set, and the same "fills 
   - `_cnr` alpha (coat roughness) is never suggested; add it here if your roughness map is meant for the coat.
   - Targets the engine skipped are listed under the controls ("Skipped iron alpha: iron.png already has alpha").
 - **Read from.** Which channel of the helper is used: **Auto (R)**, **R**, **G**, **B**, **A** or **Luminance** (`helper.read`). Auto removes the setting. Use it for a mask stored in another channel.
-- **Invert.** Flips what the helper feeds, white to black (`helper.invert = true`), for an inverted mask. A gloss map feeding the packed roughness needs no Invert: give it the role *Glossiness*, and packing turns gloss into roughness by itself. Invert there would write gloss into the roughness channel. An alpha fill has no automatic conversion, so there Invert is the only flip.
+- **Invert.** Flips what the helper feeds, white to black (`helper.invert = true`). A gloss map feeding the packed roughness needs no Invert: give it the role *Glossiness*, and packing turns gloss into roughness (Invert there would write gloss into the roughness channel). An alpha fill has no automatic conversion, so there Invert is the only flip.
 - **Blends into** (RNM layers only, in place of Fills, Read from and Invert): *Normal*, *CNR* or *Both*, the `rnm.target` of the layer file. It shows the target in effect, including the `_cnr` fallback for a set without `_n`.
 - **Show <output>** buttons under the controls select each output the helper fills.
 
@@ -61,7 +61,7 @@ A set's `_bump`, `_bump2`, `_detailnorm`, `_detailnorm2` and `_bent` files (and 
 - Select the normal: its settings have an **RNM** section with a switch for the whole blend, one strength slider per layer, the layer order and, for `_bent`, the AO options (*AO blend* or *Like a detail*, *AO power*, *use AO*).
 - The normal (or `_cnr`) card has an outline in the accent colour (teal) while RNM is active (layers present and enabled). A slot the shader cannot use keeps its amber outline instead.
 - When the set has both an `_n` and a `_cnr`, each layer has a **target** switch (*Normal*, *CNR* or *Both*), written as `rnm.target` on the layer file's `[files]` entry. The layer's helper panel (**Blends into**) edits the same key.
-- Under the RNM switch, **Blended normal** shows the result at 128 px: the normal with every enabled layer blended in, drawn as `(n + 1) / 2`. It is made in the background with the same blend the export uses, and refreshes when a strength slider is released or the layer order changes; the old picture stays until the new one is ready. It is a small-size look, not the final pixels. When the blend fails it says "Preview unavailable: {reason}", with the reason from the failed read or blend.
+- Under the RNM switch, **Blended normal** shows the result at 128 px: the normal with every enabled layer blended in, drawn as `(n + 1) / 2`. It uses the export's blend, built in the background, and refreshes when a strength slider is released or the layer order changes. It is a small-size look, not the final pixels. When the blend fails it says "Preview unavailable: {reason}".
 - The `_bent` AO line shows the AO source (a raw AO map, or the B channel of `_rmaos`/`_rfaos`) as an inverted thumbnail, with a *use AO* tick. The note under it says Tessalith inverts the AO for you ([RNM layers](Texture-Packing.md#rnm-normal-layers)).
 - Set-level notes (no base for a layer, a layer ignored on an eye set, an orphan mask) appear under the set grid.
 

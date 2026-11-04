@@ -4,9 +4,7 @@ The 3D view of a set on a mesh, rendered with Direct3D 11 and your own Community
 
 ## Set preview (3D)
 
-The view does no work while it is hidden.
-
-**Layout.** The panel has one toolbar line, the frame in all the height left, and a **Details** footer under it, collapsed until you open it (each panel remembers it in `gui.toml`).
+**Layout.** The panel has one toolbar line, the frame in all the height left, and a **Details** footer under it, collapsed until you open it (each panel remembers it in `gui.toml`). The view does no work while it is hidden.
 
 The toolbar holds, for a set, *Encoded (exact export)* | *Source (faster, no compression)* and the **Mesh** list, then for both panels **View ▾**, **Copy image** and **Shader folder…**:
 
@@ -25,7 +23,7 @@ Details holds the rest: "Assumes your Tessalith JSON wins…", the preview size,
 
 ## A set in 3D
 
-The **2D | 3D** switch at the left of a set's heading row (next to its input name box) changes the centre pane in place. *2D* (the default) shows the [set editor](GUI-Set-Editor.md). *3D* shows the set's 3D view across the whole centre instead; the heading row stays above it. The switch is remembered in `gui.toml`, and the 3D view does no work while 2D is showing.
+The **2D | 3D** switch in a set's heading row changes the centre pane in place. *2D* (the default) shows the [set editor](GUI-Set-Editor.md); *3D* shows the set's 3D view across the whole centre, with the heading row above it. The switch is remembered in `gui.toml`.
 
 **TruePBR settings…** in the heading row opens a window you can move and resize, with the set's settings: the TruePBR settings (the coat settings under Multilayer, NiAlphaProperty and the rest), or for an Advanced skin set the skin card, plus the PBR Landscape card or the CS PBR records (Community Shaders target) and the complex material card when the set has them. An edit there shows in 3D right away. Whether it is open, and where, is remembered in `gui.toml`.
 
@@ -40,7 +38,7 @@ While the switch is on 3D, selecting any texture of a set (from the set or strai
 ## View options
 
 - **Debug view** (in *View ▾*, or **V** to step through): *Lit* is the normal Community Shaders render. *Albedo*, *Normals*, *Roughness*, *Metallic* and *AO* show one channel of the material. They are offered only when the Community Shaders build in use allows it and a loaded shape has that channel; where a shape has only a stand-in (non-PBR roughness as 1 − specular mask, vertex AO), the hover names it.
-- **Accurate (deferred)** (in *View ▾*, on by default): opaque shapes draw through Community Shaders' own deferred pass and composite, as in game; blended shapes still draw on top the forward way. Off uses the older forward path. If your Community Shaders build cannot run it, the view stays forward and a notice says why. The setting is remembered.
+- **Accurate (deferred)** (in *View ▾*, on by default): opaque shapes draw through Community Shaders' own deferred pass and composite, as in game; blended shapes still draw on top the forward way. Off uses the forward path. If your Community Shaders build cannot run it, the view stays forward and a notice says why. The setting is remembered.
 - **Missing textures** show in solid magenta in the frame (colour slots only; a missing normal, glow, specular or RMAOS map draws neutral), and are listed above it in magenta. A path that is a texture of the open folder has an *Open in Textures* button that selects it in the Textures view. A missing cube map (an environment map) keeps the renderer's plain stand-in instead, because a flat colour cannot go in a cube slot. In a NIF edit's **Source** view, a path that no mod ships but that PGPatcher's JSON replaces at run time (a PBR mod whose NIF still names the old path) is not listed as missing: one grey line says "1 texture path is replaced by PGPatcher at run time: switch to In game to see them", with the paths on hover; the frame still draws those slots in magenta. A path nothing supplies is still listed as missing.
 
 ## What it assumes

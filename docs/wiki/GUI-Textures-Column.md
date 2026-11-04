@@ -12,9 +12,8 @@ The **◀** on the column heading collapses the column to a thin strip; **▶** 
 
 ## Filters
 
-Above the search box is a row of pills: *Undecided*, *Warnings*, *Failed* and *Not in a set*, each with the number of textures it would show. Hover a pill for what it does. The pill row holds only filters; the Helpers group is not one.
-
-After the pills comes **Filter ▾**. It opens a popup with four combos, and stays open while you use it:
+Above the search box is a row of pills: *Undecided*, *Warnings*, *Failed* and *Not in a set*, each with the number of textures it would show.
+After the pills comes **Filter ▾**, a popup with four combos:
 
 | Combo | Values |
 |---|---|
@@ -47,7 +46,7 @@ The **−** and **+** buttons after **Filter ▾** (hover *Smaller tiles*, *Larg
 - 96 points to start;
 - **+** is greyed out at the top.
 
-A saved size above the top loads as it is. A saved size off the 16-point steps loads as it is and steps from there. Up and Down move by the number of tiles in a row, so they follow the size.
+A saved size above the top, or off the 16-point steps, loads as it is. Up and Down move by the number of tiles in a row.
 
 The filters, the sort and the tile size are remembered in `gui.toml` with the window layout ([GUI settings](GUI-Settings.md#where-settings-live)).
 

@@ -2,8 +2,6 @@
 
 How the GUI's dialogs behave: which key does what, how the buttons are laid out, and what each dialog's buttons say. For anyone who wants to know what Enter or Esc will do before pressing it.
 
-## Dialogs
-
 ## Dialog keys
 
 **Esc** is a dialog's Cancel (or Close), and so is a click outside it. The rename dialogs, **Copy settings** and **Fill from names** ignore a click outside, so a stray click cannot lose what you typed or chose.
@@ -19,11 +17,11 @@ In the "changed on disk" dialog Enter closes it without touching the file or you
 
 ## Dialog style
 
-Every dialog is one frame: a title, the question, and a footer of buttons on the right. The footer reads left to right: plain buttons, then the destructive one, then the Enter default.
+Every dialog has a title, the question, and a footer of buttons on the right: plain buttons, then the destructive one, then the Enter default.
 - The Enter default is drawn filled in the accent (teal) colour, so you can see what Enter will press. A dialog where Enter does nothing has no filled button.
 - A destructive button (Don't save, Discard, Delete, Reset, Overwrite, Stop the export) has a red outline and is never the default.
-- Each dialog is as wide as its cap: 420 points, Slot commands 640, the rename dialog 860. A button row too long for that width wraps onto a second row of the same height; the dialog never grows past that.
-- A long file name is cut in the middle in the button labels (**Replace {name}**), and the question above them gives the whole name.
+- A dialog is 420 points wide (Slot commands 640, the rename dialog 860); a long button row wraps onto a second row.
+- A long file name is cut in the middle in the button labels (**Replace {name}**); the question above gives the whole name.
 
 The buttons say what they do:
 

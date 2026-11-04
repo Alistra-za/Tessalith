@@ -17,15 +17,15 @@ In the Textures or Sets column:
 
 Helper rows take Ctrl+click and Shift+click; a Shift+click range runs over the tiles, then the helper rows shown, and skips a collapsed Helpers group. Ctrl+A and the arrow keys (with or without Shift) cover tiles only.
 
-Textures and sets are never selected together. The column heading counts the selection, for example "12 selected (4 hidden by filter)". Textures hidden by the search or a filter stay selected and are edited too. Sets work the same way ("2 selected (1 hidden by filter)").
+Textures and sets are never selected together. The column heading counts the selection ("12 selected (4 hidden by filter)"). Entries hidden by the search or a filter stay selected and are edited too.
 
 ### Editing them together
 
 With two or more textures selected, the centre shows their settings in one panel:
 
 - A row whose values differ reads *— mixed*. A row that applies to none of the selection and has no value reads *— not set*, greyed.
-- Picking a value writes it to every selected texture that can take it. Rows you do not touch are never written.
-- A row that some textures cannot take (a field locked for them, or one that does not apply, such as *Normal handling* on a diffuse) says *applies to K of N*. Hover it for the reasons.
+- Picking a value writes it to every selected texture that can take it; rows you do not touch are never written.
+- A row that some textures cannot take (a field locked for them, or one that does not apply, such as *Normal handling* on a diffuse) says *applies to K of N*, with the reasons on hover.
 - After each change, a line reports how many textures were written and why any were skipped.
 - **↺** resets the field on all of them. A reset is not blocked by a lock.
 
@@ -45,7 +45,7 @@ Right-clicking a selected tile or set keeps the selection; right-clicking anothe
 
 ![Select members of kind for two selected sets.](../img/gui/GUI-Bulk-and-Rename/members-of-kind.png)
 
-Every change of this kind is one undo step, and the folder is planned once. A read-only `sdc.toml` takes no bulk change. The Advanced drawer edits one texture at a time.
+Every change of this kind is one undo step, and the folder is planned once. A read-only `sdc.toml` takes no bulk change. The Advanced drawer edits one texture.
 
 ## Renaming
 
@@ -67,9 +67,7 @@ The dialog changes only the base name (the part before `_n`, `_normal` and so on
 - In Inputs mode, tick *Whole path* to run them over the folders too, for moving many files to another folder at once. The map suffix and the extension still stay.
 - Untick a row to leave it out.
 
-The table shows each old name, the kind its new name reads as, and the output it writes.
-
-**Apply** is greyed out while a row is red: two files or sets would end up with one name, a name Windows cannot use, a changed file extension, or an output name ending in a map suffix. Amber rows are warnings: a file whose name now reads as another kind of map, or an output that scanned meshes still use under its old name (renaming it leaves those meshes pointing at a file nothing writes). Packed outputs and textures in a pinned slot are skipped in Inputs mode. Apply is one undo step.
+The table shows each old name, the kind its new name reads as, and the output it writes. **Apply** is greyed out while a row is red: two files or sets would end up with one name, a name Windows cannot use, a changed file extension, or an output name ending in a map suffix. Amber rows are warnings: a file whose name now reads as another kind of map, or an output that scanned meshes still use under its old name (those meshes would point at a file nothing writes). Packed outputs and textures in a pinned slot are skipped in Inputs mode. Apply is one undo step.
 
 ### Input name box
 

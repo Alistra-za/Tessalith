@@ -28,7 +28,7 @@ The dialog that turns a set's normal map into a height map, an AO map or a curva
 - The set card's submenu also names the real map that replaced a file.
 - It cannot be undone.
 
-**Records.** The records live in `sdc-project.toml`'s `[generated]` table, outside Undo. They are also written at once to `_sdc/generated.json` beside `sdc-project.toml`, with the JSON hash records, so a file you generated and then closed without saving is still "generated here" next time. Opening the folder copies them back into `sdc-project.toml` quietly (no unsaved changes; the file catches up at your next Save). Where the two disagree, `_sdc/generated.json` wins over a hand edit of `sdc-project.toml`.
+**Records.** The records live in `sdc-project.toml`'s `[generated]` table, outside Undo. They are also written at once to `_sdc/generated.json` beside `sdc-project.toml`, with the JSON hash records, so a file you generated and then closed without saving is still "generated here" next time. Opening the folder copies them back into `sdc-project.toml` quietly (no unsaved changes; the file catches up at your next Save). `_sdc/generated.json` wins over a hand edit of `sdc-project.toml`.
 
 ## AO
 

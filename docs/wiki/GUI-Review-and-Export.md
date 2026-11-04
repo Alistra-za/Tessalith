@@ -8,13 +8,13 @@ What **Export** does, the Review panel that opens when something needs a look fi
 
 1. Export saves `sdc.toml` and `sdc-project.toml` first.
 2. When something needs an answer, [Review](#review) opens in the bottom panel instead of exporting.
-3. If a source file changed on disk since it was planned, the textures concerned show "changed on disk" and the Textures column offers **Reload**, which plans again, re-reading only the changed files. Export checks first and plans again by itself, so the export uses current files. The GUI also checks whenever its window regains focus.
+3. If a source file changed on disk since it was planned, the textures concerned show "changed on disk" and the Textures column offers **Reload**, which re-reads only the changed files. Export checks first and plans again by itself; the GUI also checks whenever its window regains focus.
 4. The bottom panel opens on its [Files tab](#the-files-tab).
 5. After a complete export, the PGPatcher JSON is written ([The JSON file](GUI-PGPatcher-JSON.md#the-json-file)). NIF edits are written after the textures ([NIF edits](#review)).
 
-**The header button.** **Export** reads "Review n files" in the plain button colour until the project is clean (a folder chosen, files to write, planning finished, nothing undecided), then "Export n files" in the accent colour. <!-- D:FB1 --> With no folder open it reads plain "Export". Hover it for "N files, M problems" and what Review still has open.
+**The header button.** **Export** reads "Review n files" until the project is clean (a folder chosen, files to write, planning finished, nothing undecided), then "Export n files" in the accent colour. <!-- D:FB1 --> With no folder open it reads plain "Export". Hover it for "N files, M problems" and what Review still has open.
 
-**Copy CLI command** (Files tab) copies the `sdc convert` command that reproduces this export from the command line: the same folder (with `--recursive`), output and thread count, and `--accept-suggestions high`, as the GUI plans. Because Export saved `sdc.toml` first, that command gives the same manifest records and the same DDS bytes for everything `sdc.toml` decides. One thing it does not carry over: the CLI reads neither `sdc-project.toml` nor the scan. Set edits (moved files, created sets, borrows, set renames, output names, set shaders) and the mesh and grass evidence from the scan do not apply to `sdc convert`, so sets that depend on them come out differently. The sub-types and alpha meanings that evidence decided are written to `sdc.toml`, so those carry over.
+**Copy CLI command** (Files tab) copies the `sdc convert` command that reproduces this export: the same folder (with `--recursive`), output and thread count, and `--accept-suggestions high`, as the GUI plans. Export saved `sdc.toml` first, so the command gives the same manifest records and DDS bytes for everything `sdc.toml` decides. The CLI reads neither `sdc-project.toml` nor the scan, so set edits (moved files, created sets, borrows, set renames, output names, set shaders) and the mesh and grass evidence do not apply, and sets that depend on them come out differently. The sub-types and alpha meanings that evidence decided are written to `sdc.toml`, so those carry over.
 
 The hash of each JSON Tessalith writes is recorded at once in `_sdc/generated.json` beside `sdc-project.toml`, so discarding unsaved edits after an export, a crash, or a read-only `sdc-project.toml` does not make the next export ask about Tessalith's own JSON. <!-- D:FC11 -->
 
@@ -28,10 +28,10 @@ Press **Export**: a clean project exports at once, but when something is blocked
 
 ![The Review tab.](../img/gui/GUI-Review-and-Export/review-tab.png)
 
-- Review does not lock the window. Keep editing and its lists update; Export from Review always uses the plan current at that moment.
+- Review does not lock the window. Keep editing and its lists update; Export from Review uses the plan current at that moment.
 - Review never exports by itself, not even when you decide the last texture: its **Export** button is the only way out. Enter does nothing there.
-- When Export becomes available, the button (in Review and in the header) turns to the accent colour, and the header's "Review n files" turns into "Export n files"; losing it takes both back.
-- **Size.** Review opens at 40 % of the window's height, worked out once, when Review first opens; drag its top edge to change that, and Tessalith remembers your height for Review. Review and Problems keep separate heights, so the tab strip moves when you switch between them. Under 1200 points of window width the sections stack in one scrolling column (Blockers, Undecided, then Also export as when it shows) instead of sitting side by side. Review's columns draw a thin scroll bar. In the Meshes view with a NIF selected the bottom panel (Review included) stops where the 3D preview keeps its 160 points; your height comes back in the Textures view.
+- When Export becomes available, the button in Review and in the header turns to the accent colour; losing it takes both back.
+- **Size.** Review opens at 40 % of the window's height, worked out when Review first opens; drag its top edge to change that, and Tessalith remembers your height. Review and Problems keep separate heights. Under 1200 points of window width the sections stack in one scrolling column (Blockers, Undecided, then Also export as when it shows). In the Meshes view with a NIF selected the bottom panel stops where the 3D preview keeps its 160 points; your height comes back in the Textures view.
 
 Each column's heading carries its count: **Blockers (n)**, **Undecided (n)**. Pitfalls and other warnings are not listed here: they are Warning rows in [Problems](GUI-Problems.md) and never hold back Export.
 
@@ -52,8 +52,8 @@ If a source changed on disk or a plan is still running, a click on Export waits 
 
 The **Files** tab of the bottom panel opens when Export starts. One row per file, with its state: queued, running, converted, validation failed, up to date, skipped, failed, cancelled.
 
-- While the export runs, its line reads *done/total · elapsed · files/s · ETA*. The bar and the text show the exact count. Files per second is the average of the last 10 seconds, and the ETA appears once 3 files have finished or 2 seconds have passed.
-- The list handles thousands of files: only the rows on screen are drawn. **Failed only** (failed, or failed validation) and **Has warnings** narrow it; together they show the files that match both. Click a row to select that texture. **Show in Explorer** on a row selects the written output once it exists, otherwise the source file.
+- While the export runs, its line reads *done/total · elapsed · files/s · ETA*. Files per second is the average of the last 10 seconds, and the ETA appears once 3 files have finished or 2 seconds have passed.
+- **Failed only** (failed, or failed validation) and **Has warnings** narrow it; together they show the files that match both. Click a row to select that texture. **Show in Explorer** on a row selects the written output once it exists, otherwise the source file.
 - A file's export warnings show when you hover its row, and the **Problems** tab lists them, once the export has ended, as rows that select the file.
 - **Cancel** stops the batch. **Save report…** writes the report (JSON Lines or Markdown) in the background and says "Saved report: <path>" (or why it failed) in the status line and a toast. **Copy CLI command** copies the matching `sdc` command ([above](#export)). **Open export folder** opens the export folder in Explorer (greyed out, with the reason, until Export has created it). **Close** collapses the panel.
 - What the export did besides converting (a JSON written, not written or kept, the borrowed-slot copies, files left in place) is listed under **Notes**, a collapsible list that scrolls when it is long. The Markdown report has the same lines under *Notes*; the JSON Lines report stays the engine's event stream.

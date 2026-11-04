@@ -4,7 +4,7 @@ Four checks that read the numbers Tessalith already measures while it plans, and
 
 ## Artist checks
 
-The checks only warn. No check blocks or cancels an export, none asks you anything, and none changes "ready": no amber dot on a tile, slot row or set, no "Not ready", and the header **Export** stays as it was. Each has its own switch in **Advanced → Checks** (all on by default, saved in `gui.toml`), and a switch hides its results at once, with no re-plan.
+The checks only warn. None blocks or cancels an export, asks you anything, or changes "ready" (no amber dot, no "Not ready", the header **Export** unchanged). Each has its own switch in **Advanced → Checks** (all on by default, saved in `gui.toml`); a switch hides its results at once, with no re-plan. Checks are computed from the analysis cache when a plan lands.
 
 | Check (switch) | What it flags |
 |---|---|
@@ -13,15 +13,13 @@ The checks only warn. No check blocks or cancels an export, none asks you anythi
 | **Parallax** | A height map (`_p`) or a complex `_m` alpha that uses too little range, clips, is mostly white, or is steep enough to tear; landscape sets whose displacement scales differ by more than 2×. Codes `CHK-PARALLAX` and `CHK-PARALLAX-SCALE`. |
 | **UV coverage** | UV islands that sit closer than 8 texels to each other for more than 2 % of the used texels, so colours bleed across them at a distance (mip 3 and up). Code `CHK-UV-GUTTER`. Needs a Meshes scan; see [below](#check-all-uv-coverage). |
 
-**When they run.** Checks are computed from the analysis cache when a plan lands, so they cost no extra load.
-
 ## Where the results show
 
-- **Problems rows.** Each warning is a row in the [Problems](GUI-Problems.md) tab, after the ordinary warnings, with a grey **check** dot. The tab shows a **Checks** pill while any exist; click it to narrow the list to check rows (click again to see everything). With a set filter on, it narrows to that set's check rows and keeps the set.
+- **Problems rows.** Each warning is a row in the [Problems](GUI-Problems.md) tab, after the ordinary warnings, with a grey **check** dot. The **Checks** pill narrows the list to them ([how](GUI-Problems.md#narrowing-the-list)).
 - **The ⓘ badge.** A set card shows **ⓘ n** beside its **⚠ n**, in the weak text colour: *n* counts the set's Warning-level results (a plain **ⓘ** means only Info results). Hover it for the list; click it to open Problems on that set.
 - **The green-direction guess** is a check row too, with **Treat as OpenGL** as its button (it flips green on that texture, one undo step). It also shows on the badge's hover and in the texture's own settings panel.
-- **Never in Review or in the Files rows.** A check never opens Review and is not copied into an export's file rows, so it does not show twice.
-- **The end-of-export summary.** When an export ends, one Info line (a toast and a Messages entry) counts the check rows, for example *Checks: 3 warnings on 1 texture and 1 set; see Problems*. It is not a dialog, so an open dialog stays.
+- **Never in Review or in the Files rows.** A check never opens Review and is not copied into an export's file rows.
+- **The end-of-export summary.** When an export ends, one Info line (a toast and a Messages entry) counts the check rows, for example *Checks: 3 warnings on 1 texture and 1 set; see Problems*.
 
 ## Preview overlay
 

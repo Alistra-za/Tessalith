@@ -28,7 +28,7 @@ Three labelled clusters in one wrapping flow, with only **✕ Close** pinned to 
 
 After them come the sRGB / UNORM display and the mip slider. Both panes show the values the file stores, so a source and its encode look alike under either display. HDR formats are tone-mapped for display (`x / (1 + x)` per colour channel, then sRGB), and so are the tiles of stored HDR files.
 
-A narrow toolbar wraps onto more rows in that order instead of clipping; a row that appears is drawn on the next frame. **Encode now** is filled in the accent colour while it can encode and plain while it cannot.
+A narrow toolbar wraps onto more rows in that order. **Encode now** is filled in the accent colour while it can encode.
 
 Scroll zooms and dragging pans. Readouts under the viewports show the PSNR, alpha and normal-length checks for the mip on show.
 
@@ -43,7 +43,7 @@ Scroll zooms and dragging pans. Readouts under the viewports show the PSNR, alph
 - **Tile 3×3** (**T**): the picture repeats three by three, to check the seams. Zoom, pan and the readout work on the tiled view; *Fit* fits all nine copies.
 - **Exposure.** For HDR formats (BC6H, RGBA16F) a slider from −8 to +8 EV scales the values by 2^EV before the tone map. It starts at 0 for every texture.
 - **Heatmap legend.** With the heatmap on, a colour bar under the viewports shows the scale from 0 to the *full scale* (the difference drawn white). A slider sets it from 0.005 to 0.5 (0.1 by default, about 25 codes of 255).
-  - The heatmap is made in the background. While a new one is made after a full-scale change, the previous one stays on show (a result for an older scale is shown as soon as it lands, so dragging the slider never blanks it).
+  - The heatmap is made in the background; after a full-scale change the previous one stays on show until the new one lands.
   - After a mip change the plain image shows instead, because a heatmap of another mip does not fit. The legend label reads "updating…", greyed, until the current heatmap is ready.
 
 ## Width and the settings strip
