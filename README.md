@@ -10,38 +10,38 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 
 - **Targets:** `cs` (Community Shaders with TruePBR; default) and `vanilla` ([Presets and targets](docs/wiki/Presets-and-Targets.md)).
 - **Scope:** it makes new textures. It does not fix an installed game folder.
-- **Platform and version:** Windows x64, version 1.0.0 (see the [CHANGELOG](CHANGELOG.md)). GPL-3.0-or-later.
+- **Platform and version:** Windows x64, version 2.0.0 (see the [CHANGELOG](CHANGELOG.md)). GPL-3.0-or-later.
 
 ## Features
 
 **Encoding and checks**
-- BC1, BC3, BC4, BC5, BC6H and BC7 output, with the [best encoder for each format](#uses-the-best-encoder-available).
+- BC1, BC3, BC4, BC5, BC6H and BC7 output, plus RGBA8, RGB8, R8 and RG8, with the [best encoder for each format](#uses-the-best-encoder-available). BC1 is encoded for NVIDIA and AMD decoders together.
 - [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) for data maps whose alpha matters.
-- Optional exact-opaque alpha 255 (forces BC7 mode 6's p-bit to 1; off by default).
+- Exact opaque alpha (255, not 254) for `_m` and environment masks, on by default there.
 - Every encode is decoded and checked against Skyrim's rules. DDS files made by other tools can be validated too.
-- [Artist checks](docs/wiki/GUI-Artist-Checks.md#artist-checks): warnings for problems such as a weak or clipped height map, and missing uv coverage. They never block an export.
+- [Artist checks](docs/wiki/GUI-Artist-Checks.md#artist-checks): warnings for a weak or clipped height map, missing UV coverage and similar. They never block an export.
 
 **Maps and packing**
-- Inputs: PNG, TGA, TIFF, EXR, PSD/PSB.
-- SRGB / UNORM (Linear) tag chosen per map type and target shader.
+- Inputs: PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB.
+- SRGB / UNORM (Linear) tag chosen per map type and target shader. Sizes round to a power of two automatically.
 - Cutout alpha: coverage-preserving mips, on by default. Normal mips are renormalised, and their variance is baked into TruePBR roughness.
-- Loose maps are picked up and packed into `_rmaos` / `_rfaos` / complex `_m`. Suffix-based channel remapping; ORM to RMAOS is instant. The complex-material `_m` gate is checked.
+- Loose maps are packed into `_rmaos` / `_rfaos` / complex `_m`, with suffix-based channel remapping (ORM to RMAOS is instant). The complex-material `_m` gate is checked.
 - RNM normal-layer blending (`_bump`, `_detailnorm`, `_bent`, with optional masks `_bumpmask`, `_detailnormmask`, `_bentmask`). See [RNM normal layers](docs/wiki/Texture-Packing.md#rnm-normal-layers).
-- [Generate from normal map](docs/wiki/GUI-Generate-From-Normal.md#generate-from-normal-map): makes height, AO and curvature maps from a set's normal.
-- Complex grass (1:2 image, halves mipped apart).
+- [Generate from normal map](docs/wiki/GUI-Generate-From-Normal.md#generate-from-normal-map): height, AO and curvature maps from a set's normal.
+- Complex grass (1:2 image, halves mipped apart) and [cubemaps](docs/wiki/Cubemaps.md).
 
 **Skyrim and mod aware**
-- Mod scan: meshes decide alpha meaning and set shader. Fast: 100,000 NIFs in 14 seconds, 1,500 plugins in under 3. See [Mod scanning](docs/wiki/Mod-Scanning.md).
-- TruePBR: PGPatcher JSON written per set, validated, with every option exposed, including recent ones. PGPatcher `_m` sidecar `.json`.
-- PBR Landscape: PBRTextureSets and PBRMaterialObjects JSONs built from the actual EDIDs in your load order.
+- Mod scan: meshes decide alpha meaning and set shader. 100,000 NIFs take 14 seconds, 1,500 plugins under 3 ([Mod scanning](docs/wiki/Mod-Scanning.md)).
+- TruePBR: PGPatcher JSON written per set and validated, with every option exposed, plus the PGPatcher `_m` sidecar `.json`.
+- PBR Landscape: PBRTextureSets and PBRMaterialObjects JSONs built from the EDIDs in your load order.
 - [Also export as Vanilla and Complex material](docs/wiki/GUI-Also-Export.md#also-export-as-vanilla-and-cm): converts PBR sets to those two formats.
-- Doesn't need to be launched from MO2, but can be. From MO2 it fills in your MO2 location the first time, It skips MO2's virtual file system either way.
+- Runs standalone or from MO2. From MO2 it fills in your MO2 location the first time; it skips MO2's virtual file system either way.
 
 **GUI**
-- Encoded-mip preview and pixel readout.
+- Encoded-mip preview with pixel readout, lens and difference heatmap.
 - [3D preview](docs/wiki/GUI-Set-Preview-3D.md#set-preview-3d) that matches Community Shaders' deferred rendering (**Accurate (deferred)**).
 - Context-menu options for slots and lock commands.
-- Colour picker with hex and RGB (0–255) inputs; outputs are converted to decimal.
+- Colour picker with hex and RGB (0–255) inputs.
 
 **NIF editing (in the 3D view)**
 - Edit NIF fields and shader flags.
@@ -58,11 +58,9 @@ Each format uses the encoder that measured best. The numbers behind the charts a
 
 ### BC7
 
-![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.32 dB RGB and alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. Compressonator and texconv CPU take 16 to 33 s and do not beat it. texconv GPU takes 0.03 to 0.09 s and loses 1.8 dB RGB and 2.8 dB alpha.](docs/img/encoder-bc7.svg)
+![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.32 dB RGB and alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. Compressonator and texconv CPU take 16 to 33 s and do not beat it. GPU encoders take 0.03 to 0.09 s and lose 1.8 to 2.8 dB.](docs/img/encoder-bc7.svg)
 
-`max` is opt-in and was measured on a separate sample ([Research](docs/wiki/Research.md#bc7-gpu-and-cpu-encoders-speed-and-quality)).
-
-For BC7 data maps with alpha, see the [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) chart.
+`max` is opt-in and was measured on a separate sample ([Research](docs/wiki/Research.md#bc7-gpu-and-cpu-encoders-speed-and-quality)). For BC7 data maps with alpha, see the [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) chart.
 
 ### Other formats
 
@@ -90,15 +88,13 @@ sdc validate out\textures\armor\iron\iron_n.dds --target cs
 
 Exit codes: 0 done, 1 some files failed or were skipped, 2 usage or config error, 3 fatal, 4 validation failed.
 
-**Unsigned exe.** Windows SmartScreen may warn on first run ([Installation](docs/wiki/Installation.md#the-release-zip)). Back up your mod folders before you convert in place.
+The exe is unsigned, so Windows SmartScreen may warn on first run ([Installation](docs/wiki/Installation.md#the-release-zip)). Back up your mod folders before you convert in place.
 
-## Where your data lives
+## More
 
-Settings, presets, the scan database, logs and the per-folder files are listed in [Installation](docs/wiki/Installation.md#where-tessalith-keeps-its-files).
-
-## Known issues and changes
-
-See [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
+- Settings, presets, the scan database, logs and per-folder files: [Installation](docs/wiki/Installation.md#where-tessalith-keeps-its-files).
+- [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
+- Design records: [.claude/DECISIONS.md](.claude/DECISIONS.md), [docs/presets-changelog.md](docs/presets-changelog.md) and the research pages in [docs/research/](docs/research/README.md).
 
 ## Documentation
 
@@ -107,12 +103,10 @@ See [Known issues](docs/wiki/Known-Issues.md) and the [CHANGELOG](CHANGELOG.md).
 | [Home](docs/wiki/Home.md) | [GUI guide](docs/wiki/GUI-Guide.md) | [CLI reference](docs/wiki/CLI-Reference.md) |
 | [Installation](docs/wiki/Installation.md) | [Texture types](docs/wiki/Texture-Types.md) (packing, TruePBR, RNM, grass) | [Project config](docs/wiki/Project-Config.md) |
 | [Getting started](docs/wiki/Getting-Started.md) | [Mod scanning](docs/wiki/Mod-Scanning.md) | [Presets and targets](docs/wiki/Presets-and-Targets.md) |
-| [FAQ](docs/wiki/FAQ.md) | [Research behind the defaults](docs/wiki/Research.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
-| [Troubleshooting](docs/wiki/Troubleshooting.md) | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | |
+| [FAQ](docs/wiki/FAQ.md) | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
+| [Troubleshooting](docs/wiki/Troubleshooting.md) | [Research behind the defaults](docs/wiki/Research.md) | |
 
-Optional plugins for Photoshop, GIMP 3, Paint.NET and chaiNNer are on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins), which gets bug fixes but is not kept in step with the engine.
-
-Design records: [.claude/DECISIONS.md](.claude/DECISIONS.md), [docs/presets-changelog.md](docs/presets-changelog.md) and the research pages in [docs/research/](docs/research/README.md).
+Optional plugins for Photoshop, GIMP 3, Paint.NET and chaiNNer that open and save DDS live on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins). It gets bug fixes but is not kept in step with the engine.
 
 ## Credits and licence
 
