@@ -190,3 +190,33 @@ fn help_names_the_user_presets_folder() {
         assert!(out.contains(r"%APPDATA%\sdc\presets"), "{args:?}: {out}");
     }
 }
+
+/// Note FM43: `presets show` gives the effort a BC6H sub-type encodes at (`slowest`) and says why; the stored preset
+/// value (`veryslow`, from the base) is what the other sub-types show, and a preset that sets the effort keeps it.
+#[test]
+fn presets_show_gives_the_bc6h_default_effort_and_its_reason() {
+    let show = |args: &[&str]| -> serde_json::Value {
+        let mut a = vec!["presets", "show"];
+        a.extend_from_slice(args);
+        let (code, out, err) = stdout_of(&a);
+        assert_eq!(code, 0, "{err}");
+        serde_json::from_str(&out).unwrap()
+    };
+    for st in ["pbr_emissive", "hdr_sky"] {
+        let v = show(&["cs-quality", "--subtype", st]);
+        assert_eq!(v["profile"]["encoder"]["effort"], "slowest", "{st}");
+        assert_eq!(
+            v["provenance"]["encoder.effort"], "builtin (BC6H default)",
+            "{st}"
+        );
+        // Every field the effort row shares with the stored value is untouched.
+        assert_eq!(v["profile"]["format"], "bc6h_uf16", "{st}");
+    }
+    let v = show(&["cs-quality", "--subtype", "diffuse"]);
+    assert_eq!(v["profile"]["encoder"]["effort"], "veryslow");
+    assert_eq!(v["provenance"]["encoder.effort"], "builtin");
+    // fast-preview sets the effort itself: it is not the BC6H default.
+    let v = show(&["fast-preview", "--subtype", "pbr_emissive"]);
+    assert_eq!(v["profile"]["encoder"]["effort"], "fast");
+    assert_ne!(v["provenance"]["encoder.effort"], "builtin (BC6H default)");
+}

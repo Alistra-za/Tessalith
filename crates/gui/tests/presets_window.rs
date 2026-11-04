@@ -460,6 +460,53 @@ fn the_mode_row_fits_at_1280() {
     }
 }
 
+/// Note FM43: the editor shows the effort a BC6H sub-type encodes at (Slowest) and says it is the default, without
+/// storing it; a stored Veryslow shows as itself.
+#[test]
+fn the_editor_shows_the_bc6h_default_effort_and_says_why() {
+    use engine::config::{Effort, Subtype};
+    use sdc_gui::ui::settings_panel::subtype_label;
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.open_presets();
+    m.presets_model().select("cs-quality");
+    m.presets_model().duplicate();
+    let pm = m.presets_model();
+    let before = pm.toml_text();
+    for st in [Subtype::PbrEmissive, Subtype::HdrSky] {
+        let row = pm.row(st).unwrap();
+        let (p, base) = (row.profile.as_ref().unwrap(), row.base.as_ref().unwrap());
+        assert_eq!(p.encoder.effort, Effort::Slowest, "{st:?}");
+        assert_eq!(base.encoder.effort, Effort::Slowest, "{st:?}");
+        assert!(row.peak && row.base_peak, "{st:?}");
+        assert_eq!(pm.field(st, "encoder.effort"), None, "stored value");
+    }
+    let d = pm.row(Subtype::Diffuse).unwrap();
+    assert_eq!(d.profile.as_ref().unwrap().encoder.effort, Effort::Veryslow);
+    assert!(!d.peak && !d.base_peak);
+    assert_eq!(pm.toml_text(), before, "showing the default stores nothing");
+    // A stored effort is the user's choice, not the default.
+    pm.set_field(
+        Subtype::PbrEmissive,
+        "encoder.effort",
+        serde_json::json!("veryslow"),
+    );
+    let row = pm.row(Subtype::PbrEmissive).unwrap();
+    assert_eq!(
+        row.profile.as_ref().unwrap().encoder.effort,
+        Effort::Veryslow
+    );
+    assert!(!row.peak && row.base_peak);
+    pm.clear_field(Subtype::PbrEmissive, "encoder.effort");
+    assert!(pm.row(Subtype::PbrEmissive).unwrap().peak);
+    // The row says why.
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains(&format!("{} —", subtype_label(Subtype::PbrEmissive)))
+        .click();
+    h.run();
+    h.get_by_label_contains("base: Slowest (BC6H default)");
+}
+
 /// The PBR / CS family comes first and is long: fold it so the Vanilla rows are on screen.
 fn collapse_pbr(h: &mut Harness<'static, AppModel>) {
     h.get_by_label("PBR / Community Shaders").click();

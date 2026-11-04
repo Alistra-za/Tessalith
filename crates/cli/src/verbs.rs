@@ -883,7 +883,9 @@ pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
                 out!("suffix aliases: {a}");
             }
             for st in subtypes {
-                let profile = reg.profile(&id, target, st).map_err(usage)?;
+                // The effort a BC6H sub-type encodes at (Note FM43), with the reason in its provenance.
+                let (profile, bc6h_default) =
+                    reg.effective_profile(&id, target, st).map_err(usage)?;
                 let mut prov = BTreeMap::new();
                 for (source, patch) in reg.layers(&id, st).map_err(usage)? {
                     let mut paths = vec![];
@@ -891,6 +893,9 @@ pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
                     for p in paths {
                         prov.insert(p, source.to_string());
                     }
+                }
+                if bc6h_default {
+                    prov.insert("encoder.effort".into(), "builtin (BC6H default)".into());
                 }
                 let shown = json!({ "subtype": st, "profile": profile, "provenance": prov });
                 out!(

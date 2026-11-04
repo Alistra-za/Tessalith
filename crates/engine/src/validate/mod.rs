@@ -129,6 +129,16 @@ pub fn psnr(a: &[[u8; 4]], b: &[[u8; 4]], ch: &[usize]) -> f64 {
     psnr_from_mse(s / (a.len() * ch.len()).max(1) as f64)
 }
 
+/// PSNR in dB of the Rec.709 luma (54, 183, 19 of 256, the integer weights `encoder.perceptual` gives rgbcx, Note FM42)
+/// of two equally long images; 99 dB when identical. Alpha is not part of luma.
+pub fn psnr_luma(a: &[[u8; 4]], b: &[[u8; 4]]) -> f64 {
+    let y = |p: &[u8; 4]| {
+        (54.0 * f64::from(p[0]) + 183.0 * f64::from(p[1]) + 19.0 * f64::from(p[2])) / 256.0
+    };
+    let s: f64 = a.iter().zip(b).map(|(x, z)| (y(x) - y(z)).powi(2)).sum();
+    psnr_from_mse(s / a.len().max(1) as f64)
+}
+
 fn finish(mut summary: ValidationSummary, warnings: Vec<Warning>) -> ValidationReport {
     summary.passed = !warnings.iter().any(|w| w.severity == Severity::Error);
     ValidationReport { summary, warnings }
@@ -268,13 +278,22 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
                 continue;
             };
             if !smallest_only || (l + 1) % per_face == 0 {
-                let q = psnr(e, d, &ch);
+                // Note FM43: a perceptual BC1, BC3 or BC7 trades RGB error for luma error on purpose, so it is scored
+                // on the luma the encoder optimised, against the same floor.
+                let luma = p.encoder.perceptual
+                    && matches!(p.format, Format::Bc1 | Format::Bc3 | Format::Bc7);
+                let q = if luma {
+                    psnr_luma(e, d)
+                } else {
+                    psnr(e, d, &ch)
+                };
                 s.min_mip_psnr_db = Some(s.min_mip_psnr_db.map_or(q, |m| m.min(q)));
                 if q < MIN_MIP_PSNR_DB {
+                    let what = if luma { " luma" } else { "" };
                     w.push(
                         Warning::new(
                             Code::ValMipError,
-                            format!("{}: {q:.2} dB < {:.1} dB", mip(l), MIN_MIP_PSNR_DB),
+                            format!("{}: {q:.2}{what} dB < {:.1} dB", mip(l), MIN_MIP_PSNR_DB),
                         )
                         .with_data(level_data(l, json!({"psnr": q}))),
                     );

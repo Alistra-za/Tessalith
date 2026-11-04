@@ -688,14 +688,26 @@ fn field_row(
             false,
         )
     });
+    // Note FM43: Slowest on a BC6H row that sets no effort is the engine's default, not a stored value.
+    let default_effort = field == "encoder.effort"
+        && scope.is_none()
+        && row.peak
+        && !own_value(pm, st, scope, field);
     if let Some(why) = lock {
         r.response.on_disabled_hover_text(why);
+    } else if default_effort {
+        r.response
+            .on_hover_text("BC6H default: no preset sets the effort, so BC6H encodes at slowest (the peak-preserving mode). Pick Veryslow for the plain mode.");
     }
     if let Some(v) = r.inner.0 {
         acts.push(set(st, scope, field, v));
     }
     let (h, name) = hint_profile(row, scope);
-    hint(ui, name, h.map(|b| label_of(&opts, &value_of(b, field))));
+    let mut shown = h.map(|b| label_of(&opts, &value_of(b, field)));
+    if field == "encoder.effort" && scope.is_none() && row.base_peak {
+        shown = shown.map(|s| format!("{s} (BC6H default)"));
+    }
+    hint(ui, name, shown);
     reset(ui, own_value(pm, st, scope, field), || {
         acts.push(clear(st, scope, field))
     });

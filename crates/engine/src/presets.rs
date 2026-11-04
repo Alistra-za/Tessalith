@@ -980,6 +980,41 @@ impl PresetRegistry {
         }
         finish_profile(doc, target, subtype)
     }
+
+    /// [`Self::profile`] as the encoder will use it: a BC6H profile whose effort no layer above the hidden base set
+    /// is at `slowest` ([`bc6h_peak_default`]). The flag says that rule applied, so a surface can name the reason. The
+    /// stored preset values are not changed, and the pins keep using [`Self::profile`].
+    pub fn effective_profile(
+        &self,
+        id: &str,
+        target: Target,
+        subtype: Subtype,
+    ) -> Result<(Profile, bool), PresetError> {
+        let mut doc = Value::Object(Map::new());
+        let mut effort_from = None;
+        for (source, patch) in self.layers(id, subtype)? {
+            if patch.pointer("/encoder/effort").is_some() {
+                effort_from = Some(source);
+            }
+            merge_json(&mut doc, &patch);
+        }
+        let mut p = finish_profile(doc, target, subtype)?;
+        let applied = bc6h_peak_default(&mut p, effort_from.as_ref());
+        Ok((p, applied))
+    }
+}
+
+/// Note FM43: BC6H encodes in the peak-preserving mode (`slowest`, FF1) unless a layer above the hidden base chose the
+/// effort (`effort_from` is that layer, `None` or the base when none did). Returns whether the rule applies, even when
+/// the effort already reads `slowest`. The one place the rule lives: `layered_profile_with` and the preset surfaces
+/// call it.
+pub fn bc6h_peak_default(p: &mut Profile, effort_from: Option<&Provenance>) -> bool {
+    let applies =
+        p.format == Format::Bc6hUf16 && matches!(effort_from, None | Some(Provenance::Builtin));
+    if applies {
+        p.encoder.effort = Effort::Slowest;
+    }
+    applies
 }
 
 /// One sub-type's profile document before identity fields: the chain's layers, then each config's defaults and its

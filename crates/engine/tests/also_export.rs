@@ -197,6 +197,30 @@ fn plain_sets_are_copied_and_their_bytes_match_the_pbr_folder() {
     }
 }
 
+/// Note FM43: the vanilla presets encode a diffuse perceptually and cs-quality does not, so the Vanilla phase encodes
+/// the diffuse itself instead of copying the PBR output. The normal map has the same profile in both and is copied.
+#[test]
+fn a_perceptual_vanilla_diffuse_is_encoded_not_copied() {
+    let (_d, m, loc) = project(cup);
+    let mut r = request(&m, &loc);
+    r.overrides.clear(); // the cs phase keeps its preset default (perceptual off for a diffuse)
+    let s = also(r, &spec(&loc, &[AlsoTarget::Vanilla])).0.unwrap();
+    assert_eq!(s.exit_code(), 0, "{s:#?}");
+    let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
+    let diffuse = "textures/clutter/cup.dds";
+    assert!(record(&van, diffuse).raw.get("copied_from").is_none());
+    assert_ne!(
+        std::fs::read(pbr.join(diffuse)).unwrap(),
+        std::fs::read(van.join(diffuse)).unwrap(),
+        "the perceptual encode differs from the plain one on a gradient"
+    );
+    assert!(record(&van, "textures/clutter/cup_n.dds")
+        .raw
+        .get("copied_from")
+        .is_some());
+    assert_eq!(s.copied, 1, "{s:#?}");
+}
+
 #[test]
 fn a_set_whose_vanilla_plan_differs_is_encoded_not_copied() {
     let (_d, m, loc) = project(plate);

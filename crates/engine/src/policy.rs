@@ -824,11 +824,7 @@ fn layered_profile_with(
     emissive_hdr_choice(ctx, &mut profile, &mut prov, f);
     // Note FM43: BC6H encodes in the peak-preserving mode unless a layer above the hidden base chose the effort.
     // Runs on the final format, so an LDR emissive that fell back to BC7 keeps the base effort.
-    if profile.format == Format::Bc6hUf16
-        && matches!(prov.get("encoder.effort"), None | Some(Provenance::Builtin))
-    {
-        profile.encoder.effort = Effort::Slowest;
-    }
+    crate::presets::bc6h_peak_default(&mut profile, prov.get("encoder.effort"));
     // Note FM43: a built-in preset's `perceptual` default (vanilla diffuse) yields to data alpha, which would refuse it
     // (FMT-PERCEPTUAL-DATA); an explicit `perceptual = true` is kept and reported.
     if profile.encoder.perceptual

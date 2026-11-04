@@ -147,6 +147,10 @@ pub struct Row {
     pub subtype: Subtype,
     pub profile: Result<Profile, String>,
     pub base: Option<Profile>,
+    /// Note FM43: `profile` / `base` show `slowest` because the sub-type is BC6H and no layer above the hidden base set
+    /// the effort. The stored preset values are unchanged.
+    pub peak: bool,
+    pub base_peak: bool,
     /// Note AP: one branch per suffix that names the sub-type, built-in suffixes first, then the draft's aliases.
     pub branches: Vec<Branch>,
 }
@@ -837,20 +841,39 @@ impl PresetsModel {
         let rows = Subtype::ALL
             .into_iter()
             .map(|st| {
+                // The layer that set the effort last, for the BC6H default (Note FM43).
+                let mut effort_from = None;
                 let doc = match (&parsed, &chain) {
                     (Ok(p), Ok(c)) => {
                         let mut all = c.clone();
                         all.push(p);
                         let mut doc = Value::Object(Map::new());
-                        for (_, patch) in PresetRegistry::layers_of(&all, st) {
+                        for (source, patch) in PresetRegistry::layers_of(&all, st) {
+                            if patch.pointer("/encoder/effort").is_some() {
+                                effort_from = Some(source);
+                            }
                             merge_json(&mut doc, &patch);
                         }
                         Ok(doc)
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e.clone()),
                 };
+                // A rule that sets the effort is a layer above the base: branches then keep what the rules gave.
+                let rule_effort = rules
+                    .iter()
+                    .any(|r| r.overrides.pointer("/encoder/effort").is_some());
                 let finish =
                     |doc: Value| finish_profile(doc, target, st).map_err(|e| e.to_string());
+                let peak_of =
+                    |p: &mut Profile| engine::presets::bc6h_peak_default(p, effort_from.as_ref());
+                let finish_branch = |doc: Value| {
+                    finish(doc).map(|mut p| {
+                        if !rule_effort {
+                            peak_of(&mut p);
+                        }
+                        p
+                    })
+                };
                 let branches = self
                     .suffixes(st)
                     .into_iter()
@@ -881,21 +904,29 @@ impl PresetsModel {
                         let by_alpha = layered(true).is_ok_and(|(_, a)| a);
                         Branch {
                             overrides: own.map_or(0, count_fields),
-                            profile: layered(true).and_then(|(d, _)| finish(d)),
-                            inherited: layered(false).and_then(|(d, _)| finish(d)),
+                            profile: layered(true).and_then(|(d, _)| finish_branch(d)),
+                            inherited: layered(false).and_then(|(d, _)| finish_branch(d)),
                             by_alpha,
                             suffix,
                             alias,
                         }
                     })
                     .collect();
-                let base = (!base.is_empty())
-                    .then(|| self.registry.profile(&base, target, st).ok())
-                    .flatten();
+                let (base, base_peak) = (!base.is_empty())
+                    .then(|| self.registry.effective_profile(&base, target, st).ok())
+                    .flatten()
+                    .map_or((None, false), |(p, on)| (Some(p), on));
+                let mut peak = false;
+                let profile = doc.and_then(finish).map(|mut p| {
+                    peak = peak_of(&mut p);
+                    p
+                });
                 Row {
                     subtype: st,
-                    profile: doc.and_then(finish),
+                    profile,
                     base,
+                    peak,
+                    base_peak,
                     branches,
                 }
             })

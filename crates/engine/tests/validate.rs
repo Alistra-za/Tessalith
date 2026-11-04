@@ -805,6 +805,37 @@ fn height_clip_skips_an_all_zero_alpha_but_not_a_mixed_one() {
     );
 }
 
+/// Note FM43: with `encoder.perceptual` on, a BC1, BC3 or BC7 mip is scored by Rec.709 luma PSNR against the same floor.
+/// The file below equals the input in luma and differs wildly in chroma: the RGB check warns, the luma one does not. A
+/// luma error still warns, perceptual or not, and the message says which metric it used.
+#[test]
+fn perceptual_mips_are_scored_on_luma() {
+    let mut p = profile(Subtype::Diffuse);
+    // Luma 108.75 and 108.7 (54 R + 183 G + 19 B of 256); the RGB PSNR of the pair is about 6 dB.
+    let input = [EncoderInput::Ldr(vec![[200, 90, 30, 255]; 64])];
+    let (b, _) = dds(&p, &[flat(8, [60, 110, 235, 255])]);
+    let warns = |r: &ValidationReport| r.warnings.iter().any(|w| w.code == Code::ValMipError);
+    assert!(warns(&run(&b, &p, Some(&input), None, None)));
+    p.encoder.perceptual = true;
+    let r = run(&b, &p, Some(&input), None, None);
+    assert!(!warns(&r), "{:?}", r.warnings);
+    assert!(r.summary.min_mip_psnr_db.unwrap() > 40.0);
+    // Other formats ignore the flag: RGBA8 is scored on RGBA as before.
+    let mut q = p.clone();
+    q.format = Format::Rgba8;
+    let (b8, _) = dds(&q, &[flat(8, [60, 110, 235, 255])]);
+    assert!(warns(&run(&b8, &q, Some(&input), None, None)));
+    // A real luma error warns under perceptual too, naming the metric.
+    let dark = [EncoderInput::Ldr(vec![[10, 10, 10, 255]; 64])];
+    let r = run(&b, &p, Some(&dark), None, None);
+    let w = r
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::ValMipError)
+        .expect("a luma error warns");
+    assert!(w.message.contains("luma"), "{}", w.message);
+}
+
 /// M6 Track D (Note T5): `validation.mips = smallest` checks PSNR on the last level only; coverage on every level (audit 13, DECISIONS Note Y6).
 #[test]
 fn smallest_mip_validation_checks_psnr_on_the_last_level_and_coverage_on_all() {
