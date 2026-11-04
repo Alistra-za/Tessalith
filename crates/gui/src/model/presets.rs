@@ -839,6 +839,19 @@ impl PresetsModel {
             _ => vec![],
         };
         let aliases = self.aliases();
+        // The branch rules' overrides, read once (L59): `scope` would clone the rules and re-key each per branch.
+        let branch_overrides: Vec<(Subtype, String, &toml::Table)> = self
+            .draft
+            .as_ref()
+            .and_then(|d| d.table.get("rules"))
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let (st, suffix, _) = self.branch_key(r)?;
+                Some((st, suffix, r.get("overrides")?.as_table()?))
+            })
+            .collect();
         let rows = Subtype::ALL
             .into_iter()
             .map(|st| {
@@ -886,7 +899,10 @@ impl PresetsModel {
                             .map(|(a, c)| (a.clone(), c.clone(), true)),
                     )
                     .map(|(suffix, canon, alias)| {
-                        let own = self.scope(st, Some(&suffix));
+                        let own = branch_overrides
+                            .iter()
+                            .find(|(s, x, _)| *s == st && *x == suffix)
+                            .map(|(_, _, t)| *t);
                         let facts = BranchFacts {
                             st,
                             canon: &canon,
