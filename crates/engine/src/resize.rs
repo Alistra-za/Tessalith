@@ -113,7 +113,12 @@ pub(crate) fn plan_references(
         .map(|j| {
             let p = &j.profile;
             let n = p.resize_relative_to.slot()?;
-            if p.resize.is_none() || p.subtype.txst_slot() == Some(n) {
+            // A cube is sized by `cubemap.face_size`, as `target_dims` says (ruling FR-c).
+            // A cube is sized by `cubemap.face_size`, as `target_dims` says (ruling FR-c).
+            if p.resize.is_none()
+                || p.subtype == Subtype::Cubemap
+                || p.subtype.txst_slot() == Some(n)
+            {
                 return None;
             }
             let maps: Vec<_> = jobs

@@ -983,6 +983,7 @@ pub struct Profile {
         default = "default_resize_floor",
         skip_serializing_if = "is_default_resize_floor"
     )]
+    #[schemars(range(min = 1, max = 16384))]
     pub resize_floor: u32,
     /// What `resize` is measured from (Note FM44): `self`, the map's own size, or `slot1` … `slot8`, the source size
     /// of the set's map in that texture-set slot. The map is halved while its longer side is above that size halved

@@ -2494,7 +2494,8 @@ impl Engine {
             }
         }
         // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes,
-        // the RNM layers and `file_planned` read the sizes. Sizes come from pass 1's loads, so nothing is read again.
+        // the RNM layers and `file_planned` read the sizes. A cube's size comes from pass 1's facts; any other map's
+        // from `input_dims`, which reads the file's header again (a few header reads per relative job).
         let known = |p: &Path| {
             cube_facts
                 .get(p)

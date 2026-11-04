@@ -585,6 +585,30 @@ fn six_faces_become_one_job() {
     assert!(cj.sources.iter().all(|s| s.stamp.is_some()));
 }
 
+/// Ruling FR-c: `cubemap.face_size` sizes a cube, so `resize_relative_to` reads no slot and says nothing (no
+/// RESIZE-NO-REFERENCE claiming a resize that never happens).
+#[test]
+fn a_cube_ignores_resize_relative_to() {
+    let d = tempfile::tempdir().unwrap();
+    faces(d.path(), "textures/a/chrome_e", 32);
+    let p = plan(
+        d.path(),
+        &[
+            "subtype:cubemap.resize=half",
+            "subtype:cubemap.resize_relative_to=slot1",
+        ],
+    );
+    let j = job(&p, "chrome_e.dds");
+    assert_eq!(j.profile.resize_reference, None);
+    assert!(
+        !j.warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ResizeNoReference),
+        "{:#?}",
+        j.warnings
+    );
+}
+
 #[test]
 fn cubemaps_folder_faces_group_without_e() {
     let d = tempfile::tempdir().unwrap();

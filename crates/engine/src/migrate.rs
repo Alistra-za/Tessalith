@@ -284,7 +284,21 @@ fn shown_key(k: &str) -> String {
     }
 }
 
-fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String) -> Option<String> {
+/// The rows that `segs` with a value matching `has` hits: the first row only, except that a list (`allow`) gets one
+/// row per removed value it holds (rows of one key with `value: Some` name distinct values).
+fn rows_hit<'r>(segs: &[&str], list: bool, has: impl Fn(&str) -> bool) -> Vec<&'r Removed> {
+    let mut hits = REMOVED
+        .iter()
+        .filter(|r| key_hit(r, segs) && r.value.is_none_or(&has));
+    match (list, hits.next()) {
+        (true, Some(first)) if first.value.is_some() => std::iter::once(first)
+            .chain(hits.filter(|r| r.value.is_some()))
+            .collect(),
+        (_, first) => first.into_iter().collect(),
+    }
+}
+
+fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String, out: &mut Vec<String>) {
     match v {
         Value::Table(t) => {
             for (k, child) in t {
@@ -299,15 +313,14 @@ fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String) -> Option
                     Value::Array(a) => a.iter().any(|x| x.as_str() == Some(w)),
                     _ => false,
                 };
-                let hit = REMOVED
-                    .iter()
-                    .find(|r| key_hit(r, segs) && r.value.is_none_or(value_hit));
-                if let Some(r) = hit {
-                    return Some(format!("{shown}: removed in 2.0; {}", r.hint));
+                let hits = rows_hit(segs, child.is_array(), value_hit);
+                if hits.is_empty() {
+                    walk(child, segs, shown, out);
                 }
-                if let Some(m) = walk(child, segs, shown) {
-                    return Some(m);
-                }
+                out.extend(
+                    hits.iter()
+                        .map(|r| format!("{shown}: removed in 2.0; {}", r.hint)),
+                );
                 segs.pop();
                 shown.truncate(keep);
             }
@@ -316,20 +329,32 @@ fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String) -> Option
             for (i, child) in a.iter().enumerate() {
                 let keep = shown.len();
                 shown.push_str(&format!("[{i}]"));
-                if let Some(m) = walk(child, segs, shown) {
-                    return Some(m);
-                }
+                walk(child, segs, shown, out);
                 shown.truncate(keep);
             }
         }
         _ => {}
     }
-    None
 }
 
-/// First removed key or value in a config or preset table: `<dotted path>: removed in 2.0; <hint>`.
+/// Ruling FR-a: at most this many hits are listed, then "and N more".
+const LISTED: usize = 10;
+
+fn listed(hits: Vec<String>) -> Option<String> {
+    let more = hits.len().saturating_sub(LISTED);
+    let mut m = hits.into_iter().take(LISTED).collect::<Vec<_>>().join("\n");
+    if more > 0 {
+        m.push_str(&format!("\nand {more} more"));
+    }
+    (!m.is_empty()).then_some(m)
+}
+
+/// Every removed key or value in a config or preset table, one per line (`<dotted path>: removed in 2.0; <hint>`),
+/// in key order; past [`LISTED`] the last line is `and N more`.
 pub fn removed_in(v: &Value) -> Option<String> {
-    walk(v, &mut vec![], &mut String::new())
+    let mut out = vec![];
+    walk(v, &mut vec![], &mut String::new(), &mut out);
+    listed(out)
 }
 
 /// The same for one `--set field=value`. `field` may carry a `file:<glob>.` prefix: only its last segments count.
@@ -343,10 +368,12 @@ pub fn removed_set(field: &str, value: &str) -> Option<String> {
         .split(',')
         .map(|e| e.trim().trim_matches(['"', '\'']))
         .collect();
-    let r = REMOVED
-        .iter()
-        .find(|r| key_hit(r, &segs) && r.value.is_none_or(|w| items.contains(&w)))?;
-    Some(format!("{field}: removed in 2.0; {}", r.hint))
+    let hits = rows_hit(&segs, items.len() > 1, |w| items.contains(&w));
+    listed(
+        hits.iter()
+            .map(|r| format!("{field}: removed in 2.0; {}", r.hint))
+            .collect(),
+    )
 }
 
 fn toml_version(v: &Value, key: &'static str, absent: Option<u32>) -> Result<u32, MigrateError> {
@@ -484,6 +511,54 @@ mod tests {
         assert!(removed_set("file:a.png.subtype", "\"rfaos\"").is_some());
         assert_eq!(removed_set("format", "bc7"), None);
         assert_eq!(removed_set("subtype", "diffuse"), None);
+    }
+
+    /// Ruling FR-a: every hit in one error (10 lines, then "and N more"), so one editing pass fixes a 1.x file.
+    #[test]
+    fn every_removed_key_is_listed_in_one_error() {
+        let mut text =
+            String::from("[defaults]\nencoder = { backend = \"bc7e\" }\nresize = \"pot-down\"\n");
+        for i in 0..20 {
+            text.push_str(&format!("[files.\"t{i:02}.png\"]\ndrop_top_mip = true\n"));
+        }
+        let MigrateError::Removed(m) = migrate_config(t(&text)).unwrap_err() else {
+            panic!()
+        };
+        let lines: Vec<&str> = m.lines().collect();
+        assert_eq!(lines.len(), 11, "{m}");
+        assert!(
+            lines[0].starts_with("defaults.encoder.backend: removed in 2.0;"),
+            "{m}"
+        );
+        assert!(
+            lines[1].starts_with("defaults.resize: removed in 2.0;"),
+            "{m}"
+        );
+        assert!(
+            lines[2].starts_with("files.\"t00.png\".drop_top_mip: removed in 2.0;"),
+            "{m}"
+        );
+        assert_eq!(lines[10], "and 12 more");
+        // A single hit reads as before.
+        let one = removed_in(&t("[files.\"a.png\"]\ndrop_top_mip = true")).unwrap();
+        assert_eq!(
+            one,
+            "files.\"a.png\".drop_top_mip: removed in 2.0; use resize = \"half\""
+        );
+        // Two removed codes in one allow list, from a config or `--set`.
+        let m = removed_in(&t("allow = [\"CHK-RANGE\", \"CHK-PLASTIC\"]")).unwrap();
+        assert!(
+            m.contains("CHK-RANGE was") && m.contains("CHK-PLASTIC was"),
+            "{m}"
+        );
+        let m = removed_set("allow", "[\"CHK-RANGE\", \"CHK-PLASTIC\"]").unwrap();
+        assert!(
+            m.contains("CHK-RANGE was") && m.contains("CHK-PLASTIC was"),
+            "{m}"
+        );
+        // The nvtt row still wins over the generic backend row: one line, naming the value.
+        let m = removed_in(&t("[defaults]\nencoder = { backend = \"nvtt\" }")).unwrap();
+        assert!(!m.contains('\n') && m.contains("NVTT was removed"), "{m}");
     }
 
     #[test]

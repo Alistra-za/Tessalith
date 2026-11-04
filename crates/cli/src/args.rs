@@ -286,16 +286,25 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
     r.user_config =
         std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("config.toml"));
     r.user_presets = user_presets_dir();
-    r.overrides = b
-        .set
-        .iter()
-        .map(|s| parse_set(s))
-        .collect::<Result<_, _>>()?;
-    r.allow = b
-        .allow
-        .iter()
-        .map(|a| Code::parse_allow(a))
-        .collect::<Result<_, _>>()?;
+    // Ruling FR-a: every bad `--set` and `--allow` in one error, so a pasted 1.x command is fixed in one pass.
+    let mut bad = vec![];
+    for s in &b.set {
+        match parse_set(s) {
+            Ok(o) => r.overrides.push(o),
+            Err(e) => bad.push(e),
+        }
+    }
+    for a in &b.allow {
+        match Code::parse_allow(a) {
+            Ok(c) => {
+                r.allow.insert(c);
+            }
+            Err(e) => bad.push(e),
+        }
+    }
+    if !bad.is_empty() {
+        return Err(bad.join("\n"));
+    }
     r.accept = match b.accept_suggestions {
         AcceptArg::None => AcceptSuggestions::None,
         AcceptArg::High => AcceptSuggestions::High,

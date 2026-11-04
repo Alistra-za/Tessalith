@@ -160,6 +160,30 @@ fn allowing_a_removed_nvtt_code_names_the_removal() {
     assert!(text(&o.stderr).contains("unknown code"));
 }
 
+/// Ruling FR-a: every removed `--set` and `--allow` is named in the one error, not only the first.
+#[test]
+fn every_removed_set_and_allow_is_named_at_once() {
+    let o = sdc()
+        .args([
+            "convert",
+            "--set",
+            "drop_top_mip=true",
+            "--set",
+            "resize=pot-down",
+            "--allow",
+            "CHK-RANGE",
+            "in",
+            "out",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 2);
+    let e = text(&o.stderr);
+    for k in ["drop_top_mip", "pot-down", "CHK-RANGE"] {
+        assert!(e.contains(k), "{k}: {e}");
+    }
+}
+
 #[test]
 fn bad_mem_budget_is_a_usage_error() {
     for bad in ["8Q", "G", "-1", "99999999999999999999G"] {
