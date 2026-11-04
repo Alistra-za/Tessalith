@@ -3601,9 +3601,11 @@ fn compact_2048_varying_alpha_diffuse_with_a_blend_mesh_plans_1024_bc7() {
     assert_eq!(resize_of(&o, "a/wall.png"), "half");
 }
 
+/// The normal halves beside its full-size (opaque, BC1) diffuse; a lone normal keeps its size (Note FM44).
 #[test]
 fn compact_2048_normal_plans_1024() {
     let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/wall.png", rgb_wh(2048, 2048));
     put(d.path(), "textures/a/wall_n.png", flat_normal(2048));
     let o = plan_preset(d.path(), Target::Cs, "cs-compact", &[]);
     assert_eq!(
@@ -3628,9 +3630,11 @@ fn compact_512_mask_stays_512() {
     assert_eq!(format_prov(&o, "a/wall_m.png").0, "bc4");
 }
 
+/// Beside its full-size diffuse (Note FM44).
 #[test]
 fn compact_1024x512_plans_512x256() {
     let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/wide.png", rgb_wh(1024, 512));
     put(d.path(), "textures/a/wide_n.png", rgb_wh(1024, 512));
     let o = plan_preset(
         d.path(),

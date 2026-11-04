@@ -2398,6 +2398,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Open: mip PSNR.** Perceptual BC7 lowers RGB PSNR, which `VAL-MIP-ERROR` (30 dB floor, RGB) measures. On a smooth 64 px gradient (`golden`'s `rgb(64)`) the 8x8 and 4x4 mips of a vanilla diffuse read 28.95 and 23.00 dB, so three golden "clean fixture" tests (`vanilla_diffuse_bc7_unorm_no_srgb_full_chain`, `bmp_diffuse_is_bc7_unorm`, `vanilla_g_is_glow_and_m_with_alpha_is_envmask_with_loss`) now set `encoder.perceptual=false`. The warning does not block the write. Owner item: weight the PSNR check the way the encoder weights the error, or accept the warning.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM44, 2026-11-03)
+  - **`resize`** is `none`, `half`, `quarter` or `eighth`: `resize::shrink` halves both axes 1, 2 or 3 times (each at least 1 px), each time only while the longer side / 2 is still ≥ `resize_floor`. `resize_floor` is a new top-level `Profile` field, default 512 (`DEFAULT_RESIZE_FLOOR`), valid 1..=16384 (outside: `CFG-INVALID` "resize_floor N outside 1..=16384", test `policy_checks::a_resize_floor_out_of_range_is_cfg_invalid`; 0 would mean the same as 1, so it is refused rather than given a meaning), not serialised at its default, so existing profile hashes and identities hold where it is unset. `sdc-base` sets `[subtypes.height] resize_floor = 256`, so a 512² height map under `cs-compact` or `vanilla-compact` (`resize = "half"`) is written 256². `target_dims(dims, p)` = `shrink(pot_dims or dims, p.resize, p.resize_floor)`, used by the pipeline, the DIM checks, the bake plan, `estimated_bytes`, admission and the GUI's size estimate.
+
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)

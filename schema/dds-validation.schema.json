@@ -81,6 +81,7 @@
         "DIM-FLOW-SMALL",
         "DIM-RESIZED",
         "DIM-TOO-LARGE",
+        "RESIZE-NO-REFERENCE",
         "SET-MISSING-COMPANION",
         "SET-COMPANION-DDS",
         "SET-BAKE-RATIO",

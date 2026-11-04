@@ -113,11 +113,12 @@ pub fn weighting_value(p: &Profile) -> Value {
 }
 
 /// The rarely changed fields the Advanced drawer edits (M3a spec §2.5).
-pub const ADVANCED_FIELDS: [(&str, &str); 5] = [
+pub const ADVANCED_FIELDS: [(&str, &str); 6] = [
     (WEIGHTING, "BC7 weighting"),
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
     ("header", "DDS header"),
     ("resize", "Resize"),
+    ("resize_relative_to", "Relative to"),
     ("resize_floor", "Size floor"),
 ];
 
@@ -430,6 +431,7 @@ pub(crate) fn views_of(
                 .unwrap_or_else(|| match field {
                     "mips.edge" => Value::from("wrap"),
                     "resize" => Value::from("none"),
+                    "resize_relative_to" => Value::from("self"),
                     "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
                     "encoder.bc1_alpha" => Value::from(false),
                     _ => Value::Null,

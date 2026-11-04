@@ -236,6 +236,21 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             opt(json!("quarter"), "Quarter"),
             opt(json!("eighth"), "Eighth"),
         ],
+        // Note FM44: own size, or a texture-set slot by the set editor's name for it (PBR names for a PBR map).
+        "resize_relative_to" => {
+            let pbr = target == Target::Cs
+                && (p.subtype.is_pbr_color()
+                    || matches!(
+                        p.subtype,
+                        Subtype::PbrNormal | Subtype::Rmaos | Subtype::CoatNormal
+                    ));
+            std::iter::once(opt(json!("self"), "Own size"))
+                .chain((1..=8u8).map(|n| {
+                    let name = crate::model::sets::slot_name(pbr, n);
+                    (json!(format!("slot{n}")), format!("Slot {n} · {name}"))
+                }))
+                .collect()
+        }
         // A hand-written floor outside the list (300) is listed too, so the combo reads "300 px".
         "resize_floor" => {
             let mut v = vec![64, 128, 256, 512, 1024, 2048];

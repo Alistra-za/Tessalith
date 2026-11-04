@@ -76,13 +76,87 @@ pub fn pot_exempt(p: &Profile) -> bool {
 }
 
 /// The size Preprocess writes: [`pot_dims`] unless `mips.levels = "none"`, then [`shrink`]. A cube is sized by
-/// `cubemap.face_size` (`cube::layout::face_size`), so its source keeps its size here.
+/// `cubemap.face_size` (`cube::layout::face_size`), so its source keeps its size here. With a planned
+/// `resize_reference` (Note FM44) the map is instead halved, as `shrink` halves, while its longer side is above the
+/// reference's longer side after the same power-of-two step and `shrink`; `[0, 0]` (no single map in the slot)
+/// keeps it at its own size.
 pub fn target_dims(dims: (u32, u32), p: &Profile) -> (u32, u32) {
     if p.subtype == Subtype::Cubemap {
         return dims;
     }
-    let base = if pot_exempt(p) { dims } else { pot_dims(dims) };
-    shrink(base, p.resize, p.resize_floor)
+    let pot = |d| if pot_exempt(p) { d } else { pot_dims(d) };
+    let (mut w, mut h) = pot(dims);
+    match p.resize_reference {
+        None => shrink((w, h), p.resize, p.resize_floor),
+        Some((0, _) | (_, 0)) => (w, h),
+        Some(r) => {
+            let (rw, rh) = shrink(pot(r), p.resize, p.resize_floor);
+            while w.max(h) > rw.max(rh) && w.max(h) / 2 >= p.resize_floor {
+                (w, h) = ((w / 2).max(1), (h / 2).max(1));
+            }
+            (w, h)
+        }
+    }
+}
+
+/// Note FM44: sets every job's `resize_reference` from its `resize_relative_to`, once the plan's jobs are final.
+/// `source` is a job's source size (a packed or derived job's sources' common size). A slot is read only with a
+/// `resize` mode and when it is not the map's own slot (relative to itself is the self rule); with no single map in
+/// the slot the reference is `[0, 0]` and the job gets RESIZE-NO-REFERENCE. A changed size replaces DIM-RESIZED.
+pub(crate) fn plan_references(
+    jobs: &mut [crate::policy::ResolvedJob],
+    source: impl Fn(&crate::policy::ResolvedJob) -> Option<(u32, u32)>,
+) {
+    use crate::codes::{Code, Warning};
+    let refs: Vec<Option<(u32, u32, usize)>> = jobs
+        .iter()
+        .map(|j| {
+            let p = &j.profile;
+            let n = p.resize_relative_to.slot()?;
+            if p.resize.is_none() || p.subtype.txst_slot() == Some(n) {
+                return None;
+            }
+            let maps: Vec<_> = jobs
+                .iter()
+                .filter(|o| o.set_key == j.set_key && o.profile.subtype.txst_slot() == Some(n))
+                .collect();
+            Some(match maps[..] {
+                [one] => source(one).map_or((0, 0, 1), |(w, h)| (w, h, 1)),
+                _ => (0, 0, maps.len()),
+            })
+        })
+        .collect();
+    for (j, r) in jobs.iter_mut().zip(refs) {
+        j.profile.resize_reference = r.map(|(w, h, _)| (w, h));
+        let Some((w, h, maps)) = r else {
+            continue;
+        };
+        let n = j.profile.resize_relative_to.slot().unwrap_or(0);
+        if (w, h) == (0, 0) {
+            let what = match maps {
+                0 => "no map".to_string(),
+                1 => "a map whose size could not be read".to_string(),
+                _ => format!("{maps} maps"),
+            };
+            j.warnings.push(
+                Warning::new(
+                    Code::ResizeNoReference,
+                    format!(
+                        "resize_relative_to = \"slot{n}\": the set has {what} in slot {n}, so this map keeps its own size"
+                    ),
+                )
+                .with_data(serde_json::json!({ "slot": n, "maps": maps })),
+            );
+        }
+        if let Some(src) = source(j) {
+            j.warnings.retain(|w| w.code != Code::DimResized);
+            j.warnings.extend(crate::policy::resized_warning(
+                src,
+                target_dims(src, &j.profile),
+                &j.profile,
+            ));
+        }
+    }
 }
 
 /// One axis resampled to `n` texels by linear interpolation, texel-centre aligned, edges clamped.

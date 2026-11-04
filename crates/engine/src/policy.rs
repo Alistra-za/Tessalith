@@ -2052,24 +2052,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     }
     // S-mips-7: the DIM checks read the size Preprocess writes. DIM-RESIZED is pushed after the last `add` (ruling F3).
     let (ow, oh) = crate::resize::target_dims((a.width, a.height), p);
-    // Note FM29: the message names the source and written sizes, and `resize` when it took part.
-    let mut resized = ((ow, oh) != (a.width, a.height)).then(|| {
-        let mode = match p.resize {
-            ResizeMode::None => String::new(),
-            m => format!(
-                " (resize = {})",
-                serde_json::to_value(m)
-                    .unwrap_or_default()
-                    .as_str()
-                    .unwrap_or("?")
-            ),
-        };
-        Warning::new(
-            DimResized,
-            format!("{}x{} → {ow}x{oh}{mode}", a.width, a.height),
-        )
-        .with_data(json!({ "from": [a.width, a.height], "to": [ow, oh] }))
-    });
+    let mut resized = resized_warning((a.width, a.height), (ow, oh), p);
     // A cube's source size is not its face size: its checks read the face (DECISIONS DS7). With no layout the
     // planner marks the file unclear, so no DIM-* here. Only a `mips.levels = "none"` texture keeps an odd size.
     if st != Subtype::Cubemap && !(ow.is_power_of_two() && oh.is_power_of_two()) {
@@ -2213,6 +2196,28 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
         });
     }
     w
+}
+
+/// DIM-RESIZED when a `from` source is written at `to` (Note FM29): the message names both sizes, and `resize` when it
+/// took part.
+pub(crate) fn resized_warning(from: (u32, u32), to: (u32, u32), p: &Profile) -> Option<Warning> {
+    (to != from).then(|| {
+        let mode = match p.resize {
+            ResizeMode::None => String::new(),
+            m => format!(
+                " (resize = {})",
+                serde_json::to_value(m)
+                    .unwrap_or_default()
+                    .as_str()
+                    .unwrap_or("?")
+            ),
+        };
+        Warning::new(
+            Code::DimResized,
+            format!("{}x{} → {}x{}{mode}", from.0, from.1, to.0, to.1),
+        )
+        .with_data(json!({ "from": [from.0, from.1], "to": [to.0, to.1] }))
+    })
 }
 
 /// Codes of `warnings` at severity `sev` (SUG-LOW-CONFIDENCE excluded), in first-seen order without repeats.

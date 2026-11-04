@@ -93,6 +93,8 @@ codes! {
     DimFlowSmall = "DIM-FLOW-SMALL" => Warning,
     DimResized = "DIM-RESIZED" => Info,
     DimTooLarge = "DIM-TOO-LARGE" => Error,
+    // Note FM44: `resize_relative_to` names a slot the set has no map in, or more than one; the map keeps its size.
+    ResizeNoReference = "RESIZE-NO-REFERENCE" => Info,
     SetMissingCompanion = "SET-MISSING-COMPANION" => Info,
     SetCompanionDds = "SET-COMPANION-DDS" => Warning,
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
@@ -255,7 +257,8 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 94);
+        assert_eq!(Code::ALL.len(), 95);
+        assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);
         assert_eq!(Code::ALL.last(), Some(&Code::CubeNoMips));

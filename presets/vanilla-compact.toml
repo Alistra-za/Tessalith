@@ -20,44 +20,65 @@ match = { alpha = "constant255", subtypes = ["diffuse", "pbr_albedo", "glow", "s
 overrides = { format = "bc1", resize = "none", encoder.perceptual = true }
 
 # Data maps and BC7 colour at half size: both sides halve when the larger is above 512 (spec §2.2).
+# The slot-1 colour maps halve their own size; every other map halves relative to the set's slot-1 map, so a map
+# already exported smaller is not halved again (owner, 2026-11-03, Note FM44).
 [subtypes.normal]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.landscape_normal]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.pbr_normal]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.msn]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.coat_normal]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.skin_wet]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.envmask]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.height]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.projected_noise]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.detail_normal]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.msn_specular]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.skin_sk]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.complex_material]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.rmaos]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.skin_rfaos]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.flow]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.generic_two_channel]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.generic_data]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.gray]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.diffuse]
 resize = "half"
 [subtypes.landscape_diffuse]
@@ -66,15 +87,21 @@ resize = "half"
 resize = "half"
 [subtypes.glow]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.pbr_subsurface]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.pbr_fuzz]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.subsurface_tint]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.backlight_tint]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.ui_sky]
 resize = "half"
+resize_relative_to = "slot1"
 [subtypes.skin_albedo]
 resize = "half"

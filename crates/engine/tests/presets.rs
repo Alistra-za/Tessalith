@@ -179,6 +179,13 @@ fn compact_and_fast_preview_resolve_as_designed() {
             ResizeMode::None
         };
         assert_eq!(p.resize, want, "{st:?}");
+        // Note FM44: the slot-1 colour maps halve their own size, every other halved map relative to slot 1.
+        let relative = if want == ResizeMode::Half && st.txst_slot() != Some(1) {
+            engine::config::ResizeRelativeTo::Slot1
+        } else {
+            engine::config::ResizeRelativeTo::Own
+        };
+        assert_eq!(p.resize_relative_to, relative, "{st:?}");
         // Formats are the quality preset's: BC1 comes from the rules only.
         assert_eq!(
             p.format,

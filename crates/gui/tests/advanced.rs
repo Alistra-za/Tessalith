@@ -308,6 +308,7 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
             "encoder.bc45_search_radius",
             "header",
             "resize",
+            "resize_relative_to",
             "resize_floor"
         ]
     );

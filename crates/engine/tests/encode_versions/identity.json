@@ -104,6 +104,20 @@
     "subtype": "diffuse",
     "width": 64
   },
+  "cov/textures/c/relhalf.dds": {
+    "format": "Bc1 { srgb: false }",
+    "height": 64,
+    "payload_sha256": "d44f278c767aea470f8094a5edcdd3370dbb06b2416cdf666f6b20d385bb8d58",
+    "subtype": "diffuse",
+    "width": 64
+  },
+  "cov/textures/c/relhalf_n.dds": {
+    "format": "Bc7 { srgb: false }",
+    "height": 32,
+    "payload_sha256@avx2": "07c8fe7460a326996db3a1266b406efa409491c90d3f521414298b8ea95b7216",
+    "subtype": "normal",
+    "width": 32
+  },
   "cov/textures/c/rg_bc5.dds": {
     "format": "Bc5",
     "height": 64,

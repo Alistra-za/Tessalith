@@ -661,6 +661,15 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 /// The size `job` holds its input at: its own, or for a pack, a derive or an alpha fill the common size its sources
 /// are enlarged to (Note FM30). `own` is `job.input`'s size, read once by the caller.
 fn job_dims(job: &ResolvedJob, own: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    job_dims_by(job, own, &input_dims)
+}
+
+/// [`job_dims`] with each other source's size from `read`.
+fn job_dims_by(
+    job: &ResolvedJob,
+    own: Option<(u32, u32)>,
+    read: &dyn Fn(&Path) -> Option<(u32, u32)>,
+) -> Option<(u32, u32)> {
     let mut paths: Vec<&Path> = vec![];
     paths.extend(
         job.pack
@@ -679,7 +688,7 @@ fn job_dims(job: &ResolvedJob, own: Option<(u32, u32)>) -> Option<(u32, u32)> {
     }
     let dims: Vec<_> = paths
         .iter()
-        .filter_map(|&p| if p == job.input { own } else { input_dims(p) })
+        .filter_map(|&p| if p == job.input { own } else { read(p) })
         .collect();
     crate::pack::common_size(&dims)
         .filter(|_| dims.len() == paths.len())
@@ -2484,6 +2493,24 @@ impl Engine {
                 );
             }
         }
+        // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes,
+        // the RNM layers and `file_planned` read the sizes. Sizes come from pass 1's loads, so nothing is read again.
+        let known = |p: &Path| {
+            cube_facts
+                .get(p)
+                .map(|&(w, h, _)| (w, h))
+                .or_else(|| input_dims(p))
+        };
+        crate::resize::plan_references(&mut jobs, |j| {
+            let own = known(&j.input);
+            match &j.cube {
+                Some(c) => own.map(|d| {
+                    let s = crate::cube::layout::source_cell(c.layout, d);
+                    (s, s)
+                }),
+                None => job_dims_by(j, own, &known),
+            }
+        });
         let ctx = ResolveCtx {
             shaders: &picks,
             ..base_ctx

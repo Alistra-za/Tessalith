@@ -342,6 +342,7 @@ pub const FIELD_PATHS: &[&str] = &[
     "header",
     "resize",
     "resize_floor",
+    "resize_relative_to",
     "encoder.effort",
     "encoder.perceptual",
     "encoder.bc7_weights",

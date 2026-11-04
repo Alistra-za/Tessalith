@@ -103,6 +103,31 @@ impl ResizeMode {
         *self == ResizeMode::None
     }
 }
+// What `resize` is measured from (Note FM44): the map's own size, or the source size of the set's map in a texture-set
+// slot. `//` on purpose: a `///` doc on a variant turns the schema into `oneOf`.
+cfg_enum!(#[derive(Default)] ResizeRelativeTo, "lowercase" {
+    #[default] Own = "self", Slot1, Slot2, Slot3, Slot4, Slot5, Slot6, Slot7, Slot8
+});
+impl ResizeRelativeTo {
+    pub fn is_own(&self) -> bool {
+        *self == ResizeRelativeTo::Own
+    }
+    /// The 1-based slot, `None` for the map's own size.
+    pub fn slot(self) -> Option<u8> {
+        use ResizeRelativeTo::*;
+        Some(match self {
+            Own => return None,
+            Slot1 => 1,
+            Slot2 => 2,
+            Slot3 => 3,
+            Slot4 => 4,
+            Slot5 => 5,
+            Slot6 => 6,
+            Slot7 => 7,
+            Slot8 => 8,
+        })
+    }
+}
 /// `resize_floor` when nothing sets it.
 pub const DEFAULT_RESIZE_FLOOR: u32 = 512;
 fn default_resize_floor() -> u32 {
@@ -589,6 +614,25 @@ impl Subtype {
     }
 
     /// PBR colour data: the only sub-types that may carry `_SRGB` (cs only) [D#4, D#5].
+    /// The 1-based texture-set slot this sub-type fills (Note FM44): the set editor's slot card where it has one
+    /// (`gui::model::sets::slot_kind`, held equal by a gui test), else the vanilla TXST slot. `None` for maps that
+    /// fill no slot.
+    pub fn txst_slot(self) -> Option<u8> {
+        use Subtype::*;
+        match self {
+            Diffuse | LandscapeDiffuse | PbrAlbedo | SkinAlbedo | ComplexGrass => Some(1),
+            Normal | LandscapeNormal | PbrNormal | Msn => Some(2),
+            PbrEmissive | Glow | SkinSk | SubsurfaceTint => Some(3),
+            Height => Some(4),
+            Cubemap => Some(5),
+            Envmask | ComplexMaterial | Rmaos | SkinRfaos => Some(6),
+            CoatNormal | PbrFuzz => Some(7),
+            PbrSubsurface | BacklightTint | MsnSpecular => Some(8),
+            UiSky | Flow | GenericTwoChannel | GenericData | HdrSky | SkinWet | ProjectedNoise
+            | DetailNormal | Gray => None,
+        }
+    }
+
     pub fn is_pbr_color(self) -> bool {
         matches!(
             self,
@@ -940,6 +984,16 @@ pub struct Profile {
         skip_serializing_if = "is_default_resize_floor"
     )]
     pub resize_floor: u32,
+    /// What `resize` is measured from (Note FM44): `self`, the map's own size, or `slot1` … `slot8`, the source size
+    /// of the set's map in that texture-set slot. The map is halved while its longer side is above that size halved
+    /// by `resize`; it is never enlarged. Read only when `resize` is not `none`.
+    #[serde(default, skip_serializing_if = "ResizeRelativeTo::is_own")]
+    pub resize_relative_to: ResizeRelativeTo,
+    /// Written by the planner, not a setting: a config value is refused or replaced. The source size of the map
+    /// `resize_relative_to` names, or `[0, 0]` when the set has no single map in that slot (the map then keeps its
+    /// own size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resize_reference: Option<(u32, u32)>,
     pub encoder: EncoderSpec,
     #[serde(default)]
     pub validation: ValidationSpec,

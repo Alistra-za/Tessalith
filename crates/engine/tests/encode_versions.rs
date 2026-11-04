@@ -410,6 +410,18 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
         &["subtype=diffuse", "format=bc1", "mips.filter=box"],
     );
     add("height_half", rgb(512), &["subtype=height", "resize=half"]);
+    // Note FM44: a 128 normal halved relative to its set's 64 diffuse (slot 1) is written at 32, not its own half 64.
+    add("relhalf", rgb(64), &["subtype=diffuse", "format=bc1"]);
+    add(
+        "relhalf_n",
+        DynamicImage::ImageRgb8(ImageBuffer::from_pixel(128, 128, Rgb([128, 128, 255]))),
+        &[
+            "subtype=normal",
+            "resize=half",
+            "resize_floor=16",
+            "resize_relative_to=slot1",
+        ],
+    );
     // Note FM30: a pack of two sizes. The 32x32 AO is enlarged to the roughness map's 64x64 (the `_rmaos` is BC7).
     let ramp = |w: u32| {
         DynamicImage::ImageRgb8(ImageBuffer::from_fn(w, w, |x, y| {
@@ -620,6 +632,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     };
     assert_eq!(dims("npot_1000_bc1"), (Some(1024), Some(1024)));
     assert_eq!(dims("height_half"), (Some(256), Some(256)));
+    assert_eq!(dims("relhalf_n"), (Some(32), Some(32)));
     assert_eq!(dims("twosize_rmaos"), (Some(64), Some(64)));
     assert_eq!(dims("gpick_rmaos"), (Some(64), Some(64)));
     t200_pins_the_cutoff(c.path());
@@ -660,6 +673,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "wide_bc3",
         "npot_1000_bc1",
         "height_half",
+        "relhalf_n",
         "gray_r8",
         "opaque_rgb8",
         "wide_rgb8",

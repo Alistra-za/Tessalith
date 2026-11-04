@@ -259,6 +259,90 @@ fn the_estimate_follows_resize_and_its_floor() {
     assert_eq!(estimate((1024, 1024), &p).width, 128);
 }
 
+/// Note FM44: the Advanced drawer's "Relative to" row sits after Resize, offers own size and slots 1 to 8 by name, is
+/// never locked (so Copy settings carries it onto a texture whose resize is still None), and the size estimate
+/// follows the planned reference.
+#[test]
+fn the_size_row_offers_relative_to_slots() {
+    use engine::config::{ResizeMode, Target};
+    use sdc_gui::model::fields::{advanced_field_views, ADVANCED_FIELDS};
+    use sdc_gui::model::out_size::estimate;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let at = |f: &str| ADVANCED_FIELDS.iter().position(|(g, _)| *g == f).unwrap();
+    assert_eq!(at("resize_relative_to"), at("resize") + 1);
+    let view = |m: &AppModel, item: &str| {
+        let j = m.item(item).unwrap().job.clone().unwrap();
+        advanced_field_views(m.target, &j)
+            .into_iter()
+            .find(|v| v.field == "resize_relative_to")
+            .unwrap()
+    };
+    let v = view(&m, "up.png");
+    assert_eq!((v.value, v.lock), (serde_json::json!("self"), None));
+    let p = m.item("up.png").unwrap().job.clone().unwrap().profile;
+    let opts = sdc_gui::ui::presets::field_options("resize_relative_to", Target::Cs, &p);
+    assert_eq!(opts.len(), 9, "{opts:?}");
+    assert_eq!(opts[0], (serde_json::json!("self"), "Own size".to_string()));
+    assert_eq!(opts[1].0, serde_json::json!("slot1"));
+    assert!(opts[1].1.starts_with("Slot 1 · Diffuse"), "{opts:?}");
+    assert!(opts[8].1.starts_with("Slot 8 · "), "{opts:?}");
+    m.set_field("up.png", "resize", serde_json::json!("half"));
+    m.set_field("up.png", "resize_relative_to", serde_json::json!("slot1"));
+    assert!(m.wait_idle(WAIT));
+    let v = view(&m, "up.png");
+    assert_eq!(
+        (v.value.clone(), v.lock),
+        (serde_json::json!("slot1"), None)
+    );
+    assert!(v.edited);
+    m.settings.advanced_open = true;
+    m.select_item("up.png");
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Relative to");
+    let mut m = h.into_state();
+    // Copy settings carries it.
+    m.click_item("up2.png", false, false);
+    m.click_item("up.png", true, false);
+    m.open_copy_settings();
+    match &m.dialog {
+        Some(Dialog::CopySettings { fields, .. }) => {
+            assert!(
+                fields.contains(&("resize_relative_to".to_string(), true)),
+                "{fields:?}"
+            )
+        }
+        d => panic!("{d:?}"),
+    }
+    m.apply_copy_settings(
+        "up.png",
+        &["up2.png".to_string()],
+        &["resize_relative_to".to_string()],
+    );
+    assert_eq!(
+        own(&m, "up2.png", "resize_relative_to"),
+        Some(serde_json::json!("slot1"))
+    );
+    // The estimate reads the planned reference: half of a 512 reference over a 128 floor is 256.
+    let mut p = p;
+    p.resize = ResizeMode::Half;
+    p.resize_floor = 128;
+    assert_eq!(estimate((1024, 1024), &p).width, 512);
+    p.resize_reference = Some((512, 512));
+    assert_eq!(estimate((1024, 1024), &p).width, 256);
+}
+
+/// Note FM44: the engine's slot table agrees with the set editor's slot cards wherever a sub-type has a card.
+#[test]
+fn the_engine_slot_table_matches_the_slot_cards() {
+    for st in engine::config::Subtype::ALL {
+        if let Some(k) = sdc_gui::model::sets::slot_kind(st) {
+            assert_eq!(k.slot_number(), st.txst_slot(), "{st:?}");
+        }
+    }
+}
+
 /// The Advanced drawer has a Size floor row showing the default, then the texture's own value; Clear removes the key.
 #[test]
 fn the_size_floor_row_follows_resize_and_clear_removes_it() {

@@ -14,6 +14,10 @@ version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
   (alpha `data`). `height` gets `resize_floor = 256`, so a `half` height map shrinks down to 256 px.
 - `cs-compact` and `vanilla-compact` halve `projected_noise`, `detail_normal` and `gray` like the other data maps (larger
   side above 512).
+- `cs-compact` and `vanilla-compact` set `resize_relative_to = "slot1"` on every halved sub-type except `diffuse`,
+  `landscape_diffuse`, `pbr_albedo` and `skin_albedo`: such a map halves only while it is larger than the set's
+  halved slot-1 map, so a normal already exported smaller than its diffuse keeps its size, and a map in a set with no
+  slot-1 map keeps its own size (`RESIZE-NO-REFERENCE`). Those 25 sub-types' profile hashes change.
 - `vanilla-compact` sets `encoder.perceptual = true` in its two BC1 colour rules (luma-weighted BC1), so those outputs
   change; its data maps do not.
 - `vanilla-quality` sets `encoder.perceptual = true` in its `diffuse`, `glow` and `skin_albedo` tables, and

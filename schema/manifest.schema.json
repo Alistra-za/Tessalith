@@ -870,6 +870,31 @@
           "minimum": 0,
           "type": "integer"
         },
+        "resize_reference": {
+          "description": "Written by the planner, not a setting: a config value is refused or replaced. The source size of the map\n`resize_relative_to` names, or `[0, 0]` when the set has no single map in that slot (the map then keeps its\nown size).",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "resize_relative_to": {
+          "$ref": "#/$defs/ResizeRelativeTo",
+          "description": "What `resize` is measured from (Note FM44): `self`, the map's own size, or `slot1` … `slot8`, the source size\nof the set's map in that texture-set slot. The map is halved while its longer side is above that size halved\nby `resize`; it is never enlarged. Read only when `resize` is not `none`."
+        },
         "rnm": {
           "$ref": "#/$defs/RnmSpec",
           "description": "RNM normal layers (M6 Track F2); read only by base normals (`Subtype::rnm_base`)."
@@ -929,6 +954,20 @@
         "half",
         "quarter",
         "eighth"
+      ],
+      "type": "string"
+    },
+    "ResizeRelativeTo": {
+      "enum": [
+        "self",
+        "slot1",
+        "slot2",
+        "slot3",
+        "slot4",
+        "slot5",
+        "slot6",
+        "slot7",
+        "slot8"
       ],
       "type": "string"
     },
