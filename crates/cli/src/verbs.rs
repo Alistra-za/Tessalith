@@ -327,15 +327,21 @@ fn print_event(ev: &EngineEvent) {
 /// '/'-separated and lower-case; `set` keys are lower-case already, `output` paths keep their case.
 fn strip_root(s: &str, root: &str) -> Option<String> {
     let norm = s.replace('\\', "/");
-    let n = root.chars().count();
-    let head: String = norm.chars().take(n).collect::<String>().to_lowercase();
-    let rest = if let Some(rest) = norm.strip_prefix(root) {
-        rest
-    } else if head == root {
-        &norm[norm.char_indices().nth(n).map_or(norm.len(), |(i, _)| i)..]
-    } else {
+    // `root` is the lower-cased form, which can be longer than the original ('İ' lowers to two chars), so
+    // lower-case `norm` char by char until it reaches the root's length, then slice at that char.
+    let mut head = String::new();
+    let mut end = 0;
+    for c in norm.chars() {
+        if head.len() >= root.len() {
+            break;
+        }
+        head.extend(c.to_lowercase());
+        end += c.len_utf8();
+    }
+    if head != root {
         return None;
-    };
+    }
+    let rest = &norm[end..];
     // Only whole components: `sdc-inspect-abc` is not under `sdc-inspect-ab`.
     if !rest.is_empty() && !rest.starts_with('/') {
         return None;
@@ -1008,6 +1014,12 @@ mod tests {
         assert_eq!(
             s("c:/users/x/temp/sdc-inspect-ab/a/rock_n").as_deref(),
             Some("a/rock_n")
+        );
+        // 'İ' lowers to two chars, so the root is longer than the path's own prefix.
+        let root_i = "c:/users/İbrahim/t".to_lowercase();
+        assert_eq!(
+            strip_root("C:\\Users\\İbrahim\\t\\a.dds", &root_i).as_deref(),
+            Some("a.dds")
         );
         assert_eq!(s("in/rock_n.png"), None);
         assert_eq!(s("c:/users/x/temp/sdc-inspect-abc/a"), None);
