@@ -1295,3 +1295,22 @@ fn nif_export_is_due_once_after_an_also_run_ends() {
     assert!(m.take_nif_export_due(), "due after the run");
     assert!(!m.take_nif_export_due(), "once");
 }
+
+/// Backlog T29 (Note FP1): a tick sends the header's Export click to Review, so the button reads Review, not Export.
+#[test]
+fn a_tick_makes_the_header_read_review() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    assert!(
+        m.header_export_text().starts_with("Export "),
+        "clean before the tick: {}",
+        m.header_export_text()
+    );
+    tick(&mut m, AlsoTarget::Vanilla);
+    assert!(!m.export_is_clean());
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "{}",
+        m.header_export_text()
+    );
+}
