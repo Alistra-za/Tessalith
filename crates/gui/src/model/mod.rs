@@ -2303,13 +2303,18 @@ impl AppModel {
             .unwrap_or(&p.path)
             .to_string_lossy()
             .into_owned()];
-        for old in history::orphans(&shas, &root, named.iter()) {
-            self.export.notes.push(format!(
-                "{}: the PGPatcher JSON is now {}; the old file was left in place and PGPatcher still reads it",
-                old.display(),
-                p.path.display()
-            ));
-        }
+        // Note FP6 (T23): these say where the JSON went, so they are kept only when this export writes one.
+        let orphans: Vec<String> = history::orphans(&shas, &root, named.iter())
+            .into_iter()
+            .map(|old| {
+                format!(
+                    "{}: the PGPatcher JSON is now {}; the old file was left in place and PGPatcher still reads it",
+                    old.display(),
+                    p.path.display()
+                )
+            })
+            .collect();
+        let at = self.export.notes.len();
         match pbr_export::finish(
             &p,
             &self.export.rows,
@@ -2317,6 +2322,7 @@ impl AppModel {
             &mut self.export.notes,
         ) {
             pbr_export::Finish::Written(sha) => {
+                self.export.notes.splice(at..at, orphans);
                 self.also_json.push(p.path.clone());
                 self.record_json_sha(&root, &key, &sha)
             }
@@ -2329,6 +2335,7 @@ impl AppModel {
                 if answer.is_some_and(|a| a.overwrite) {
                     if let Some(sha) = pbr_export::overwrite(&p.path, &text, &mut self.export.notes)
                     {
+                        self.export.notes.splice(at..at, orphans);
                         self.also_json.push(p.path.clone());
                         self.record_json_sha(&root, &key, &sha);
                     }
