@@ -8,7 +8,7 @@ use super::sets::{
 };
 use super::{AppModel, ViewCache};
 use crate::pgp::prefix::{
-    check_json_path, check_rel_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
+    check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
     subsurface_pitfalls,
 };
 use crate::pgp::settings::{blocked_by, feature_key, feature_on, Feature, Settings, FEATURE_KEYS};
@@ -154,33 +154,11 @@ pub(crate) fn file_name_problem(what: &str, name: &str) -> Option<String> {
     if name.trim().is_empty() {
         return bad("empty");
     }
-    if name.contains(['\\', '/']) {
-        return bad("must be a single file name, not a path");
-    }
-    if name == ".." || name.contains("..") {
+    if name.contains("..") {
         return bad("must not contain '..'");
     }
-    if name.ends_with('.') || name.ends_with(' ') {
-        return bad("must not end in a dot or a space");
-    }
-    if check_rel_path(name, "JSON name").is_err() {
-        return bad("contains a character Windows does not allow in names");
-    }
-    let stem = name
-        .split('.')
-        .next()
-        .unwrap_or("")
-        .trim_end()
-        .to_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || ["COM", "LPT"].iter().any(|p| {
-            stem.strip_prefix(p)
-                .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
-        });
-    if reserved {
-        return bad("is a name Windows reserves for a device");
-    }
-    None
+    // Note FW: separators, a trailing dot or space, forbidden characters and device names are `check_file_name`'s.
+    check_file_name(name, what).err().map(|e| e.0)
 }
 
 /// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
@@ -870,4 +848,27 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
         place(i, false);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_name_problem;
+    use crate::pgp::prefix::check_file_name;
+
+    /// Backlog L8: the JSON-name check and `check_file_name` refuse the same device names, trailing dots and spaces
+    /// and separators, with the same wording.
+    #[test]
+    fn both_file_name_checks_refuse_the_same_names() {
+        for bad in [
+            "CON", "nul", "Com1", "lpt9.txt", "name.", "name ", "a/b", r"a\b", "a:b",
+        ] {
+            let a = file_name_problem("x", bad).unwrap_or_else(|| panic!("{bad:?} passes"));
+            let b = check_file_name(bad, "x").unwrap_err().0;
+            assert_eq!(a, b, "{bad:?}");
+        }
+        for good in ["textures", "My Pack", "com10", "console"] {
+            assert_eq!(file_name_problem("x", good), None, "{good:?}");
+            assert!(check_file_name(good, "x").is_ok(), "{good:?}");
+        }
+    }
 }

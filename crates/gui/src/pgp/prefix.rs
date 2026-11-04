@@ -67,7 +67,7 @@ pub fn check_file_name(name: &str, field: &str) -> Result<(), PrefixError> {
     };
     if ["CON", "PRN", "AUX", "NUL"].contains(&device.as_str()) || numbered("COM") || numbered("LPT")
     {
-        return err("is a name Windows reserves");
+        return err("is a name Windows reserves for a device");
     }
     Ok(())
 }

@@ -91,7 +91,6 @@ impl AppModel {
         list
     }
 
-
     /// The current input name of set `set_id`: its own diffuse's game path without extension.
     pub fn input_name_of(&self, set_id: &str) -> Option<String> {
         let views = views(self);
