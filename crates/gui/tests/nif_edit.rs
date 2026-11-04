@@ -3609,6 +3609,7 @@ fn a_source_change_after_export_makes_it_pending_again() {
     let e = m.edit.as_ref().unwrap();
     assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
     assert!(e.pending());
+    assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
     assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
@@ -3632,8 +3633,13 @@ fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
     assert_eq!(*e.source, src);
     assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
     assert!(e.pending());
-    // the document on disk is saved with the next change (open), so the badge comes from the session's document
-    assert_eq!(DocBadge::of(&e.doc), Some(DocBadge::Pending));
+    assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    // closed again before any export: the persisted document is still pending
+    m.close_edit();
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    m.open_edit();
+    assert!(m.edit.as_ref().unwrap().pending());
     assert_eq!(export(&mut m), Ok(1));
     assert_eq!(
         std::fs::read(exported(&d)).unwrap(),

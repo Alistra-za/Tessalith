@@ -734,6 +734,7 @@ impl NifEdit {
         e.reapply();
         if changed {
             e.count_changed();
+            e.save(); // the forced re-export (GQ1) must reach the persisted document, as in reload_source
         }
         Ok(e)
     }
