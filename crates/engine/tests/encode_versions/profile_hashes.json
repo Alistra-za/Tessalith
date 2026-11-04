@@ -48,7 +48,7 @@
     "subtype": "glow"
   },
   "cs-compact/cs/gray": {
-    "sha256": "30e7280bd035972073238f3efb825da9882bd8220d7854296da80b5a0905bf64",
+    "sha256": "6bfcd3264dc1e27a279f2d4a92c68be55fac4747d42ef8831664ab71524d923a",
     "subtype": "gray"
   },
   "cs-compact/cs/hdr_sky": {
@@ -180,7 +180,7 @@
     "subtype": "glow"
   },
   "cs-compact/vanilla/gray": {
-    "sha256": "10692b62c85a6751dcf1f6387fed8584ec0da77c7ee53a27ba26b068584b5ccb",
+    "sha256": "a4e73ba22c9df0c5498605d1dbb7e3d177f911ec60b59de78f4154b73db813fb",
     "subtype": "gray"
   },
   "cs-compact/vanilla/hdr_sky": {
@@ -1104,7 +1104,7 @@
     "subtype": "glow"
   },
   "vanilla-compact/cs/gray": {
-    "sha256": "30e7280bd035972073238f3efb825da9882bd8220d7854296da80b5a0905bf64",
+    "sha256": "6bfcd3264dc1e27a279f2d4a92c68be55fac4747d42ef8831664ab71524d923a",
     "subtype": "gray"
   },
   "vanilla-compact/cs/hdr_sky": {
@@ -1236,7 +1236,7 @@
     "subtype": "glow"
   },
   "vanilla-compact/vanilla/gray": {
-    "sha256": "10692b62c85a6751dcf1f6387fed8584ec0da77c7ee53a27ba26b068584b5ccb",
+    "sha256": "a4e73ba22c9df0c5498605d1dbb7e3d177f911ec60b59de78f4154b73db813fb",
     "subtype": "gray"
   },
   "vanilla-compact/vanilla/hdr_sky": {

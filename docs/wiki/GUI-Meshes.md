@@ -6,7 +6,7 @@ The GUI's view of the meshes a mod scan found: the mesh list, its filters, the s
 
 Switch to it with the **Meshes** tab in the header. The header is the Textures view's, without the column eyes.
 
-![The Meshes view with a mesh selected.](../img/gui/GUI-Meshes/meshes-view.png)
+![The Meshes view with no mesh selected: the NIFs column with its search, Any mod picker, chips and list.](../img/gui/GUI-Meshes/meshes-view.png)
 
 The scan source and the scan's progress are behind the **MO2…** header button; see [Choosing what to scan](Mod-Scanning.md#choosing-what-to-scan). The scan row's **Scan details** lists what the last scan found and any notes (missing mod folders, archive notes, meshes that failed to read).
 

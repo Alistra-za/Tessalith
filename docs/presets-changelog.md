@@ -3,7 +3,19 @@
 One entry per built-in preset version. A version changes when anything the preset resolves to changes; the workspace
 version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
 
-## Unreleased — sdc 1.1.0 (sdc-base 1.2.0)
+## 2026-11-03 — sdc 2.0.0 (every preset 2.0.0)
+
+- All six built-in presets move to 2.0.0 and every output re-encodes once under `if-changed` (engine version 2.0.0).
+- `sdc-base` loses the keys 2.0 removed: `encoder.backend`, `encoder.rgbcx_level`, `encoder.bc1_transparent_black`
+  and the five `validation` thresholds. The format picks the encoder, BC1 and BC3 colour use rgbcx level 18 (the value
+  every preset set), and the thresholds are fixed at the values the presets used. A user preset that still names one is
+  refused with a message that names the key.
+- New sub-types in `sdc-base`: `gray` (BC4, read from the red channel), `projected_noise` (BC4) and `detail_normal`
+  (alpha `data`). `height` gets `resize_floor = 256`, so a `half` height map shrinks down to 256 px.
+- `cs-compact` and `vanilla-compact` halve `projected_noise`, `detail_normal` and `gray` like the other data maps (larger
+  side above 512).
+
+## 2026-10-28 — sdc 1.1.0 (sdc-base 1.2.0)
 
 - New sub-type `cubemap` (`_e`, or any file under a `cubemaps` folder): sRGB content, UNORM tag; format BC7, alpha
   remove and full mips come from `[defaults]`. Cubes are written as BC1, BC3, BC7 or RGBA8, UNORM only.

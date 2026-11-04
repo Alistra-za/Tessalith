@@ -37,7 +37,6 @@ def default_files(root):
     out = [r / "README.md", r / "docs/gui.md"]
     out += sorted((r / "docs/wiki").glob("*.md"))
     out += sorted((r / "docs/research").glob("*.md"))
-    out += sorted((r / "docs").glob("*-plugin.md"))
     return [p for p in out if p.exists() and p.name != "_Sidebar.md"]
 
 

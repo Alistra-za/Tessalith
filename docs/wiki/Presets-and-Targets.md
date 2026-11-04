@@ -81,13 +81,13 @@ A shader the target does not have falls back to `default`, with `SHADER-UNAVAILA
 
 | Id | Version | Target | Description |
 |---|---|---|---|
-| `cs-quality` | 1.0.0 | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
-| `cs-compact` | 1.0.0 | `cs` | Smaller files. BC1 for opaque colour maps at full size; every other listed sub-type at half size when its larger side is above 512 (256 for height); BC4/BC5 search radius `fast`. |
-| `vanilla-quality` | 1.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. |
-| `vanilla-compact` | 1.0.0 | `vanilla` | The vanilla version of `cs-compact`. |
-| `fast-preview` | 1.0.0 | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. For checking a mod quickly, not for release. |
+| `cs-quality` | 2.0.0 | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
+| `cs-compact` | 2.0.0 | `cs` | Smaller files. BC1 for opaque colour maps at full size; every other listed sub-type at half size when its larger side is above 512 (256 for height); BC4/BC5 search radius `fast`. |
+| `vanilla-quality` | 2.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. |
+| `vanilla-compact` | 2.0.0 | `vanilla` | The vanilla version of `cs-compact`. |
+| `fast-preview` | 2.0.0 | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. For checking a mod quickly, not for release. |
 
-All of them inherit from `sdc-base` (version 1.1.0), a hidden preset that holds the per-sub-type defaults. It is not listed by `presets list`, and a user preset cannot use its id.
+All of them inherit from `sdc-base` (version 2.0.0), a hidden preset that holds the per-sub-type defaults. It is not listed by `presets list`, and a user preset cannot use its id.
 
 How the preset is chosen, highest first:
 

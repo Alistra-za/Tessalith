@@ -135,7 +135,7 @@ fn compact_and_fast_preview_resolve_as_designed() {
         let p = r.get(id).unwrap();
         assert_eq!(
             (p.schema_version, p.version.as_str(), p.hidden, p.target),
-            (1, "1.0.0", false, target)
+            (1, "2.0.0", false, target)
         );
         r.check_preset(id).unwrap();
     }
@@ -159,6 +159,7 @@ fn compact_and_fast_preview_resolve_as_designed() {
         Subtype::Flow,
         Subtype::GenericTwoChannel,
         Subtype::GenericData,
+        Subtype::Gray,
         Subtype::Diffuse,
         Subtype::LandscapeDiffuse,
         Subtype::PbrAlbedo,
