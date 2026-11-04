@@ -1048,7 +1048,10 @@ impl MeshesModel {
         match keep {
             Some(id) => {
                 self.select_mod(id);
-                if let Some(c) = nif.filter(|c| self.nifs.iter().any(|n| n.copy_id == *c)) {
+                if !self.store_settled() {
+                    // Note GQ4: select_nif refuses now; the next completed scan's reload takes it
+                    self.reselect = nif;
+                } else if let Some(c) = nif.filter(|c| self.nifs.iter().any(|n| n.copy_id == *c)) {
                     self.select_nif(c);
                 }
             }

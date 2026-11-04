@@ -822,6 +822,64 @@ fn select_nif_after_an_unfinished_scan_reads_nothing() {
     assert!(m.shapes.is_empty() && m.selected_row().is_none());
 }
 
+/// Note GQ4: a reload under a picked mod while the store is not settled holds the selected NIF (select_nif refuses
+/// then); the next completed scan selects it again.
+#[cfg(windows)]
+#[test]
+fn a_reload_after_an_unfinished_scan_holds_the_nif_for_the_next_completed_scan() {
+    let (d, mut m) = scanned();
+    let a = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a);
+    let nif = m.nifs[0].copy_id;
+    m.select_nif(nif);
+    let lock = hold_scan_lock(d.path());
+    start_scan(&mut m);
+    wait(&mut m);
+    drop(lock);
+    assert!(!m.scan_completed && !m.scanning());
+    m.reload();
+    assert_eq!(
+        m.selected_nif, None,
+        "nothing read from the unsettled store"
+    );
+    start_scan(&mut m);
+    wait(&mut m);
+    assert!(m.scan_completed);
+    assert_eq!(m.selected_mod, Some(a));
+    assert_eq!(
+        m.selected_nif,
+        Some(nif),
+        "selected again after the completed scan"
+    );
+}
+
+/// Note GQ4: a worklist fix (edit by path) while the store is not settled opens nothing, not the NIF still selected,
+/// and says why.
+#[cfg(windows)]
+#[test]
+fn an_edit_by_path_waits_for_a_settled_store() {
+    use sdc_gui::model::meshes::NifTab;
+    let (d, mut m) = scanned();
+    let rock = m.nif_at(0).0.copy_id;
+    let oak = m.nif_at(1).0.path.clone();
+    m.select_nif(rock);
+    let lock = hold_scan_lock(d.path());
+    start_scan(&mut m);
+    wait(&mut m);
+    drop(lock);
+    assert!(!m.scan_completed && !m.scanning());
+    m.error = None;
+    m.show_nif_tab(&oak, NifTab::Shader, None);
+    assert!(m.edit.is_none() && m.nif_tab.is_none());
+    assert_eq!(
+        m.error.as_deref(),
+        Some(
+            format!("{oak} opens once the Meshes scan finishes: wait for it, or scan again.")
+                .as_str()
+        )
+    );
+}
+
 /// Note GQ4 (item 41): after an unfinished scan the mod picker is disabled and a texture-path click asks the store
 /// nothing; both work again once a scan completes.
 #[cfg(windows)]

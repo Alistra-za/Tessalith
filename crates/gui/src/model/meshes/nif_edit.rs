@@ -260,8 +260,9 @@ type RetargetKey = (
     Option<(u64, Option<std::time::SystemTime>)>,
 );
 
-/// The copy an edit applies to: the first that is neither PGPatcher output, our chosen edit mod, nor the 1.x default
-/// edit mod (spec §8.1; Note GD28: `mods\sdc NIF Edits` holds Tessalith's own earlier output).
+/// The copy an edit applies to: the first that is neither PGPatcher output, our chosen edit mod, the 1.x default
+/// edit mod (spec §8.1; Note GD28: `mods\sdc NIF Edits` holds Tessalith's own earlier output), nor a folder holding
+/// our edit document for this NIF (Note GQ3).
 pub fn pick_source<'a>(
     copies: &'a [PathCopy],
     edit_mod: &Path,
@@ -734,15 +735,19 @@ impl NifEdit {
             match_tests: 0,
             in_game: None,
             pg_supplied: vec![],
-            // a recovered autosave is saved into the folder with the next save or close
+            // a recovered autosave is saved into the folder with the next save or close; an exported session on a
+            // changed source is saved at open (below)
             unsaved: recovered,
             drag: None,
         };
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
         e.reapply();
         if changed {
+            let was_exported = e.doc.export.ops_hash.is_some();
             e.count_changed();
-            e.save(); // the forced re-export (GQ1) must reach the persisted document, as in reload_source
+            if was_exported {
+                e.save(); // the forced re-export (GQ1) must reach the persisted document, as in reload_source
+            }
         }
         Ok(e)
     }
@@ -2410,6 +2415,13 @@ impl MeshesModel {
                 self.error = Some(format!("{path} is not in the scanned meshes."));
                 return;
             };
+            // Note GQ4: select_nif refuses then, and open_edit would open whatever is still selected
+            if !self.store_settled() {
+                self.error = Some(format!(
+                    "{path} opens once the Meshes scan finishes: wait for it, or scan again."
+                ));
+                return;
+            }
             self.select_nif(id);
             self.open_edit();
         }

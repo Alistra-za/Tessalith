@@ -723,8 +723,8 @@ fn slot_labels_follow_shader_type_and_flags() {
     assert_eq!(edit_slot_label(0, 0, 1 << 23, 5), "RMAOS");
 }
 
-/// Trace 2026-10-28 #1 (fix round 1): 2000 zero-size BSTriShapes that all name one 100 000-byte string (0x80, which
-/// decodes to three bytes). The shape cards keep the one shared name, not a copy per card.
+/// Trace 2026-10-28 #1 (fix round 1): 2000 112-byte BSTriShapes (a head, no geometry) that all name one 100 000-byte
+/// string (0x80, which decodes to three bytes). The shape cards keep the one shared name, not a copy per card.
 #[test]
 fn shape_cards_share_one_name_across_many_shapes() {
     // a BSTriShape head naming string 30 (the large one), shader and alpha refs -1: 112 bytes
@@ -736,8 +736,7 @@ fn shape_cards_share_one_name_across_many_shapes() {
         h[10] = 0xFF;
         h[11] = 0xFF;
         h[12] = 14; // flags
-                    // translation 12, rotation 36 and scale 4 stay zero; collision -1 at 16 + 52
-        h[68] = 0xFF;
+        h[68] = 0xFF; // collision -1 at 16 + 52 (translation 12, rotation 36 and scale 4 stay zero)
         h[69] = 0xFF;
         h[70] = 0xFF;
         h[71] = 0xFF;
@@ -3730,6 +3729,26 @@ fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
     assert_eq!(
         std::fs::read(exported(&d)).unwrap(),
         *m.edit.as_ref().unwrap().out
+    );
+}
+
+/// Note GQ1: only an exported session is saved at open; a never-exported one keeps its document until the next save.
+#[test]
+fn reopening_a_never_exported_edit_with_a_changed_source_writes_no_document() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let doc = m.edit.as_ref().unwrap().doc_path.clone();
+    let before = std::fs::read_to_string(&doc).unwrap();
+    let src = changed_source(&m);
+    m.close_edit();
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.open_edit();
+    assert_eq!(*m.edit.as_ref().unwrap().source, src);
+    assert_eq!(
+        std::fs::read_to_string(&doc).unwrap(),
+        before,
+        "no write at open"
     );
 }
 
