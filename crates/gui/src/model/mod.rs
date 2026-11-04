@@ -4347,6 +4347,19 @@ mod tests {
         assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
     }
 
+    /// Backlog L56: looking one set up borrows the cached views and clones only that set's view.
+    #[test]
+    fn looking_up_one_set_deep_clones_no_whole_view_list() {
+        let d = tempfile::tempdir().unwrap();
+        let m = packed_named_model(d.path());
+        let v = sets::views(&m);
+        let (id, item) = (v[0].id.clone(), v[0].members[0].clone());
+        sets::SET_VIEWS_CLONES.with(|c| c.set(0));
+        let _ = m.input_name_plan(&id, "textures/x/other");
+        let _ = m.set_of_item(&item);
+        assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
+    }
+
     pub(super) fn panicked(what: &'static str) -> WorkerMsg {
         WorkerMsg::Panicked {
             what,

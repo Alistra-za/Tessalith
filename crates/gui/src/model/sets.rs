@@ -1428,10 +1428,11 @@ impl AppModel {
         views(self).iter().find(|v| same_id(&v.id, id)).cloned()
     }
 
-    fn set_of_item(&self, item: &str) -> Option<SetView> {
-        set_views(self)
-            .into_iter()
+    pub(super) fn set_of_item(&self, item: &str) -> Option<SetView> {
+        views(self)
+            .iter()
             .find(|v| v.members.iter().any(|k| k == item))
+            .cloned()
     }
 
     pub(crate) fn sets_editable(&self) -> bool {

@@ -6,7 +6,7 @@ use super::items::ItemKind;
 use super::rename::{
     input_output, lower, plan_rename, split_ext, split_path, RenameDialog, RenameMode, RenameRow,
 };
-use super::sets::{set_views, views, SlotFill, SlotKind};
+use super::sets::{views, SlotFill, SlotKind};
 use super::AppModel;
 use engine::group::base_of;
 use engine::sets::{fold_id, same_id};
@@ -106,9 +106,10 @@ impl AppModel {
     /// The plan for giving set `set_id` the input name `chosen` (a game path such as `textures/landscape/rock02`,
     /// with or without `.dds`), or why it cannot have it.
     pub fn input_name_plan(&self, set_id: &str, chosen: &str) -> Result<InputNamePlan, String> {
-        let v = set_views(self)
-            .into_iter()
+        let v = views(self)
+            .iter()
             .find(|v| same_id(&v.id, set_id))
+            .cloned()
             .ok_or("the set is no longer in the plan")?;
         let Some(SlotFill::Own { item: diffuse }) = v.slots.get(&SlotKind::Diffuse) else {
             return Err("the set has no diffuse of its own to name it by".into());

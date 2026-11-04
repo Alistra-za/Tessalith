@@ -677,7 +677,7 @@ impl AppModel {
         };
         // AB1: each set whose own diffuse is renamed takes its sdc-project.toml entry to its new automatic id.
         let retargets: Vec<(String, String)> = match d.mode {
-            RenameMode::Inputs => super::sets::set_views(self)
+            RenameMode::Inputs => super::sets::views(self)
                 .iter()
                 .filter_map(|v| {
                     let Some(super::sets::SlotFill::Own { item }) =

@@ -306,9 +306,10 @@ impl AppModel {
     /// The scan database and the scan path of set `set`'s diffuse; `None` without either.
     fn original_source(&self, set: &str) -> Option<(std::path::PathBuf, String)> {
         let db = self.scan_db.clone().filter(|d| self.stat_is_file(d))?;
-        let v = super::sets::set_views(self)
-            .into_iter()
-            .find(|v| engine::sets::same_id(&v.id, set))?;
+        let v = super::sets::views(self)
+            .iter()
+            .find(|v| engine::sets::same_id(&v.id, set))
+            .cloned()?;
         let diffuse = match v.slots.get(&super::sets::SlotKind::Diffuse)? {
             super::sets::SlotFill::Own { item } | super::sets::SlotFill::Borrowed { item, .. } => {
                 item.clone()
