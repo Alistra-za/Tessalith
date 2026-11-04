@@ -88,7 +88,13 @@ fn render_state() -> Option<&'static RenderState> {
             None,
             RendererOptions::default(),
         ))
-        .inspect_err(|e| eprintln!("skipped: no GPU adapter: {e}"))
+        // Straight to stderr: libtest captures `eprintln!` and drops it for a passing test.
+        .inspect_err(|e| {
+            let _ = std::io::Write::write_fmt(
+                &mut std::io::stderr(),
+                format_args!("skipped: no GPU adapter: {e}\n"),
+            );
+        })
         .ok()
     })
     .as_ref()
