@@ -172,7 +172,7 @@ pub struct NifEdit {
     anim: Vec<(ShapeId, MaterialState, Vec<Track>)>,
     /// The clock time whose materials the viewport shows; None after anything sent un-animated materials.
     anim_shown: Option<f32>,
-    /// The last dit_changed store lookup failed: the next change looks every shape up again (Note GP9).
+    /// The last `edit_changed` store lookup failed: the next change looks every shape up again (Note GP9).
     lookup_failed: bool,
     /// The shapes the last `tick_anim` animated (D15: one that leaves gets its file material back).
     anim_last: Vec<ShapeId>,

@@ -980,7 +980,7 @@ fn a_new_slot_path_still_reloads_with_its_texture() {
     assert!(textures.contains_key("textures/new.dds"));
 }
 
-/// Note GP9: a store error in dit_changed is retried on the next change, though no slot path changed since.
+/// Note GP9: a store error in `edit_changed` is retried on the next change, though no slot path changed since.
 #[test]
 fn a_failed_texture_lookup_is_retried_on_the_next_change() {
     let (d, mut m) = session(false);

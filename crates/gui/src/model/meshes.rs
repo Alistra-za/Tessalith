@@ -304,6 +304,7 @@ type MeshFacts = (
     BTreeMap<String, Vec<MeshAlpha>>,
     BTreeMap<String, bool>,
 );
+
 /// One shape row of the evidence query: (NIF path id, block, shader type, alpha flags, alpha threshold, SLSF2).
 type EvidenceRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, i64);
 
