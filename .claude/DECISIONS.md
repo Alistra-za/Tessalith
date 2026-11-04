@@ -18,13 +18,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1015,3 +1015,16 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ8** `esp::mato_data` takes the last EDID and the last DATA of a record, as the scan (`records::read`) does, so a name the scan stored finds its record (a good DATA followed by a short one gives None in both). The orbit pitch clamps to +-1.52 rad, below asin(0.999) where the view's up vector switches; the pan basis is unchanged.
 - **GQ9** `decode_head_at` reads inside its block: the cursor is bounded to the declared block end, so a head that runs past its declared size reports `BlockSize` (block, kind, declared, bytes needed; a scan problem for that block, not "file ends early") instead of taking its shader and alpha refs from the next block. The header gives an implausible block count its own `NifError::TooManyBlocks` (modscan now stores such a file as a failed parse, not `not_skyrim`) and a type index past the type list `NifError::BadTypeIndex` naming the block; no modscan schema change, so an existing store keeps its old `not_skyrim` answer for an unchanged file (rows are reused while size and mtime match) until the store is rebuilt: a modscan schema bump, a corrupt scan.db or a deleted one.
 - **GQ10** Gate fix for GQ9: the render3d `skipped_shape_messages_use_a_short_label` fixture had zero-size blocks that relied on the head reading past its block into the footer; each block now carries its own 116-byte head, so the test still skips 2000 shapes under the bounded read.
+
+## Note FP — backlog batch B1: gui model fixes (main team, 2026-11-04)
+
+Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debug-2026-11-04`) by number; each has a test.
+
+- **FP1 The header says Review while a tick is on (T29).** `export_is_clean` is false while an Also tick is on, as `export_checks` already sent the click to Review (Note CN), so the button no longer reads `Export N files` and then opens Review. Test `also_export::a_tick_makes_the_header_read_review`.
+- **FP2 Every export ends its rows (T25).** `export_ended` ends the Queued and Running rows of a plain export too (the `also_pass` guard and field are gone; `also_error` is None for a plain export). An export that dies after discovery leaves no row Queued. Test `export::a_failed_plain_export_leaves_no_row_queued`.
+- **FP3 Cancel does not keep the automatic types marked written (T36).** `cancel_open` clears `auto_written` of the history it restores, because the folder's documents were re-read (FI4) and the next plan records the types again. Test `open_cancel::cancel_does_not_keep_the_automatic_types_marked_written`.
+- **FP4 Undo steps recorded under a blame keep the stashed `sdc.toml` (T37).** `ProjectDoc::snapshot_text` is the stashed text while `blamed()`, else `text()`; `snapshot_of` uses it, so a step taken while the engine's rejection holds `sdc.toml` no longer stores an empty file for Undo and Redo to restore. Test `history::a_step_recorded_while_sdc_toml_is_blamed_keeps_its_text`.
+- **FP5 Clearing the read-only flag refreshes Review's check (T31).** `refresh_read_only_flags` sets `review.toml_unwritable` again when the flags change, so Export is not left disabled with a reason that no longer holds. Test `also_export::clearing_the_read_only_flag_reopens_reviews_export`.
+- **FP6 Orphan notes go with a written JSON (T23).** The "the PGPatcher JSON is now ..." notes about an older file are kept only when the export writes the JSON (`Written`, or an Overwrite that wrote); an export that writes none (vanilla with a borrowed slot, a refused file) says nothing about it. Test `pbr_export::no_orphan_note_when_the_export_writes_no_json`.
+- **FP7 Save writes the edits a blame stashed (T38).** While the retry plan after a rejection is running (`tentative_edits()` is Some), `save()` writes the stashed text with `ProjectDoc::save_stashed` (same changed-on-disk check and atomic write), so Save in the Open, Close and Reload prompts keeps the user's edits. `sdc.toml` may then hold a config the engine rejects; it opens read-only with that message, as any rejected file does. Test `history::save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits`.
+- **FP8 Review's Blockers lists a missing preset and a read-only `sdc.toml` (T30).** Both refuse the gate, so both are blockers: a red row each in column 0 and in the count, the preset's row with `Choose preset…` (opens the header's Preset menu, as Problems' button does). Test `auto_accept::review_lists_a_missing_preset_as_a_blocker`.

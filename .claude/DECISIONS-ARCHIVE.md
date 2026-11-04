@@ -89,3 +89,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 - `settle` compiles the keys the pool already took; `set_material` evicts every texture-less missing entry and keeps decode-error entries; a replaced model load drops its queued shader compiles. [BT1, BT2, CX1, CV24]
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
