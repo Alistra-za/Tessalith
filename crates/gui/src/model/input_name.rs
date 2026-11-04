@@ -240,7 +240,17 @@ impl AppModel {
             .map_or_else(|| diffuse.to_string(), |a| a.replace('\\', "/"));
         let old_out = lower(no_ext(&input_output(&cur)));
         let new_out = lower(no_ext(&input_output(new)));
-        let old_auto = fold_id(&engine::sets::set_id(&self.sets_root(), set_key));
+        let mut old_auto = fold_id(&engine::sets::set_id(&self.sets_root(), set_key));
+        // A renamed set's automatic id is its `renamed_from`, not the user's name (Note FO1).
+        let renamed = self.sets_doc.as_ref().and_then(|d| {
+            d.entries()
+                .iter()
+                .find(|e| !e.created && same_id(&e.id, &old_auto))
+                .and_then(|e| e.renamed_from.clone())
+        });
+        if let Some(r) = renamed {
+            old_auto = fold_id(&r);
+        }
         let head = old_auto.strip_suffix(&old_out)?;
         let new_auto = format!("{head}{new_out}");
         (new_auto != old_auto).then_some((old_auto, new_auto))

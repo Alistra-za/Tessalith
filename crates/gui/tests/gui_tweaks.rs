@@ -83,6 +83,35 @@ fn an_input_name_aliases_every_member_and_the_set_keeps_its_settings() {
     );
 }
 
+/// Trace-debug 2026-11-04 #1 (Note FO1): a renamed set's input name moves its entry's `renamed_from`.
+#[test]
+fn input_name_on_renamed_set_moves_its_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.rename_set(ROCK_SET, "Cliffs").unwrap();
+    idle(&mut m);
+    m.set_json_value("Cliffs", "specular_level", Some(json!(0.5)));
+    idle(&mut m);
+    m.set_input_name("Cliffs", "textures/landscape/rock02")
+        .unwrap();
+    idle(&mut m);
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    let e = entries.iter().find(|e| e.id == "Cliffs").expect("entry");
+    assert_eq!(e.renamed_from.as_deref(), Some("landscape/rock02"));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let v = views
+        .iter()
+        .find(|v| v.id.eq_ignore_ascii_case("Cliffs"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no Cliffs view in {:?}",
+                views.iter().map(|v| v.id.clone()).collect::<Vec<_>>()
+            )
+        });
+    assert!(v.settings.contains_key("specular_level"), "{:?}", v.settings);
+    assert!(views.iter().all(|v| v.id != "landscape/rock02"));
+}
+
 #[test]
 fn an_input_name_outside_the_project_or_the_same_name_is_refused() {
     let d = tempfile::tempdir().unwrap();
