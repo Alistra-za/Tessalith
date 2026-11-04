@@ -637,12 +637,7 @@ fn value_of(p: &Profile, field: &str) -> Value {
     let v = serde_json::to_value(p).unwrap_or_default();
     v.pointer(&format!("/{}", field.replace('.', "/")))
         .cloned()
-        .unwrap_or_else(|| match field {
-            "resize" => json!("none"),
-            "resize_relative_to" => json!("self"),
-            "resize_floor" => json!(engine::config::DEFAULT_RESIZE_FLOOR),
-            _ => Value::Null,
-        })
+        .unwrap_or_else(|| crate::model::fields::unset_default(field))
 }
 
 /// The options a field offers for `p`: only what the engine accepts (owner design §2).
@@ -1137,5 +1132,26 @@ mod tests {
             .get_by_label("Reset preset")
             .accesskit_node()
             .is_disabled());
+    }
+
+    /// L62: a key the serialised profile lacks reads as `fields::unset_default`, for every editor field.
+    #[test]
+    fn value_of_shares_the_unset_defaults() {
+        use crate::model::fields::{unset_default, ADVANCED_FIELDS, CUBE_FIELDS, FIELDS};
+        let (p, _) = engine::presets::PresetRegistry::builtin()
+            .unwrap()
+            .effective_profile("cs-quality", Target::Cs, Subtype::Diffuse)
+            .unwrap();
+        let doc = serde_json::to_value(&p).unwrap();
+        for (key, _) in FIELDS.iter().chain(&ADVANCED_FIELDS).chain(&CUBE_FIELDS) {
+            if *key == "format" {
+                continue;
+            }
+            let want = doc
+                .pointer(&format!("/{}", key.replace('.', "/")))
+                .cloned()
+                .unwrap_or_else(|| unset_default(key));
+            assert_eq!(value_of(&p, key), want, "{key}");
+        }
     }
 }
