@@ -393,12 +393,16 @@ pub fn derive_sets(
         // Final review I1: `_curves` and cavity are raw maps, planned as packing inputs (CN3).
         let raw = |want: RawMap| {
             plain.iter().find_map(|j| match j.status {
-                JobStatus::PackingInput { role } if role == want => Some(ChannelSource::Source {
-                    path: j.input.clone(),
-                    role,
-                    invert: false,
-                    channel: None,
-                }),
+                JobStatus::PackingInput { role } if role == want => {
+                    // Backlog T27: the hand-set `helper.invert` / `helper.read`, as the pack loop applies them.
+                    let h = pbr.helpers.iter().find(|h| h.path == j.input);
+                    Some(ChannelSource::Source {
+                        path: j.input.clone(),
+                        role,
+                        invert: h.is_some_and(|h| h.invert),
+                        channel: h.and_then(|h| h.read).map(|r| r.channel()),
+                    })
+                }
                 _ => None,
             })
         };
