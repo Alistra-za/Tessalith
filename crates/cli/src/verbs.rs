@@ -147,6 +147,16 @@ fn pct(n: u64, of: u64) -> String {
     )
 }
 
+/// The serde string form of an enum value (`"bc7"`, `"high"`), as the JSON events carry it.
+macro_rules! tag {
+    ($v:expr) => {
+        match serde_json::to_value($v) {
+            Ok(Value::String(t)) => t,
+            _ => "-".to_string(),
+        }
+    };
+}
+
 fn print_dds_info(info: &DdsInfo) {
     let h = match info {
         DdsInfo::Unreadable(u) => {
@@ -163,12 +173,12 @@ fn print_dds_info(info: &DdsInfo) {
         None => "",
     };
     out!(
-        "  format {}{srgb}  {}x{}  {} mips  {:?} header  cubemap {}",
+        "  format {}{srgb}  {}x{}  {} mips  {} header  cubemap {}",
         h.format,
         h.width,
         h.height,
         h.mip_count,
-        h.header,
+        tag!(&h.header),
         h.cubemap
     );
     for issue in &h.header_issues {
@@ -188,16 +198,6 @@ fn print_dds_info(info: &DdsInfo) {
         };
         out!("  mip {i} {}x{}{alpha}", m.width, m.height);
     }
-}
-
-/// The serde string form of an enum value (`"bc7"`, `"high"`), as the JSON events carry it.
-macro_rules! tag {
-    ($v:expr) => {
-        match serde_json::to_value($v) {
-            Ok(Value::String(t)) => t,
-            _ => "-".to_string(),
-        }
-    };
 }
 
 /// One compact line per RNM layer of a base normal: file, resolved strength, mask and AO source when used.
@@ -327,15 +327,16 @@ fn print_event(ev: &EngineEvent) {
 fn strip_root(s: &str, root: &str) -> Option<String> {
     let norm = s.replace('\\', "/");
     // `root` is the lower-cased form, which can be longer than the original ('İ' lowers to two chars), so
-    // lower-case `norm` char by char until it reaches the root's length, then slice at that char.
+    // grow the candidate prefix a char at a time and lower-case it as a whole string (a final 'Σ' lowers
+    // to 'ς', which a per-char lower-casing would miss) until it reaches the root's length.
     let mut head = String::new();
     let mut end = 0;
     for c in norm.chars() {
         if head.len() >= root.len() {
             break;
         }
-        head.extend(c.to_lowercase());
         end += c.len_utf8();
+        head = norm[..end].to_lowercase();
     }
     if head != root {
         return None;
@@ -1017,6 +1018,12 @@ mod tests {
         let root_i = "c:/users/İbrahim/t".to_lowercase();
         assert_eq!(
             strip_root("C:\\Users\\İbrahim\\t\\a.dds", &root_i).as_deref(),
+            Some("a.dds")
+        );
+        // A word-final 'Σ' lower-cases to 'ς' only when the whole string is lowered.
+        let root_s = "c:/users/ΟΔΥΣΣΕΑΣ".to_lowercase();
+        assert_eq!(
+            strip_root("C:\\Users\\ΟΔΥΣΣΕΑΣ\\a.dds", &root_s).as_deref(),
             Some("a.dds")
         );
         assert_eq!(s("in/rock_n.png"), None);

@@ -21,7 +21,11 @@ impl Default for HumanSink {
 /// `severity CODE message`; with a `label` (a file or set) the severity is padded and the label leads:
 /// `warning label: CODE message`.
 pub fn warning_line(label: Option<&str>, w: &Warning) -> String {
-    let sev = format!("{:?}", w.severity).to_lowercase();
+    // The serde form, as the JSON events carry it.
+    let sev = match serde_json::to_value(w.severity) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => "-".to_string(),
+    };
     match label {
         Some(l) => format!("{sev:<5} {l}: {} {}", w.code.as_str(), w.message),
         None => format!("{sev} {} {}", w.code.as_str(), w.message),

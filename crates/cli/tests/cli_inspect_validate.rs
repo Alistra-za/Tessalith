@@ -68,10 +68,10 @@ fn inspect_reports_suggestions_and_dds_headers() {
     let out = text(&o.stdout);
     assert!(out.contains("normal") && out.contains("high"), "{out}");
 
-    let bench = alpha254_dds(d.path());
+    let dds = alpha254_dds(d.path());
     let o = sdc()
         .args(["inspect", "--json"])
-        .arg(&bench)
+        .arg(&dds)
         .output()
         .unwrap();
     assert_eq!(code(&o), 0);
@@ -93,8 +93,8 @@ fn inspect_reports_suggestions_and_dds_headers() {
 #[test]
 fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
     let d = tempfile::tempdir().unwrap();
-    let bench = alpha254_dds(d.path());
-    let o = sdc().arg("inspect").arg(&bench).output().unwrap();
+    let dds = alpha254_dds(d.path());
+    let o = sdc().arg("inspect").arg(&dds).output().unwrap();
     assert_eq!(code(&o), 0);
     let out = text(&o.stdout);
     for want in [
@@ -103,6 +103,7 @@ fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
         "7 mips",
         "Dx10",
         "cubemap false",
+        // The exact percentages pin the human output byte for byte (backlog L69), not just the codec.
         "mip 0 64x32  alpha min 253 =255 19.5% =254 39.1% <254 41.4%",
     ] {
         assert!(out.contains(want), "{want}: {out}");
@@ -184,12 +185,12 @@ fn inspect_cleans_up_and_writes_nothing_into_its_temp_root() {
 }
 
 #[test]
-fn validate_passes_bench_bc7() {
+fn validate_passes_a_bc7_diffuse() {
     let d = tempfile::tempdir().unwrap();
-    let bench = alpha254_dds(d.path());
+    let dds = alpha254_dds(d.path());
     let o = sdc()
         .args(["validate", "--subtype", "diffuse", "--target", "vanilla"])
-        .arg(&bench)
+        .arg(&dds)
         .output()
         .unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
@@ -211,10 +212,10 @@ fn validate_unreadable_file_exits_1_even_next_to_a_good_one() {
         .output()
         .unwrap();
     assert_eq!(code(&o), 1);
-    let bench = alpha254_dds(d.path());
+    let dds = alpha254_dds(d.path());
     let o = sdc()
         .args(["validate", "--subtype", "diffuse"])
-        .arg(&bench)
+        .arg(&dds)
         .arg(&junk)
         .output()
         .unwrap();
@@ -1210,5 +1211,6 @@ fn convert_logs_the_set_shader_warnings() {
         .output()
         .unwrap();
     let err = text(&o.stderr);
-    assert!(err.contains("wall: SHADER-MISSING-MAP"), "{err}");
+    assert_eq!(code(&o), 0, "{err}");
+    assert_eq!(err.matches("wall: SHADER-MISSING-MAP").count(), 1, "{err}");
 }
