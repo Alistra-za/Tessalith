@@ -8,7 +8,7 @@ use engine::codes::Code;
 use engine::config::{Bc7Weights, ColorTag, Format};
 use sdc_gui::model::bulk::BulkOp;
 use sdc_gui::model::fields::{
-    field_view, hidden_reason, weighting_option_lock, WEIGHTING, WEIGHTING_OPTIONS,
+    field_lock, field_view, hidden_reason, weighting_option_lock, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
@@ -274,6 +274,52 @@ fn perceptual_keeps_its_lock_and_the_row_is_bc7_only() {
         field_view(m.target, &j, WEIGHTING).unwrap().lock,
         Some("BC7 only")
     );
+}
+
+/// FM42: on BC1 and BC3 the BC7 weighting row is hidden and a Perceptual tick edits `encoder.perceptual`; on BC7 the
+/// tick is hidden (the dropdown has Perceptual). The tick keeps the colour-without-data-alpha lock.
+#[test]
+fn the_perceptual_tick_shows_for_bc1() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    let n = m.item(NORMAL).unwrap().job.clone().unwrap().profile;
+    let mut nb = n.clone();
+    nb.format = Format::Bc1;
+    assert!(field_lock(m.target, &nb, "encoder.perceptual").is_some());
+    m.select_item(ROCK);
+    let ticks = |h: &Harness<'static, AppModel>| {
+        h.query_all_by_role(Role::CheckBox)
+            .filter(|n| n.accesskit_node().label().as_deref() == Some("Perceptual"))
+            .count()
+    };
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(ticks(&h), 0, "BC7 has the dropdown, not the tick");
+    for fmt in [Format::Bc3, Format::Bc1] {
+        h.state_mut().set_format(ROCK, fmt, ColorTag::Srgb);
+        idle(h.state_mut());
+        h.run();
+        let p = h.state().item(ROCK).unwrap().job.clone().unwrap().profile;
+        assert_eq!(hidden_reason(&p, "encoder.perceptual"), None, "{fmt:?}");
+        assert_eq!(field_lock(h.state().target, &p, "encoder.perceptual"), None);
+        assert_eq!(ticks(&h), 1, "{fmt:?}");
+        assert_eq!(
+            h.query_all_by_role(Role::ComboBox)
+                .filter(|n| n.accesskit_node().label().as_deref() == Some("BC7 weighting"))
+                .count(),
+            0,
+            "{fmt:?}"
+        );
+    }
+    h.get_by_role_and_label(Role::CheckBox, "Perceptual")
+        .click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    let m = h.state();
+    assert_eq!(own(m, ROCK).0, Some(json!(true)));
+    assert_eq!(encode_params(m, ROCK), (true, None));
+    assert!(!ignored(m, ROCK));
 }
 
 /// Fix round 1, M1: leaving BC7 drops the texture's own weighting, so no hidden value keeps warning.

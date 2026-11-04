@@ -2,7 +2,7 @@
 
 | Path | Upstream | Commit | Licence |
 |---|---|---|---|
-| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut and BC1 alpha patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
+| bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
 | ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patch 0001 | MIT (kernel.ispc modified; change notice at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18) with ISPC 1.31.0: `-O2 --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions` | — | Apache-2.0 |
@@ -19,7 +19,7 @@ Provenance of the first objects: the bc7e objects are byte-identical to the ones
 because the bench's copies embed the bench's absolute source path; same source and flags,
 but the files differ from the bench's.
 
-Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut and BC1 alpha patches at
+Three vendored encoders carry sdc patches: bc7e (patches 0001 and 0002 below), ISPC TC (BC6H patch 0001 below) and rgbcx (the BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches at
 the end of this file).
 
 Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) changes bc7e. `bc7e/bc7e.ispc` is the pristine `bc7enc_rdo/bc7e.ispc` with that patch applied:
@@ -128,3 +128,18 @@ transparent (opaque black is reached through an endpoint). The shim adds `sdc_bc
 `c5defdaa3daf151116517a386cfb38145010b2490000976f524baf6a6dc97592`.
 The principal-axis and extreme-texel setup is a copy of the one in `try_3color_block_useblack`; on an upstream update,
 keep the two in sync.
+
+Patch "rgbcx BC1 perceptual" (2026-11-03) applies on top of BC1 alpha, marked `sdc patch (bc1 perceptual, see
+README-VENDOR.md)`. `rgbcx.h` declares and `rgbcx.cpp` adds `set_bc1_perceptual(bool)`, which sets per-thread
+(`thread_local`) weights of the R, G and B terms of the BC1 colour error: 54, 183, 19 (Rec.709 luma scaled to 256) when
+on, 1, 1, 1 when off. They multiply the 14 error sums of `bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the
+forced-selector path of `bc1_find_sels4` and `bc1_find_sels3_fullerr`, and both palettes of `bc1_dual_err` (the
+cBC1Dual scoring that `bc1_find_sels4_dual`, `bc1_find_sels3_dual` and `bc1_alpha_find_sels` use; `bc1_dual_palette`
+carries the weights). The PCA axis, the least-squares fits, the orderings, the single-colour tables and the BC4 code are
+unweighted. Off, every sum is the old integer times 1, so the bytes are unchanged (`encoders-sys`
+`tests/bc1_perceptual.rs` pins the pre-patch output of BC1, BC1 alpha and BC3; `tests/bc1_dual.rs` keeps its pinned
+error). The shim's `sdc_bc1_encode`, `sdc_bc1_encode_alpha` and `sdc_bc3_encode` take a `perceptual` flag and set the
+weights for that call only (reset on return), so encodes on other threads keep their own (`perceptual_is_per_thread`).
+Before this patch `rgbcx.cpp` had SHA-256 `04073b629c49abd8c17347e5d01c0036fedb39567d90e4e36c3157630aa4c189` and
+`rgbcx.h` `863b8e8e1100fbc0695cc65fea10399c345020530b06911dd6ad17312d2ab72d`. Measurements:
+docs/research/encoder-benchmark.md ("Luma-weighted BC1 error").

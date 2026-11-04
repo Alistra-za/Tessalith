@@ -416,20 +416,24 @@ Dual against Ideal: +0.20 dB on NVIDIA, +0.35 dB on AMD, -0.16 dB on an exact (I
 
 ### Luma-weighted BC1 error (2026-10-31)
 
-rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`). The experiment (`F:\ai\dds\bench\scripts\bc1w\`) weights only those sums, in a scratch copy of the vendored rgbcx built as a separate tool. The PCA axis, the least-squares fits and the cluster orderings stay unweighted. It encodes with the engine's call of the time (level 18, Ideal model, 3-colour blocks allowed, no transparent black). Scoring uses the bench's decoder (`bcdecode.exe`) and `run_bench.metrics`. Besides the bench's luma metrics (`y_psnr`, and `ssim_y` = SSIM on Rec.709 luma), it adds mean CIELAB ΔE76 (sRGB, D65) as an independent colour-perception metric.
+rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`), and under cBC1Dual in `bc1_dual_err`. Weighting only those sums leaves the PCA axis, the least-squares fits and the cluster orderings unweighted. Tessalith ships it as `encoder.perceptual` on BC1 and BC3 colour (Rec.709, FM42; `vanilla-compact` turns it on).
 
-Round 3 `rgb_real` (93 images), Δ against unweighted. For ΔE, + = lower (better):
+Two runs, both level 18 with 3-colour blocks allowed and no transparent black, both scored with the bench's decoder (`bcdecode.exe`) and `run_bench.metrics`. Besides the bench's luma metrics (`y_psnr`, and `ssim_y` = SSIM on Rec.709 luma), they add mean CIELAB ΔE76 (sRGB, D65) as an independent colour-perception metric.
 
-| Weights | `rgb_psnr` | `y_psnr` | `ssim_y` | ΔE76 | time |
+- 2026-10-31, Ideal model: a scratch copy of the vendored rgbcx built as a separate tool (`F:\ai\dds\bench\scripts\bc1w\`). Its unweighted absolute values are 0.01 dB from the bench's own `bc1_rgbcx_L18` row (39.413 vs 39.424 dB), since bc7enc's CLI flags differ slightly.
+- 2026-11-03, cBC1Dual: the shipped encoder (`encoders_sys::bc1_encode_block` with the flag off and on; `release/2.0` at 9c9fbd52 plus FM42, release build, 16 threads). Unweighted it scores 39.629 dB RGB and 41.264 dB luma.
+
+Round 3 `rgb_real` (93 images), Δ against unweighted under the same model. For ΔE, + = lower (better):
+
+| Weights, model | `rgb_psnr` | `y_psnr` | `ssim_y` | ΔE76 | time |
 |---|---|---|---|---|---|
-| Rec.709 (0.2126, 0.7152, 0.0722; ints 54/183/19) | −0.284 [±0.041] 1/92 | **+0.656 [±0.121] 93/0** | **+0.00354 [±0.00075] 93/0** | −0.062 [±0.013] 8/85 | same |
-| Rec.601 (0.299, 0.587, 0.114; 77/150/29) | −0.163 [±0.023] 1/92 | +0.488 [±0.095] 93/0 | +0.00275 [±0.00063] 93/0 | −0.038 [±0.010] 9/84 | same |
+| Rec.709 (0.2126, 0.7152, 0.0722; ints 54/183/19), Dual (shipped) | −0.297 [±0.042] 0/93 | **+0.681 [±0.123] 93/0** | **+0.00351 [±0.00074] 93/0** | −0.063 [±0.014] 8/85 | same |
+| Rec.709, Ideal | −0.284 [±0.041] 1/92 | +0.656 [±0.121] 93/0 | +0.00354 [±0.00075] 93/0 | −0.062 [±0.013] 8/85 | same |
+| Rec.601 (0.299, 0.587, 0.114; 77/150/29), Ideal | −0.163 [±0.023] 1/92 | +0.488 [±0.095] 93/0 | +0.00275 [±0.00063] 93/0 | −0.038 [±0.010] 9/84 | same |
 
-Round 1 gives the same picture: `rgb_real` (7) Rec.709 y +0.95 dB, ssim_y +0.0045 and ΔE −0.088; `rgb_grad` (7) y +0.98 dB.
+Round 1 (Ideal) gives the same picture: `rgb_real` (7) Rec.709 y +0.95 dB, ssim_y +0.0045 and ΔE −0.088; `rgb_grad` (7) y +0.98 dB. Under Dual the weighted Δs match the Ideal run within their intervals.
 
-The weighting moves error out of luma into chroma, and both luma metrics use the same Rec.709 weights it optimises. On those metrics weighted rgbcx BC1 beats every BC1 row in the bench, NVTT −highest included (y 41.65 vs 41.33 dB; ssim_y 0.9824 vs 0.9793). ΔE76, which also sees chroma, gets worse on 85 of 93 images, and RGB PSNR drops on 92 of 93. It costs no time. Like bc7e's perceptual mode, it is a preference at most, not a free win; the owner declined a BC1 perceptual option (2026-11-01).
-
-BC1 is scored under the bench decoder (`bcdecode.exe`), and the base run uses the Ideal model the engine encoded for. The weighted-vs-unweighted comparison shares that decoder, so the Δs stand. Absolute values are 0.01 dB from the bench's own `bc1_rgbcx_L18` row (39.413 vs 39.424 dB), since bc7enc's CLI flags differ slightly.
+The weighting moves error out of luma into chroma, and both luma metrics use the same Rec.709 weights it optimises. On those metrics weighted rgbcx BC1 beats every BC1 row in the bench, NVTT −highest included (Ideal run: y 41.65 vs 41.33 dB; ssim_y 0.9824 vs 0.9793). ΔE76, which also sees chroma, gets worse on 85 of 93 images, and RGB PSNR drops on every image. It costs no time. Like bc7e's perceptual mode, it is a preference, not a free win, which is why it is off by default.
 
 ## BC4 and BC5
 

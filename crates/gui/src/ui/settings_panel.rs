@@ -7,8 +7,8 @@ use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, shown_
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
-    weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER, WEIGHTING,
-    WEIGHTING_OPTIONS,
+    weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
+    WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -579,6 +579,17 @@ pub(super) fn editor(
             let r = ui
                 .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
                 .on_hover_text(BC1_ALPHA_HOVER);
+            (r.changed().then(|| json!(b)), r)
+        }
+        "encoder.perceptual" => {
+            let mut b = f.value.as_bool().unwrap_or(false);
+            let r = ui
+                .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
+                .on_hover_text(PERCEPTUAL_HOVER);
+            // The box has no text of its own, so name it for AccessKit (FM42).
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), b, "Perceptual")
+            });
             (r.changed().then(|| json!(b)), r)
         }
         "alpha.exact_opaque" => {

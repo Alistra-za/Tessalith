@@ -304,3 +304,4 @@ M12	M		back	FM		partial	2026-11-03		goes: the provenance example names only R an
 FM20	FM		back	FM		partial	2026-11-03		goes: `data` always blocks (Note FM39: an empty `data` alpha is accepted); stays: the rest of the item
 FM38	FM		back	FM		partial	2026-11-03		goes: FMT-RGB8-ALPHA for any alpha policy but remove (Note FM39: an empty data alpha is accepted); stays: the rest of the item
 FM¶- **Left alone.**	FM		back	FM		partial	2026-11-03		goes: cs-compact and vanilla-compact do not halve a Gray map (Note FM41: they do); stays: the rest of the item
+FJ7	FJ		back	FM		partial	2026-11-03		goes: "Q3 no BC1 perceptual option" (reversed by the owner 2026-11-03, FM42); stays: Q1, Q2, Q4 and the fast-preset answer

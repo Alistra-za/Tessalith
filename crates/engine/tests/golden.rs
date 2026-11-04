@@ -3700,6 +3700,76 @@ fn vanilla_compact_opaque_diffuse_is_bc1() {
     );
 }
 
+/// FM42: vanilla-compact's two BC1 colour rules turn perceptual on; a data map and BC7 colour keep it off.
+#[test]
+fn vanilla_compact_bc1_colour_is_perceptual_and_data_is_not() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/wall.png", rgb(64));
+    put(d.path(), "textures/a/wall_n.png", flat_normal(64));
+    // Varying alpha keeps the diffuse off the BC1 rules (blend, BC7).
+    put(
+        d.path(),
+        "textures/b/glass.png",
+        rgba(64, |x, y| [90, 120, 200, ((x + y) * 2) as u8]),
+    );
+    let o = plan_preset(
+        d.path(),
+        Target::Vanilla,
+        "vanilla-compact",
+        &["file:**/glass.png.alpha.policy=blend"],
+    );
+    let get = |s: &str| {
+        let j = planned(&o, s);
+        (
+            j["profile"]["format"].as_str().unwrap().to_string(),
+            j["profile"]["encoder"]["perceptual"].as_bool().unwrap(),
+        )
+    };
+    assert_eq!(get("a/wall.png"), ("bc1".into(), true));
+    assert!(!get("a/wall_n.png").1);
+    assert_eq!(get("b/glass.png"), ("bc7".into(), false));
+    assert!(!planned(&o, "a/wall.png")
+        .to_string()
+        .contains("FMT-PERCEPTUAL-DATA"));
+    // Every vanilla sub-type the rules name takes perceptual BC1 without FMT-PERCEPTUAL-DATA.
+    let sts = [
+        "diffuse",
+        "glow",
+        "subsurface_tint",
+        "backlight_tint",
+        "ui_sky",
+    ];
+    let e = tempfile::tempdir().unwrap();
+    let sets: Vec<String> = sts
+        .iter()
+        .map(|st| {
+            put(e.path(), &format!("textures/s/{st}.png"), rgb(64));
+            format!("file:**/s/{st}.png.subtype={st}")
+        })
+        .collect();
+    let sets: Vec<&str> = sets.iter().map(String::as_str).collect();
+    let o = plan_preset(e.path(), Target::Vanilla, "vanilla-compact", &sets);
+    for st in sts {
+        let j = planned(&o, &format!("s/{st}.png"));
+        assert_eq!(
+            (
+                j["profile"]["format"].as_str(),
+                j["profile"]["encoder"]["perceptual"].as_bool()
+            ),
+            (Some("bc1"), Some(true)),
+            "{st}"
+        );
+        assert!(!j.to_string().contains("FMT-PERCEPTUAL-DATA"), "{st}");
+        assert_eq!(j["status"]["state"], "ready", "{st}: {}", j["status"]);
+    }
+    // cs-compact has the same rules and stays off.
+    let o = plan_preset(d.path(), Target::Cs, "cs-compact", &[]);
+    assert_eq!(
+        planned(&o, "a/wall.png")["profile"]["encoder"]["perceptual"],
+        false
+    );
+}
+
 #[test]
 fn fast_preview_is_fast_with_smallest_mip_validation() {
     for t in [Target::Cs, Target::Vanilla] {

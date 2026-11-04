@@ -5,7 +5,7 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields in display order, with the label each row shows.
-pub const FIELDS: [(&str, &str); 15] = [
+pub const FIELDS: [(&str, &str); 16] = [
     ("subtype", "Sub-type"),
     ("color.content", "Content"),
     ("color.tag", "DDS tag"),
@@ -22,7 +22,13 @@ pub const FIELDS: [(&str, &str); 15] = [
     ("format", "Format"),
     ("encoder.effort", "Effort"),
     (WEIGHTING, "BC7 weighting"),
+    // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
+    ("encoder.perceptual", "Perceptual"),
 ];
+
+/// Hover text of the BC1/BC3 "Perceptual" check box (FM42).
+pub const PERCEPTUAL_HOVER: &str =
+    "On: colour error is weighted by luma (Rec.709), so brightness keeps more detail and colour a little less. Colour maps without data alpha only";
 
 /// The BC7 weighting row (DECISIONS Note CP): one dropdown over `encoder.perceptual` and `encoder.bc7_weights`.
 pub const WEIGHTING: &str = "encoder.bc7_weights";
@@ -249,6 +255,9 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
         "encoder.bc1_alpha" if p.format != Format::Bc1 => Some("BC1 only"),
+        "encoder.perceptual" if !matches!(p.format, Format::Bc1 | Format::Bc3) => {
+            Some("BC1 and BC3 only (BC7: the BC7 weighting row)")
+        }
         "alpha.parallax" if p.subtype != Subtype::ComplexMaterial => {
             Some("complex material _m only")
         }
@@ -275,9 +284,9 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "encoder.perceptual"
             if !(p.subtype.category() == Category::Color
                 && p.alpha.policy != AlphaPolicy::Data
-                && p.format == Format::Bc7) =>
+                && matches!(p.format, Format::Bc1 | Format::Bc3 | Format::Bc7)) =>
         {
-            Some("perceptual BC7 is only for colour without data alpha")
+            Some("perceptual is only for colour without data alpha, on BC1, BC3 or BC7")
         }
         "alpha.threshold" | "alpha.compare" if !cutout => {
             Some("used only by cutout and cutout + blend")

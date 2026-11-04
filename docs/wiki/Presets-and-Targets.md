@@ -84,7 +84,7 @@ A shader the target does not have falls back to `default`, with `SHADER-UNAVAILA
 | `cs-quality` | 2.0.0 | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
 | `cs-compact` | 2.0.0 | `cs` | Smaller files. BC1 for opaque colour maps at full size; every other listed sub-type at half size when its larger side is above 512 (256 for height); BC4/BC5 search radius `fast`. |
 | `vanilla-quality` | 2.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. |
-| `vanilla-compact` | 2.0.0 | `vanilla` | The vanilla version of `cs-compact`. |
+| `vanilla-compact` | 2.0.0 | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
 | `fast-preview` | 2.0.0 | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. For checking a mod quickly, not for release. |
 
 All of them inherit from `sdc-base` (version 2.0.0), a hidden preset that holds the per-sub-type defaults. It is not listed by `presets list`, and a user preset cannot use its id.
@@ -105,6 +105,8 @@ In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "
 1. Colour maps that are opaque become BC1 at full size. This applies to `diffuse`, `pbr_albedo`, `glow`, `pbr_subsurface`, `pbr_fuzz`, `subsurface_tint`, `backlight_tint`, `ui_sky` and `skin_albedo` when the source has no alpha channel (or scanned meshes decided to remove the alpha), and to the same list minus `pbr_subsurface` and `pbr_fuzz` when the alpha is constant 255. `landscape_diffuse` is never BC1 (its alpha is the snow mask), and `pbr_emissive` stays BC6H or BC7.
 2. Every other listed sub-type gets `resize = "half"`: both sides halve while the larger side stays at or above 512, or 256 for `height` ([`resize_floor`](Project-Config-Fields.md#format-and-size)). Emissive and HDR sky are not resized.
 3. `encoder.bc45_search_radius = "fast"`.
+
+`vanilla-compact` also sets [`encoder.perceptual`](Project-Config-Fields.md#encoder) on those BC1 colour maps, and only there.
 
 Compact output never uses BC3, which is the same size as BC7.
 

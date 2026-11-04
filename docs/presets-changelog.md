@@ -14,6 +14,8 @@ version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
   (alpha `data`). `height` gets `resize_floor = 256`, so a `half` height map shrinks down to 256 px.
 - `cs-compact` and `vanilla-compact` halve `projected_noise`, `detail_normal` and `gray` like the other data maps (larger
   side above 512).
+- `vanilla-compact` sets `encoder.perceptual = true` in its two BC1 colour rules (luma-weighted BC1), so those outputs
+  change; its data maps and BC7 colour do not.
 
 ## 2026-10-28 — sdc 1.1.0 (sdc-base 1.2.0)
 

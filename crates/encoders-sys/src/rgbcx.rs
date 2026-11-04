@@ -19,10 +19,12 @@ fn bytes(px: &[[u8; 4]; 16]) -> [u8; 64] {
 }
 
 /// Encode one BC1 block from 16 RGBA texels (alpha is ignored) at the top rgbcx level, scored for NVIDIA + AMD together (DECISIONS Note FM).
+/// `perceptual` weights the colour error by Rec.709 luma instead of equal RGB (DECISIONS FM42); off is the plain encode.
 pub fn bc1_encode_block(
     px: &[[u8; 4]; 16],
     allow_3color: bool,
     transparent_black: bool,
+    perceptual: bool,
 ) -> [u8; 8] {
     init();
     let src = bytes(px);
@@ -36,15 +38,16 @@ pub fn bc1_encode_block(
             RGBCX_MAX_LEVEL,
             allow_3color as i32,
             transparent_black as i32,
+            perceptual as i32,
         )
     };
     out
 }
 
 /// Encode one BC1 block with 1-bit alpha (DECISIONS Note FM): bit i of `transparent` marks texel i transparent. No
-/// bit set gives exactly `bc1_encode_block(px, true, false)`; otherwise a 3-colour block fitted to the opaque texels,
-/// with selector 3 (transparent black) on the masked texels only.
-pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16) -> [u8; 8] {
+/// bit set gives exactly `bc1_encode_block(px, true, false, perceptual)`; otherwise a 3-colour block fitted to the
+/// opaque texels, with selector 3 (transparent black) on the masked texels only.
+pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
     init();
     let src = bytes(px);
     let mut out = [0u8; 8];
@@ -56,6 +59,7 @@ pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16) -> [u8; 8] {
             src.as_ptr(),
             RGBCX_MAX_LEVEL,
             transparent as u32,
+            perceptual as i32,
         )
     };
     out
@@ -63,7 +67,13 @@ pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16) -> [u8; 8] {
 
 /// Encode one BC3 block (BC1 colour at the top level plus HQ BC4 alpha). The alpha search keeps texels on their side of
 /// the alpha test: a texel passes when its alpha is at least `cut` (1..=255; 128 is the default test, Note FM).
-pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32, cut: u8) -> [u8; 16] {
+/// `perceptual` reaches the colour block only, as in [`bc1_encode_block`].
+pub fn bc3_encode_block(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: u8,
+    perceptual: bool,
+) -> [u8; 16] {
     init();
     let src = bytes(px);
     let mut out = [0u8; 16];
@@ -75,6 +85,7 @@ pub fn bc3_encode_block(px: &[[u8; 4]; 16], search_radius: u32, cut: u8) -> [u8;
             RGBCX_MAX_LEVEL,
             search_radius,
             cut as u32,
+            perceptual as i32,
         )
     };
     out

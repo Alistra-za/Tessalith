@@ -587,6 +587,65 @@ fn bc7_weighting_options_change_the_bytes_and_unset_is_the_plain_call() {
     assert_eq!(encode(&input, w, h, &q), encode(&input, w, h, &r));
 }
 
+/// Rec.709 luma PSNR of a BC1 or BC3 encode against `px` (bcdec decode).
+fn y_psnr(enc: &[u8], fmt: Format, px: &[[u8; 4]], w: u32, h: u32) -> f64 {
+    let blocks = encoders_sys::gather_blocks(px, w, h);
+    let bs = enc.len() / (blocks.len() / 16);
+    let y =
+        |t: &[u8]| 0.2126 * f64::from(t[0]) + 0.7152 * f64::from(t[1]) + 0.0722 * f64::from(t[2]);
+    let mut se = 0f64;
+    for (b, src) in enc.chunks(bs).zip(blocks.chunks(16)) {
+        let mut d = [0u8; 64];
+        match fmt {
+            Format::Bc1 => bcdec_rs::bc1(b, &mut d, 16),
+            _ => bcdec_rs::bc3(b, &mut d, 16),
+        }
+        for (t, s) in d.chunks(4).zip(src) {
+            se += (y(t) - y(s)).powi(2);
+        }
+    }
+    10.0 * (255.0f64 * 255.0 / (se / blocks.len() as f64).max(1e-9)).log10()
+}
+
+/// FM42: `encoder.perceptual` reaches BC1 and BC3 colour (Rec.709-weighted error) and raises luma PSNR; off is the
+/// plain encode.
+#[test]
+fn perceptual_bc1_raises_y_psnr_on_a_colour_gradient() {
+    let (w, h) = (64, 64);
+    let mut s = 0x9e37_79b9_u32;
+    let px: Vec<[u8; 4]> = (0..w * h)
+        .map(|i| {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            let (x, y) = (i % w, i / w);
+            let n = |k: u32| ((s >> k) & 31) as u8;
+            [
+                (x * 4) as u8 / 2 + n(0),
+                (y * 3) as u8 + n(8),
+                ((x ^ y) * 4) as u8 / 2 + n(16),
+                255,
+            ]
+        })
+        .collect();
+    let input = EncoderInput::Ldr(px.clone());
+    for fmt in [Format::Bc1, Format::Bc3] {
+        let mut p = profile(Subtype::Diffuse);
+        p.format = fmt;
+        p.alpha.policy = AlphaPolicy::Remove;
+        assert!(!p.encoder.perceptual, "off by default");
+        let off = encode(&input, w, h, &p);
+        p.encoder.perceptual = true;
+        let on = encode(&input, w, h, &p);
+        assert!(off != on, "{fmt:?}: perceptual changed no byte");
+        let (a, b) = (y_psnr(&off, fmt, &px, w, h), y_psnr(&on, fmt, &px, w, h));
+        assert!(
+            b > a + 0.2,
+            "{fmt:?}: luma PSNR off {a:.2} dB, on {b:.2} dB"
+        );
+    }
+}
+
 fn alpha_psnr(bc7: &[u8], px: &[[u8; 4]], w: u32, h: u32) -> f64 {
     let blocks = encoders_sys::gather_blocks(px, w, h);
     let mut se = 0f64;

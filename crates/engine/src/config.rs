@@ -744,6 +744,7 @@ fn default_bake_clamp() -> f64 {
 #[serde(deny_unknown_fields)]
 pub struct EncoderSpec {
     pub effort: Effort,
+    // Perceptual colour error: bc7e's own weights for BC7, Rec.709 luma weights in rgbcx for BC1 and BC3 colour (FM42).
     pub perceptual: bool,
     /// BC7 linear error weights (bc7e only; ignored when `perceptual` is on). Not serialised when unset, so existing
     /// profile hashes hold (DECISIONS Note CP).

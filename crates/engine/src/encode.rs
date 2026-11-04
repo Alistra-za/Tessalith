@@ -131,13 +131,17 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                             .iter()
                             .enumerate()
                             .fold(0u16, |m, (i, t)| m | (u16::from(t[3] < 128) << i));
-                        blk.copy_from_slice(&bc1_encode_block_alpha(src, mask))
+                        blk.copy_from_slice(&bc1_encode_block_alpha(src, mask, e.perceptual))
                     }
-                    Format::Bc1 => blk.copy_from_slice(&bc1_encode_block(src, true, false)),
+                    // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
+                    Format::Bc1 => {
+                        blk.copy_from_slice(&bc1_encode_block(src, true, false, e.perceptual))
+                    }
                     Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
                         src,
                         radius(e.bc45_search_radius),
                         alpha_cut(&p.alpha),
+                        e.perceptual,
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
                     Format::Bc4 => {

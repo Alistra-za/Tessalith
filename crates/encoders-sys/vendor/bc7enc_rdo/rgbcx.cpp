@@ -254,6 +254,17 @@ namespace rgbcx
 	static inline int squarei(int a) { return a * a; }
 	//static inline int absi(int a) { return (a < 0) ? -a : a; }
 
+	// sdc patch (bc1 perceptual, see README-VENDOR.md): weights of the R, G, B terms of every BC1 colour error sum.
+	// Per thread, so encodes on other threads keep their own; 1, 1, 1 (plain SSE) unless set_bc1_perceptual(true).
+	static thread_local int g_sdc_bc1_w[3] = { 1, 1, 1 };
+
+	void set_bc1_perceptual(bool on)
+	{
+		g_sdc_bc1_w[0] = on ? 54 : 1; // Rec.709 luma 0.2126, 0.7152, 0.0722 scaled to 256
+		g_sdc_bc1_w[1] = on ? 183 : 1;
+		g_sdc_bc1_w[2] = on ? 19 : 1;
+	}
+
 	template<typename F> inline F lerp(F a, F b, F s) { return a + (b - a) * s; }
 
 	static const uint32_t TOTAL_ORDER_4_0_16 = 15;
@@ -962,10 +973,11 @@ namespace rgbcx
 	// 3-colour block (entry 3 of a 3-colour block is black in both); a texel's error under selector s is its NVidia
 	// error plus its AMD error. bc1_get_block_colors4/3 above never see cBC1Dual (their final else is NVidia): every
 	// caller of them dispatches to the functions below first.
-	struct bc1_dual_palette { int r[2][4], g[2][4], b[2][4]; };
+	struct bc1_dual_palette { int r[2][4], g[2][4], b[2][4]; int w[3]; }; // w: sdc patch (bc1 perceptual)
 
 	static inline void bc1_get_dual_palette(bc1_dual_palette& p, bool three, int lr, int lg, int lb, int hr, int hg, int hb)
 	{
+		p.w[0] = g_sdc_bc1_w[0]; p.w[1] = g_sdc_bc1_w[1]; p.w[2] = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 		const int r0 = (lr << 3) | (lr >> 2), g0 = (lg << 2) | (lg >> 4), b0 = (lb << 3) | (lb >> 2);
 		const int r3 = (hr << 3) | (hr >> 2), g3 = (hg << 2) | (hg >> 4), b3 = (hb << 3) | (hb >> 2);
 		for (int k = 0; k < 2; k++)
@@ -997,8 +1009,9 @@ namespace rgbcx
 
 	static inline uint32_t bc1_dual_err(const bc1_dual_palette& p, uint32_t s, const color32& c)
 	{
-		return squarei(p.r[0][s] - c.r) + squarei(p.g[0][s] - c.g) + squarei(p.b[0][s] - c.b) +
-			squarei(p.r[1][s] - c.r) + squarei(p.g[1][s] - c.g) + squarei(p.b[1][s] - c.b);
+		const int wr = p.w[0], wg = p.w[1], wb = p.w[2]; // sdc patch (bc1 perceptual)
+		return (wr * squarei(p.r[0][s] - c.r) + wg * squarei(p.g[0][s] - c.g) + wb * squarei(p.b[0][s] - c.b)) +
+			(wr * squarei(p.r[1][s] - c.r) + wg * squarei(p.g[1][s] - c.g) + wb * squarei(p.b[1][s] - c.b));
 	}
 
 	// 4-colour: like bc1_find_sels4_fullerr (same tie rule, same early-out) on the summed error. Every 4-colour
@@ -1120,6 +1133,7 @@ namespace rgbcx
 
 	static inline uint32_t bc1_find_sels4_fasterr(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err)
 	{
+		const int wr = g_sdc_bc1_w[0], wg = g_sdc_bc1_w[1], wb = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 		uint32_t block_r[4], block_g[4], block_b[4];
 		bc1_get_block_colors4(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
@@ -1154,10 +1168,10 @@ namespace rgbcx
 			sels[i + 2] = sel2;
 			sels[i + 3] = sel3;
 
-			total_err += squarei(pSrc_pixels[i + 0].r - block_r[sel0]) + squarei(pSrc_pixels[i + 0].g - block_g[sel0]) + squarei(pSrc_pixels[i + 0].b - block_b[sel0]);
-			total_err += squarei(pSrc_pixels[i + 1].r - block_r[sel1]) + squarei(pSrc_pixels[i + 1].g - block_g[sel1]) + squarei(pSrc_pixels[i + 1].b - block_b[sel1]);
-			total_err += squarei(pSrc_pixels[i + 2].r - block_r[sel2]) + squarei(pSrc_pixels[i + 2].g - block_g[sel2]) + squarei(pSrc_pixels[i + 2].b - block_b[sel2]);
-			total_err += squarei(pSrc_pixels[i + 3].r - block_r[sel3]) + squarei(pSrc_pixels[i + 3].g - block_g[sel3]) + squarei(pSrc_pixels[i + 3].b - block_b[sel3]);
+			total_err += (wr * squarei(pSrc_pixels[i + 0].r - block_r[sel0]) + wg * squarei(pSrc_pixels[i + 0].g - block_g[sel0]) + wb * squarei(pSrc_pixels[i + 0].b - block_b[sel0]));
+			total_err += (wr * squarei(pSrc_pixels[i + 1].r - block_r[sel1]) + wg * squarei(pSrc_pixels[i + 1].g - block_g[sel1]) + wb * squarei(pSrc_pixels[i + 1].b - block_b[sel1]));
+			total_err += (wr * squarei(pSrc_pixels[i + 2].r - block_r[sel2]) + wg * squarei(pSrc_pixels[i + 2].g - block_g[sel2]) + wb * squarei(pSrc_pixels[i + 2].b - block_b[sel2]));
+			total_err += (wr * squarei(pSrc_pixels[i + 3].r - block_r[sel3]) + wg * squarei(pSrc_pixels[i + 3].g - block_g[sel3]) + wb * squarei(pSrc_pixels[i + 3].b - block_b[sel3]));
 
 			if (total_err >= cur_err)
 				break;
@@ -1168,6 +1182,7 @@ namespace rgbcx
 
 	static inline uint32_t bc1_find_sels4_check2_err(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err)
 	{
+		const int wr = g_sdc_bc1_w[0], wg = g_sdc_bc1_w[1], wb = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 		uint32_t block_r[4], block_g[4], block_b[4];
 		bc1_get_block_colors4(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
@@ -1186,8 +1201,8 @@ namespace rgbcx
 			int sel = (int)((float)((r - (int)block_r[0]) * dr + (g - (int)block_g[0]) * dg + (b - (int)block_b[0]) * db) * f + .5f);
 			sel = clampi(sel, 1, 3);
 
-			uint32_t err0 = squarei((int)block_r[sel - 1] - (int)r) + squarei((int)block_g[sel - 1] - (int)g) + squarei((int)block_b[sel - 1] - (int)b);
-			uint32_t err1 = squarei((int)block_r[sel] - (int)r) + squarei((int)block_g[sel] - (int)g) + squarei((int)block_b[sel] - (int)b);
+			uint32_t err0 = (wr * squarei((int)block_r[sel - 1] - (int)r) + wg * squarei((int)block_g[sel - 1] - (int)g) + wb * squarei((int)block_b[sel - 1] - (int)b));
+			uint32_t err1 = (wr * squarei((int)block_r[sel] - (int)r) + wg * squarei((int)block_g[sel] - (int)g) + wb * squarei((int)block_b[sel] - (int)b));
 
 			int best_sel = sel;
 			uint32_t best_err = err1;
@@ -1215,6 +1230,7 @@ namespace rgbcx
 
 	static inline uint32_t bc1_find_sels4_fullerr(const color32* pSrc_pixels, uint32_t lr, uint32_t lg, uint32_t lb, uint32_t hr, uint32_t hg, uint32_t hb, uint8_t sels[16], uint32_t cur_err)
 	{
+		const int wr = g_sdc_bc1_w[0], wg = g_sdc_bc1_w[1], wb = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 		uint32_t block_r[4], block_g[4], block_b[4];
 		bc1_get_block_colors4(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
@@ -1226,12 +1242,12 @@ namespace rgbcx
 			const int g = pSrc_pixels[i].g;
 			const int b = pSrc_pixels[i].b;
 
-			uint32_t best_err = squarei((int)block_r[0] - (int)r) + squarei((int)block_g[0] - (int)g) + squarei((int)block_b[0] - (int)b);
+			uint32_t best_err = (wr * squarei((int)block_r[0] - (int)r) + wg * squarei((int)block_g[0] - (int)g) + wb * squarei((int)block_b[0] - (int)b));
 			uint8_t best_sel = 0;
 
 			for (uint32_t j = 1; (j < 4) && best_err; j++)
 			{
-				uint32_t err = squarei((int)block_r[j] - (int)r) + squarei((int)block_g[j] - (int)g) + squarei((int)block_b[j] - (int)b);
+				uint32_t err = (wr * squarei((int)block_r[j] - (int)r) + wg * squarei((int)block_g[j] - (int)g) + wb * squarei((int)block_b[j] - (int)b));
 				if ((err < best_err) || ((err == best_err) && (j == 3)))
 				{
 					best_err = err;
@@ -1262,6 +1278,7 @@ namespace rgbcx
 			uint32_t block_r[4], block_g[4], block_b[4];
 			bc1_get_block_colors4(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
+			const int wr = g_sdc_bc1_w[0], wg = g_sdc_bc1_w[1], wb = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 			err = 0;
 			for (uint32_t i = 0; i < 16; i++)
 			{
@@ -1272,7 +1289,7 @@ namespace rgbcx
 				const uint32_t sel = pForce_selectors[i];
 				assert(sel <= 3);
 
-				err += squarei((int)block_r[sel] - (int)r) + squarei((int)block_g[sel] - (int)g) + squarei((int)block_b[sel] - (int)b);
+				err += (wr * squarei((int)block_r[sel] - (int)r) + wg * squarei((int)block_g[sel] - (int)g) + wb * squarei((int)block_b[sel] - (int)b));
 			}
 		}
 		else
@@ -1295,6 +1312,7 @@ namespace rgbcx
 		uint32_t block_r[4], block_g[4], block_b[4];
 		bc1_get_block_colors3(block_r, block_g, block_b, lr, lg, lb, hr, hg, hb);
 
+		const int wr = g_sdc_bc1_w[0], wg = g_sdc_bc1_w[1], wb = g_sdc_bc1_w[2]; // sdc patch (bc1 perceptual)
 		uint32_t total_err = 0;
 
 		if (pForce_selectors)
@@ -1315,7 +1333,7 @@ namespace rgbcx
 				const uint32_t sel = pForce_selectors[i];
 				assert(sel <= 3);
 
-				total_err += squarei((int)block_r[sel] - (int)r) + squarei((int)block_g[sel] - (int)g) + squarei((int)block_b[sel] - (int)b);
+				total_err += (wr * squarei((int)block_r[sel] - (int)r) + wg * squarei((int)block_g[sel] - (int)g) + wb * squarei((int)block_b[sel] - (int)b));
 			}
 		}
 		else
@@ -1326,17 +1344,17 @@ namespace rgbcx
 				const int g = pSrc_pixels[i].g;
 				const int b = pSrc_pixels[i].b;
 
-				uint32_t best_err = squarei((int)block_r[0] - (int)r) + squarei((int)block_g[0] - (int)g) + squarei((int)block_b[0] - (int)b);
+				uint32_t best_err = (wr * squarei((int)block_r[0] - (int)r) + wg * squarei((int)block_g[0] - (int)g) + wb * squarei((int)block_b[0] - (int)b));
 				uint32_t best_sel = 0;
 
-				uint32_t err1 = squarei((int)block_r[1] - (int)r) + squarei((int)block_g[1] - (int)g) + squarei((int)block_b[1] - (int)b);
+				uint32_t err1 = (wr * squarei((int)block_r[1] - (int)r) + wg * squarei((int)block_g[1] - (int)g) + wb * squarei((int)block_b[1] - (int)b));
 				if (err1 < best_err)
 				{
 					best_err = err1;
 					best_sel = 1;
 				}
 
-				uint32_t err2 = squarei((int)block_r[2] - (int)r) + squarei((int)block_g[2] - (int)g) + squarei((int)block_b[2] - (int)b);
+				uint32_t err2 = (wr * squarei((int)block_r[2] - (int)r) + wg * squarei((int)block_g[2] - (int)g) + wb * squarei((int)block_b[2] - (int)b));
 				if (err2 < best_err)
 				{
 					best_err = err2;
@@ -1345,7 +1363,7 @@ namespace rgbcx
 
 				if (use_black)
 				{
-					uint32_t err3 = squarei(r) + squarei(g) + squarei(b);
+					uint32_t err3 = (wr * squarei(r) + wg * squarei(g) + wb * squarei(b));
 					if (err3 < best_err)
 					{
 						best_err = err3;

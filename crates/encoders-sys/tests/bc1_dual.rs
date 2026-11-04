@@ -45,7 +45,7 @@ fn summed_sse() -> u64 {
         .chunks(16)
         .map(|b| {
             let b: &[[u8; 4]; 16] = b.try_into().unwrap();
-            dual_sse(&bc1_encode_block(b, true, false), b)
+            dual_sse(&bc1_encode_block(b, true, false, false), b)
         })
         .sum()
 }
@@ -60,7 +60,7 @@ fn dual_summed_vendor_error_is_pinned() {
 #[test]
 fn nvidia_and_amd_decode_a_dual_block() {
     init();
-    let blk = bc1_encode_block(&[[10, 200, 30, 255]; 16], true, false);
+    let blk = bc1_encode_block(&[[10, 200, 30, 255]; 16], true, false, false);
     for m in [Bc1Model::Nvidia, Bc1Model::Amd] {
         let px = bc1_decode_block(&blk, m);
         assert_eq!(px.len(), 16);

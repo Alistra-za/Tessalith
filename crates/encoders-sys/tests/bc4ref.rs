@@ -17,7 +17,9 @@ fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
 
 /// The alpha half of `bc3_encode_block` for texels `v` (the colour half is not under test).
 fn bc3_alpha(v: &[u8; 16], r: u32, cut: u8) -> [u8; 8] {
-    bc3_encode_block(&px(v, 3), r, cut)[..8].try_into().unwrap()
+    bc3_encode_block(&px(v, 3), r, cut, false)[..8]
+        .try_into()
+        .unwrap()
 }
 
 fn sse(b: &[u8; 8], v: &[u8; 16]) -> u64 {

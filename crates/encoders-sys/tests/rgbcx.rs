@@ -23,7 +23,7 @@ fn bc1_with_transparent_black_off_always_decodes_opaque() {
     for p in b.iter_mut().take(6) {
         *p = [0, 0, 0, 255];
     }
-    let enc = bc1_encode_block(&b, true, false);
+    let enc = bc1_encode_block(&b, true, false, false);
     for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
         assert!(
             bc1_decode_block(&enc, model).iter().all(|p| p[3] == 255),
@@ -42,7 +42,7 @@ fn bc1_alpha_keeps_opaque_black_opaque() {
             _ => [90, 90, 90, 0],
         };
     }
-    let enc = bc1_encode_block_alpha(&b, 0xFF00);
+    let enc = bc1_encode_block_alpha(&b, 0xFF00, false);
     for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
         let dec = bc1_decode_block(&enc, model);
         for (i, d) in dec.iter().enumerate() {
@@ -58,7 +58,7 @@ fn bc1_alpha_keeps_opaque_black_opaque() {
 
 #[test]
 fn bc1_alpha_all_transparent_block() {
-    let enc = bc1_encode_block_alpha(&ramp_block(), 0xFFFF);
+    let enc = bc1_encode_block_alpha(&ramp_block(), 0xFFFF, false);
     for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
         assert!(
             bc1_decode_block(&enc, model)
@@ -77,8 +77,8 @@ fn bc1_alpha_without_transparent_texels_matches_plain_encode() {
     }
     for blk in [ramp_block(), b] {
         assert_eq!(
-            bc1_encode_block_alpha(&blk, 0),
-            bc1_encode_block(&blk, true, false)
+            bc1_encode_block_alpha(&blk, 0, false),
+            bc1_encode_block(&blk, true, false, false)
         );
     }
 }
@@ -100,7 +100,7 @@ fn bc1_alpha_fits_only_opaque_texels() {
             }
         };
     }
-    let enc = bc1_encode_block_alpha(&b, mask);
+    let enc = bc1_encode_block_alpha(&b, mask, false);
     for model in [Bc1Model::Nvidia, Bc1Model::Amd] {
         let dec = bc1_decode_block(&enc, model);
         for (i, (d, s)) in dec.iter().zip(&b).enumerate() {
@@ -144,7 +144,7 @@ fn bc1_alpha_swapped_endpoints_keep_the_mask() {
                     [lo[0], lo[1], lo[2], 255]
                 };
             }
-            let enc = bc1_encode_block_alpha(&px, mask);
+            let enc = bc1_encode_block_alpha(&px, mask, false);
             let (c0, c1) = (
                 u16::from_le_bytes([enc[0], enc[1]]),
                 u16::from_le_bytes([enc[2], enc[3]]),
@@ -201,7 +201,7 @@ fn bc5_encodes_red_and_green() {
 #[test]
 fn bc3_keeps_alpha() {
     let b = ramp_block();
-    let enc = bc3_encode_block(&b, BC45_RADIUS_MAX, 128);
+    let enc = bc3_encode_block(&b, BC45_RADIUS_MAX, 128, false);
     let mut dec = [0u8; 64];
     bcdec_rs::bc3(&enc, &mut dec, 16);
     for i in 0..16 {

@@ -200,7 +200,16 @@ fn compact_and_fast_preview_resolve_as_designed() {
         assert!(!rule.matcher.subtypes.contains(&Subtype::PbrEmissive));
         assert_eq!(rule.overrides, json!({"format": "bc1", "resize": "none"}));
     }
-    assert_eq!(r.get("vanilla-compact").unwrap().rules, compact.rules);
+    // vanilla-compact has the same rules, with perceptual BC1 (FM42).
+    let vanilla = &r.get("vanilla-compact").unwrap().rules;
+    assert_eq!(vanilla.len(), compact.rules.len());
+    for (v, c) in vanilla.iter().zip(&compact.rules) {
+        assert_eq!(v.matcher, c.matcher);
+        assert_eq!(
+            v.overrides,
+            json!({"format": "bc1", "resize": "none", "encoder": {"perceptual": true}})
+        );
+    }
     for t in [Target::Cs, Target::Vanilla] {
         let p = r.profile("fast-preview", t, Subtype::Diffuse).unwrap();
         assert_eq!(p.encoder.effort, Effort::Fast);

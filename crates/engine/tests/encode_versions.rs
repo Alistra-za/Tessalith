@@ -150,7 +150,7 @@ fn t200_pins_the_cutoff(d: &Path) {
         .enumerate()
     {
         let blk: &[[u8; 4]; 16] = blk.try_into().unwrap();
-        let alpha = |cut| encoders_sys::bc3_encode_block(blk, 5, cut)[..8].to_vec();
+        let alpha = |cut| encoders_sys::bc3_encode_block(blk, 5, cut, false)[..8].to_vec();
         assert_eq!(dds.data[b * 16..b * 16 + 8], alpha(201), "block {b}");
         differs += (alpha(201) != alpha(128)) as u32;
     }
@@ -296,6 +296,12 @@ fn coverage_fixture(dir: &Path) -> Vec<String> {
     };
     // BC1 stores no alpha (FMT-BC1-ALPHA), so it gets an opaque source; with `encoder.bc1_alpha` it keeps 1-bit alpha.
     add("opaque_bc1", rgb(64), &["subtype=diffuse", "format=bc1"]);
+    // FM42: the same source with perceptual (Rec.709-weighted) BC1.
+    add(
+        "perceptual_bc1",
+        rgb(64),
+        &["subtype=diffuse", "format=bc1", "encoder.perceptual=true"],
+    );
     add(
         "cutout_bc1",
         checker(),
@@ -621,6 +627,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     let sha =
         |name: &str| identity[&format!("cov/textures/c/{name}.dds")]["payload_sha256"].clone();
     assert_ne!(sha("cutout_bc3_tent"), sha("cutout_bc3"));
+    assert_ne!(sha("perceptual_bc1"), sha("opaque_bc1"));
     // `_rmaos` is BC7, so its hash is the ISA-keyed one.
     let bc7 = |name: &str| {
         identity[&format!("cov/textures/c/{name}.dds")]
@@ -641,6 +648,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     let covered = |name: &str| identity.keys().any(|k| k.contains(name));
     for name in [
         "opaque_bc1",
+        "perceptual_bc1",
         "cutout_bc1",
         "cutout_bc3",
         "cutout_bc7",

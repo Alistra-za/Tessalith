@@ -105,15 +105,24 @@ void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, i
     ispc::bc7e_compress_blocks(n, blocks, px, &p);
 }
 
-void sdc_bc1_encode(uint8_t* dst, const uint8_t* px, uint32_t level, int allow3, int black) {
+// `perceptual` != 0 weights the BC1 colour error by Rec.709 luma for this one call (rgbcx's per-thread weights).
+struct Bc1Weights {
+    explicit Bc1Weights(int perceptual) { rgbcx::set_bc1_perceptual(perceptual != 0); }
+    ~Bc1Weights() { rgbcx::set_bc1_perceptual(false); }
+};
+
+void sdc_bc1_encode(uint8_t* dst, const uint8_t* px, uint32_t level, int allow3, int black, int perceptual) {
+    Bc1Weights w(perceptual);
     rgbcx::encode_bc1(level, dst, px, allow3 != 0, black != 0);
 }
 
-void sdc_bc1_encode_alpha(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t transparent) {
+void sdc_bc1_encode_alpha(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t transparent, int perceptual) {
+    Bc1Weights w(perceptual);
     rgbcx::encode_bc1_alpha(level, dst, px, transparent);
 }
 
-void sdc_bc3_encode(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t rad, uint32_t cut) {
+void sdc_bc3_encode(uint8_t* dst, const uint8_t* px, uint32_t level, uint32_t rad, uint32_t cut, int perceptual) {
+    Bc1Weights w(perceptual);
     rgbcx::encode_bc3_hq(level, dst, px, rad, rgbcx::BC4_USE_ALL_MODES | rgbcx::BC4_SDC_SEARCH | rgbcx::BC4_SDC_GUARD128 | (cut << 8));
 }
 

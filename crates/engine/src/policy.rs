@@ -1927,10 +1927,11 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     {
         add(
             FmtPerceptualData,
-            "perceptual BC7 is allowed only for colour without data alpha [B2 §1]".into(),
+            "perceptual BC1/BC3/BC7 is allowed only for colour without data alpha [B2 §1]".into(),
         );
     }
     // DECISIONS Note CP: the weights reach bc7e only, and only without perceptual (bc7e's own weights win there).
+    // `perceptual` itself also reaches BC1 and BC3 colour (rgbcx Rec.709 weights, FM42); other formats ignore it.
     // `linear` is the plain encode everywhere, so it is never "ignored".
     if let Some(w) = p.encoder.bc7_weights.filter(|w| *w != Bc7Weights::Linear) {
         let why = if p.format != Format::Bc7 {

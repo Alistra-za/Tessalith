@@ -247,6 +247,11 @@ namespace rgbcx
 	// under cBC1Dual), masked texels selector 3, so an opaque texel never decodes transparent.
 	void encode_bc1_alpha(uint32_t level, void* pDst, const uint8_t* pPixels, uint32_t transparent_mask);
 
+	// sdc patch (bc1 perceptual, see README-VENDOR.md): on, every BC1 colour error sum of this thread (all BC1 entry
+	// points and BC3's colour block, cBC1Dual included) weights R, G, B by Rec.709 luma (54, 183, 19 of 256); off, plain
+	// SSE. Per thread; the shim sets it around one encode.
+	void set_bc1_perceptual(bool on);
+
 	// Low-level interface for BC1 encoding.
 	// Always returns a 4 color block, unless cEncodeBC1Use3ColorBlocksForBlackPixels or cEncodeBC1Use3ColorBlock flags are specified. 
 	// total_orderings_to_try controls the perf. vs. quality tradeoff on 4-color blocks when the cEncodeBC1UseLikelyTotalOrderings flag is used. It must range between [MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4].

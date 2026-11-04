@@ -40,14 +40,16 @@ pub struct Versions {
     pub ispctc: &'static str,
     pub ispc: &'static str,
     pub bc7e_patch: Option<&'static str>,
-    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search; BC1 dual; BC3 alpha guard cutoff in `mode_flag` bits 8..15; BC1 1-bit alpha); README-VENDOR.md.
+    /// The sdc patches in the vendored `rgbcx.h`/`rgbcx.cpp` (BC4 palette rounded to nearest, M6 Track D; BC4 block search; BC1 dual; BC3 alpha guard cutoff in `mode_flag` bits 8..15; BC1 1-bit alpha; BC1 perceptual weights); README-VENDOR.md.
     pub rgbcx_patch: Option<&'static str>,
 }
 
 pub fn versions() -> Versions {
     Versions {
         bc7enc_rdo: "b943862",
-        rgbcx_patch: Some("bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha"),
+        rgbcx_patch: Some(
+            "bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha+bc1-perceptual",
+        ),
         ispctc: "79ddbc9",
         ispc: "1.31.0",
         bc7e_patch: Some("0001-exact-opaque-alpha"),

@@ -602,6 +602,47 @@ fn unavailable_subtype_reports_cfg_unavailable_only() {
     );
 }
 
+/// FM42: perceptual BC1 is refused on a data map like perceptual BC7 (FMT-PERCEPTUAL-DATA, which names BC1), and
+/// allowed on colour.
+#[test]
+fn perceptual_bc1_on_a_normal_is_refused() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x_n.png",
+        Some("n"),
+        &["n"],
+        opaque(),
+        &[
+            "subtype:normal.format=bc1",
+            "subtype:normal.encoder.perceptual=true",
+        ],
+        &[],
+    );
+    assert!(
+        matches!(&j.status, JobStatus::Error { codes } if codes.contains(&Code::FmtPerceptualData)),
+        "{:?}",
+        j.status
+    );
+    let m = &warning(&j, Code::FmtPerceptualData).message;
+    assert!(m.contains("BC1"), "{m}");
+    let j = run(
+        Target::Cs,
+        "textures/a/x.png",
+        None,
+        &[],
+        opaque(),
+        &[
+            "subtype=diffuse",
+            "format=bc1",
+            "alpha.policy=remove",
+            "encoder.perceptual=true",
+        ],
+        &[],
+    );
+    assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+    assert!(j.profile.encoder.perceptual);
+}
+
 /// Carry 3: without `encoder.bc1_alpha` BC1 is opaque only, whatever the alpha policy; `has_alpha()` is not relied on.
 #[test]
 fn bc1_blocks_every_alpha_policy_but_remove() {

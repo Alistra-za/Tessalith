@@ -2137,6 +2137,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
 ARCHIVED (superseded by Note FM, 2026-11-02)
 - **FJ9 Not done: per-mesh alpha thresholds.** The guard protects the alpha-test value 128 only, the vanilla and Community Shaders default. A mesh with another alpha-test threshold is not protected, because the threshold lives in the NIF (`NiAlphaProperty`), not in the texture the encoder sees.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+- **FJ7 Owner answers (2026-11-01).** "yes to all four" to the plan's questions: Q1 coverage guard on BC3 alpha only (BC4/BC5 are data; on `packed_real` the guard costs 0.02 dB); Q2 the near-exhaustive `max` timed first (FJ8); Q3 no BC1 perceptual option; Q4 ship in 1.2.0. Fast presets: the search also runs at radius 4 (`fast`: `cs-compact`, `vanilla-compact`, `fast-preview`); the owner chose "new search" after the C++ timing (radius 4: 153 → 380 ms median per image, 2.48×; NVTT `-highest` per image BC4 0.424 s and BC5 1.025 s against sdc's pre-patch 0.159 s and 0.307 s). No code change: the shim sets the flags at every radius.
+
 ## Note DM — Per-type encode versions for if-changed (owner, 2026-10-26)
 
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-02)
