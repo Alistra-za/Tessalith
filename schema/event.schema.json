@@ -2218,11 +2218,6 @@
           "type": "string"
         },
         {
-          "const": "low_detail",
-          "description": "`CHK-LOW-DETAIL`: no longer emitted as a skip; kept so older event logs parse.",
-          "type": "string"
-        },
-        {
           "const": "generated_replaced",
           "description": "A generated member that a real source for its slot replaced (`GEN-REPLACED`, Note CO).",
           "type": "string"

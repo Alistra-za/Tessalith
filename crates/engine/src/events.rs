@@ -79,8 +79,6 @@ pub enum SkipKind {
     PackConflict,
     /// A raw map consumed by a recipe; the event's `job_key` names the packed output.
     PackedSource,
-    /// `CHK-LOW-DETAIL`: no longer emitted as a skip; kept so older event logs parse.
-    LowDetail,
     /// A generated member that a real source for its slot replaced (`GEN-REPLACED`, Note CO).
     GeneratedReplaced,
 }
