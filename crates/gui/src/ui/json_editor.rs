@@ -5,7 +5,7 @@
 use super::columns::{AMBER, RED};
 use super::path_picker;
 use super::pgp_fields::{
-    alpha_default, context, control, disabled_reason, edit_key, kept_line, kept_unused, Ctx,
+    alpha_default, context_of, control, disabled_reason, edit_key, kept_line, kept_unused, Ctx,
 };
 use crate::model::pbr_export::{json_issues, json_name, written_json_entries, JsonIssues};
 use crate::model::sections::{delete_hits, not_written_reason, DeleteHit};
@@ -622,7 +622,6 @@ fn set_entry(
     nav: &mut Nav,
     acts: &mut Vec<Act>,
 ) {
-    let c = context(model, &v.id);
     let owner = Owner::Set(v.id.clone());
     let mine: Vec<&DeleteHit> = hits.iter().filter(|h| same_id(&h.set_id, &v.id)).collect();
     let mine_of = |l: &[(String, String)]| -> Vec<String> {
@@ -679,37 +678,38 @@ fn set_entry(
         if !open {
             return;
         }
+        let c = context_of(model, &v.id, Some(v));
         let derived = v.derived_match.clone().unwrap_or_default();
-        let mut taken: Vec<Mode> = active_matches(&c.own, &derived)
-            .iter()
-            .map(|(n, _)| Mode::Exact(*n))
-            .collect();
+        let active = active_matches(&c.own, &derived);
+        let renamed_to = json_rename(&c.own, &derived);
+        let mut taken: Vec<Mode> = active.iter().map(|(n, _)| Mode::Exact(*n)).collect();
         let contains = text_of(&c.own, "path_contains").map(str::to_string);
         if contains.is_some() {
             taken.push(Mode::Contains);
         }
         let waiting = pending(ui, &owner);
-        if let Some((d, _)) = json_rename(&c.own, &derived) {
+        if let Some((d, _)) = &renamed_to {
             ui.weak(RENAMED_MATCH_NOTE).on_hover_text(format!(
                 "Written as match_diffuse = {d}; other match slots are not written"
             ));
         }
         ui.horizontal_wrapped(|ui| {
             // AN2: a renamed set's matches keep their mode (another would be refused), and only its first is written.
-            let renamed = json_rename(&c.own, &derived).is_some();
+            let renamed = renamed_to.is_some();
             let blocked: Vec<Mode> = if renamed {
                 (1..=8u8).map(Mode::Exact).chain([Mode::Contains]).collect()
             } else {
                 taken.clone()
             };
-            let first = active_matches(&c.own, &derived).first().map(|(n, _)| *n);
-            for (n, path) in active_matches(&c.own, &derived) {
+            let first = active.first().map(|(n, _)| *n);
+            for (n, path) in &active {
+                let n = *n;
                 match_pill(
                     ui,
                     model,
                     &owner,
                     Mode::Exact(n),
-                    &path,
+                    path,
                     &derived,
                     &blocked,
                     acts,
@@ -791,9 +791,9 @@ fn set_entry(
         .into_iter()
         .filter(|k| {
             // A stored empty match (slot 1 turned off, `match1 = ""`) has no pill, so it keeps waiting.
-            !c.own.contains_key(edit_key(k))
+            !v.settings.contains_key(edit_key(k))
                 || (is_match_key(k)
-                    && matches!(c.own.get(edit_key(k)), Some(Value::String(s)) if s.is_empty()))
+                    && matches!(v.settings.get(edit_key(k)), Some(Value::String(s)) if s.is_empty()))
         })
         .collect();
     set_pending(ui, &owner, left);

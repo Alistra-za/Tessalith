@@ -191,24 +191,34 @@ fn deciding_a_row_in_review_keeps_the_columns_usable() {
     let mut h = harness(opened(d.path()));
     h.run();
     press_export(&mut h);
-    // One ✓ per row that asks its sub-type, in list order.
+    // One `Set type: X ✓` per row that asks its sub-type with a suggestion, in list order (Backlog L64).
     let with_check: Vec<String> = h
         .state()
         .undecided_keys()
         .into_iter()
-        .filter(|k| h.state().subtype_question(k).is_some())
+        .filter(|k| matches!(h.state().subtype_question(k), Some(Some(_))))
         .collect();
     let at = with_check.iter().position(|k| k == ROCK).unwrap();
-    let before = h.query_all_by_label("\u{2713}").count();
+    let before = h.query_all_by_label_contains("Set type: ").count();
     assert_eq!(before, with_check.len());
-    let node = h.query_all_by_label("\u{2713}").nth(at).unwrap();
+    let node = h.query_all_by_label_contains("Set type: ").nth(at).unwrap();
     node.hover();
     h.run();
-    h.query_all_by_label("\u{2713}").nth(at).unwrap().click();
+    h.query_all_by_label_contains("Set type: ")
+        .nth(at)
+        .unwrap()
+        .click();
     h.run();
     settle(&mut h);
-    assert!(!h.state().undecided_keys().contains(&ROCK.to_string()));
-    assert_eq!(h.query_all_by_label("\u{2713}").count(), before - 1);
+    assert!(
+        !h.state().undecided_keys().contains(&ROCK.to_string()),
+        "{with_check:?} at {at}: left {:?}",
+        h.state().undecided_keys()
+    );
+    assert_eq!(
+        h.query_all_by_label_contains("Set type: ").count(),
+        before - 1
+    );
     // The Textures column still takes a click while Review is open (Note DY16: the raw roughness is a helper row now).
     h.query_all_by_role(eframe::egui::accesskit::Role::Button)
         .find(|n| {

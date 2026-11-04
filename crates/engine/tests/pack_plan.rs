@@ -697,6 +697,7 @@ fn lost_sources_end_once_and_never_when_something_else_ends_them() {
         output: PathBuf::new(),
         stage: Stage::Load,
         error: "x".into(),
+        set: None,
     }];
     let mut skipped = vec![];
     end_lost_sources(&lost, &p.jobs, &failed, &[cancelled], &mut skipped);

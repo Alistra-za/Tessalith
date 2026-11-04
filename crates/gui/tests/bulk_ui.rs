@@ -255,6 +255,23 @@ fn a_second_frame_with_nothing_changed_does_not_recompute_the_bulk_view() {
     assert_eq!(h.state().bulk_computes(), n);
 }
 
+/// Backlog L14: the re-encode split (it builds a writers map) is part of the cached view, not redone every frame.
+#[test]
+fn the_reencode_split_is_computed_with_the_bulk_view_not_per_frame() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    let mut h = harness(m);
+    h.run();
+    let n = h.state().reencode_splits();
+    assert!(n >= 1, "the panel asked for the split");
+    h.step();
+    h.step();
+    h.step();
+    assert_eq!(h.state().reencode_splits(), n);
+}
+
 #[test]
 fn a_mixed_slider_shows_mixed_and_an_idle_frame_writes_nothing() {
     let d = tempfile::tempdir().unwrap();

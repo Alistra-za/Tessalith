@@ -179,7 +179,7 @@ fn merged_transparency(r: &mut In, h: &Header, end: u64) -> Result<bool, PsdErro
     let mut found = negative_count(r, layers)?;
     r.seek(start.saturating_add(layers))?;
     if r.pos()? + 4 > end {
-        return Ok(false);
+        return Ok(found);
     }
     let mask = u64::from(r.u32()?);
     r.skip(mask)?;

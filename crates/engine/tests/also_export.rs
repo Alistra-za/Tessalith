@@ -824,6 +824,144 @@ fn derive_sets_skip_by_id() {
     assert_eq!(notes.len(), 1);
 }
 
+/// Backlog T26: a PBR member that fails to load leaves its set out of the derive, with a note.
+#[test]
+fn derive_sets_leaves_out_a_set_with_a_failed_member() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+        std::fs::write(m.join("textures/pbr/arm/steel_rmaos.png"), b"not a png").unwrap();
+    });
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            request(&m, &loc.join("Mod PBR")),
+            &Reporter::new(Arc::new(NullSink), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    assert_eq!(p.failed.len(), 1, "{:?}", p.failed);
+    let (sets, drop, notes) = derive_sets(&p, &BTreeSet::new());
+    assert!(
+        sets.is_empty(),
+        "{:?}",
+        sets.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+    assert!(!drop.is_empty());
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, "textures/pbr/arm/steel");
+    assert!(
+        notes[0].why.contains("failed in the PBR export"),
+        "{}",
+        notes[0].why
+    );
+}
+
+/// Backlog T26 (review): a set renamed by a `[sets]` edit is found through the final sets, not by file name.
+#[test]
+fn derive_sets_finds_a_renamed_set_with_a_failed_member() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        std::fs::write(m.join("textures/pbr/arm/steel_rmaos.png"), b"not a png").unwrap();
+    });
+    let mut r = request(&m, &loc.join("Mod PBR"));
+    r.set_edits.push(engine::sets::SetEdit::Rename {
+        from: "textures/pbr/arm/steel".into(),
+        to: "textures/pbr/arm/iron".into(),
+    });
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(Arc::new(NullSink), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    assert_eq!(p.failed.len(), 1, "{:?}", p.failed);
+    let (sets, _, notes) = derive_sets(&p, &BTreeSet::new());
+    assert!(
+        sets.is_empty(),
+        "{:?}",
+        sets.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, "textures/pbr/arm/iron");
+}
+
+/// Backlog T27: `helper.invert` on a raw cavity map reaches the derived set's cavity source.
+#[test]
+fn derive_sets_applies_a_cavity_maps_helper_invert() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        png(
+            &m.join("textures/pbr/arm/steel_cavity.png"),
+            16,
+            16,
+            [90, 90, 90, 255],
+        );
+    });
+    png(
+        &m.join("textures/pbr/arm/steel_curves.png"),
+        16,
+        16,
+        [90, 90, 90, 255],
+    );
+    let curves = |sel: &str| {
+        let mut r = request(&m, &loc.join("Mod PBR"));
+        r.overrides.push(parse_set(sel).unwrap());
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                r,
+                &Reporter::new(Arc::new(NullSink), "t"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        derive_sets(&p, &BTreeSet::new()).0[0]
+            .curves
+            .clone()
+            .expect("curves map")
+    };
+    // `helper.read` on the curves map picks its channel; the plain curves map has none.
+    assert!(matches!(
+        curves("file:**/steel_curves.png.helper.read=g"),
+        engine::pack::ChannelSource::Source {
+            channel: Some(1),
+            ..
+        }
+    ));
+    assert!(matches!(
+        curves("file:**/steel_curves.png.helper.invert=true"),
+        engine::pack::ChannelSource::Source {
+            invert: true,
+            channel: None,
+            ..
+        }
+    ));
+    let cavity = |invert: bool| {
+        let mut r = request(&m, &loc.join("Mod PBR"));
+        if invert {
+            r.overrides
+                .push(parse_set("file:**/steel_cavity.png.helper.invert=true").unwrap());
+        }
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                r,
+                &Reporter::new(Arc::new(NullSink), "t"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        let (sets, ..) = derive_sets(&p, &BTreeSet::new());
+        sets[0].cavity.clone().expect("cavity map")
+    };
+    assert_ne!(cavity(true), cavity(false));
+    assert!(matches!(
+        cavity(true),
+        engine::pack::ChannelSource::Source { invert: true, .. }
+    ));
+}
+
 // ---- Note FM: no zip, no sums file, no report; files the run did not write are noted ----
 
 /// Every name in `loc` (not below it) but the opened folder `Mod`.

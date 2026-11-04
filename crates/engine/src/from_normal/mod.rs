@@ -861,6 +861,34 @@ mod tests {
         );
     }
 
+    /// Backlog R1: a 1000² torus normal, resampled to 1024², solves to the 1024² torus's height.
+    #[test]
+    fn an_npot_torus_solves_like_its_power_of_two_twin() {
+        let mut o = opts(1024, Neutral::Half);
+        o.tiling = Tiling::Wrap;
+        o.green = Some(Directx);
+        let (a, b) = (
+            height(&torus_n(1000, 1000), &o),
+            height(&torus_n(1024, 1024), &o),
+        );
+        let mean =
+            a.px.iter()
+                .zip(&b.px)
+                .map(|(x, y)| (x - y).abs())
+                .sum::<f32>()
+                / a.px.len() as f32;
+        assert!(mean < 0.001, "mean abs height difference {mean}");
+        // The height is range-normalised, which would hide a uniform slope shrink: compare the slopes the solve
+        // starts from (the resampled normal against the true one), so a bias in `to_pot` shows.
+        let up = to_pot(&torus_n(1000, 1000)).expect("1000 is not a power of two");
+        let (s, t) = (slopes(&up, Directx), slopes(&torus_n(1024, 1024), Directx));
+        let mean_abs = |v: &[f64]| v.iter().map(|x| x.abs()).sum::<f64>() / v.len() as f64;
+        // A torus normal holds per-pixel slopes, so the 1000 px one is 1024/1000 steeper per pixel than the 1024 px
+        // one; resampling must keep exactly that (measured 1.0238 against 1.024).
+        let ratio = mean_abs(&s.p) / mean_abs(&t.p);
+        assert!((ratio - 1.024).abs() < 0.003, "mean |p| ratio {ratio}");
+    }
+
     #[test]
     fn a_recipe_height_may_reach_2048() {
         // OWNER-Q1: the solve runs at SOLVE_MAX and the height is resampled up to the recipe's size.

@@ -106,6 +106,27 @@ fn one_click_accepts_the_suggestion() {
     assert_eq!(std::fs::read_to_string(&toml).ok(), on_disk);
 }
 
+/// Backlog L64: Review's Undecided row offers the same `Set type: X ✓` accept as a Problems row (one `fix_buttons`).
+#[test]
+fn review_undecided_row_offers_the_problems_accept() {
+    use sdc_gui::ui::review::{apply, undecided_row};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(900.0, 300.0))
+        .build_ui_state(
+            |ui, m: &mut AppModel| {
+                if let Some(p) = undecided_row(ui, m, TINT, None) {
+                    apply(m, p);
+                }
+            },
+            with_tint(d.path()),
+        );
+    h.run();
+    h.get_by_label("Set type: subsurface tint ✓").click();
+    idle(&mut h);
+    assert_eq!(subtype(h.state(), TINT), Some(json!("subsurface_tint")));
+}
+
 #[test]
 fn the_arrow_opens_the_picker_for_another_type() {
     let d = tempfile::tempdir().unwrap();

@@ -15,6 +15,8 @@ struct Psd {
     blocks: Vec<(&'static [u8; 4], Vec<u8>)>,
     /// The layer info's layer count, written alone (no layer records follow); 0 writes an empty layer info.
     layer_count: i16,
+    /// Leave out the global layer mask length (a third-party writer's short layer section).
+    no_mask_len: bool,
     compression: u16,
     planes: Vec<Vec<u8>>,
 }
@@ -30,6 +32,7 @@ impl Psd {
             res: Vec::new(),
             blocks: Vec::new(),
             layer_count: 0,
+            no_mask_len: false,
             compression: 0,
             planes,
         }
@@ -75,7 +78,9 @@ impl Psd {
             len(&mut lm, 2, self.big);
             lm.extend_from_slice(&self.layer_count.to_be_bytes());
         }
-        lm.extend_from_slice(&0u32.to_be_bytes()); // no global layer mask
+        if !self.no_mask_len {
+            lm.extend_from_slice(&0u32.to_be_bytes()); // no global layer mask
+        }
         for (key, data) in &self.blocks {
             lm.extend_from_slice(b"8BIM");
             lm.extend_from_slice(*key);
@@ -249,6 +254,27 @@ fn merged_transparency_is_unmatted() {
     psd.layer_count = 0;
     psd.blocks = vec![(b"Lr32", vec![0xFF, 0xFF, 0, 0])];
     let p = psd.write(d.path(), "lr32.psd");
+    assert!((load_image(&p).unwrap().0.at(0, 0)[0] - 0.2).abs() < 1e-6);
+}
+
+/// Backlog T28: a negative layer count still counts when the global layer mask length is missing.
+#[test]
+fn negative_count_survives_a_missing_global_mask_length() {
+    let d = tempfile::tempdir().unwrap();
+    let mut psd = Psd::rgb(
+        2,
+        1,
+        32,
+        vec![
+            f32s(&[0.6, 1.0]),
+            f32s(&[1.0, 1.0]),
+            f32s(&[0.5, 1.0]),
+            f32s(&[0.5, 0.0]),
+        ],
+    );
+    psd.layer_count = -1;
+    psd.no_mask_len = true;
+    let p = psd.write(d.path(), "short.psd");
     assert!((load_image(&p).unwrap().0.at(0, 0)[0] - 0.2).abs() < 1e-6);
 }
 

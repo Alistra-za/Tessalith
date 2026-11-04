@@ -208,3 +208,38 @@ fn an_orm_gives_the_bent_layer_its_ao() {
     let ao = n.rnm.as_ref().unwrap().ao.clone().unwrap();
     assert!(ao.file.path.ends_with("iron_orm.png") && ao.channel == 0);
 }
+
+/// Backlog T40 (Note FV): a hand-set `helper.role` decides the bent layer's AO before the file name does.
+#[test]
+fn a_hand_set_role_picks_the_bent_layers_ao_before_the_name() {
+    let d = tempfile::tempdir().unwrap();
+    for n in [
+        "iron.png",
+        "iron_n.png",
+        "iron_bent.png",
+        "iron_ao.png",
+        "iron_occlusion.png",
+    ] {
+        png(d.path(), n);
+    }
+    let ao = |sets: Vec<String>| {
+        job(&plan_dir(d.path(), sets), "iron_n.png")
+            .rnm
+            .as_ref()
+            .unwrap()
+            .ao
+            .clone()
+    };
+    // The name rule alone: `_ao` is the AO, `_occlusion` is not.
+    assert!(ao(vec![]).unwrap().file.path.ends_with("iron_ao.png"));
+    // `none` takes `_ao` out; the unnamed file with role `ao` takes over.
+    let sets = vec![
+        "file:**/iron_ao.png.helper.role=none".to_string(),
+        "file:**/iron_occlusion.png.helper.role=ao".to_string(),
+    ];
+    let a = ao(sets).unwrap();
+    assert!(a.file.path.ends_with("iron_occlusion.png") && a.channel == 0);
+    // Role `none` on the only name-matched AO leaves the layer's weight uniform.
+    std::fs::remove_file(d.path().join("in/iron_occlusion.png")).unwrap();
+    assert!(ao(vec!["file:**/iron_ao.png.helper.role=none".into()]).is_none());
+}
