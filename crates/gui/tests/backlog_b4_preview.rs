@@ -112,9 +112,9 @@ fn a_cube_dds_previews_all_six_faces() {
     assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 64);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded_mip(0).unwrap()).contains(&r),
+            reds(out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded_mip(0).unwrap())
+            reds(out.decoded_mip(0).unwrap())
         );
     }
 }
@@ -129,9 +129,9 @@ fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
     assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 16);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded_mip(0).unwrap()).contains(&r),
+            reds(out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded_mip(0).unwrap())
+            reds(out.decoded_mip(0).unwrap())
         );
     }
 }
