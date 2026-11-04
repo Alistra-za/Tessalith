@@ -65,6 +65,8 @@ pub fn undecided_row(
 ) -> Option<RowPick> {
     let item = model.item(key)?;
     let mut pick = None;
+    // The name and its sentences wrap; the buttons get a line of their own, since a wrapped layout squeezes a button
+    // word by word instead of moving it down.
     ui.horizontal_wrapped(|ui| {
         if ui.link(&item.name).clicked() {
             pick = Some(RowPick::Select(key.to_string()));
@@ -83,8 +85,10 @@ pub fn undecided_row(
                 Decision::CubeLayout | Decision::Subtype { .. } => {}
             }
         }
-        // Backlog L64: the buttons are the Problems row's, so both surfaces offer the same fixes.
-        if let Some(p) = fix_buttons(ui, model, key, off) {
+    });
+    // Backlog L64: the buttons are the Problems row's, so both surfaces offer the same fixes.
+    ui.horizontal(|ui| {
+        if let Some(p) = fix_buttons_on(ui, model, key, off, "Review") {
             pick = Some(p);
         }
     });
@@ -119,6 +123,17 @@ pub fn fix_buttons(
     model: &AppModel,
     key: &str,
     off: Option<&str>,
+) -> Option<RowPick> {
+    fix_buttons_on(ui, model, key, off, "Problems")
+}
+
+/// `fix_buttons` on the surface `surface` names (the accessible name of the alpha dropdown).
+fn fix_buttons_on(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    key: &str,
+    off: Option<&str>,
+    surface: &str,
 ) -> Option<RowPick> {
     let item = model.item(key)?;
     let why = off.unwrap_or_default();
@@ -170,7 +185,7 @@ pub fn fix_buttons(
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
                         let id = egui::Id::new(("problems-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why, "Problems") {
+                        if let Some(p) = alpha_dropdown(ui, id, shown, why, surface) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
                     }

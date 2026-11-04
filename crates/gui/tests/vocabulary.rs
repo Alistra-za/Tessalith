@@ -250,7 +250,40 @@ fn the_subtype_dropdowns_offer_skin_rfaos() {
     let mut h = harness(m);
     h.run();
     h.run();
-    open_a_combo_and_check(&mut h, "Review");
+    // Backlog L64: Review's rows open the shared `Set type…` picker, not a combo.
+    let openers: Vec<_> = h
+        .query_all_by_label("Set type…")
+        .map(|n| n.rect())
+        .collect();
+    assert!(!openers.is_empty(), "Review: a type picker");
+    let mut seen = false;
+    for r in openers {
+        h.input_mut()
+            .events
+            .push(egui::Event::PointerMoved(r.center()));
+        for pressed in [true, false] {
+            h.input_mut().events.push(egui::Event::PointerButton {
+                pos: r.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+        }
+        h.run();
+        h.run();
+        assert_eq!(
+            h.query_all_by_label_contains("skin rfaos").count(),
+            0,
+            "Review: lower-case id offered"
+        );
+        if h.query_all_by_label("Skin RFAOS").count() > 0 {
+            seen = true;
+            break;
+        }
+        h.key_press(egui::Key::Escape);
+        h.run();
+    }
+    assert!(seen, "Review: Skin RFAOS is offered");
 }
 
 /// Note FC9 (AN6): a PGPatcher-locked slot is a grey padlock with the caption `kept by PGPatcher`, not a red cross.
