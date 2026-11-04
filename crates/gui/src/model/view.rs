@@ -266,7 +266,7 @@ pub fn heatmap_of(
 ) -> Option<(u32, u32, Vec<u8>)> {
     let i = mip.checked_sub(out.result.source.first_level)?;
     let src = out.result.source.levels.get(i)?;
-    let dec = out.decoded.get(i)?;
+    let dec = out.decoded_mip(i)?;
     (dec.len() == src.px.len()).then(|| heatmap(src, dec, channel, full_scale))
 }
 

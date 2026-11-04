@@ -109,12 +109,12 @@ fn a_cube_dds_previews_all_six_faces() {
     let out = dds_preview(&cube_file(d.path(), 8, 1), 4096).unwrap();
     assert_eq!(out.result.faces, 6);
     // The cross is 4 x 3 faces wide and high.
-    assert_eq!(out.decoded[0].len(), 12 * 64);
+    assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 64);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded[0]).contains(&r),
+            reds(out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded[0])
+            reds(out.decoded_mip(0).unwrap())
         );
     }
 }
@@ -126,12 +126,12 @@ fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
     let out = dds_preview(&cube_file(d.path(), 8, 4), 4).unwrap();
     assert_eq!(out.result.source.first_level, 1);
     assert_eq!(out.result.levels.len(), 6 * 3);
-    assert_eq!(out.decoded[0].len(), 12 * 16);
+    assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 16);
     for r in [10, 20, 30, 40, 50, 60] {
         assert!(
-            reds(&out.decoded[0]).contains(&r),
+            reds(out.decoded_mip(0).unwrap()).contains(&r),
             "face {r} is in the cross: {:?}",
-            reds(&out.decoded[0])
+            reds(out.decoded_mip(0).unwrap())
         );
     }
 }
@@ -176,4 +176,31 @@ fn an_array_dds_says_which_slice_it_shows() {
     )
     .unwrap();
     assert!(dds_preview(&q, 4096).unwrap().note.is_none());
+}
+
+/// L12: a DDS preview decodes every mip on the worker when the upload must take the CPU path (uncompressed), and
+/// none when it is a BC file the GPU can take.
+#[test]
+fn a_dds_preview_decodes_eagerly_only_when_the_cpu_path_is_certain() {
+    let d = tempfile::tempdir().unwrap();
+    let raw = d.path().join("raw.dds");
+    let levels = vec![vec![9u8; 16 * 16 * 4], vec![9u8; 8 * 8 * 4]];
+    std::fs::write(
+        &raw,
+        dds_bytes(&desc(16, ResolvedHeader::Legacy), &levels).unwrap(),
+    )
+    .unwrap();
+    let out = dds_preview(&raw, 4096).unwrap();
+    assert_eq!(out.decoded.decoded_count(), 2, "uncompressed: eager");
+    let bc = d.path().join("bc1.dds");
+    let mut dd = desc(16, ResolvedHeader::Legacy);
+    dd.format = Format::Bc1;
+    std::fs::write(&bc, dds_bytes(&dd, &[vec![0u8; 128]]).unwrap()).unwrap();
+    let out = dds_preview(&bc, 4096).unwrap();
+    assert_eq!(out.decoded.len(), 1);
+    assert_eq!(
+        out.decoded.decoded_count(),
+        0,
+        "BC1 on a multiple of 4: lazy"
+    );
 }

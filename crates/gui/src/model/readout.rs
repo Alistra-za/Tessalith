@@ -62,9 +62,7 @@ pub struct PixelReadout {
 /// The decoded image of absolute mip `mip` of `out`.
 fn decoded_side(out: &PreviewOut, mip: usize) -> Option<Side<'_>> {
     let (width, height) = out.result.source.dims.get(mip).copied()?;
-    let px = out
-        .decoded
-        .get(mip.checked_sub(out.result.source.first_level)?)?;
+    let px = out.decoded_mip(mip.checked_sub(out.result.source.first_level)?)?;
     Some(Side { width, height, px })
 }
 

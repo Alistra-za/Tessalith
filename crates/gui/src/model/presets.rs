@@ -838,6 +838,20 @@ impl PresetsModel {
             (Ok(p), Ok(c)) => c.iter().flat_map(|x| &x.rules).chain(&p.rules).collect(),
             _ => vec![],
         };
+        let aliases = self.aliases();
+        // The branch rules' overrides, read once (L59): `scope` would clone the rules and re-key each per branch.
+        let branch_overrides: Vec<(Subtype, String, &toml::Table)> = self
+            .draft
+            .as_ref()
+            .and_then(|d| d.table.get("rules"))
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let (st, suffix, _) = self.branch_key(r)?;
+                Some((st, suffix, r.get("overrides")?.as_table()?))
+            })
+            .collect();
         let rows = Subtype::ALL
             .into_iter()
             .map(|st| {
@@ -874,13 +888,21 @@ impl PresetsModel {
                         p
                     })
                 };
-                let branches = self
-                    .suffixes(st)
-                    .into_iter()
+                let own_suffixes = self.suffixes(st);
+                let branches = own_suffixes
+                    .iter()
                     .map(|s| (s.to_string(), s.to_string(), false))
-                    .chain(self.aliases_for(st).into_iter().map(|(a, c)| (a, c, true)))
+                    .chain(
+                        aliases
+                            .iter()
+                            .filter(|(_, c)| own_suffixes.contains(&c.as_str()))
+                            .map(|(a, c)| (a.clone(), c.clone(), true)),
+                    )
                     .map(|(suffix, canon, alias)| {
-                        let own = self.scope(st, Some(&suffix));
+                        let own = branch_overrides
+                            .iter()
+                            .find(|(s, x, _)| *s == st && *x == suffix)
+                            .map(|(_, _, t)| *t);
                         let facts = BranchFacts {
                             st,
                             canon: &canon,
@@ -901,10 +923,11 @@ impl PresetsModel {
                                 (d, by_alpha)
                             })
                         };
-                        let by_alpha = layered(true).is_ok_and(|(_, a)| a);
+                        let with_own = layered(true);
+                        let by_alpha = with_own.as_ref().is_ok_and(|(_, a)| *a);
                         Branch {
                             overrides: own.map_or(0, count_fields),
-                            profile: layered(true).and_then(|(d, _)| finish_branch(d)),
+                            profile: with_own.and_then(|(d, _)| finish_branch(d)),
                             inherited: layered(false).and_then(|(d, _)| finish_branch(d)),
                             by_alpha,
                             suffix,

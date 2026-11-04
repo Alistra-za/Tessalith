@@ -165,7 +165,7 @@ mod tests {
                 warnings: vec![],
                 normal_len: vec![],
             },
-            decoded: vec![],
+            decoded: Default::default(),
         });
         m.preview.encoded = preview::EncodedState::Done(out);
         m.view.heatmap = true;

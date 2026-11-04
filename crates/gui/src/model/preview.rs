@@ -11,7 +11,7 @@ use engine::decode::decode_level_rgba;
 use engine::manifest::sha256_json;
 use engine::policy::{ResolvedJob, SourceStamp};
 use engine::session::{first_level_within, pack_key, PreviewResult, SourcePreview};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How long an edit must rest before a debounced request starts.
@@ -31,8 +31,8 @@ pub const NO_GPU: &str = "No usable GPU: the preview is off; everything else wor
 #[derive(Debug)]
 pub struct PreviewOut {
     pub result: PreviewResult,
-    /// CPU decode of every encoded mip (RGBA f32), for the heatmap and the no-BC-support fallback.
-    pub decoded: Vec<Vec<[f32; 4]>>,
+    /// CPU decode of the encoded mips, each on its first read: [`PreviewOut::decoded_mip`].
+    pub decoded: Decoded,
     /// A line for the preview notice that only the reader of the file knows (an array DDS shows one slice).
     pub note: Option<String>,
 }
@@ -266,37 +266,108 @@ fn decode_chain(
         .collect()
 }
 
-/// CPU decode of every encoded mip of `r` (a mip that fails to decode comes back black, never missing). A cube
-/// (`faces == 6`, face-major levels) decodes to one horizontal cross per mip (Note DT16).
-pub fn decode_levels(r: &PreviewResult) -> Vec<Vec<[f32; 4]>> {
-    let s = &r.source;
-    let fmt = r.format.pixel_format(r.srgb);
-    decode_faces(fmt, &s.dims, s.first_level, &r.levels, r.faces)
+/// The CPU decode of a preview's mips (RGBA f32), for the readouts, the heatmap and the no-BC-support fallback. Each
+/// mip decodes on its first read (L12): an encode with the heatmap off and no readout decodes none. A mip that fails
+/// to decode comes back black, never missing. A cube (`faces == 6`, face-major levels) decodes to one horizontal cross
+/// per mip (Note DT16).
+#[derive(Debug, Default)]
+pub struct Decoded {
+    /// The layout the encoded bytes are in (a DDS input's own, which `PreviewResult::format` only names for display).
+    fmt: Option<DdsPixelFormat>,
+    mips: Vec<OnceLock<Vec<[f32; 4]>>>,
 }
 
-/// [`decode_chain`] for one face, or for six face-major chains laid out as one cross per mip.
-fn decode_faces(
-    fmt: DdsPixelFormat,
-    dims: &[(u32, u32)],
-    first_level: usize,
-    levels: &[Vec<u8>],
-    faces: u8,
-) -> Vec<Vec<[f32; 4]>> {
-    if faces != 6 {
-        return decode_chain(fmt, dims, first_level, levels);
+impl Decoded {
+    /// `n` mips, none decoded yet: `fmt` is the layout of the encoded bytes.
+    pub fn lazy(fmt: DdsPixelFormat, n: usize) -> Self {
+        Self {
+            fmt: Some(fmt),
+            mips: (0..n).map(|_| OnceLock::new()).collect(),
+        }
     }
-    let per_face = levels.len() / 6;
-    let faces: Vec<_> = levels
-        .chunks(per_face.max(1))
-        .map(|f| decode_chain(fmt, dims, first_level, f))
-        .collect();
-    (0..per_face)
-        .map(|i| {
-            let size = dims[first_level + i].0;
-            let refs = std::array::from_fn(|f| faces[f][i].as_slice());
-            cube_cross::cross_image(refs, size).2
-        })
-        .collect()
+
+    /// The mips of `r`'s encoded levels, as `r.format` stores them.
+    pub fn of(r: &PreviewResult) -> Self {
+        let n = if r.faces == 6 {
+            r.levels.len() / 6
+        } else {
+            r.levels.len()
+        };
+        Self::lazy(r.format.pixel_format(r.srgb), n)
+    }
+
+    pub fn len(&self) -> usize {
+        self.mips.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.mips.is_empty()
+    }
+
+    /// How many mips are decoded so far.
+    #[cfg(feature = "test-hooks")]
+    pub fn decoded_count(&self) -> usize {
+        self.mips.iter().filter(|m| m.get().is_some()).count()
+    }
+}
+
+impl From<Vec<Vec<[f32; 4]>>> for Decoded {
+    /// Mips already decoded.
+    fn from(v: Vec<Vec<[f32; 4]>>) -> Self {
+        Self {
+            fmt: None,
+            mips: v.into_iter().map(OnceLock::from).collect(),
+        }
+    }
+}
+
+impl PreviewOut {
+    /// Mip `i` of the encoded levels (counted from the first one kept), decoded on first read.
+    pub fn decoded_mip(&self, i: usize) -> Option<&[[f32; 4]]> {
+        let slot = self.decoded.mips.get(i)?;
+        let fmt = self.decoded.fmt;
+        Some(slot.get_or_init(|| match fmt {
+            Some(fmt) => decode_mip(fmt, &self.result, i),
+            None => vec![],
+        }))
+    }
+
+    /// Decode every mip now when the upload will take the CPU path whatever the GPU says: a cube (a cross image),
+    /// an uncompressed layout, or a base mip that is not a multiple of 4. The worker calls this before the hand-off,
+    /// so the UI thread never decodes for such an upload (L12). A BC encode stays lazy: its upload is GPU-side where
+    /// the adapter supports BC, and a mip then decodes on its first readout or heatmap read.
+    /// shortcut: a worker that holds a mip's `OnceLock` (a heatmap job) makes a UI read of that mip wait for it;
+    /// upgrade by decoding the heatmap's mip before it is queued if that ever shows.
+    pub fn decode_if_cpu_path(self) -> Self {
+        let r = &self.result;
+        let base = r.source.dims.get(r.source.first_level);
+        if r.faces == 6
+            || !r.format.is_block()
+            || base.is_none_or(|(w, h)| w % 4 != 0 || h % 4 != 0)
+        {
+            for i in 0..self.decoded.len() {
+                self.decoded_mip(i);
+            }
+        }
+        self
+    }
+}
+
+/// [`decode_chain`] for mip `i` of one face, or for mip `i` of six face-major chains laid out as one cross.
+fn decode_mip(fmt: DdsPixelFormat, r: &PreviewResult, i: usize) -> Vec<[f32; 4]> {
+    let (dims, first) = (&r.source.dims, r.source.first_level);
+    let one = |at: usize| {
+        decode_chain(fmt, dims, first + i, &r.levels[at..=at])
+            .pop()
+            .unwrap_or_default()
+    };
+    if r.faces != 6 {
+        return one(i);
+    }
+    let per_face = r.levels.len() / 6;
+    let faces: [Vec<[f32; 4]>; 6] = std::array::from_fn(|f| one(f * per_face + i));
+    let refs = std::array::from_fn(|f| faces[f].as_slice());
+    cube_cross::cross_image(refs, dims[first + i].0).2
 }
 
 /// A DDS input as stored: its mips within `max`, no source side (M3a spec §2.2).
@@ -358,7 +429,7 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         )
     });
     // Decoded as the file's own layout: for a format sdc never writes, `format` above is only the display kind.
-    let decoded = decode_faces(f.format, &dims, first_level, &levels, faces);
+    let (n, own_layout) = (levels.len() / usize::from(faces), f.format);
     let result = PreviewResult {
         source: SourcePreview {
             first_level,
@@ -374,10 +445,11 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         normal_len: vec![],
     };
     Ok(PreviewOut {
-        decoded,
+        decoded: Decoded::lazy(own_layout, n),
         result,
         note,
-    })
+    }
+    .decode_if_cpu_path())
 }
 
 /// Whether a DDS stores float values that can pass 1: `Format::is_hdr` (BC6H UF16, RGBA16F) and RGBA32F, which has no

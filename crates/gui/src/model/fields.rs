@@ -426,6 +426,18 @@ pub fn field_view(target: Target, job: &ResolvedJob, field: &str) -> Option<Fiel
     views_of(&[entry], target, job).pop()
 }
 
+/// What `field` holds when the serialised profile has no key for it: the defaults the profile does not serialise (F5).
+pub(crate) fn unset_default(field: &str) -> Value {
+    match field {
+        "mips.edge" => Value::from("wrap"),
+        "resize" => Value::from("none"),
+        "resize_relative_to" => Value::from("self"),
+        "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
+        "encoder.bc1_alpha" => Value::from(false),
+        _ => Value::Null,
+    }
+}
+
 pub(crate) fn views_of(
     fields: &[(&'static str, &'static str)],
     target: Target,
@@ -441,15 +453,7 @@ pub(crate) fn views_of(
             let value = profile
                 .pointer(&format!("/{}", field.replace('.', "/")))
                 .cloned()
-                // Defaults the profile does not serialise (F5).
-                .unwrap_or_else(|| match field {
-                    "mips.edge" => Value::from("wrap"),
-                    "resize" => Value::from("none"),
-                    "resize_relative_to" => Value::from("self"),
-                    "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
-                    "encoder.bc1_alpha" => Value::from(false),
-                    _ => Value::Null,
-                });
+                .unwrap_or_else(|| unset_default(field));
             let provenance = job
                 .provenance
                 .get(field)

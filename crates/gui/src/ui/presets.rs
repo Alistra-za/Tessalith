@@ -630,19 +630,14 @@ fn clear(st: Subtype, scope: Scope, field: &'static str) -> Act {
 }
 
 /// A field's value in `p`, as the options name it (the format as `[format, tag]`).
-fn value_of(p: &Profile, field: &str) -> Value {
+pub fn value_of(p: &Profile, field: &str) -> Value {
     if field == "format" {
         return json!([p.format, p.color.tag]);
     }
     let v = serde_json::to_value(p).unwrap_or_default();
     v.pointer(&format!("/{}", field.replace('.', "/")))
         .cloned()
-        .unwrap_or_else(|| match field {
-            "resize" => json!("none"),
-            "resize_relative_to" => json!("self"),
-            "resize_floor" => json!(engine::config::DEFAULT_RESIZE_FLOOR),
-            _ => Value::Null,
-        })
+        .unwrap_or_else(|| crate::model::fields::unset_default(field))
 }
 
 /// The options a field offers for `p`: only what the engine accepts (owner design §2).

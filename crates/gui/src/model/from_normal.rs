@@ -184,6 +184,7 @@ fn file_backed(i: &TextureItem) -> bool {
 }
 
 /// The rival named by the engine's GEN-REPLACED skip (P4): "generated … replaced by <name>[ (a DDS…)]".
+/// shortcut: parses the engine's message; read the rival from structured warning data once the engine adds it.
 fn replaced_by(i: &TextureItem) -> Option<String> {
     let w = i.warnings.iter().find(|w| w.code == Code::GenReplaced)?;
     let tail = w.message.split_once("replaced by ")?.1;
@@ -1088,7 +1089,12 @@ impl AppModel {
         let normal = self.normal_of(&v, &aliases);
         let dims = normal.as_deref().and_then(|n| self.gen_normal_size(n));
         let shader = shader_of(&v);
-        let resolved = crate::model::auto_flags::resolved(v.pbr, &v.slots, &v.settings);
+        let resolved = crate::model::auto_flags::resolved_for(
+            v.pbr,
+            &v.slots,
+            &v.settings,
+            &crate::model::auto_flags::hint(self, &v),
+        );
         let neutral = height_neutral(Some(shader), &resolved);
         let size_rule = self.gen_size_of_opt(&v, pre.unwrap_or(GenMap::Height), dims, &aliases);
         let stored = pre.and_then(|map| {
@@ -1959,7 +1965,12 @@ impl AppModel {
             .iter()
             .find(|v| i.set_key.as_deref() == Some(v.key.as_str()))?;
         let shader = v.shader_choice.or(v.shader.as_ref().map(|s| s.shader));
-        let resolved = super::auto_flags::resolved(v.pbr, &v.slots, &v.settings);
+        let resolved = super::auto_flags::resolved_for(
+            v.pbr,
+            &v.slots,
+            &v.settings,
+            &super::auto_flags::hint(self, v),
+        );
         let neutral = height_neutral(shader, &resolved);
         let unused = if p.m_alpha {
             shader != Some(Shader::ComplexMaterial)

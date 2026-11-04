@@ -241,9 +241,9 @@ pub fn rnm_section(ui: &mut egui::Ui, model: &mut AppModel, key: &str, off: &Opt
     }
 }
 
-/// A slider that returns its value once per gesture (drag release, click or key press), not every frame; the
-/// value in flight lives in `ui.data` under `id`. As settings_panel::commit_slider does, a value already sent
-/// (`committed`) stays on show while the re-plan runs (`busy`), so the slider does not snap back after release.
+/// A slider that returns its value once per gesture (drag release or click; arrow keys settle when the slider is left),
+/// not every frame, by [`super::advanced::held`]: a value already sent stays on show while the re-plan runs (`busy`),
+/// so the slider does not snap back after release.
 fn drag_slider(
     ui: &mut egui::Ui,
     busy: bool,
@@ -252,30 +252,16 @@ fn drag_slider(
     range: std::ops::RangeInclusive<f64>,
     text: &str,
 ) -> Option<f64> {
-    let mut pending: Option<(f64, bool)> = ui.data(|d| d.get_temp(id));
-    if pending.is_some_and(|(v, sent)| v == current || (sent && !busy)) {
-        pending = None;
-    }
-    let mut v = pending.map_or(current, |p| p.0);
-    let r = ui.add(egui::Slider::new(&mut v, range.clone()).text(text));
-    if r.changed() {
-        pending = Some((v, false));
-    }
-    let mut out = None;
-    if r.drag_stopped() || (r.changed() && !r.dragged()) {
-        let v = v.clamp(*range.start(), *range.end());
-        if v != current {
-            out = Some(v);
-            pending = Some((v, true));
-        }
-    }
-    ui.data_mut(|d| match pending {
-        Some(p) => {
-            d.insert_temp(id, p);
-        }
-        None => d.remove::<(f64, bool)>(id),
+    let (lo, hi) = (*range.start(), *range.end());
+    let (out, _) = super::advanced::held(ui, id, current, busy, false, |ui, v| {
+        // Typed text in the value box is applied when it is left (FN2), not on every keystroke.
+        ui.add(
+            egui::Slider::new(v, range)
+                .text(text)
+                .update_while_editing(false),
+        )
     });
-    out
+    out.map(|v| v.clamp(lo, hi))
 }
 
 /// The blended preview's texture: one slot, holding the `Arc` it was made from (so its pointer cannot be reused by
@@ -321,5 +307,34 @@ fn blended_preview(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
         .on_hover_text(format!("Preview unavailable: {why}"));
     } else {
         ui.weak("Blending…");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::advanced::gesture::{arrow, click, typed, St};
+    use super::*;
+    use eframe::egui::accesskit::Role;
+
+    fn slider(ui: &mut egui::Ui, s: &mut St) {
+        let done = drag_slider(ui, false, egui::Id::new("s"), s.cur, 0.0..=2.0, "");
+        s.take(done);
+        // Somewhere for Tab to go: a lone widget keeps the focus.
+        let _ = ui.button("other");
+    }
+
+    #[test]
+    fn drag_slider_commits_a_click_once() {
+        assert_eq!(click(slider, Role::Slider).len(), 1);
+    }
+
+    #[test]
+    fn drag_slider_commits_an_arrow_key_once() {
+        assert_eq!(arrow(slider, Role::Slider, egui::Key::ArrowRight).len(), 1);
+    }
+
+    #[test]
+    fn drag_slider_commits_a_typed_value_once() {
+        assert_eq!(typed(slider, Role::SpinButton, "1.5"), vec![1.5]);
     }
 }

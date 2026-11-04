@@ -803,15 +803,18 @@ impl SetsDoc {
             .expect("just made")
     }
 
+    /// The table of set `id`, if it has one (ids compare case-insensitively).
+    fn table(&self, id: &str) -> Option<&Table> {
+        let lower = fold_id(id);
+        let tables = self.f.doc.get("sets")?.as_array_of_tables()?;
+        tables.iter().find(|t| is_id(t, &lower))
+    }
+
     /// The table of set `id`, created at the end when missing (ids compare case-insensitively).
     fn table_mut(&mut self, id: &str) -> &mut Table {
         let lower = fold_id(id);
         let tables = self.tables_mut();
-        let i = tables.iter().position(|t| {
-            t.get("id")
-                .and_then(Item::as_str)
-                .is_some_and(|s| fold_id(s) == lower)
-        });
+        let i = tables.iter().position(|t| is_id(t, &lower));
         let i = match i {
             Some(i) => i,
             None => {
@@ -1128,19 +1131,7 @@ impl SetsDoc {
             return;
         }
         // Clearing a set with no table changes nothing (no table, no dirty, no undo step).
-        let lower = fold_id(id);
-        let has_table = self
-            .f
-            .doc
-            .get("sets")
-            .and_then(Item::as_array_of_tables)
-            .is_some_and(|ts| {
-                ts.iter().any(|t| {
-                    t.get("id")
-                        .and_then(Item::as_str)
-                        .is_some_and(|s| fold_id(s) == lower)
-                })
-            });
+        let has_table = self.table(id).is_some();
         if shader.is_none() && !has_table {
             return;
         }
@@ -1167,20 +1158,15 @@ impl SetsDoc {
         if self.read_only() {
             return;
         }
-        let lower = fold_id(id);
-        let has_table = self
-            .f
-            .doc
-            .get("sets")
-            .and_then(Item::as_array_of_tables)
-            .is_some_and(|ts| {
-                ts.iter().any(|t| {
-                    t.get("id")
-                        .and_then(Item::as_str)
-                        .is_some_and(|s| fold_id(s) == lower)
-                })
-            });
-        if name.is_none() && !has_table {
+        let old = self
+            .table(id)
+            .map(|t| t.get("output_name").and_then(Item::as_str));
+        if name.is_none() && old.is_none() {
+            return;
+        }
+        // An equal write is no edit (L55): the set has a table and already holds this name (or none). Nothing is
+        // written either, so the item keeps its decor and the text stays as it was.
+        if old == Some(name) {
             return;
         }
         let t = self.table_mut(id);
@@ -1486,6 +1472,13 @@ pub(crate) fn names_file(key: &str, file: &str) -> bool {
     same_id(key, file) || engine::overrides::path_key_matches(key, file)
 }
 
+/// Whether set table `t` has the id whose folded form is `lower` (ids compare case-insensitively).
+fn is_id(t: &Table, lower: &str) -> bool {
+    t.get("id")
+        .and_then(Item::as_str)
+        .is_some_and(|s| fold_id(s) == lower)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1671,5 +1664,19 @@ mod tests {
             assert!(s.is_dirty(), "{what}");
             assert_eq!(*s.entries(), s.parse_entries(), "{what}");
         }
+    }
+
+    /// Backlog L55: writing the output name a set already has is no edit (no revision bump, no dirty flag).
+    #[test]
+    fn an_equal_output_name_write_is_no_edit() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = SetsDoc::open(d.path());
+        s.restore("[[sets]]\nid = \"a/x\"\noutput_name = \"same\" # kept\n");
+        let (rev, dirty, text) = (s.rev(), s.is_dirty(), s.text());
+        s.set_output_name("a/x", Some("same"));
+        assert_eq!((s.rev(), s.is_dirty()), (rev, dirty));
+        assert_eq!(s.text(), text, "the document is not rewritten");
+        s.set_output_name("a/x", Some("other"));
+        assert_ne!(s.rev(), rev, "a different name is an edit");
     }
 }

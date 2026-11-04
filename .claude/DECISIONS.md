@@ -15,15 +15,15 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FT, FS
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS, FZ
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
@@ -1071,6 +1071,16 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS (or an array of cubes) still shows its first slice, with the line `Array of N: only the first slice is shown` (`cube` for cubes) added to the preview notice through `PreviewOut::note`. A cut-off cube is an error, not a panic. Tests `backlog_b4_preview::a_cube_dds_previews_all_six_faces`, `a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels`, `a_truncated_cube_dds_is_an_error`, `an_array_dds_says_which_slice_it_shows`.
 - **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
 - **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.
+
+## Note FY — backlog batch B8: gui refactors and dead code (main team, 2026-11-04)
+
+- **FY1 One commit-once-per-gesture widget (L29).** `advanced::held` holds the in-flight and the sent value in egui memory (pending, sent, busy: R2) and settles on a drag end, on leaving the box (FN2: typed text and arrow keys on a number box are one edit), or on a click. `settled_drag` (Advanced fill boxes, busy), the cube section's `num`, the RNM `drag_slider` and `held_value` (busy false) wrap it; `colour` and `settings_panel::commit_slider` stay. The RNM slider's value box is built with `update_while_editing(false)`, so typed text is one edit too, and the result is clamped to the range. A slider passes `on_blur` false, so an arrow key settles at once (as `the_rnm_strength_slider_does_not_snap_back_while_the_plan_runs` pins); a number box defers it to leaving the box. `held_value` also settles on `lost_focus` now, which changes nothing a caller sees: its boxes took an arrow key at once and still do. Tests in `ui/advanced.rs`, `cube_section.rs` and `rnm_section.rs` (typed value, arrow key and click commit once).
+- **FY2 The preview decodes each mip on its first read (L12).** `PreviewOut.decoded` is `Decoded`, one `OnceLock` per mip, filled by `PreviewOut::decoded_mip` for the readout, the heatmap job and the no-BC fallback upload; an encode with the heatmap off and no readout decodes none. A DDS input is lazy too, in its own pixel layout. Trade-off: where the upload takes the CPU path whatever the GPU says (a cube, an uncompressed layout, a base mip that is not a multiple of 4), `decode_if_cpu_path` decodes every mip on the worker before the hand-off, as before. A BC encode stays lazy, so on an adapter without BC support its fallback upload decodes on the UI thread, and a pixel readout's first read of a mip decodes that mip there; a UI read of a mip that a heatmap job is decoding waits for it (`OnceLock`; `shortcut:` note on the method). `decode_levels` and `decode_faces` (named in FT4) are gone: `decode_mip` decodes one mip of one face or of a cube's six (the cross, DT16). Test `preview_model::encoding_is_off_by_default_and_encode_now_encodes_once` counts decoded mips (test-hooks).
+- **FY3 `PresetsModel::refresh` layers each branch once and reads the aliases once (L59).** The branch rules' overrides are read once per refresh too (`scope` per branch cloned the rules and re-keyed each). The #46 cross-preset check stays in `validate`.
+- **FY4 One unset-default table (L62).** `fields::unset_default` serves the field views and the preset editor's `value_of`. `value_of` now also answers `mips.edge` (`wrap`) and `encoder.bc1_alpha` (false), which no preset row shows yet. Test `ui::presets::tests::value_of_shares_the_unset_defaults`.
+- **FY5 One auto-flag entry point (L57).** `checks`, `from_normal` (two sites) pass `auto_flags::hint` to `resolved_for`, as the PGPatcher export and Parameters panel do; `auto_flags` and `resolved` (no scan evidence) exist only under `test-hooks`. A PBR grass set's checks and generate-from-normal now read the grass-only auto keys as its export does (test `auto_flags::a_pbr_grass_sets_checks_read_the_keys_its_export_writes`); the visible result of those readers (`height_neutral`) is the same, because a grass shader is `Half` either way.
+- **FY6 The two warning-text parsers carry `shortcut:` notes (L76).** `from_normal::replaced_by` (GEN-REPLACED) and `Cx::errors` in the cube section (CFG-INVALID); the upgrade is structured warning data, which needs an engine event change.
+- **FY7 `SetsDoc` shares one table lookup; an equal output-name write is no edit (L55).** `table(&self, id)` serves `set_shader` and `set_output_name`; writing the name a set already has leaves the revision and the dirty flag alone. Test `sets_doc::tests::an_equal_output_name_write_is_no_edit`.
 
 ## Note FX — backlog batch B9: cli (main team, 2026-11-04)
 
