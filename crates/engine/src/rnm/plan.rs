@@ -236,7 +236,7 @@ fn ao_source(
             .into_owned()
     };
     let kind = |f: &InputFile| match crate::policy::helper_requested(ctx, f).role {
-        Some(HelperRole::Raw(r)) => Some(r),
+        Some(HelperRole::Raw(r)) => (f.kind == crate::discover::InputKind::Image).then_some(r),
         Some(_) => None,
         None => match vocab_of(&stem(f)).map(|v| v.role) {
             Some(VocabRole::PackingInput(r @ (RawMap::Ao | RawMap::Orm))) => Some(r),
