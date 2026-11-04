@@ -18,12 +18,12 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FT
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
@@ -1028,3 +1028,12 @@ Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debu
 - **FP6 Orphan notes go with a written JSON (T23).** The "the PGPatcher JSON is now ..." notes about an older file are kept only when the export writes the JSON (`Written`, or an Overwrite that wrote); an export that writes none (vanilla with a borrowed slot, a refused file) says nothing about it. Test `pbr_export::no_orphan_note_when_the_export_writes_no_json`.
 - **FP7 Save writes the edits a blame stashed (T38).** While the retry plan after a rejection is running (`tentative_edits()` is Some), `save()` writes the stashed text with `ProjectDoc::save_stashed` (same changed-on-disk check and atomic write), so Save in the Open, Close and Reload prompts keeps the user's edits. `sdc.toml` may then hold a config the engine rejects; it opens read-only with that message, as any rejected file does. Test `history::save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits`.
 - **FP8 Review's Blockers lists a missing preset and a read-only `sdc.toml` (T30).** Both refuse the gate, so both are blockers: a red row each in column 0 and in the count, the preset's row with `Choose preset…` (opens the header's Preset menu, as Problems' button does). Test `auto_accept::review_lists_a_missing_preset_as_a_blocker`.
+
+## Note FT — backlog batch B4: gui model 2 (main team, 2026-11-04)
+
+- **FT1 An input rename moves the set's Also export opt-out (T34).** `set_input_name` calls `rename_skip_also` in the same edit as `retarget_auto`, as `rename_set` does (Note TA31), so `[export] skip` follows the new automatic id. Test `backlog_b4_input_name::an_input_rename_moves_the_skip_entry`.
+- **FT2 The set's own input name is refused in any case (T35).** `input_name_plan` returns "the set already has this name" when the chosen path equals the diffuse's game path ignoring case, `\` and `.dds`, so no case-only alias is written and no undo step is taken. Test `backlog_b4_input_name::the_sets_current_name_in_another_case_is_refused`.
+- **FT3 A blocked item shows its current reason (T15).** When a re-plan leaves an item blocked for a different reason, `preview_after_plan` sets `preview.source` to the new `Failed(reason)` as well as the notice. Test `backlog_b4_preview::a_blocked_item_shows_its_new_reason`.
+- **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS still shows slice 0 with no "slice 1 of N" notice: the notice needs a new `PreviewOut` field (seven test constructors), left as a question. Test `backlog_b4_preview::a_cube_dds_previews_all_six_faces`.
+- **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does, Wave 2 #6). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
+- **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.
