@@ -383,6 +383,29 @@ fn a_format_change_away_from_bc7_drops_the_weighting() {
     assert!(!ignored(&m, ROCK));
 }
 
+/// Trace-debug 2026-11-04 #4 (Note FO4): a bulk Linear completes the follow-up of every texture, not the last.
+#[test]
+fn bulk_linear_overrides_every_hidden_inherited() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready_with(d.path(), "[defaults]\nencoder.bc7_weights = \"alpha8\"\n");
+    let leaf = "landscape/leaf.png".to_string();
+    let keys = vec![ROCK.to_string(), leaf.clone()];
+    for k in &keys {
+        m.project
+            .as_mut()
+            .unwrap()
+            .set_file_value(k, WEIGHTING, &json!("alpha16"));
+    }
+    idle(&mut m);
+    m.apply_bulk_edit(&keys, WEIGHTING, BulkOp::Set(json!("linear")));
+    idle(&mut m);
+    for k in &keys {
+        assert_eq!(row_value(&m, k), json!("linear"), "{k}");
+        assert_eq!(encode_params(&m, k), (false, None), "{k}");
+        assert_eq!(own(&m, k), (Some(json!(false)), Some(json!("linear"))), "{k}");
+    }
+}
+
 /// Bulk: Perceptual skips the normal map with the lock's reason; Alpha ×16 reaches both. Copy settings carries a
 /// perceptual pick, which lives in the other field.
 #[test]
