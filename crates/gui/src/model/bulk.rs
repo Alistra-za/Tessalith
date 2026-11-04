@@ -68,6 +68,8 @@ pub struct BulkView {
     pub chips: Vec<KindChip>,
     /// The Format row's (format, tag) choices: `bulk_encodings`.
     pub encodings: Vec<((Format, ColorTag), String)>,
+    /// `reencode_split(keys)`: the DDS files the Re-encode button can take, and the names of the blocked ones.
+    pub reencode: (Vec<String>, Vec<String>),
 }
 
 impl AppModel {
@@ -1039,11 +1041,13 @@ impl AppModel {
             vec![]
         };
         let encodings = bulk_encodings(self, &keys);
+        let reencode = self.reencode_split(&keys);
         let view = std::sync::Arc::new(BulkView {
             keys,
             rows,
             chips,
             encodings,
+            reencode,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;

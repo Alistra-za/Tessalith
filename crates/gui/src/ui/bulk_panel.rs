@@ -19,8 +19,13 @@ enum Act {
 
 /// Note FI3: re-encode the selection's skipped DDS files (the S6 `reencode` selector, a plan-time field, so not a
 /// `FIELDS` row). Files another input already writes are left out, with their names on hover.
-fn reencode_row(ui: &mut egui::Ui, model: &AppModel, keys: &[String], acts: &mut Vec<Act>) {
-    let (ok, blocked) = model.reencode_split(keys);
+fn reencode_row(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    split: &(Vec<String>, Vec<String>),
+    acts: &mut Vec<Act>,
+) {
+    let (ok, blocked) = split;
     let (k, j) = (ok.len(), blocked.len());
     if k == 0 && j == 0 {
         return;
@@ -84,7 +89,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
     if let Some(r) = &model.bulk.report {
         ui.weak(r);
     }
-    reencode_row(ui, model, keys, &mut acts);
+    reencode_row(ui, model, &view.reencode, &mut acts);
     // Options come from the active texture's job, else the first target's (design §3.2).
     let active = match &model.selection {
         Selection::Item(k) => model.item(k).and_then(|i| i.job.clone()),
