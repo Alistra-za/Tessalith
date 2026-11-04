@@ -735,6 +735,17 @@ pub(super) mod gesture {
         h.state().commits.clone()
     }
 
+    /// Focus the box and press the arrow key, without leaving it: what was committed so far.
+    pub fn arrow_held(draw: fn(&mut egui::Ui, &mut St), role: Role, key: egui::Key) -> Vec<f64> {
+        let mut h = harness(draw);
+        h.get_by_role(role).focus();
+        h.run();
+        h.key_press(key);
+        h.run();
+        h.run();
+        h.state().commits.clone()
+    }
+
     /// Focus the box, press the arrow key, then leave it with Tab: what was committed.
     pub fn arrow(draw: fn(&mut egui::Ui, &mut St), role: Role, key: egui::Key) -> Vec<f64> {
         let mut h = harness(draw);
@@ -777,6 +788,13 @@ mod tests {
     fn settled_drag_commits_a_typed_value_and_an_arrow_key_once() {
         assert_eq!(typed(settled, Role::SpinButton, "25"), vec![25.0]);
         assert_eq!(arrow(settled, Role::SpinButton, egui::Key::ArrowUp), [1.0]);
+    }
+
+    /// A number box (`on_blur`) commits nothing while it is focused: the arrow key settles when the box is left.
+    #[test]
+    fn a_number_box_commits_nothing_before_it_is_left() {
+        use super::gesture::arrow_held;
+        assert!(arrow_held(settled, Role::SpinButton, egui::Key::ArrowUp).is_empty());
     }
 
     #[test]

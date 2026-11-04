@@ -806,27 +806,15 @@ impl SetsDoc {
     /// The table of set `id`, if it has one (ids compare case-insensitively).
     fn table(&self, id: &str) -> Option<&Table> {
         let lower = fold_id(id);
-        self.f
-            .doc
-            .get("sets")?
-            .as_array_of_tables()?
-            .iter()
-            .find(|t| {
-                t.get("id")
-                    .and_then(Item::as_str)
-                    .is_some_and(|s| fold_id(s) == lower)
-            })
+        let tables = self.f.doc.get("sets")?.as_array_of_tables()?;
+        tables.iter().find(|t| is_id(t, &lower))
     }
 
     /// The table of set `id`, created at the end when missing (ids compare case-insensitively).
     fn table_mut(&mut self, id: &str) -> &mut Table {
         let lower = fold_id(id);
         let tables = self.tables_mut();
-        let i = tables.iter().position(|t| {
-            t.get("id")
-                .and_then(Item::as_str)
-                .is_some_and(|s| fold_id(s) == lower)
-        });
+        let i = tables.iter().position(|t| is_id(t, &lower));
         let i = match i {
             Some(i) => i,
             None => {
@@ -1176,8 +1164,11 @@ impl SetsDoc {
         if name.is_none() && old.is_none() {
             return;
         }
-        // An equal write is no edit (L55): the set has a table and already holds this name (or none).
-        let same = old == Some(name);
+        // An equal write is no edit (L55): the set has a table and already holds this name (or none). Nothing is
+        // written either, so the item keeps its decor and the text stays as it was.
+        if old == Some(name) {
+            return;
+        }
         let t = self.table_mut(id);
         match name {
             Some(n) => {
@@ -1187,9 +1178,7 @@ impl SetsDoc {
                 t.remove("output_name");
             }
         }
-        if !same {
-            self.f.touch();
-        }
+        self.f.touch();
     }
 
     /// Set (or with `None` remove) JSON setting `key` (a dotted schema path) of set `id`. On a set with a texture-set
@@ -1483,6 +1472,13 @@ pub(crate) fn names_file(key: &str, file: &str) -> bool {
     same_id(key, file) || engine::overrides::path_key_matches(key, file)
 }
 
+/// Whether set table `t` has the id whose folded form is `lower` (ids compare case-insensitively).
+fn is_id(t: &Table, lower: &str) -> bool {
+    t.get("id")
+        .and_then(Item::as_str)
+        .is_some_and(|s| fold_id(s) == lower)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1675,10 +1671,11 @@ mod tests {
     fn an_equal_output_name_write_is_no_edit() {
         let d = tempfile::tempdir().unwrap();
         let mut s = SetsDoc::open(d.path());
-        s.restore("[[sets]]\nid = \"a/x\"\noutput_name = \"same\"\n");
-        let (rev, dirty) = (s.rev(), s.is_dirty());
+        s.restore("[[sets]]\nid = \"a/x\"\noutput_name = \"same\" # kept\n");
+        let (rev, dirty, text) = (s.rev(), s.is_dirty(), s.text());
         s.set_output_name("a/x", Some("same"));
         assert_eq!((s.rev(), s.is_dirty()), (rev, dirty));
+        assert_eq!(s.text(), text, "the document is not rewritten");
         s.set_output_name("a/x", Some("other"));
         assert_ne!(s.rev(), rev, "a different name is an edit");
     }

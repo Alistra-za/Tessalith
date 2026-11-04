@@ -151,7 +151,8 @@ impl Cx<'_> {
     }
 
     /// The engine's CFG-INVALID lines for `field`, shown under its row.
-    /// shortcut: matches the message's leading `<field> `; read the field from structured warning data once the engine adds it.
+    /// shortcut: matches the message's leading `<field> `; read the field from structured warning data once the engine
+    /// adds it.
     fn errors(&self, field: &str) -> Vec<&str> {
         let head = format!("{field} ");
         self.job
@@ -609,8 +610,8 @@ mod tests {
     fn num_commits_a_typed_value_and_an_arrow_key_once() {
         assert_eq!(typed(cube_num, Role::SpinButton, "5"), vec![5.0]);
         assert_eq!(
-            arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp).len(),
-            1
+            arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp),
+            [0.1]
         );
     }
 }
