@@ -141,8 +141,9 @@ impl EncoderVersions {
     }
 }
 
-/// The preset that resolved a file. For a file matched by a suffix alias this is the alias preset, with `alias_chain`
-/// holding its full inheritance chain, root base first, so a reader can tell which presets contributed. Empty for a file resolved by the batch preset's own chain.
+/// The preset that resolved a file. For a file matched by a suffix alias this is the alias preset, with
+/// `alias_chain` holding its full inheritance chain, root base first, so a reader can tell which presets
+/// contributed. Empty for a file resolved by the batch preset's own chain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PresetRef {
     pub id: String,
