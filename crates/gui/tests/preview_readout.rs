@@ -27,6 +27,7 @@ fn out(
     format: Format,
 ) -> PreviewOut {
     PreviewOut {
+        note: None,
         result: PreviewResult {
             source: SourcePreview {
                 first_level: first,

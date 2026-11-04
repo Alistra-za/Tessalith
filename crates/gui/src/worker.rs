@@ -441,6 +441,7 @@ pub fn spawn_encode(
                     )
                     .map(|r| {
                         Arc::new(PreviewOut {
+                            note: None,
                             decoded: decode_levels(&r),
                             result: r,
                         })

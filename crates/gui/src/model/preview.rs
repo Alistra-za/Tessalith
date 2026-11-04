@@ -33,6 +33,8 @@ pub struct PreviewOut {
     pub result: PreviewResult,
     /// CPU decode of every encoded mip (RGBA f32), for the heatmap and the no-BC-support fallback.
     pub decoded: Vec<Vec<[f32; 4]>>,
+    /// A line for the preview notice that only the reader of the file knows (an array DDS shows one slice).
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -334,10 +336,27 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
     let faces: u8 = if f.is_cubemap { 6 } else { 1 };
     let per_face = f.levels.len();
     let surfaces = f.surfaces();
-    let levels: Vec<Vec<u8>> = (0..usize::from(faces))
-        .flat_map(|face| surfaces[face * per_face + first_level..(face + 1) * per_face].iter())
-        .map(|(_, _, r)| f.data[r.clone()].to_vec())
-        .collect();
+    let mut levels: Vec<Vec<u8>> = vec![];
+    for face in 0..usize::from(faces) {
+        let chain = surfaces
+            .get(face * per_face + first_level..(face + 1) * per_face)
+            .ok_or("the cubemap does not hold six full mip chains")?;
+        for (_, _, r) in chain {
+            levels.push(
+                f.data
+                    .get(r.clone())
+                    .ok_or("the file ends inside a mip level")?
+                    .to_vec(),
+            );
+        }
+    }
+    // An array shows its first slice (first cube): say so.
+    let note = f.dx10.map(|d| d.array_size).filter(|n| *n > 1).map(|n| {
+        format!(
+            "Array of {n}: only the first {} is shown",
+            if f.is_cubemap { "cube" } else { "slice" }
+        )
+    });
     // Decoded as the file's own layout: for a format sdc never writes, `format` above is only the display kind.
     let decoded = decode_faces(f.format, &dims, first_level, &levels, faces);
     let result = PreviewResult {
@@ -354,7 +373,11 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         warnings: vec![],
         normal_len: vec![],
     };
-    Ok(PreviewOut { decoded, result })
+    Ok(PreviewOut {
+        decoded,
+        result,
+        note,
+    })
 }
 
 /// Whether a DDS stores float values that can pass 1: `Format::is_hdr` (BC6H UF16, RGBA16F) and RGBA32F, which has no
@@ -694,6 +717,10 @@ impl AppModel {
         self.preview.inflight_encode = None;
         if let Ok(r) = &result {
             self.note_gpu_limit(&r.result.source.dims, r.result.source.first_level);
+            if let Some(n) = &r.note {
+                let base = self.preview.base_notice.take();
+                self.set_base_notice(Some(base.map_or(n.clone(), |b| format!("{b}\n{n}"))));
+            }
         }
         self.preview.encoded = match result {
             Ok(r) => EncodedState::Done(r),
