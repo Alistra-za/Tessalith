@@ -14,17 +14,17 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
-- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
 - vfs: AV, BP, BU, CV
 - esp: GG, GO
@@ -990,3 +990,15 @@ Leads 32, 2, 17, 24, 10 and 27 of `F:\ai\dds\reports\debloat-2.0\main-audit-lead
 - **FN4 The JSON Lines report leaves out per-mip progress (lead 10).** `ExportModel::on_event_at` drops `EventKind::Progress` before it is stored in `events`, so the GUI's JSON Lines report is the engine stream without progress lines, and a long export no longer keeps one event per mip in memory. Test `progress_events_are_not_kept_for_the_report`.
 - **FN5 A feature clash offers both features (owner, 2026-11-04; supersedes FC3's single P26 fix in part).** A PGPatcher "X and Y can't both be on" row carries `Fix::FeatureClash(set id, X, Y)` and draws two buttons, **Turn off X** and **Turn off Y** (the label was "Turn X off"), in the sentence's order, neither a default. Each asks for `Fix::TurnFeatureOff` on its own feature only, applied by `AppModel::turn_feature_off` as one undo step of its own ("Turn off X"). It does not use `set_json_value`'s per-set-and-key merge, so a click right after turning the same feature on by hand stays a separate step and one undo brings the feature back. FC3's rule that the row turns off the later feature in enum order no longer applies; the rest of FC3 stands. Test `a_feature_clash_offers_both_features_and_each_turns_off_only_its_own` (it turns both features on by hand first; with the merge, undo left the feature unset).
 - **FN6 The Also project name needs no change (lead 27, checked).** `also_project` already calls `engine::also::project_name(&[root])`, so the GUI and CLI name the project the same way by construction (CV12). Nothing changed.
+
+## Note FO — trace-debug fixes 2026-11-04 (main team, 2026-11-04)
+
+Items are numbered by the trace-debug report's finding (`.superpowers/sdd/trace-debug-2026-11-04`); FO6 and FO7 are not here (findings 6 and 7 were delegated to the NIF team, owner, 2026-11-04).
+
+- **FO1 A renamed set's input name moves its entry (finding 1).** Restates the digest rule (a rename or input name moves each renamed set's entry in the same undo step): `auto_retarget` takes the set's `renamed_from` as the old automatic id when the entry is a renamed, non-created one, so `SetsDoc::retarget_auto` finds it. Test `gui_tweaks::input_name_on_renamed_set_moves_its_entry`.
+- **FO2 Export on a missing preset opens Review (finding 2).** `export_stopped` opens Review when `missing_preset_text()` is set, as it does for `export_blocks`, so the header and palette Export never write with the fallback preset (FC1). Review's own Export stays off through `review_gate`. Test `auto_accept::a_missing_preset_export_click_opens_review_and_writes_nothing`.
+- **FO3 Number boxes show a stored value as it is (finding 3).** Ruling V6: `clamp_existing_to_range(false)` on the CS PBR `drag` (every Num and Glint row), the skin card, the complex-material card and the PGPatcher RGB boxes, so drawing never rewrites an out-of-range stored value (a template's `densityRandomization` 300 stays 300). A drag or a typed value is still clamped. shortcut: an AccessKit SetValue skips the range; clamp what is written if that matters. `advanced.rs`, `presets.rs`, `marker_dialog.rs` and `viewport3d.rs` edit values that are not stored project values and keep the default. Test `cs_pbr_ui::a_draw_keeps_an_out_of_range_template_value`.
+- **FO4 A bulk or copied BC7 weighting pick completes every texture (finding 4).** FC8's follow-up is a list, one entry per picked texture; `follow_weighting` writes each one that still does not show the pick, joined to its own pick's step, and the writes share one re-plan. A bulk pick is two undo steps (the bulk, then the follow-up): the bulk's step has no merge key to join. Test `bc7_weighting::bulk_linear_overrides_every_hidden_inherited`.
+- **FO5 A packed bake member is sized by the common canvas (finding 5).** `bake::plan::post_resize_dims` starts from `api::job_dims` (FM30's common size of a pack's sources) instead of the first source's own size, so the planned level shift equals the run's. Every pack source is sized by content (`load::image_size`, as Load reads it; a PNG named `.jpg` counts as its content; a cube DDS counts 6w, DS7). Same-size sets are unchanged: goldens and `encode_versions` pass without a diff. Test `bake_plan::packed_member_bake_shift_uses_the_common_canvas_size`.
+- **FO8 The Auto wetness guess binds in the preview (finding 8).** GN1 says the Auto wetness map is meant to bind at t74; both GUI texture-map builders (`meshes::texture_sources`, `SetPreview::add_vfs`) now add `wet_candidates` beside the RFAOS ones through `meshes::skin_map_guesses`, as optional sources. render3d is unchanged. Test `nif_edit::the_auto_wet_guess_is_in_the_mesh_texture_map`.
+- **FO12 The cube marker writer replaces any 152-byte 1x1 cube DDS (won't fix, owner, 2026-11-04).** Trace-debug minor 12: the user must target that exact path, and the file is easy to recreate.

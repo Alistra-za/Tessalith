@@ -142,6 +142,75 @@ fn a_packed_rmaos_bakes_like_a_prepacked_one() {
     assert!(bake_flag(&ev, "textures/pbr/iron"));
 }
 
+/// Trace-debug 2026-11-04 #5 (Note FO5): a packed member's shift uses the common canvas the pack is built at
+/// (Note FM30), not its first source's own size.
+#[test]
+fn packed_member_bake_shift_uses_the_common_canvas_size() {
+    let sized = |dir: &Path, rel: &str, w: u32, h: u32| {
+        let p = dir.join("in").join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        ImageBuffer::from_fn(w, h, |x, _| Luma([x as u8]))
+            .save(p)
+            .unwrap();
+    };
+    // (roughness, ao, normal) sizes and the shift the run will compute.
+    for ((r, a, n), shift) in [((32u32, 64u32, 64u32), 0i32), ((64, 128, 64), -1)] {
+        let d = tempfile::tempdir().unwrap();
+        normal(d.path(), "textures/pbr/iron_n.png", n, n);
+        sized(d.path(), "textures/pbr/iron_roughness.png", r, r);
+        sized(d.path(), "textures/pbr/iron_ao.png", a, a);
+        let (p, _) = plan(req(d.path(), &[]));
+        let packed = p
+            .jobs
+            .iter()
+            .find(|j| j.pack.is_some())
+            .expect("a packed rmaos");
+        assert!(
+            packed.input.ends_with("iron_roughness.png"),
+            "{:?}",
+            packed.input
+        );
+        assert_eq!(
+            packed.bake.as_ref().map(|b| b.shift),
+            Some(shift),
+            "{r}/{a}/{n}: {:?}",
+            packed.warnings
+        );
+    }
+}
+
+/// Note FO5: `input_dims` (via `job_dims`) sizes a pack source by content, as Load reads it: a PNG named `.jpg`.
+#[test]
+fn a_mislabelled_pack_source_is_sized_by_content() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    let sized = |rel: &str, w: u32, ext: image::ImageFormat| {
+        let p = d.path().join("in").join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        ImageBuffer::from_fn(w, w, |x, _| Luma([x as u8]))
+            .save_with_format(p, ext)
+            .unwrap();
+    };
+    sized(
+        "textures/pbr/iron_roughness.png",
+        32,
+        image::ImageFormat::Png,
+    );
+    sized("textures/pbr/iron_ao.jpg", 64, image::ImageFormat::Png);
+    let (p, _) = plan(req(d.path(), &[]));
+    let packed = p
+        .jobs
+        .iter()
+        .find(|j| j.pack.is_some())
+        .expect("a packed rmaos");
+    assert_eq!(
+        packed.bake.as_ref().map(|b| b.shift),
+        Some(0),
+        "{:?}",
+        packed.warnings
+    );
+}
+
 #[test]
 fn size_ratios_give_the_level_shift() {
     for ((nw, nh), (mw, mh), shift) in [

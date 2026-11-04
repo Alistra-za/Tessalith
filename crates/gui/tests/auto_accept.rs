@@ -440,6 +440,29 @@ fn a_missing_preset_blocks_export_with_a_row() {
     );
 }
 
+/// Trace-debug 2026-11-04 #2 (Note FO2): the header's Export click on a missing preset opens Review, writes nothing.
+#[test]
+fn a_missing_preset_export_click_opens_review_and_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    rgb(&root, "a/rock_n.png", [128, 128, 255]);
+    std::fs::write(root.join("sdc.toml"), "preset = \"ghost\"\n").unwrap();
+    let export = d.path().join("export");
+    let mut m = support::opened_as_the_app(root, export.clone());
+    assert_eq!(m.undecided(), 0);
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(m.review.is_some(), "Review is open");
+    assert!(m.export.summary.is_none() && m.export.running.is_none());
+    let dds = |p: &std::path::Path| {
+        walkdir::WalkDir::new(p)
+            .into_iter()
+            .flatten()
+            .any(|e| e.path().extension().is_some_and(|x| x == "dds"))
+    };
+    assert!(!dds(&export), "no .dds written");
+}
+
 /// AM14: the row's `Choose preset…` opens the header's Preset menu.
 #[test]
 fn choose_preset_opens_the_preset_menu() {

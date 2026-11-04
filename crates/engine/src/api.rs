@@ -660,7 +660,7 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 
 /// The size `job` holds its input at: its own, or for a pack, a derive or an alpha fill the common size its sources
 /// are enlarged to (Note FM30). `own` is `job.input`'s size, read once by the caller.
-fn job_dims(job: &ResolvedJob, own: Option<(u32, u32)>) -> Option<(u32, u32)> {
+pub(crate) fn job_dims(job: &ResolvedJob, own: Option<(u32, u32)>) -> Option<(u32, u32)> {
     job_dims_by(job, own, &input_dims)
 }
 

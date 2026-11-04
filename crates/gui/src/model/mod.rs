@@ -544,7 +544,7 @@ pub struct AppModel {
     pub after_commit: Vec<AfterCommit>,
     /// Note FC8 (CP10): a BC7 weighting pick whose own value may have hidden an inherited one: (item key, pick, the
     /// pick's history merge key). The settled plan checks it and completes the pick in the same step.
-    weighting_follow: Option<(String, String, String)>,
+    weighting_follow: Vec<(String, String, String)>,
     /// Note FI3: a re-encode step's history merge key; the FC1 recording its settled plan makes joins that step.
     reencode_follow: Option<String>,
     /// The last Generate job id, so a new dialog's ids never repeat a closed one's.
@@ -850,7 +850,7 @@ impl AppModel {
             gen: None,
             gen_select: None,
             after_commit: Vec::new(),
-            weighting_follow: None,
+            weighting_follow: Vec::new(),
             reencode_follow: None,
             gen_ids: 0,
             gen_opens: 0,
@@ -907,7 +907,7 @@ impl AppModel {
         // A Generate of the previous folder: cancelled; one that writes still lands, and records nothing here (I1).
         self.gen_cancel();
         self.gen_select = None;
-        self.weighting_follow = None;
+        self.weighting_follow.clear();
         self.reencode_follow = None;
         self.after_commit.clear();
         self.drop_provenance_note();
@@ -1904,7 +1904,8 @@ impl AppModel {
             return true;
         }
         let blocks = pbr_export::export_blocks(self);
-        if !blocks.is_empty() {
+        // Note FO2: a missing preset would export with the fallback; Review's gate lists it and keeps Export off.
+        if !blocks.is_empty() || self.missing_preset_text().is_some() {
             self.open_review();
             return true;
         }
@@ -3152,9 +3153,10 @@ impl AppModel {
         w: &str,
         profile: &engine::config::Profile,
         merge: String,
+        replan: bool,
     ) {
         let (k, w, profile) = (item_key.to_string(), w.to_string(), profile.clone());
-        self.edit_docs("Change BC7 weighting", Some(merge), true, move |p, _| {
+        self.edit_docs("Change BC7 weighting", Some(merge), replan, move |p, _| {
             let (own_p, own_w) = (
                 p.file_value(&k, "encoder.perceptual"),
                 p.file_value(&k, fields::WEIGHTING),
@@ -3176,22 +3178,25 @@ impl AppModel {
     /// hid; when the row is still not the pick, the pick is written again over it, joined to the pick's step. True
     /// when that wrote (a re-plan follows).
     fn follow_weighting(&mut self) -> bool {
-        let Some((k, w, merge)) = self.weighting_follow.take() else {
-            return false;
-        };
-        let Some(profile) = self
-            .item(&k)
-            .and_then(|i| i.job.as_ref())
-            .map(|j| j.profile.clone())
-        else {
-            return false;
-        };
-        if fields::weighting_value(&profile) == json!(w) {
-            return false;
-        }
         let pushes = self.history.pushes;
-        self.write_weighting(&k, &w, &profile, merge);
-        self.history.pushes != pushes
+        for (k, w, merge) in std::mem::take(&mut self.weighting_follow) {
+            let Some(profile) = self
+                .item(&k)
+                .and_then(|i| i.job.as_ref())
+                .map(|j| j.profile.clone())
+            else {
+                continue;
+            };
+            if fields::weighting_value(&profile) != json!(w) {
+                self.write_weighting(&k, &w, &profile, merge, false);
+            }
+        }
+        // Note FO4: one plan for all the writes, not one per texture.
+        let wrote = self.history.pushes != pushes;
+        if wrote {
+            self.replan_after_edit(false);
+        }
+        wrote
     }
 
     /// An `sdc.toml` edit (a read-only `sdc.toml` ignores it), re-planned. The sets document is not touched, so
@@ -3212,7 +3217,7 @@ impl AppModel {
         // Task 9 (Z11): restoring a state as it was is no sub-type change to clean up after.
         self.reset_type_follow();
         // Note FC8 ledger minor: a weighting re-write queued for the plan of the step undone no longer applies.
-        self.weighting_follow = None;
+        self.weighting_follow.clear();
         self.reencode_follow = None;
         // Fast re-plan: a step that leaves the sets document as it is may send a partial (`replan` checks the rest).
         // Compared as the edit path compares its snapshots (Minor 3: no sets document on both sides is unchanged).
@@ -3529,8 +3534,12 @@ impl AppModel {
             });
             // Unique per pick, so two picks stay two steps; the follow-up joins this one.
             let merge = format!("bc7-weighting#{}", self.history.pushes);
-            self.write_weighting(item_key, w, &profile, merge.clone());
-            self.weighting_follow = hides.then(|| (item_key.to_string(), w.to_string(), merge));
+            self.write_weighting(item_key, w, &profile, merge.clone(), true);
+            // Note FO4: one entry per texture, so a bulk or copy pick completes every one.
+            if hides {
+                self.weighting_follow
+                    .push((item_key.to_string(), w.to_string(), merge));
+            }
             return;
         }
         let k = item_key.to_string();

@@ -34,6 +34,15 @@ ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
 
+ARCHIVED (wording before the edit; superseded in part by Note FO, 2026-11-04)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FO, 2026-11-04)
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP
+
+ARCHIVED (wording before the edit; superseded in part by Note FO, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
