@@ -113,28 +113,12 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     }
 }
 
-/// Per-field overrides of a level's bc7e parameters, for the BC7 tuning study (docs/research/bc7e-tuning.md).
-/// The engine sets only `weights` (`encoder.bc7_weights`, DECISIONS Note CP). `None` keeps the level's value.
+/// An override of a level's bc7e parameters (`encoder.bc7_weights`, DECISIONS Note CP). `None` keeps the level's
+/// value. The shim's other tuning slots (the BC7 tuning study's) are always sent unset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Bc7Tune {
-    /// Partitions given a full encode after the cheap estimate (modes 0, 1/3, 2 and 7 together).
-    pub partitions_to_try: Option<u32>,
-    /// bc7e "uber" refinement level, 0..=4.
-    pub uber_level: Option<u32>,
-    /// Least-squares refinement passes after the first fit.
-    pub refinement_passes: Option<u32>,
-    /// Try every p-bit combination instead of rounding each endpoint to its nearest one.
-    pub pbit_search: Option<bool>,
     /// Linear per-channel error weights (used with `perceptual = false`).
     pub weights: Option<[u32; 4]>,
-    /// Partitions the cheap estimate ranks for modes 1, 3 and 7 (max 64).
-    pub max_partitions_2subset: Option<u32>,
-    /// Partitions the cheap estimate ranks for mode 0 (max 16) and mode 2 (max 64).
-    pub max_partitions_3subset: Option<(u32, u32)>,
-    /// Patch 0002: greedy ±1 search over the quantised endpoints after the least-squares and uber stages.
-    pub endpoint_search: Option<bool>,
-    /// Patch 0002: full refinement while ranking partitions (upstream refines only the winner past two).
-    pub refine_partitions: Option<bool>,
 }
 
 /// `bc7e_compress_blocks` with `tune` applied over the level's parameters.
@@ -146,25 +130,13 @@ pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Para
         return;
     }
     init();
-    let o = |v: Option<u32>| v.map_or(-1, |x| x as i32);
-    let w = tune.weights;
-    let m3 = tune.max_partitions_3subset;
-    let t: [i32; 14] = [
-        o(tune.partitions_to_try),
-        o(tune.uber_level),
-        o(tune.refinement_passes),
-        tune.pbit_search.map_or(-1, |b| b as i32),
-        o(w.map(|w| w[0])),
-        o(w.map(|w| w[1])),
-        o(w.map(|w| w[2])),
-        o(w.map(|w| w[3])),
-        o(tune.max_partitions_2subset),
-        o(m3.map(|m| m.0)),
-        o(m3.map(|m| m.1)),
-        tune.endpoint_search.map_or(-1, |b| b as i32),
-        tune.refine_partitions.map_or(-1, |b| b as i32),
-        -1,
-    ];
+    // -1 leaves a slot at the level's value (sdc_shim.cpp).
+    let mut t = [-1i32; 14];
+    if let Some(w) = tune.weights {
+        for (slot, x) in t[4..8].iter_mut().zip(w) {
+            *slot = x as i32;
+        }
+    }
     let src: Vec<u32> = pixels.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let mut dst = vec![0u64; n * 2];
     // SAFETY: as in `bc7e_compress_blocks`; `t` is 14 ints, which is what the shim reads.

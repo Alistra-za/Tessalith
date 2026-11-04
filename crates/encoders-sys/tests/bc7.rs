@@ -95,7 +95,6 @@ fn tuned_with_unit_weights_matches_the_plain_call() {
         .collect();
     let tune = |weights| Bc7Tune {
         weights: Some(weights),
-        ..Default::default()
     };
     let levels = [
         Bc7Level::Ultrafast,

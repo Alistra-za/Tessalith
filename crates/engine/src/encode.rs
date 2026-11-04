@@ -106,7 +106,6 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         params,
                         Bc7Tune {
                             weights: Some(w.weights()),
-                            ..Default::default()
                         },
                     ),
                     None => bc7e_compress_blocks(bc, oc, params),
