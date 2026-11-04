@@ -257,11 +257,6 @@ pub fn parse_bytes(s: &str) -> Result<u64, String> {
     }
 }
 
-/// `%APPDATA%\sdc\presets`, the user presets folder (M6 Track D spec §3); `None` when APPDATA is unset.
-pub fn user_presets_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("presets"))
-}
-
 /// Translate the shared batch flags into a `BatchRequest`. Errors are usage or configuration errors (exit 2).
 pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, String> {
     // `BatchRequest::new` takes a target; `--target` is optional, so reset it to "not given".
@@ -283,9 +278,8 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
     // `--preset-file` loads without selecting (spec §3.7, §8).
     r.preset_files.extend(b.preset_file.iter().cloned());
     r.project_config = b.config.clone();
-    r.user_config =
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("sdc").join("config.toml"));
-    r.user_presets = user_presets_dir();
+    r.user_config = engine::presets::user_config_path();
+    r.user_presets = engine::presets::user_presets_dir();
     // Ruling FR-a: every bad `--set` and `--allow` in one error, so a pasted 1.x command is fixed in one pass.
     let mut bad = vec![];
     for s in &b.set {

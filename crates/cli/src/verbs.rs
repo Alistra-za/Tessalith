@@ -821,7 +821,7 @@ fn policy_id(p: AlphaPolicy) -> String {
 pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
     let engine = Engine::new()?;
     let mut reg = engine.registry().clone();
-    if let Some(dir) = user_presets_dir() {
+    if let Some(dir) = engine::presets::user_presets_dir() {
         for w in reg.add_dir(&dir) {
             err!("{}: {}", w.code.as_str(), w.message);
         }

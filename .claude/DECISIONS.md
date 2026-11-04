@@ -16,10 +16,10 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FV, FT
-- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FT, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
@@ -1061,3 +1061,13 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **FT4 A skipped cube DDS previews as a cross (T16).** `dds_preview` keeps all six faces' levels from `first_level` (face-major, from `DdsFile::surfaces`) and sets `faces: 6`; `decode_faces` is shared with `decode_levels`. An array DDS (or an array of cubes) still shows its first slice, with the line `Array of N: only the first slice is shown` (`cube` for cubes) added to the preview notice through `PreviewOut::note`. A cut-off cube is an error, not a panic. Tests `backlog_b4_preview::a_cube_dds_previews_all_six_faces`, `a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels`, `a_truncated_cube_dds_is_an_error`, `an_array_dds_says_which_slice_it_shows`.
 - **FT5 No original-textures read while the scan store is unsettled (T43).** `ask_original_textures` returns at once while `scan_store_unsettled`, so a store a running or cancelled scan left empty caches no false "no mesh" (as `used_by_for` does). Test `pgp_lock::no_original_textures_read_starts_while_the_scan_store_is_unsettled`.
 - **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.
+
+## Note FX — backlog batch B9: cli (main team, 2026-11-04)
+
+- **FX1 `sdc convert`'s human log lists a set's SHADER-* warnings (T48).** `HumanSink` has a `SetResolved` arm that prints each warning of severity warning or higher as `warning <set>: CODE message`, the same line it prints for a file's warning with the set in the file's place; `--json` is unchanged. Test `cli_inspect_validate::convert_logs_the_set_shader_warnings`. The trace reviewer's side note (a SUG-LOW-CONFIDENCE line saying "High-confidence") is not a bug: the warning is raised for a High suggestion that `--accept-suggestions` did not accept, and its text (also in the CLI-Reference and Troubleshooting examples) says so.
+- **FX2 `inspect` strips a root whose lower-case form is longer than the path's own prefix (T49).** `strip_root` lower-cases the path char by char until it reaches the root's byte length, then compares and slices there, so `C:\Users\İbrahim\t` no longer leaves absolute temp paths in the output. Test `strip_root_handles_case_separators_and_foreign_paths`.
+- **FX3 One formatter for warning and skip lines (L67).** `human::warning_line(label, warning)` and `human::skip_line(code, reason)` serve `HumanSink`, `inspect`'s plan printers and FX1's arm. The output of every verb is byte-identical.
+- **FX4 The CLI inspect and validate tests build their BC7 (L53).** `alpha254_dds` converts a 64x32 RGBA PNG whose alpha ramps 255..252 every four columns (BC7 decodes about 39 % of mip 0 to exactly 254); `SDC_BENCH_ROOT` is no longer read and the four tests run everywhere. The human-output test pins the whole mip 0 line.
+- **FX5 `sdc inspect` prints the typed `DdsInfo` (L69).** `print_dds_info` matches the struct; only `--json` serialises it. The human output is byte-identical.
+- **FX6 One `sdc()` for the CLI tests (L79).** `crates/cli/tests/common/mod.rs` holds it with its APPDATA isolation; `cli_convert.rs` keeps its own because its fixture owns the APPDATA folder.
+- **FX7 One home for the user config and presets paths (L35, L78).** `engine::presets::user_config_path()` and `user_presets_dir()` are used by `sdc` (`build_request`, `presets`) and `tessalith.exe`; the three copies are gone.
