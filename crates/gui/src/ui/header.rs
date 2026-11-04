@@ -590,17 +590,20 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
             })
             .inner;
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, b.enabled, &b.name));
-        if r.on_hover_text(b.hover.clone())
-            .on_disabled_hover_text(b.hover)
-            .clicked()
-            && !super::meshes::request_undo(ui.ctx(), undo)
-        {
-            if undo {
-                model.undo();
-            } else {
-                model.redo();
+        let r = r
+            .on_hover_text(b.hover.clone())
+            .on_disabled_hover_text(b.hover);
+        // Backlog T20: a focused text field commits first, so its step is the one undone and Redo is not cleared.
+        let ctx = ui.ctx().clone();
+        super::commit_click(ui, &r, model, move |m| {
+            if !super::meshes::request_undo(&ctx, undo) {
+                if undo {
+                    m.undo();
+                } else {
+                    m.redo();
+                }
             }
-        }
+        });
     }
 }
 

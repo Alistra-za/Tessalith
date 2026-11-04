@@ -61,6 +61,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM
 
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -104,3 +110,24 @@ ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FQ, 2026-11-04)
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FS, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO

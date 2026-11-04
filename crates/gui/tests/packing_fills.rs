@@ -1022,3 +1022,72 @@ fn a_dropped_fill_is_an_info_row_with_undo() {
     m.set_json_name("other");
     assert_eq!(row(m).expect("still listed").fix, None);
 }
+
+/// Backlog R2: after Enter the Fills box keeps showing the typed value until the re-plan lands (it reverted to the
+/// old value for those frames).
+#[test]
+fn a_fill_box_keeps_the_typed_value_until_the_plan_lands() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    h.run();
+    fn ao<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::SpinButton, "AO fill")
+    }
+    ao(&h).scroll_to_me();
+    h.run();
+    ao(&h).focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    for c in ["2", "0", "0"] {
+        h.event(Event::Text(c.into()));
+        h.run();
+    }
+    h.key_press(Key::Enter);
+    for _ in 0..3 {
+        h.run_steps(1);
+        assert!(h.state().edit_busy(), "the re-plan is still out");
+        assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(200.0));
+    }
+    settle(&mut h);
+    assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(200.0));
+}
+
+/// Backlog R2 review: the held value belongs to its box. Switching to another set before the plan lands must not
+/// show (or later write) the first set's typed value in the second set's AO box.
+#[test]
+fn a_held_fill_value_does_not_follow_to_another_set() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture_with(d.path(), "", true));
+    h.run();
+    fn ao<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::SpinButton, "AO fill")
+    }
+    ao(&h).scroll_to_me();
+    h.run();
+    ao(&h).focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    for c in ["2", "0", "0"] {
+        h.event(Event::Text(c.into()));
+        h.run();
+    }
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+    assert!(h.state().edit_busy(), "the re-plan is still out");
+    let other = h
+        .state()
+        .sets
+        .iter()
+        .find(|s| s.key.ends_with("m/rock02"))
+        .expect("the rock02 set")
+        .key
+        .clone();
+    h.state_mut().select_set(&other);
+    h.run_steps(3);
+    assert!(h.state().edit_busy(), "still out after the switch");
+    assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(255.0));
+}

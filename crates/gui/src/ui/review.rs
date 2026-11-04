@@ -254,6 +254,7 @@ enum Act {
     AlsoSet(Box<dyn FnOnce(&mut ExportConfig)>),
     AlsoLocation,
     ChooseExport,
+    ChoosePreset,
     Skip(String, bool),
     Recipe,
     GoTo(String),
@@ -615,6 +616,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         })
     });
     let gate = m.review_gate();
+    // Note FP8 (T30): the gate also refuses for a missing preset and a read-only `sdc.toml`, so they are blockers.
+    let preset_row = m.missing_preset_text();
+    let toml_row = m.toml_read_only_reason();
     let nif_folder = m.export_folder_chosen();
     let folder_chosen = nif_folder.is_some();
     let json = m.review_json();
@@ -737,7 +741,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         }
                         Err(why) => {
                             ui.add_enabled(false, button).on_disabled_hover_text(why);
-                            ui.colored_label(RED, why);
+                            // Note FP8: the Blockers column already lists these two reasons.
+                            let listed = toml_row.as_deref() == Some(why.as_str())
+                                || preset_row.as_ref().is_some_and(|(t, _)| t == why);
+                            if !listed {
+                                ui.colored_label(RED, why);
+                            }
                         }
                     }
                     // Note FL: the rows may be an edit's partial plan; a click waits for the full plan (rule 7.2).
@@ -750,7 +759,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         });
     // Note FB4: the missing export folder counts, because the gate enforces it; Note FC5: so does an unanswered
     // overwrite question.
-    let blockers = blocks.len() + usize::from(!folder_chosen) + m.unanswered_overwrites().len();
+    let blockers = blocks.len()
+        + usize::from(!folder_chosen)
+        + usize::from(preset_row.is_some())
+        + usize::from(toml_row.is_some())
+        + m.unanswered_overwrites().len();
     let json_answer = review.json_answer.as_ref();
     let questions = json
         .iter()
@@ -784,6 +797,24 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         .on_disabled_hover_text(picker::BUSY_HOVER);
                     if r.clicked() {
                         act = Some(Act::ChooseExport);
+                    }
+                });
+            }
+            if let Some(why) = &toml_row {
+                ui.colored_label(RED, why);
+            }
+            if let Some((text, hover)) = &preset_row {
+                ui.horizontal_wrapped(|ui| {
+                    let l = ui.colored_label(RED, text);
+                    if let Some(h) = hover {
+                        l.on_hover_text(h);
+                    }
+                    // Rule 5.4: the visible text is the accessible name.
+                    let r = ui.button("Choose preset…");
+                    if r.on_hover_text("Open the Preset menu and pick an installed preset")
+                        .clicked()
+                    {
+                        act = Some(Act::ChoosePreset);
                     }
                 });
             }
@@ -893,6 +924,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::ChooseExport) => {
             model.pick_export_folder(ui.ctx());
         }
+        // The header's Preset menu opens on the request (as Problems' `Choose preset…` does).
+        Some(Act::ChoosePreset) => model.choose_preset = Some(ui.ctx().cumulative_pass_nr()),
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
         Some(Act::Recipe) => {
             super::advanced::open_recipe(ui.ctx());

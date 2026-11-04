@@ -608,3 +608,30 @@ fn a_reencode_and_its_recording_ask_on_close() {
     assert!(!m.request_close());
     assert_eq!(m.dialog, Some(sdc_gui::model::Dialog::CloseUnsaved));
 }
+
+/// Backlog T30 (Note FP8): Review's Blockers column lists a missing preset (the gate refuses for it) with the row's
+/// `Choose preset…`, instead of saying "None" beside a disabled Export.
+#[test]
+fn review_lists_a_missing_preset_as_a_blocker() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    rgb(&root, "a/rock_n.png", [128, 128, 255]);
+    std::fs::write(root.join("sdc.toml"), "preset = \"ghost\"\n").unwrap();
+    let mut m = support::opened_as_the_app(root, d.path().join("export"));
+    m.export_clicked();
+    assert!(m.wait_idle(WAIT));
+    assert!(m.review.is_some(), "Review is open");
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.get_by_label("Blockers (1)");
+    // Listed once, in Blockers (the gate's text beside Export does not repeat it).
+    assert_eq!(
+        h.query_all_by_label_contains("Preset ghost is not installed")
+            .count(),
+        1
+    );
+    h.get_by_label("Choose preset…").click();
+    h.run();
+    h.get_by_label("Presets…");
+}

@@ -18,13 +18,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS, FP
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1024,3 +1024,23 @@ Fixes for trace-debug minors 17, 18, 9, 10, 11, 19 and 13 (owner delegated, 2026
 - **FQ4 `subtype`, `target`, `category` and `resize_reference` in a defaults table are load errors (T10, T11).** `check_chain` refuses them in `[defaults]` and `[subtypes.X]` of every preset and config, naming the table and the key and saying why (it has no effect there; for `resize_reference`, that the planner sets it and a hand-written value skews the size checks). Before, the first three were overwritten by `finish_profile` and a hand-written `resize_reference` skewed the DIM-* checks. The planner's own in-memory `resize_reference` (FM44) is not a parsed table and is not refused. The built-in presets keep their top-level `target`. CHANGELOG has the line; Project-Config-Fields no longer says `subtype` is accepted there.
 - **FQ5 An `[inputs]` alias is matched against the folder case-insensitively (T19).** `read_as_target` strips the folder the file was found in from the alias path component by component, ignoring case and keeping the remainder's case, so a project config named in another case than the input folder no longer gives IN-ALIAS-INVALID.
 - **FQ6 A legacy cube DDS that lists only some faces is a partial cube (T13).** `read_dds` returns `DdsError::Unsupported("partial cube: …")` for a header without DX10 whose `caps2` lacks any of the six face bits, before the length check, instead of "truncated DDS file". A legacy cube with no face bits at all (`caps2 = 0x200`) is a partial cube too; it was read before, and is refused now.
+
+## Note FS — backlog batch B3: GUI input and keys (main team, 2026-11-04)
+- **FS1** The Advanced drawer's Mipmaps and Advanced texture fields rows gate on `AppModel::fix_off` (read-only reason first, else "Wait for the plan to finish"), as the texture settings panel's rows do (FK), so a pick during a pending plan is not dropped as "unchanged" against the stale view. (Backlog T32)
+- **FS2** The Fills box (`settled_drag`) keeps a settled value on show while a re-plan is out, until the model hands the same value back or the plan is idle, as `cube_section::num` does; the held value is keyed to the box's set, so another set's box never shows it. Before, it showed the old value after Enter until the plan landed. (Backlog R2)
+- **FS3** The header Undo and Redo go through `commit_click`: a focused text field commits first, so its step is the one undone and Redo is not cleared (FC8). (Backlog T20)
+- **FS4** An Explorer file drop is ignored for the frame when a modal was open at its start: `model.dialog`, a pending sets-column prompt (Rename, Replace, Refused and the rest), the Slot commands dialog, or egui's top modal layer. Before, a drop over a slot raised a Replace? prompt or an error line under the modal, and a drop elsewhere replaced the open dialog. (Backlog T21)
+- **FS5** The Preview key actions (`]`, `[`, 1-6, L, T...) are live only while the Selection is in front of the centre (`centre_front() == Selection`), as the Grid and Sets keys are (FB7); a docked Presets or JSON tab owns the keys. (Backlog T22)
+
+## Note FP — backlog batch B1: gui model fixes (main team, 2026-11-04)
+
+Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debug-2026-11-04`) by number; each has a test.
+
+- **FP1 The header says Review while a tick is on (T29).** `export_is_clean` is false while an Also tick is on, as `export_checks` already sent the click to Review (Note CN), so the button no longer reads `Export N files` and then opens Review. Test `also_export::a_tick_makes_the_header_read_review`.
+- **FP2 Every export ends its rows (T25).** `export_ended` ends the Queued and Running rows of a plain export too (the `also_pass` guard and field are gone; `also_error` is None for a plain export). An export that dies after discovery leaves no row Queued. Test `export::a_failed_plain_export_leaves_no_row_queued`.
+- **FP3 Cancel does not keep the automatic types marked written (T36).** `cancel_open` clears `auto_written` of the history it restores, because the folder's documents were re-read (FI4) and the next plan records the types again. Test `open_cancel::cancel_does_not_keep_the_automatic_types_marked_written`.
+- **FP4 Undo steps recorded under a blame keep the stashed `sdc.toml` (T37).** `ProjectDoc::snapshot_text` is the stashed text while `blamed()`, else `text()`; `snapshot_of` uses it, so a step taken while the engine's rejection holds `sdc.toml` no longer stores an empty file for Undo and Redo to restore. Test `history::a_step_recorded_while_sdc_toml_is_blamed_keeps_its_text`.
+- **FP5 Clearing the read-only flag refreshes Review's check (T31).** `refresh_read_only_flags` sets `review.toml_unwritable` again when the flags change, so Export is not left disabled with a reason that no longer holds. Test `also_export::clearing_the_read_only_flag_reopens_reviews_export`.
+- **FP6 Orphan notes go with a written JSON (T23).** The "the PGPatcher JSON is now ..." notes about an older file are kept only when the export writes the JSON (`Written`, or an Overwrite that wrote); an export that writes none (vanilla with a borrowed slot, a refused file) says nothing about it. Test `pbr_export::no_orphan_note_when_the_export_writes_no_json`.
+- **FP7 Save writes the edits a blame stashed (T38).** While the retry plan after a rejection is running (`tentative_edits()` is Some), `save()` writes the stashed text with `ProjectDoc::save_stashed` (same changed-on-disk check and atomic write), so Save in the Open, Close and Reload prompts keeps the user's edits. `sdc.toml` may then hold a config the engine rejects; it opens read-only with that message, as any rejected file does. Test `history::save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits`.
+- **FP8 Review's Blockers lists a missing preset and a read-only `sdc.toml` (T30).** Both refuse the gate, so both are blockers: a red row each in column 0 and in the count, the preset's row with `Choose preset…` (opens the header's Preset menu, as Problems' button does). Test `auto_accept::review_lists_a_missing_preset_as_a_blocker`.

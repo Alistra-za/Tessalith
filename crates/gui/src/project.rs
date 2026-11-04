@@ -119,16 +119,21 @@ impl TomlFile {
         if self.read_only() {
             return Err(SaveError::ReadOnly);
         }
+        self.write_text(self.doc.to_string(), force)?;
+        // The `.recovery` file stays: only a user's Save holds the recovered edits (`AppModel::save`, wave 2 #3).
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// The changed-on-disk check, then the atomic write of `text`, which becomes the saved text.
+    fn write_text(&mut self, text: String, force: bool) -> Result<(), SaveError> {
         if !force && self.changed_on_disk() {
             return Err(SaveError::ChangedOnDisk);
         }
-        let text = self.doc.to_string();
         engine::dds::write_atomic(&self.path, text.as_bytes())
             .map_err(|e| write_error(&self.path, e))?;
         self.saved_text = text;
         self.disk = SourceStamp::of(&self.path);
-        // The `.recovery` file stays: only a user's Save holds the recovered edits (`AppModel::save`, wave 2 #3).
-        self.dirty = false;
         Ok(())
     }
 }
@@ -345,6 +350,14 @@ impl ProjectDoc {
     /// The document as text (undo snapshots, DECISIONS P9).
     pub fn text(&self) -> String {
         self.f.text()
+    }
+
+    /// [`Self::text`] for an undo step: while a blame holds the document, the stashed text it stands for.
+    pub fn snapshot_text(&self) -> String {
+        match &self.stash {
+            Some((doc, _)) => doc.to_string(),
+            None => self.f.text(),
+        }
     }
 
     /// Replace the document with `text` (an undo or redo). It is an unsaved change. A read-only document is left
@@ -742,6 +755,17 @@ impl ProjectDoc {
     /// Write the document (atomically: a temporary file, then rename).
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
         self.f.save(force)
+    }
+
+    /// Note FP7 (T38): write the unsaved edits a blame stashed (the engine may still reject them: the file then opens
+    /// read-only with that message). `Ok(false)` when nothing is stashed.
+    pub fn save_stashed(&mut self) -> Result<bool, SaveError> {
+        let Some((doc, dirty)) = self.stash.as_mut().filter(|(_, dirty)| *dirty) else {
+            return Ok(false);
+        };
+        self.f.write_text(doc.to_string(), false)?;
+        *dirty = false;
+        Ok(true)
     }
 }
 

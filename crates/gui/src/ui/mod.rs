@@ -123,13 +123,22 @@ pub fn draw_with_scan(
         state.slot_cmds = Default::default();
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).
-    let paths: Vec<std::path::PathBuf> = ui.input(|i| {
-        i.raw
-            .dropped_files
-            .iter()
-            .map(|f| f.path().to_path_buf())
-            .collect()
-    });
+    // Backlog T21: a modal open at this frame's start owns the window; a drop under it is ignored.
+    let modal = model.dialog.is_some()
+        || state.drops.pending.is_some()
+        || state.slot_cmds.open.is_some()
+        || ui.ctx().memory(|m| m.top_modal_layer()).is_some();
+    let paths: Vec<std::path::PathBuf> = if modal {
+        Vec::new()
+    } else {
+        ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        })
+    };
     state.drops.file = (!paths.is_empty()).then(|| sets_column::FileDrop {
         paths,
         pos: drop_pos(ui.ctx()),

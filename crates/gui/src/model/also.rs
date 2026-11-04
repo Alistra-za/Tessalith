@@ -336,7 +336,6 @@ mod tests {
     #[test]
     fn an_also_export_error_ends_every_queued_row() {
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         discovered(&mut m, "a.dds");
         discovered(&mut m, "textures Vanilla/a.dds");
@@ -352,7 +351,6 @@ mod tests {
     #[test]
     fn a_cancelled_also_export_ends_its_queued_rows_as_cancelled() {
         let mut m = bare_model();
-        m.also_pass = true;
         let c = engine::api::CancelToken::default();
         c.cancel();
         m.export.running = Some(c);
@@ -398,7 +396,6 @@ mod tests {
     #[test]
     fn a_pbr_phase_error_is_logged_once() {
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         m.also_finished(summary(Some(Phase::Pbr)));
         m.end_export_with(Err("plan broke".into()));
@@ -411,14 +408,17 @@ mod tests {
         assert!(matches!(m.dialog, Some(super::super::Dialog::Error(_))));
     }
 
-    /// A plain export keeps today's behaviour: no sweep.
+    /// Note FP2 (supersedes "a plain export keeps its rows"): a plain export that ends with an error sweeps too.
     #[test]
-    fn a_plain_export_error_keeps_its_rows_as_today() {
+    fn a_plain_export_error_ends_its_rows() {
         let mut m = bare_model();
         m.export.running = Some(Default::default());
         discovered(&mut m, "a.dds");
         m.end_export_with(Err("x".into()));
-        assert_eq!(m.export.rows[0].state, RowState::Queued);
+        assert_eq!(
+            m.export.rows[0].state,
+            RowState::Failed("not run: x".into())
+        );
     }
 
     /// CN56 carried: a later phase's error in `AlsoSummary::error` is an error, and the export's end is logged as
@@ -427,7 +427,6 @@ mod tests {
     fn a_later_phase_error_is_shown_as_an_error() {
         use super::super::messages::Severity;
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         discovered(&mut m, "textures Vanilla/a.dds");
         m.also_finished(summary(Some(Phase::Vanilla)));
@@ -463,7 +462,6 @@ mod tests {
     #[test]
     fn a_panic_while_walking_ends_the_export_and_a_late_walk_result_is_dropped() {
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         m.also_tail = Some(None);
         m.handle(panicked("export"));
@@ -487,7 +485,6 @@ mod tests {
     #[test]
     fn a_cancel_while_walking_makes_no_nif_export_due() {
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         m.export.running.as_ref().unwrap().cancel();
         m.also_tail = Some(None);
@@ -514,7 +511,6 @@ mod tests {
     #[test]
     fn an_also_export_panic_ends_the_export() {
         let mut m = bare_model();
-        m.also_pass = true;
         m.export.running = Some(Default::default());
         discovered(&mut m, "textures Vanilla/a.dds");
         m.handle(panicked("export"));
