@@ -635,13 +635,6 @@ impl AppModel {
     pub fn clear_rename_cache(&self) {
         self.rename_cache.take();
     }
-    /// The open rename dialog's plan.
-    pub fn rename_plan(&self) -> Option<RenamePlan> {
-        match &self.dialog {
-            Some(Dialog::Rename(d)) => Some(plan_rename(self, d)),
-            _ => None,
-        }
-    }
 
     /// Switch the open dialog's mode; the recipe stays, the keys follow the selection.
     pub fn set_rename_mode(&mut self, mode: RenameMode) {

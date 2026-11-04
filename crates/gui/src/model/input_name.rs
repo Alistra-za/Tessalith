@@ -91,21 +91,6 @@ impl AppModel {
         list
     }
 
-    /// Note DO: the lighting slots (0-based bits) the scan saw texture `path` in, with or without `textures/` and
-    /// `.dds`; 0 when the scan does not know it.
-    pub fn known_slot_bits(&self, path: &str) -> u16 {
-        let p = lower(super::known_paths::strip_dds(path.trim()));
-        let p = if bare_name(&p) {
-            format!("textures/{p}")
-        } else {
-            p
-        };
-        self.known
-            .textures
-            .get(&format!("{p}.dds"))
-            .copied()
-            .unwrap_or(0)
-    }
 
     /// The current input name of set `set_id`: its own diffuse's game path without extension.
     pub fn input_name_of(&self, set_id: &str) -> Option<String> {

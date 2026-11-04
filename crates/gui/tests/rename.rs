@@ -27,7 +27,10 @@ fn dialog(m: &mut AppModel) -> &mut RenameDialog {
 }
 
 fn plan(m: &AppModel) -> RenamePlan {
-    m.rename_plan().expect("the rename dialog is open")
+    match &m.dialog {
+        Some(Dialog::Rename(d)) => plan_rename(m, d),
+        _ => panic!("the rename dialog is open"),
+    }
 }
 
 fn row<'a>(p: &'a RenamePlan, key: &str) -> &'a RenameRow {
