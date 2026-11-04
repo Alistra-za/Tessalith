@@ -325,4 +325,5 @@ mod tests {
     #[test]
     fn drag_slider_commits_an_arrow_key_once() {
         assert_eq!(arrow(slider, Role::Slider, egui::Key::ArrowRight).len(), 1);
-    }}
+    }
+}

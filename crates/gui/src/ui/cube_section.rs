@@ -592,13 +592,25 @@ mod tests {
     use eframe::egui::accesskit::Role;
 
     fn cube_num(ui: &mut egui::Ui, s: &mut St) {
-        let (done, _) = num(ui, false, egui::Id::new("n"), s.cur, 0.0..=10.0, 0.1, "", "exposure");
+        let (done, _) = num(
+            ui,
+            false,
+            egui::Id::new("n"),
+            s.cur,
+            0.0..=10.0,
+            0.1,
+            "",
+            "exposure",
+        );
         s.take(done);
     }
 
     #[test]
     fn num_commits_a_typed_value_and_an_arrow_key_once() {
         assert_eq!(typed(cube_num, Role::SpinButton, "5"), vec![5.0]);
-        assert_eq!(arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp).len(), 1);
+        assert_eq!(
+            arrow(cube_num, Role::SpinButton, egui::Key::ArrowUp).len(),
+            1
+        );
     }
 }

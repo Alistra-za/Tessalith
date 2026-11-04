@@ -1170,7 +1170,9 @@ impl SetsDoc {
         if self.read_only() {
             return;
         }
-        let old = self.table(id).map(|t| t.get("output_name").and_then(Item::as_str));
+        let old = self
+            .table(id)
+            .map(|t| t.get("output_name").and_then(Item::as_str));
         if name.is_none() && old.is_none() {
             return;
         }
