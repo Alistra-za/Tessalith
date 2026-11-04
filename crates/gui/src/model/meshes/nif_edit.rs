@@ -746,6 +746,10 @@ impl NifEdit {
             .filter(|d| d.status == OpStatus::Conflict)
             .count();
         self.source_changed = Some((self.doc.ops.len() - n, n));
+        // the exported file was built from the old source: force a re-export (write_out sets a real hash again)
+        if self.doc.export.ops_hash.is_some() {
+            self.doc.export.ops_hash = Some(String::new());
+        }
     }
 
     /// The source copy's bytes changed on disk (export step 1): the ops are re-anchored on them and the statuses

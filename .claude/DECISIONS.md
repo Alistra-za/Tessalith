@@ -22,7 +22,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
-- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
@@ -545,7 +545,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Review exports NIF edits without a texture folder; the Edit-mode 3D view has a right-click "Export this NIF". [GH8, GH9]
 - With no folder open the header reads "Export" with nothing pending, else `Review k NIF edit(s)` (every pending edit, blocked included). [FI18, FI7]
 - With a NIF selected the bottom panel is capped so the 3D frame keeps 160 px (content above scrolls); a taller user height returns where the cap no longer applies. [FI18, GH6]
-- The edit panel's footer (`meshes-edit-export`, before the tab strip) shows a status line ("Ready", "Blocked: <reason>", idle "No edits to export."), "Writes <data path> to <export path>", the source-never-changed line and Review…; with no export folder it stays blocked with the reason. The button reads "Export NIF · N edits", "Export NIF" or "Export NIF again". [CZ2, CZ3, CZ8]
+- The edit panel's footer (`meshes-edit-export`, before the tab strip) shows a status line ("Ready", "Blocked: <reason>", idle "No edits to export."), "Writes <data path> to <export path>", the source-never-changed line and Review…; with no export folder it stays blocked with the reason. The export itself runs from Review (GP10); an edit whose source changed after its export is pending again (GQ1). [CZ2, CZ3, GQ1]
 - Enter or Space on a focused Destructive button (Export NIF included) is not a click; a pointer or AccessKit click still presses it. [CZ4]
 - The pending list is a collapsible "Pending edits (N)", closed until a row turns red. All clip controls except Preview sit in one closed "Clips (N · showing X)" section that opens itself on a refusal. The left column is capped at 40 % of the width so the 3D view keeps its 240 px minimum with an edit open. [CZ5, CZ15, CZ23]
 - Slot numbers count from 1 and carry the NIF index on hover. [GH7]
@@ -976,3 +976,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
   - **GUI.** The preset editor has a Perceptual box for BC1, BC3 and BC7 with the texture panel's lock; the closed Relative to combo shows "Slot N", with the slot's name in the list and on hover (it held the Advanced drawer about 90 px past its edge); the 1-bit alpha box is named for AccessKit; the alpha dropdowns of Problems and Review are named "Problems alpha type: …" and "Review alpha type: …" (the texture panel keeps "Alpha type: …"); the FMT-BC1-ALPHA sentence offers 1-bit alpha only for see-through alpha.
   - **Schema.** `resize_floor` is `1..=16384` in the schemas, as the loader checks. `[defaults] packing.fill` still validates in the schema: the `[defaults]`, sub-type and `[files]` tables share one partial profile, so refusing it there needs a definition of its own. The loader refuses it (FM16).
   - **Docs.** CHANGELOG: the `--strict-cubemaps` and 2D cube-check lines go (a 2D `_e` file fails validation, as in 1.1.0), the power-of-two rule is the 95 % / 85 % one, the byte-change, vanilla perceptual and compact height lines give the final state, and the FM12 event change is listed. The Known issues page is a section of Troubleshooting. The broken `CHANGELOG.md#unreleased` anchor in `GUI-NIF-Edit.md` is the NIF team's (HANDOFF line, FR-d).
+
+## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
+Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegated, 2026-11-04).
+- **GQ1** A source change makes an exported edit pending again. When the source NIF's bytes change (`reload_source`, or a reopen on a changed source), `export.ops_hash` is set to an empty sentinel (not `None`, which would hide the PGPatcher warning), so the edit is pending and Review exports it again; the export records a real hash again. The exported file was built from the old source, so it would otherwise override the mod's update.

@@ -3575,6 +3575,85 @@ fn undo_after_export_makes_it_pending_again() {
     assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.source);
 }
 
+/// The open session's source with its specular strength raised: an unrelated change that leaves the glossiness edit
+/// applied and the block count the same.
+fn changed_source(m: &MeshesModel) -> Vec<u8> {
+    let e = m.edit.as_ref().unwrap();
+    let (shape, shader) = lit_shape(e);
+    let cur = e.model.lighting[&shader].lighting.params.specular_strength;
+    nif::edit::apply(
+        &e.source,
+        &[Op::SetField {
+            at: nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap(),
+            field: Field::SpecularStrength,
+            value: Value::F32((cur + 1.0).to_bits()),
+            base: Value::F32(cur.to_bits()),
+        }],
+    )
+    .unwrap()
+    .bytes
+}
+
+/// Note GQ1: the exported file was built from the old source, so a source change makes the edit pending again.
+#[test]
+fn a_source_change_after_export_makes_it_pending_again() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+    let src = changed_source(&m);
+    // the export re-reads the source copy: the change is on disk too
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.edit_with(|e| e.reload_source(src.clone()).unwrap());
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
+    assert!(e.pending());
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(export(&mut m), Ok(1));
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(*e.source, src);
+    assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.out);
+    assert!(!e.pending(), "the export records a real hash again");
+}
+
+/// The same when the source changed while the edit was closed.
+#[test]
+fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let src = changed_source(&m);
+    m.close_edit();
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.open_edit();
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(*e.source, src);
+    assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
+    assert!(e.pending());
+    // the document on disk is saved with the next change (open), so the badge comes from the session's document
+    assert_eq!(DocBadge::of(&e.doc), Some(DocBadge::Pending));
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(
+        std::fs::read(exported(&d)).unwrap(),
+        *m.edit.as_ref().unwrap().out
+    );
+}
+
+/// Review Focus 1: only a changed source forces the re-export.
+#[test]
+fn reopening_an_exported_edit_with_an_unchanged_source_is_not_pending() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    m.close_edit();
+    m.open_edit();
+    assert!(!m.edit.as_ref().unwrap().pending());
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+}
+
 /// Note GD2: the footer keeps its status and destination lines; its button opens Review (the NIF edits export there,
 /// with the textures) and writes nothing. The placement and Re-run lines are Review's and the worklist's now.
 #[test]
