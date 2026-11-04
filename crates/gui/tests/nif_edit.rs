@@ -6098,6 +6098,38 @@ fn shader_colour_picker_shows_and_stores_srgb() {
     assert_eq!(g.accesskit_node().numeric_value(), Some(c[1] as f64));
 }
 
+/// Note GQ2: the Shader tab's colour picker ends its undo step when its popup closes (like the key swatch): a second
+/// popup pick is a second step, and one undo keeps the first pick.
+#[test]
+fn shader_colour_picker_flushes_on_popup_close() {
+    let (m, a) = specular_scene([0.5; 3]);
+    let mut h = view(m);
+    h.run_steps(2);
+    let well = |h: &mut Harness<'static, MeshesModel>| {
+        h.get_by_role_and_label(AkRole::ColorWell, "Specular colour")
+            .click();
+        h.run_steps(3);
+    };
+    well(&mut h);
+    type_picker_byte(&mut h, 1, 102); // G
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(ops(h.state()).len(), 6, "scene + the first pick");
+    well(&mut h);
+    type_picker_byte(&mut h, 2, 51); // B
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(ops(h.state()).len(), 9, "the second pick is its own step");
+    assert!(h.state_mut().undo_edit());
+    let c = specular(h.state(), a);
+    assert_eq!(ops(h.state()).len(), 6, "one undo");
+    assert!(
+        (c[1] * 255.0 - 102.0).abs() < 0.01,
+        "first pick kept: {c:?}"
+    );
+    assert_eq!(c[2].to_bits(), 0.5f32.to_bits(), "B back to before");
+}
+
 /// Owner follow-up: a key outside 0-1 (an HDR emissive colour) gets a disabled swatch with the reason on hover; the
 /// picker would clamp it. The in-range key on the same table keeps its picker.
 #[test]

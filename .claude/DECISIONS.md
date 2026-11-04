@@ -980,3 +980,4 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegated, 2026-11-04).
 - **GQ1** A source change makes an exported edit pending again. When the source NIF's bytes change (`reload_source`, or a reopen on a changed source), `export.ops_hash` is set to an empty sentinel (not `None`, which would hide the PGPatcher warning), so the edit is pending and Review exports it again; the export records a real hash again. The exported file was built from the old source, so it would otherwise override the mod's update.
+- **GQ2** The Shader tab's colour picker ends its undo step when its popup closes (or a drag in it is released), as the key-table swatch does. Before, only the R/G/B fields flushed, so picks from two popups merged into one undo step.
