@@ -10,11 +10,12 @@ fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// Trace 2026-10-28 #1 fix round 2: 2000 zero-size BSTriShapes (not Lighting shapes, so each gets a warning and a
-/// skipped entry) all named by one 100 000-byte string of 0x80 (`€` decoded). The messages carry a short label, so
-/// the text stays small (about 1.2 GB with the full name).
+/// One fixture shape block: a BSTriShape head with no geometry.
 const BLOCK_LEN: u32 = 116;
 
+/// Trace 2026-10-28 #1 fix round 2: 2000 BSTriShapes with no geometry (not Lighting shapes, so each gets a warning
+/// and a skipped entry) all named by one 100 000-byte string of 0x80 (`€` decoded). The messages carry a short label,
+/// so the text stays small (about 1.2 GB with the full name).
 #[test]
 fn skipped_shape_messages_use_a_short_label() {
     let mut b = b"Gamebryo File Format, Version 20.2.0.7\n".to_vec();
