@@ -297,6 +297,42 @@ fn dynamic_cubemaps_loaded_adds_the_define() {
     assert!(preview_defines(&s, false).is_empty());
 }
 
+/// Trace 2026-11-04 #45: a Game Gamma other than 1.6 compiles as CS_GAME_GAMMA (the f32 to 9 decimals, as CS
+/// passes it: the composite test's `1.600000024`); 1.6 (the files hold the f32) or no key adds nothing.
+#[test]
+fn game_gamma_from_settings_is_a_define() {
+    let user = |json: &str| {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("SettingsUser.json");
+        std::fs::write(&p, json).unwrap();
+        read_settings(&SettingsPaths {
+            user: Some(p),
+            ..Default::default()
+        })
+    };
+    assert_eq!(
+        preview_defines(&user(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), true),
+        ["CS_GAME_GAMMA=2.200000048", "ENABLE_LL"]
+    );
+    assert!(preview_defines(&user(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), false).is_empty());
+    for json in [
+        r#"{"Linear Lighting": {"gameGamma": 1.600000023841858}}"#,
+        r#"{"Linear Lighting": {"gameGamma": 1.6}}"#,
+        r#"{"Linear Lighting": {}}"#,
+    ] {
+        assert_eq!(
+            preview_defines(&user(json), true),
+            render3d::DEFAULT_FEATURES,
+            "{json}"
+        );
+    }
+    // The owner-shaped fixture (gameGamma 1.600000023841858 in both files): no CS_GAME_GAMMA.
+    let s = read_settings(&paths(true, true, true, None));
+    assert!(!preview_defines(&s, true)
+        .iter()
+        .any(|d| d.starts_with("CS_GAME_GAMMA")));
+}
+
 fn value<'a>(fd: &'a [(String, Vec<f64>)], name: &str) -> &'a [f64] {
     &fd.iter()
         .find(|(n, _)| n == name)
@@ -442,6 +478,34 @@ fn an_unreadable_settings_file_is_parse_failed_with_a_note() {
     let mut p = paths(true, true, false, None);
     p.info_ini = Some(d.path().to_path_buf());
     assert!(!read_settings(&p).parse_failed);
+}
+
+/// Trace 2026-11-04 #46: a UTF-16 Info.ini is a note like an unreadable one: the settings files still apply and
+/// the Features inis stand in.
+#[test]
+fn a_non_utf8_info_ini_is_a_note_not_a_parse_failure() {
+    let d = tempfile::tempdir().unwrap();
+    let info = d.path().join("Info.ini");
+    let mut utf16 = vec![0xFF, 0xFE];
+    utf16.extend(
+        "[Skin]\r\nEnabled = true\r\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    std::fs::write(&info, utf16).unwrap();
+    let feats = features_dir(&["HairSpecular"]);
+    let mut p = paths(true, true, false, Some(feats.path()));
+    p.info_ini = Some(info);
+    let s = read_settings(&p);
+    assert!(!s.parse_failed, "{:?}", s.notes);
+    assert!(
+        s.notes.iter().any(|n| n.contains("not UTF-8")),
+        "{:?}",
+        s.notes
+    );
+    assert_eq!(s.loaded, names_set(&["HairSpecular"]));
+    let good = read_settings(&paths(true, true, false, None));
+    assert_eq!(s.merged, good.merged, "SettingsUser values kept");
 }
 
 /// Task 8 fix round 2: the hash covers the loaded feature set, so features found only through the Features

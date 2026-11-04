@@ -29,7 +29,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - vfs: AV, BP, BU, CV
 - esp: GG, GO
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM
 
@@ -984,3 +984,4 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ3** `pick_source` also skips any folder that holds Tessalith's edit document for this NIF (`<root>\.sdc\nif-edits\<path>.sdc-nifedit.toml`), extending GD28 from `sdc NIF Edits` to every earlier export folder; a folder with a document for another NIF is still a source. Before, an old export folder under another name was picked as the source and the edit applied to its own earlier output.
 - **GQ4** Meshes reads never land across a scan start or a reload, extending GC14, GC15 and GC19. `MeshesModel::store_settled` (no scan running and the store not unsettled) gates `select_nif`, the mod picker (greyed) and the texture-path click (`show_users`), so after a cancelled or failed scan they read nothing from the disabled store. `start()` drops a This-project pill read still out, and `reload()` drops a Controllers read still out, so neither lands an answer for the old store or file.
 - **GQ5** A set member edit in the set preview no longer pushes the whole scene: the member re-encodes and its new bytes are swapped in (`sync_textures`), as a cap change already was. Only a member the edit newly blocks pushes the scene, so the game's copy of its texture comes back: `Encoder::sync` sets `scene_dirty` and `SetPreview::check` takes it in the same frame. Before, every member edit pushed the scene again.
+- **GQ6** The preview compiles the user's Game Gamma: `preview_defines` adds `CS_GAME_GAMMA=<f32 to 9 decimals>` (CS's own form, `1.600000024`) only when `"Linear Lighting".gameGamma` is not 1.6, so default users keep their defines and program keys; the Lighting programs and the composite share it through the feature list, and `settings_define` treats it as a settings define. `ENABLE_ACESCG` stays uncompiled (shortcut: the readback has no ACEScg conversion). A non-UTF-8 Info.ini is now a note with the Features-ini fallback, like an unreadable one, not a parse failure that kept the old settings.

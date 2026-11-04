@@ -68,7 +68,7 @@ pub fn read_settings(p: &SettingsPaths) -> CsSettings {
     let mut parse_failed = false;
     let user = read(p.user.as_deref(), &mut notes, &mut parse_failed);
     let default = read(p.default.as_deref(), &mut notes, &mut parse_failed);
-    // An unreadable Info.ini is a note only: the Features inis stand in for it.
+    // An unreadable or non-UTF-8 Info.ini is a note only: the Features inis stand in for it.
     let info = read(p.info_ini.as_deref(), &mut notes, &mut false);
     let mut merged = Map::new();
     for (file, bytes) in [
@@ -95,7 +95,6 @@ pub fn read_settings(p: &SettingsPaths) -> CsSettings {
     let loaded = match info.as_deref().map(std::str::from_utf8) {
         Some(Ok(text)) => info_ini_features(text),
         Some(Err(e)) => {
-            parse_failed = true;
             notes.push(format!("Info.ini is not UTF-8 ({e}): ignored"));
             feature_inis(p.features_dir.as_deref(), &merged, &mut notes)
         }
@@ -128,6 +127,14 @@ pub fn preview_defines(s: &CsSettings, features_on: bool) -> Vec<String> {
         .collect();
     if s.linear_lighting {
         out.push("ENABLE_LL".into());
+    }
+    // Only off the shaders' built-in 1.6, so default users keep today's defines. The files hold the f32; CS passes
+    // it to 9 decimals (`1.600000024`).
+    // shortcut: ENABLE_ACESCG is not compiled; the readback has no ACEScg conversion. Upgrade when a user reports ACEScg on.
+    if let Some(g) = setting(&s.merged, "Linear Lighting", "gameGamma").map(|g| g as f32) {
+        if g != 1.6 && g.is_finite() && g > 0.0 {
+            out.push(format!("CS_GAME_GAMMA={:.9}", f64::from(g)));
+        }
     }
     out.sort();
     out
@@ -328,8 +335,9 @@ const SECTIONS: &[Section] = &[
 
 /// Settings keys with no FeatureData field by design (03 report 3, 6.3): CPU-only (`SkinnedOnly`, the sweat
 /// timers, `DetailTexture`, `EnableVerboseJsonLogging`), consumed by a derivation (`diffuseMidReflectance` ->
-/// diffuseCurve, `enableLinearLighting` -> the LL switch) or unused by the shader (`enableACEScg`, `gameGamma`,
-/// 1.9 `emitColorMult`, `UseDynamicWetness`).
+/// diffuseCurve, `enableLinearLighting` -> the LL switch, `gameGamma` -> the `CS_GAME_GAMMA` define), not compiled
+/// by the preview (`enableACEScg`: CS's ENABLE_ACESCG define) or unused by the shader (1.9 `emitColorMult`,
+/// `UseDynamicWetness`).
 #[cfg(feature = "test-hooks")]
 const NO_FIELD_KEYS: &[&str] = &[
     "SkinnedOnly",

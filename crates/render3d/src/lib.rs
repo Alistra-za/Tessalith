@@ -2626,9 +2626,12 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
         .collect()
 }
 
-/// A define the CS settings manage (C8): `ENABLE_LL` or a [`cs_settings::PREVIEW_FEATURES`] define.
+/// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a
+/// [`cs_settings::PREVIEW_FEATURES`] define.
 fn settings_define(d: &str) -> bool {
-    d == "ENABLE_LL" || cs_settings::PREVIEW_FEATURES.iter().any(|(_, x)| *x == d)
+    d == "ENABLE_LL"
+        || d.starts_with("CS_GAME_GAMMA=")
+        || cs_settings::PREVIEW_FEATURES.iter().any(|(_, x)| *x == d)
 }
 
 /// Owner D3: the missing-texture fill goes to colour registers only, the base colour t0 and the env cube at t4.

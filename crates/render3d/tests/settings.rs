@@ -150,6 +150,31 @@ fn off_in_preview_lists_loaded_but_uncompiled_features() {
     assert_eq!(r.settings(), &s);
 }
 
+/// Trace 2026-11-04 #45: CS_GAME_GAMMA is a settings define: a new value replaces the old one, back to 1.6 drops it.
+#[test]
+fn game_gamma_define_follows_the_settings() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), FLAT);
+    let gamma = |g: f64| {
+        let mut s = settings(true, 1.0);
+        s.merged["Linear Lighting"]["gameGamma"] = g.into();
+        s
+    };
+    let gammas = |r: &Renderer| -> Vec<String> {
+        r.features()
+            .iter()
+            .filter(|f| f.starts_with("CS_GAME_GAMMA"))
+            .cloned()
+            .collect()
+    };
+    r.set_settings(gamma(2.2));
+    assert_eq!(gammas(&r), ["CS_GAME_GAMMA=2.200000048"]);
+    r.set_settings(gamma(3.0));
+    assert_eq!(gammas(&r), ["CS_GAME_GAMMA=3.000000000"]);
+    r.set_settings(gamma(1.6));
+    assert!(gammas(&r).is_empty(), "{:?}", r.features());
+}
+
 /// C11: a device rebuild keeps the settings, the toggle, the FeatureData values and the sRGB mode.
 #[test]
 fn rebuild_device_on_keeps_settings() {
