@@ -107,8 +107,11 @@ pub enum Fix {
     OpenFolder(PathBuf),
     /// CHK-GREEN-GUESS (CL5): answer this item's green convention as OpenGL.
     TreatAsOpenGl(String),
-    /// P26: turn one of two exclusive features of a set (by id) off.
+    /// P26: turn one of two exclusive features of a set (by id) off; what a `FeatureClash` button asks for.
     TurnFeatureOff(String, Feature),
+    /// P26, owner 2026-11-04: two exclusive features of a set (by id) are both on. The row offers one
+    /// `TurnFeatureOff` button per feature, neither a default; the modder picks which one goes.
+    FeatureClash(String, Feature, Feature),
     /// P13: go to the set (by key) and focus the path field (a settings key) the blocker names.
     FixPath(String, String),
     /// R-fills-2, Z11: undo the step that caused the row; only built while that step is the top of the history.

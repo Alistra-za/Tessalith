@@ -812,7 +812,7 @@ fn prepare_follows_the_first_entry_of_a_duplicated_id() {
     );
 }
 
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::{Code, Warning};
 use sdc_gui::model::export::{Row, RowState};
@@ -931,6 +931,39 @@ fn the_card_ticks_export_and_a_key_in_one_undo_step_each() {
     idle(m);
     let b = m.cm_block(&v.id).unwrap();
     assert!(b.export && !b.values.contains_key("glossiness"), "{b:?}");
+}
+
+/// Audit leads 24 and 17: a read-only `sdc-project.toml` greys the card with its own reason on hover, never the
+/// banner's text (which can hold recovery or startup lines).
+#[test]
+fn a_read_only_project_greys_the_card_with_its_reason_not_the_banner() {
+    use sdc_gui::ui::cm_card::{EXPORT, SECTION};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path(), Target::Cs);
+    let v = view(&m, "m/iron");
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.sets_doc = Some(SetsDoc::open(&bad));
+    m.banner = Some("Restored 2 unsaved edits from the last session".into());
+    m.select_set(&v.key);
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(1400.0, 2400.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    h.get_by_label(SECTION).click();
+    h.run();
+    let tick = h.get_by_label(EXPORT);
+    assert!(tick.accesskit_node().is_disabled());
+    tick.hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label_contains("sdc-project.toml is read-only")
+            .is_some(),
+        "the reason shows on hover"
+    );
 }
 
 fn cm_pending(root: &Path, rel: &str, strength: f64) -> PendingCm {

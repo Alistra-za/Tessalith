@@ -340,9 +340,9 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                         feature_key(f).trim_end_matches("_on"),
                         feature_key(b).trim_end_matches("_on")
                     );
-                    // Note FC3 (P26): the row turns the second one off.
+                    // P26, owner 2026-11-04 (Note FN5): the row offers to turn off either one.
                     out.push(ExportIssue {
-                        fix: Some(Fix::TurnFeatureOff(v.id.clone(), b)),
+                        fix: Some(Fix::FeatureClash(v.id.clone(), f, b)),
                         ..issue(v, text)
                     });
                 }

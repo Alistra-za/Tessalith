@@ -334,7 +334,7 @@ fn a_feature_clash_offers_turn_it_off() {
         .cloned()
         .expect("the clash");
     assert_eq!(row.level, Level::Blocks);
-    assert!(matches!(&row.fix, Some(Fix::TurnFeatureOff(i, _)) if *i == id));
+    assert!(matches!(&row.fix, Some(Fix::FeatureClash(i, ..)) if *i == id));
     let mut h = harness(m);
     h.run();
     // Fix round 1: the set row keeps Go to set beside its fix.
@@ -343,11 +343,60 @@ fn a_feature_clash_offers_turn_it_off() {
     assert!(h
         .query_all_by_label("Go to set")
         .any(|n| (n.rect().center().y - y).abs() < 8.0));
-    h.get_by_label("Turn glint off").click();
+    h.get_by_label("Turn off glint").click();
     idle(&mut h);
     assert!(!problems(h.state())
         .iter()
         .any(|p| p.text.contains("can't both be on")));
+}
+
+/// Owner ruling 2026-11-04 (supersedes FC3's one-click P26 fix in part): the clash row offers both features, neither
+/// a default, and each button turns off only its own feature, in one undo step.
+#[test]
+fn a_feature_clash_offers_both_features_and_each_turns_off_only_its_own() {
+    let on = |m: &AppModel, id: &str, key: &str| {
+        sdc_gui::model::sets::views(m)
+            .iter()
+            .find(|v| v.id == id)
+            .and_then(|v| v.settings.get(key).cloned())
+    };
+    for (pick, other) in [("hair", "emissive"), ("emissive", "hair")] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = pbr_ready(d.path());
+        let (id, _) = rock_id(&m);
+        // Two hand edits, the clicked feature possibly last: the click must not join its step.
+        m.set_json_value(&id, "hair", Some(serde_json::json!(true)));
+        m.set_json_value(&id, "emissive", Some(serde_json::json!(true)));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let row = problems(&m)
+            .iter()
+            .find(|p| p.text.contains("can't both be on"))
+            .cloned()
+            .expect("the clash");
+        let mut h = harness(m);
+        h.run();
+        let y = h
+            .get_by_label(&format!("{id}: {}", row.shown()))
+            .rect()
+            .center()
+            .y;
+        for f in ["hair", "emissive"] {
+            assert!(
+                h.query_all_by_label(&format!("Turn off {f}"))
+                    .any(|n| (n.rect().center().y - y).abs() < 8.0),
+                "the row offers Turn off {f}"
+            );
+        }
+        h.get_by_label(&format!("Turn off {pick}")).click();
+        idle(&mut h);
+        let m = h.state_mut();
+        assert_eq!(on(m, &id, pick), Some(serde_json::json!(false)), "{pick}");
+        assert_eq!(on(m, &id, other), Some(serde_json::json!(true)), "{other}");
+        assert_eq!(m.undo_label(), Some(&*format!("Turn off {pick}")));
+        m.undo();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(on(m, &id, pick), Some(serde_json::json!(true)), "one step");
+    }
 }
 
 /// P13: a path that blocks goes to its set and focuses the field that holds it.

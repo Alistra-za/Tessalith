@@ -144,6 +144,21 @@ fn ev(seq: u64, job: &str, path: &str, kind: EventKind) -> EngineEvent {
     }
 }
 
+/// Audit lead 10: the per-mip Progress events are not kept, so the JSON Lines report has none.
+#[test]
+fn progress_events_are_not_kept_for_the_report() {
+    let mut x = ExportModel::default();
+    x.on_event(ev(0, "a/b.dds", "a/b.png", EventKind::FileStarted));
+    let progress = EventKind::Progress {
+        stage: engine::events::Stage::Compress,
+        done: 1,
+        total: 11,
+    };
+    x.on_event(ev(1, "a/b.dds", "a/b.png", progress));
+    assert_eq!(x.events.len(), 1);
+    assert!(!x.to_jsonl().contains("progress"), "{}", x.to_jsonl());
+}
+
 #[test]
 fn a_later_run_overrides_an_earlier_pack_conflict_skip_of_the_same_job() {
     let mut x = ExportModel::default();

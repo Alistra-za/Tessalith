@@ -35,8 +35,9 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
         .iter()
         .find(|v| same_id(&v.id, &set))
         .is_some_and(|v| v.pbr);
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = model.banner.clone().unwrap_or_default();
+    let off = model.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     let given: Vec<String> = (1..=8u8).map(|n| slot_gives(model, &set, n)).collect();
     let mut apply: Vec<(u8, SlotCommand)> = vec![];
     let mut lock: Vec<(u8, bool)> = vec![];

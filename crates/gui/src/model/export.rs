@@ -61,7 +61,7 @@ pub struct ExportModel {
     pub running: Option<CancelToken>,
     /// In first-seen order, one per job key.
     pub rows: Vec<Row>,
-    /// The whole stream, for JSON Lines export.
+    /// The stream without its per-mip `Progress` events, for JSON Lines export.
     pub events: Vec<EngineEvent>,
     pub summary: Option<BatchSummary>,
     pub error: Option<String>,
@@ -247,6 +247,9 @@ impl ExportModel {
                     r.state = RowState::Cancelled;
                 }
             }
+            // Audit lead 10: one Progress per mip per file is not kept (a 10k batch held ~120k); rows and pace never
+            // read `events`, so only the saved JSON Lines report loses its progress lines.
+            EventKind::Progress { .. } => return,
             _ => {}
         }
         self.events.push(ev);

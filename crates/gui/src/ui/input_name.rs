@@ -184,14 +184,8 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
         return;
     };
     let why = model
-        .project
-        .as_ref()
-        .and_then(|p| p.error())
-        .map(|e| format!("sdc.toml is read-only: {e}"))
-        .or_else(|| {
-            let e = model.sets_doc.as_ref()?.error()?;
-            Some(format!("sdc-project.toml is read-only: {e}"))
-        });
+        .toml_read_only_reason()
+        .or_else(|| model.sets_read_only_reason());
     let id = egui::Id::new(("input-name", &v.id));
     let err_id = id.with("error");
     let edit_id = id.with("edit");

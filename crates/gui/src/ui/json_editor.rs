@@ -112,13 +112,9 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
             .and_then(|d| d.json_name())
             .unwrap_or_default()
     });
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = model
-        .sets_doc
-        .as_ref()
-        .and_then(|d| d.error())
-        .unwrap_or("sdc-project.toml is read-only")
-        .to_string();
+    let off = model.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     // Note FB1: no path to show until a folder is chosen (`sdc-out` is only a name).
     let path = match model.export_folder_chosen() {
         Some(root) => format!(
@@ -160,13 +156,7 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
 /// The editor, in the centre column or in its popped-out window (Note FB7).
 pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut acts: Vec<Act> = vec![];
-    let read_only = model.sets_doc.as_ref().and_then(|d| {
-        d.read_only().then(|| {
-            d.error()
-                .unwrap_or("sdc-project.toml is read-only")
-                .to_string()
-        })
-    });
+    let read_only = model.sets_read_only_reason();
     ui.horizontal_wrapped(|ui| {
         ui.heading(WINDOW_TITLE);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

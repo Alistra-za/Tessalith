@@ -13,8 +13,8 @@ use engine::config::{GreenConvention, RawMap};
 use engine::dds::{may_replace, write_atomic, Kept};
 use engine::discover::InputKind;
 use engine::from_normal::{
-    generate, png16, sizes, GenerateError, Generated, HeightOpts, Neutral, Opts, Tiling, AO_MAX,
-    COST_WARN_ABOVE, HEIGHT_MAX, HEIGHT_MAX_RECIPE,
+    generate, png16, sizes, Generated, HeightOpts, Neutral, Opts, Tiling, AO_MAX, COST_WARN_ABOVE,
+    HEIGHT_MAX, HEIGHT_MAX_RECIPE,
 };
 use engine::group::{
     is_generated, real_rival, split_generated, split_suffix_with, vocab_of, VocabRole,
@@ -194,26 +194,36 @@ fn size_locked((w, h): (u32, u32), what: &str, why: String) -> String {
     format!("this set's maps are {w}×{h}; a generated {what} must match them ({why})")
 }
 
-/// The one size a recipe needs (P6): its sources' `(w, h)`, never upsampled from a smaller or other-aspect normal,
-/// and within `cap`.
+/// The one size a recipe needs (P6): its sources' `(sw, sh)` at the power of two they are written at (FM29), never
+/// upsampled from a smaller or other-aspect normal (`(nw, nh)`, already at its power of two), and within `cap`.
+/// A pack or derive enlarges same-aspect sources to the largest (FM30), so the written size joins the raw sources;
+/// when the power-of-two step changes the aspect it cannot (Note FN1).
 fn locked_to(
-    (w, h): (u32, u32),
+    (sw, sh): (u32, u32),
     (nw, nh): (u32, u32),
     cap: u32,
     what: &str,
 ) -> Result<GenSize, String> {
-    if nw < w || nh < h || u64::from(nw) * u64::from(h) != u64::from(nh) * u64::from(w) {
+    let (w, h) = engine::resize::pot_dims((sw, sh));
+    let aspect = |(a, b): (u32, u32), (c, d): (u32, u32)| {
+        u64::from(a) * u64::from(d) == u64::from(b) * u64::from(c)
+    };
+    if !aspect((w, h), (sw, sh)) {
+        // The solve's FFT needs power-of-two sides (review M1), and the pack needs one aspect (FM30).
         Err(size_locked(
-            (w, h),
+            (sw, sh),
+            what,
+            format!("written {w}×{h}, another aspect ratio"),
+        ))
+    } else if nw < w || nh < h || !aspect((nw, nh), (w, h)) {
+        Err(size_locked(
+            (sw, sh),
             what,
             format!("the normal is {nw}×{nh}"),
         ))
-    } else if !w.is_power_of_two() || !h.is_power_of_two() {
-        // The solve's FFT needs power-of-two sides (review M1).
-        Err(size_locked((w, h), what, "not a power of two".into()))
     } else if w.max(h) > cap {
         Err(size_locked(
-            (w, h),
+            (sw, sh),
             what,
             format!("above the {cap} px limit"),
         ))
@@ -359,6 +369,12 @@ impl AppModel {
         }
     }
 
+    /// The size Generate solves a normal at: the one the export writes it at (`resize::pot_dims`, FM29; the engine's
+    /// `generate` resamples to it), so the offers match what is made (Note FN1).
+    fn gen_normal_size(&self, key: &str) -> Option<(u32, u32)> {
+        self.normal_size(key).map(engine::resize::pot_dims)
+    }
+
     /// A header size by path, re-stated at most once per `STAT_TTL` and read again only when the stamp moved.
     fn header_dims(&self, path: &Path) -> Option<(u32, u32)> {
         let now = Instant::now();
@@ -469,9 +485,6 @@ impl AppModel {
         }
         let normal = self.normal_of(v, aliases).ok_or(NO_NORMAL)?;
         let dims = self.normal_dims(&normal)?;
-        if !dims.0.is_power_of_two() || !dims.1.is_power_of_two() {
-            return Err(GenerateError::NotPowerOfTwo(dims.0, dims.1).to_string());
-        }
         let shader = shader_of(v);
         let (own, what) = match map {
             GenMap::Ao => {
@@ -696,7 +709,7 @@ impl AppModel {
     }
 
     fn normal_dims(&self, normal: &str) -> Result<(u32, u32), String> {
-        self.normal_size(normal).ok_or_else(|| {
+        self.gen_normal_size(normal).ok_or_else(|| {
             let name = self.item(normal).map_or(normal, |i| i.name.as_str());
             format!("the normal map {name} cannot be read")
         })
@@ -1073,7 +1086,7 @@ impl AppModel {
         };
         let aliases = self.plan_aliases();
         let normal = self.normal_of(&v, &aliases);
-        let dims = normal.as_deref().and_then(|n| self.normal_size(n));
+        let dims = normal.as_deref().and_then(|n| self.gen_normal_size(n));
         let shader = shader_of(&v);
         let resolved = crate::model::auto_flags::resolved(v.pbr, &v.slots, &v.settings);
         let neutral = height_neutral(Some(shader), &resolved);
@@ -1196,7 +1209,7 @@ impl AppModel {
         let aliases = self.plan_aliases();
         let normal = self.normal_of(&v, &aliases).and_then(|key| {
             let path = self.item(&key)?.input.clone();
-            let dims = self.normal_size(&key);
+            let dims = self.gen_normal_size(&key);
             Some((key, path, dims))
         });
         Some(GenCtx { v, aliases, normal })

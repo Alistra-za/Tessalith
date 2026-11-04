@@ -2,7 +2,7 @@
 //! the rarely changed texture fields, and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
-use super::settings_panel::{field_row, toml_read_only_reason, Ctx, RowEdit};
+use super::settings_panel::{field_row, Ctx, RowEdit};
 use crate::model::fields::{advanced_field_views, levels_view, provenance_text};
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::{AppModel, Selection};
@@ -241,7 +241,9 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
     }
 }
 
-/// A number box; true once its value is settled (a drag ended, or a typed value was accepted).
+/// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed
+/// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one
+/// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
 /// The in-progress drag value is held in egui memory, so a caller that rebuilds `value` from the model each frame
 /// still gets the final dragged value on release, not the model's old one.
 pub(super) fn settled_drag<T: egui::emath::Numeric>(
@@ -249,18 +251,33 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     value: &mut T,
     speed: f64,
     range: std::ops::RangeInclusive<T>,
+    name: &str,
 ) -> bool {
     let id = ui.next_auto_id().with("settled_drag");
+    let came_in = value.to_f64();
     if let Some(held) = ui.data(|d| d.get_temp::<f64>(id)) {
         *value = T::from_f64(held);
     }
-    let r = ui.add(egui::DragValue::new(value).speed(speed).range(range));
+    let r = ui.add(
+        egui::DragValue::new(value)
+            .speed(speed)
+            .range(range)
+            .update_while_editing(false),
+    );
+    let v = value.to_f64();
+    r.widget_info(|| {
+        let mut i = egui::WidgetInfo::drag_value(r.enabled(), v);
+        i.label = Some(name.to_string());
+        i
+    });
     if r.dragged() {
-        ui.data_mut(|d| d.insert_temp(id, value.to_f64()));
+        ui.data_mut(|d| d.insert_temp(id, v));
     } else {
         ui.data_mut(|d| d.remove::<f64>(id));
     }
-    r.drag_stopped() || (r.changed() && !r.dragged())
+    let settled =
+        r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus());
+    settled && v != came_in
 }
 
 fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
@@ -348,7 +365,7 @@ fn also_recipe(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
         } else if model.export.running.is_some() {
             Some(crate::model::also::EXPORT_RUNNING.to_string())
         } else {
-            toml_read_only_reason(model)
+            model.toml_read_only_reason()
         };
         let now = model.also_config().legacy;
         let mut p = now;
@@ -524,7 +541,7 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             return;
         };
         let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
-        let why = toml_read_only_reason(model);
+        let why = model.toml_read_only_reason();
         let f = levels_view(model.target, &job);
         ui.add_enabled_ui(!read_only, |ui| {
             egui::Grid::new(("advanced-mips", &key))
@@ -561,7 +578,7 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
         };
         let read_only = model.project.as_ref().is_none_or(|p| p.read_only());
         let busy = model.edit_busy();
-        let why = toml_read_only_reason(model);
+        let why = model.toml_read_only_reason();
         ui.add_enabled_ui(!read_only, |ui| {
             egui::Grid::new(("advanced-fields", &key))
                 .num_columns(3)

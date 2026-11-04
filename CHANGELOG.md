@@ -73,7 +73,12 @@
 - The **Value range** and **Plastic look** artist checks are removed (`CHK-RANGE`, `CHK-PLASTIC`), with the preview's **Range** overlay and their two switches in Advanced → Checks. Four checks remain. An allow list naming either code is an error that says so, and an old `[checks]` line for either in `gui.toml` is ignored.
 - Mip filter: Tent is now allowed on alpha-tested and blended colour (`cutout`, `blend`, `cutout_blend`). It weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge; alpha stays the area-exact box. Mitchell and Kaiser stay off there because they ring at cutout edges. Box is the default and its output does not change. A texture that set `mips.filter = "tent"` on such colour used box in 1.x and now writes the tent.
 - The TruePBR editors list a feature's group (Coat, Emissive, Glint, Fuzz) only while the feature is on; one that is off but still has values in the JSON stays, with "kept, not used". Parallax has no group: **Displacement scale** is a row of Material while Parallax is on. The PGPatcher JSON editor marks the same keys "kept, not used". Nothing in the JSON changes.
+- Generate from normal accepts a normal whose sides are not powers of two: the height is solved at the power-of-two size the normal is written at (1000×1000 becomes 1024×1024), and the sizes offered follow that size. A locked size (AO beside other `_rmaos` sources, curvature) is the albedo's or sources' power-of-two size, and is refused only when rounding changes its aspect ratio.
+- A PGPatcher feature clash in Problems ("X and Y can't both be on") offers **Turn off X** and **Turn off Y**, where 1.x offered one button for the later feature.
+- The GUI's JSON Lines export report leaves out the per-mip progress events.
 - Fixes:
+  - Typing a value into a pack fill box is one edit (one undo step), applied when you leave the box, where each keystroke was written and planned.
+  - A greyed-out set control says why it is read-only (the `sdc-project.toml` error), not the general status line.
   - NIF validate reads non-ASCII texture paths and BSX names as Windows-1252, the same as apply.
   - The 2D and set previews update when a helper's Invert or Read changes, or when a bake, cube face or derive source changes.
   - Renaming a large selection no longer slows down quadratically.

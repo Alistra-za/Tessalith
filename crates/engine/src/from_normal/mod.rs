@@ -194,8 +194,6 @@ pub struct Generated {
 
 #[derive(Debug, thiserror::Error)]
 pub enum GenerateError {
-    #[error("the normal map is {0}×{1}; only power-of-two sizes can be generated")]
-    NotPowerOfTwo(u32, u32),
     #[error("{0}")]
     InvalidOpts(&'static str),
     #[error("cancelled")]
@@ -246,6 +244,25 @@ fn resize(s: &Slopes, size: (u32, u32)) -> Slopes {
         q: r.px.iter().map(|v| f64::from(v[1])).collect(),
         tilt: s.tilt,
     }
+}
+
+/// `stored` at `resize::pot_dims` as `resize_work` gets there (growing axes interpolated, then an area-exact box
+/// down), or `None` when it already is a power of two.
+fn to_pot(stored: &Rgba32F) -> Option<Rgba32F> {
+    let (w, h) = (stored.width, stored.height);
+    let to = crate::resize::pot_dims((w, h));
+    if to == (w, h) {
+        return None;
+    }
+    let grown = (to.0.max(w), to.1.max(h));
+    let img = match grown != (w, h) {
+        true => crate::resize::enlarge(stored, grown, false),
+        false => stored.clone(),
+    };
+    Some(match grown != to {
+        true => crate::mips::area_resample(&img, to, false),
+        false => img,
+    })
 }
 
 /// The same slopes read as OpenGL (q negated).
@@ -396,13 +413,13 @@ pub fn generate(
             return Err(InvalidOpts("the AO intensity must be between 0.5 and 3"));
         }
     }
-    let (w, h) = (stored.width, stored.height);
-    if w == 0 || h == 0 {
+    if stored.width == 0 || stored.height == 0 {
         return Err(InvalidOpts("the normal map is empty"));
     }
-    if !w.is_power_of_two() || !h.is_power_of_two() {
-        return Err(GenerateError::NotPowerOfTwo(w, h));
-    }
+    // The FFT needs power-of-two sides: solve at the size the export writes the normal at (FM29, Note FN1).
+    let pot = to_pot(stored);
+    let stored = pot.as_ref().unwrap_or(stored);
+    let (w, h) = (stored.width, stored.height);
     if opts.size > w.max(h) {
         // Spec: never upsample beyond the normal (Note CO).
         return Err(InvalidOpts("the size is above the normal map's own size"));
@@ -820,16 +837,28 @@ mod tests {
     }
 
     #[test]
-    fn generate_writes_the_requested_size_and_refuses_npot() {
+    fn generate_writes_the_requested_size_and_solves_npot_at_its_power_of_two() {
         let g = height(&torus_n(1024, 1024), &opts(512, Neutral::Half));
         assert_eq!((g.width, g.height, g.px.len()), (512, 512, 512 * 512));
         let g = height(&torus_n(1024, 512), &opts(512, Neutral::Half));
         assert_eq!((g.width, g.height, g.px.len()), (512, 256, 512 * 256));
+        // Note FN1: a non-power-of-two normal is resampled to the size the export writes it at (FM29).
         let npot = constant(1000, 1000, [0.5, 0.5, 1.0, 1.0]);
-        assert!(matches!(
-            run(&npot, &opts(512, Neutral::Half)),
-            Err(GenerateError::NotPowerOfTwo(1000, 1000))
-        ));
+        let g = height(&npot, &opts(1024, Neutral::Half));
+        assert_eq!((g.width, g.height), (1024, 1024), "1000 rounds up to 1024");
+        let g = height(
+            &constant(1000, 600, [0.5, 0.5, 1.0, 1.0]),
+            &opts(512, Neutral::Half),
+        );
+        assert_eq!(
+            (g.width, g.height),
+            (512, 256),
+            "1000x600 is written 1024x512"
+        );
+        assert!(
+            g.px.iter().all(|v| (v - 0.5).abs() < 1e-6),
+            "flat stays flat"
+        );
     }
 
     #[test]

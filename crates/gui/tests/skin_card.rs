@@ -88,6 +88,32 @@ fn the_card_shows_for_a_skin_set_and_not_for_a_plain_one() {
     assert!(h.query_by_label_contains(TITLE).is_none());
 }
 
+/// Audit lead 24: a read-only `sdc-project.toml` greys the card and says why on hover.
+#[test]
+fn a_read_only_project_greys_the_card_with_its_reason() {
+    use egui_kittest::kittest::NodeT;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_opened(d.path());
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    let k = set_key(&m);
+    m.sets_doc = Some(SetsDoc::open(&bad));
+    m.select_set(&k);
+    let mut h = harness(m);
+    h.run();
+    let set = h.query_all_by_label("set").next().expect("a set button");
+    assert!(set.accesskit_node().is_disabled());
+    set.hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label_contains("sdc-project.toml is read-only")
+            .is_some(),
+        "the reason shows on hover"
+    );
+}
+
 #[test]
 fn an_unset_field_shows_its_default_and_stores_nothing() {
     let d = tempfile::tempdir().unwrap();

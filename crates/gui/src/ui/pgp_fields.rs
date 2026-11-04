@@ -24,7 +24,6 @@ use serde_json::{json, Value};
 
 type Edit = (String, Option<Value>);
 
-const READ_ONLY: &str = "sdc-project.toml is read-only";
 /// Fuzz and a coat normal cannot be in the same set (owner, 2026-10-10).
 const FUZZ_BLOCKED_BY_COAT: &str = "off: the set has a coat normal (_cnr)";
 const COAT_NORMAL_BLOCKED_BY_FUZZ: &str = "off: the set has a fuzz texture (_f)";
@@ -165,7 +164,7 @@ pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
     let v = all.iter().find(|v| same_id(&v.id, set));
     let filled =
         |v: &SetView, s: SlotKind| !matches!(v.slots.get(&s), None | Some(SlotFill::Empty));
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
+    let read_only = model.sets_read_only_reason();
     let own: Settings = v.as_ref().map(|v| v.settings.clone()).unwrap_or_default();
     let derived = v.as_ref().and_then(|v| v.derived_match.clone());
     let ss = v.as_ref().map(|v| hint(model, v)).unwrap_or_default();
@@ -194,13 +193,7 @@ pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
         matches,
         addable,
         set: set.to_string(),
-        read_only: (!editable).then(|| {
-            model
-                .sets_doc
-                .as_ref()
-                .and_then(|d| d.error())
-                .map_or_else(|| READ_ONLY.into(), str::to_string)
-        }),
+        read_only,
     }
 }
 

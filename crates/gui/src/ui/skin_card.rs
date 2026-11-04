@@ -32,7 +32,7 @@ fn members(model: &AppModel, v: &SetView) -> Vec<String> {
 
 pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     let own = model.skin_values(&v.id);
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
+    let off = model.sets_read_only_reason();
     let mut edits: Vec<(&str, Option<Value>)> = vec![];
     ui.add_space(6.0);
     egui::CollapsingHeader::new(egui::RichText::new(TITLE).strong())
@@ -46,7 +46,7 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             } else {
                 format!("Skin textures: {}", m.join(", "))
             });
-            ui.add_enabled_ui(editable, |ui| {
+            let r = ui.add_enabled_ui(off.is_none(), |ui| {
                 for g in GROUPS {
                     ui.label(egui::RichText::new(g).strong());
                     egui::Grid::new(("skin-grid", &v.id, g))
@@ -59,6 +59,10 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                         });
                 }
             });
+            // Audit lead 24: a greyed card says why.
+            if let Some(why) = &off {
+                r.response.on_disabled_hover_text(why);
+            }
             // AG90: the skin set gets no PGPatcher JSON; its own export is still to be specified.
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Export JSON").strong());

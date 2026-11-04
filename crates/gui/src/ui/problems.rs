@@ -159,6 +159,23 @@ fn fix_button(
         let tip = format!("Open {} with its default program", path.display());
         return button(ui, "Open in editor", &tip, None).then(|| fix.clone());
     }
+    // P26, owner 2026-11-04 (Note FN5): one button per feature, neither a default; right to left, so the row reads
+    // in the sentence's order.
+    if let Fix::FeatureClash(id, f, b) = fix {
+        for g in [b, f] {
+            let name = feature_key(*g).trim_end_matches("_on");
+            let text = format!("Turn off {name}");
+            if button(
+                ui,
+                &text,
+                "Turn this feature off for the set",
+                off.or(sets_off),
+            ) {
+                return Some(Fix::TurnFeatureOff(id.clone(), *g));
+            }
+        }
+        return None;
+    }
     let clicked = match fix {
         // Note DU3: a set entry that matches no file is removed in place.
         Fix::RemoveMissing(miss) => {
@@ -209,11 +226,8 @@ fn fix_button(
             "Flip this normal map's green channel (channels.green_convention = opengl)",
             off,
         ),
-        Fix::TurnFeatureOff(_, f) => {
-            let name = feature_key(*f).trim_end_matches("_on");
-            let text = format!("Turn {name} off");
-            button(ui, &text, "Turn this feature off for the set", off.or(sets_off))
-        }
+        // Asked for by a `FeatureClash` row's buttons (above), never a row's own fix.
+        Fix::TurnFeatureOff(..) | Fix::FeatureClash(..) => false,
         Fix::FixPath(..) => button(ui, "Fix path", "Go to the set and its path field", None),
         Fix::UndoLast => {
             let tip = format!("Undo: {}", m.undo_label().unwrap_or_default());
@@ -582,7 +596,9 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::TreatAsOpenGl(k) => {
             model.decide(&k, Answer::Green(engine::config::GreenConvention::Opengl))
         }
-        Fix::TurnFeatureOff(id, f) => model.set_json_value(&id, feature_key(f), Some(json!(false))),
+        Fix::TurnFeatureOff(id, f) => model.turn_feature_off(&id, f),
+        // Its buttons ask for `TurnFeatureOff` (`fix_button`).
+        Fix::FeatureClash(..) => {}
         Fix::FixPath(key, field) => {
             let id = crate::model::sets::views(model)
                 .iter()

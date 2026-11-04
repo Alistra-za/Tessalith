@@ -171,6 +171,44 @@ fn an_rmaos_card_without_an_ao_source_has_an_ao_row_and_a_set_value_becomes_the_
     assert!(!channel(m, RMAOS, "pack.b").starts_with("fill:"));
 }
 
+/// Audit lead 2: typing 200 into a Fills box is one edit (one undo step, one re-plan), written when the box is
+/// left, not one per keystroke.
+#[test]
+fn typing_into_a_fill_box_is_one_edit() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    h.run();
+    fn ao<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::SpinButton, "AO fill")
+    }
+    ao(&h).scroll_to_me();
+    h.run();
+    ao(&h).focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    for c in ["2", "0", "0"] {
+        h.event(Event::Text(c.into()));
+        h.run();
+    }
+    let fill = |m: &AppModel| {
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(RMAOS, "packing.fill.ao")
+    };
+    assert_eq!(fill(h.state()), None, "nothing is written while typing");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    assert_eq!(fill(h.state()), Some(json!(200)));
+    assert_eq!(h.state().undo_label(), Some("Fill value"));
+    h.state_mut().undo();
+    settle(&mut h);
+    assert_eq!(fill(h.state()), None, "one undo step");
+    assert!(!h.state().can_undo(), "no earlier partial edit");
+}
+
 #[test]
 fn an_rmaos_card_never_shows_a_fuzz_row() {
     let d = tempfile::tempdir().unwrap();

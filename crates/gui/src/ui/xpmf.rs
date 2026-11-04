@@ -18,8 +18,6 @@ const TOGGLE_HOVER: &str =
                             default is written as Tessalith fills it, or left to XPMF. Turning it off removes the \
                             block's values; Undo brings them back.";
 const RESET_HOVER: &str = "Back to the default";
-/// The disabled card's hover when the model gives no reason.
-const READ_ONLY: &str = "sdc-project.toml is read-only";
 
 /// ui-rules 8.4: a repeated control gets a name with its key (call after `ui.add`).
 fn named(r: egui::Response, kind: egui::WidgetType, name: String) -> egui::Response {
@@ -59,11 +57,9 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Opti
         return;
     }
     // The model's own check, so the card is never enabled while its edits are dropped.
-    let editable = m.sets_editable();
-    let why = m
-        .sets_read_only_reason()
-        .or_else(|| m.banner.clone())
-        .unwrap_or_else(|| READ_ONLY.into());
+    let off = m.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     let head = egui::RichText::new(if block.is_some() { "on" } else { "off" }).weak();
     super::group::group(ui, ("xpmf", v.id.as_str()), CARD, Some(head), true, |ui| {
         ui.add_enabled_ui(editable, |ui| {

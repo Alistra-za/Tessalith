@@ -22,7 +22,22 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP
 
+ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
 - OPEN: `resize` upscaling (`pot-up`, `pot-nearest`). [S]
+
+ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
+- Anything the user must act on is a Problems row with its action; hand remedies are row buttons. [FC3, FC10]

@@ -273,21 +273,44 @@ fn a_generated_height_without_provenance_is_unrecorded_and_a_recorded_one_regene
     );
 }
 
+/// Audit lead 32: a non-power-of-two normal is offered at the size the export writes it (FM29's automatic power of
+/// two), and Generate solves it there.
 #[test]
-fn an_npot_normal_disables_the_entry_with_its_size() {
+fn an_npot_normal_is_offered_at_its_power_of_two_size() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
-    ImageBuffer::from_fn(48, 48, |_, _| Rgb([128u8, 128, 255]))
-        .save(land(d.path()).join("rock01_normal.png"))
-        .unwrap();
+    flat_normal(&land(d.path()).join("rock01_normal.png"), 1000);
     reopen(&mut m, d.path());
-    let why = "the normal map is 48×48; only power-of-two sizes can be generated";
-    assert_eq!(height(&m, ROCK_SET), Err(why.into()));
+    assert_eq!(height(&m, ROCK_SET), Ok(()));
     let row = m.slot_menu(ROCK_SET, SlotKind::Height);
-    assert_eq!(gen_open(&row).unwrap().disabled.as_deref(), Some(why));
-    // Review M5: the size comes before the shader rules.
-    shader(&mut m, Shader::Glow);
-    assert_eq!(height(&m, ROCK_SET), Err(why.into()));
+    assert_eq!(gen_open(&row).unwrap().disabled, None);
+    assert_eq!(
+        m.gen_size(ROCK_SET, GenMap::Height),
+        Ok(GenSize::Free {
+            sizes: vec![256, 512, 1024],
+            default: 1024
+        }),
+        "1000 is written 1024, so 1024 is offered"
+    );
+    m.open_gen(ROCK_SET, Some(GenMap::Height));
+    assert_eq!(m.gen_facts().paths[0].2, (1024, 1024));
+    m.gen_generate();
+    idle(&mut m);
+    assert_eq!(m.gen.as_ref().and_then(|g| g.error.clone()), None);
+    let p = land(d.path()).join("rock01_p_generated.png");
+    assert_eq!(image::image_dimensions(&p).unwrap(), (1024, 1024));
+    // A 48² normal is written 32², so 32 is its one size.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    flat_normal(&land(d.path()).join("rock01_normal.png"), 48);
+    reopen(&mut m, d.path());
+    assert_eq!(
+        m.gen_size(ROCK_SET, GenMap::Height),
+        Ok(GenSize::Free {
+            sizes: vec![32],
+            default: 32
+        })
+    );
 }
 
 #[test]
@@ -414,15 +437,27 @@ fn a_dds_normals_size_is_read_once() {
     bc1_dds(&dds, 48, 48);
     reopen(&mut m, d.path());
     shader(&mut m, Shader::Default);
-    let why = Err("the normal map is 48×48; only power-of-two sizes can be generated".to_string());
-    assert_eq!(height(&m, ROCK_SET), why);
-    assert_eq!(height(&m, ROCK_SET), why);
+    // A 48² normal is solved at 32² (lead 32), a 64² one at 64².
+    let size = |m: &AppModel| m.gen_size(ROCK_SET, GenMap::Height);
+    let small = Ok(GenSize::Free {
+        sizes: vec![32],
+        default: 32,
+    });
+    assert_eq!(size(&m), small);
+    assert_eq!(size(&m), small);
     assert_eq!(m.gen_dims_len(), 1, "one header read, cached");
     bc1_dds(&dds, 64, 64);
     // Review M2: within the 1 s TTL the cached answer stands without a stat.
-    assert_eq!(height(&m, ROCK_SET), why);
+    assert_eq!(size(&m), small);
     m.clear_gen_dims();
-    assert_eq!(height(&m, ROCK_SET), Ok(()), "a new stamp is read again");
+    assert_eq!(
+        size(&m),
+        Ok(GenSize::Free {
+            sizes: vec![64],
+            default: 64
+        }),
+        "a new stamp is read again"
+    );
     assert_eq!(m.gen_dims_len(), 1, "one entry per file");
 }
 
@@ -2682,14 +2717,11 @@ fn ao_reasons_cover_vanilla_non_pbr_real_ao_and_prepacked_rmaos() {
         )
     );
     std::fs::remove_file(land(d.path()).join("rock01_ao_generated.png")).unwrap();
-    // NPOT comes before NOT_PBR.
+    // Lead 32: an NPOT normal is no reason of its own; NOT_PBR still applies.
     m.set_target(Target::Vanilla);
     flat_normal(&land(d.path()).join("rock01_normal.png"), 48);
     reopen(&mut m, d.path());
-    assert_eq!(
-        ao(&m),
-        Err("the normal map is 48×48; only power-of-two sizes can be generated".into())
-    );
+    assert_eq!(ao(&m), Err(NOT_PBR.into()));
 }
 
 #[test]
@@ -3384,15 +3416,9 @@ fn curvature_reasons() {
                 .into()
         )
     );
-    // An NPOT normal; then no normal.
+    // No normal.
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
-    flat_normal(&land(d.path()).join(NORMAL), 48);
-    reopen(&mut m, d.path());
-    assert_eq!(
-        curves(&m),
-        Err("the normal map is 48×48; only power-of-two sizes can be generated".into())
-    );
     std::fs::remove_file(land(d.path()).join(NORMAL)).unwrap();
     reopen(&mut m, d.path());
     assert_eq!(curves(&m), Err(NO_NORMAL.into()));
@@ -3558,14 +3584,29 @@ fn curvature_is_refused_where_also_export_reads_none() {
 }
 
 #[test]
-fn a_locked_size_that_is_not_a_power_of_two_is_refused() {
-    // M1: a 1000² albedo beside a 1024² normal; never an "internal error" from the FFT.
+fn a_locked_size_takes_the_power_of_two_the_maps_are_written_at() {
+    // Lead 32: a 1000² albedo is written 1024², so a 1000² normal (also written 1024²) locks the curvature at 1024.
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
-    flat_normal(&land(d.path()).join(NORMAL), 1024);
+    flat_normal(&land(d.path()).join(NORMAL), 1000);
     albedo(d.path(), 1000);
     reopen(&mut m, d.path());
-    let locked = "this set's maps are 1000×1000; a generated curvature map must match them (not a power of two)";
+    assert_eq!(curves(&m), Ok(()));
+    assert_eq!(
+        m.gen_size(ROCK_SET, GenMap::Curvature),
+        Ok(GenSize::Locked(1024))
+    );
+    // M1: when the power-of-two step changes the aspect (1000×600 is written 1024×512), a map made at 1024×512 could
+    // not join the 1000×600 albedo in one derive, so it is refused; never an "internal error" from the FFT.
+    ImageBuffer::from_fn(1000, 600, |x, y| Rgb([x as u8, y as u8, 90u8]))
+        .save(land(d.path()).join("rock01.png"))
+        .unwrap();
+    ImageBuffer::from_fn(1000, 600, |_, _| Rgb([128u8, 128, 255]))
+        .save(land(d.path()).join(NORMAL))
+        .unwrap();
+    reopen(&mut m, d.path());
+    let locked = "this set's maps are 1000×600; a generated curvature map must match them (written 1024×512, \
+                  another aspect ratio)";
     assert_eq!(curves(&m), Err(locked.into()));
     assert_eq!(m.gen_size(ROCK_SET, GenMap::Curvature), Err(locked.into()));
 }
@@ -3844,12 +3885,13 @@ fn a_shared_packed_rmaos_has_no_button() {
     assert!(gen_buttons_below(&h, "RMAOS").is_empty());
 }
 #[test]
-fn an_npot_normal_shows_the_button_disabled_with_the_reason() {
+fn a_disabled_generate_button_shows_the_reason() {
     use egui_kittest::kittest::{NodeT, Queryable};
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
-    ImageBuffer::from_fn(48, 48, |_, _| Rgb([128u8, 128, 255]))
-        .save(land(d.path()).join("rock01_normal.png"))
+    // A height file Tessalith did not generate fills the slot (lead 32: an NPOT normal is no reason any more).
+    ImageBuffer::from_fn(64, 64, |_, _| Luma([128u8]))
+        .save(land(d.path()).join("rock01_p_generated.png"))
         .unwrap();
     reopen(&mut m, d.path());
     let why = m

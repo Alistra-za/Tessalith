@@ -127,8 +127,9 @@ pub fn draw(
     let mut acts = vec![];
     // Item 17: where a file from Explorer was dropped this frame, if one waits for a slot card.
     let drop_at = drops.file.as_ref().and_then(|f| f.pos);
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = model.banner.clone().unwrap_or_default();
+    let off = model.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     // Note FB2 (amendment C): one column, as the texture settings panel: the name box, the slot rows at full width,
     // then the tabs and groups. Nothing sits beside the rows, so nothing can cover them.
     let mut area = egui::ScrollArea::vertical()
@@ -696,11 +697,7 @@ fn row(
     });
 
     // Format, or Assign… on an empty slot (R13: the slot's own menu); a packed output's recipe and fills under it.
-    let toml_read_only = model
-        .project
-        .as_ref()
-        .and_then(|p| p.error())
-        .map(|e| format!("sdc.toml is read-only: {e}"));
+    let toml_read_only = model.toml_read_only_reason();
     let own = item.filter(|_| borrowed.is_none());
     let own_job = own.and_then(|i| i.job.as_ref().map(|j| (i, j)));
     let format_w = ui
@@ -806,21 +803,24 @@ fn row(
                 let on = active_matches(&v.settings, derived)
                     .iter()
                     .any(|(m, _)| *m == n);
-                let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
                 let path = slot_match_path(derived, slot.suffix());
                 // AN2: a renamed set takes no second match.
                 let (k, val) = match_toggle(n, true, &path);
-                let refused = (!on)
-                    .then(|| extra_match_refusal(&v.settings, derived, &k, val.as_ref()))
-                    .flatten();
+                // Audit lead 17: a read-only sdc-project.toml is the reason first.
+                let refused = model.sets_read_only_reason().or_else(|| {
+                    (!on)
+                        .then(|| extra_match_refusal(&v.settings, derived, &k, val.as_ref()))
+                        .flatten()
+                        .map(str::to_string)
+                });
                 if flag(
                     ui,
-                    editable && refused.is_none(),
+                    refused.is_none(),
                     on,
                     "🔗",
                     "Match on this",
                     "PGPatcher applies the entry to meshes with this exact texture in this slot",
-                    refused.unwrap_or_default(),
+                    refused.as_deref().unwrap_or_default(),
                 ) {
                     let (k, val) = match_toggle(n, !on, &path);
                     acts.push(Act::Json(v.id.clone(), k, val));
@@ -1254,7 +1254,8 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                     ui.label(egui::RichText::new(role_label(role)).small());
                     source_picker(ui, model, key, role, None, acts);
                     let mut v = shown;
-                    if super::advanced::settled_drag(ui, &mut v, 1.0, 0..=255) {
+                    let name = format!("{} fill", role_label(role));
+                    if super::advanced::settled_drag(ui, &mut v, 1.0, 0..=255, &name) {
                         acts.push(Act::Fill(key.to_string(), role, Some(v)));
                     }
                     if own_key
@@ -1274,7 +1275,7 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
 /// Outputs that fill no slot card get their controls here, under the cards: the complex `_m` (packed or loose)
 /// its "Enable parallax" box (DECISIONS AH2), a packed output its fill rows.
 fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
-    let why = super::settings_panel::toml_read_only_reason(model);
+    let why = model.toml_read_only_reason();
     for item in v
         .members
         .iter()

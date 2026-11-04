@@ -1978,10 +1978,8 @@ impl AppModel {
     /// Note DU1-DU2: drop entry `m` of set `id` that matches no file, as one step: a path leaves `add`/`remove`, a
     /// borrow is dropped, and an entry with no files left is deleted (`delete_set`).
     pub fn remove_missing(&mut self, id: &str, m: &Missing) -> Result<(), String> {
-        if !self.sets_editable() {
-            return Err(self
-                .sets_read_only_reason()
-                .unwrap_or_else(|| READ_ONLY.into()));
+        if let Some(why) = self.sets_read_only_reason() {
+            return Err(why);
         }
         let id = self.view_of(id).ok_or_else(|| format!("no set {id}"))?.id;
         match m.clone() {
@@ -2004,12 +2002,16 @@ impl AppModel {
         Ok(())
     }
 
-    /// Why `sdc-project.toml` takes no edit, when it does not (the set edits' disabled reason).
+    /// Why `sdc-project.toml` takes no edit, when it does not (the set edits' disabled reason): `None` exactly when
+    /// `sets_editable()`. Every greyed set control shows this, never the banner (Note FN3).
     pub fn sets_read_only_reason(&self) -> Option<String> {
-        self.sets_doc
-            .as_ref()
-            .and_then(|d| d.error())
-            .map(|e| format!("{READ_ONLY}: {e}"))
+        if self.sets_editable() {
+            return None;
+        }
+        Some(match self.sets_doc.as_ref().and_then(|d| d.error()) {
+            Some(e) => format!("{READ_ONLY}: {e}"),
+            None => READ_ONLY.into(),
+        })
     }
 
     /// Choose set `set`'s shader, or with `None` go back to Auto (M6 spec §7). Plans again.
@@ -2206,6 +2208,16 @@ impl AppModel {
             for (k, v) in edits {
                 m.set_json_value(set, &k, v);
             }
+        });
+    }
+
+    /// Note FN5: turn feature `f` of set `set` off as a step of its own, so the click never joins a hand edit of the
+    /// same key just before it (`set_json_value` merges per set and key) and one undo brings the feature back.
+    pub fn turn_feature_off(&mut self, set: &str, f: crate::pgp::settings::Feature) {
+        let key = crate::pgp::settings::feature_key(f);
+        let label = format!("Turn off {}", key.trim_end_matches("_on"));
+        self.batch_edit(&label, |m| {
+            m.set_json_value(set, key, Some(Value::Bool(false)))
         });
     }
 

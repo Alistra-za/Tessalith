@@ -58,7 +58,7 @@ A row you must act on never just reports; its fix is its button:
 | A folder that could not be read | A Project row with **Open folder**. |
 | The Vanilla/CM derive results ("NIF suggests …") | No button: hover the row for the values. |
 | An unclear cubemap layout | **Set layout ▾**. |
-| A PGPatcher feature clash | **Turn {feature} off**. |
+| A PGPatcher feature clash | **Turn off {feature}** for each of the two features; neither is the default. <!-- D:FN5 --> |
 | A PGPatcher path error | **Fix path**, which selects the set and puts the keyboard in that field (a `rename` or match path). A slot path error has **Go to set** instead, because slot paths are edited in the JSON editor. |
 | A NIF problem from the Meshes view | **Open the {tab} tab**, with the edit panel's own tab name (*Shader*, *Alpha*, *Controllers*, *Extra data*). |
 | *sdc-project.toml cannot be read: TOML parse error at line n…* | A red Project row (the parser's whole message on hover) with **Open in editor**, which opens the file with Windows' default program for it, and **Reload**, which reads both files again (it asks first when something is unsaved). Sets and the JSON stay read-only until the file is fixed, and the banner says why. |

@@ -1165,10 +1165,6 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
         });
 }
 
-pub fn toml_read_only_reason(model: &AppModel) -> Option<String> {
-    model.toml_read_only_reason()
-}
-
 /// Draw texture `key`'s settings. `compact` (the preview's strip) keeps the decision box and the Alpha, Mipmaps and
 /// Compression groups, without provenance text.
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {

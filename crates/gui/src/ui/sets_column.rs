@@ -613,8 +613,9 @@ pub fn draw(
     // One set per frame keeps the per-pill and per-member tests O(1) however many are selected.
     let sel_sets: HashSet<String> = model.selected_sets().into_iter().collect();
     let sel_items: HashSet<String> = model.selected_items().into_iter().collect();
-    let editable = model.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = model.banner.clone().unwrap_or_default();
+    let off = model.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     let editing = Editing {
         on: editable,
         why: &why,

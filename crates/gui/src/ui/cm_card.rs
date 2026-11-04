@@ -33,8 +33,9 @@ pub fn section(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     let mut acts = vec![];
     let m: &AppModel = model;
     let b = m.cm_block(&v.id).unwrap_or_default();
-    let editable = m.sets_doc.as_ref().is_some_and(|d| !d.read_only());
-    let why = m.banner.clone().unwrap_or_default();
+    let off = m.sets_read_only_reason();
+    let editable = off.is_none();
+    let why = off.unwrap_or_default();
     egui::CollapsingHeader::new(SECTION)
         .id_salt(("cm-card", v.id.as_str()))
         .show(ui, |ui| {

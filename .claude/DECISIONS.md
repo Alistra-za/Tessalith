@@ -14,17 +14,17 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
 - vfs: AV, BP, BU, CV
 - esp: GG, GO
@@ -396,7 +396,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 
 - The GUI writes the same bytes as the CLI: export saves `sdc.toml` first, so `sdc convert <folder>` reproduces the last export; the GUI re-resolves unsaved edits in memory. [N4]
 - The GUI's automatic decisions (High accepts, evidence-driven sub-type and alpha) are recorded in the project. [FC1]
-- Anything the user must act on is a Problems row with its action; hand remedies are row buttons. [FC3, FC10]
+- Anything the user must act on is a Problems row with its action; hand remedies are row buttons; a feature clash offers to turn off either feature. [FC3, FC10, FN5]
 - No codes in the UI: rows and banners say what to do; the code is on hover and in the Messages log. [FB8]
 - One word per concept (Words section in `docs/gui.md`), one accent colour. [FC9]
 - No surprising defaults or silent data effects. [FC12]
@@ -976,3 +976,17 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
   - **GUI.** The preset editor has a Perceptual box for BC1, BC3 and BC7 with the texture panel's lock; the closed Relative to combo shows "Slot N", with the slot's name in the list and on hover (it held the Advanced drawer about 90 px past its edge); the 1-bit alpha box is named for AccessKit; the alpha dropdowns of Problems and Review are named "Problems alpha type: …" and "Review alpha type: …" (the texture panel keeps "Alpha type: …"); the FMT-BC1-ALPHA sentence offers 1-bit alpha only for see-through alpha.
   - **Schema.** `resize_floor` is `1..=16384` in the schemas, as the loader checks. `[defaults] packing.fill` still validates in the schema: the `[defaults]`, sub-type and `[files]` tables share one partial profile, so refusing it there needs a definition of its own. The loader refuses it (FM16).
   - **Docs.** CHANGELOG: the `--strict-cubemaps` and 2D cube-check lines go (a 2D `_e` file fails validation, as in 1.1.0), the power-of-two rule is the 95 % / 85 % one, the byte-change, vanilla perceptual and compact height lines give the final state, and the FM12 event change is listed. The Known issues page is a section of Troubleshooting. The broken `CHANGELOG.md#unreleased` anchor in `GUI-NIF-Edit.md` is the NIF team's (HANDOFF line, FR-d).
+
+## Note FN — User-facing audit leads: generate sizes, fill boxes, read-only reasons, report, feature clash (main team, 2026-11-04)
+
+Leads 32, 2, 17, 24, 10 and 27 of `F:\ai\dds\reports\debloat-2.0\main-audit-leads.md`, plus an owner ruling on the feature clash row. No encoded byte changes: `encode_versions` pins do not move.
+
+- **FN1 Generate from normal follows the automatic power of two (lead 32).** The export writes a normal with mips at `resize::pot_dims` (FM29), so Generate solves there too.
+  - Engine: `from_normal::generate` resamples a non-power-of-two normal to `pot_dims` before the FFT (`to_pot`: `resize::enlarge` on the axes that grow, then `mips::area_resample` down, the order `resize_work` uses). `GenerateError::NotPowerOfTwo` is gone. A 1000² normal is solved at 1024² (a 2.4 % upsample), so the height lines up texel for texel with the written normal. A normal kept at its own size by `mips.levels = "none"` is still solved at its power of two; the generated map is a mip-mapped input like any other.
+  - GUI: `AppModel::gen_normal_size` (the normal's `pot_dims`) feeds the offered sizes, the dialog's paths and Generate. `locked_to` locks AO beside other `_rmaos` sources, and curvature, to the sources' `pot_dims`, and refuses with "written W×H, another aspect ratio" when that step changes the aspect (1000×600 is written 1024×512), because a pack or derive cannot join different aspects (FM30). The NPOT reasons in the entry and in curvature are gone.
+  - Tests: engine `generate_writes_the_requested_size_and_solves_npot_at_its_power_of_two`; GUI `an_npot_normal_is_offered_at_its_power_of_two_size`, `a_locked_size_takes_the_power_of_two_the_maps_are_written_at`, `a_disabled_generate_button_shows_the_reason`, plus the size and reason tests adjusted in `generate_from_normal.rs`.
+- **FN2 A pack Fills box takes typed text once (lead 2).** `advanced::settled_drag` uses `DragValue::update_while_editing(false)` and settles on `drag_stopped || lost_focus || (changed && !dragged && !has_focus)`, and only when the value differs from what came in. Typing "200" is one edit and one undo step ("Fill value"), applied on Enter, Tab or a click away; Esc keeps the old value. The box carries an AccessKit name ("AO fill" and so on). Test `typing_into_a_fill_box_is_one_edit` (RED on the old rule: 255 was written on the first keystroke).
+- **FN3 A greyed set control gives the model's own reason (leads 17 and 24).** `AppModel::sets_read_only_reason()` is `None` exactly when `sets_editable()`, else "{READ_ONLY}: {error}", or `READ_ONLY` with no project doc. Every set control greyed for that reason shows it: the CM card, the XPMF card, the PGPatcher fields, the Sets column, slot commands, the JSON editor, the skin card, the set editor and `remove_missing`. Controls that write `sdc-project.toml` settings use `AppModel::toml_read_only_reason()`; the input name box uses that, then the set reason. The status banner is never a disabled reason (it can hold recovery and startup lines). The pass-through `settings_panel::toml_read_only_reason` wrapper is deleted. Tests `a_read_only_project_greys_the_card_with_its_reason_not_the_banner` (`cm_json.rs`) and `a_read_only_project_greys_the_card_with_its_reason` (`skin_card.rs`).
+- **FN4 The JSON Lines report leaves out per-mip progress (lead 10).** `ExportModel::on_event_at` drops `EventKind::Progress` before it is stored in `events`, so the GUI's JSON Lines report is the engine stream without progress lines, and a long export no longer keeps one event per mip in memory. Test `progress_events_are_not_kept_for_the_report`.
+- **FN5 A feature clash offers both features (owner, 2026-11-04; supersedes FC3's single P26 fix in part).** A PGPatcher "X and Y can't both be on" row carries `Fix::FeatureClash(set id, X, Y)` and draws two buttons, **Turn off X** and **Turn off Y** (the label was "Turn X off"), in the sentence's order, neither a default. Each asks for `Fix::TurnFeatureOff` on its own feature only, applied by `AppModel::turn_feature_off` as one undo step of its own ("Turn off X"). It does not use `set_json_value`'s per-set-and-key merge, so a click right after turning the same feature on by hand stays a separate step and one undo brings the feature back. FC3's rule that the row turns off the later feature in enum order no longer applies; the rest of FC3 stands. Test `a_feature_clash_offers_both_features_and_each_turns_off_only_its_own` (it turns both features on by hand first; with the merge, undo left the feature unset).
+- **FN6 The Also project name needs no change (lead 27, checked).** `also_project` already calls `engine::also::project_name(&[root])`, so the GUI and CLI name the project the same way by construction (CV12). Nothing changed.
