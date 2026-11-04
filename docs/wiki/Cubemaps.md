@@ -1,7 +1,5 @@
 # Cubemaps
 
-> **Coming in 1.1.0.** This page describes cubemap support in the 1.1.0 release. In 1.0.0, Tessalith refuses cube DDS files.
-
 A cubemap is six square pictures, one for each direction around a point. Skyrim uses them for reflections: the `_e` texture on Environment Map and Eye shaders (NIF slot 4), plus room reflections in caves and temples. Tessalith takes six faces, a cross, a strip, a 360° panorama, a mirror ball, an angular map or a single photo, and writes a correct cube DDS with a full mip chain.
 
 ## Which face is which
@@ -23,7 +21,7 @@ Skyrim's world has X pointing east, Y north and Z up. Each face is named after t
 
 ### How each face is turned
 
-Each face is a square image, and each edge of that image points somewhere in the world. This was measured in game, and it is plain DirectX cube addressing:
+Each edge of a face image points somewhere in the world. This is plain DirectX cube addressing, measured in game:
 
 ![Six coloured squares, one per face, in file order. +X east: top edge points north, left edge points up. −X west: top north, left down. +Y north: top down, left west. −Y south: top up, left west. +Z sky: top north, left west. −Z ground: top north, left east.](../img/cube-faces.svg)
 
@@ -117,7 +115,7 @@ Tessalith applies the settings in this order: import, face rotate and flip, yaw,
 
 ### Blur
 
-`cubemap.blur` blurs the cube evenly across the faces, so no seams show. It is a cone blur, not the GGX filter a game engine might use for rough metal. The default is no blur, unless a style sets one or the layout is `photo` (0.6).
+`cubemap.blur` blurs the cube evenly across the faces, so no seams show. It is a cone blur. The default is no blur, unless a style sets one or the layout is `photo` (0.6).
 
 ### HDR sources
 
@@ -129,7 +127,7 @@ A cube has no mips: `CUBE-NO-MIPS` warns when `mips.levels` is `none` or 1. A cu
 
 `sdc inspect` and `sdc validate` flag these broken cube files (as `VAL-HEADER` in `validate`, each failing the file):
 - a cube wider than 1 pixel with only one mip (a 1×1 marker is not flagged);
-- a flat 2D texture whose name ends in `_e`, or that sits in `textures\cubemaps\`, where a cube is expected;
+- a flat 2D texture whose name ends in `_e`, or that sits under `textures\cubemaps\` (a `textures` folder directly followed by `cubemaps`), where a cube is expected;
 - a 1×1 cube whose +Y isn't black (Community Shaders shows it as a nearly black static reflection);
 - a cube in an sRGB format.
 

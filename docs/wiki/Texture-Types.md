@@ -1,6 +1,6 @@
 # Texture types
 
-Tessalith decides how to encode each file from its sub-type: what the texture is for. The sub-type sets the format, the colour tag, the alpha handling and the mip settings. This page covers how files are named, grouped and typed, and what each type becomes.
+The sub-type (what a texture is for) sets its format, colour tag, alpha handling and mip settings. This page covers how files are named, grouped and typed, and what each type becomes.
 
 ## Input formats
 
@@ -26,7 +26,7 @@ textures\armor\iron\
   iron_trim.png     set "iron_trim", colour map (_trim is not a suffix)
 ```
 
-Some decisions depend on the whole set: whether it is a PBR set, which shader it is for, which raw maps get packed together, and whether a normal map's detail is baked into roughness.
+Some decisions depend on the whole set: whether it is a PBR set, its shader, which raw maps get packed together, and whether a normal map's detail is baked into roughness.
 
 ## Suffixes
 
@@ -57,7 +57,7 @@ A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `
 
 Medium and Low suggestions always need your confirmation. High suggestions are applied automatically in the GUI; for the command line see [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters).
 
-A file whose name does not fit these rules is read as a colour map. A normal map saved as `rock_nm.png` would become a diffuse. Fix it by renaming, by an `[inputs]` alias, or by setting `subtype` in a `[files]` entry.
+A file whose name fits none of these rules is read as a colour map (`rock_nm.png` becomes a diffuse). Rename it, add an `[inputs]` alias, or set `subtype` in a `[files]` entry.
 
 ### Exporter names
 
@@ -83,7 +83,7 @@ Tessalith also understands the names that texturing tools commonly export:
 | `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by Also export as (Vanilla / Complex material) |
 | `_cavity` | Raw cavity | read only by Also export as (Vanilla / Complex material) |
 
-A normal map named only `_normal`, `_nrm` or `_norm` does not say which way its green channel points. Tessalith assumes DirectX, which is what Skyrim uses, converts it without a flip and notes `IN-GREEN-UNSTATED` as information. <!-- D:AW1 --> If the map is OpenGL, set `channels.green_convention = "opengl"` on the file (the GUI offers a *Treat as OpenGL* button on that note) or name it `_normalgl`.
+A normal map named only `_normal`, `_nrm` or `_norm` does not say which way its green channel points. Tessalith assumes DirectX (Skyrim's), converts it without a flip and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> If the map is OpenGL, set `channels.green_convention = "opengl"` on the file (the GUI offers a *Treat as OpenGL* button on that note) or name it `_normalgl`.
 
 You can add your own suffixes through a preset's `suffix_aliases`. See [Presets and targets](Presets-and-Targets.md#suffix-aliases).
 
@@ -129,9 +129,9 @@ There are 33 sub-types in five categories.
 
 Notes on the defaults:
 
-- A single photo as a cubemap (`cubemap.layout = "photo"`) is an approximation: the photo becomes the front half of a mirrored fake panorama, and the cube is blurred by default (0.6). It gives soft reflections, not an exact sky.
+- A single photo as a cubemap (`cubemap.layout = "photo"`) is an approximation: the photo becomes the front half of a mirrored fake panorama, blurred by default (0.6).
 - The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha counts as opaque when its minimum is 251 or more, or when the texels below 251 are fewer than 0.1 % of the image and no connected group of them is larger than 16 texels (stray noise left by a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes supply one.
-- Exact opaque means opaque alpha decodes as exactly 255 in BC7 rather than 254. It is on for `_m` maps because PGPatcher and ENB read their alpha; turning it off for a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
+- Exact opaque means opaque alpha decodes as exactly 255 in BC7, not 254. It is on for `_m` maps because PGPatcher and ENB read their alpha; turning it off for a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
 - Normal maps are never BC4 or BC5: the game would decode Z as -1 and lose alpha (`FMT-BC5-NORMAL`, blocking).
 
 The full list of format, tag and target rules is on [Presets and targets](Presets-and-Targets.md).

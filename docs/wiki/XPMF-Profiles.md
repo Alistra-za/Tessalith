@@ -16,7 +16,7 @@ Export writes one file per set that has an XPMF block: `SKSE\Plugins\XPMF\tessal
 - The file is written after a clean export, with the same guard as the CS PBR files. A file Tessalith did not write is kept and never replaced; Review shows it as foreign. A profile that no set writes any more is reported, not deleted. <!-- D:GI8 -->
 - A profile that fails the schema (for example `shelterFade = 500`, `noiseUVScale = 0` or a string in `pbr`, typed by hand in `sdc-project.toml`) is not written. The export note quotes the schema error, and an unknown key in the block refuses the file with a note naming the key. <!-- D:GI8 -->
 - A set with no `cs_mato` EDIDs and no typed `editorIds` writes nothing, because the schema requires `editorIds`. The note reads "<set>: no editorIds; XPMF profile not written". A set that is not a Landscape or PBR Landscape set is refused with "<set>: not a landscape set; XPMF profile not written". <!-- D:GI3 -->
-- A profile that names a texture of this project that was not exported is not written either.
+- A profile that names a texture of this project that was not exported is not written.
 - **Also export with Vanilla ticked:** a PBR Landscape set's Projected noise and Detail normal maps are written to the Vanilla folder as well, and the Vanilla folder gets a copy of the profile with `pbr` set to false. The copy keeps the values you typed and `specularMult`, and its texture paths are the Vanilla folder's files (without the `pbr` folder). A set left out of Also, or one with a DDS file (which Also does not re-encode), gets none. <!-- D:GI27 -->
 
 ## What Tessalith fills
@@ -65,4 +65,4 @@ A Landscape or PBR Landscape set has two optional slots that feed the profile: *
 
 - With `pbr` on, each listed EDID without a wildcard that no `cs_mato` block of this project names gets an amber Problems row: "XPMF skips <EDID>: no PBRMaterialObjects JSON from this project". Only this project's blocks are checked; PBRMaterialObjects files from other mods are not scanned. <!-- D:GI4 -->
 - Review's list of what will be written has a row per profile (new, replaced or foreign). A profile the project no longer makes is left in place with a note.
-- Texture-Types has the two sub-types ([Texture types](Texture-Types.md)).
+- The two sub-types are listed on [Texture types](Texture-Types.md).

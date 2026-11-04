@@ -18,9 +18,9 @@ C:\Work\IronPlate\
 
 Things to notice:
 
-- The folder path contains `textures`. Tessalith takes the game path of each file from the last `textures` folder in its path, so `textures\pbr\armor\ironplate\ironplate.png` has the game path `textures/pbr/armor/ironplate/ironplate.png`. Rules and sub-type detection use that game path.
-- All five files share the base name `ironplate`, so they form one texture set.
-- The raw `_roughness`, `_metallic` and `_ao` maps are packing inputs. Under the `cs` target they are packed into a single `ironplate_rmaos.dds` (R roughness, G metallic, B AO, A specular). Under `cs`, any of these makes the set a PBR set: a raw roughness, glossiness, metallic or AO map; an `_rmaos`, `_rfaos`, `_cnr` or `_f` file; or a `pbr` folder in the path.
+- Tessalith takes the game path of each file from the last `textures` folder in its path, so `textures\pbr\armor\ironplate\ironplate.png` has the game path `textures/pbr/armor/ironplate/ironplate.png`. Rules and sub-type detection use it.
+- The five files share the base name `ironplate`, so they form one texture set.
+- The raw `_roughness`, `_metallic` and `_ao` maps are packing inputs. Under `cs` they are packed into one `ironplate_rmaos.dds` (R roughness, G metallic, B AO, A specular). Under `cs`, any of these makes the set a PBR set: a raw roughness, glossiness, metallic or AO map; an `_rmaos`, `_rfaos`, `_cnr` or `_f` file; or a `pbr` folder in the path.
 - The output tree mirrors the input tree under the output folder, with `.dds` extensions.
 
 See [Texture types](Texture-Types.md) for the full naming rules.
@@ -36,9 +36,7 @@ cd C:\Work\IronPlate
 sdc inspect C:\Work\IronPlate --recursive --accept-suggestions high
 ```
 
-`--recursive` is needed because the images sit several folders down. Without it, Tessalith reads only the files directly inside the folder you name.
-
-`--accept-suggestions high` tells Tessalith to accept its High-confidence guesses about what each file is. On the command line the default is `none`, which leaves every file whose sub-type came from a suggestion (rather than from a rule, a `--set`, or a `[files]` entry) unresolved. The GUI accepts High-confidence suggestions automatically, so this flag makes the CLI behave the same way.
+`--recursive` is needed because the images sit several folders down; without it only the files directly inside the folder are read. `--accept-suggestions high` accepts High-confidence guesses about what each file is, as the GUI does. The CLI default is `none`, which leaves every file whose sub-type came from a suggestion (rather than from a rule, a `--set`, or a `[files]` entry) unresolved.
 
 The output has one block per file and one per set. Abridged, it looks like this:
 
@@ -116,17 +114,9 @@ ok    ... -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_rmaos.
 done: 3 converted, 0 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
 ```
 
-The three raw maps do not get lines of their own: they were consumed by the packed output and are not written separately, and they are not counted as skipped.
+The three raw maps get no lines of their own: the packed output consumed them, and they are not counted as skipped. Without `-o`, output goes to `.\sdc-out` in the current directory ([layout](Validation-and-Output.md#output-layout)).
 
-Without `-o`, output goes to `.\sdc-out` in the current directory; it may sit inside the source folder ([why](Validation-and-Output.md#output-layout)).
-
-Check the exit code:
-
-```powershell
-$LASTEXITCODE
-```
-
-`0` means every file converted and passed validation. See [CLI reference](CLI-Reference.md#exit-codes) for the others.
+`$LASTEXITCODE` is `0` when every file converted and passed validation; the other codes are in [CLI reference](CLI-Reference.md#exit-codes).
 
 ### Step 4. Run it again
 
@@ -141,7 +131,7 @@ skip  ...: up to date
 done: 0 converted, 3 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
 ```
 
-The default `--on-existing if-changed` compares each output with its record in `C:\Work\IronPlate-out\_sdc\manifest.jsonl` and re-encodes only what changed: the source file, the resolved settings, the texture type's encode version or the encoder version, or the output file itself. Edit `ironplate_roughness.png` and run again, and only the `_rmaos` is rebuilt. See [Validation and output](Validation-and-Output.md).
+The default `--on-existing if-changed` compares each output with its record in `C:\Work\IronPlate-out\_sdc\manifest.jsonl` and re-encodes only what changed. Edit `ironplate_roughness.png` and run again, and only the `_rmaos` is rebuilt ([what counts as changed](Validation-and-Output.md#re-runs-and-if-changed)).
 
 ### Step 5. Verify a DDS
 
@@ -160,7 +150,7 @@ Install the output as [Installing the output](Validation-and-Output.md#installin
 
 The GUI runs the same engine and reads and writes the same `sdc.toml`, so you can switch between the two at any point.
 
-1. Start `tessalith.exe`. The start screen has one large **Open folder** button (and your recent folders below it). Click it and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet.
+1. Start `tessalith.exe`, click **Open folder** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet.
 2. Check **Mode** at the top of the **Presets** tab (**Presets…** in the header's Preset menu). It should read `cs`. Changing it writes `target` to `sdc.toml`.
 3. The Textures column on the left shows a tile per file. The three raw maps show "Packed into ..." because they feed the `_rmaos`. A tile with an amber border is undecided. Click the **Undecided** pill above the tiles to see only those (**Filter ▾** has the other filters and the sort).
 4. Click a tile. The centre column shows its settings in groups (Type, Colour, Alpha, Mipmaps, Compression), and each value says where it came from. A sub-type the GUI accepted reads **(auto)**; hover it to see why.
@@ -171,7 +161,7 @@ The GUI runs the same engine and reads and writes the same `sdc.toml`, so you ca
 9. Press **Export**. If the Review tab opens first, fix or tick what it lists and press its Export ([Export](GUI-Review-and-Export.md#export)).
 10. When the export finishes, the GUI writes `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported fully.
 
-To get an equivalent command line, press **Copy CLI command** in the Files tab at the bottom. The copied command already has `--accept-suggestions high`, because the GUI accepts High-confidence suggestions and the CLI does not by default. Set edits made in the Sets column live in `sdc-project.toml`, which the CLI does not read; see [GUI guide](GUI-Review-and-Export.md#export).
+**Copy CLI command** in the Files tab copies an equivalent command line. Set edits made in the Sets column live in `sdc-project.toml`, which the CLI does not read ([what carries over](GUI-Review-and-Export.md#export)).
 
 ## Where to go next
 

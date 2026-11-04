@@ -18,7 +18,7 @@ A diffuse (or albedo, UI or skin colour) whose alpha varies cannot be decided fr
 
 ### A normal map reports IN-GREEN-UNSTATED
 
-The file is named `_normal`, `_nrm` or `_norm`, which does not say whether its green channel is DirectX (Skyrim's convention) or OpenGL. It is converted as DirectX and this note says so. If it is really OpenGL, set it:
+The file is named `_normal`, `_nrm` or `_norm`, which does not say whether its green channel is DirectX (Skyrim's convention) or OpenGL. It is converted as DirectX. If it is really OpenGL, set it:
 
 ```toml
 [files."textures/armor/iron/iron_normal.png"]
@@ -29,19 +29,19 @@ Or rename the file `_normalgl`, `_normaldx` or `_n` (`_n` means DirectX). Nothin
 
 ### A texture is black under torchlight
 
-Look for `CHK-GREEN-GUESS` on its normal map (the ⓘ badge on the set card, or the texture's settings panel). A normal map whose green channel points the wrong way lights from the wrong side, and a face that should catch the torch looks black. The check reads the map's slopes and says it "looks OpenGL"; it is a hint, not a fix, and it is weak on straight ridges. If it is right, press **Treat as OpenGL (flip green)**, or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel points the wrong way too.
+Look for `CHK-GREEN-GUESS` on its normal map (the ⓘ badge on the set card, or the texture's settings panel). A normal map whose green channel points the wrong way lights from the wrong side. The check reads the map's slopes and says it "looks OpenGL"; it is a hint, weak on straight ridges. If it is right, press **Treat as OpenGL (flip green)**, or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel points the wrong way too.
 
 ### Dark seams at a distance
 
-Look for `CHK-UV-GUTTER`. UV islands that sit closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The warning needs a Meshes scan. **Check all UV coverage** in Advanced reads every colour texture of the folder; a texture that no scanned mesh uses raises nothing.
+Look for `CHK-UV-GUTTER`. UV islands closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The warning needs a Meshes scan ([Check all UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)).
 
 ### UV coverage is greyed out
 
-The overlay and the check read your Meshes scan, so scan first: scan your MO2 instance in the Meshes view. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage, and landscape diffuses are left out. The toggle is also off after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on ("Turn on UV coverage check first").
+The overlay and the check read your Meshes scan, so scan your MO2 instance in the Meshes view first. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage; landscape diffuses are left out. The toggle is also off after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on.
 
 ### A normal map came out as a diffuse
 
-Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, add an `[inputs]` alias, or set `subtype = "normal"` in a `[files]` entry.
+Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
 
 ### A texture is written at a different size
 
@@ -76,7 +76,7 @@ An `_opacity` file (or a mask you gave the role Opacity) fills the alpha of its 
 | `no targets chosen` | Its `helper.fills` is `[]`. | Reset Fills in the panel, or remove the key. |
 | `<file> was not analysed` | The helper or the colour texture failed to load. | Fix the load error shown for that file. |
 
-If the file is not listed as a helper at all, its name has no term Tessalith knows, so it is an ordinary tile: select the tile and pick *Opacity* in **Helper role** in its settings (or write `helper.role = "opacity"` on its `[files]` entry in `sdc.toml`, or use `--set "file:**/<name>.helper.role=opacity"`). It then becomes a row in the Helpers group. To convert an opacity map as its own texture instead, set its role to *Not a helper* (`helper.role = "none"`). See [Texture types](Texture-Packing.md#helper-textures).
+If the file is not listed as a helper at all, its name has no term Tessalith knows, so it is an ordinary tile: pick *Opacity* in **Helper role** in its settings, or write `helper.role = "opacity"` on its `[files]` entry (`--set "file:**/<name>.helper.role=opacity"`). To convert an opacity map as its own texture instead, set its role to *Not a helper* (`helper.role = "none"`). See [Helper textures](Texture-Packing.md#helper-textures).
 
 ### sRGB or UNORM is blocked
 
@@ -109,9 +109,7 @@ A hard abort can leave temporary files in the output folders ([atomic writes](Va
 |---|---|
 | `input not found: <path>` | An input path does not exist. |
 | `<path> is a folder; give .dds files` | `validate` takes files, not folders. |
-| `--mem-budget '<s>': must be greater than 0 (omit the flag for the default, 50% of RAM)` | `--mem-budget 0`. |
-| `--mem-budget '<s>': use bytes or a G/M suffix` | A size ending in something other than a digit, `G` or `M`, such as `8Q`. |
-| `--mem-budget '<s>': not a valid size` | A number that is not a whole number, such as `1.5G`. |
+| `--mem-budget '<s>': must be greater than 0 …`, `… use bytes or a G/M suffix`, `… not a valid size` | `0`; a unit other than `G` or `M` (`8Q`); a fractional number (`1.5G`). |
 | `--allow <X>: unknown code` | A misspelt code. |
 | `--set '<s>': unknown field '<f>'` | A misspelt field name. |
 | `--set '<s>': unknown sub-type '<id>'` | A misspelt sub-type. |
@@ -142,7 +140,7 @@ Tessalith's validation checks the files, not the game. After installing converte
 2. **Brightness of PBR colour maps.** Under Community Shaders, compare PBR albedo, emissive (`_g`) and fuzz (`_f`) with linear lighting on and off. They are written `_SRGB` (or BC6H for HDR emissive), which was the tested result; a washed-out look points to a UNORM override (`TAG-UNORM-PBR`).
 3. **Ordinary diffuse brightness.** A non-PBR diffuse that looks too dark under Community Shaders points to an `_SRGB` override (`TAG-SRGB-NONPBR`).
 4. **Small textures.** Textures from 16 to 128 px with full mip chains loaded without crashes in testing. If a small texture crashes the game, report it.
-5. **Complex `_m` maps (CS, or vanilla with the complex material shader).** Community Shaders turns complex material off when the smallest mip's alpha is 251/255 or more. Check parallax and complex shading at a distance. `VAL-M-COMPLEX-MARGIN` warns from 247/255.
+5. **Complex `_m` maps (CS, or vanilla with the complex material shader).** Check parallax and complex shading at a distance. `VAL-M-COMPLEX-MARGIN` warns when the smallest mip's alpha nears the point where Community Shaders turns complex material off ([rule](Validation-and-Output.md#validation)).
 6. **Plain `_m` maps and PGPatcher.** A plain `_m` stored with alpha whose decoded alpha is 50% or more non-white is treated as complex by PGPatcher. Tessalith keeps `_m` alpha exactly opaque by default (`exact_opaque`) and warns with `VAL-PGPATCHER-50`.
 7. **Cutouts at a distance.** Foliage and fences with `cutout` keep their coverage in smaller mips. If they thin out or thicken, check the `alpha.threshold` against the mesh and look for `VAL-COVERAGE`.
 8. **TruePBR sets.** Run PGPatcher after installing the JSON, then check that the PBR material shows on the intended meshes and not on others (watch for delete sections that hit your own sets).

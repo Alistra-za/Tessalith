@@ -36,7 +36,7 @@ Every file is written to a temporary `.sdc-*.tmp` file in the target folder and 
 Tessalith writes its own DDS headers:
 
 - BC1 and BC3 without `_SRGB`, and uncompressed RGBA8 without `_SRGB`, get a legacy header. RGB8 always gets a legacy header, because DXGI has no 24-bit format. Everything else (BC4, BC5, BC6H, BC7, any `_SRGB` format, R8, RG8, RGBA16F) gets a DX10 header. You can change this with the `header` field, except for RGB8.
-- The flags, caps, linear size and mip count are always set consistently, which some other tools get wrong.
+- The flags, caps, linear size and mip count are always set consistently.
 - The non-standard `DDPF_NORMAL` flag is never written.
 
 ## Validation
@@ -62,20 +62,11 @@ A file with an error from validation is still written. It is reported as `ok ...
 
 ### Cube checks
 
-`sdc inspect` lists these as header issues, and `sdc validate` fails the file with `VAL-HEADER` for each:
-
-| Check | Rule |
-|---|---|
-| No mips | A cube wider than 1 pixel has more than one mip. |
-| Marker +Y | A 1×1 cube has a black +Y face. A lit +Y reads in Community Shaders as a near-black static reflection, not a dynamic marker. |
-| Format | A cube is UNORM, never an `_SRGB` format. |
-| Cube expected | A file named `_e`, or under `textures\cubemaps\` (a `textures` folder directly followed by `cubemaps`), is a cube DDS, not a 2D one. |
-
-The messages are quoted word for word under [Cubemaps](Cubemaps.md#checks). A cube is judged on all six faces, and each message names the face and mip. See [Cubemaps](Cubemaps.md).
+`sdc inspect` lists four cube header issues (no mips, a 1×1 marker with a lit +Y, an `_SRGB` format, a 2D file where a cube is expected), and `sdc validate` fails the file with `VAL-HEADER` for each. A cube is judged on all six faces, and each message names the face and mip. Rules and messages: [Cubemaps](Cubemaps.md#checks).
 
 ### The BC1 encode target
 
-NVIDIA and AMD GPUs decode BC1 colour slightly differently. BC1 blocks, and the colour half of BC3, are encoded so that the error is lowest for both decoders together. The gain is in [Research](Research.md). Validation, previews and readouts decode BC1 as NVIDIA does. A BC1 DDS read as an input keeps the exact decode, so a re-encode does not take on one vendor's error. The record's `bc1_model` is `dual`; 1.x records name a decoder model, so each BC1 and BC3 output re-encodes once. <!-- D:FM17 -->
+NVIDIA and AMD GPUs decode BC1 colour slightly differently. BC1 blocks, and the colour half of BC3, are encoded so that the error is lowest for both decoders together ([measurements](Research.md)). Validation, previews and readouts decode BC1 as NVIDIA does. A BC1 DDS read as an input keeps the exact decode, so a re-encode does not take on one vendor's error. The record's `bc1_model` is `dual`; 1.x records name a decoder model, so each BC1 and BC3 output re-encodes once. <!-- D:FM17 -->
 
 ## The manifest
 
@@ -111,7 +102,7 @@ The JSON Schema is available with `sdc presets schema manifest`.
 - every source file's content (by SHA-256), including packing sources, the baked normal map and RNM layers;
 - the resolved settings (by hash).
 
-So editing a source, changing a setting in `sdc.toml` or a preset re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed, and nothing when none did. Touching an output by hand (or replacing it) also re-encodes it.
+So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.
 
 An existing output with no manifest record is never overwritten by `if-changed`. It is kept and reported as `OUT-UNKNOWN-EXISTING`, and the run exits with 1. Use `--on-existing overwrite` to replace it.
 

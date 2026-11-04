@@ -25,7 +25,7 @@ Every warning has a code and a severity:
 | `IN-NONFINITE` | warning | NaN or infinite samples were replaced. | Fix the source. |
 | `IN-UNREADABLE` | warning | A file or folder under an input folder could not be read (access denied, broken junction, cloud placeholder) and was skipped. | Fix permissions, or ignore. |
 | `IN-ALIAS-INVALID` | warning | An `[inputs]` alias that breaks the [rules](Project-Config.md#inputs) is ignored. | Fix the `as` path. |
-| `IN-ALIAS-STALE` | info | An `[inputs]` key matches no file ([inputs](Project-Config.md#inputs)). | Remove the entry. |
+| `IN-ALIAS-STALE` | info | An `[inputs]` key matches no file. | Remove the entry. |
 
 ### Loss
 
@@ -174,6 +174,6 @@ These concern the `*_generated.png` files the GUI's **Generate from normal mapâ€
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `GEN-REPLACED` | info | A generated file was skipped because a real map for the same slot is in the set. It counts as skipped on purpose. | Nothing; the real map wins. Delete the generated file if you no longer want it. |
+| `GEN-REPLACED` | info | A generated file was skipped on purpose because a real map for the same slot is in the set. | Nothing; the real map wins. Delete the generated file if you no longer want it. |
 | `GEN-STALE` | info | GUI only: the generated file's normal, height neutral or shader changed since it was made. | **Regenerateâ€¦**, or ignore. |
-| `GEN-AO` | info | A packed `_rmaos` takes its blue channel from a generated AO (in place of `PACK-DEFAULTED`). | Nothing; a baked AO is better if you have one. |
+| `GEN-AO` | info | A packed `_rmaos` takes its blue channel from a generated AO (replaces `PACK-DEFAULTED`). | Nothing; a baked AO is better if you have one. |

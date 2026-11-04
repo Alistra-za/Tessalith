@@ -401,7 +401,18 @@ The model rgbcx encodes for changes the bytes, because it picks endpoints and se
 | NVIDIA | 7280 | **50.29** | 45.93 | 44.09 |
 | AMD | 7776 | 44.45 | **52.45** | 48.78 |
 
-To the eye all four decode to the same gradient; the difference is per-block texture of a few code values. Encoding for the card that decodes gains about 1.8 dB on NVIDIA and 3.5 dB on AMD over Ideal; encoding for the other vendor loses 2.5 to 4 dB against Ideal. This led to rgbcx's Dual mode, which scores NVIDIA and AMD error together; its measurements are on the wiki's [Research](../wiki/Research.md) page (Note FM17).
+To the eye all four decode to the same gradient; the difference is per-block texture of a few code values. Encoding for the card that decodes gains about 1.8 dB on NVIDIA and 3.5 dB on AMD over Ideal; encoding for the other vendor loses 2.5 to 4 dB against Ideal. This led to rgbcx's Dual mode (below).
+
+### BC1 Dual: NVIDIA and AMD scored together (2026-11-02, Note FM17)
+
+rgbcx `cBC1Dual` (mode 4, encode only) minimises the summed NVIDIA and AMD squared RGB error per texel, so one encoding serves both vendors. Measured on the bench's `research/bc1-dual` branch (commits 9363fa72 rgbcx patch, 85c11ef7 bench), level 18 with 3-colour blocks allowed, `rgb_real` (93 images), PSNR in dB by decoder model:
+
+| encoded for | NVIDIA | AMD | Ideal |
+|---|---|---|---|
+| Dual | 39.51 | 39.74 | 39.37 |
+| Ideal | 39.31 | 39.40 | 39.53 |
+
+Dual against Ideal: +0.20 dB on NVIDIA, +0.35 dB on AMD, -0.16 dB on an exact (Ideal) decoder; better on both vendors for 93 of 93 images. On the 7 synthetic gradients (`rgb_grad`) the gain is +1.10 dB NVIDIA and +2.28 dB AMD. Encode time is 1.6 times Ideal's (15.2 s against 9.3 s for 92.8 Mpix on 16 threads). The existing rgbcx modes stay byte-identical. Report: `F:\ai\dds\reports\bc1-dual\REPORT-dual-mode.md`.
 
 ### Luma-weighted BC1 error (2026-10-31)
 

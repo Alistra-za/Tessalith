@@ -4,7 +4,7 @@ A project config records how one folder of textures is converted. It is a TOML f
 
 There is also a user config at `%APPDATA%\sdc\config.toml`. It has the same format, minus `[files]` and `[inputs]`, and applies to every project. Put personal defaults there, such as a preferred target.
 
-Unknown keys, unknown values and values of the wrong type are errors. The whole run stops with exit code 2 (CLI), or the GUI shows a banner and stays read-only until you fix the file and press Reload. A value of the right type but outside its allowed range (for example `alpha.threshold = 0`) is reported per file as `CFG-INVALID`, and that file is not converted.
+Unknown keys, unknown values and values of the wrong type are errors: the CLI stops with exit code 2, or the GUI shows a banner and stays read-only until you fix the file and press Reload. A value of the right type but outside its range (for example `alpha.threshold = 0`) is reported per file as `CFG-INVALID`, and that file is not converted.
 
 ## A complete example
 
@@ -59,7 +59,7 @@ as = "textures/armor/iron/iron_n.png"
 |---|---|---|---|
 | `schema_version` | integer, 1 or more | 1 | Format version of this file. A version newer than this build supports is an error: `<file>: config schema_version N is newer than this sdc supports (1)`. |
 | `preset` | string | the target's default | The preset to use, by id. A built-in id or a user preset's. See [Presets and targets](Presets-and-Targets.md). |
-| `target` | `"cs"`, `"vanilla"` (`"cpm"` is an error) | from the preset, else `"cs"` | The target. The GUI's Mode menu writes this. |
+| `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's Mode menu writes this. |
 | `[defaults]` | partial profile | none | Field values for every texture. |
 | `[subtypes.<id>]` | partial profile | none | Field values for one sub-type. |
 | `[[rules]]` | array of tables | none | Conditional settings. |
@@ -197,8 +197,6 @@ Setting `helper.role` or `helper.fills` makes the helper *assigned*: it replaces
 
 An entry that names no file under the current target is reported as `CFG-FILE-UNMATCHED` (info), and the GUI lists it under "Unmatched [files] entries" in the Advanced drawer so you can remove it.
 
-The GUI writes only `target`, the `[files.*]` tables and `[inputs.*]` aliases. Everything else in your `sdc.toml`, including comments and order, is left as it was.
-
 ## [inputs]
 
 ```toml
@@ -248,9 +246,7 @@ brightness = 0.9
 | `keep_metal_brightness` | `false` | | The CM folder gets its own diffuses without the metal darkening ([CM folder](Set-Shaders.md#also-export-as-vanilla-and-cm)). |
 | `keep_metal_strength` | 1.0 | 0–1 | How much of the metal darkening Keep metal brightness undoes. |
 
-What each folder's files hold is in [Also export as Vanilla and CM](Set-Shaders.md#also-export-as-vanilla-and-cm). The vanilla env `_m` needs a Meshes scan, so the CLI writes none.
-
-The GUI keeps the folders' location in `sdc-project.toml` as `[project] also_location` (by default the export folder); the CLI writes them under `-o`.
+What each folder's files hold is in [Also export as Vanilla and CM](Set-Shaders.md#also-export-as-vanilla-and-cm). The GUI keeps the folders' location in `sdc-project.toml` as `[project] also_location` (by default the export folder); the CLI writes them under `-o`.
 
 ## Field reference
 
@@ -266,4 +262,4 @@ sdc inspect C:\Work\IronPlate --recursive --accept-suggestions high > $null
 sdc presets schema config
 ```
 
-The repository also has the schema at `schema/config.schema.json`, which editors that understand JSON Schema for TOML can use for completion.
+The repository has the schema at `schema/config.schema.json` for editor completion.

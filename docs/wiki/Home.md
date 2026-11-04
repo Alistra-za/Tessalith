@@ -14,7 +14,7 @@ Tessalith builds for two targets:
 | Community Shaders | `cs` (default) | You play with Community Shaders, including TruePBR materials. |
 | Vanilla | `vanilla` | You want textures that load without Community Shaders. A set given the complex material shader packs the complex `_m` (environment, gloss, metal, height). |
 
-This wiki covers version 1.0.0. Tessalith is licensed GPL-3.0-or-later. Its conversion engine (the `engine` and `encoders-sys` crates) is MPL-2.0.
+This wiki covers version 2.0.0. Tessalith is licensed GPL-3.0-or-later. Its conversion engine (the `engine` and `encoders-sys` crates) is MPL-2.0.
 
 ## Pages
 
@@ -36,7 +36,7 @@ This wiki covers version 1.0.0. Tessalith is licensed GPL-3.0-or-later. Its conv
 
 ## Names you will see
 
-The product is called Tessalith, and the GUI program is `tessalith.exe`. The command line, files and folders keep the working name `sdc`, and those are what you type:
+The command line, files and folders keep the working name `sdc`:
 
 | You type or see | What it is |
 |---|---|
@@ -57,4 +57,4 @@ The product is called Tessalith, and the GUI program is `tessalith.exe`. The com
 6. Builds mipmaps, encodes with the chosen encoder, writes the DDS atomically.
 7. Decodes the result again and validates it, then records it in the manifest.
 
-Tessalith does not guess at files whose type it cannot work out. It reports them as unresolved, and you fix them by renaming or by adding a `[files]` entry. See [Texture types](Texture-Types.md).
+A file whose type Tessalith cannot work out is reported as unresolved, not guessed; fix it by renaming or with a `[files]` entry ([Texture types](Texture-Types.md)).

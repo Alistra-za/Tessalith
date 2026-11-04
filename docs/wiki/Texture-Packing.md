@@ -6,7 +6,7 @@ How raw maps such as roughness, metallic and AO pack into the files each shader 
 
 Raw single-channel maps (from the exporter names above) are not converted on their own. They are packed into the layout the target reads. One source per role is used; if a set has two roughness maps, the first by path wins and the other is reported as `PACK-UNUSED-INPUT`. A raw map is read from its red channel; for a map that keeps its value in another channel, set [`channels.grayscale_source`](Project-Config-Fields.md#channels).
 
-An `_orm` file counts as three raw maps at once: AO from its R channel, roughness from G and metallic from B. Every recipe below that reads roughness, AO or metallic takes them from it. A separate map for the same slot (an `_roughness` next to the `_orm`) wins that slot. An `_rfaos` has no metallic channel, so it leaves the `_orm` metallic unused. Slots an `_orm` does not hold (specular, height, fuzz) come from their own maps, the fill, or the default, as usual. So an `_rmaos` built from an `_orm` alone has `packing.fill.specular` in alpha, or 1 when no fill is set.
+An `_orm` file counts as three raw maps at once: AO from its R channel, roughness from G and metallic from B. Every recipe below that reads roughness, AO or metallic takes them from it; a separate map for the same slot (an `_roughness` next to the `_orm`) wins that slot. An `_rfaos` has no metallic channel, so it leaves the `_orm` metallic unused. Slots an `_orm` does not hold (specular, height, fuzz) come from their own maps, the fill, or the default, so an `_rmaos` built from an `_orm` alone has `packing.fill.specular` in alpha, or 1 when no fill is set.
 
 ### Community Shaders (`cs`)
 
@@ -47,7 +47,7 @@ Under `vanilla`, a set whose shader is complex material (picked in the GUI, `--s
 
 `_m` is a BC4 environment mask, built from metallic (else specular) only when one of them exists. Other raw maps are not used (`PACK-UNUSED-INPUT`).
 
-The recipe id of the complex `_m` in events and manifests is `cpm_m`, a name kept from the removed `cpm` target.
+The complex `_m` recipe id in events and manifests is `cpm_m`.
 
 ### Fills and defaults
 
@@ -78,7 +78,7 @@ A **helper** is a source file that fills one channel of another output of its ow
 
 Fuzz weight and subsurface weight have no file-name term: a file is one only when you set its role.
 
-**Alpha targets.** The colour texture's alpha is a `diffuse`, `pbr_albedo` or `skin_albedo` file of the set (never complex grass, a UI/sky texture or a landscape diffuse); `n.a` is a plain `normal` (so never a PBR `_n`); `f.a` is `pbr_fuzz`, `s.a` `pbr_subsurface`, `cnr.a` `coat_normal`. A target must be planned under the active target: under `vanilla` there is no `_f`, `_s`, `_cnr` or `_rmaos`, so a fuzz-weight helper reads "not used: no _f planned under vanilla". Cubemaps and the outputs of Also export never take a fill. A helper never creates an output, except the packed ones (`_rmaos`, `_rfaos`, `_m`, `_p`), as before.
+**Alpha targets.** The colour texture's alpha is a `diffuse`, `pbr_albedo` or `skin_albedo` file of the set (never complex grass, a UI/sky texture or a landscape diffuse); `n.a` is a plain `normal` (so never a PBR `_n`); `f.a` is `pbr_fuzz`, `s.a` `pbr_subsurface`, `cnr.a` `coat_normal`. A target must be planned under the active target: under `vanilla` there is no `_f`, `_s`, `_cnr` or `_rmaos`, so a fuzz-weight helper reads "not used: no _f planned under vanilla". Cubemaps and the outputs of Also export never take a fill. A helper never creates an output, except the packed ones (`_rmaos`, `_rfaos`, `_m`, `_p`).
 
 **Which data wins.**
 - A **suggested** helper (its role and targets come from its name) fills an alpha only when that alpha is empty in the source: no alpha, fully opaque, or one flat value. A colour PNG with a real alpha keeps it, and the helper reads "not used: x.png already has alpha".
@@ -88,9 +88,9 @@ Fuzz weight and subsurface weight have no file-name term: a file is one only whe
 
 **Sizes.** A suggested alpha fill whose helper is not the target's size is skipped ("512x512, target 1024x1024: sizes differ"). An assigned one of the same aspect ratio is resized like a packed source, so a helper larger than its colour texture makes that texture larger; one with another aspect ratio fails the target with `PACK-SIZE-MISMATCH`, naming both sizes.
 
-**The fill comes first.** The helper's channel is written into the target before the target is analysed, so alpha policy, format choice, alpha-coverage mips and cutout handling all see the filled alpha, exactly as if the source had carried it. A diffuse that would be BC1 can therefore move to an alpha format. Only the alpha comes from the helper; the target keeps its own bit depth.
+**The fill comes first.** The helper's channel is written into the target before the target is analysed, so alpha policy, format choice, coverage mips and cutout handling see the filled alpha as if the source had carried it. A diffuse that would be BC1 can therefore move to an alpha format. The target keeps its own bit depth.
 
-**Read from and Invert.** `helper.read` picks the helper's channel: `r`, `g`, `b`, `a` or `luma` (Rec. 709 luminance). Unset reads R (or luminance where a recipe already does); A is never picked by itself. `helper.invert = true` flips whatever the channel would otherwise read (one minus the value), for an inverted mask. In a packed channel it flips on top of the recipe's own conversion: a glossiness source feeding roughness (or the reverse) is already inverted, so a gloss map needs `helper.role = "glossiness"` and no Invert; Invert there would write gloss into the roughness channel. An alpha fill has no automatic conversion, so Invert is its only flip. A helper with an explicit read is not reported for colour in a greyscale slot (`CHAN-NOT-GRAY`).
+**Read from and Invert.** `helper.read` picks the helper's channel: `r`, `g`, `b`, `a` or `luma` (Rec. 709 luminance). Unset reads R (or luminance where a recipe already does); A is never picked by itself. `helper.invert = true` flips whatever the channel would otherwise read (one minus the value). In a packed channel it flips on top of the recipe's own conversion: a glossiness source feeding roughness is already inverted, so a gloss map needs `helper.role = "glossiness"` and no Invert. An alpha fill has no automatic conversion, so Invert is its only flip. A helper with an explicit read is not reported for colour in a greyscale slot (`CHAN-NOT-GRAY`).
 
 **Not a helper.** `helper.role = "none"` makes the file an ordinary texture again, converted on its own. Any other `helper.role` makes a file a helper even when its name or sub-type says otherwise. Roles apply to image sources, not DDS files. A file you give a role that has no known suffix (`iron_mask.png`) joins the set of its name without the last `_part` (`iron`) when that set exists.
 

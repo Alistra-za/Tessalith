@@ -9,7 +9,7 @@ A target says which renderer the textures are for. A preset is a named bundle of
 | Community Shaders | `cs` | Everything: TruePBR materials, Advanced skin, `_SRGB` tags on PBR colour maps, BC6H and RGBA16F for HDR data, every set shader. The default. |
 | Vanilla | `vanilla` | Bethesda shaders, plus the complex-material `_m` (environment, gloss, metal, height in one map) for a set whose shader is complex material, and complex grass. No `_SRGB`, no BC6H, no PBR. |
 
-Before the first release there was a third target, `cpm`. It is gone: a vanilla set with the complex material shader packs the same `_m`. <!-- D:AZ --> `cpm` is an error in `--target`, `sdc.toml`, the user config, `--preset cpm-quality` and `base = "cpm-quality"`. A user preset file with `target = "cpm"` is skipped with a `CFG-PRESET-SKIPPED` warning that names `cpm`.
+There is no `cpm` target: a vanilla set with the complex material shader packs the same `_m`. <!-- D:AZ --> `cpm` is an error in `--target`, `sdc.toml`, the user config, `--preset cpm-quality` and `base = "cpm-quality"`. A user preset file with `target = "cpm"` is skipped with a `CFG-PRESET-SKIPPED` warning that names `cpm`.
 
 How the target is chosen, highest first:
 
@@ -38,7 +38,7 @@ A file whose sub-type is unavailable is blocked with `CFG-UNAVAILABLE`. When a f
 
 ### sRGB tagging
 
-The DDS format's `_SRGB` flag tells the game to decode colours from sRGB. Getting it wrong makes textures look too dark or washed out.
+The DDS `_SRGB` flag tells the game to decode colours from sRGB; a wrong tag makes textures look too dark or washed out.
 
 | Rule | Code if broken |
 |---|---|
@@ -66,7 +66,7 @@ Raw maps (`_roughness`, `_metallic`, `_ao` and so on) are packed differently per
 
 Under vanilla, pick **Complex Material** as the set's shader (GUI) or pass `--set set:<id>.shader=complex_material` (CLI) to get the complex `_m` from raw maps. A set that already has a complex-material `_m` file picks the shader by itself, and that file is kept unless `packing.prefer = "raw"`.
 
-See [Texture types](Texture-Packing.md#packing-raw-maps) for the details.
+Details: [Texture packing](Texture-Packing.md#packing-raw-maps).
 
 ### Set shaders per target
 
@@ -75,7 +75,7 @@ See [Texture types](Texture-Packing.md#packing-raw-maps) for the details.
 | `pbr`, `pbr_grass`, `pbr_landscape`, `advanced_skin` | yes | no |
 | `default`, `envmap`, `complex_material`, `glow`, `parallax`, `skin`, `hair`, `eye`, `multilayer`, `landscape`, `complex_grass` | yes | yes |
 
-A shader the target does not have falls back to `default`, with `SHADER-UNAVAILABLE`. See [Texture types](Set-Shaders.md#set-shaders).
+A shader the target does not have falls back to `default`, with `SHADER-UNAVAILABLE` ([Set shaders](Set-Shaders.md#set-shaders)).
 
 ## Built-in presets
 
@@ -106,11 +106,11 @@ In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "
 2. Every other listed sub-type gets `resize = "half"`: both sides halve while the larger side stays at or above 512, or 256 for `height` ([`resize_floor`](Project-Config-Fields.md#format-and-size)). Emissive and HDR sky are not resized.
 3. `encoder.bc45_search_radius = "fast"`.
 
-BC3 is never used for compact output, because it is the same size as BC7.
+Compact output never uses BC3, which is the same size as BC7.
 
 ### Built-in rules
 
-`sdc-base` contains two rules that every preset inherits: any file under an `interface` folder or a `sky` folder gets `mips.levels = "none"`.
+`sdc-base` has one rule that every preset inherits: any file under an `interface` or `sky` folder gets `mips.levels = "none"`.
 
 ## Writing your own preset
 
@@ -147,7 +147,7 @@ rmaosultrahigh = "rmaos"
 | `schema_version` | yes | 1. |
 | `id` | yes | The preset's id. Must not clash with an id that is already loaded, built-in or user. |
 | `version` | yes | Your version string. |
-| `base` | in practice | The preset this one inherits from, such as `cs-quality` or `sdc-base`. Every sub-type's profile must resolve completely, so a preset without a `base` would have to supply every field itself, and the load names what is missing. A cycle is an error (`preset inheritance cycle at '<id>'`). |
+| `base` | in practice | The preset this one inherits from, such as `cs-quality` or `sdc-base`. Every sub-type's profile must resolve completely, so a preset without a `base` must supply every field itself; the load names what is missing. A cycle is an error (`preset inheritance cycle at '<id>'`). |
 | `target` | no | The preset's target, used when nothing else sets one. Leave it out for a target-neutral preset like `fast-preview`. |
 | `hidden` | no | `true` keeps the preset out of `presets list`. |
 | `description` | no | Shown by `presets list`. |

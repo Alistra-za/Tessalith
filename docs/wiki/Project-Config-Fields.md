@@ -2,7 +2,7 @@
 
 Every `sdc.toml` field with its values, default and meaning. A lookup page: how settings layer, rules and `[files]` are on [Project config](Project-Config.md).
 
-Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`, a `[files]` entry, or with `--set`. Defaults are those of the built-in base preset; a sub-type or preset may change them, as noted.
+Every field can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`, a `[files]` entry, or with `--set`. Defaults are the built-in base preset's; a sub-type or preset may change them, as noted.
 
 ## Type and colour
 
@@ -48,7 +48,7 @@ Every field below can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overr
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `rgb8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgba8` is written as B8G8R8A8, `rgb8` as 24-bit B8G8R8 (no alpha, linear only). |
+| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `rgb8`, `r8`, `rg8`, `rgba16f` | `bc7`; see [Texture types](Texture-Types.md#formats) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgb8` is 24-bit (no alpha, linear only). |
 | `header` | `auto`, `dx10`, `legacy` | `auto` | DDS header form. `auto` writes a legacy header for BC1, BC3 and RGBA8 without the `_SRGB` tag, and the DX10 header for everything else. `legacy` is valid only for formats that have a legacy form (such as BC1, BC3, BC4, BC5) and no `_SRGB` tag; otherwise it is `CFG-INVALID`. |
 | `resize` | `none`, `half`, `quarter`, `eighth` | `none` | Halves both sides once, twice or three times. Each halving happens only while the longer side stays at or above `resize_floor`: with the 512 floor, 2048x1024 under `quarter` becomes 512x256, and 1024x1024 under `eighth` stops at 512x512. <!-- D:FM29 --> |
 | `resize_floor` | pixels, 1 to 16384 | 512; 256 for `height` | The longer side `resize` never halves below. Outside 1 to 16384 it is `CFG-INVALID`. <!-- D:FM29 --> |
@@ -59,9 +59,9 @@ Every texture with mips is written at a power-of-two size, before `resize` appli
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `encoder.effort` | `ultrafast`, `veryfast`, `fast`, `basic`, `veryslow`, `slowest`, `max` | `veryslow` | bc7e quality level. `max` is the sdc patch-0002 level from the [bc7e tuning study](../research/bc7e-tuning.md) and takes about 3× the time of `veryslow` (2.7 to 2.9× measured on Skyrim textures). For BC6H, `ultrafast` and `veryfast` map to veryfast and `veryslow` to veryslow; `slowest` and `max` both use a peak-preserving veryslow that keeps small, very bright highlights (a sun) near their source brightness. |
+| `encoder.effort` | `ultrafast`, `veryfast`, `fast`, `basic`, `veryslow`, `slowest`, `max` | `veryslow` | bc7e quality level. `max` is the patch-0002 level from the [bc7e tuning study](../research/bc7e-tuning.md), at 2.7 to 2.9× the time of `veryslow`. For BC6H, `ultrafast` and `veryfast` map to veryfast and `veryslow` to veryslow; `slowest` and `max` both use a peak-preserving veryslow that keeps small, very bright highlights (a sun) near their source brightness. |
 | `encoder.perceptual` | `true`, `false` | `false` | Perceptual error metric for BC7. Allowed only on colour sub-types whose alpha policy is not `data`; anywhere else it is an error (`FMT-PERCEPTUAL-DATA`). |
-| `encoder.bc7_weights` | `linear`, `alpha2`, `alpha8`, `alpha16` | unset | BC7 linear error weights for bc7e (R, G, B, A): `linear` 1,1,1,1, the same encode as unset (use it to override an inherited weighting for one file); `alpha2` 1,1,1,2; `alpha8` 1,1,1,8 (an alternative to BC3 for delicate alpha); `alpha16` 1,1,1,16 (a `_n` with specular in alpha). Unset is today's linear 1,1,1,1, and is not written to profiles or manifests. `encoder.perceptual = true` wins over it. On another format, or with perceptual on, it has no effect and raises `ENC-WEIGHTS-IGNORED`. The GUI's *BC7 weighting* row edits both fields. |
+| `encoder.bc7_weights` | `linear`, `alpha2`, `alpha8`, `alpha16` | unset | BC7 linear error weights for bc7e (R, G, B, A): `linear` 1,1,1,1, the same encode as unset (use it to override an inherited weighting for one file); `alpha2` 1,1,1,2; `alpha8` 1,1,1,8 (an alternative to BC3 for delicate alpha); `alpha16` 1,1,1,16 (a `_n` with specular in alpha). Unset encodes as `linear` and is not written to profiles or manifests. `encoder.perceptual = true` wins over it. On another format, or with perceptual on, it has no effect and raises `ENC-WEIGHTS-IGNORED`. The GUI's *BC7 weighting* row edits both fields. |
 | `encoder.bc1_alpha` | `true`, `false` | `false` | BC1 with 1-bit alpha for `cutout`, `blend` and `cutout_blend` ([BC1 alpha](Texture-Types.md#alpha-policies)). Ignored by other formats. |
 | `encoder.bc45_search_radius` | `default`, `max`, `fast` | `default` | BC4/BC5 endpoint search. `max` searches a radius of 10, `fast` a radius of 4. |
 
@@ -126,7 +126,7 @@ These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` f
 
 The order the cube is built in is in [Cubemaps](Cubemaps.md#order-of-work).
 
-A cube is written as BC1, BC3, BC7, RGBA8 or RGB8 with the UNORM tag; any other `format` or an sRGB tag is `CFG-INVALID`. `mips.levels = "none"` raises `CUBE-NO-MIPS`.
+A cube's formats are listed in [Cubemaps](Cubemaps.md#inside-the-file); any other `format` or an sRGB tag is `CFG-INVALID`. `mips.levels = "none"` raises `CUBE-NO-MIPS`.
 
 ## Re-encoding DDS inputs
 

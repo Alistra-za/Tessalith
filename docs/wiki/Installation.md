@@ -24,9 +24,7 @@ What you need:
 - Windows 10 or 11, x64.
 - A graphics card for the GUI's preview windows. The CLI needs none.
 
-The programs are not code-signed, so Windows SmartScreen may warn the first time. Click **More info**, then **Run anyway**.
-
-To run `sdc` from any folder, add the unzipped folder to your `PATH`.
+The programs are not code-signed, so Windows SmartScreen may warn the first time: click **More info**, then **Run anyway**. To run `sdc` from any folder, add the unzipped folder to your `PATH`.
 
 ## Building from source
 
@@ -44,7 +42,7 @@ To run `sdc` from any folder, add the unzipped folder to your `PATH`.
 ### Build steps
 
 1. Install the Visual Studio Build Tools with the "Desktop development with C++" workload.
-2. Install Rust with `rustup`. You do not need to pick a toolchain by hand: `rust-toolchain.toml` in the repository root makes `cargo` fetch and use the right one, including the MSVC target and components.
+2. Install Rust with `rustup`; `rust-toolchain.toml` in the repository root makes `cargo` fetch the right toolchain, target and components.
 3. Clone the repository and build in release mode:
 
 ```powershell
@@ -75,7 +73,7 @@ Copy the two `.exe` files wherever you like, or add the folder to your `PATH` so
 sdc --version
 ```
 
-`sdc --version` lists the encoder libraries that were linked in. If it runs, the native encoder layer works.
+`sdc --version` lists the encoder libraries that were linked in.
 
 ### Workspace layout
 
@@ -116,7 +114,7 @@ Use this script only if you want to check the vendored objects or change the ISP
 | `-Update` | off | Copy the rebuilt objects and headers into `vendor\ispc-objs`. |
 | `-Bc7eOnly` | off | With `-Update`, replace only the bc7e objects. |
 
-The script compiles for x86-64 Windows with the targets SSE2, SSE4, AVX and AVX2. It runs from the repository root with repository-relative source paths so the output is reproducible, and it reports `MATCH` or `DIFF` for each object. It exits with 0 when every object matches.
+The script compiles for x86-64 Windows with the targets SSE2, SSE4, AVX and AVX2, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH` or `DIFF` for each object and exits with 0 when every object matches.
 
 ### tools\hash-vendor.ps1
 
@@ -126,7 +124,7 @@ After you change anything under `crates\encoders-sys\vendor`, run this to rewrit
 .\tools\hash-vendor.ps1
 ```
 
-It takes no parameters. It hashes every vendored file except `SHA256SUMS` itself and writes sorted `<sha256>  <relative/path>` lines.
+It takes no parameters and hashes every vendored file except `SHA256SUMS` itself.
 
 ## Where Tessalith keeps its files
 

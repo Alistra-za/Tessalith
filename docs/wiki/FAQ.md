@@ -4,7 +4,7 @@ Short answers to common questions about Tessalith, for anyone using the GUI or `
 
 ### What is Tessalith, and why is the command line called sdc?
 
-Tessalith is the product name. The GUI is `tessalith.exe` and its window says Tessalith. The command line, config files and folders kept the project's working name: `sdc.exe`, `sdc.toml`, `sdc-project.toml`, `%APPDATA%\sdc`, `%LOCALAPPDATA%\sdc` and the `SDC_*` environment variables. Those are what you type.
+Tessalith is the product name (the GUI is `tessalith.exe`). The command line, config files and folders keep the working name `sdc` ([list](Home.md#names-you-will-see)).
 
 ### Does it run on Linux or macOS?
 
@@ -36,7 +36,7 @@ No, not by default ([why, and what to do](Troubleshooting.md#dds-files-in-the-fo
 
 ### Does it change my source files?
 
-No. Tessalith only writes to the output folder, `sdc.toml`, `sdc-project.toml` (GUI), the manifest under `<output>\_sdc\`, the scan database with its `scan.lock`, the 3D preview's shader cache under `%LOCALAPPDATA%\sdc\shader-cache`, and its own settings (plus `gui.toml.bad`, a copy of a settings file it could not read). Renaming in the GUI writes aliases; files on disk are never renamed. The one exception: when you click **Generate** in the GUI's **Generate from normal map…** dialog, it writes new `*_generated.png` files next to the set's normal. It never overwrites a file Tessalith did not write, and **Delete generated file…** removes one only after you confirm.
+No. Tessalith writes only the output folder, `sdc.toml`, `sdc-project.toml` (GUI), the manifest under `<output>\_sdc\`, the scan database with its `scan.lock`, the 3D preview's shader cache under `%LOCALAPPDATA%\sdc\shader-cache`, and its own settings (plus `gui.toml.bad`, a copy of a settings file it could not read). Renaming in the GUI writes aliases; files on disk are never renamed. The one exception is **Generate** in the **Generate from normal map…** dialog, which writes new `*_generated.png` files next to the set's normal. It never overwrites a file Tessalith did not write, and **Delete generated file…** removes one only after you confirm.
 
 ### Why BC7 for almost everything?
 
@@ -78,7 +78,7 @@ The GUI does, for PBR sets under `cs`, to `<export folder>\PBRNIFPatcher\<name>.
 
 ### Which source formats work?
 
-PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, and PSD/PSB (merged image, saved with Maximize Compatibility). GIMP `.xcf`, Paint.NET `.pdn`, Krita and OpenRaster files are not read; export to PNG or TGA first.
+See [input formats](Texture-Types.md#input-formats). PSD/PSB is read as the merged image, saved with Maximize Compatibility. GIMP `.xcf`, Paint.NET `.pdn`, Krita and OpenRaster files are not read; export to PNG or TGA first.
 
 ### Can I run conversions from a script or another tool?
 

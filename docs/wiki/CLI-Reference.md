@@ -21,7 +21,7 @@ Human-readable output from `convert` goes to stderr. The result verbs (`inspect`
 | Flag | Default | Meaning |
 |---|---|---|
 | `<inputs>...` | required | Image files or folders. Several are allowed. |
-| `--recursive` | off | Walk folders recursively. Without it, only the files directly inside each folder are read. Files you name explicitly are always included. |
+| `--recursive` | off | Walk folders recursively; otherwise only the files directly inside each folder are read. Files you name explicitly are always included. |
 | `--target cs\|vanilla` | see below | The target game setup. |
 | `--preset <id or file.toml>` | see below | Select a preset by id, or load a preset file and select the id it declares. |
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
@@ -39,15 +39,15 @@ The user config and the user presets are always loaded ([where they are](Install
 
 ### Why `--accept-suggestions high` matters
 
-Tessalith works out each file's sub-type from its name. A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence suggestion. On the command line, suggestions are not applied unless you pass `--accept-suggestions high`. Without it, those files are reported as unresolved:
+A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence sub-type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise those files are reported as unresolved:
 
 ```text
 skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-Files decided by a rule, a `--set`, a `[files]` entry or a set shader are not affected. The GUI accepts High-confidence suggestions and writes each one into `sdc.toml` as a `[files]` entry, so a project saved from the GUI converts the same way here without the flag. For a folder the GUI has not saved, use `--accept-suggestions high` to match it.
+Files decided by a rule, a `--set`, a `[files]` entry or a set shader are not affected. The GUI accepts High-confidence suggestions and writes each one into `sdc.toml` as a `[files]` entry, so a project saved from the GUI converts the same way here without the flag. For a folder the GUI has not saved, pass the flag to match it.
 
-What the GUI decides from a Meshes scan, `sdc` cannot: it never reads the scan database. The GUI writes those decisions into `sdc.toml` too (a sub-type the meshes' shader gives, grass found on a GRAS model, an alpha meaning from the meshes), so a saved project agrees. Two stay GUI-only: a mesh *Remove* on a texture whose alpha varies (`sdc` asks for its alpha meaning instead), and the environment-map `_m` the GUI's Also export derives from the meshes (`sdc convert` writes no `_m`).
+`sdc` never reads the scan database, but the GUI writes what the Meshes scan decided into `sdc.toml` too (a sub-type the meshes' shader gives, grass found on a GRAS model, an alpha meaning), so a saved project agrees. Two stay GUI-only: a mesh *Remove* on a texture whose alpha varies (`sdc` asks for its alpha meaning instead), and the environment-map `_m` the GUI's Also export derives from the meshes (`sdc convert` writes no `_m`).
 
 ### --set syntax
 
@@ -130,7 +130,7 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 | Value | Behaviour |
 |---|---|
-| `if-changed` | Re-encode only when the manifest record differs: source content, resolved settings, the texture type's encode version (bumped only when a release changes that type's output), encoder versions, BC1 encode target (for BC1/BC3), a record that failed validation, or an output file whose size or modified time changed. An output with no manifest record is kept and reported as `OUT-UNKNOWN-EXISTING`. |
+| `if-changed` | Re-encode only when the manifest record differs ([what is compared](Validation-and-Output.md#re-runs-and-if-changed)). An output with no record is kept and reported as `OUT-UNKNOWN-EXISTING`. |
 | `skip` | Keep every existing output. Counted as skipped on purpose. |
 | `overwrite` | Always re-encode. |
 
@@ -159,7 +159,7 @@ The `done` counters:
 | converted | Files encoded and written in this run. |
 | up to date | Outputs left alone by `if-changed`. |
 | skipped | Files not converted for any other reason: unresolved, blocked, duplicate output, DDS input, existing output with no record, `--on-existing skip`, a pre-packed file replaced under `packing.prefer = "raw"` (`PACK-CONFLICT`), a generated file replaced by a real map (`GEN-REPLACED`). |
-| on purpose | The part of skipped that you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, a pre-packed file replaced under `packing.prefer = "raw"` (`PACK-CONFLICT`), a generated file replaced by a real map (`GEN-REPLACED`). |
+| on purpose | The part of skipped that you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, `PACK-CONFLICT` and `GEN-REPLACED` as above. |
 | failed | Files that failed to load, resolve, encode or write. |
 | failed validation | Files written whose validation reported an error. |
 | cancelled | Files not started because you pressed Ctrl-C. |
@@ -172,9 +172,9 @@ The first Ctrl-C prints:
 cancelling: finishing current bands... (Ctrl-C again to exit immediately)
 ```
 
-Files that are running stop at their next band boundary and no new file starts. Nothing half-written is left behind, because every output is written to a temporary file in the target folder and then renamed into place. The cancelled files are listed in `batch_done`, and the exit code is 1. A Ctrl-C during planning is honoured too.
+Running files stop at their next band boundary and no new file starts. Nothing half-written is left behind (outputs are written to a temporary file and renamed). The cancelled files are listed in `batch_done`, and the exit code is 1. A Ctrl-C during planning is honoured too.
 
-A second Ctrl-C exits at once with code 3, without waiting for running encodes. That can leave `.sdc-*.tmp` files in the output folders (delete them by hand) and, with `--json`, no `batch_done` event. A file renamed into place just before the abort may have no manifest record; the next run reports it as `OUT-UNKNOWN-EXISTING`, and `--on-existing overwrite` replaces it.
+A second Ctrl-C exits at once with code 3. That can leave `.sdc-*.tmp` files in the output folders (delete them by hand) and, with `--json`, no `batch_done` event. A file renamed into place just before the abort may have no manifest record; the next run reports it as `OUT-UNKNOWN-EXISTING`, and `--on-existing overwrite` replaces it.
 
 ### Examples
 
@@ -213,7 +213,7 @@ C:/out/textures/armor/iron/iron.dds
   ...
 ```
 
-Header problems are listed as `header issue:` lines. The `=254` column matters for BC7: an opaque texture whose alpha decodes as 254 instead of 255 can show as slightly transparent in some shaders.
+Header problems are listed as `header issue:` lines. The `=254` column matters for BC7: an opaque texture whose alpha decodes as 254 can show as slightly transparent in some shaders.
 
 For image inputs it runs the whole plan as a dry run and prints, per set:
 
@@ -324,15 +324,7 @@ Exit codes: 0 written; 1 kept (an existing file Tessalith did not write, or one 
 
 When several apply, the highest-precedence one wins: 3, then 2, then 1, then 4, then 0. Intentional skips, up-to-date files and raw maps consumed by packing never cause exit 1.
 
-Errors that stop a run before it starts print `sdc: <message>` to stderr. Examples:
-
-```text
-sdc: input not found: C:\Work\missing
-sdc: --mem-budget '0': must be greater than 0 (omit the flag for the default, 50% of RAM)
-sdc: --allow FOO: unknown code
-sdc: --set 'alpha.treshold=100': unknown field 'alpha.treshold'
-sdc: unknown preset 'cs-qualty'
-```
+Errors that stop a run before it starts print `sdc: <message>` to stderr, for example `sdc: input not found: C:\Work\missing` or `sdc: unknown preset 'cs-qualty'` (the messages are in [Troubleshooting](Troubleshooting.md#error-messages)).
 
 ## JSON event stream
 

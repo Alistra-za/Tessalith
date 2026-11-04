@@ -68,7 +68,7 @@ Also called equirectangular or lat-long. This is what 360° cameras, HDRI sites 
 
 An exact 2:1 image is read as a panorama without any setting. Any other size needs `cubemap.layout = "equirect"`.
 
-- **Checked in game:** a cube made from a panorama by Tessalith showed north, south, east and west where they belong, with no mirror and no swap.
+- **Checked in game:** a cube made from a panorama showed north, south, east and west where they belong.
 - **Turning:** `cubemap.yaw` turns the cube (in degrees, clockwise seen from above, so 90 moves east to south), and `cubemap.mirror` swaps east and west.
 - **HDR:** an HDR sky with a bright sun needs `cubemap.highlight_clamp`, or the sun blows out the whole reflection.
 
@@ -86,7 +86,7 @@ Both assume the camera stood south of the ball looking north, with east on the r
 
 ![A wide strip: your photo in the middle half, mirrored copies on both sides, the top fading to the photo's top-row colour and the bottom fading to its bottom-row colour.](../img/cube-photo.svg)
 
-One photo can't show what is behind you, so this mode makes a believable reflection rather than a true one. Set `cubemap.layout = "photo"`. Tessalith builds the fake panorama shown above (the photo in front, mirrored copies behind, and the top and bottom fading to the average colour of the photo's top and bottom rows), makes a cube from it and blurs it hard: `cubemap.blur = 0.6` unless you set another value, even when a style sets one. It works well for shiny metal and glass, where the reflection only needs the right colours and light. The default face size is half the photo's width. The photo's centre faces east; `cubemap.yaw = -90` turns it to face north. A portrait photo (taller than wide) loses its top and bottom: only its middle rows, as many as it is wide, are used, so crop it yourself to choose which. In the GUI, Review lists it as a warning to acknowledge before the export: "Only the middle 1024×1024 of photo.png is used".
+One photo can't show what is behind you, so this mode makes a believable reflection, not a true one. Set `cubemap.layout = "photo"`. Tessalith builds the fake panorama shown above (the photo in front, mirrored copies behind, the top and bottom fading to the average colour of the photo's top and bottom rows), makes a cube from it and blurs it hard: `cubemap.blur = 0.6` unless you set another value, even when a style sets one. It suits shiny metal and glass, where the reflection only needs the right colours and light. The default face size is half the photo's width. The photo's centre faces east; `cubemap.yaw = -90` turns it to face north. A portrait photo (taller than wide) loses its top and bottom: only its middle rows, as many as it is wide, are used, so crop it yourself to choose which. In the GUI, Review lists it as a warning to acknowledge before the export: "Only the middle 1024×1024 of photo.png is used".
 
 ### Face size
 
@@ -104,11 +104,9 @@ A cube DDS goes through the same size, filter, blur and format settings as any o
 
 ![Six one-pixel faces. +X holds a colour with roughness in alpha; +Y and every other face is black.](../img/cube-marker.svg)
 
-Community Shaders (and ENB) read a 1×1 cube whose +Y is black as an instruction to reflect the live scene, not a picture, this is a dynamic cubemap. 
-For Community Shaders only, The +X pixel then sets the reflection's colour (RGB) and roughness (alpha). 
-For ENB PG Patcher already applies a dynamic cubemap with all features ENB supports.
+Community Shaders and ENB read a 1×1 cube whose +Y is black as an instruction to reflect the live scene instead of a picture (a dynamic cubemap). In Community Shaders the +X pixel then sets the reflection's colour (RGB) and roughness (alpha). For ENB, PGPatcher already applies a dynamic cubemap with every feature ENB supports.
 
-Cli write command:
+Write one from the command line:
 
 ```text
 sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\steel_e.dds
@@ -118,4 +116,4 @@ sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\stee
 - The colour sits on the +X face. +Y stays black, so the file is always a dynamic marker.
 - `--roughness` is 0 to 1 and is stored in alpha as `min(round(r × 255), 254)`. Leave it out and alpha is 255, which gives Community Shaders' defaults (F0 1, roughness 1/7).
 
-The file is 152 bytes. See [CLI reference](CLI-Reference.md#sdc-cubemap-marker). Tessalith never writes a picture cube at 1×1 by accident, so a real cube can't turn into a marker.
+The file is 152 bytes ([CLI reference](CLI-Reference.md#sdc-cubemap-marker)). Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.

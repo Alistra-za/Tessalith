@@ -1,56 +1,26 @@
 # Known issues
 
-This page covers version 1.0.0. These are the things you may run into, and what to do about them. For fixes to common errors, see [Troubleshooting](Troubleshooting.md).
+Things you may run into in version 2.0.0, and what to do about them. For fixes to common errors, see [Troubleshooting](Troubleshooting.md).
 
-## Crashes and memory
+## Crashes
 
-**The app can crash with a lost graphics device (GPU)**
-
-Sometimes the graphics device is lost, and the app has to close. The cause is not proven. It often happens after a long session, around alt-tab or screen capture.
-
-- Version 1.0.0 closes with a crash message about failing to create a "staging buffer".
-- Later versions show a message that the graphics device was lost and that unsaved edits were kept, then close.
-
-- Unsaved edits are kept beside the original and come back the next time you open the folder ([crash recovery](GUI-Settings.md#when-something-goes-wrong)).
-- The crash log is in the logs folder ([where](Installation.md#where-tessalith-keeps-its-files)). Attach it if you report the crash.
-
-## Speed
-
-**The Missing and Unused lists can freeze briefly the first time you open them**
-
-On a very large load-order scan, the first open reads the data on the main thread, so the window stops responding for a moment. It comes back by itself.
+**The graphics device can be lost.** The cause is not proven; it often happens after a long session, around alt-tab or screen capture. Tessalith shows a message that the device was lost and that unsaved edits were kept, then restarts or closes. Unsaved edits come back the next time you open the folder ([crash recovery](GUI-Settings.md#when-something-goes-wrong)). The crash log is in the logs folder ([where](Installation.md#where-tessalith-keeps-its-files)); attach it if you report the crash.
 
 ## Things that do not work yet
 
-**The Advanced skin card does not export**
+**The Advanced skin card does not export.** The card saves its values in the project, but nothing is written to Community Shaders. Its **Export JSON...** button is greyed out on purpose.
 
-The card (Advanced skin (Community Shaders)) saves its values in the project, but nothing is written to Community Shaders yet. The **Export JSON...** button on it is greyed out on purpose.
+**PBR grass is approximated in the 3D preview.** The preview draws the PBR grass shader type with the normal PBR shader: no wind, no wrapped diffuse, no grass LOD. The exported files are not affected.
 
-**PBR grass is approximated in the 3D preview**
-
-The PBR grass shader type is available, but the preview draws it with the normal PBR shader. It has no wind, no wrapped diffuse and no grass LOD. The exported files are not affected.
-
-**Debug views depend on your Community Shaders build**
-
-The 3D preview's debug views (View menu, **Debug view**) follow the Community Shaders build you have installed. A view may differ from the game, or be missing, on another build.
+**Debug views depend on your Community Shaders build.** The 3D preview's **Debug view** follows the installed build, so a view may differ from the game or be missing.
 
 ## Behaviour that may surprise you
 
-**Renaming a colour map's output path loses the shader suggestion**
-
-If you change the output path of a colour map in the GUI, the shader suggestion that came from the meshes can disappear. The suggestion looks meshes up by the new path, and no mesh uses it. Pick the shader by hand.
-
-**Plain `_normal`, `_nrm` and `_norm` maps are treated as DirectX green**
-
-These names do not say whether the green channel is DirectX or OpenGL. Tessalith assumes DirectX (Skyrim's convention) and adds a note. If the map is really OpenGL, click **Treat as OpenGL (flip green)** in the GUI, or set `channels.green_convention = "opengl"` for the file in `sdc.toml`. See [Troubleshooting](Troubleshooting.md#a-normal-map-reports-in-green-unstated).
-
-**Windows SmartScreen warns on first run**
-
-The program is not code-signed yet. On first run, click **More info**, then **Run anyway**.
+**Renaming a colour map's output path loses the shader suggestion.** The suggestion looks meshes up by the new path, and no mesh uses it. Pick the shader by hand.
 
 ## Reporting a problem
 
-Open an issue on the Tessalith GitHub page. Please include:
+Open an issue on the Tessalith GitHub page. Include:
 
 - The Tessalith version (the exe's file properties, or `sdc --version`).
 - Your GPU and driver.
