@@ -24,7 +24,7 @@ use engine::reports::{
 };
 use engine::schemas::SchemaKind;
 use engine::suggest::{suggest, SuggestContext};
-use engine::validate::alpha::{alpha_stats, AlphaStats};
+use engine::validate::alpha::alpha_stats;
 use engine::validate::{validate, ValidationReport, ValidationSummary};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -147,44 +147,46 @@ fn pct(n: u64, of: u64) -> String {
     )
 }
 
-fn print_dds_info(v: &Value) {
-    out!("{}", v["path"].as_str().unwrap_or(""));
-    if let Some(e) = v["error"].as_str() {
-        out!("  cannot be read: {e}");
-        return;
-    }
-    let srgb = match v["srgb"].as_bool() {
+fn print_dds_info(info: &DdsInfo) {
+    let h = match info {
+        DdsInfo::Unreadable(u) => {
+            out!("{}", u.path);
+            out!("  cannot be read: {}", u.error);
+            return;
+        }
+        DdsInfo::Info(h) => h,
+    };
+    out!("{}", h.path);
+    let srgb = match h.srgb {
         Some(true) => " srgb",
         Some(false) => " unorm",
         None => "",
     };
     out!(
-        "  format {}{srgb}  {}x{}  {} mips  {} header  cubemap {}",
-        v["format"].as_str().unwrap_or(""),
-        v["width"],
-        v["height"],
-        v["mip_count"],
-        v["header"].as_str().unwrap_or(""),
-        v["cubemap"]
+        "  format {}{srgb}  {}x{}  {} mips  {:?} header  cubemap {}",
+        h.format,
+        h.width,
+        h.height,
+        h.mip_count,
+        h.header,
+        h.cubemap
     );
-    for issue in v["header_issues"].as_array().into_iter().flatten() {
-        out!("  header issue: {}", issue.as_str().unwrap_or(""));
+    for issue in &h.header_issues {
+        out!("  header issue: {issue}");
     }
-    for (i, m) in v["mips"].as_array().into_iter().flatten().enumerate() {
-        let alpha = match serde_json::from_value::<AlphaStats>(m["alpha"].clone()) {
-            Ok(a) => format!(
+    for (i, m) in h.mips.iter().enumerate() {
+        let alpha = match (&m.alpha, &m.decode_error) {
+            (Some(a), _) => format!(
                 "  alpha min {} =255 {} =254 {} <254 {}",
                 a.min,
                 pct(a.eq255, a.pixels),
                 pct(a.eq254, a.pixels),
                 pct(a.below254, a.pixels)
             ),
-            Err(_) => m["decode_error"]
-                .as_str()
-                .map(|e| format!("  decode failed: {e}"))
-                .unwrap_or_default(),
+            (None, Some(e)) => format!("  decode failed: {e}"),
+            (None, None) => String::new(),
         };
-        out!("  mip {i} {}x{}{alpha}", m["width"], m["height"]);
+        out!("  mip {i} {}x{}{alpha}", m.width, m.height);
     }
 }
 
@@ -417,11 +419,10 @@ pub fn inspect(a: InspectArgs) -> Result<i32, EngineError> {
     for f in found.iter().filter(|f| f.kind == InputKind::Dds) {
         let info = dds_info(&f.path);
         unreadable += u32::from(matches!(info, DdsInfo::Unreadable(_)));
-        let v = serde_json::to_value(&info).unwrap_or(Value::Null);
         if json {
-            out!("{v}");
+            out!("{}", serde_json::to_value(&info).unwrap_or(Value::Null));
         } else {
-            print_dds_info(&v);
+            print_dds_info(&info);
         }
     }
     if !found.iter().any(|f| f.kind == InputKind::Image) {
