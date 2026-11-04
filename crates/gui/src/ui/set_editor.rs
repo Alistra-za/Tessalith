@@ -464,10 +464,7 @@ fn rows(
             // The row takes the right-click; its labels are not selectable, so they do not take it.
             ui.style_mut().interaction.selectable_labels = false;
             for cell in slot_row(v.shader.as_ref(), &v.slots) {
-                let size = match &cell.fill {
-                    SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => sizes.get(item),
-                    SlotFill::Empty => None,
-                };
+                let size = cell.fill.item().and_then(|i| sizes.get(i));
                 let w = row(ui, model, v, &cell, thumbs, acts, drop_at, size, file_w);
                 for (a, b) in widths.iter_mut().zip(w) {
                     *a = a.max(b);
@@ -545,11 +542,9 @@ fn row(
         _ => vec![],
     };
     let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
-    let title = match fill {
-        SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => {
-            card_title(slot, item, v.shader.as_ref().map(|p| p.shader))
-        }
-        SlotFill::Empty => slot_label(slot, ""),
+    let title = match fill.item() {
+        Some(item) => card_title(slot, item, v.shader.as_ref().map(|p| p.shader)),
+        None => slot_label(slot, ""),
     };
     let (item_key, borrowed) = match fill {
         SlotFill::Own { item } => (Some(item.clone()), None),
@@ -1345,10 +1340,7 @@ fn clash_rows(
     thumbs: &mut ThumbCache,
     acts: &mut Vec<Act>,
 ) {
-    let item_of = |fill: Option<&SlotFill>| match fill {
-        Some(SlotFill::Own { item } | SlotFill::Borrowed { item, .. }) => model.item(item),
-        _ => None,
-    };
+    let item_of = |fill: Option<&SlotFill>| model.item(fill?.item()?);
     let both: Vec<&TextureItem> = [Some(&cell.fill), cell.clash.and_then(|k| v.slots.get(&k))]
         .into_iter()
         .filter_map(item_of)

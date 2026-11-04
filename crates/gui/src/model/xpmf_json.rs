@@ -407,11 +407,7 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
 }
 
 fn slot_job<'a>(m: &'a AppModel, fill: Option<&SlotFill>) -> Option<&'a ResolvedJob> {
-    let item = match fill? {
-        SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => item,
-        SlotFill::Empty => return None,
-    };
-    m.item(item)?.job.as_ref()
+    m.item(fill?.item()?)?.job.as_ref()
 }
 
 /// The Data-relative path of a job's output under `root`; with `vanilla`, the file the Vanilla folder gets for it
@@ -473,7 +469,7 @@ fn fold_path(p: &str) -> String {
 /// PBR Landscape set with a diffuse or a normal and no DDS member (a DDS is never re-encoded, so the derive skips the
 /// set, M9). Only such a set has Vanilla files for a profile copy to name.
 fn vanilla_keeps(m: &AppModel, v: &SetView) -> bool {
-    let filled = |k| !matches!(v.slots.get(&k), None | Some(SlotFill::Empty));
+    let filled = |k| v.slots.get(&k).is_some_and(SlotFill::is_filled);
     is_pbr_landscape(v)
         && (filled(SlotKind::Diffuse) || filled(SlotKind::Normal))
         && !v.members.iter().filter_map(|k| m.item(k)).any(|i| {

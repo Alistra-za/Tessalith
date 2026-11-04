@@ -243,7 +243,7 @@ const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [
 ];
 
 fn has(v: &SetView, s: SlotKind) -> bool {
-    !matches!(v.slots.get(&s), None | Some(SlotFill::Empty))
+    v.slots.get(&s).is_some_and(SlotFill::is_filled)
 }
 
 /// The "feature is on but its texture is missing" blocks of one PBR set; `has` says whether a slot is filled.
@@ -630,12 +630,10 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
     let deps = |v: &SetView| -> Vec<String> {
         v.slots
             .values()
-            .filter_map(|f| match f {
-                SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => m
-                    .item(item)
+            .filter_map(|f| {
+                m.item(f.item()?)
                     .map(|i| i.job_key.clone())
-                    .filter(|j| !j.is_empty()),
-                SlotFill::Empty => None,
+                    .filter(|j| !j.is_empty())
             })
             .collect()
     };
