@@ -3067,7 +3067,8 @@ impl AppModel {
         s: Option<&crate::sets_doc::SetsDoc>,
     ) -> history::Snapshot {
         history::Snapshot {
-            sdc_toml: p.map(ProjectDoc::text).unwrap_or_default(),
+            // Note FP4 (T37): a blamed document is empty; its stashed text is what the step must keep.
+            sdc_toml: p.map(ProjectDoc::snapshot_text).unwrap_or_default(),
             project: s.map(crate::sets_doc::SetsDoc::text).unwrap_or_default(),
         }
     }

@@ -333,3 +333,50 @@ fn an_edit_during_an_export_is_not_saved_by_the_hash_record() {
     let disk = std::fs::read_to_string(doc.path()).unwrap();
     assert!(disk.contains("0.37") && disk.contains(&sha), "{disk}");
 }
+
+/// Backlog T37 (Note FP4): a step recorded while the engine's rejection blames `sdc.toml` keeps the stashed text, not
+/// the empty document, so Undo and Redo through it never empty the file.
+#[test]
+fn a_step_recorded_while_sdc_toml_is_blamed_keeps_its_text() {
+    let wait = std::time::Duration::from_secs(60);
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let item = m
+        .items
+        .iter()
+        .find(|i| i.name == "rock01.png")
+        .unwrap()
+        .key
+        .clone();
+    m.set_field(&item, "alpha.threshold", json!(1000));
+    assert!(m.wait_idle(wait));
+    assert!(m.project.as_ref().unwrap().read_only(), "blamed");
+    m.edit_docs("hair", None, false, |_, s| {
+        s.set_value("landscape/rock01", "hair", Some(json!(true)))
+    });
+    let step = m.history.undo.last().unwrap();
+    assert!(
+        !step.before.sdc_toml.is_empty() && !step.after.sdc_toml.is_empty(),
+        "before {:?} after {:?}",
+        step.before.sdc_toml,
+        step.after.sdc_toml
+    );
+    m.undo();
+    assert!(m.wait_idle(wait));
+    m.undo();
+    assert!(m.wait_idle(wait));
+    assert!(!m.project.as_ref().unwrap().read_only(), "undone");
+    m.redo();
+    assert!(m.wait_idle(wait));
+    m.redo();
+    assert!(m.wait_idle(wait));
+    // Redone, the engine rejects the value again, so the text is the stashed one.
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .snapshot_text()
+            .contains("threshold"),
+        "sdc.toml was emptied"
+    );
+}

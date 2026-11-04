@@ -347,6 +347,14 @@ impl ProjectDoc {
         self.f.text()
     }
 
+    /// [`Self::text`] for an undo step: while a blame holds the document, the stashed text it stands for.
+    pub fn snapshot_text(&self) -> String {
+        match &self.stash {
+            Some((doc, _)) => doc.to_string(),
+            None => self.f.text(),
+        }
+    }
+
     /// Replace the document with `text` (an undo or redo). It is an unsaved change. A read-only document is left
     /// alone: its edits never happened.
     pub fn restore(&mut self, text: &str) {
