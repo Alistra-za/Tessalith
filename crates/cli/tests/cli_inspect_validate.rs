@@ -1,4 +1,4 @@
-use image::{ImageBuffer, Luma, Rgb};
+use image::{ImageBuffer, Luma, Rgb, Rgba};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -20,19 +20,26 @@ fn text(b: &[u8]) -> String {
     String::from_utf8(b.to_vec()).unwrap()
 }
 
-/// A bench DDS (BC7, decoded alpha 254 on ~21 % of mip 0), or `None` when the bench is not on this machine.
-fn bench_dds(encoder: &str) -> Option<PathBuf> {
-    let Ok(root) = std::env::var("SDC_BENCH_ROOT") else {
-        eprintln!("skipped: set SDC_BENCH_ROOT");
-        return None;
-    };
-    let p = PathBuf::from(root).join(format!("out/{encoder}/rgb_real/Bricks104.dds"));
-    if p.exists() {
-        Some(p)
-    } else {
-        eprintln!("skipped: {} not found", p.display());
-        None
-    }
+/// `<root>/out/rock.dds`: a 64x32 BC7 diffuse, decoded alpha 254 on about 39 % of mip 0, made by `sdc convert`.
+fn alpha254_dds(root: &Path) -> PathBuf {
+    let src = root.join("in");
+    std::fs::create_dir_all(&src).unwrap();
+    ImageBuffer::from_fn(64, 32, |x, y| {
+        // A 255..252 alpha ramp every 4 columns: BC7 decodes about 39 % of mip 0 to exactly 254.
+        Rgba([x as u8 * 4, y as u8 * 8, 90, 255 - (x % 4) as u8])
+    })
+        .save(src.join("rock.png"))
+        .unwrap();
+    let out = root.join("out");
+    let o = sdc()
+        .args(["convert", "--accept-suggestions", "high"])
+        .args(["--set", "alpha.policy=blend", "--set", "format=bc7", "-o"])
+        .arg(&out)
+        .arg(src.join("rock.png"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    out.join("rock.dds")
 }
 
 /// `<root>/wall_n.png` converted by `sdc convert`; returns the DDS.
@@ -68,9 +75,7 @@ fn inspect_reports_suggestions_and_dds_headers() {
     let out = text(&o.stdout);
     assert!(out.contains("normal") && out.contains("high"), "{out}");
 
-    let Some(bench) = bench_dds("bc7e_u5") else {
-        return;
-    };
+    let bench = alpha254_dds(d.path());
     let o = sdc()
         .args(["inspect", "--json"])
         .arg(&bench)
@@ -83,8 +88,9 @@ fn inspect_reports_suggestions_and_dds_headers() {
         "{out}"
     );
     let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v["mip_count"], 1);
-    assert_eq!(v["mips"][0]["alpha"]["min"], 254);
+    assert_eq!(v["mip_count"], 7);
+    assert_eq!(v["mips"][0]["alpha"]["min"], 253);
+    assert!(v["mips"][0]["alpha"]["eq254"].as_u64().unwrap() > 0, "{v}");
     assert_eq!(v["schema"], 1);
     // The object is exactly what `schema/dds-info.schema.json` describes.
     let info: engine::reports::DdsInfo = serde_json::from_value(v).unwrap();
@@ -93,20 +99,18 @@ fn inspect_reports_suggestions_and_dds_headers() {
 
 #[test]
 fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
-    let Some(bench) = bench_dds("bc7e_u5") else {
-        return;
-    };
+    let d = tempfile::tempdir().unwrap();
+    let bench = alpha254_dds(d.path());
     let o = sdc().arg("inspect").arg(&bench).output().unwrap();
     assert_eq!(code(&o), 0);
     let out = text(&o.stdout);
     for want in [
         "format Bc7",
-        "1024x512",
-        "1 mips",
+        "64x32",
+        "7 mips",
         "Dx10",
         "cubemap false",
-        "mip 0",
-        "=254",
+        "mip 0 64x32  alpha min 253 =255 19.5% =254 39.1% <254 41.4%",
     ] {
         assert!(out.contains(want), "{want}: {out}");
     }
@@ -188,9 +192,8 @@ fn inspect_cleans_up_and_writes_nothing_into_its_temp_root() {
 
 #[test]
 fn validate_passes_bench_bc7() {
-    let Some(bench) = bench_dds("bc7e_u6") else {
-        return;
-    };
+    let d = tempfile::tempdir().unwrap();
+    let bench = alpha254_dds(d.path());
     let o = sdc()
         .args(["validate", "--subtype", "diffuse", "--target", "vanilla"])
         .arg(&bench)
@@ -215,15 +218,14 @@ fn validate_unreadable_file_exits_1_even_next_to_a_good_one() {
         .output()
         .unwrap();
     assert_eq!(code(&o), 1);
-    if let Some(bench) = bench_dds("bc7e_u6") {
-        let o = sdc()
-            .args(["validate", "--subtype", "diffuse"])
-            .arg(&bench)
-            .arg(&junk)
-            .output()
-            .unwrap();
-        assert_eq!(code(&o), 1);
-    }
+    let bench = alpha254_dds(d.path());
+    let o = sdc()
+        .args(["validate", "--subtype", "diffuse"])
+        .arg(&bench)
+        .arg(&junk)
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 1);
 }
 
 #[test]
