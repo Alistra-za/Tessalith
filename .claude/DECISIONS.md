@@ -14,17 +14,17 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FO
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FO
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FO
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
-- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FO
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
 - vfs: AV, BP, BU, CV
 - esp: GG, GO
@@ -976,3 +976,15 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
   - **GUI.** The preset editor has a Perceptual box for BC1, BC3 and BC7 with the texture panel's lock; the closed Relative to combo shows "Slot N", with the slot's name in the list and on hover (it held the Advanced drawer about 90 px past its edge); the 1-bit alpha box is named for AccessKit; the alpha dropdowns of Problems and Review are named "Problems alpha type: …" and "Review alpha type: …" (the texture panel keeps "Alpha type: …"); the FMT-BC1-ALPHA sentence offers 1-bit alpha only for see-through alpha.
   - **Schema.** `resize_floor` is `1..=16384` in the schemas, as the loader checks. `[defaults] packing.fill` still validates in the schema: the `[defaults]`, sub-type and `[files]` tables share one partial profile, so refusing it there needs a definition of its own. The loader refuses it (FM16).
   - **Docs.** CHANGELOG: the `--strict-cubemaps` and 2D cube-check lines go (a 2D `_e` file fails validation, as in 1.1.0), the power-of-two rule is the 95 % / 85 % one, the byte-change, vanilla perceptual and compact height lines give the final state, and the FM12 event change is listed. The Known issues page is a section of Troubleshooting. The broken `CHANGELOG.md#unreleased` anchor in `GUI-NIF-Edit.md` is the NIF team's (HANDOFF line, FR-d).
+
+## Note FO — trace-debug fixes 2026-11-04 (main team, 2026-11-04)
+
+Items are numbered by the trace-debug report's finding (`.superpowers/sdd/trace-debug-2026-11-04`); FO6 and FO7 are not here (findings 6 and 7 belong to another team).
+
+- **FO1 A renamed set's input name moves its entry (finding 1).** Restates the digest rule (a rename or input name moves each renamed set's entry in the same undo step): `auto_retarget` takes the set's `renamed_from` as the old automatic id when the entry is a renamed, non-created one, so `SetsDoc::retarget_auto` finds it. Test `gui_tweaks::input_name_on_renamed_set_moves_its_entry`.
+- **FO2 Export on a missing preset opens Review (finding 2).** `export_stopped` opens Review when `missing_preset_text()` is set, as it does for `export_blocks`, so the header and palette Export never write with the fallback preset (FC1). Review's own Export stays off through `review_gate`. Test `auto_accept::a_missing_preset_export_click_opens_review_and_writes_nothing`.
+- **FO3 Number boxes show a stored value as it is (finding 3).** Ruling V6: `clamp_existing_to_range(false)` on the CS PBR `drag` (every Num and Glint row), the skin card, the complex-material card and the PGPatcher RGB boxes, so drawing never rewrites an out-of-range stored value (a template's `densityRandomization` 300 stays 300). A drag or a typed value is still clamped. shortcut: an AccessKit SetValue skips the range; clamp what is written if that matters. `advanced.rs`, `presets.rs`, `marker_dialog.rs` and `viewport3d.rs` edit values that are not stored project values and keep the default. Test `cs_pbr_ui::a_draw_keeps_an_out_of_range_template_value`.
+- **FO4 A bulk or copied BC7 weighting pick completes every texture (finding 4).** FC8's follow-up is a list, one entry per picked texture; `follow_weighting` writes each one that still does not show the pick, joined to its own pick's step. Test `bc7_weighting::bulk_linear_overrides_every_hidden_inherited`.
+- **FO5 A packed bake member is sized by the common canvas (finding 5).** `bake::plan::post_resize_dims` starts from `api::job_dims` (FM30's common size of a pack's sources) instead of the first source's own size, so the planned level shift equals the run's. Same-size sets are unchanged: goldens and `encode_versions` pass without a diff. Test `bake_plan::packed_member_bake_shift_uses_the_common_canvas_size`.
+- **FO8 The Auto wetness guess binds in the preview (finding 8).** GN1 says the Auto wetness map is meant to bind at t74; both GUI texture-map builders (`meshes::texture_sources`, `SetPreview::add_vfs`) now add `wet_candidates` beside the RFAOS ones through `meshes::skin_map_guesses`, as optional sources. render3d is unchanged. Test `nif_edit::the_auto_wet_guess_is_in_the_mesh_texture_map`.
+- **FO12 The cube marker writer replaces any 152-byte 1x1 cube DDS (won't fix, owner, 2026-11-04).** Trace-debug minor 12: the user must target that exact path, and the file is easy to recreate.
