@@ -1022,3 +1022,34 @@ fn a_dropped_fill_is_an_info_row_with_undo() {
     m.set_json_name("other");
     assert_eq!(row(m).expect("still listed").fix, None);
 }
+
+/// Backlog R2: after Enter the Fills box keeps showing the typed value until the re-plan lands (it reverted to the
+/// old value for those frames).
+#[test]
+fn a_fill_box_keeps_the_typed_value_until_the_plan_lands() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    h.run();
+    fn ao<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::SpinButton, "AO fill")
+    }
+    ao(&h).scroll_to_me();
+    h.run();
+    ao(&h).focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    for c in ["2", "0", "0"] {
+        h.event(Event::Text(c.into()));
+        h.run();
+    }
+    h.key_press(Key::Enter);
+    for _ in 0..3 {
+        h.run_steps(1);
+        assert!(h.state().edit_busy(), "the re-plan is still out");
+        assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(200.0));
+    }
+    settle(&mut h);
+    assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(200.0));
+}

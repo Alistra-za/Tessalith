@@ -245,17 +245,24 @@ fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState)
 /// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one
 /// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
 /// The in-progress value of a drag, or of arrow keys on the focused box, is held in egui memory, so a caller that
-/// rebuilds `value` from the model each frame still gets the final value on release or when the box is left.
+/// rebuilds `value` from the model each frame still gets the final value on release or when the box is left. While
+/// `busy` (a re-plan is out) a settled value stays on show until the model hands it back (Backlog R2).
 pub(super) fn settled_drag<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut T,
     speed: f64,
     range: std::ops::RangeInclusive<T>,
     name: &str,
+    busy: bool,
 ) -> bool {
     let id = ui.next_auto_id().with("settled_drag");
+    let sent_id = id.with("sent");
     let came_in = value.to_f64();
-    if let Some(held) = ui.data(|d| d.get_temp::<f64>(id)) {
+    // Backlog R2: a settled value stays on show until the re-plan hands it back (or the plan is idle).
+    let sent = ui
+        .data(|d| d.get_temp::<f64>(sent_id))
+        .filter(|s| *s != came_in && busy);
+    if let Some(held) = ui.data(|d| d.get_temp::<f64>(id)).or(sent) {
         *value = T::from_f64(held);
     }
     let r = ui.add(
@@ -277,7 +284,17 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     }
     let settled =
         r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus());
-    settled && v != came_in
+    let out = settled && v != came_in;
+    ui.data_mut(|d| match (out, sent) {
+        (true, _) => {
+            d.insert_temp(sent_id, v);
+        }
+        (false, Some(s)) => {
+            d.insert_temp(sent_id, s);
+        }
+        (false, None) => d.remove::<f64>(sent_id),
+    });
+    out
 }
 
 fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {

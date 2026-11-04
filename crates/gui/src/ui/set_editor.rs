@@ -1255,7 +1255,14 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                     source_picker(ui, model, key, role, None, acts);
                     let mut v = shown;
                     let name = format!("{} fill", role_label(role));
-                    if super::advanced::settled_drag(ui, &mut v, 1.0, 0..=255, &name) {
+                    if super::advanced::settled_drag(
+                        ui,
+                        &mut v,
+                        1.0,
+                        0..=255,
+                        &name,
+                        model.edit_busy(),
+                    ) {
                         acts.push(Act::Fill(key.to_string(), role, Some(v)));
                     }
                     if own_key
