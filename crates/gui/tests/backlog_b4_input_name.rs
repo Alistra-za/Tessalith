@@ -63,9 +63,14 @@ fn the_sets_current_name_in_another_case_is_refused() {
     idle(&mut m);
     let id = "landscape/rock01";
     let steps = m.history.undo.len();
-    let e = m
-        .set_input_name(id, "textures/landscape/rock01")
-        .unwrap_err();
-    assert!(e.contains("already has this name"), "{e}");
+    for typed in [
+        "textures/landscape/rock01",
+        "textures/landscape/rock01.dds",
+        "textures\\Landscape\\ROCK01",
+        "TEXTURES/landscape/rock01.DDS",
+    ] {
+        let e = m.set_input_name(id, typed).unwrap_err();
+        assert!(e.contains("already has this name"), "{typed}: {e}");
+    }
     assert_eq!(m.history.undo.len(), steps, "no undo step");
 }
