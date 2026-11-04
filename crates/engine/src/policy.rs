@@ -829,7 +829,10 @@ fn layered_profile_with(
     // (FMT-PERCEPTUAL-DATA); an explicit `perceptual = true` is kept and reported.
     if profile.encoder.perceptual
         && profile.alpha.policy == AlphaPolicy::Data
-        && !field_explicit(ctx, &prov, "encoder.perceptual")
+        && (!field_explicit(ctx, &prov, "encoder.perceptual")
+            // Backlog T9: a built-in preset's own rule (`vanilla-compact#0`) is a default too.
+            || matches!(prov.get("encoder.perceptual"),
+                Some(Provenance::Rule(src)) if ctx.registry.is_builtin(src.split('#').next().unwrap_or(src))))
     {
         profile.encoder.perceptual = false;
     }

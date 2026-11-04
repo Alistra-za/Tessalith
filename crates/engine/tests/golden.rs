@@ -3700,6 +3700,23 @@ fn vanilla_compact_opaque_diffuse_is_bc1() {
     );
 }
 
+/// Backlog T9: the `perceptual` a built-in preset's rule turned on yields to a user's `alpha.policy = data`
+/// (FM43), as the preset's own default does; it is not an explicit choice.
+#[test]
+fn vanilla_compact_rule_perceptual_yields_to_data_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/a/wall.png", rgb(64));
+    let o = plan_preset(
+        d.path(),
+        Target::Vanilla,
+        "vanilla-compact",
+        &["file:**/wall.png.alpha.policy=data"],
+    );
+    let j = planned(&o, "a/wall.png");
+    assert_eq!(j["status"]["state"], "ready", "{}", j["status"]);
+    assert_eq!(j["profile"]["encoder"]["perceptual"], false);
+}
+
 /// FM42: vanilla-compact's two BC1 colour rules turn perceptual on; a data map keeps it off (FM43: a BC7 diffuse is
 /// perceptual through vanilla-quality's table).
 #[test]
