@@ -1342,3 +1342,46 @@ fn the_vanilla_presets_mark_three_colour_types_perceptual() {
         }
     }
 }
+
+/// Backlog T10/T11: keys a defaults table cannot use are load errors that name the table and the key.
+#[test]
+fn defaults_tables_refuse_keys_that_would_do_nothing() {
+    let r = PresetRegistry::builtin().unwrap();
+    let chain = r.chain("cs-quality").unwrap();
+    let check = |defaults: serde_json::Value, subtypes: serde_json::Value| {
+        let mut cfg = ConfigFile {
+            defaults,
+            ..Default::default()
+        };
+        if let serde_json::Value::Object(m) = subtypes {
+            for (k, v) in m {
+                cfg.subtypes
+                    .insert(serde_json::from_value(json!(k)).unwrap(), v);
+            }
+        }
+        check_chain(&chain, &[&cfg], Target::Cs)
+    };
+    let msg = |e: Result<(), PresetError>| match e {
+        Err(PresetError::Invalid(m)) => m,
+        other => panic!("expected Invalid, got {other:?}"),
+    };
+    let m = msg(check(json!({ "subtype": "glow" }), json!({})));
+    assert!(
+        m.contains("[defaults]") && m.contains("'subtype'") && m.contains("no effect"),
+        "{m}"
+    );
+    let m = msg(check(
+        json!({}),
+        json!({ "diffuse": { "target": "vanilla" } }),
+    ));
+    assert!(
+        m.contains("[subtypes.diffuse]") && m.contains("'target'"),
+        "{m}"
+    );
+    let m = msg(check(
+        json!({ "resize": "half", "resize_floor": 1, "resize_reference": [2, 2] }),
+        json!({}),
+    ));
+    assert!(m.contains("'resize_reference'"), "{m}");
+    assert!(check(json!({ "resize": "half" }), json!({})).is_ok());
+}

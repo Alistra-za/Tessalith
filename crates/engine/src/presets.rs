@@ -1042,6 +1042,32 @@ pub fn check_chain(
     target: Target,
 ) -> Result<(), PresetError> {
     let invalid = PresetError::Invalid;
+    // Backlog T10/T11: `finish_profile` overwrites `subtype`, `target` and `category`, and the planner sets
+    // `resize_reference` in memory; a hand-written value in a defaults table would do nothing or skew DIM-*.
+    let tables = chain
+        .iter()
+        .map(|p| (format!("preset '{}'", p.id), &p.defaults, &p.subtypes))
+        .chain(
+            configs
+                .iter()
+                .map(|c| ("config".to_string(), &c.defaults, &c.subtypes)),
+        );
+    for (at, defaults, subtypes) in tables {
+        let each = std::iter::once(("[defaults]".to_string(), defaults)).chain(
+            subtypes
+                .iter()
+                .map(|(st, v)| (format!("[subtypes.{}]", st.id()), v)),
+        );
+        for (table, v) in each {
+            for key in ["subtype", "target", "category", "resize_reference"] {
+                if v.get(key).is_some() {
+                    return Err(invalid(format!(
+                        "{at} {table}: '{key}' has no effect there; remove it"
+                    )));
+                }
+            }
+        }
+    }
     let rules: Vec<(String, &Rule)> = chain
         .iter()
         .flat_map(|p| {
