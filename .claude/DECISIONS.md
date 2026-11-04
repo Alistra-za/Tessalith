@@ -23,7 +23,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FT, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS, FZ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
@@ -1097,7 +1097,7 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 ## Note FZ — backlog batch B10: dead code (main team, 2026-11-04)
 
 - **FZ1 Unused pub items are gone (L71).** `policy::preset_for` and the GUI's `ui::below_header` (with its `insert_temp` key) are deleted; `ui::centre_rect` stays. The PresetRef doc in `schema/manifest.schema.json` no longer names `preset_for`.
-- **FZ2 `SkipKind::LowDetail` is gone (L72).** Nothing emitted it since Note FM; the variant and its `schema/event.schema.json` entry are deleted. An old event log that holds a `low_detail` skip no longer parses.
+- **FZ2 `SkipKind::LowDetail` is gone (L72).** Nothing emitted it since Note FM; the variant and its `schema/event.schema.json` entry are deleted. Nothing reads saved event logs (`JsonLinesSink` only writes; the CLI's `RelativeRoot` round-trips an event and falls back to the original), so no tolerant fallback is kept.
 - **FZ3 Unused workspace dependencies (L74).** `assert_cmd` and `predicates` are removed from the root `Cargo.toml`; `sdc`'s `test-hooks` feature stays.
 - **FZ4 `Bc7Tune` is only `weights` (L41).** The research-only override fields are removed; `bc7e_compress_blocks_tuned` sends -1 (the level's value) for every other shim slot, as unset fields did. Output bytes are unchanged (golden, `level_identity`, `identity.json`).
-- **FZ5 GPU render tests say when they skip (L80).** `render_state` in `crates/gui/tests/render.rs` prints `skipped: no GPU adapter` once; the tests still pass without an adapter.
+- **FZ5 GPU render tests say when they skip (L80).** `render_state` in `crates/gui/tests/render.rs` writes `skipped: no GPU adapter` straight to stderr once (so libtest does not capture it); the tests still pass without an adapter. `ui::record_below_header` is now `record_centre_rect`: it writes only the centre rect.

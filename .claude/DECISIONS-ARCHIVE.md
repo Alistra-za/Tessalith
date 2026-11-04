@@ -242,3 +242,6 @@ ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
 - Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV
+
+ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS

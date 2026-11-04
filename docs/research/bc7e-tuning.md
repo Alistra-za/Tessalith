@@ -49,7 +49,9 @@ change is called real only when the interval excludes 0.
 
 - `sdc-bench bc7-tune` (`crates/bench/src/bc7tune.rs`, on branch `bench` since Note FM8): encodes every image with named bc7e variants through
   `encoders_sys::bc7e_compress_blocks_tuned`, a measurement-only overlay on a level's parameters, and writes one
-  CSV row per image and variant. `--reference N` adds the reference encoder.
+  CSV row per image and variant. `--reference N` adds the reference encoder. Main's `Bc7Tune` now holds only
+  `weights`; the other knobs this study used (partitions, uber level, refinement, p-bit, endpoint search) live in
+  git history before Note FZ and on branch `bench`.
 - The reference encoder (`crates/bench/src/bc7ref.rs`) tries every mode, every partition (16 or 64), all four
   rotations of modes 4 and 5 and both index selectors of mode 4; fits each subset with a PCA start, iterated
   least squares under every p-bit combination, and a greedy ±1 local search over the quantised endpoints and
