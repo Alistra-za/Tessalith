@@ -106,3 +106,26 @@ fn without_the_member_nothing_is_written() {
         "{t}"
     );
 }
+
+/// Backlog L57: the checks and generate-from-normal read a set's auto keys through `hint`, so a pbr_grass set gets
+/// the grass-only keys its export writes (no `_cnr` multilayer) and not the hint-less ones.
+#[test]
+fn a_pbr_grass_sets_checks_read_the_keys_its_export_writes() {
+    use sdc_gui::model::auto_flags::{hint, resolved_for};
+    let d = tempfile::tempdir().unwrap();
+    mod_folder(d.path());
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(d.path().join("textures/landscape/rock01_cnr.png"))
+        .unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_shader("landscape/rock01", Some(engine::shader::Shader::PbrGrass));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::views(&m);
+    let v = views.iter().find(|v| v.id == "landscape/rock01").unwrap();
+    let h = hint(&m, v);
+    assert!(h.grass);
+    assert!(resolved(v.pbr, &v.slots, &v.settings).contains_key("multilayer"));
+    let product = resolved_for(v.pbr, &v.slots, &v.settings, &h);
+    assert!(!product.contains_key("multilayer"), "{product:?}");
+    assert!(!text(&m).contains("\"multilayer\""));
+}
