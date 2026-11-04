@@ -12,7 +12,7 @@ use crate::ctrl::{
     body, interp_floats, is_ctrl, known_len, read_blend_interp, read_manager, BASE_LEN, CB_LEN,
 };
 use crate::extra::read_extra;
-use crate::graph::NODE_TYPES;
+use crate::graph::{is_node, is_root_node};
 use crate::header::Header;
 use crate::keys::read_data;
 use crate::net::read_net;
@@ -74,9 +74,7 @@ fn refs_of(h: &Header, b: &[u8], i: usize, root: Option<usize>) -> Result<Refs, 
         let mut v = net()?.0;
         v.extend([at.shader - start, at.alpha - start]);
         Refs::Patchable(v)
-    } else if NODE_TYPES.iter().any(|t| t.as_bytes() == kind)
-        || (Some(i) == root && kind.ends_with(b"Node"))
-    {
+    } else if is_node(kind) || (Some(i) == root && is_root_node(kind)) {
         // children and effects name source blocks only: no op adds one
         Refs::Patchable(net()?.0)
     } else if kind == b"BSLightingShaderProperty" {

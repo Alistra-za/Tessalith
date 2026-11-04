@@ -291,116 +291,87 @@ const SLOT0_SOURCE_SHAPES: &str = "FROM path tp
      JOIN origin o ON o.id = c.origin_id AND o.enabled = 1
      WHERE tp.p = ?1";
 
-/// M6 Track A (DECISIONS S-shader-10): for each key (`engine::shader::mesh_key`), the shader of every lighting shape
-/// that uses `<key>.dds` in slot 0, in non-derived copies of enabled origins. PGPatcher's output copies and TruePBR
-/// shapes (SLSF2 bit 23) do not vote: sdc's own rules decide PBR. Types outside the 12 shaders do not vote
-/// (`Shader::from_lighting_type`). Keys without a vote are left out.
-pub fn mesh_votes(
-    db: &Path,
-    keys: &BTreeSet<String>,
-) -> Result<BTreeMap<String, Vec<Shader>>, String> {
-    let store = Store::open_read_only(db).map_err(db_err)?;
-    // shortcut: raw SQL on `Store::conn()` against modscan's schema (breaks silently if `SCHEMA_VERSION` changes
-    // these tables), one query per key; move it into `modscan::store` as a typed query when modscan is next edited.
-    // `DISTINCT` per NIF path and block: the same mesh in two mods votes once.
-    let mut st = store
-        .conn()
-        .prepare(&format!(
-            "SELECT DISTINCT c.path_id, s.block, s.shader_type {SLOT0_SOURCE_SHAPES}"
-        ))
-        .map_err(db_err)?;
-    let mut out = BTreeMap::new();
-    for k in keys {
-        let types = st
-            .query_map([format!("{k}.dds")], |r| r.get::<_, Option<i64>>(2))
-            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
-            .map_err(db_err)?;
-        let v: Vec<Shader> = types
-            .into_iter()
-            .flatten()
-            .filter_map(|t| u32::try_from(t).ok().and_then(Shader::from_lighting_type))
-            .collect();
-        if !v.is_empty() {
-            out.insert(k.clone(), v);
-        }
-    }
-    Ok(out)
-}
-
 /// NiAlphaProperty flag bits (nif.xml): alpha blending enable, alpha testing enable.
 const ALPHA_BLEND: i64 = 1;
 const ALPHA_TEST: i64 = 1 << 9;
 
-/// M6 Track E (spec §4.1, DECISIONS Note U5): for each key, the NiAlphaProperty of every source lighting shape that
-/// uses `<key>.dds` in slot 0, by `mesh_votes`'s rules but whatever the shader type. A shape without the property
-/// is no alpha. Keys without a shape are left out.
-pub fn mesh_alpha(
-    db: &Path,
-    keys: &BTreeSet<String>,
-) -> Result<BTreeMap<String, Vec<MeshAlpha>>, String> {
+/// SLSF2 bit 29, Tree_Anim: the shader flag that makes Community Shaders take the foliage subsurface term.
+const TREE_ANIM: i64 = 1 << 29;
+
+/// The three maps of mesh_evidence: shader votes, alpha properties, Tree_Anim.
+type MeshFacts = (
+    BTreeMap<String, Vec<Shader>>,
+    BTreeMap<String, Vec<MeshAlpha>>,
+    BTreeMap<String, bool>,
+);
+
+/// One shape row of the evidence query: (NIF path id, block, shader type, alpha flags, alpha threshold, SLSF2).
+type EvidenceRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, i64);
+
+/// One read of the scan's mesh evidence for each key (`engine::shader::mesh_key`), over the shapes that use
+/// `<key>.dds` in slot 0 of non-derived copies of enabled origins (DECISIONS S-shader-10, Note U5): PGPatcher's output
+/// copies and TruePBR shapes (SLSF2 bit 23) do not count. Returns (votes, alpha, Tree_Anim), each without the keys it
+/// has no evidence for:
+/// - votes (M6 Track A): the shader of each lighting shape; types outside the 12 shaders do not vote
+///   (`Shader::from_lighting_type`). The same mesh in two mods votes once (per NIF path and block).
+/// - alpha (M6 Track E, spec §4.1): the NiAlphaProperty of each shape whatever its shader type; a shape without the
+///   property is no alpha. Counted once per NIF path, block and alpha property.
+/// - Tree_Anim (DECISIONS AG102): whether any shape is Tree_Anim (SLSF2 bit 29).
+pub fn mesh_evidence(db: &Path, keys: &BTreeSet<String>) -> Result<MeshFacts, String> {
     let store = Store::open_read_only(db).map_err(db_err)?;
-    // shortcut: raw SQL on `Store::conn()`, as `mesh_votes`; move both into `modscan::store` when modscan is next
-    // edited. `DISTINCT` per NIF path, block and alpha property: the same mesh in two mods counts once.
+    // shortcut: raw SQL on `Store::conn()` against modscan's schema (breaks silently if `SCHEMA_VERSION` changes
+    // these tables), one query per key; move it into `modscan::store` as a typed query when modscan is next edited.
     let mut st = store
         .conn()
         .prepare(&format!(
-            "SELECT DISTINCT c.path_id, s.block, s.alpha_flags, s.alpha_threshold {SLOT0_SOURCE_SHAPES}"
+            "SELECT c.path_id, s.block, s.shader_type, s.alpha_flags, s.alpha_threshold, ifnull(s.slsf2, 0) {SLOT0_SOURCE_SHAPES}"
         ))
         .map_err(db_err)?;
-    let mut out = BTreeMap::new();
+    let (mut votes, mut alpha, mut tree_anim) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
     for k in keys {
         let rows = st
             .query_map([format!("{k}.dds")], |r| {
-                Ok((r.get::<_, Option<i64>>(2)?, r.get::<_, Option<i64>>(3)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
             })
-            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+            .and_then(|rows| rows.collect::<Result<Vec<EvidenceRow>, _>>())
             .map_err(db_err)?;
-        let v: Vec<MeshAlpha> = rows
+        let (mut v, mut a, mut t) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for (path, block, ty, flags, threshold, slsf2) in rows {
+            v.insert((path, block, ty));
+            a.insert((path, block, flags, threshold));
+            t.insert((path, block, slsf2));
+        }
+        let v: Vec<Shader> = v
             .into_iter()
-            .map(|(flags, threshold)| {
+            .filter_map(|(_, _, ty)| ty)
+            .filter_map(|ty| u32::try_from(ty).ok().and_then(Shader::from_lighting_type))
+            .collect();
+        if !v.is_empty() {
+            votes.insert(k.clone(), v);
+        }
+        if !a.is_empty() {
+            let a = a.into_iter().map(|(_, _, flags, threshold)| {
                 let f = flags.unwrap_or(0);
                 MeshAlpha {
                     blend: f & ALPHA_BLEND != 0,
                     test: f & ALPHA_TEST != 0,
                     threshold: threshold.unwrap_or(0).clamp(0, 255) as u8,
                 }
-            })
-            .collect();
-        if !v.is_empty() {
-            out.insert(k.clone(), v);
+            });
+            alpha.insert(k.clone(), a.collect());
+        }
+        if !t.is_empty() {
+            tree_anim.insert(k.clone(), t.iter().any(|(_, _, f)| f & TREE_ANIM != 0));
         }
     }
-    Ok(out)
-}
-
-/// SLSF2 bit 29, Tree_Anim: the shader flag that makes Community Shaders take the foliage subsurface term.
-const TREE_ANIM: i64 = 1 << 29;
-
-/// DECISIONS AG102: for each key, whether any source lighting shape that uses `<key>.dds` in slot 0 is Tree_Anim.
-/// Keys without a shape are left out (no evidence).
-pub fn mesh_tree_anim(
-    db: &Path,
-    keys: &BTreeSet<String>,
-) -> Result<BTreeMap<String, bool>, String> {
-    let store = Store::open_read_only(db).map_err(db_err)?;
-    // shortcut: raw SQL on `Store::conn()`, as `mesh_votes`.
-    let mut st = store
-        .conn()
-        .prepare(&format!(
-            "SELECT DISTINCT c.path_id, s.block, ifnull(s.slsf2, 0) {SLOT0_SOURCE_SHAPES}"
-        ))
-        .map_err(db_err)?;
-    let mut out = BTreeMap::new();
-    for k in keys {
-        let flags = st
-            .query_map([format!("{k}.dds")], |r| r.get::<_, i64>(2))
-            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
-            .map_err(db_err)?;
-        if !flags.is_empty() {
-            out.insert(k.clone(), flags.iter().any(|f| f & TREE_ANIM != 0));
-        }
-    }
-    Ok(out)
+    Ok((votes, alpha, tree_anim))
 }
 
 /// Complex grass design §5 condition 1: the GRAS diffuses of the scan, as `engine::grass::path_key` keys (sent as
@@ -1827,6 +1798,17 @@ fn mesh_spec(
     }))
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static TEXTURE_SOURCE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many `texture_sources` store lookups this thread made (Note GP9's test: none for a float edit).
+#[cfg(feature = "test-hooks")]
+pub fn texture_source_calls() -> usize {
+    TEXTURE_SOURCE_CALLS.with(std::cell::Cell::get)
+}
+
 /// Where the game's copy of each texture is, for shapes given as (shader type, slot paths; "" = empty): every slot
 /// path the store has, then the skin RFAOS candidates (render3d resolves only through this map), those optional: a
 /// failed read is quiet. The first entry for a path wins.
@@ -1834,6 +1816,8 @@ fn texture_sources(
     store: &Store,
     paths: &[(u32, Vec<String>)],
 ) -> Result<HashMap<String, FileSource>, ScanError> {
+    #[cfg(feature = "test-hooks")]
+    TEXTURE_SOURCE_CALLS.with(|n| n.set(n.get() + 1));
     let mut textures = HashMap::new();
     for t in paths.iter().flat_map(|(_, s)| s).filter(|t| !t.is_empty()) {
         if textures.contains_key(t) {

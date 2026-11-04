@@ -127,13 +127,23 @@ fn depth(parent: &HashMap<u32, u32>, mut b: u32) -> usize {
     d
 }
 
+/// Whether `kind` is a [`NODE_TYPES`] block.
+pub fn is_node(kind: &[u8]) -> bool {
+    NODE_TYPES.iter().any(|t| t.as_bytes() == kind)
+}
+
+/// The root's node test: [`is_node`], or any type named `…Node` (a subclass the list does not know).
+pub fn is_root_node(kind: &[u8]) -> bool {
+    is_node(kind) || kind.ends_with(b"Node")
+}
+
 /// Never fails. Walks every block whose type is in [`NODE_TYPES`], in block order.
 pub fn read_graph(header: &Header, bytes: &[u8]) -> NodeGraph {
     let mut g = NodeGraph::default();
     let total = header.sizes.len();
     for i in 0..total {
         let kind = header.kind(i);
-        if !NODE_TYPES.iter().any(|t| t.as_bytes() == kind) {
+        if !is_node(kind) {
             continue;
         }
         let (local, kids) = match children(header, bytes, i) {
@@ -238,7 +248,7 @@ fn av_refs_into(h: &Header, b: &[u8], block: usize, out: &mut Vec<i32>) -> Resul
     let kind = h.kind(block);
     let is = |names: &[&str]| names.iter().any(|t| t.as_bytes() == kind);
     let mut c = block_cursor(h, b, block)?;
-    if is(NODE_TYPES) {
+    if is_node(kind) {
         read_av_head(&mut c)?;
         for _ in 0..2 {
             // children, then effects (both present below FO4)
@@ -311,9 +321,8 @@ fn av_refs_into(h: &Header, b: &[u8], block: usize, out: &mut Vec<i32>) -> Resul
 /// 0 when it is a [`NODE_TYPES`] block, else the first block that is.
 pub fn index3d(header: &Header, bytes: &[u8]) -> BTreeMap<u32, u32> {
     let total = header.sizes.len();
-    let is_node = |i: usize| NODE_TYPES.iter().any(|t| t.as_bytes() == header.kind(i));
     let mut out = BTreeMap::new();
-    let Some(root) = (0..total).find(|&i| is_node(i)) else {
+    let Some(root) = (0..total).find(|&i| is_node(header.kind(i))) else {
         return out;
     };
     let mut seen: HashSet<usize> = HashSet::new();

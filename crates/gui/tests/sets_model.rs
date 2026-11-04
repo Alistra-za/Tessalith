@@ -1121,6 +1121,48 @@ fn scan_db(db: &std::path::Path, tex: &str, shapes: &[(u32, u32, i32, bool, bool
     }
 }
 
+/// L7: one read gives each mesh once per fact. One NIF in two enabled mods whose copies differ only in the alpha
+/// property: one shader vote, two alpha entries, and Tree_Anim evidence (not set).
+#[test]
+fn mesh_evidence_counts_each_mesh_once_per_fact() {
+    use engine::shader::{MeshAlpha, Shader};
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    let s = modscan::store::Store::open(&db).unwrap();
+    s.conn()
+        .execute_batch(
+            "INSERT INTO path(id, p) VALUES (1, 'textures/a/wall.dds'), (2, 'meshes/m.nif');
+             INSERT INTO texset(id, n, t0) VALUES (1, 1, 1);
+             INSERT INTO tex_use(tex_path_id, texset_id, slot) VALUES (1, 1, 0);
+             INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (1, 1, 'A', 'A', 1, 1), (2, 1, 'B', 'B', 2, 1);
+             INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (1, 2, 1, 0, 0), (2, 2, 2, 0, 0);
+             INSERT INTO shape(copy_id, block, kind, shader_kind, shader_type, slsf2, texset_id, alpha_flags, alpha_threshold) VALUES
+               (1, 0, 'BSTriShape', 1, 6, 0, 1, 1, 0), (2, 0, 'BSTriShape', 1, 6, 0, 1, NULL, NULL);",
+        )
+        .unwrap();
+    drop(s);
+    let keys = ["textures/a/wall".to_string(), "textures/a/none".to_string()]
+        .into_iter()
+        .collect();
+    let (votes, alpha, tree) = sdc_gui::model::meshes::mesh_evidence(&db, &keys).unwrap();
+    assert_eq!(votes["textures/a/wall"], vec![Shader::Hair]);
+    // The copy without the property (no alpha), then the blend one: entries sort by flags, NULL first.
+    let none = MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    let blend = MeshAlpha {
+        blend: true,
+        ..none
+    };
+    assert_eq!(alpha["textures/a/wall"], vec![none, blend]);
+    assert_eq!(tree.get("textures/a/wall"), Some(&false));
+    assert!(!votes.contains_key("textures/a/none"));
+    assert!(!alpha.contains_key("textures/a/none"));
+    assert!(!tree.contains_key("textures/a/none"));
+}
+
 #[test]
 fn mesh_votes_count_enabled_source_lighting_shapes_only() {
     use engine::shader::Shader;
@@ -1141,7 +1183,7 @@ fn mesh_votes_count_enabled_source_lighting_shapes_only() {
     let keys = ["textures/a/wall".to_string(), "textures/a/none".to_string()]
         .into_iter()
         .collect();
-    let v = sdc_gui::model::meshes::mesh_votes(&db, &keys).unwrap();
+    let v = sdc_gui::model::meshes::mesh_evidence(&db, &keys).unwrap().0;
     assert_eq!(v.get("textures/a/wall"), Some(&vec![Shader::Hair]));
     assert!(!v.contains_key("textures/a/none"));
 }
@@ -1253,7 +1295,7 @@ fn mesh_alpha_reads_the_alpha_property_of_each_source_lighting_shape() {
     let keys = ["textures/a/wall".to_string(), "textures/a/none".to_string()]
         .into_iter()
         .collect();
-    let v = sdc_gui::model::meshes::mesh_alpha(&db, &keys).unwrap();
+    let v = sdc_gui::model::meshes::mesh_evidence(&db, &keys).unwrap().1;
     let mut got = v["textures/a/wall"].clone();
     got.sort_by_key(|a| (a.blend, a.test, a.threshold));
     let ma = |blend, test, threshold| MeshAlpha {

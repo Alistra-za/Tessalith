@@ -1,8 +1,8 @@
 mod builder;
 use builder::scenes::{free_chain, managed_clip};
 use nif::anim::{
-    apply_anim, clip_tracks, ctrl_time, free_tracks, sample_f32, sample_vec3, AnimValue, Target,
-    Track,
+    apply_anim, clip_tracks, clips_by_ctrl, clips_of_in, ctrl_time, free_tracks, sample_f32,
+    sample_vec3, AnimValue, Target, Track,
 };
 use nif::header::Header;
 use nif::keys::{Key, KeyData, KeyGroup};
@@ -721,4 +721,27 @@ fn real_curves_evaluate() {
     }
     assert!(found > 0, "no real file found");
     assert!(keyed > 0, "no track had keys");
+}
+
+#[test]
+fn clips_by_ctrl_equals_clips_of_in_for_every_controller() {
+    let fixture = std::fs::read(format!(
+        "{}/tests/fixtures/TestNifFile_Animated_LE.nif",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    for b in [fixture, managed_clip()] {
+        let m = read_model(&b).unwrap();
+        let h = Header::parse(&b).unwrap();
+        let by = clips_by_ctrl(&m, &h);
+        assert!(!by.is_empty(), "no controller has a clip");
+        assert!(!m.ctrls.is_empty());
+        for &c in m.ctrls.keys() {
+            assert_eq!(
+                by.get(&c).cloned().unwrap_or_default(),
+                clips_of_in(&m, &h, c),
+                "ctrl {c}"
+            );
+        }
+    }
 }

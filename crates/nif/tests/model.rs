@@ -136,3 +136,15 @@ fn read_model_is_linear_in_the_shape_count() {
         "80k shapes took {ratio:.1}x 10k ({big:.3} s vs {small:.3} s)"
     );
 }
+
+#[test]
+fn a_nibone_root_has_its_object_net() {
+    // NiBone adds no fields to NiNode, so renaming the (length-prefixed) header type string keeps the file readable.
+    let mut b = scenes::root_extras();
+    let old = b"\x06\0\0\0NiNode";
+    let at = b.windows(old.len()).position(|w| w == old).unwrap();
+    b[at + 4..at + 10].copy_from_slice(b"NiBone");
+    let m = read_model(&b).unwrap();
+    assert_eq!(m.root, Some(7));
+    assert!(m.root_net.is_some());
+}

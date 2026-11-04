@@ -60,6 +60,7 @@ pub struct NifModel {
     pub root_kind: String,
     /// When the root block has an NiObjectNET prefix (node types).
     pub root_net: Option<ObjectNet>,
+    /// In ascending `block` order (`read_model`, the only constructor, pushes in block order): `shape` binary-searches.
     pub shapes: Vec<ShapeModel>,
     /// Every BSLightingShaderProperty block, orphans too.
     pub lighting: BTreeMap<u32, LightingModel>,
@@ -78,7 +79,10 @@ pub struct NifModel {
 
 impl NifModel {
     pub fn shape(&self, block: u32) -> Option<&ShapeModel> {
-        self.shapes.iter().find(|s| s.block == block)
+        self.shapes
+            .binary_search_by_key(&block, |s| s.block)
+            .ok()
+            .map(|i| &self.shapes[i])
     }
 
     /// Flags bit 0x20 (Manager Controlled), or named by any controlled block of a sequence.
@@ -108,10 +112,6 @@ fn is_extra(kind: &[u8]) -> bool {
             b"BSInvMarker" | b"BSBound" | b"BSFurnitureMarker" | b"BSFurnitureMarkerNode"
         )
         || kind.starts_with(b"BSConnectPoint")
-}
-
-fn is_node(kind: &[u8]) -> bool {
-    kind.ends_with(b"Node")
 }
 
 pub fn read_model(b: &[u8]) -> Result<NifModel, NifError> {
@@ -222,7 +222,7 @@ pub fn read_model(b: &[u8]) -> Result<NifModel, NifError> {
                 Ok(s) => m.sequences.push(s),
                 Err(e) => p.push(format!("block {i}: {e}")),
             }
-        } else if Some(i as u32) == m.root && is_node(kind) {
+        } else if Some(i as u32) == m.root && crate::graph::is_root_node(kind) {
             match read_net(&h, b, i) {
                 Ok(net) => m.root_net = Some(net),
                 Err(e) => p.push(format!("block {i}: {e}")),
@@ -338,5 +338,6 @@ pub fn read_model(b: &[u8]) -> Result<NifModel, NifError> {
         }
     }
     m.problems = p;
+    debug_assert!(m.shapes.windows(2).all(|w| w[0].block < w[1].block));
     Ok(m)
 }

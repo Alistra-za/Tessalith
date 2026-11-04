@@ -22,7 +22,7 @@ use nif::keys::KeyData;
 use nif::material::{MaterialState, SLSF2_TRUE_PBR};
 use nif::model::{read_model, NifModel, ShapeModel};
 use nif::props::LightingTrailer;
-use render3d::{ParsedNif, ShapeId};
+use render3d::{ParsedNif, ParsedShape, ShapeId};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -82,6 +82,8 @@ pub struct NifEdit {
     pub source: Arc<Vec<u8>>,
     pub source_copy: PathCopy,
     pub data_path: String,
+    /// The source with the ops applied. Written only by `reapply` (and the test seam `set_patched`), which keep
+    /// `read_err` and `cards` in step with it (Note GP8): never assign it elsewhere.
     pub patched: Arc<Vec<u8>>,
     /// Note GD2 (CQ1-CQ4): what the export writes, `patched` without its orphan blocks; rebuilt by `reapply`.
     pub out: Arc<Vec<u8>>,
@@ -119,9 +121,11 @@ pub struct NifEdit {
     pub error: Option<String>,
     /// Every enabled copy of the NIF (the store's order), for the placement check and the PGPatcher re-run note.
     pub copies: Vec<PathCopy>,
-    /// The shape cards of the edited bytes (`shape_cards`), rebuilt by every `reapply` (Note CZ1; was the scan's
-    /// cards of `source_copy`, final review I1).
+    /// The shape cards of the edited bytes (`shape_views` of `reapply`'s one scan of `patched`, Note GP8), rebuilt by
+    /// every `reapply` (Note CZ1; was the scan's cards of `source_copy`, final review I1).
     pub cards: Vec<ShapeView>,
+    /// Note GP8: `read_back`'s text for `patched` from the same scan; `export_block` reads it, never scans.
+    read_err: Option<String>,
     /// Meshes UI T2: each shape's controllers line ("2: Emissive multiple, Alpha (clip)"), by shape block; rebuilt with
     /// `cards`.
     pub card_ctrls: HashMap<u32, String>,
@@ -129,12 +133,12 @@ pub struct NifEdit {
     pub placement: Option<Placement>,
     /// Why "Export NIF" is disabled, from the in-memory state (`export_block`), kept current by every change.
     pub blocked: Option<String>,
+    /// Note GP8: the `rev` `refresh_blocked` last ran for; `edit_checks` skips a check it already made.
+    blocked_rev: u64,
     /// Note GD1: this edit's worklist rows, rebuilt with `blocked` (a new `Arc` only when they change, rule 9.1).
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
     pub notice: Option<String>,
-    /// The guard dialog's question, while it is open.
-    pub guard: Option<GuardAsk>,
     /// The last export's result line, and whether it is an error.
     pub export_note: Option<(String, bool)>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
@@ -168,6 +172,8 @@ pub struct NifEdit {
     anim: Vec<(ShapeId, MaterialState, Vec<Track>)>,
     /// The clock time whose materials the viewport shows; None after anything sent un-animated materials.
     anim_shown: Option<f32>,
+    /// The last `edit_changed` store lookup failed: the next change looks every shape up again (Note GP9).
+    lookup_failed: bool,
     /// The shapes the last `tick_anim` animated (D15: one that leaves gets its file material back).
     anim_last: Vec<ShapeId>,
     /// v2 B8 fix F1: per shape, the files that can patch it (keyed on its slots and the JSON generation) and its
@@ -206,17 +212,6 @@ struct SimCache {
 /// Under the toggle when `show_edit_preview` failed and a plain copy shows (fix F8).
 pub const EDIT_HIDDEN: &str = "Your edit could not be shown. Switch to In game or Source to retry.";
 
-/// The open guard dialog: the block diff, whether Diff is showing it, and the hash of the file it was asked about
-/// (Overwrite applies only while the file still has it).
-#[derive(Debug, Clone, PartialEq)]
-pub struct GuardAsk {
-    pub diff: Vec<String>,
-    pub show_diff: bool,
-    pub sha256: String,
-    /// sdc never exported to this path: the file there is not one it wrote and then saw changed.
-    pub never_exported: bool,
-}
-
 /// The idle reason Export NIF is off: drawn neutral, not as a block (review Minor 5).
 pub const NO_EDITS: &str = "No edits to export.";
 pub const RERUN_PGPATCHER: &str = "Re-run PGPatcher so its output includes this edit.";
@@ -227,6 +222,9 @@ pub const NIF_UNANSWERED: &str =
     "the file on disk was not written by Tessalith: answer Keep or Overwrite on its row";
 pub const NIF_KEPT: &str = "you kept the file on disk";
 pub const NIF_CHANGED_SINCE: &str = "changed on disk since you answered";
+/// Note GP10: the write found a file Tessalith did not write that the row had not (it changed in between).
+pub const NIF_FOREIGN_AT_WRITE: &str =
+    "the file on disk changed before the write: answer Keep or Overwrite on its row";
 /// Note GD2 (was CQ5's under-button line): the export will write the patch without dropping orphan blocks.
 pub const NO_CLEANUP: &str =
     "Exports without cleanup: the file has a block Tessalith does not understand";
@@ -698,12 +696,13 @@ impl NifEdit {
             error: None,
             copies: vec![],
             cards: vec![],
+            read_err: None,
             card_ctrls: HashMap::new(),
             placement: None,
             blocked: None,
+            blocked_rev: 0,
             problems: Arc::default(),
             notice: None,
-            guard: None,
             export_note: None,
             cleanup_note: None,
             retarget_error: None,
@@ -718,6 +717,7 @@ impl NifEdit {
             playing_name: None,
             anim: vec![],
             anim_shown: None,
+            lookup_failed: false,
             anim_last: vec![],
             sim_cache: BTreeMap::new(),
             #[cfg(feature = "test-hooks")]
@@ -830,25 +830,24 @@ impl NifEdit {
         if let Some(w) = self.op_warnings.iter().find(|w| w.level == Level::Error) {
             return Some(w.text.clone());
         }
-        read_back(&self.patched).err()
+        self.read_err.clone()
     }
 
     /// Note GD33: a reason the export is blocked that no worklist row says: a failed folder change, an apply error, or
     /// bytes that do not read back. Refused ops, conflicts and errors have their own rows, so `export_block`'s
-    /// summaries of them are never a row. Unblocked, the bytes read back (`export_block` checked), so no second scan.
+    /// summaries of them are never a row.
     pub fn uncovered_block(&self) -> Option<String> {
         self.retarget_error
             .clone()
             .or_else(|| self.apply_err.clone())
-            .or_else(|| {
-                self.blocked
-                    .as_ref()
-                    .and_then(|_| read_back(&self.patched).err())
-            })
+            .or_else(|| self.read_err.clone())
     }
 
     /// Recomputes `blocked` after the ops or the warnings changed.
     pub fn refresh_blocked(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        CHECKS.with(|n| n.set(n.get() + 1));
+        self.blocked_rev = self.rev;
         self.blocked = self.export_block();
         self.refresh_problems();
     }
@@ -861,23 +860,10 @@ impl NifEdit {
         }
     }
 
-    /// Export steps 1-6 (spec §8.3). Nothing is written when a check fails; a file sdc did not write is replaced
-    /// only by an Overwrite answered for exactly the bytes on disk now.
-    pub fn export(&mut self, choice: Option<GuardChoice>) -> ExportOutcome {
-        let asked = self.guard.take();
-        if choice == Some(GuardChoice::KeepTheirs) {
-            return ExportOutcome::KeptTheirs; // whatever is on disk now stays
-        }
-        let overwrite = match choice {
-            Some(GuardChoice::Overwrite) => asked.map(|a| a.sha256),
-            _ => None,
-        };
-        self.write_out(overwrite)
-    }
-
-    /// [`Self::export`]'s steps with the answer already given (Note GD2's Review path too): `overwrite` is the hash
-    /// (hex) of the file on disk the user answered Overwrite for; a foreign file with another hash is not written.
-    pub(super) fn write_out(&mut self, overwrite: Option<String>) -> ExportOutcome {
+    /// Export steps 1-6 (spec §8.3) for Review's Export (Note GD2). Nothing is written when a check fails; a file
+    /// Tessalith did not write is replaced only when `overwrite`, the SHA-256 its Overwrite answer was given for, is
+    /// the hash of the bytes on disk now.
+    pub(super) fn write_out(&mut self, overwrite: Option<[u8; 32]>) -> ExportOutcome {
         if self.edit_mod.as_os_str().is_empty() {
             return ExportOutcome::Blocked(NO_EXPORT_FOLDER.into());
         }
@@ -899,36 +885,10 @@ impl NifEdit {
         // (`reapply` made both, Note GD2)
         let (out, skipped) = (self.out.to_vec(), self.cleanup_skip.clone());
         let path = self.export_path.clone();
-        let cannot_read = |e: std::io::Error| {
-            ExportOutcome::Blocked(format!("Cannot read {}: {e}", path.display()))
-        };
-        let last = self.doc.export.sha256.clone();
-        let ours = |b: &[u8]| last.as_deref() == Some(edit_doc::sha256_hex(b).as_str());
-        match engine::dds::may_replace(&path, &out, ours) {
-            Ok(()) => {}
-            Err(Kept::Unreadable(e)) => return cannot_read(e),
-            Err(Kept::Foreign) => {
-                let on_disk = match std::fs::read(&path) {
-                    Ok(b) => b,
-                    Err(e) => return cannot_read(e),
-                };
-                let sha256 = edit_doc::sha256_hex(&on_disk);
-                match overwrite {
-                    Some(h) if h == sha256 => {}
-                    _ => {
-                        let diff = nif::write::block_diff(&on_disk, &out).unwrap_or_else(|e| {
-                            vec![format!("The file on disk does not read as a NIF: {e}")]
-                        });
-                        self.guard = Some(GuardAsk {
-                            diff: diff.clone(),
-                            show_diff: false,
-                            sha256,
-                            never_exported: last.is_none(),
-                        });
-                        return ExportOutcome::Guard { diff };
-                    }
-                }
-            }
+        match foreign_hash(&path, &out, self.doc.export.sha256.as_deref()) {
+            Err(e) => return ExportOutcome::Blocked(e),
+            Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
+            Ok(_) => {}
         }
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
             return ExportOutcome::Blocked(format!("Cannot write {}: {e}", path.display()));
@@ -959,6 +919,7 @@ impl NifEdit {
             Err(e) => {
                 self.error = Some(e.to_string());
                 self.apply_err = Some(e.to_string());
+                self.read_err = None; // `apply_err` says why
                 self.up_to_date = false; // review Minor 3: the stale bytes are not what the last export wrote
                 self.refresh_blocked();
                 return;
@@ -997,13 +958,14 @@ impl NifEdit {
             Ok(m) => self.model = m,
             Err(e) => self.error = Some(e.to_string()),
         }
-        self.trailer_types = trailer_types(&self.doc.ops(), &self.outcomes, &self.model);
-        self.cards = shape_cards(&self.patched); // once per change, never per frame (rule 9.1)
+        // After the ReAnchored write-back: each op's `at.block` is the block its warning targets.
+        let ops = self.doc.ops();
+        self.trailer_types = trailer_types(&ops, &self.outcomes, &self.model);
+        self.scan_patched(); // once per change, never per frame (rule 9.1)
         self.card_ctrls = card_ctrls(&self.model);
         self.warnings = validate(&self.model, None);
         demote_source(&self.source_warnings, &mut self.warnings);
-        // After the ReAnchored write-back: each op's `at.block` is the block its warning targets.
-        self.op_warnings = validate_ops(&self.doc.ops());
+        self.op_warnings = validate_ops(&ops);
         // B-P41: one header parse per change; one per controller cost 266 ms a drag tick on a 608-controller NIF.
         let header = nif::header::Header::parse(&self.patched).map_err(|e| e.to_string());
         self.keys =
@@ -1017,12 +979,13 @@ impl NifEdit {
                     ((c, None), k)
                 })
                 .collect();
-        // v2 B7: the keys of each clip a managed controller is driven by (once per change).
-        // shortcut: clips_of_in walks every property per (sequence, controller): ~18 ms a drag tick on a 608-controller,
-        // 818-shape NIF (CM32); invert it per sequence if a file the owner edits passes 16 ms.
+        // v2 B7: the keys of each clip a managed controller is driven by (once per change, one bound map per sequence).
         if let Ok(h) = &header {
-            for &c in self.model.ctrls.keys().filter(|&&c| self.model.managed(c)) {
-                for seq in nif::anim::clips_of_in(&self.model, h, c) {
+            for (c, seqs) in nif::anim::clips_by_ctrl(&self.model, h) {
+                if !self.model.ctrls.contains_key(&c) || !self.model.managed(c) {
+                    continue;
+                }
+                for seq in seqs {
                     let k = nif::edit::keys_of_in(h, &self.patched, &self.model, c, Some(seq));
                     self.keys.insert((c, Some(seq)), k);
                 }
@@ -1045,6 +1008,24 @@ impl NifEdit {
         self.anim = anim_tracks(&self.model, &self.patched, &self.parsed, self.playing);
         self.anim_shown = None;
         self.refresh_pg_warnings();
+        self.refresh_blocked();
+    }
+
+    /// Note GP8: the one scan of `patched`: its shape cards, as the scan store would give them for these bytes
+    /// (`modscan::store::shape_views`, Note CZ1), and whether it reads back.
+    fn scan_patched(&mut self) {
+        // Silent cards on purpose (review Minor 4): they fall back to titles, and `read_err` blocks Export NIF.
+        (self.cards, self.read_err) = match read_back(&self.patched) {
+            Ok(s) => (modscan::store::shape_views(&s), None),
+            Err(e) => (vec![], Some(e)),
+        };
+    }
+
+    /// Test seam: `patched` replaced as `reapply` would leave it, for bytes no edit can make (Note GP8).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_patched(&mut self, bytes: Vec<u8>) {
+        self.patched = Arc::new(bytes);
+        self.scan_patched();
         self.refresh_blocked();
     }
 
@@ -1222,7 +1203,6 @@ impl NifEdit {
         // first save there (Note GD19), not claimed here
         (self.edit_mod, self.doc_path, self.export_path) = (edit_mod, doc_path, export_path);
         self.drag = None;
-        self.guard = None; // Note GD30: its question was about the old folder's file
         self.history.break_merge();
         self.unsaved = true;
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
@@ -1657,98 +1637,6 @@ fn anim_tracks(
         .collect()
 }
 
-/// The shape cards of `bytes`, as the scan store would give them for these bytes (`modscan` `write_shapes` and
-/// `shapes_of`): the edit-mode cards then show the edited values (Note CZ1). Empty when the bytes do not scan.
-pub fn shape_cards(bytes: &[u8]) -> Vec<ShapeView> {
-    use modscan::store::{RawSlot, MAX_SLOTS};
-    use nif::path::TexPath;
-    use nif::scan::Shader;
-    let Ok(scan) = nif::scan::scan(bytes) else {
-        // Silent on purpose (review Minor 4): the cards fall back to titles, and the same failure blocks Export NIF
-        // with its reason, since `read_back` scans the patched bytes too.
-        return vec![];
-    };
-    // modscan's `keep_raw`: the raw string says more than the canonical path.
-    let keep_raw = |p: &TexPath| {
-        let f = &p.flags;
-        f.rebased
-            || f.prefixed
-            || f.non_dds
-            || p.raw.replace('\\', "/").to_ascii_lowercase() != p.norm
-    };
-    let json = |v: serde_json::Result<String>| v.ok();
-    scan.shapes
-        .iter()
-        .map(|s| {
-            let (shader_kind, shader_type, slsf1, slsf2, slots, params): (
-                _,
-                _,
-                _,
-                _,
-                Vec<&TexPath>,
-                _,
-            ) = match &s.shader {
-                Shader::None => (0, None, None, None, vec![], None),
-                Shader::Lighting(l, ts) => (
-                    1,
-                    Some(l.shader_type),
-                    Some(l.slsf1),
-                    Some(l.slsf2),
-                    ts.iter().take(MAX_SLOTS).collect(),
-                    json(serde_json::to_string(&l.params)),
-                ),
-                Shader::Effect(e) => (
-                    2,
-                    None,
-                    Some(e.slsf1),
-                    Some(e.slsf2),
-                    vec![&e.source, &e.greyscale],
-                    json(serde_json::to_string(&e.params)),
-                ),
-                Shader::Other { kind } => (
-                    3,
-                    None,
-                    None,
-                    None,
-                    vec![],
-                    Some(serde_json::json!({ "shader": kind }).to_string()),
-                ),
-            };
-            let h = &s.head;
-            ShapeView {
-                block: s.block,
-                name: h.name.clone(),
-                kind: format!("{:?}", h.kind),
-                shader_kind,
-                shader_type,
-                slsf1,
-                slsf2,
-                textures: slots
-                    .iter()
-                    .map(|p| (!(p.flags.empty || p.norm.is_empty())).then(|| p.norm.clone()))
-                    .collect(),
-                raw: slots
-                    .iter()
-                    .map(|p| {
-                        keep_raw(p).then(|| RawSlot {
-                            raw: p.raw.clone(),
-                            flags: p.flags.clone(),
-                        })
-                    })
-                    .collect(),
-                alpha_flags: s.alpha.map(|a| a.flags),
-                alpha_threshold: s.alpha.map(|a| a.threshold),
-                params,
-                skinned: h.skinned,
-                vertex_desc: h.vertex_desc,
-                num_vertices: h.num_vertices,
-                num_triangles: h.num_triangles,
-                index3d: scan.index3d.get(&s.block).copied(),
-            }
-        })
-        .collect()
-}
-
 /// Meshes UI T5b (Note CZ19): the heel height shape `shape` needs, Z = −(lowest bind-pose vertex Z) in root space,
 /// rounded to 0.1. A skinned shape's vertices go through the inverse of its NiSkinData skin transform; an unskinned
 /// one through its node chain. None when the shape has no drawable geometry (a non-lighting shape, an LE file).
@@ -1903,17 +1791,26 @@ fn source_id(copy: &PathCopy, data_path: &str, source: &[u8]) -> SourceId {
 }
 
 /// Each shape's (shader type, slot paths) for [`texture_sources`].
-fn slot_paths(p: &ParsedNif) -> Vec<(u32, Vec<String>)> {
-    p.shapes
-        .iter()
+fn slot_paths<'a>(shapes: impl IntoIterator<Item = &'a ParsedShape>) -> Vec<(u32, Vec<String>)> {
+    shapes
+        .into_iter()
         .map(|s| {
-            let m = &s.material;
-            (
-                m.shader_type,
-                m.slots.iter().map(|t| t.norm.clone()).collect(),
-            )
+            let (ty, slots) = lookup_key(&s.material);
+            (ty, slots.map(str::to_owned).collect())
         })
         .collect()
+}
+
+/// What [`texture_sources`] reads of a material: its shader type and slot paths. [`slot_paths`] and
+/// [`same_lookup`] both go through it, so the store lookup and its trigger cannot drift apart.
+fn lookup_key(m: &MaterialState) -> (u32, impl Iterator<Item = &str>) {
+    (m.shader_type, m.slots.iter().map(|t| t.norm.as_str()))
+}
+
+/// Whether `a` and `b` name the same textures to [`texture_sources`].
+fn same_lookup(a: &MaterialState, b: &MaterialState) -> bool {
+    let ((ta, sa), (tb, sb)) = (lookup_key(a), lookup_key(b));
+    ta == tb && sa.eq(sb)
 }
 
 /// The same folder, ignoring ASCII case, `/` versus `\` and a trailing separator (MO2 paths on Windows).
@@ -1925,9 +1822,19 @@ pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// Lowercase hex of a SHA-256, as `edit_doc::sha256_hex` writes it.
-fn hex(h: [u8; 32]) -> String {
-    h.iter().map(|b| format!("{b:02x}")).collect()
+/// Note GP10: what an export of `out` to `path` finds there: None when the file is absent, equal to `out` or
+/// Tessalith's own (its hash is `last`, the last export's); Some(its SHA-256) when Tessalith did not write it; Err
+/// when it cannot be read.
+fn foreign_hash(path: &Path, out: &[u8], last: Option<&str>) -> Result<Option<[u8; 32]>, String> {
+    let cannot = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
+    let ours = |b: &[u8]| last == Some(edit_doc::sha256_hex(b).as_str());
+    match engine::dds::may_replace(path, out, ours) {
+        Ok(()) => Ok(None),
+        Err(Kept::Unreadable(e)) => Err(cannot(e)),
+        Err(Kept::Foreign) => std::fs::read(path)
+            .map(|b| Some(Sha256::digest(&b).into()))
+            .map_err(cannot),
+    }
 }
 
 /// The header's block count; 0 when it does not parse.
@@ -1939,6 +1846,17 @@ fn block_count(b: &[u8]) -> u32 {
 fn next_key() -> u64 {
     static KEY: AtomicU64 = AtomicU64::new(1);
     KEY.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many `refresh_blocked` calls this thread made (Note GP8's test: one per change).
+#[cfg(feature = "test-hooks")]
+pub fn block_check_count() -> usize {
+    CHECKS.with(std::cell::Cell::get)
 }
 
 impl MeshesModel {
@@ -2019,7 +1937,7 @@ impl MeshesModel {
         }
         let mut nif = e.preview_nif();
         nif.head_part = store.is_head_part_mesh(&e.data_path).unwrap_or(false); // shading only, as mesh_spec
-        let textures = texture_sources(store, &slot_paths(&nif)).map_err(db_err)?;
+        let textures = texture_sources(store, &slot_paths(&nif.shapes)).map_err(db_err)?;
         Ok(Some(Content::Parsed {
             key: next_key(),
             nif: Arc::new(nif),
@@ -2196,6 +2114,9 @@ impl MeshesModel {
         e.check_exists = on;
         e.warnings = validate(&e.model, None);
         demote_source(&e.source_warnings, &mut e.warnings);
+        if !on || self.store.is_none() {
+            e.refresh_blocked(); // the warnings changed without a new `rev`, and `edit_checks` does not validate (GP8)
+        }
         self.edit_checks();
     }
 
@@ -2213,29 +2134,39 @@ impl MeshesModel {
         if let Some(err) = e.error.take() {
             self.error = Some(err);
         }
+        let mut validated = false;
         if let (true, Some(store)) = (e.check_exists, &self.store) {
             let exists = |n: &str| matches!(store.texture_location(n), Ok(Some(_)));
+            // shortcut: with the check on, every change queries the store once per slot, drag ticks included, upgrade
+            // by caching the lookups per slot path if a drag stalls on a slow store.
             e.warnings = validate(&e.model, Some(&exists));
             demote_source(&e.source_warnings, &mut e.warnings);
+            validated = true;
         }
-        e.refresh_blocked();
+        // Note GP8: a change already checked in `reapply` is not checked again; what changes the block's inputs
+        // without a new `rev` refreshes it itself (`after_export`, `set_edit_check_exists`, the folder change)
+        if validated || e.blocked_rev != e.rev {
+            e.refresh_blocked();
+        } else {
+            debug_assert_eq!(
+                e.blocked,
+                e.export_block(),
+                "stale export block at rev {}",
+                e.rev
+            );
+            debug_assert_eq!(
+                *e.problems,
+                super::worklist::problems(e),
+                "stale worklist rows at rev {}",
+                e.rev
+            );
+        }
         if !e.edit_mod.as_os_str().is_empty() {
             match DocBadge::of(&e.doc) {
                 Some(b) => self.doc_badges.insert(e.data_path.clone(), b),
                 None => self.doc_badges.remove(&e.data_path),
             };
         }
-    }
-
-    /// Export steps 1-7 for the open session (spec §8): the outcome also sets the session's guard and result line.
-    pub fn export_edit(&mut self, choice: Option<GuardChoice>) -> ExportOutcome {
-        let Some(e) = &mut self.edit else {
-            return ExportOutcome::Blocked("No NIF is being edited.".into());
-        };
-        let before = e.materials();
-        let out = e.export(choice);
-        self.after_export(before, &out);
-        out
     }
 
     /// The open session's result line after an export, and the preview (a changed source re-applied the ops).
@@ -2251,11 +2182,12 @@ impl MeshesModel {
                 false,
             )),
             ExportOutcome::Blocked(s) => Some((s.clone(), true)),
-            ExportOutcome::KeptTheirs => {
-                Some(("Not exported: the file on disk was kept.".into(), false))
+            ExportOutcome::Foreign => {
+                Some((format!("Not exported: {NIF_FOREIGN_AT_WRITE}."), true))
             }
-            ExportOutcome::Guard { .. } => None,
         };
+        // the re-run row follows `export_note`, which has no `rev` of its own (Note GP8)
+        e.refresh_blocked();
         // A changed source re-applied the ops: the preview follows.
         self.edit_changed(before);
     }
@@ -2314,17 +2246,7 @@ impl MeshesModel {
                 return v.clone();
             }
         }
-        let cannot =
-            |err: std::io::Error| format!("Cannot read {}: {err}", e.export_path.display());
-        let last = e.doc.export.sha256.clone();
-        let ours = |b: &[u8]| last.as_deref() == Some(edit_doc::sha256_hex(b).as_str());
-        let v = match engine::dds::may_replace(&e.export_path, &e.out, ours) {
-            Ok(()) => Ok(None),
-            Err(Kept::Unreadable(err)) => Err(cannot(err)),
-            Err(Kept::Foreign) => std::fs::read(&e.export_path)
-                .map(|b| Some(Sha256::digest(&b).into()))
-                .map_err(cannot),
-        };
+        let v = foreign_hash(&e.export_path, &e.out, e.doc.export.sha256.as_deref());
         *self.foreign_cache.borrow_mut() = Some((key, v.clone()));
         v
     }
@@ -2379,7 +2301,7 @@ impl MeshesModel {
         self.nif_answers.clear();
     }
 
-    /// Note GD2: the block diff the guard dialog showed, for the Review row's Diff…: the file on disk against what the
+    /// Note GD2: the block diff for the Review row's Diff…: the file on disk against what the
     /// export writes. None unless `path`'s row has a foreign file. Reads the disk: call it on a click, not per frame.
     pub fn nif_diff(&self, path: &str) -> Option<Vec<String>> {
         let row = self
@@ -2425,8 +2347,7 @@ impl MeshesModel {
                 continue;
             };
             let before = e.materials();
-            let out = e.write_out(r.foreign.map(hex));
-            e.guard = None; // the Review answers on its row: no dialog
+            let out = e.write_out(r.foreign);
             let placement = e.placement.clone();
             self.after_export(before, &out);
             match out {
@@ -2439,8 +2360,8 @@ impl MeshesModel {
                     }
                 }
                 ExportOutcome::Blocked(why) => skipped.push(format!("{}: {why}", r.path)),
-                ExportOutcome::Guard { .. } | ExportOutcome::KeptTheirs => {
-                    skipped.push(format!("{}: {NIF_CHANGED_SINCE}", r.path))
+                ExportOutcome::Foreign => {
+                    skipped.push(format!("{}: {NIF_FOREIGN_AT_WRITE}", r.path))
                 }
             }
         }
@@ -2632,22 +2553,43 @@ impl MeshesModel {
         let Some(Content::Parsed { nif, textures, .. }) = self.v3.content() else {
             return;
         };
-        let (head_part, textures) = (nif.head_part, textures.clone());
+        let (head_part, textures, retry) = (nif.head_part, textures.clone(), e.lookup_failed);
         let mut next = e.preview_nif();
         next.head_part = head_part;
-        let fresh = match texture_sources(store, &slot_paths(&next)) {
-            Ok(f) => f,
-            Err(err) => {
-                self.error = Some(db_err(err));
-                return;
+        let pairs: Vec<(&ParsedShape, Option<&MaterialState>)> = next
+            .shapes
+            .iter()
+            .map(|s| (s, before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m)))
+            .collect();
+        // The store is asked only for shapes whose shader type or slot paths changed (the only inputs of
+        // `texture_sources`): a drag tick on a float field changes a material but names no new texture.
+        let named: Vec<&ParsedShape> = pairs
+            .iter()
+            .filter(|(s, old)| retry || old.is_none_or(|m| !same_lookup(m, &s.material)))
+            .map(|(s, _)| *s)
+            .collect();
+        let fresh = if named.is_empty() {
+            HashMap::new()
+        } else {
+            match texture_sources(store, &slot_paths(named)) {
+                Ok(f) => f,
+                Err(err) => {
+                    self.error = Some(db_err(err));
+                    if let Some(e) = &mut self.edit {
+                        e.lookup_failed = true;
+                    }
+                    return;
+                }
             }
         };
+        if let Some(e) = &mut self.edit {
+            e.lookup_failed = false;
+        }
         let mut reload = fresh.keys().any(|k| !textures.contains_key(k));
         if !reload {
             // The render thread keeps these edits and re-applies them on a reload it starts itself.
-            for s in &next.shapes {
-                let old = before.iter().find(|(id, _)| *id == s.id).map(|(_, m)| m);
-                if old != Some(&s.material) && !self.v3.set_material(s.id, s.material.clone()) {
+            for (s, old) in &pairs {
+                if *old != Some(&s.material) && !self.v3.set_material(s.id, s.material.clone()) {
                     reload = true;
                     break;
                 }

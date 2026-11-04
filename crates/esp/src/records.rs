@@ -1,6 +1,6 @@
 //! Which groups are read, and what each record type contributes (spec §3).
 use crate::read::{each_sub, u32_at};
-use crate::{AltTex, ModelRef, Payload, Rec, Txst};
+use crate::{mato, AltTex, ModelRef, Payload, Rec, Txst};
 use nif::path::{canon_model, canon_texture, is_lod_path};
 
 /// Top-level groups read (spec §3); every other group is skipped by its size. Every type here has a model (WTHR its
@@ -55,7 +55,9 @@ pub(crate) fn read(rec: &mut Rec, data: &[u8]) -> Result<(), usize> {
         match &kind {
             b"TXST" => txst(p, &sig, d),
             b"RACE" => race(p, &sig, d),
-            b"MATO" if &sig == b"DATA" => p.mato_flags = (d.len() >= 48).then(|| u32_at(d, 44)),
+            b"MATO" if &sig == b"DATA" => {
+                p.mato_flags = (d.len() >= mato::DATA_LEN).then(|| u32_at(d, mato::FLAGS_AT))
+            }
             // xEdit `wbRecord(ARMA…)`: NAM0 / NAM1 male / female skin texture (TXST FormID).
             // shortcut: NAM2 / NAM3 skin-texture swap lists (FLST) are not read, read them if a preview needs them.
             b"ARMA" if d.len() >= 4 && (&sig == b"NAM0" || &sig == b"NAM1") => {

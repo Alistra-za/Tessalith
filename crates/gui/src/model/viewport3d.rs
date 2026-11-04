@@ -678,6 +678,8 @@ pub enum V3Reply {
         report: LoadReport,
         bounds: Option<([f32; 3], f32)>,
     },
+    /// Warnings found after load `id`'s report went out (its last async compile landed); appended to that load's notes.
+    LateWarnings(u64, Vec<String>),
     Frame {
         frame: Arc<Frame>,
         #[cfg(feature = "test-hooks")]
@@ -868,7 +870,7 @@ impl Viewport3d {
             adapter: None,
             panel: "meshes",
             render_error: None,
-            cache_dir: default_cache_dir(),
+            cache_dir: None, // set by `SdcApp::new` from `AppModel::shader_cache`, so tests never use the real cache
             bounds: None,
             content: None,
             shapes: vec![],
@@ -1681,6 +1683,13 @@ impl Viewport3d {
                     self.bounds = bounds;
                 }
             }
+            V3Reply::LateWarnings(id, w) => {
+                if self.loaded == Some(id) {
+                    if let Some(rep) = &mut self.report {
+                        rep.warnings.extend(w);
+                    }
+                }
+            }
             V3Reply::Frame {
                 frame,
                 #[cfg(feature = "test-hooks")]
@@ -2471,6 +2480,11 @@ fn render_loop(
             }
         }
         pump(&mut r);
+        // After the batch's loads and edits: what the renderer found belongs to the load it now holds.
+        let late = r.take_late_warnings();
+        if let (false, Some((lid, _))) = (late.is_empty(), &last) {
+            send(V3Reply::LateWarnings(*lid, late));
+        }
         if reshaded {
             send(V3Reply::DebugSupport(r.debug_supported()));
         }

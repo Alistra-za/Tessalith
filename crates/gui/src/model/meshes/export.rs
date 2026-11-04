@@ -1,5 +1,6 @@
-//! Export of a NIF edit into the export folder (spec §8, plan A19, Note CI29): the MO2 placement check, the guard outcomes and
-//! the per-NIF badges read from the edit documents. No egui types. The export routine is `MeshesModel::export_edit`.
+//! Export of a NIF edit into the export folder (spec §8, plan A19, Note CI29): the MO2 placement check, the export outcomes
+//! and the per-NIF badges read from the edit documents. No egui types. The export routine is Review's
+//! `MeshesModel::export_nif_edits`.
 use super::edit_doc::{self, EditDoc};
 use modscan::store::{ModRow, PathCopy, KIND_BSA, KIND_MOD};
 use std::path::Path;
@@ -72,7 +73,7 @@ pub fn placement(copies: &[PathCopy], mods: &[ModRow], edit_mod_name: &str) -> P
     Placement::Ok
 }
 
-/// The answer to the guard dialog.
+/// A Review row's answer for a file Tessalith did not write (Note GD2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardChoice {
     Overwrite,
@@ -84,12 +85,9 @@ pub enum ExportOutcome {
     Written {
         rerun_pgpatcher: bool,
     },
-    /// The file on disk is not the one sdc last wrote: ask (the block-level diff, on disk → ours).
-    Guard {
-        diff: Vec<String>,
-    },
     Blocked(String),
-    KeptTheirs,
+    /// The file on disk is not one Tessalith wrote, and no Overwrite answer is for its bytes now: nothing written.
+    Foreign,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,9 +147,21 @@ pub fn pending_docs(edit_mod: &Path) -> Vec<(String, DocBadge)> {
     out
 }
 
-/// `bytes` read back as a NIF (`scan` checks the file length too).
-pub fn read_back(bytes: &[u8]) -> Result<(), String> {
-    nif::scan::scan(bytes)
-        .map(|_| ())
-        .map_err(|e| format!("The written file would not read back: {e}"))
+/// `bytes` read back as a NIF (`scan` checks the file length too). Returns the scan, which `scan_patched` turns into
+/// the edit's shape cards (Note GP8).
+pub fn read_back(bytes: &[u8]) -> Result<nif::scan::NifScan, String> {
+    #[cfg(feature = "test-hooks")]
+    SCANS.with(|n| n.set(n.get() + 1));
+    nif::scan::scan(bytes).map_err(|e| format!("The written file would not read back: {e}"))
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many `read_back` scans this thread made (Note GP8's test: one per change of the patched bytes).
+#[cfg(feature = "test-hooks")]
+pub fn scan_count() -> usize {
+    SCANS.with(std::cell::Cell::get)
 }

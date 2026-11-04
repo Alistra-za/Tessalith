@@ -408,6 +408,18 @@ pub fn clips_of_in(m: &NifModel, h: &Header, ctrl: u32) -> Vec<u32> {
         .collect()
 }
 
+/// [`clips_of_in`] for every controller at once, from one [`bound_map`] per sequence: controller -> the sequence
+/// blocks (in `m.sequences` order) with a CB driving it. A controller no sequence drives is absent.
+pub fn clips_by_ctrl(m: &NifModel, h: &Header) -> BTreeMap<u32, Vec<u32>> {
+    let mut out: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for s in &m.sequences {
+        for c in bound_map(m, h, s).into_keys() {
+            out.entry(c).or_default().push(s.block);
+        }
+    }
+    out
+}
+
 /// The interpolator of the first CB of sequence `seq` that drives `ctrl` (B2's binding, as `bound_cbs`). Parses the
 /// header: call on a click, never per frame.
 pub fn clip_interp(m: &NifModel, b: &[u8], seq: u32, ctrl: u32) -> Option<i32> {

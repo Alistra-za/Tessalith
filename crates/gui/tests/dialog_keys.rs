@@ -888,8 +888,9 @@ fn enter_right_after_typing_in_find_applies_the_rename() {
 /// Note FC5 (supersedes CZ4's "other Destructive buttons unchanged"): Enter or Space on a focused Destructive button
 /// in any `dialogs::dialog` does nothing; a click still does. One row per dialog with a Destructive button (the
 /// `Role::Destructive` uses in `ui/`): Reload, Changed on disk, Reset all, Delete generated file, Export running,
-/// Close / Open unsaved, the sets column's Replace and the presets Discard. The Meshes view's NIF guard dialog
-/// (Overwrite) is pinned in `nif_edit::enter_or_space_on_focused_export_or_overwrite_writes_nothing`.
+/// Close / Open unsaved, the sets column's Replace and the presets Discard. A NIF file Tessalith did not write has no
+/// dialog: it is answered on its Review row (Note GD2), and Enter there writes nothing
+/// (`nif_edit::a_foreign_file_opens_no_guard_dialog`).
 #[test]
 fn focused_destructive_buttons_ignore_enter_and_space() {
     use sdc_gui::model::sets::DropChoice;

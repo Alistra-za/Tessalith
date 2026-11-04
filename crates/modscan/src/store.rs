@@ -1,7 +1,7 @@
 //! SQLite scan store (plan 02 §6 with the PGPatcher columns of 05 §5.2). One row per NIF copy and per shape.
 use crate::ScanError;
 use nif::path::{PathFlags, TexPath};
-use nif::scan::{NifScan, Shader};
+use nif::scan::{NifScan, Shader, ShapeRow};
 use nif::NifError;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
@@ -570,40 +570,10 @@ fn write_shapes(
         t.raw, t.key
     );
     for s in &scan.shapes {
-        let mut slots: Vec<&TexPath> = vec![];
-        let (kind, ty, f1, f2, texset, params) = match &s.shader {
-            Shader::None => (0, None, None, None, None, None),
-            Shader::Lighting(l, ts) => {
-                slots = ts.iter().take(MAX_SLOTS).collect();
-                (
-                    1,
-                    Some(l.shader_type),
-                    Some(l.slsf1),
-                    Some(l.slsf2),
-                    tex_slots(c, i, &slots)?,
-                    Some(serde_json::to_string(&l.params).map_err(json_err)?),
-                )
-            }
-            Shader::Effect(e) => {
-                slots = vec![&e.source, &e.greyscale];
-                (
-                    2,
-                    None,
-                    Some(e.slsf1),
-                    Some(e.slsf2),
-                    tex_slots(c, i, &slots)?,
-                    Some(serde_json::to_string(&e.params).map_err(json_err)?),
-                )
-            }
-            Shader::Other { kind } => (
-                3,
-                None,
-                None,
-                None,
-                None,
-                Some(serde_json::json!({ "shader": kind }).to_string()),
-            ),
-        };
+        let (kind, ty, f1, f2, slots, params) = shader_cols(s);
+        let params = params.map_err(json_err)?;
+        // No slots at all (`tex_slots` returns None before interning anything) store a NULL texset.
+        let texset = tex_slots(c, i, &slots)?;
         let h = &s.head;
         c.prepare_cached(&sql)?.execute(params![
             key,
@@ -637,6 +607,98 @@ fn write_shapes(
         }
     }
     Ok(())
+}
+
+/// The shader-derived columns of one shape row: `shader_kind`, `shader_type`, `slsf1`, `slsf2`, the slots stored in
+/// the texset (at most [`MAX_SLOTS`]; none for no/other shaders) and the `params` JSON (`None` without a shader).
+#[allow(clippy::type_complexity)] // one tuple shared by two row builders; a struct would only rename it
+fn shader_cols(
+    s: &ShapeRow,
+) -> (
+    i32,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    Vec<&TexPath>,
+    serde_json::Result<Option<String>>,
+) {
+    match &s.shader {
+        Shader::None => (0, None, None, None, vec![], Ok(None)),
+        Shader::Lighting(l, ts) => (
+            1,
+            Some(l.shader_type),
+            Some(l.slsf1),
+            Some(l.slsf2),
+            ts.iter().take(MAX_SLOTS).collect(),
+            serde_json::to_string(&l.params).map(Some),
+        ),
+        Shader::Effect(e) => (
+            2,
+            None,
+            Some(e.slsf1),
+            Some(e.slsf2),
+            vec![&e.source, &e.greyscale],
+            serde_json::to_string(&e.params).map(Some),
+        ),
+        Shader::Other { kind } => (
+            3,
+            None,
+            None,
+            None,
+            vec![],
+            Ok(Some(serde_json::json!({ "shader": kind }).to_string())),
+        ),
+    }
+}
+
+/// What [`Store::shapes_of`] returns for a copy written from `scan`, without the store: the Meshes edit cards show
+/// the rows of edited bytes the way a rescan would (Note GP7). `name` is interned per call; a params JSON error reads
+/// as `None` here (the store write fails instead).
+pub fn shape_views(scan: &NifScan) -> Vec<ShapeView> {
+    let mut names: HashSet<Arc<str>> = HashSet::new();
+    scan.shapes
+        .iter()
+        .map(|s| {
+            let (shader_kind, shader_type, slsf1, slsf2, slots, params) = shader_cols(s);
+            let h = &s.head;
+            ShapeView {
+                block: s.block,
+                name: h.name.as_ref().map(|n| match names.get(&**n) {
+                    Some(a) => a.clone(),
+                    None => {
+                        names.insert(n.clone());
+                        n.clone()
+                    }
+                }),
+                kind: format!("{:?}", h.kind),
+                shader_kind,
+                shader_type,
+                slsf1,
+                slsf2,
+                textures: slots
+                    .iter()
+                    .map(|p| (!(p.flags.empty || p.norm.is_empty())).then(|| p.norm.clone()))
+                    .collect(),
+                raw: slots
+                    .iter()
+                    .map(|p| {
+                        keep_raw(p).then(|| RawSlot {
+                            raw: p.raw.clone(),
+                            flags: p.flags.clone(),
+                        })
+                    })
+                    .collect(),
+                alpha_flags: s.alpha.map(|a| a.flags),
+                alpha_threshold: s.alpha.map(|a| a.threshold),
+                params: params.ok().flatten(),
+                skinned: h.skinned,
+                vertex_desc: h.vertex_desc,
+                num_vertices: h.num_vertices,
+                num_triangles: h.num_triangles,
+                index3d: scan.index3d.get(&s.block).copied(),
+            }
+        })
+        .collect()
 }
 
 fn delete_shapes(c: &Connection, copy_id: i64) -> rusqlite::Result<()> {

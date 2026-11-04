@@ -3,6 +3,10 @@
 //! projection xyz, normal dampener, single-pass colour rgb) then a u32 flags field.
 use crate::read::{each_sub, group_records, record_data, sig_at, top_groups, u32_at, HEADER};
 
+/// The DATA bytes a usable MATO needs (11 f32 and the flags word), and where the flags word starts.
+pub(crate) const DATA_LEN: usize = 48;
+pub(crate) const FLAGS_AT: usize = 44;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatoData {
     pub falloff_scale: f32,
@@ -63,9 +67,11 @@ fn record(data: &[u8], edid: &str) -> Option<Option<MatoData>> {
         _ => {}
     })
     .ok()?;
-    let name = name.map(|n| n.strip_suffix(&[0]).unwrap_or(n));
-    let wanted = name.is_some_and(|n| n.eq_ignore_ascii_case(edid.as_bytes()));
-    let Some(d) = dat.filter(|d| wanted && d.len() >= 48) else {
+    // The same cut and decode as the scan's `records::zstring`, so the name it stored finds its record.
+    let wanted = name
+        .map(|n| nif::text::lossy(crate::records::until_nul(n)))
+        .is_some_and(|n| n.eq_ignore_ascii_case(edid));
+    let Some(d) = dat.filter(|d| wanted && d.len() >= DATA_LEN) else {
         return Some(None);
     };
     let f = |o: usize| f32::from_bits(u32_at(d, o));
@@ -77,6 +83,6 @@ fn record(data: &[u8], edid: &str) -> Option<Option<MatoData>> {
         projection: [f(16), f(20), f(24)],
         normal_dampener: f(28),
         colour: [f(32), f(36), f(40)],
-        flags: u32_at(d, 44),
+        flags: u32_at(d, FLAGS_AT),
     }))
 }
