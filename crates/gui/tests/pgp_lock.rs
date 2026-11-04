@@ -564,5 +564,14 @@ fn no_original_textures_read_starts_while_the_scan_store_is_unsettled() {
     m.scan_store_unsettled = true;
     m.ask_original_textures(SET, 2);
     assert!(!m.used_by_pending(), "no read started");
-    assert_eq!(m.original_textures(SET, 2), Some(None));
+    // Long enough for a started read to land (the sibling test's reads land within milliseconds).
+    for _ in 0..30 {
+        m.poll();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(m.original_textures(SET, 2), Some(None), "nothing cached");
+    // Control: once the store is settled the same ask reads.
+    m.scan_store_unsettled = false;
+    m.ask_original_textures(SET, 2);
+    assert!(m.used_by_pending(), "a settled store reads");
 }
