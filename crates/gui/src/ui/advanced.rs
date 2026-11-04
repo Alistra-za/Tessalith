@@ -713,9 +713,11 @@ pub(super) mod gesture {
         let mut h = harness(draw);
         h.get_by_role(role).click();
         h.run();
-        // The cursor opens at the start of the text "0": Delete clears it.
-        h.key_press(egui::Key::Delete);
-        h.run();
+        // The cursor opens at the start of the text ("0", "0.00" in a slider's box): Delete clears it.
+        for _ in 0..6 {
+            h.key_press(egui::Key::Delete);
+            h.run();
+        }
         h.get_by_role(role).type_text(text);
         h.run();
         h.key_press(egui::Key::Enter);

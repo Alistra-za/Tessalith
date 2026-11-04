@@ -252,10 +252,16 @@ fn drag_slider(
     range: std::ops::RangeInclusive<f64>,
     text: &str,
 ) -> Option<f64> {
-    super::advanced::held(ui, id, current, busy, false, |ui, v| {
-        ui.add(egui::Slider::new(v, range).text(text))
-    })
-    .0
+    let (lo, hi) = (*range.start(), *range.end());
+    let (out, _) = super::advanced::held(ui, id, current, busy, false, |ui, v| {
+        // Typed text in the value box is applied when it is left (FN2), not on every keystroke.
+        ui.add(
+            egui::Slider::new(v, range)
+                .text(text)
+                .update_while_editing(false),
+        )
+    });
+    out.map(|v| v.clamp(lo, hi))
 }
 
 /// The blended preview's texture: one slot, holding the `Arc` it was made from (so its pointer cannot be reused by
@@ -306,7 +312,7 @@ fn blended_preview(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::advanced::gesture::{arrow, click, St};
+    use super::super::advanced::gesture::{arrow, click, typed, St};
     use super::*;
     use eframe::egui::accesskit::Role;
 
@@ -325,5 +331,10 @@ mod tests {
     #[test]
     fn drag_slider_commits_an_arrow_key_once() {
         assert_eq!(arrow(slider, Role::Slider, egui::Key::ArrowRight).len(), 1);
+    }
+
+    #[test]
+    fn drag_slider_commits_a_typed_value_once() {
+        assert_eq!(typed(slider, Role::SpinButton, "1.5"), vec![1.5]);
     }
 }
