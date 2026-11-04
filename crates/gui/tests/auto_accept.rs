@@ -626,7 +626,11 @@ fn review_lists_a_missing_preset_as_a_blocker() {
     h.run();
     h.get_by_label("Blockers (1)");
     // Also drawn beside the disabled Export, so more than one node.
-    assert!(h.query_all_by_label_contains("Preset ghost is not installed").count() >= 1);
+    assert!(
+        h.query_all_by_label_contains("Preset ghost is not installed")
+            .count()
+            >= 1
+    );
     h.get_by_label("Choose preset…").click();
     h.run();
     h.get_by_label("Presets…");
