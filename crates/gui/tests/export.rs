@@ -451,3 +451,32 @@ fn an_export_that_ends_under_an_open_dialog_still_logs_the_summary_and_keeps_the
     assert_eq!(m.dialog, Some(Dialog::ReloadUnsaved));
     assert_eq!(summary_lines(&m), 1);
 }
+
+/// Backlog T25 (Note FP2): a plain export that ends with an error ends its rows too (the Also export already did).
+#[test]
+fn a_failed_plain_export_leaves_no_row_queued() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.export_clicked();
+    assert!(m.export.running.is_some(), "the export started");
+    // A job the worker announced and never reached (the run died after discovery).
+    let found = EventKind::FileDiscovered {
+        output: "zz/never.dds".into(),
+    };
+    m.export
+        .on_event(ev(9_000, "zz/never.dds", "zz/never.png", found));
+    assert!(
+        m.export.rows.iter().any(|r| r.state == RowState::Queued),
+        "a row is queued"
+    );
+    m.end_export_with(Err("cannot create the output folder".into()));
+    let open: Vec<_> = m
+        .export
+        .rows
+        .iter()
+        .filter(|r| matches!(r.state, RowState::Queued | RowState::Running))
+        .map(|r| r.job_key.clone())
+        .collect();
+    assert!(open.is_empty(), "still open: {open:?}");
+}

@@ -412,6 +412,8 @@ impl AppModel {
             && self.undecided() == 0
             // Note FC5: NIF edits are written by Review's Export only. Note FC14: a blocked one is never written.
             && !self.nif_rows_written()
+            // Note FP1 (T29): a tick sends the click to Review (`export_checks`), so the button says Review.
+            && !self.also_on()
     }
 
     /// Note FB1: the header's Export button: `Export {n} files` once the project is clean, else `Review {n} files`.

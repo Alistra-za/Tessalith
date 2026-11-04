@@ -713,7 +713,17 @@ fn vanilla_borrow(
     std::path::PathBuf,
     std::path::PathBuf,
 ) {
-    let mut m = pbr_ready(d);
+    borrow_on_vanilla(pbr_ready(d))
+}
+
+/// [`vanilla_borrow`] over a project that may already have exported on cs.
+fn borrow_on_vanilla(
+    mut m: sdc_gui::model::AppModel,
+) -> (
+    sdc_gui::model::AppModel,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
     let leaf = m
         .items
         .iter()
@@ -1449,3 +1459,24 @@ fn a_foreign_json_in_the_export_folder_is_kept() {
 // Audit 08f-6's "the overwrite question never replaces an open dialog" ended with the question (Note FC5): Review
 // asks before the export, and a JSON with no answer at the end is kept with a note
 // (`model::tests::a_json_edited_during_the_export_is_kept_with_a_note_and_no_dialog`).
+
+/// Backlog T23 (Note FP6): the "PGPatcher JSON is now ..." note about an older file belongs to a JSON this export
+/// writes; an export that writes none (vanilla, only a borrowed-slot copy) says nothing about it.
+#[test]
+fn no_orphan_note_when_the_export_writes_no_json() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    export_and_wait(&mut m);
+    assert!(pgp_json_path(&m).is_file(), "the cs export wrote its JSON");
+    let (mut m, _src, _want) = borrow_on_vanilla(m);
+    m.export.notes.clear();
+    export_and_wait(&mut m);
+    assert!(
+        !m.export
+            .notes
+            .iter()
+            .any(|n| n.contains("the PGPatcher JSON is now")),
+        "{:?}",
+        m.export.notes
+    );
+}

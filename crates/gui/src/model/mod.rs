@@ -595,8 +595,6 @@ pub struct AppModel {
     nif_export_queued: bool,
     /// Note FC5: the run has ended; `take_nif_export_due` hands it to `app.rs` once.
     nif_export_due: bool,
-    /// Note CN: the running (or last) export is an Also export (`run_also`).
-    also_pass: bool,
     /// Note CN: the last Also export's phase error (CN56), so its end is logged as an error, not a success.
     also_error: Option<String>,
     /// Note CN: the three folders the last Also export wrote (`also_file`).
@@ -830,7 +828,6 @@ impl AppModel {
             nif_diff_request: None,
             nif_export_queued: false,
             nif_export_due: false,
-            also_pass: false,
             also_error: None,
             also_written: None,
             also_reply: None,
@@ -1422,6 +1419,8 @@ impl AppModel {
                 // so the re-read files are where the history left them. Note FC14: unless the re-open restored crash
                 // edits as a step; then its history is the one that matches the documents (and the toast's Undo).
                 if self.history.undo.is_empty() {
+                    // Note FP3 (T36): the re-read documents lost the automatic types the old history marked written.
+                    history.auto_written.clear();
                     history.pushes = history.pushes.max(self.history.pushes);
                     self.history = history;
                 }
@@ -1735,18 +1734,16 @@ impl AppModel {
         if self.also_reply.is_some() {
             self.also_cancel = token;
         }
-        if self.also_pass {
-            // Note CN: every row ends, whatever ended the export (a refusal or plan error leaves planned rows with no
-            // `BatchDone`; a cancelled copy has no event).
-            let why = match &result {
-                Err(e) => Some(e.clone()),
-                Ok(s) => (!cancelled && s.cancelled.is_empty())
-                    .then(|| self.also_error.clone())
-                    .flatten(),
-            };
-            let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
-            self.export.end_unfinished(cancelled, why.as_deref());
-        }
+        // Note CN: every row ends, whatever ended the export (a refusal or plan error leaves planned rows with no
+        // `BatchDone`; a cancelled copy has no event). Note FP2 (T25): a plain export too (`also_error` is None).
+        let why = match &result {
+            Err(e) => Some(e.clone()),
+            Ok(s) => (!cancelled && s.cancelled.is_empty())
+                .then(|| self.also_error.clone())
+                .flatten(),
+        };
+        let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
+        self.export.end_unfinished(cancelled, why.as_deref());
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
         }
@@ -1857,6 +1854,16 @@ impl AppModel {
     #[cfg(feature = "test-hooks")]
     pub fn end_export_with(&mut self, result: Result<engine::api::BatchSummary, String>) {
         self.export_ended(result);
+    }
+
+    /// Tests: the state `plan_failed` leaves while the retry plan without a rejected `sdc.toml` is still running: the
+    /// file blamed (its unsaved edits stashed) and the blame tentative.
+    #[cfg(feature = "test-hooks")]
+    pub fn blame_sdc_toml_while_retrying(&mut self, message: &str) {
+        if let Some(p) = self.project.as_mut() {
+            p.set_error(message);
+            self.ignored_by_plan = true;
+        }
     }
 
     /// An export waits for a plan to land (Export clicked while planning, or a Continue after a re-plan).
@@ -2237,7 +2244,6 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         let also = self.also_on();
-        self.also_pass = also;
         self.also_error = None;
         self.also_written = None;
         // Final review I2: dropping an earlier export's sender releases its worker (no extra file).
@@ -2307,13 +2313,18 @@ impl AppModel {
             .unwrap_or(&p.path)
             .to_string_lossy()
             .into_owned()];
-        for old in history::orphans(&shas, &root, named.iter()) {
-            self.export.notes.push(format!(
-                "{}: the PGPatcher JSON is now {}; the old file was left in place and PGPatcher still reads it",
-                old.display(),
-                p.path.display()
-            ));
-        }
+        // Note FP6 (T23): these say where the JSON went, so they are kept only when this export writes one.
+        let orphans: Vec<String> = history::orphans(&shas, &root, named.iter())
+            .into_iter()
+            .map(|old| {
+                format!(
+                    "{}: the PGPatcher JSON is now {}; the old file was left in place and PGPatcher still reads it",
+                    old.display(),
+                    p.path.display()
+                )
+            })
+            .collect();
+        let at = self.export.notes.len();
         match pbr_export::finish(
             &p,
             &self.export.rows,
@@ -2321,6 +2332,7 @@ impl AppModel {
             &mut self.export.notes,
         ) {
             pbr_export::Finish::Written(sha) => {
+                self.export.notes.splice(at..at, orphans);
                 self.also_json.push(p.path.clone());
                 self.record_json_sha(&root, &key, &sha)
             }
@@ -2333,6 +2345,7 @@ impl AppModel {
                 if answer.is_some_and(|a| a.overwrite) {
                     if let Some(sha) = pbr_export::overwrite(&p.path, &text, &mut self.export.notes)
                     {
+                        self.export.notes.splice(at..at, orphans);
                         self.also_json.push(p.path.clone());
                         self.record_json_sha(&root, &key, &sha);
                     }
@@ -3071,7 +3084,8 @@ impl AppModel {
         s: Option<&crate::sets_doc::SetsDoc>,
     ) -> history::Snapshot {
         history::Snapshot {
-            sdc_toml: p.map(ProjectDoc::text).unwrap_or_default(),
+            // Note FP4 (T37): a blamed document is empty; its stashed text is what the step must keep.
+            sdc_toml: p.map(ProjectDoc::snapshot_text).unwrap_or_default(),
             project: s.map(crate::sets_doc::SetsDoc::text).unwrap_or_default(),
         }
     }
@@ -3814,6 +3828,11 @@ impl AppModel {
         if now != self.read_only_flags {
             self.read_only_flags = now;
             self.invalidate_views();
+            // Note FP5 (T31): Review's cached check follows the flag, or Export stays disabled after it is cleared.
+            let unwritable = self.also_toml_unwritable();
+            if let Some(r) = self.review.as_mut() {
+                r.toml_unwritable = unwritable;
+            }
         }
     }
 
@@ -3964,6 +3983,21 @@ impl AppModel {
     /// the GUI never loaded).
     pub fn save(&mut self) -> Result<(), SaveError> {
         let mut wrote = false;
+        // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
+        if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
+            match p.save_stashed() {
+                Ok(w) => {
+                    if w {
+                        crate::crash_log::discard_recovery(p.path());
+                    }
+                    wrote |= w;
+                }
+                Err(e) => {
+                    self.save_failed(DocKind::SdcToml, &e);
+                    return Err(e);
+                }
+            }
+        }
         if let Some(p) = self.project.as_mut().filter(|p| p.is_dirty()) {
             if let Err(e) = p.save(false) {
                 self.save_failed(DocKind::SdcToml, &e);
