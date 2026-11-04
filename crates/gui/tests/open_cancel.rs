@@ -205,3 +205,31 @@ fn undo_label_names_the_nif_history() {
         .hover
         .starts_with("Undo NIF edit: Set the emissive colour of every shape in the mesh"));
 }
+
+fn lone_normal(root: &std::path::Path, rel: &str) {
+    let p = root.join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    image::ImageBuffer::from_pixel(16, 16, image::Rgb([128u8, 128, 255]))
+        .save(p)
+        .unwrap();
+}
+
+/// Backlog T36 (Note FP3): the automatic types a cancelled open dropped (the documents were re-read) are recorded
+/// again by the folder's next plan; the restored history must not claim it already wrote them.
+#[test]
+fn cancel_does_not_keep_the_automatic_types_marked_written() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    for k in ["a/x_n.png", "a/y_n.png", "a/z_n.png"] {
+        lone_normal(&root, k);
+    }
+    let mut m = support::opened_as_the_app(root, d.path().join("export"));
+    assert!(m.only_automatic_unsaved());
+    let other = d.path().join("other");
+    lone_normal(&other, "b/w_n.png");
+    assert!(m.request_open(other));
+    m.cancel_open();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let text = m.project.as_ref().unwrap().text();
+    assert_eq!(text.matches("subtype = \"normal\"").count(), 3, "{text}");
+}

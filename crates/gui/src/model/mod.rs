@@ -1419,6 +1419,8 @@ impl AppModel {
                 // so the re-read files are where the history left them. Note FC14: unless the re-open restored crash
                 // edits as a step; then its history is the one that matches the documents (and the toast's Undo).
                 if self.history.undo.is_empty() {
+                    // Note FP3 (T36): the re-read documents lost the automatic types the old history marked written.
+                    history.auto_written.clear();
                     history.pushes = history.pushes.max(self.history.pushes);
                     self.history = history;
                 }
