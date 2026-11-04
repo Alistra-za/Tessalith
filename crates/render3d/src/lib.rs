@@ -356,7 +356,8 @@ pub struct Renderer {
     load_epoch: Arc<AtomicU64>,
     /// Hosts that drive a pool turn this on; the default settles every load and edit before returning.
     async_compile: bool,
-    /// The missing-cbuffer-field check is done for this load (it waits until no shape is `Pending`). True while a load builds, so `apply_compiled` calls inside it stay quiet.
+    /// The missing-cbuffer-field check is done for this load (it waits until no shape is `Pending`). True while a
+    /// load builds, so `apply_compiled` calls inside it stay quiet.
     fields_checked: bool,
     /// Warnings found after the load returned (async compiles landed); drained by [`Renderer::take_late_warnings`].
     late_warnings: Vec<String>,

@@ -1125,7 +1125,7 @@ fn scan_db(db: &std::path::Path, tex: &str, shapes: &[(u32, u32, i32, bool, bool
 /// property: one shader vote, two alpha entries, and Tree_Anim evidence (not set).
 #[test]
 fn mesh_evidence_counts_each_mesh_once_per_fact() {
-    use engine::shader::Shader;
+    use engine::shader::{MeshAlpha, Shader};
     let d = tempfile::tempdir().unwrap();
     let db = d.path().join("scan.db");
     let s = modscan::store::Store::open(&db).unwrap();
@@ -1146,12 +1146,23 @@ fn mesh_evidence_counts_each_mesh_once_per_fact() {
         .collect();
     let (votes, alpha, tree) = sdc_gui::model::meshes::mesh_evidence(&db, &keys).unwrap();
     assert_eq!(votes["textures/a/wall"], vec![Shader::Hair]);
-    assert_eq!(alpha["textures/a/wall"].len(), 2);
+    // The copy without the property (no alpha), then the blend one: entries sort by flags, NULL first.
+    let none = MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    let blend = MeshAlpha {
+        blend: true,
+        ..none
+    };
+    assert_eq!(alpha["textures/a/wall"], vec![none, blend]);
     assert_eq!(tree.get("textures/a/wall"), Some(&false));
     assert!(!votes.contains_key("textures/a/none"));
     assert!(!alpha.contains_key("textures/a/none"));
     assert!(!tree.contains_key("textures/a/none"));
 }
+
 #[test]
 fn mesh_votes_count_enabled_source_lighting_shapes_only() {
     use engine::shader::Shader;

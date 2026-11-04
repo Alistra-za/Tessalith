@@ -966,8 +966,45 @@ fn a_new_slot_path_still_reloads_with_its_texture() {
         path: r"textures\new.dds".into(),
         base,
     };
+    let Some(Content::Parsed { textures, .. }) = m.v3.content() else {
+        panic!("a Parsed content")
+    };
+    assert!(!textures.contains_key("textures/new.dds"));
     let n = sdc_gui::model::meshes::texture_source_calls();
     m.edit_push(vec![op], None);
+    assert_eq!(m.error, None);
+    assert_eq!(sdc_gui::model::meshes::texture_source_calls() - n, 1);
+    let Some(Content::Parsed { textures, .. }) = m.v3.content() else {
+        panic!("a Parsed content")
+    };
+    assert!(textures.contains_key("textures/new.dds"));
+}
+
+/// Note GP9: a store error in dit_changed is retried on the next change, though no slot path changed since.
+#[test]
+fn a_failed_texture_lookup_is_retried_on_the_next_change() {
+    let (d, mut m) = session(false);
+    m.open_edit();
+    let e = m.edit.as_ref().unwrap();
+    let (shape, shader) = lit_shape(e);
+    let set = e.model.lighting[&shader].texture_set.unwrap();
+    let base = String::from_utf8_lossy(&e.model.texsets[&set].raw.slots[0]).into_owned();
+    let op = Op::SetTexturePath {
+        at: nif::edit::anchor_shape(&e.model, shape),
+        slot: 0,
+        path: r"textures\new.dds".into(),
+        base,
+    };
+    let db = rusqlite::Connection::open(d.path().join("scan.db")).unwrap();
+    db.execute_batch("ALTER TABLE tex_winner RENAME TO tex_winner_off")
+        .unwrap();
+    m.edit_push(vec![op], None);
+    assert!(m.error.is_some(), "the lookup failed");
+    m.error = None;
+    db.execute_batch("ALTER TABLE tex_winner_off RENAME TO tex_winner")
+        .unwrap();
+    let n = sdc_gui::model::meshes::texture_source_calls();
+    gloss(&mut m, 12.5);
     assert_eq!(m.error, None);
     assert_eq!(sdc_gui::model::meshes::texture_source_calls() - n, 1);
     let Some(Content::Parsed { textures, .. }) = m.v3.content() else {

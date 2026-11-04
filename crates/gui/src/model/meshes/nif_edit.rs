@@ -172,6 +172,8 @@ pub struct NifEdit {
     anim: Vec<(ShapeId, MaterialState, Vec<Track>)>,
     /// The clock time whose materials the viewport shows; None after anything sent un-animated materials.
     anim_shown: Option<f32>,
+    /// The last dit_changed store lookup failed: the next change looks every shape up again (Note GP9).
+    lookup_failed: bool,
     /// The shapes the last `tick_anim` animated (D15: one that leaves gets its file material back).
     anim_last: Vec<ShapeId>,
     /// v2 B8 fix F1: per shape, the files that can patch it (keyed on its slots and the JSON generation) and its
@@ -715,6 +717,7 @@ impl NifEdit {
             playing_name: None,
             anim: vec![],
             anim_shown: None,
+            lookup_failed: false,
             anim_last: vec![],
             sim_cache: BTreeMap::new(),
             #[cfg(feature = "test-hooks")]
@@ -1011,7 +1014,7 @@ impl NifEdit {
     /// Note GP8: the one scan of `patched`: its shape cards, as the scan store would give them for these bytes
     /// (`modscan::store::shape_views`, Note CZ1), and whether it reads back.
     fn scan_patched(&mut self) {
-        // Silent cards on purpose (review Minor 4): they fall back to titles, and `read_err` blocks Export NIF
+        // Silent cards on purpose (review Minor 4): they fall back to titles, and `read_err` blocks Export NIF.
         (self.cards, self.read_err) = match read_back(&self.patched) {
             Ok(s) => (modscan::store::shape_views(&s), None),
             Err(e) => (vec![], Some(e)),
@@ -2134,6 +2137,8 @@ impl MeshesModel {
         let mut validated = false;
         if let (true, Some(store)) = (e.check_exists, &self.store) {
             let exists = |n: &str| matches!(store.texture_location(n), Ok(Some(_)));
+            // shortcut: with the check on, every change queries the store once per slot, drag ticks included, upgrade
+            // by caching the lookups per slot path if a drag stalls on a slow store.
             e.warnings = validate(&e.model, Some(&exists));
             demote_source(&e.source_warnings, &mut e.warnings);
             validated = true;
@@ -2548,7 +2553,7 @@ impl MeshesModel {
         let Some(Content::Parsed { nif, textures, .. }) = self.v3.content() else {
             return;
         };
-        let (head_part, textures) = (nif.head_part, textures.clone());
+        let (head_part, textures, retry) = (nif.head_part, textures.clone(), e.lookup_failed);
         let mut next = e.preview_nif();
         next.head_part = head_part;
         let pairs: Vec<(&ParsedShape, Option<&MaterialState>)> = next
@@ -2560,7 +2565,7 @@ impl MeshesModel {
         // `texture_sources`): a drag tick on a float field changes a material but names no new texture.
         let named: Vec<&ParsedShape> = pairs
             .iter()
-            .filter(|(s, old)| old.is_none_or(|m| !same_lookup(m, &s.material)))
+            .filter(|(s, old)| retry || old.is_none_or(|m| !same_lookup(m, &s.material)))
             .map(|(s, _)| *s)
             .collect();
         let fresh = if named.is_empty() {
@@ -2570,10 +2575,16 @@ impl MeshesModel {
                 Ok(f) => f,
                 Err(err) => {
                     self.error = Some(db_err(err));
+                    if let Some(e) = &mut self.edit {
+                        e.lookup_failed = true;
+                    }
                     return;
                 }
             }
         };
+        if let Some(e) = &mut self.edit {
+            e.lookup_failed = false;
+        }
         let mut reload = fresh.keys().any(|k| !textures.contains_key(k));
         if !reload {
             // The render thread keeps these edits and re-applies them on a reload it starts itself.

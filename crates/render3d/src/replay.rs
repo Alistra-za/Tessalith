@@ -1499,6 +1499,7 @@ mod tests {
         s["compare"] = "AlwaysFalse".into();
         assert_eq!(sampler(&s).unwrap().1.compare, 1);
     }
+
     fn mesh(sems: &[&str]) -> ReplayMesh {
         ReplayMesh {
             inputs: sems.iter().map(|s| (s.to_string(), 0, 2, 0, 0)).collect(),

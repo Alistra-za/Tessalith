@@ -248,7 +248,7 @@ fn av_refs_into(h: &Header, b: &[u8], block: usize, out: &mut Vec<i32>) -> Resul
     let kind = h.kind(block);
     let is = |names: &[&str]| names.iter().any(|t| t.as_bytes() == kind);
     let mut c = block_cursor(h, b, block)?;
-    if is(NODE_TYPES) {
+    if is_node(kind) {
         read_av_head(&mut c)?;
         for _ in 0..2 {
             // children, then effects (both present below FO4)

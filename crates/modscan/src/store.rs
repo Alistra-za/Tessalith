@@ -572,6 +572,7 @@ fn write_shapes(
     for s in &scan.shapes {
         let (kind, ty, f1, f2, slots, params) = shader_cols(s);
         let params = params.map_err(json_err)?;
+        // No slots at all (`tex_slots` returns None before interning anything) store a NULL texset.
         let texset = tex_slots(c, i, &slots)?;
         let h = &s.head;
         c.prepare_cached(&sql)?.execute(params![

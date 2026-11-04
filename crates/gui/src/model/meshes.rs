@@ -304,6 +304,8 @@ type MeshFacts = (
     BTreeMap<String, Vec<MeshAlpha>>,
     BTreeMap<String, bool>,
 );
+/// One shape row of the evidence query: (NIF path id, block, shader type, alpha flags, alpha threshold, SLSF2).
+type EvidenceRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, i64);
 
 /// One read of the scan's mesh evidence for each key (`engine::shader::mesh_key`), over the shapes that use
 /// `<key>.dds` in slot 0 of non-derived copies of enabled origins (DECISIONS S-shader-10, Note U5): PGPatcher's output
@@ -326,7 +328,6 @@ pub fn mesh_evidence(db: &Path, keys: &BTreeSet<String>) -> Result<MeshFacts, St
         .map_err(db_err)?;
     let (mut votes, mut alpha, mut tree_anim) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
     for k in keys {
-        type Row = (i64, i64, Option<i64>, Option<i64>, Option<i64>, i64);
         let rows = st
             .query_map([format!("{k}.dds")], |r| {
                 Ok((
@@ -338,7 +339,7 @@ pub fn mesh_evidence(db: &Path, keys: &BTreeSet<String>) -> Result<MeshFacts, St
                     r.get(5)?,
                 ))
             })
-            .and_then(|rows| rows.collect::<Result<Vec<Row>, _>>())
+            .and_then(|rows| rows.collect::<Result<Vec<EvidenceRow>, _>>())
             .map_err(db_err)?;
         let (mut v, mut a, mut t) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
         for (path, block, ty, flags, threshold, slsf2) in rows {
@@ -371,6 +372,7 @@ pub fn mesh_evidence(db: &Path, keys: &BTreeSet<String>) -> Result<MeshFacts, St
     }
     Ok((votes, alpha, tree_anim))
 }
+
 /// Complex grass design §5 condition 1: the GRAS diffuses of the scan, as `engine::grass::path_key` keys (sent as
 /// `BatchRequest::gras_diffuses`).
 pub fn gras_diffuses(db: &Path) -> Result<BTreeSet<String>, String> {
