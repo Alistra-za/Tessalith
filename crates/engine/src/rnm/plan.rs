@@ -170,7 +170,7 @@ pub fn plan_rnm(
                     .push(Warning::new(Code::RnmMaskOrphan, msg));
             }
         }
-        let ao = ao_source(set, files, aliases);
+        let ao = ao_source(ctx, set, files, aliases);
         for &(b, kind) in &bases {
             let mut stack: Vec<RnmLayer> = vec![];
             let mut notes: Vec<Warning> = vec![];
@@ -217,12 +217,17 @@ pub fn plan_rnm(
     }
 }
 
-/// Note W9: the set's raw AO map (R), else its `_orm` (R, Note AL4), else its `_rmaos`/`_rfaos` file (B).
+/// Note W9, as Note FV changes it: the set's AO map (R), else its `_orm` (R, Note AL4), else its `_rmaos`/`_rfaos`
+/// file (B). A file's hand-set `helper.role` says which of these it is (`none` or any other role: none); a file
+/// with no hand-set role is read by its name.
 fn ao_source(
+    ctx: &ResolveCtx,
     set: &TextureSet,
     files: &[InputFile],
     aliases: &BTreeMap<String, String>,
 ) -> Option<RnmAo> {
+    use crate::config::RawMap;
+    use crate::helper::HelperRole;
     let stem = |f: &InputFile| {
         f.rel
             .file_stem()
@@ -230,30 +235,35 @@ fn ao_source(
             .to_string_lossy()
             .into_owned()
     };
-    let members = || set.members.iter().map(|&i| &files[i]);
-    let role_is = |f: &InputFile, role| {
-        vocab_of(&stem(f)).map(|v| v.role) == Some(VocabRole::PackingInput(role))
-    };
-    // Note AL4: a loose `_ao`, else an `_orm` (AO in R).
-    let raw = members()
-        .find(|f| role_is(f, crate::config::RawMap::Ao))
-        .or_else(|| members().find(|f| role_is(f, crate::config::RawMap::Orm)));
-    if let Some(f) = raw {
-        return Some(RnmAo {
-            file: file(&f.path),
-            channel: 0,
-        });
-    }
-    members()
-        .find(|f| {
-            f.kind == crate::discover::InputKind::Image
+    let kind = |f: &InputFile| match crate::policy::helper_requested(ctx, f).role {
+        Some(HelperRole::Raw(r)) => Some(r),
+        Some(_) => None,
+        None => match vocab_of(&stem(f)).map(|v| v.role) {
+            Some(VocabRole::PackingInput(r @ (RawMap::Ao | RawMap::Orm))) => Some(r),
+            _ => (f.kind == crate::discover::InputKind::Image
                 && matches!(
                     split_suffix_with(&stem(f), aliases).suffix.as_deref(),
                     Some("rmaos" | "rfaos")
-                )
-        })
-        .map(|f| RnmAo {
-            file: file(&f.path),
-            channel: 2,
-        })
+                ))
+            .then_some(RawMap::Rmaos),
+        },
+    };
+    let kinds: Vec<(&InputFile, Option<RawMap>)> = set
+        .members
+        .iter()
+        .map(|&i| (&files[i], kind(&files[i])))
+        .collect();
+    let find = |want: RawMap, channel: u8| {
+        kinds
+            .iter()
+            .find(|(_, k)| *k == Some(want))
+            .map(|(f, _)| RnmAo {
+                file: file(&f.path),
+                channel,
+            })
+    };
+    // Note AL4: a loose AO, else an `_orm` (AO in R), else the `_rmaos` (AO in B).
+    find(RawMap::Ao, 0)
+        .or_else(|| find(RawMap::Orm, 0))
+        .or_else(|| find(RawMap::Rmaos, 2))
 }
