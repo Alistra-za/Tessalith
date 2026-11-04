@@ -9,16 +9,16 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ
-- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS, FP
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
@@ -233,7 +233,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Opt-in gloss bake for a complex `_m`. [CL40]
 - A layer with no prefix targets `n`, falling back to `cnr` when the set has no `_n`; a prefixed layer targets its prefix; a layer whose targets name no base gets `RNM-NO-BASE`. Candidates for one layer id rank a prefix naming this base, then no prefix, then the other prefix, ties by path; the first wins and each loser gives `RNM-LAYER-SHADOWED` on the base job. [W4]
 - Every `rnm.*` field is optional and `Profile.rnm` is skipped at its default, so no existing profile hash moves. `rnm.order` drops duplicates (first kept) and appends the missing ids in the order `bent, bump, bump2, detail, detail2`. `rnm.*` on a sub-type that cannot be a base is reset to the default. [W6]
-- The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16]
+- The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. A file's hand-set `helper.role` (`ao`, `orm`, `rmaos`) says which it is and any other role (`none` included) takes it out; the file name decides only a file with no hand-set role. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16, FV3]
 - RNM decode clamps z to at least 0: a no-op at strength ≤ 1; above 1 it deviates from rnm.py, which does not clamp. [Y5]
 - A generated map rivals a real map only until the real one appears: step 3b (after `apply_output_paths`, before duplicate detection) drops the loser from `set.members` with no job, skipped `GEN-REPLACED` (Info) "generated <name> replaced by <real name>". The generated member's own earlier export (`dds::same_file`, also its packed outputs: the member's output folder joined with the rival's name) is no rival, so an in-place run keeps it. A replaced member never reaches the pre-packed conflict, so no `PACK-CONFLICT`. [CO6, CO7, CO8, CO10, CO102]
 - Height ranges use `R = p99.5(|h|)` of the zero-mean solve-size height and Strength 0.1–1.0 (default 1.0). Half's clamp `[8/255, 247/255]` sits inside the complex-material gate `(4/255, 251/255)`. [CO21, CO22]
@@ -1044,3 +1044,11 @@ Items cite the trace-debug report's minor findings (`.superpowers/sdd/trace-debu
 - **FP6 Orphan notes go with a written JSON (T23).** The "the PGPatcher JSON is now ..." notes about an older file are kept only when the export writes the JSON (`Written`, or an Overwrite that wrote); an export that writes none (vanilla with a borrowed slot, a refused file) says nothing about it. Test `pbr_export::no_orphan_note_when_the_export_writes_no_json`.
 - **FP7 Save writes the edits a blame stashed (T38).** While the retry plan after a rejection is running (`tentative_edits()` is Some), `save()` writes the stashed text with `ProjectDoc::save_stashed` (same changed-on-disk check and atomic write), so Save in the Open, Close and Reload prompts keeps the user's edits. `sdc.toml` may then hold a config the engine rejects; it opens read-only with that message, as any rejected file does. Test `history::save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits`.
 - **FP8 Review's Blockers lists a missing preset and a read-only `sdc.toml` (T30).** Both refuse the gate, so both are blockers: a red row each in column 0 and in the count, the preset's row with `Choose preset…` (opens the header's Preset menu, as Problems' button does). Test `auto_accept::review_lists_a_missing_preset_as_a_blocker`.
+
+## Note FV — backlog batch B5: Also derive, RNM AO, PSD (main team, 2026-11-04)
+Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` and `encode_versions` are unchanged. No `encode_version` arm is set: each change reaches only inputs handled wrongly before, and the identity of those outputs changes by itself (FV2: the cavity source carries `invert`; FV3: the manifest role names the AO file and channel).
+- **FV1 A PBR member that fails to load leaves its set out of the Also derive (T26).** `derive_sets` finds the set of each `Plan::failed` file by the grouping rule (its output's folder plus its name's base, aliases applied), drops the set's members and adds a SetNote "not derived: N map(s) failed in the PBR export", as an undecided set does (CN99). Before, the Vanilla and CM outputs were built from default metal, AO and roughness. A set joined by a `[sets]` edit or a helper/`_wet` join is not matched (`shortcut:` comment; recording the set key on `FailedFile` is the upgrade). Test `also_export::derive_sets_leaves_out_a_set_with_a_failed_member`.
+- **FV2 The derive honours `helper.invert` and `helper.read` on raw `_curves` and cavity maps (T27).** The derived set's `curves` and `cavity` sources take the member's `HelperReport` invert and read channel, as the pack loop applies them, so the derived job and its identity carry them. Test `also_export::derive_sets_applies_a_cavity_maps_helper_invert`.
+- **FV3 The RNM bent layer's AO follows a hand-set `helper.role` first (T40; supersedes W9 in part).** A set member whose `helper.role` is `ao`, `orm` or `rmaos` is that AO source (R, R, B); any other hand-set role, `none` included, takes the file out; a file with no hand-set role is read by its name as W9 and AL4 say. The order stays AO, `_orm`, `_rmaos`. `_n` bytes change only for a set with a hand-set role. Test `rnm_plan::a_hand_set_role_picks_the_bent_layers_ao_before_the_name`.
+- **FV4 A negative PSD layer count keeps merged transparency when the global layer mask length is missing (T28).** `merged_transparency` returns what it found instead of false. Test `psd::negative_count_survives_a_missing_global_mask_length`.
+- **FV5 An NPOT normal solved at its power of two is unchanged (R1; no fix).** The torus test came out green: 1000² against 1024² differ by a mean 0.0001 in height, so `to_pot` keeps resampling the normal. The test stays as a pin (`from_normal::an_npot_torus_solves_like_its_power_of_two_twin`).

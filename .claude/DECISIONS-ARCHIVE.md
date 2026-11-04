@@ -131,3 +131,18 @@ ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FP, 2026-11-04)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP
+
+ARCHIVED (wording before the edit; superseded in part by Note FV, 2026-11-04)
+- The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16]
