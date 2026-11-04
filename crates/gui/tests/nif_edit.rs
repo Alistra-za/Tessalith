@@ -6102,7 +6102,10 @@ fn shader_colour_picker_shows_and_stores_srgb() {
 /// popup pick is a second step, and one undo keeps the first pick.
 #[test]
 fn shader_colour_picker_flushes_on_popup_close() {
-    let (m, a) = specular_scene([0.5; 3]);
+    let (mut m, a) = specular_scene([0.5; 3]);
+    // `direct` has no document path (nothing to save): give it one.
+    let d = tempfile::tempdir().unwrap();
+    m.edit.as_mut().unwrap().doc_path = d.path().join("x.toml");
     let mut h = view(m);
     h.run_steps(2);
     let well = |h: &mut Harness<'static, MeshesModel>| {
@@ -6114,7 +6117,11 @@ fn shader_colour_picker_flushes_on_popup_close() {
     type_picker_byte(&mut h, 1, 102); // G
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
+    // A pick is 3 ops (R, G, B); the scene is 3 more.
     assert_eq!(ops(h.state()).len(), 6, "scene + the first pick");
+    // The close flushed the merged step to disk.
+    let e = h.state().edit.as_ref().unwrap();
+    assert_eq!(load(&e.doc_path).unwrap().unwrap().ops.len(), 6, "saved");
     well(&mut h);
     type_picker_byte(&mut h, 2, 51); // B
     h.key_press(egui::Key::Escape);
