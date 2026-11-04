@@ -824,6 +824,31 @@ fn derive_sets_skip_by_id() {
     assert_eq!(notes.len(), 1);
 }
 
+/// Backlog T26: a PBR member that fails to load leaves its set out of the derive, with a note.
+#[test]
+fn derive_sets_leaves_out_a_set_with_a_failed_member() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+        std::fs::write(m.join("textures/pbr/arm/steel_rmaos.png"), b"not a png").unwrap();
+    });
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            request(&m, &loc.join("Mod PBR")),
+            &Reporter::new(Arc::new(NullSink), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    assert_eq!(p.failed.len(), 1, "{:?}", p.failed);
+    let (sets, drop, notes) = derive_sets(&p, &BTreeSet::new());
+    assert!(sets.is_empty(), "{:?}", sets.iter().map(|s| &s.id).collect::<Vec<_>>());
+    assert!(!drop.is_empty());
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, "textures/pbr/arm/steel");
+    assert!(notes[0].why.contains("failed in the PBR export"), "{}", notes[0].why);
+}
+
 // ---- Note FM: no zip, no sums file, no report; files the run did not write are noted ----
 
 /// Every name in `loc` (not below it) but the opened folder `Mod`.
