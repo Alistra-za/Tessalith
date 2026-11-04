@@ -9,6 +9,8 @@ import argparse, csv, pathlib, re, subprocess, sys, tempfile
 
 DEC = ".claude/DECISIONS.md"
 ARC = ".claude/DECISIONS-ARCHIVE.md"
+FROZEN = ".claude/DECISIONS-1.x.md"  # 1.x, frozen at 2.0: live part, then 1.x archive under FROZEN_ARCHIVED
+FROZEN_ARCHIVED = "# Archived"
 DEC_BEFORE_MOVE = "docs/" + "DECISIONS.md"  # where a --base before the move into .claude/ holds it
 RESEARCH = "docs/research"  # a `research` row is moved by hand into its format's page there (DOCUMENTATION.md)
 
@@ -148,12 +150,20 @@ def contains(doc, block):
     return any(doc[i:i + n] == block for i in range(len(doc) - n + 1))
 
 
+def frozen_parts(lines):
+    """(live part, archived part) of DECISIONS-1.x.md; headings repeat between the parts, never inside one."""
+    k = lines.index(FROZEN_ARCHIVED) if FROZEN_ARCHIVED in lines else len(lines)
+    return lines[:k], lines[k:]
+
+
 def apply(root, rows):
     root = pathlib.Path(root)
     live, nl = read_doc(root / DEC)
     arc, anl = read_doc(root / ARC)
     if not arc or arc == [""]:
         arc, anl = list(ARC_HEAD), nl
+    # A row archived before 2.0 is done: its old wording sits under `# Archived` in the 1.x file.
+    done = [arc, frozen_parts(read_doc(root / FROZEN)[0])[1]]
     moved_sections = {r["id"] for r in rows if r["class"] in ("research", "archive-note") and is_section(r)}
     found = []
     for r in rows:
@@ -163,7 +173,7 @@ def apply(root, rows):
             raise LookupError2(f"{r['id']}: its section is moved whole ({r['id'].split('¶')[0]})")
         sp = find_span(live, r)
         if sp is None:
-            if r["class"] != "research" and not archived_already(arc, r):
+            if r["class"] != "research" and not any(archived_already(d, r) for d in done):
                 raise LookupError2(f"{r['id']}: not found in DECISIONS.md and not archived")
             continue
         if r["class"] == "research":
@@ -187,6 +197,10 @@ def apply(root, rows):
             continue
         heading = live[next(i for i in range(a, -1, -1) if live[i].startswith("## "))]
         block = [archived_line(r), *live[a:b]]
+        # A partial row's live text was edited after its old wording was archived: archiving it again would file
+        # the current wording as "before the edit" (T8-a). A whole move still archives whatever is live now.
+        if r["class"] == "partial" and any(archived_already(d, r) for d in done):
+            continue
         if not contains(arc, live[a:b]):
             add_block(arc, heading, block)
     for (a, b), r in sorted(found, key=lambda x: -x[0][0]):
@@ -197,9 +211,12 @@ def apply(root, rows):
 
 
 def archived_already(arc, r):
-    if is_section(r):
-        return section_range(arc, r["id"]) is not None
-    return find_span(arc, r) is not None
+    try:
+        if is_section(r):
+            return section_range(arc, r["id"]) is not None
+        return find_span(arc, r) is not None
+    except LookupError2:  # more than one match: archived (at least once)
+        return True
 
 
 def deleted_lines(old, new):
@@ -213,11 +230,14 @@ def deleted_lines(old, new):
     return [l[1:] for l in out.split("\n") if l.startswith("-") and not l.startswith("---")]
 
 
-def check(base_text, live_text, archive_text, research_text, rows):
+def check(base_text, live_text, archive_text, research_text, rows, frozen_text=""):
     fails = []
     live = live_text.replace("\r\n", "\n").split("\n")
     arc = archive_text.replace("\r\n", "\n").split("\n")
-    for name, doc in (("DECISIONS.md", live), ("DECISIONS-ARCHIVE.md", arc)):
+    frozen = frozen_text.replace("\r\n", "\n").split("\n")
+    f_live, f_arc = frozen_parts(frozen)
+    for name, doc in (("DECISIONS.md", live), ("DECISIONS-ARCHIVE.md", arc),
+                      ("DECISIONS-1.x.md (live part)", f_live), ("DECISIONS-1.x.md (# Archived)", f_arc)):
         seen = {}
         for l in doc:
             if l.startswith("## "):
@@ -231,7 +251,7 @@ def check(base_text, live_text, archive_text, research_text, rows):
                 fails.append(f"DECISIONS.md: archive-note {r['id']} is still a heading")
         except LookupError2 as e:
             fails.append(str(e))
-    kept = set(arc) | set(research_text.replace("\r\n", "\n").split("\n"))
+    kept = set(arc) | set(frozen) | set(research_text.replace("\r\n", "\n").split("\n"))
     for l in deleted_lines(base_text.replace("\r\n", "\n"), "\n".join(live)):
         if l.strip() and l not in kept:
             fails.append(f"deleted and not archived: {l[:120]}")
@@ -393,6 +413,22 @@ def self_test():
         before = ((root / DEC).read_bytes(), (root / ARC).read_bytes())
         apply(root, ROWS)
         ok("a second --apply changes nothing", before == ((root / DEC).read_bytes(), (root / ARC).read_bytes()))
+        edited = before[0].replace(b"- DU2. **Two.** text", b"- DU2. **Two.** edited to the current rule")
+        (root / DEC).write_bytes(edited)
+        apply(root, ROWS)
+        ok("re-applying a partial row after its live text was edited leaves the archive alone (T8-a)",
+           (root / ARC).read_bytes() == before[1] and (root / DEC).read_bytes() == edited)
+        (root / DEC).write_bytes(before[0])
+        (root / FROZEN).write_bytes(b"# DECISIONS 1.x (frozen)\n\n## Note Q - q\n\n- **Q1 Live.** x\n\n"
+                                    b"# Archived\n\n## Note Q - q\n\nARCHIVED (superseded by Note R, 2026-10-11)\n"
+                                    b"- **Q2 Old.** y\n")
+        apply(root, ROWS + [{"id": "Q2", "note": "Q", "class": "archive-item", "superseder": "R", "date": "2026-10-11"}])
+        ok("a row archived before 2.0 (only under # Archived in the 1.x file) is done, not an error",
+           before == ((root / DEC).read_bytes(), (root / ARC).read_bytes()))
+        frozen = (root / FROZEN).read_text(encoding="utf-8")
+        ok("--check: a heading in both 1.x parts passes, twice in one part fails, 1.x lines count as kept",
+           check(FIXTURE + "## Note Q - q\n- **Q1 Live.** x\n", live, arc, "", ROWS, frozen) == []
+           and any("heading twice" in f for f in check(FIXTURE, live, arc, "", ROWS, frozen + "\n## Note Q - q\n")))
         res = ""
         ok("--check passes", check(FIXTURE, live, arc, res, ROWS) == [])
         hand = live.replace("- **H3 Next.** x\n", "")
@@ -459,7 +495,7 @@ def main():
             except subprocess.CalledProcessError:
                 old = git("show", f"{a.base}:{DEC_BEFORE_MOVE}")
             research = "\n".join(p.read_text(encoding="utf-8") for p in sorted((root / RESEARCH).glob("*.md")))
-            fails = check(old, text(DEC), text(ARC), research, read_table(table))
+            fails = check(old, text(DEC), text(ARC), research, read_table(table), text(FROZEN))
         else:
             # The DECISIONS files and the mistakes log are prose, not code with comments.
             diff = git("diff", "-U0", "--no-color", a.base, "--", "crates", "tools", ".claude",

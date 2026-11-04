@@ -37,7 +37,7 @@ const pkg = await agent(
 phase('Review')
 const review = await agent(
   `Read-only pre-merge review of branch ${a.branch} (worktree ${a.worktree}, base ${a.base}). Do NOT edit or commit.
-Requirements: ${a.requirements}. Diff package: ${pkg}. Rulings: .claude/DECISIONS.md (the branch's new note).
+Requirements: ${a.requirements}. Diff package: ${pkg}. Rulings: .claude/DECISIONS.md (the branch's new note; 1.x IDs it cites are in .claude/DECISIONS-1.x.md, which is frozen and never edited).
 Check spec compliance and quality: correctness on edge cases, no lost user data, goldens untouched unless a ruling says why, every caller of a changed function, tests that would fail without the fix (not weakened), .claude/DECISIONS.md updated. ${a.focus ? 'Owner/lead focus: ' + a.focus : ''}
 Each finding needs a concrete failing case. Minor = cosmetic or test gaps. ${SHELL}
 Write the full review to ${PKG}/review.md.`,

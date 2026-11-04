@@ -99,18 +99,22 @@ Every menu, context menu, panel, tab and dialog the guide documents has a screen
 - Unreleased changes collect under `## Unreleased` until a release commit names the version.
 
 ## 7. DECISIONS.md: live rulings only
-DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only rulings that are in force.
-- **Fully reverted or superseded rulings move to `.claude/DECISIONS-ARCHIVE.md`.** They move verbatim, under their original ID, headed `ARCHIVED (superseded by Note XX, <date>)`.
+DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only rulings that are in force. Three files hold the record:
+- **`.claude/DECISIONS.md`:** an index (one line per crate or area, naming the notes that govern it), a digest of the 1.x rulings still in force (each line cites its 1.x IDs), then the 2.x notes in full. A new note goes at the end and adds its letter to the index line of every crate or area it governs.
+- **`.claude/DECISIONS-1.x.md`:** the 1.x record, frozen at 2.0 and never edited. Its IDs stay citable. Rulings archived before 2.0 sit under its `# Archived` heading.
+- **`.claude/DECISIONS-ARCHIVE.md`:** superseded 2.x rulings.
+- **A letter is free only when none of the three files uses it.**
+- **Fully reverted or superseded 2.x rulings move to `.claude/DECISIONS-ARCHIVE.md`.** They move verbatim, under their original ID, headed `ARCHIVED (superseded by Note XX, <date>)`.
 - **A partly superseded item is edited in place to the current rule.** The replaced wording goes to the archive under the same ID.
 - **IDs are permanent.** Code comments and commits cite them ("Note BC10"), so a letter is never reused. An archived ID stays findable by grep in the archive.
 - **When you archive a ruling, update the code comments that cite it** to cite the ruling that replaced it.
 - **A live note keeps the rule and its reason.** Narratives of how a ruling was reached, and measurement tables, go to docs/research. The note links to them.
 - **What agents read:**
   - Agents read DECISIONS.md.
-  - They open DECISIONS-ARCHIVE.md only when a citation points there or someone asks about history.
+  - They open DECISIONS-1.x.md when a digest line or a citation points there, and DECISIONS-ARCHIVE.md only when a citation points there or someone asks about history.
   - Archived rulings are not in force. Never cite one as a reason for current behaviour.
 
-**Why archive.** DECISIONS.md had grown to about 1.3 MB across 139 notes. That is too big to read whole, so agents search it. A search returns superseded rulings beside the live ones with no way to tell them apart. Agents have planned from stale rulings: the first drafts of the 2026-10-29 fix plans were rejected for exactly that.
+**Why archive, and why the 2.0 reset.** DECISIONS.md had grown to about 1.3 MB across 139 notes. That is too big to read whole, so agents search it. A search returns superseded rulings beside the live ones with no way to tell them apart. Agents have planned from stale rulings: the first drafts of the 2026-10-29 fix plans were rejected for exactly that. At 2.0 the 1.x record was frozen whole and replaced by the index and digest, which an agent can read.
 
 ## 8. Checklist for a documentation change
 1. Find the fact's home. Edit it there, with the skills in §3a.
@@ -124,7 +128,7 @@ DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only r
 
 ## 9. Ruling markers
 A statement of Tessalith behaviour that a ruling decided carries a hidden marker at that fact's one home (§2), so the ruling behind it can be found and a stale sentence is caught when the ruling is archived.
-- **Syntax:** `<!-- D:<ID>[,<ID>…] -->` at the end of the sentence or table row it governs, one space before it. `<ID>` is a DECISIONS item ID (`FC5`, `AG126`, `DM8`), or a note letter alone (`FE`) when the whole note is the ruling. A placeholder `F?n` is allowed only on a branch.
-- **Scope:** only the home is marked. Short references that link to the home are not. DECISIONS.md, DECISIONS-ARCHIVE.md, CHANGELOG.md, docs/research/ and this file are never marked.
+- **Syntax:** `<!-- D:<ID>[,<ID>…] -->` at the end of the sentence or table row it governs, one space before it. `<ID>` is an item ID from DECISIONS.md or DECISIONS-1.x.md (`FC5`, `AG126`, `DM8`), or a note letter alone (`FE`) when the whole note is the ruling. A placeholder `F?n` is allowed only on a branch.
+- **Scope:** only the home is marked. Short references that link to the home are not. The three DECISIONS files, CHANGELOG.md, docs/research/ and this file are never marked.
 - **Never invent a ruling:** a statement no ruling decided stays unmarked.
-- **The check:** run `tools\doc-markers.ps1` before a push, with `tools\doc-shots.ps1`. It fails a marker that names an unknown ID, an archived one (the sentence is stale), one whose item says "(superseded by X)", one inside a code block, and an `F?` placeholder on `main`. Fix a stale sentence to the current ruling and cite its ID, or delete it if it is no longer true (§1). `-ListUnmarked` lists live rulings with no marker, for information.
+- **The check:** run `tools\doc-markers.ps1` before a push, with `tools\doc-shots.ps1`. It fails a marker that names an unknown ID, an archived one (in DECISIONS-ARCHIVE.md, or only under `# Archived` in DECISIONS-1.x.md: the sentence is stale), one whose item says "(superseded by X)", one inside a code block, and an `F?` placeholder on `main`. Fix a stale sentence to the current ruling and cite its ID, or delete it if it is no longer true (§1). `-ListUnmarked` lists live rulings with no marker, for information.

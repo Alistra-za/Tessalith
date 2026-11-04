@@ -87,7 +87,7 @@ const SWEEPS = [
   { id: 'tests', name: 'Test suite health',
     task: 'Grep crates/*/tests and #[cfg(test)] modules: slow or sleep-based tests, tests that assert nothing or only that code ran, duplicated fixture builders that a shared helper should replace, #[ignore] tests with no SDC_* gate or reason, risky code paths (writes, overwrite guards, migrations, parsers of hostile input) with no test, and test files over ~3000 lines. Do not run the suite.' },
   { id: 'debt', name: 'Recorded shortcuts and stale notes',
-    task: 'List every `shortcut:` (and older `ponytail:`) comment with its stated limit, and judge whether the limit is now crossed or the upgrade is cheap. Also find TODO/FIXME/XXX, comments that cite a DECISIONS note that no longer says that, and doc comments that contradict the code beside them. Read .claude/DECISIONS.md only by grep.' },
+    task: 'List every `shortcut:` (and older `ponytail:`) comment with its stated limit, and judge whether the limit is now crossed or the upgrade is cheap. Also find TODO/FIXME/XXX, comments that cite a DECISIONS note that no longer says that, and doc comments that contradict the code beside them. Read .claude/DECISIONS.md only by grep; a 1.x ID it cites is in .claude/DECISIONS-1.x.md (frozen).' },
 ]
 
 const FINDINGS = {

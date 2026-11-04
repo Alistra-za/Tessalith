@@ -204,7 +204,7 @@ Size: about ${s.lines} lines of source. Context budget: read the files on the ma
 Method — systematic tracing, not browsing:
 1. List the section's entry points (${s.entry}).
 2. For each, trace data from where it enters to where it leaves (written file, GPU, DB, UI state, exit code). At every hop ask: what input breaks this? Empty, zero, max size, non-ASCII path, duplicate key, concurrent call, cancelled mid-way, file changed on disk, error swallowed, callers that disagree with the callee's contract, the same rule computed two different ways.
-3. Record only bugs with a concrete failing case (input/state -> wrong result, crash, data loss, hang). Shortcuts marked \`shortcut:\` are decisions, not bugs, unless the stated limit is already crossed. Behaviour recorded in .claude/DECISIONS.md as a ruling is intended — cite it if you think it's wrong rather than reporting it as a bug.
+3. Record only bugs with a concrete failing case (input/state -> wrong result, crash, data loss, hang). Shortcuts marked \`shortcut:\` are decisions, not bugs, unless the stated limit is already crossed. Behaviour recorded in .claude/DECISIONS.md as a ruling is intended — cite it if you think it's wrong rather than reporting it as a bug. A 1.x ID the digest cites is in .claude/DECISIONS-1.x.md (frozen; rulings under its \`# Archived\` heading are not in force).
 4. Prefer evidence you can show: quote the condition, or run one targeted existing test / a tiny probe. Max 8 findings; most severe first.
 Already reported (do not repeat):\n${prior}
 ${RULES_TRACE}`,
