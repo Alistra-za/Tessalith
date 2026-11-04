@@ -88,6 +88,7 @@ fn render_state() -> Option<&'static RenderState> {
             None,
             RendererOptions::default(),
         ))
+        .inspect_err(|e| eprintln!("skipped: no GPU adapter: {e}"))
         .ok()
     })
     .as_ref()
