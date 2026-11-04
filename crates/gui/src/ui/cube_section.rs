@@ -171,6 +171,7 @@ impl Cx<'_> {
     }
 
     /// The engine's CFG-INVALID lines for `field`, shown under its row.
+    /// shortcut: matches the message's leading `<field> `; read the field from structured warning data once the engine adds it.
     fn errors(&self, field: &str) -> Vec<&str> {
         let head = format!("{field} ");
         self.job

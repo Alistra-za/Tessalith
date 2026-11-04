@@ -184,6 +184,7 @@ fn file_backed(i: &TextureItem) -> bool {
 }
 
 /// The rival named by the engine's GEN-REPLACED skip (P4): "generated … replaced by <name>[ (a DDS…)]".
+/// shortcut: parses the engine's message; read the rival from structured warning data once the engine adds it.
 fn replaced_by(i: &TextureItem) -> Option<String> {
     let w = i.warnings.iter().find(|w| w.code == Code::GenReplaced)?;
     let tail = w.message.split_once("replaced by ")?.1;
