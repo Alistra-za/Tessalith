@@ -98,7 +98,8 @@ fn drawer_harness(width: f32, model: AppModel) -> Harness<'static, AppModel> {
 /// `leaf_model` with a user preset whose id and rule glob are long, chosen as the project's preset, so the
 /// provenance column carries long text ("from preset …", "from rule …").
 fn long_text_model(dir: &std::path::Path) -> AppModel {
-    let presets = dir.join("user-presets");
+    // A long folder makes the shown preset path long on every machine, not only where the temp dir is (CI's is longer).
+    let presets = dir.join("a-user-presets-folder-with-a-long-name-on-purpose");
     std::fs::create_dir_all(&presets).unwrap();
     std::fs::write(
         presets.join("long.toml"),
@@ -195,12 +196,16 @@ fn the_inspector_shows_labels_with_the_key_on_hover() {
 fn no_inspector_value_passes_the_drawer_edge() {
     for width in [260.0f32, 380.0, 520.0] {
         let d = tempfile::tempdir().unwrap();
+        // The drawer's right edge: the allocated rect starts inside the harness margin, so it ends past `width`.
+        let edge = std::rc::Rc::new(std::cell::Cell::new(f32::NAN));
+        let edge_in = edge.clone();
         let mut h = Harness::builder()
             .with_size(eframe::egui::vec2(width, 1400.0))
             .build_ui_state(
-                |ui, model: &mut AppModel| {
+                move |ui, model: &mut AppModel| {
                     let mut state = sdc_gui::ui::advanced::AdvancedState::default();
                     ui.allocate_ui(eframe::egui::vec2(width, 1400.0), |ui| {
+                        edge_in.set(ui.max_rect().right());
                         sdc_gui::ui::advanced::body(ui, model, &mut state);
                     });
                 },
@@ -210,15 +215,16 @@ fn no_inspector_value_passes_the_drawer_edge() {
         h.run();
         let inspector_top = h.get_by_label("Preset inspector").rect().min.y;
         let preview_top = h.get_by_label("Preview").rect().min.y;
+        let edge = edge.get();
         let mut checked = 0;
         for n in h.query_all_by_role(Role::Label) {
             let r = n.rect();
             if r.min.y > inspector_top && r.min.y < preview_top {
                 checked += 1;
                 assert!(
-                    r.max.x <= width + 1.0,
+                    r.max.x <= edge + 1.0,
                     "{width}: {:?} ends at {} past the drawer edge",
-                    n.accesskit_node().label(),
+                    n.accesskit_node().label().or(n.accesskit_node().value()),
                     r.max.x
                 );
             }

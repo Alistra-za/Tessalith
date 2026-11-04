@@ -27,4 +27,5 @@ jobs:
       # Tests that need owner data are #[ignore]d or skip without SDC_BENCH_ROOT and similar variables.
       # The render3d and gui GPU tests use the WARP software adapter or skip when no adapter is found,
       # so no GPU is required.
-      - run: cargo test --workspace
+      # --no-fail-fast: one failing test binary must not hide failures in the binaries after it.
+      - run: cargo test --workspace --no-fail-fast
