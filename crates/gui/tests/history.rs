@@ -380,3 +380,35 @@ fn a_step_recorded_while_sdc_toml_is_blamed_keeps_its_text() {
         "sdc.toml was emptied"
     );
 }
+
+/// Backlog T38 (Note FP7): while the engine's rejection of `sdc.toml` is still being retried, the unsaved edits the
+/// blame stashed are what "Save" in the unsaved dialogs writes.
+#[test]
+fn save_in_the_open_dialog_writes_the_stashed_sdc_toml_edits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let item = m
+        .items
+        .iter()
+        .find(|i| i.name == "rock01.png")
+        .unwrap()
+        .key
+        .clone();
+    m.set_field(&item, "alpha.threshold", json!(1000));
+    // Poll until the engine's rejection blames the file; its retry plan is still running then.
+    let start = std::time::Instant::now();
+    while !m.project.as_ref().unwrap().read_only() {
+        assert!(start.elapsed().as_secs() < 60, "never rejected");
+        m.poll();
+    }
+    let stashed = m.project.as_ref().unwrap().stashed_edits();
+    let Some(stashed) = stashed else {
+        panic!("the retry plan landed before the test could act");
+    };
+    assert!(m.is_dirty(), "the stashed edits count as unsaved");
+    let toml = m.root.clone().unwrap().join("sdc.toml");
+    let other = d.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    m.resolve_open_unsaved(other, true);
+    assert_eq!(std::fs::read_to_string(&toml).unwrap_or_default(), stashed);
+}

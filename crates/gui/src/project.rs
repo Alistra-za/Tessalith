@@ -751,6 +751,27 @@ impl ProjectDoc {
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
         self.f.save(force)
     }
+
+    /// Note FP7 (T38): write the unsaved edits a blame stashed (the engine may still reject them: the file then opens
+    /// read-only with that message). `Ok(false)` when nothing is stashed.
+    pub fn save_stashed(&mut self) -> Result<bool, SaveError> {
+        if !self.stash.as_ref().is_some_and(|(_, dirty)| *dirty) {
+            return Ok(false);
+        }
+        if self.f.changed_on_disk() {
+            return Err(SaveError::ChangedOnDisk);
+        }
+        let Some((doc, dirty)) = self.stash.as_mut() else {
+            return Ok(false);
+        };
+        let text = doc.to_string();
+        engine::dds::write_atomic(&self.f.path, text.as_bytes())
+            .map_err(|e| write_error(&self.f.path, e))?;
+        self.f.saved_text = text;
+        self.f.disk = SourceStamp::of(&self.f.path);
+        *dirty = false;
+        Ok(true)
+    }
 }
 
 /// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.

@@ -3961,6 +3961,21 @@ impl AppModel {
     /// the GUI never loaded).
     pub fn save(&mut self) -> Result<(), SaveError> {
         let mut wrote = false;
+        // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
+        if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
+            match p.save_stashed() {
+                Ok(w) => {
+                    if w {
+                        crate::crash_log::discard_recovery(p.path());
+                    }
+                    wrote |= w;
+                }
+                Err(e) => {
+                    self.save_failed(DocKind::SdcToml, &e);
+                    return Err(e);
+                }
+            }
+        }
         if let Some(p) = self.project.as_mut().filter(|p| p.is_dirty()) {
             if let Err(e) = p.save(false) {
                 self.save_failed(DocKind::SdcToml, &e);
