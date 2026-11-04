@@ -3153,9 +3153,10 @@ impl AppModel {
         w: &str,
         profile: &engine::config::Profile,
         merge: String,
+        replan: bool,
     ) {
         let (k, w, profile) = (item_key.to_string(), w.to_string(), profile.clone());
-        self.edit_docs("Change BC7 weighting", Some(merge), true, move |p, _| {
+        self.edit_docs("Change BC7 weighting", Some(merge), replan, move |p, _| {
             let (own_p, own_w) = (
                 p.file_value(&k, "encoder.perceptual"),
                 p.file_value(&k, fields::WEIGHTING),
@@ -3187,10 +3188,15 @@ impl AppModel {
                 continue;
             };
             if fields::weighting_value(&profile) != json!(w) {
-                self.write_weighting(&k, &w, &profile, merge);
+                self.write_weighting(&k, &w, &profile, merge, false);
             }
         }
-        self.history.pushes != pushes
+        // Note FO4: one plan for all the writes, not one per texture.
+        let wrote = self.history.pushes != pushes;
+        if wrote {
+            self.replan_after_edit(false);
+        }
+        wrote
     }
 
     /// An `sdc.toml` edit (a read-only `sdc.toml` ignores it), re-planned. The sets document is not touched, so
@@ -3528,7 +3534,7 @@ impl AppModel {
             });
             // Unique per pick, so two picks stay two steps; the follow-up joins this one.
             let merge = format!("bc7-weighting#{}", self.history.pushes);
-            self.write_weighting(item_key, w, &profile, merge.clone());
+            self.write_weighting(item_key, w, &profile, merge.clone(), true);
             // Note FO4: one entry per texture, so a bulk or copy pick completes every one.
             if hides {
                 self.weighting_follow

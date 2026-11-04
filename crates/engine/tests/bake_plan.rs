@@ -179,6 +179,34 @@ fn packed_member_bake_shift_uses_the_common_canvas_size() {
     }
 }
 
+/// Note FO5: `input_dims` (via `job_dims`) sizes a pack source by content, as Load reads it: a PNG named `.jpg`.
+#[test]
+fn a_mislabelled_pack_source_is_sized_by_content() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    let sized = |rel: &str, w: u32, ext: image::ImageFormat| {
+        let p = d.path().join("in").join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        ImageBuffer::from_fn(w, w, |x, _| Luma([x as u8]))
+            .save_with_format(p, ext)
+            .unwrap();
+    };
+    sized("textures/pbr/iron_roughness.png", 32, image::ImageFormat::Png);
+    sized("textures/pbr/iron_ao.jpg", 64, image::ImageFormat::Png);
+    let (p, _) = plan(req(d.path(), &[]));
+    let packed = p
+        .jobs
+        .iter()
+        .find(|j| j.pack.is_some())
+        .expect("a packed rmaos");
+    assert_eq!(
+        packed.bake.as_ref().map(|b| b.shift),
+        Some(0),
+        "{:?}",
+        packed.warnings
+    );
+}
+
 #[test]
 fn size_ratios_give_the_level_shift() {
     for ((nw, nh), (mw, mh), shift) in [

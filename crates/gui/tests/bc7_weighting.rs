@@ -397,8 +397,13 @@ fn bulk_linear_overrides_every_hidden_inherited() {
             .set_file_value(k, WEIGHTING, &json!("alpha16"));
     }
     idle(&mut m);
+    let (steps, plans) = (m.history.undo.len(), m.generation());
     m.apply_bulk_edit(&keys, WEIGHTING, BulkOp::Set(json!("linear")));
     idle(&mut m);
+    // One plan for the bulk apply and one for the follow-up (not one per texture). The follow-up is its own undo
+    // step: the bulk's step has no merge key to join (Note FO4 records this rather than widening the fix).
+    assert_eq!(m.generation() - plans, 2, "re-plans");
+    assert_eq!(m.history.undo.len() - steps, 2, "undo steps");
     for k in &keys {
         assert_eq!(row_value(&m, k), json!("linear"), "{k}");
         assert_eq!(encode_params(&m, k), (false, None), "{k}");
