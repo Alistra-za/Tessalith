@@ -951,6 +951,34 @@ fn a_float_edit_makes_no_store_query() {
     assert!(!got.iter().any(|c| matches!(c, V3Cmd::LoadParsed { .. })));
 }
 
+/// Trace-debug 2026-11-04 #8 (Note FO8): the Auto wetness guess (GN1) is in the texture map a skin shape loads with.
+#[test]
+fn the_auto_wet_guess_is_in_the_mesh_texture_map() {
+    let d = files(false);
+    put(d.path(), "mods/A/textures/a/body_wet.dds", Some(b"dds"));
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let store = modscan::store::Store::open_read_only(&d.path().join("scan.db")).unwrap();
+    let slots = || {
+        vec![
+            "textures/a/body.dds".to_string(),
+            "textures/a/body_msn.dds".to_string(),
+        ]
+    };
+    let map = sdc_gui::model::meshes::texture_sources(&store, &[(4, slots()), (0, slots())]).unwrap();
+    assert!(
+        matches!(
+            map.get("textures/a/body_wet.dds"),
+            Some(sdc_gui::model::viewport3d::FileSource::Optional(_))
+        ),
+        "the _wet guess of the type-4 shape is an optional source"
+    );
+    // Control: a plain shape (type 0) gets no guess.
+    let map = sdc_gui::model::meshes::texture_sources(&store, &[(0, slots())]).unwrap();
+    assert!(!map.contains_key("textures/a/body_wet.dds"));
+}
+
 /// Note GP9 (Review Focus 3): a slot path the store has and the loaded map lacks is still looked up and reloaded.
 #[test]
 fn a_new_slot_path_still_reloads_with_its_texture() {

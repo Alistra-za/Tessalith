@@ -1809,10 +1809,18 @@ pub fn texture_source_calls() -> usize {
     TEXTURE_SOURCE_CALLS.with(std::cell::Cell::get)
 }
 
+/// The skin shape's Auto texture guesses the resolver must be able to find: the RFAOS candidates and the wetness
+/// ones (Note GN1; render3d resolves them only through the texture map). Empty for a shape that is not skin.
+pub(crate) fn skin_map_guesses(ty: u32, normal: &str, specular: &str) -> Vec<String> {
+    let mut v = render3d::textures::rfaos_candidates(ty, normal, specular);
+    v.extend(render3d::textures::wet_candidates(ty, normal, specular));
+    v
+}
+
 /// Where the game's copy of each texture is, for shapes given as (shader type, slot paths; "" = empty): every slot
-/// path the store has, then the skin RFAOS candidates (render3d resolves only through this map), those optional: a
-/// failed read is quiet. The first entry for a path wins.
-fn texture_sources(
+/// path the store has, then the skin RFAOS and wetness guesses ([`skin_map_guesses`]), those optional: a failed read
+/// is quiet. The first entry for a path wins.
+pub fn texture_sources(
     store: &Store,
     paths: &[(u32, Vec<String>)],
 ) -> Result<HashMap<String, FileSource>, ScanError> {
@@ -1829,7 +1837,7 @@ fn texture_sources(
     }
     for (ty, s) in paths {
         let slot = |i: usize| s.get(i).map_or("", String::as_str);
-        for c in render3d::textures::rfaos_candidates(*ty, slot(1), slot(7)) {
+        for c in skin_map_guesses(*ty, slot(1), slot(7)) {
             if textures.contains_key(&c) {
                 continue;
             }

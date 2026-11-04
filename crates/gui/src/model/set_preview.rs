@@ -2268,10 +2268,11 @@ impl SetPreview {
                 }
             }
         }
-        // The skin RFAOS candidates too (render3d resolves only through this map), optional: a failed read is quiet.
+        // The skin RFAOS and wetness (GN1) candidates too (render3d resolves only through this map), optional: a
+        // failed read is quiet.
         for m in materials {
             let slot = |i: usize| m.slots.get(i).map_or("", |p| p.norm.as_str());
-            for c in render3d::textures::rfaos_candidates(m.shader_type, slot(1), slot(7)) {
+            for c in super::meshes::skin_map_guesses(m.shader_type, slot(1), slot(7)) {
                 if map.contains_key(&c) {
                     continue;
                 }
