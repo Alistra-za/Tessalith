@@ -233,3 +233,12 @@ ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FW, 2026-11-04)
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS
+
+ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ
+
+ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
+
+ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV

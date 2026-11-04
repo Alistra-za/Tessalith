@@ -9,15 +9,15 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX
-- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU
@@ -1093,3 +1093,11 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **FW7 `SlotFill::item` and `is_filled` (L60).** They replace the hand matches over `Own`, `Borrowed` and `Empty` in `model/sets.rs`, `pbr_export.rs`, `xpmf_json.rs`, `auto_flags.rs`, `checks.rs` and `ui/set_editor.rs`; no behaviour changed. (`ui/pgp_fields.rs` and `used_by.rs` use them too.)
 - **FW8 Looking one set up clones one view (L56).** `set_of_item`, `input_name_plan`, `original_source` and the rename retargets read the cached `views` and clone only the set they return. Test `model::tests::looking_up_one_set_deep_clones_no_whole_view_list` (the `SET_VIEWS_CLONES` probe stays at 0).
 - **FW9 Dead and test-only model functions are gone (L58).** `known_slot_bits` (no callers) and `rename_plan` (tests only; `tests/rename.rs` calls `plan_rename` itself) are deleted.
+
+## Note FZ — backlog batch B10: dead code (main team, 2026-11-04)
+
+- **FZ1 Unused pub items are gone (L71).** `policy::preset_for` and the GUI's `ui::below_header` (with its `insert_temp` key) are deleted; `ui::centre_rect` stays. The PresetRef doc in `schema/manifest.schema.json` no longer names `preset_for`.
+- **FZ2 `SkipKind::LowDetail` is gone (L72).** Nothing emitted it since Note FM; the variant and its `schema/event.schema.json` entry are deleted. An old event log that holds a `low_detail` skip no longer parses.
+- **FZ3 Unused workspace dependencies (L74).** `assert_cmd` and `predicates` are removed from the root `Cargo.toml`; `sdc`'s `test-hooks` feature stays.
+- **FZ4 `Bc7Tune` is only `weights` (L41).** The research-only override fields are removed; `bc7e_compress_blocks_tuned` sends -1 (the level's value) for every other shim slot, as unset fields did. Output bytes are unchanged (golden, `level_identity`, `identity.json`).
+- **FZ5 GPU render tests say when they skip (L80).** `render_state` in `crates/gui/tests/render.rs` prints `skipped: no GPU adapter` once; the tests still pass without an adapter.
