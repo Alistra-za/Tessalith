@@ -102,14 +102,24 @@ fn a_read_only_project_greys_the_card_with_its_reason() {
     m.select_set(&k);
     let mut h = harness(m);
     h.run();
-    let set = h.query_all_by_label("set").next().expect("a set button");
+    const WHY: &str = "sdc-project.toml is read-only";
+    assert!(
+        h.query_by_label_contains(WHY).is_none(),
+        "the reason is not shown before the hover"
+    );
+    // The card's "set" buttons sit between its title and its own Export JSON… button.
+    let top = h.get_by_label_contains(TITLE).rect().max.y;
+    let bottom = h.get_by_label("Export JSON…").rect().min.y;
+    let set = h
+        .query_all_by_label("set")
+        .find(|n| n.rect().min.y > top && n.rect().max.y < bottom)
+        .expect("a set button in the skin card");
     assert!(set.accesskit_node().is_disabled());
     set.hover();
     h.run();
     h.run();
     assert!(
-        h.query_by_label_contains("sdc-project.toml is read-only")
-            .is_some(),
+        h.query_by_label_contains(WHY).is_some(),
         "the reason shows on hover"
     );
 }

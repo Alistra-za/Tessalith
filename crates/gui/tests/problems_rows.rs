@@ -380,13 +380,21 @@ fn a_feature_clash_offers_both_features_and_each_turns_off_only_its_own() {
             .rect()
             .center()
             .y;
-        for f in ["hair", "emissive"] {
-            assert!(
-                h.query_all_by_label(&format!("Turn off {f}"))
-                    .any(|n| (n.rect().center().y - y).abs() < 8.0),
-                "the row offers Turn off {f}"
-            );
-        }
+        let x_of = |f: &str| {
+            h.query_all_by_label(&format!("Turn off {f}"))
+                .find(|n| (n.rect().center().y - y).abs() < 8.0)
+                .unwrap_or_else(|| panic!("the row offers Turn off {f}"))
+                .rect()
+                .center()
+                .x
+        };
+        // The buttons read in the sentence's order ("X and Y can't both be on").
+        let at = |f: &str| row.text.find(f).expect("the sentence names both");
+        let (first, second) = match at("hair") < at("emissive") {
+            true => ("hair", "emissive"),
+            false => ("emissive", "hair"),
+        };
+        assert!(x_of(first) < x_of(second), "Turn off {first} comes first");
         h.get_by_label(&format!("Turn off {pick}")).click();
         idle(&mut h);
         let m = h.state_mut();

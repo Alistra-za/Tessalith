@@ -945,7 +945,9 @@ fn a_read_only_project_greys_the_card_with_its_reason_not_the_banner() {
     std::fs::create_dir_all(&bad).unwrap();
     std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
     m.sets_doc = Some(SetsDoc::open(&bad));
-    m.banner = Some("Restored 2 unsaved edits from the last session".into());
+    const BANNER: &str = "Restored 2 unsaved edits from the last session";
+    const WHY: &str = "sdc-project.toml is read-only";
+    m.banner = Some(BANNER.into());
     m.select_set(&v.key);
     let mut h = Harness::builder()
         .with_size(eframe::egui::vec2(1400.0, 2400.0))
@@ -954,15 +956,28 @@ fn a_read_only_project_greys_the_card_with_its_reason_not_the_banner() {
     h.run();
     h.get_by_label(SECTION).click();
     h.run();
+    assert!(
+        h.query_by_label_contains(WHY).is_none(),
+        "the reason is not shown before the hover"
+    );
+    let banners = h.query_all_by_label_contains(BANNER).count();
     let tick = h.get_by_label(EXPORT);
     assert!(tick.accesskit_node().is_disabled());
     tick.hover();
     h.run();
     h.run();
+    let tip = h.get_by_label_contains(WHY);
     assert!(
-        h.query_by_label_contains("sdc-project.toml is read-only")
-            .is_some(),
-        "the reason shows on hover"
+        !tip.accesskit_node()
+            .label()
+            .unwrap_or_default()
+            .contains(BANNER),
+        "the tooltip is the reason, not the banner"
+    );
+    assert_eq!(
+        h.query_all_by_label_contains(BANNER).count(),
+        banners,
+        "the hover adds no banner text"
     );
 }
 
