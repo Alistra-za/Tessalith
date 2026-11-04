@@ -2611,6 +2611,18 @@ impl Engine {
                 if let Some(pk) = &j.pack {
                     rels.extend(pk.sources.iter().filter_map(|s| rel_of_path(&s.path)));
                 }
+                // Backlog T18: a cube's faces, and its output stem (folder of the first face + the output's name).
+                if let Some(cj) = &j.cube {
+                    rels.extend(cj.sources.iter().filter_map(|s| rel_of_path(&s.path)));
+                    if let (Some(r), Some(stem)) = (rel_of_path(&j.input), j.output.file_stem()) {
+                        let dir = r.rsplit_once('/').map_or("", |(d, _)| d);
+                        rels.push(
+                            format!("{dir}/{}", stem.to_string_lossy())
+                                .trim_start_matches('/')
+                                .to_string(),
+                        );
+                    }
+                }
                 rels.extend(j.fill.iter().filter_map(|f| rel_of_path(&f.source.path)));
             }
             rels.extend(skipped.iter().filter_map(|s| rel_of_path(&s.path)));

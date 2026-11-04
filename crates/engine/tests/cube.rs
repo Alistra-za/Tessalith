@@ -585,6 +585,27 @@ fn six_faces_become_one_job() {
     assert!(cj.sources.iter().all(|s| s.stamp.is_some()));
 }
 
+/// Backlog T18: every face file and the cube's output stem are planned `[files]` keys, so none is unmatched.
+#[test]
+fn six_face_files_keys_and_the_stem_key_are_not_unmatched() {
+    let d = tempfile::tempdir().unwrap();
+    faces(d.path(), "textures/a/chrome_e", 32);
+    let mut toml = String::from("[files.\"textures/a/chrome_e\"]\nalpha.threshold = 90\n");
+    for f in FACES {
+        toml += &format!("[files.\"textures/a/chrome_e_{f}.png\"]\nalpha.threshold = 90\n");
+    }
+    std::fs::write(d.path().join("in/sdc.toml"), toml).unwrap();
+    let (_, ev) = plan_of(req(d.path(), &[], true));
+    let unmatched: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Warning(w) if w.code == Code::CfgFileUnmatched => Some(w.message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(unmatched.is_empty(), "{unmatched:?}");
+}
+
 /// Ruling FR-c: `cubemap.face_size` sizes a cube, so `resize_relative_to` reads no slot and says nothing (no
 /// RESIZE-NO-REFERENCE claiming a resize that never happens).
 #[test]
