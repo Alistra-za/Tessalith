@@ -3118,3 +3118,16 @@ fn the_clock_time_joins_the_render_dedupe() {
         "no clock: 1.0"
     );
 }
+
+#[test]
+fn orbit_pitch_stays_below_the_up_switch() {
+    let mut o = v3::Orbit::default();
+    for _ in 0..500 {
+        o.drag(0.0, 10.0);
+    }
+    assert!((1.5..0.999f32.asin()).contains(&o.pitch), "{}", o.pitch);
+    for _ in 0..500 {
+        o.drag(0.0, -10.0);
+    }
+    assert!((-0.999f32.asin()..-1.5).contains(&o.pitch), "{}", o.pitch);
+}

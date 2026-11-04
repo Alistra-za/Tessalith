@@ -10,9 +10,12 @@ fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// Trace 2026-10-28 #1 fix round 2: 2000 zero-size BSTriShapes (not Lighting shapes, so each gets a warning and a
-/// skipped entry) all named by one 100 000-byte string of 0x80 (`€` decoded). The messages carry a short label, so
-/// the text stays small (about 1.2 GB with the full name).
+/// One fixture shape block: a BSTriShape head with no geometry.
+const BLOCK_LEN: u32 = 116;
+
+/// Trace 2026-10-28 #1 fix round 2: 2000 BSTriShapes with no geometry (not Lighting shapes, so each gets a warning
+/// and a skipped entry) all named by one 100 000-byte string of 0x80 (`€` decoded). The messages carry a short label,
+/// so the text stays small (about 1.2 GB with the full name).
 #[test]
 fn skipped_shape_messages_use_a_short_label() {
     let mut b = b"Gamebryo File Format, Version 20.2.0.7\n".to_vec();
@@ -26,7 +29,9 @@ fn skipped_shape_messages_use_a_short_label() {
     b.extend(10u32.to_le_bytes());
     b.extend(b"BSTriShape");
     b.extend([0u8; 2 * 2000]); // type indices
-    b.extend([0u8; 4 * 2000]); // sizes: every block starts at the footer
+    for _ in 0..2000 {
+        b.extend(BLOCK_LEN.to_le_bytes());
+    }
     b.extend(31u32.to_le_bytes());
     b.extend(100_000u32.to_le_bytes());
     for k in 0..30 {
@@ -36,8 +41,21 @@ fn skipped_shape_messages_use_a_short_label() {
     b.extend(100_000u32.to_le_bytes());
     b.extend(vec![0x80u8; 100_000]);
     b.extend(0u32.to_le_bytes()); // groups
-    b.extend(30u32.to_le_bytes()); // footer: 30 roots, read as name index 30
-    b.extend([0u8; 4 * 30]);
+    for _ in 0..2000 {
+        // Shape head read inside its own block: name 30, no extra data, then NiAVObject (flags, transform), the
+        // bounding sphere, and no skin / shader / alpha refs.
+        b.extend(30i32.to_le_bytes());
+        b.extend(0u32.to_le_bytes());
+        b.extend((-1i32).to_le_bytes());
+        b.extend([0u8; 4 + 52]);
+        b.extend((-1i32).to_le_bytes());
+        b.extend([0u8; 16]);
+        for _ in 0..3 {
+            b.extend((-1i32).to_le_bytes());
+        }
+        b.extend([0u8; 8 + 2 + 2 + 4]);
+    }
+    b.extend(0u32.to_le_bytes()); // footer: no roots
     let p = parse(&b);
     assert_eq!(p.skipped.len(), 2000);
     let texts = || {

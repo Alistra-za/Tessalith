@@ -221,9 +221,17 @@ fn color(
         let mut picked = lin;
         // C-P25: disabled outside 0-1 (NaN included): the picker would clamp.
         let hdr = v.iter().any(|x| !(0.0..=1.0).contains(x));
-        let r = ui
-            .add_enabled_ui(!hdr, |ui| ui.color_edit_button_rgb(&mut picked))
+        let (r, was, open) = ui
+            .add_enabled_ui(!hdr, |ui| {
+                // The id egui's colour button gives its popup (auto_id_with does not advance the id).
+                let popup = ui.auto_id_with("popup");
+                let was = egui::Popup::is_id_open(ui.ctx(), popup);
+                let r = ui.color_edit_button_rgb(&mut picked);
+                (r, was, egui::Popup::is_id_open(ui.ctx(), popup))
+            })
             .inner;
+        // The step ends when the popup closes, or a drag in it is released (like the key swatch).
+        done |= (was && !open) || (open && ui.input(|i| i.pointer.any_released()));
         set_name(&r, egui::WidgetType::ColorButton, name, None, None);
         let r = r.on_disabled_hover_text(OUT_OF_RANGE);
         if r.changed() {

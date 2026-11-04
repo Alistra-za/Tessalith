@@ -30,6 +30,14 @@ pub enum NifError {
     NotSkyrim { version: u32, user: u32, bsver: u32 },
     #[error("implausible string count {0}")]
     TooManyStrings(u32),
+    #[error("implausible block count {0}")]
+    TooManyBlocks(u32),
+    #[error("block {block} has type index {index} but the header lists {types} block types")]
+    BadTypeIndex {
+        block: u32,
+        index: u16,
+        types: usize,
+    },
     #[error("big-endian NIF")]
     BadEndian,
     #[error("no Gamebryo header line")]

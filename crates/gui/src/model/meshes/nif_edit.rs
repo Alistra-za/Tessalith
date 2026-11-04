@@ -260,17 +260,26 @@ type RetargetKey = (
     Option<(u64, Option<std::time::SystemTime>)>,
 );
 
-/// The copy an edit applies to: the first that is neither PGPatcher output, our chosen edit mod, nor the 1.x default
-/// edit mod (spec §8.1; Note GD28: `mods\sdc NIF Edits` holds Tessalith's own earlier output).
-pub fn pick_source<'a>(copies: &'a [PathCopy], edit_mod: &Path) -> Option<&'a PathCopy> {
+/// The copy an edit applies to: the first that is neither PGPatcher output, our chosen edit mod, the 1.x default
+/// edit mod (spec §8.1; Note GD28: `mods\sdc NIF Edits` holds Tessalith's own earlier output), nor a folder holding
+/// our edit document for this NIF (Note GQ3).
+pub fn pick_source<'a>(
+    copies: &'a [PathCopy],
+    edit_mod: &Path,
+    data_path: &str,
+) -> Option<&'a PathCopy> {
     let legacy = |root: &str| {
         Path::new(&root.replace('/', "\\"))
             .file_name()
             .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(edit_doc::EDIT_MOD))
     };
-    copies
-        .iter()
-        .find(|c| !c.derived && !same_dir(Path::new(&c.root), edit_mod) && !legacy(&c.root))
+    // Note GQ3: a folder holding our edit document for this NIF is one of our own exports.
+    // shortcut: a folder whose .sdc\nif-edits was deleted is not recognised as ours, upgrade if users report it
+    let ours =
+        |root: &str| edit_doc::doc_path(Path::new(root), data_path).is_ok_and(|p| p.exists());
+    copies.iter().find(|c| {
+        !c.derived && !same_dir(Path::new(&c.root), edit_mod) && !legacy(&c.root) && !ours(&c.root)
+    })
 }
 
 pub fn generated_warning(origin: &str) -> Option<String> {
@@ -726,14 +735,19 @@ impl NifEdit {
             match_tests: 0,
             in_game: None,
             pg_supplied: vec![],
-            // a recovered autosave is saved into the folder with the next save or close
+            // a recovered autosave is saved into the folder with the next save or close; an exported session on a
+            // changed source is saved at open (below)
             unsaved: recovered,
             drag: None,
         };
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
         e.reapply();
         if changed {
+            let was_exported = e.doc.export.ops_hash.is_some();
             e.count_changed();
+            if was_exported {
+                e.save(); // the forced re-export (GQ1) must reach the persisted document, as in reload_source
+            }
         }
         Ok(e)
     }
@@ -746,6 +760,10 @@ impl NifEdit {
             .filter(|d| d.status == OpStatus::Conflict)
             .count();
         self.source_changed = Some((self.doc.ops.len() - n, n));
+        // the exported file was built from the old source: force a re-export (write_out sets a real hash again)
+        if self.doc.export.ops_hash.is_some() {
+            self.doc.export.ops_hash = Some(String::new());
+        }
     }
 
     /// The source copy's bytes changed on disk (export step 1): the ops are re-anchored on them and the statuses
@@ -1916,7 +1934,7 @@ impl MeshesModel {
         let store = self.store.as_ref().ok_or("No scan store.")?;
         edit_doc::win(path)?; // before the read: a loose copy's root joined with `..` would read outside its mod
         let copies = store.copies_of_path(path).map_err(db_err)?;
-        let src = pick_source(&copies, edit_mod.unwrap_or(Path::new("")))
+        let src = pick_source(&copies, edit_mod.unwrap_or(Path::new("")), path)
             .ok_or_else(|| format!("No source copy of {path} to edit."))?
             .clone();
         let bytes = read_file(&FileSource::from_store(src.kind, &src.root, path))?;
@@ -2397,6 +2415,13 @@ impl MeshesModel {
                 self.error = Some(format!("{path} is not in the scanned meshes."));
                 return;
             };
+            // Note GQ4: select_nif refuses then, and open_edit would open whatever is still selected
+            if !self.store_settled() {
+                self.error = Some(format!(
+                    "{path} opens once the Meshes scan finishes: wait for it, or scan again."
+                ));
+                return;
+            }
             self.select_nif(id);
             self.open_edit();
         }

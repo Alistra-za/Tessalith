@@ -61,12 +61,15 @@ impl Header {
         let nblocks_at = c.pos();
         let nblocks = c.u32()?;
         let bsver = c.u32()?;
-        if user != 12 || !(bsver == 83 || bsver == 100) || nblocks > MAX_BLOCKS {
+        if user != 12 || !(bsver == 83 || bsver == 100) {
             return Err(NifError::NotSkyrim {
                 version,
                 user,
                 bsver,
             });
+        }
+        if nblocks > MAX_BLOCKS {
+            return Err(NifError::TooManyBlocks(nblocks));
         }
         c.export_bytes()?; // author
         c.export_bytes()?; // process script (BSVER < 131)
@@ -80,10 +83,11 @@ impl Header {
             .map(|_| c.u16())
             .collect::<Result<Vec<_>, _>>()?;
         let type_index: Vec<u16> = type_index_raw.iter().map(|t| t & 0x7FFF).collect();
-        if type_index.iter().any(|&t| t as usize >= ntypes) {
-            return Err(NifError::Truncated {
-                at: c.pos(),
-                need: 0,
+        if let Some(block) = type_index.iter().position(|&t| t as usize >= ntypes) {
+            return Err(NifError::BadTypeIndex {
+                block: block as u32,
+                index: type_index[block],
+                types: ntypes,
             });
         }
         let sizes = (0..nblocks)

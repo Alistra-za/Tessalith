@@ -132,3 +132,33 @@ fn header_keeps_raw_parts_for_re_emit() {
     assert_eq!(h.roots(&b).unwrap(), vec![0, 0]);
     assert_eq!(h.strings[s as usize], b"abc");
 }
+
+#[test]
+fn too_many_blocks_is_not_called_not_skyrim() {
+    let mut n = Nif::new(100);
+    n.block("NiNode", vec![]);
+    let mut b = n.bytes();
+    let at = Header::parse(&b).unwrap().nblocks_at;
+    b[at..at + 4].copy_from_slice(&((1u32 << 20) + 1).to_le_bytes());
+    assert!(matches!(
+        Header::parse(&b),
+        Err(NifError::TooManyBlocks(n)) if n == (1 << 20) + 1
+    ));
+}
+
+#[test]
+fn a_bad_type_index_names_the_block() {
+    let mut n = Nif::new(100);
+    n.block("NiNode", vec![]);
+    let mut b = n.bytes();
+    let pos = b.windows(6).position(|w| w == b"NiNode").unwrap() + 6;
+    b[pos..pos + 2].copy_from_slice(&5u16.to_le_bytes());
+    assert!(matches!(
+        Header::parse(&b),
+        Err(NifError::BadTypeIndex {
+            block: 0,
+            index: 5,
+            types: 1
+        })
+    ));
+}

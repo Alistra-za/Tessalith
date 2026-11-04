@@ -234,7 +234,7 @@ impl Variant {
 }
 
 /// Both textures of one canonical path (`textures/…`) and the one the draws use. GPU textures are immutable, so a
-/// swap makes a new texture and SRV and rebinds. Both `None` = the resolver had nothing (kept so one load asks once).
+/// swap makes a new texture and SRV and rebinds. Both `None` = the resolver had nothing (`absent`) or the file did not decode (kept so one load asks once).
 #[derive(Clone, Default)]
 struct TexEntry {
     source: Option<textures::Texture>,
@@ -243,6 +243,8 @@ struct TexEntry {
     /// A texture-set slot path the resolver did not return (a `LoadReport::missing_textures` line); never set for an
     /// RFAOS guess. Kept through swaps, so a dropped swap falls back to the missing-texture fill.
     missing: bool,
+    /// The resolver returned no file for the path (whatever `report_missing` was); a failed decode is not absent.
+    absent: bool,
 }
 
 impl TexEntry {
@@ -268,6 +270,16 @@ impl TexEntry {
         self.source.is_some() || self.encoded.is_some()
     }
 }
+
+/// Whether a cached entry answers a `texture()` request. A path the resolver found no file for and no request
+/// has reported yet (an absent Auto guess: `absent`, not `missing`) is loaded again when a slot or pick names it
+/// (`report_missing`), so the pick can bind a file that appeared since. A failed decode stays cached, and so does
+/// an absent entry a swap has since filled (`replace_texture` clones `absent`; `any()`). No pure test for that
+/// case: a `Texture` holds a D3D11 view.
+fn reuse(e: &TexEntry, report_missing: bool) -> bool {
+    !(report_missing && e.absent && !e.missing && !e.any())
+}
+
 /// [`Renderer::draw_diag`]: PS defines, PS reflection, (register, DXGI format) of every bound SRV.
 pub type DrawDiag = (
     Vec<(String, String)>,
@@ -1068,7 +1080,11 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) -> TexSlot {
-        if let Some(e) = self.tex_cache.get(norm) {
+        if let Some(e) = self
+            .tex_cache
+            .get(norm)
+            .filter(|e| reuse(e, report_missing))
+        {
             return e.current().map(|t| (t.srv.clone(), t.kind));
         }
         let v = self.load_variant;
@@ -1079,6 +1095,7 @@ impl Renderer {
         };
         match textures(norm) {
             None => {
+                entry.absent = true;
                 entry.missing = report_missing;
                 if !rep.missing_textures.iter().any(|m| m == norm) {
                     rep.missing_textures.push(norm.to_string());
@@ -2626,9 +2643,12 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
         .collect()
 }
 
-/// A define the CS settings manage (C8): `ENABLE_LL` or a [`cs_settings::PREVIEW_FEATURES`] define.
+/// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a
+/// [`cs_settings::PREVIEW_FEATURES`] define.
 fn settings_define(d: &str) -> bool {
-    d == "ENABLE_LL" || cs_settings::PREVIEW_FEATURES.iter().any(|(_, x)| *x == d)
+    d == "ENABLE_LL"
+        || d.starts_with("CS_GAME_GAMMA=")
+        || cs_settings::PREVIEW_FEATURES.iter().any(|(_, x)| *x == d)
 }
 
 /// Owner D3: the missing-texture fill goes to colour registers only, the base colour t0 and the env cube at t4.
@@ -2788,6 +2808,30 @@ fn glint_noise_or_fallback<T>(
 #[cfg(test)]
 mod context_tests {
     use super::*;
+
+    /// Item 53: a pick reloads a path cached as an absent Auto guess; every other hit stays a hit.
+    #[test]
+    fn a_pick_reloads_an_absent_auto_guess() {
+        let guess = TexEntry {
+            absent: true,
+            ..TexEntry::default()
+        };
+        // A file that was found but did not decode is empty too; reloading it would repeat its error line.
+        let failed_decode = TexEntry::default();
+        assert!(reuse(&failed_decode, true), "a failed decode stays cached");
+        assert!(reuse(&guess, false), "an Auto guess re-asking stays cached");
+        assert!(!reuse(&guess, true), "a pick reloads the absent guess");
+        let listed = TexEntry {
+            absent: true,
+            missing: true,
+            ..TexEntry::default()
+        };
+        assert!(
+            reuse(&listed, true),
+            "an already-listed missing path stays cached"
+        );
+        assert!(reuse(&listed, false));
+    }
 
     /// Final review M4: a glint-noise upload that fails leaves the shape on the old 1x1 default and is logged once;
     /// a lost device still fails so the GUI rebuilds. (Tested on the decision itself: no seam makes the real upload fail.)

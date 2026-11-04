@@ -43,6 +43,24 @@ ARCHIVED (wording before the edit; superseded in part by Note FO, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note FO, 2026-11-04)
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
 
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- esp: GG, GO
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -50,3 +68,24 @@ ARCHIVED (superseded by Note FM, 2026-11-03)
 
 ARCHIVED (wording before the edit; superseded in part by Note FN, 2026-11-04)
 - Anything the user must act on is a Problems row with its action; hand remedies are row buttons. [FC3, FC10]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- The visible list is cached; row reads never land across a scan start; chips wait for a settled store. [GC11, GC14, GC15]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- The edit panel's footer (`meshes-edit-export`, before the tab strip) shows a status line ("Ready", "Blocked: <reason>", idle "No edits to export."), "Writes <data path> to <export path>", the source-never-changed line and Review…; with no export folder it stays blocked with the reason. The button reads "Export NIF · N edits", "Export NIF" or "Export NIF again". [CZ2, CZ3, CZ8]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- `esp::mato_data` returns None for the whole plugin on any fault its walk reaches (bad group size, bad zlib, a subrecord past its record) and never clamps; the first record with at least 48 bytes of DATA wins. [GG11]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- The writer re-opens per op, writes atomically and never writes what its parser rejects. The reader seeks by the block size array; `Header::check_file_length` and each decoder's exact-size check refuse a file whose sizes are wrong. [CI1, CI4, CI5, CY2]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- Edit source and documents: `pick_source` compares roots ignoring path spelling and never takes the edit mod's own copy or any `sdc NIF Edits` folder. An autosave is deleted only when this session holds it; a session stays unsaved until its save succeeds; a root change waits for the live edit to move (else blocked with the reason, retried when that file changes); the newer of autosave and folder document wins. [CV1, GD11, GD12, GD13, GD20, GD21, GD24, GD27, GD28]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- Meshes list: picking a mod never deselects; a reload keeps the picked mod while it has NIFs and is not derived, else Any mod, and reselects a NIF picked under Any mod once the store settles. Wins hides under Any mod; Overridden lists every losing copy; Conflicted is `n_copies > 1`; Problems is a problem or an LE mesh. Search matches path (no `meshes/`) or mod, ASCII case-insensitive, `\` as `/`; the texture chip (`users_of_texture`) combines with it; "Show in Meshes" sets Any mod, clears search and chips. Row chips list warnings first; "In game" is short, full text as its AccessKit name. [BT5, GC4, GC6, GC7, GC8, GC9, GC10, GC16, GC17, GC19, GC20]
+
+ARCHIVED (wording before the edit; superseded in part by Note GQ, 2026-11-04)
+- `settle` compiles the keys the pool already took; `set_material` evicts every texture-less missing entry and keeps decode-error entries; a replaced model load drops its queued shader compiles. [BT1, BT2, CX1, CV24]

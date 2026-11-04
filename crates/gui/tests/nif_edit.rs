@@ -598,8 +598,61 @@ fn pick_source_skips_the_edit_mod_and_pgpatcher_output() {
         copy(EDIT_MOD, 8, false),
         copy("A", 3, false),
     ];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
-    assert!(pick_source(&c[..2], m).is_none());
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
+    assert!(pick_source(&c[..2], m, NIF).is_none());
+}
+
+const NIF: &str = r"meshes\a.nif";
+
+/// Writes `<root>\.sdc\nif-edits\<path>.sdc-nifedit.toml`, as every Tessalith export folder does.
+fn write_doc(root: &Path, data_path: &str) {
+    let p = sdc_gui::model::meshes::edit_doc::doc_path(root, data_path).unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, "").unwrap();
+}
+
+fn copy_at(root: &Path, origin: &str, prio: i32) -> PathCopy {
+    PathCopy {
+        root: root.to_string_lossy().into_owned(),
+        ..copy(origin, prio, false)
+    }
+}
+
+/// Note GQ3 (extends GD28): any folder holding our edit document for this NIF is Tessalith's own export, never the source.
+#[test]
+fn pick_source_skips_a_folder_holding_our_edit_document_for_this_nif() {
+    let d = tempfile::tempdir().unwrap();
+    let (old, edit, real) = (
+        d.path().join("old"),
+        d.path().join("edit"),
+        d.path().join("A"),
+    );
+    write_doc(&old, NIF);
+    let c = [
+        copy_at(&old, "old export", 9),
+        copy_at(&edit, "edit", 8),
+        copy_at(&real, "A", 3),
+    ];
+    assert_eq!(
+        pick_source(&c, &edit, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
+    assert!(pick_source(&c[..1], &edit, NIF).is_none());
+}
+
+#[test]
+fn a_folder_with_our_edit_document_for_another_nif_is_still_a_source() {
+    let d = tempfile::tempdir().unwrap();
+    let (old, edit) = (d.path().join("old"), d.path().join("edit"));
+    write_doc(&old, r"meshes\other.nif");
+    let c = [copy_at(&old, "old", 9)];
+    assert_eq!(
+        pick_source(&c, &edit, NIF).map(|c| c.origin.as_str()),
+        Some("old")
+    );
 }
 
 /// Note GD28: the 1.x default edit mod (`mods\sdc NIF Edits`, CI3) holds Tessalith's own earlier output: it is never
@@ -607,12 +660,12 @@ fn pick_source_skips_the_edit_mod_and_pgpatcher_output() {
 #[test]
 fn the_legacy_edit_mod_is_never_the_source() {
     let c = [copy("SDC NIF Edits", 8, false), copy("A", 3, false)];
-    let src = |m: &str| pick_source(&c, Path::new(m)).map(|c| c.origin.clone());
+    let src = |m: &str| pick_source(&c, Path::new(m), NIF).map(|c| c.origin.clone());
     assert_eq!(src(""), Some("A".into()), "no folder chosen");
     assert_eq!(src(r"C:\I\mods\MyOut"), Some("A".into()), "another folder");
     let mut slash = c[0].clone();
     slash.root = r"C:\I/mods\sdc NIF Edits\".into();
-    assert!(pick_source(&[slash], Path::new("")).is_none());
+    assert!(pick_source(&[slash], Path::new(""), NIF).is_none());
 }
 
 /// Final review M2: Windows folder names ignore case, so `SDC NIF Edits` is still the edit mod.
@@ -621,7 +674,10 @@ fn the_edit_mod_is_matched_ignoring_case() {
     let m = Path::new(r"C:\I\mods\sdc NIF Edits");
     let other = "SDC NIF Edits";
     let c = [copy(other, 8, false), copy("A", 3, false)];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
     let mods = [
         mod_row("PGP", 9, true),
         mod_row(other, 5, false),
@@ -640,9 +696,12 @@ fn the_edit_mod_is_matched_across_separator_spelling() {
     let mut a = copy("A", 3, false);
     a.root = r"X:\Instance/mods\A".into();
     let c = [edit.clone(), a];
-    assert_eq!(pick_source(&c, m).map(|c| c.origin.as_str()), Some("A"));
+    assert_eq!(
+        pick_source(&c, m, NIF).map(|c| c.origin.as_str()),
+        Some("A")
+    );
     edit.root = r"X:\Instance/mods\sdc NIF Edits\".into();
-    assert!(pick_source(&[edit], m).is_none());
+    assert!(pick_source(&[edit], m, NIF).is_none());
 }
 
 #[test]
@@ -664,10 +723,31 @@ fn slot_labels_follow_shader_type_and_flags() {
     assert_eq!(edit_slot_label(0, 0, 1 << 23, 5), "RMAOS");
 }
 
-/// Trace 2026-10-28 #1 (fix round 1): 2000 zero-size BSTriShapes that all name one 100 000-byte string (0x80, which
-/// decodes to three bytes). The shape cards keep the one shared name, not a copy per card.
+/// Trace 2026-10-28 #1 (fix round 1): 2000 112-byte BSTriShapes (a head, no geometry) that all name one 100 000-byte
+/// string (0x80, which decodes to three bytes). The shape cards keep the one shared name, not a copy per card.
 #[test]
 fn shape_cards_share_one_name_across_many_shapes() {
+    // a BSTriShape head naming string 30 (the large one), shader and alpha refs -1: 112 bytes
+    const HEAD: [u8; 112] = {
+        let mut h = [0u8; 112];
+        h[0] = 30; // name
+        h[8] = 0xFF; // controller -1
+        h[9] = 0xFF;
+        h[10] = 0xFF;
+        h[11] = 0xFF;
+        h[12] = 14; // flags
+        h[68] = 0xFF; // collision -1 at 16 + 52 (translation 12, rotation 36 and scale 4 stay zero)
+        h[69] = 0xFF;
+        h[70] = 0xFF;
+        h[71] = 0xFF;
+        // bounding sphere 16 at 72..88; skin, shader, alpha refs -1 at 88..100
+        let mut i = 88;
+        while i < 100 {
+            h[i] = 0xFF;
+            i += 1;
+        }
+        h
+    };
     let mut b = b"Gamebryo File Format, Version 20.2.0.7\n".to_vec();
     b.extend(0x1402_0007u32.to_le_bytes());
     b.push(1);
@@ -679,7 +759,9 @@ fn shape_cards_share_one_name_across_many_shapes() {
     b.extend(10u32.to_le_bytes());
     b.extend(b"BSTriShape");
     b.extend([0u8; 2 * 2000]); // type indices
-    b.extend([0u8; 4 * 2000]); // sizes: every block starts at the footer
+    for _ in 0..2000 {
+        b.extend((HEAD.len() as u32).to_le_bytes()); // sizes
+    }
     b.extend(31u32.to_le_bytes());
     b.extend(100_000u32.to_le_bytes());
     for k in 0..30 {
@@ -689,7 +771,10 @@ fn shape_cards_share_one_name_across_many_shapes() {
     b.extend(100_000u32.to_le_bytes());
     b.extend(vec![0x80u8; 100_000]);
     b.extend(0u32.to_le_bytes()); // groups
-    b.extend(30u32.to_le_bytes()); // footer: 30 roots, read as name index 30
+    for _ in 0..2000 {
+        b.extend(&HEAD);
+    }
+    b.extend(30u32.to_le_bytes()); // footer: 30 roots
     b.extend([0u8; 4 * 30]);
     let cards = modscan::store::shape_views(&nif::scan::scan(&b).unwrap());
     assert_eq!(cards.len(), 2000);
@@ -3608,6 +3693,111 @@ fn undo_after_export_makes_it_pending_again() {
     assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.source);
 }
 
+/// The open session's source with its specular strength raised: an unrelated change that leaves the glossiness edit
+/// applied and the block count the same.
+fn changed_source(m: &MeshesModel) -> Vec<u8> {
+    let e = m.edit.as_ref().unwrap();
+    let (shape, shader) = lit_shape(e);
+    let cur = e.model.lighting[&shader].lighting.params.specular_strength;
+    nif::edit::apply(
+        &e.source,
+        &[Op::SetField {
+            at: nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap(),
+            field: Field::SpecularStrength,
+            value: Value::F32((cur + 1.0).to_bits()),
+            base: Value::F32(cur.to_bits()),
+        }],
+    )
+    .unwrap()
+    .bytes
+}
+
+/// Note GQ1: the exported file was built from the old source, so a source change makes the edit pending again.
+#[test]
+fn a_source_change_after_export_makes_it_pending_again() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+    let src = changed_source(&m);
+    // the export re-reads the source copy: the change is on disk too
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.edit_with(|e| e.reload_source(src.clone()).unwrap());
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
+    assert!(e.pending());
+    assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(export(&mut m), Ok(1));
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(*e.source, src);
+    assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.out);
+    assert!(!e.pending(), "the export records a real hash again");
+}
+
+/// The same when the source changed while the edit was closed.
+#[test]
+fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let src = changed_source(&m);
+    m.close_edit();
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.open_edit();
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(*e.source, src);
+    assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
+    assert!(e.pending());
+    assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    // closed again before any export: the persisted document is still pending
+    m.close_edit();
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    m.open_edit();
+    assert!(m.edit.as_ref().unwrap().pending());
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(
+        std::fs::read(exported(&d)).unwrap(),
+        *m.edit.as_ref().unwrap().out
+    );
+}
+
+/// Note GQ1: only an exported session is saved at open; a never-exported one keeps its document until the next save.
+#[test]
+fn reopening_a_never_exported_edit_with_a_changed_source_writes_no_document() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let doc = m.edit.as_ref().unwrap().doc_path.clone();
+    let before = std::fs::read_to_string(&doc).unwrap();
+    let src = changed_source(&m);
+    m.close_edit();
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.open_edit();
+    assert_eq!(*m.edit.as_ref().unwrap().source, src);
+    assert_eq!(
+        std::fs::read_to_string(&doc).unwrap(),
+        before,
+        "no write at open"
+    );
+}
+
+/// Review Focus 1: only a changed source forces the re-export.
+#[test]
+fn reopening_an_exported_edit_with_an_unchanged_source_is_not_pending() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    m.close_edit();
+    m.open_edit();
+    assert!(!m.edit.as_ref().unwrap().pending());
+    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+}
+
 /// Note GD2: the footer keeps its status and destination lines; its button opens Review (the NIF edits export there,
 /// with the textures) and writes nothing. The placement and Re-run lines are Review's and the worklist's now.
 #[test]
@@ -6044,6 +6234,45 @@ fn shader_colour_picker_shows_and_stores_srgb() {
     );
     let g = h.get_by_label("Specular colour G");
     assert_eq!(g.accesskit_node().numeric_value(), Some(c[1] as f64));
+}
+
+/// Note GQ2: the Shader tab's colour picker ends its undo step when its popup closes (like the key swatch): a second
+/// popup pick is a second step, and one undo keeps the first pick.
+#[test]
+fn shader_colour_picker_flushes_on_popup_close() {
+    let (mut m, a) = specular_scene([0.5; 3]);
+    // `direct` has no document path (nothing to save): give it one.
+    let d = tempfile::tempdir().unwrap();
+    m.edit.as_mut().unwrap().doc_path = d.path().join("x.toml");
+    let mut h = view(m);
+    h.run_steps(2);
+    let well = |h: &mut Harness<'static, MeshesModel>| {
+        h.get_by_role_and_label(AkRole::ColorWell, "Specular colour")
+            .click();
+        h.run_steps(3);
+    };
+    well(&mut h);
+    type_picker_byte(&mut h, 1, 102); // G
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // A pick is 3 ops (R, G, B); the scene is 3 more.
+    assert_eq!(ops(h.state()).len(), 6, "scene + the first pick");
+    // The close flushed the merged step to disk.
+    let e = h.state().edit.as_ref().unwrap();
+    assert_eq!(load(&e.doc_path).unwrap().unwrap().ops.len(), 6, "saved");
+    well(&mut h);
+    type_picker_byte(&mut h, 2, 51); // B
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(ops(h.state()).len(), 9, "the second pick is its own step");
+    assert!(h.state_mut().undo_edit());
+    let c = specular(h.state(), a);
+    assert_eq!(ops(h.state()).len(), 6, "one undo");
+    assert!(
+        (c[1] * 255.0 - 102.0).abs() < 0.01,
+        "first pick kept: {c:?}"
+    );
+    assert_eq!(c[2].to_bits(), 0.5f32.to_bits(), "B back to before");
 }
 
 /// Owner follow-up: a key outside 0-1 (an HDR emissive colour) gets a disabled swatch with the reason on hover; the
