@@ -408,14 +408,17 @@ mod tests {
         assert!(matches!(m.dialog, Some(super::super::Dialog::Error(_))));
     }
 
-    /// A plain export keeps today's behaviour: no sweep.
+    /// Note FP2 (supersedes "a plain export keeps its rows"): a plain export that ends with an error sweeps too.
     #[test]
-    fn a_plain_export_error_keeps_its_rows_as_today() {
+    fn a_plain_export_error_ends_its_rows() {
         let mut m = bare_model();
         m.export.running = Some(Default::default());
         discovered(&mut m, "a.dds");
         m.end_export_with(Err("x".into()));
-        assert_eq!(m.export.rows[0].state, RowState::Queued);
+        assert_eq!(
+            m.export.rows[0].state,
+            RowState::Failed("not run: x".into())
+        );
     }
 
     /// CN56 carried: a later phase's error in `AlsoSummary::error` is an error, and the export's end is logged as
