@@ -23,7 +23,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FS
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
@@ -1018,7 +1018,7 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 
 ## Note FS — backlog batch B3: GUI input and keys (main team, 2026-11-04)
 - **FS1** The Advanced drawer's Mipmaps and Advanced texture fields rows gate on `AppModel::fix_off` (read-only reason first, else "Wait for the plan to finish"), as the texture settings panel's rows do (FK), so a pick during a pending plan is not dropped as "unchanged" against the stale view. (Backlog T32)
-- **FS2** The Fills box (`settled_drag`) keeps a settled value on show while a re-plan is out, until the model hands the same value back or the plan is idle, as `cube_section::num` does. Before, it showed the old value after Enter until the plan landed. (Backlog R2)
+- **FS2** The Fills box (`settled_drag`) keeps a settled value on show while a re-plan is out, until the model hands the same value back or the plan is idle, as `cube_section::num` does; the held value is keyed to the box's set, so another set's box never shows it. Before, it showed the old value after Enter until the plan landed. (Backlog R2)
 - **FS3** The header Undo and Redo go through `commit_click`: a focused text field commits first, so its step is the one undone and Redo is not cleared (FC8). (Backlog T20)
 - **FS4** An Explorer file drop is ignored for the frame when a modal was open at its start: `model.dialog`, a pending sets-column prompt (Rename, Replace, Refused and the rest), the Slot commands dialog, or egui's top modal layer. Before, a drop over a slot raised a Replace? prompt or an error line under the modal, and a drop elsewhere replaced the open dialog. (Backlog T21)
 - **FS5** The Preview key actions (`]`, `[`, 1-6, L, T...) are live only while the Selection is in front of the centre (`centre_front() == Selection`), as the Grid and Sets keys are (FB7); a docked Presets or JSON tab owns the keys. (Backlog T22)
