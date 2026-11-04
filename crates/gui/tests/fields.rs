@@ -565,3 +565,31 @@ fn the_dropdown_offers_rgb8_where_rgba8_unorm_is_offered() {
         .iter()
         .any(|((f, _), l)| *f == Format::Rgb8 && !l.ends_with(NOT_VALID)));
 }
+
+/// L62: the preset editor's `value_of` reads every key as the field views do, the keys the profile does not serialise
+/// (`unset_default`) included.
+#[test]
+fn value_of_agrees_with_the_field_views() {
+    let d = tempfile::tempdir().unwrap();
+    let m = opened(d.path());
+    let job = m.item("landscape/leaf.png").unwrap().job.clone().unwrap();
+    let doc = serde_json::to_value(&job.profile).unwrap();
+    let mut unserialised = 0;
+    for (key, _) in all_fields().into_iter().filter(|(f, _)| *f != WEIGHTING) {
+        let Some(view) = field_view(m.target, &job, key) else {
+            continue;
+        };
+        if view.field == "format" {
+            continue;
+        }
+        if doc.pointer(&format!("/{}", key.replace('.', "/"))).is_none() {
+            unserialised += 1;
+        }
+        assert_eq!(
+            sdc_gui::ui::presets::value_of(&job.profile, key),
+            view.value,
+            "{key}"
+        );
+    }
+    assert!(unserialised > 0, "no key exercised unset_default");
+}

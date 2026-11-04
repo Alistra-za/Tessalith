@@ -630,7 +630,7 @@ fn clear(st: Subtype, scope: Scope, field: &'static str) -> Act {
 }
 
 /// A field's value in `p`, as the options name it (the format as `[format, tag]`).
-fn value_of(p: &Profile, field: &str) -> Value {
+pub fn value_of(p: &Profile, field: &str) -> Value {
     if field == "format" {
         return json!([p.format, p.color.tag]);
     }
@@ -1132,26 +1132,5 @@ mod tests {
             .get_by_label("Reset preset")
             .accesskit_node()
             .is_disabled());
-    }
-
-    /// L62: a key the serialised profile lacks reads as `fields::unset_default`, for every editor field.
-    #[test]
-    fn value_of_shares_the_unset_defaults() {
-        use crate::model::fields::{unset_default, ADVANCED_FIELDS, CUBE_FIELDS, FIELDS};
-        let (p, _) = engine::presets::PresetRegistry::builtin()
-            .unwrap()
-            .effective_profile("cs-quality", Target::Cs, Subtype::Diffuse)
-            .unwrap();
-        let doc = serde_json::to_value(&p).unwrap();
-        for (key, _) in FIELDS.iter().chain(&ADVANCED_FIELDS).chain(&CUBE_FIELDS) {
-            if *key == "format" {
-                continue;
-            }
-            let want = doc
-                .pointer(&format!("/{}", key.replace('.', "/")))
-                .cloned()
-                .unwrap_or_else(|| unset_default(key));
-            assert_eq!(value_of(&p, key), want, "{key}");
-        }
     }
 }
