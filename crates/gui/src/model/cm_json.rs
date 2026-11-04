@@ -448,43 +448,35 @@ impl AppModel {
     /// The export ended. After a clean export, write the files of `p` (taken from `pending_cm` by the caller) and
     /// record their hashes (saved, like the CS PBR record). Otherwise only add a note.
     pub fn finish_cm_json(&mut self, p: Option<PendingCm>) {
-        let Some(p) = p else {
-            return;
-        };
-        let ok = self.export.error.is_none()
-            && self
-                .export
-                .summary
-                .as_ref()
-                .is_some_and(|s| s.cancelled.is_empty() && s.failed == 0);
-        if !ok {
-            if !p.files.is_empty() {
-                self.export
-                    .notes
-                    .push("Complex material JSON not written: the export did not finish".into());
-            }
-            return;
-        }
-        let recorded = match self.sets_doc.as_ref() {
-            Some(d) => d.cm_json_shas(),
-            None => return,
-        };
-        let shas = finish(&p, &recorded, &mut self.export.notes);
-        self.also_json
-            .extend(super::also::current_files(&p.root, &p.files));
-        if shas == recorded {
-            return;
-        }
-        let Some(d) = self.sets_doc.as_mut() else {
-            return;
-        };
-        let was_dirty = d.is_dirty();
-        let side = d.set_cm_json_shas(&shas);
-        if d.read_only() {
-            self.export.notes.push(super::sidecar_only_note(&side));
-            return;
-        }
-        self.save_hash_record(was_dirty);
+        self.finish_guarded(p);
+    }
+}
+
+impl super::json_finish::Guarded for PendingCm {
+    const NAME: &'static str = "Complex material JSON";
+    // Note FW1: its own (CM) phase, not the Vanilla copies' failures.
+    const GATE: Option<engine::also::Phase> = Some(engine::also::Phase::Cm);
+    fn has_files(&self) -> bool {
+        !self.files.is_empty()
+    }
+    fn recorded(d: &crate::sets_doc::SetsDoc) -> BTreeMap<String, String> {
+        d.cm_json_shas()
+    }
+    fn write(
+        &self,
+        recorded: &BTreeMap<String, String>,
+        notes: &mut Vec<String>,
+    ) -> BTreeMap<String, String> {
+        finish(self, recorded, notes)
+    }
+    fn current(&self) -> Vec<PathBuf> {
+        super::also::current_files(&self.root, &self.files)
+    }
+    fn record(
+        d: &mut crate::sets_doc::SetsDoc,
+        shas: &BTreeMap<String, String>,
+    ) -> std::io::Result<()> {
+        d.set_cm_json_shas(shas)
     }
 }
 

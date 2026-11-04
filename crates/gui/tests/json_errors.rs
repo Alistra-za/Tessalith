@@ -240,6 +240,31 @@ fn the_json_text_is_built_once_per_revision() {
     );
 }
 
+/// Backlog T33: a folded entry builds no `Ctx` (it used to build one, with a linear id search, every frame).
+#[test]
+fn only_an_open_entry_builds_its_context() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(broken(d.path()));
+    collapse_all(&mut h);
+    h.run();
+    let folded = sdc_gui::ui::pgp_fields::context_builds();
+    h.step();
+    assert_eq!(
+        sdc_gui::ui::pgp_fields::context_builds(),
+        folded,
+        "two folded entries build 0 contexts"
+    );
+    h.query_all_by_label("Expand").next().unwrap().click();
+    h.run();
+    let open = sdc_gui::ui::pgp_fields::context_builds();
+    h.step();
+    assert_eq!(
+        sdc_gui::ui::pgp_fields::context_builds(),
+        open + 1,
+        "one open entry builds exactly 1"
+    );
+}
+
 #[test]
 fn f8_is_in_the_actions_table() {
     let keys: Vec<_> = actions::actions()

@@ -44,8 +44,7 @@ pub fn auto_flags_for(
     let mut eff = explicit.clone();
     // PBR grass (DECISIONS AS8): only `_s` switches a key on; the others' keys are ones grass ignores (R4).
     let has = |k: SlotKind| {
-        !matches!(slots.get(&k), None | Some(SlotFill::Empty))
-            && (!hint.grass || k == SlotKind::Subsurface)
+        slots.get(&k).is_some_and(SlotFill::is_filled) && (!hint.grass || k == SlotKind::Subsurface)
     };
     if has(SlotKind::Coat) {
         let why = "on because the set has a _cnr";

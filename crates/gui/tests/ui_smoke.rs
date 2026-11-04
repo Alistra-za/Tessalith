@@ -694,7 +694,7 @@ fn export_asks_about_undecided_textures_then_the_drawer_reports() {
     assert!(h.state().review.is_some() && h.state().dialog.is_none());
     h.get_by_label_contains("Undecided (");
     h.get_by_label("Accept all suggestions");
-    assert!(h.query_all_by_label("\u{2713}").count() >= 1);
+    assert!(h.query_all_by_label_contains("Set type: ").count() >= 1);
     // Review's Close starts nothing and collapses the panel.
     press(&mut h, "Close");
     assert!(h.state().review.is_none() && !h.state().bottom.open);

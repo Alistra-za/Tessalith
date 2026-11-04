@@ -523,8 +523,8 @@ fn a_json_changed_after_the_answer_is_asked_again() {
     m.answer_review_json(true);
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     std::fs::write(&p, "{\"edited\": \"again\"}").unwrap();
-    // Past `review_json`'s 1 s cache, as the next refresh while Review is open.
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // Past `review_json`'s cache (REVIEW_JSON_TTL), as the next refresh while Review is open.
+    m.expire_review_json();
     let name = p.file_name().unwrap().to_string_lossy().into_owned();
     assert_eq!(
         m.review_gate(),
@@ -719,14 +719,15 @@ fn review_has_no_half_size_or_stale_group() {
         "Problems (8)",
         "Recipe settings are in Advanced",
         "Review",
+        "Set type: landscape diffuse ✓",
+        "Set type: landscape normal ✓",
+        "Set type…",
         "Skip these sets",
         "This texture is too small for its format — use a bigger image",
         "Undecided (4)",
         "Vanilla",
         "Vanilla folder name",
         "What will be written",
-        "landscape diffuse",
-        "landscape normal",
         "landscape/rock01",
         "leaf.png",
         "meshes\\a.nif · My Mod · written to <tmp>\\export",
@@ -735,7 +736,6 @@ fn review_has_no_half_size_or_stale_group() {
         "rock01.png",
         "rock01_normal.png",
         "▼",
-        "✓",
     ];
     assert_eq!(got, expected, "{got:#?}");
 }

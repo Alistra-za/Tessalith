@@ -611,8 +611,8 @@ pub fn draw(
     // R17: while a filter is on, the handle, Move up / Move down and the insertion line are off (K19).
     let filtering = model.sets_filter_active();
     // One set per frame keeps the per-pill and per-member tests O(1) however many are selected.
-    let sel_sets: HashSet<String> = model.selected_sets().into_iter().collect();
-    let sel_items: HashSet<String> = model.selected_items().into_iter().collect();
+    let stats = super::columns::column_stats(ui.ctx(), model);
+    let (sel_sets, sel_items) = (&stats.sets, &stats.chosen);
     let off = model.sets_read_only_reason();
     let editable = off.is_none();
     let why = off.unwrap_or_default();
@@ -633,8 +633,10 @@ pub fn draw(
             model.clear_sets_filter();
         }
     }
-    let blocked: std::collections::HashSet<String> =
-        export_blocks(model).into_iter().map(|i| i.set_id).collect();
+    let blocked: std::collections::HashSet<String> = export_blocks(model)
+        .iter()
+        .map(|i| i.set_id.clone())
+        .collect();
     // One fetch per frame: each drawn card asks `set_ready_in`, not `problems()` (Task 6).
     let flagged = crate::model::bottom::flagged(model);
     let mut acts = vec![];
@@ -736,7 +738,7 @@ pub fn draw(
                         Status::Ready
                     },
                     look,
-                    &sel_items,
+                    sel_items,
                     &mut acts,
                 );
                 resized |= (out.rect.height() - h).abs() > 0.5;

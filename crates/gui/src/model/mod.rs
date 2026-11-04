@@ -20,6 +20,7 @@ pub mod history;
 pub mod input_name;
 pub mod inspector;
 pub mod items;
+mod json_finish;
 pub mod known_paths;
 pub mod labels;
 pub mod marker;
@@ -278,6 +279,44 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
 }
 
+/// The replies `poll` drops as stale, counted for tests (backlog L54).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaleKind {
+    Plan,
+    Source,
+    Encode,
+}
+
+/// Get-or-build one slot of the view cache under the current view key (backlog L9). `get` reads the slot from a cache
+/// of this key (`None`: absent or stale), `put` stores a built value, and `build` runs with no `RefCell` borrow held
+/// (K9: it reads the same cell). A cache of another key is replaced whole before `put`.
+pub(crate) fn cached<T: Clone>(
+    m: &AppModel,
+    get: impl FnOnce(&ViewCache) -> Option<T>,
+    put: impl FnOnce(&mut ViewCache, T),
+    build: impl FnOnce() -> T,
+) -> T {
+    let key = m.view_key();
+    {
+        let c = m.views.borrow();
+        if c.key.as_ref() == Some(&key) {
+            if let Some(v) = get(&c) {
+                return v;
+            }
+        }
+    }
+    let v = build();
+    let mut c = m.views.borrow_mut();
+    if c.key.as_ref() != Some(&key) {
+        *c = ViewCache {
+            key: Some(key),
+            ..Default::default()
+        };
+    }
+    put(&mut c, v.clone());
+    v
+}
+
 #[derive(Clone, PartialEq)]
 pub(crate) struct ViewKey {
     items: u64,
@@ -474,6 +513,9 @@ pub struct AppModel {
     pub(crate) problem_lookups: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
+    /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
     #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
@@ -597,6 +639,9 @@ pub struct AppModel {
     nif_export_due: bool,
     /// Note CN: the last Also export's phase error (CN56), so its end is logged as an error, not a success.
     also_error: Option<String>,
+    /// Note FW1: the phases the last Also export ran, each with whether it had failed files or an error. Empty for a
+    /// plain export. The CM and XPMF JSON read their own phase here.
+    also_phases: Vec<(engine::also::Phase, bool)>,
     /// Note CN: the three folders the last Also export wrote (`also_file`).
     also_written: Option<[PathBuf; 3]>,
     /// Final review I2: the Also worker waits on this for the files the JSON finishers wrote into the PBR folder.
@@ -788,6 +833,8 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
+            stale_drops: Default::default(),
+            #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
             rnm_preview: Default::default(),
@@ -829,6 +876,7 @@ impl AppModel {
             nif_export_queued: false,
             nif_export_due: false,
             also_error: None,
+            also_phases: Vec::new(),
             also_written: None,
             also_reply: None,
             also_json: Vec::new(),
@@ -1559,6 +1607,39 @@ impl AppModel {
         changed
     }
 
+    /// A plan, source or encode reply for an older generation or token was dropped (tests count these, L54).
+    pub(super) fn note_stale_drop(&self, kind: StaleKind) {
+        #[cfg(feature = "test-hooks")]
+        {
+            let mut d = self.stale_drops.get();
+            d[kind as usize] += 1;
+            self.stale_drops.set(d);
+        }
+        #[cfg(not(feature = "test-hooks"))]
+        let _ = kind;
+    }
+
+    /// Tests: how many stale replies of `kind` `poll` has dropped.
+    #[cfg(feature = "test-hooks")]
+    pub fn stale_replies_dropped(&self, kind: StaleKind) -> u32 {
+        self.stale_drops.get()[kind as usize]
+    }
+
+    /// Tests: poll until one more stale reply of `kind` has been dropped, or `timeout` passes. False on a timeout.
+    #[cfg(feature = "test-hooks")]
+    pub fn poll_until_stale_drop(&mut self, kind: StaleKind, timeout: Duration) -> bool {
+        let base = self.stale_replies_dropped(kind);
+        let end = Instant::now() + timeout;
+        while self.stale_replies_dropped(kind) == base {
+            if Instant::now() >= end {
+                return false;
+            }
+            self.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+
     fn handle(&mut self, msg: WorkerMsg) {
         match msg {
             WorkerMsg::PlanProgress {
@@ -1590,7 +1671,7 @@ impl AppModel {
                     Err(f) => self.plan_failed(f),
                 }
             }
-            WorkerMsg::Planned { .. } => {}
+            WorkerMsg::Planned { .. } => self.note_stale_drop(StaleKind::Plan),
             WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
             WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
@@ -1854,6 +1935,12 @@ impl AppModel {
     #[cfg(feature = "test-hooks")]
     pub fn end_export_with(&mut self, result: Result<engine::api::BatchSummary, String>) {
         self.export_ended(result);
+    }
+
+    /// Tests: hand the model an Also export's summary, as the worker's `AlsoFinished` does.
+    #[cfg(feature = "test-hooks")]
+    pub fn also_finished_with(&mut self, s: engine::also::AlsoSummary) {
+        self.also_finished(s);
     }
 
     /// Tests: the state `plan_failed` leaves while the retry plan without a rejected `sdc.toml` is still running: the
@@ -2245,6 +2332,7 @@ impl AppModel {
         };
         let also = self.also_on();
         self.also_error = None;
+        self.also_phases.clear();
         self.also_written = None;
         // Final review I2: dropping an earlier export's sender releases its worker (no extra file).
         self.also_reply = None;
@@ -4332,6 +4420,19 @@ mod tests {
         sets::SET_VIEWS_CLONES.with(|c| c.set(0));
         assert!(m.request().is_some_and(|r| !r.output_paths.is_empty()));
         let _ = EngineInputs::of(&m);
+        assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
+    }
+
+    /// Backlog L56: looking one set up borrows the cached views and clones only that set's view.
+    #[test]
+    fn looking_up_one_set_deep_clones_no_whole_view_list() {
+        let d = tempfile::tempdir().unwrap();
+        let m = packed_named_model(d.path());
+        let v = sets::views(&m);
+        let (id, item) = (v[0].id.clone(), v[0].members[0].clone());
+        sets::SET_VIEWS_CLONES.with(|c| c.set(0));
+        let _ = m.input_name_plan(&id, "textures/x/other");
+        let _ = m.set_of_item_probe(&item);
         assert_eq!(sets::SET_VIEWS_CLONES.with(|c| c.get()), 0);
     }
 

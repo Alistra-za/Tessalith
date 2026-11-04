@@ -522,3 +522,35 @@ fn an_unrecorded_unreadable_old_case_file_survives_the_rename() {
         "{notes:?}"
     );
 }
+
+/// Backlog L7: the CS gate is cancel-only. A cancelled run writes no file and says so; failed files do not hold it back
+/// (Note FW1).
+#[test]
+fn the_cs_json_gate_is_cancel_only() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_blocks(d.path());
+    export_and_wait(&mut m);
+    let f = txst_file(&m, "LandscapeRock01");
+    std::fs::remove_file(&f).unwrap();
+    m.export.notes.clear();
+    m.export
+        .summary
+        .as_mut()
+        .unwrap()
+        .cancelled
+        .push("x.png".into());
+    m.finish_cs_pbr(prepare(&m));
+    assert!(!f.exists());
+    assert!(
+        m.export
+            .notes
+            .contains(&"CS PBR JSON not written: the export did not finish".to_string()),
+        "{:?}",
+        m.export.notes
+    );
+    let s = m.export.summary.as_mut().unwrap();
+    s.cancelled.clear();
+    s.failed = 1;
+    m.finish_cs_pbr(prepare(&m));
+    assert!(f.is_file(), "{:?}", m.export.notes);
+}

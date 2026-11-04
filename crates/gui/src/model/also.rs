@@ -21,7 +21,7 @@ pub fn is_pbr_set(v: &sets::SetView) -> bool {
     v.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family())
 }
 
-fn phase_name(p: Phase) -> &'static str {
+pub(super) fn phase_name(p: Phase) -> &'static str {
     match p {
         Phase::Pbr => "PBR",
         Phase::Vanilla => "Vanilla",
@@ -268,7 +268,20 @@ impl AppModel {
                 phase_name(p)
             ));
         }
+        self.also_phases = s
+            .phases
+            .iter()
+            .map(|(p, b)| {
+                (
+                    *p,
+                    b.failed > 0 || s.error.as_ref().is_some_and(|e| e.0 == *p),
+                )
+            })
+            .collect();
         if let Some((phase, msg, code)) = &s.error {
+            if !self.also_phases.iter().any(|(p, _)| p == phase) {
+                self.also_phases.push((*phase, true));
+            }
             let t = format!(
                 "Also export: the {} phase failed (exit {code}): {msg}",
                 phase_name(*phase)

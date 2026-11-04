@@ -6,7 +6,18 @@ use engine::overrides::REENCODE_FIELD;
 use serde_json::json;
 use std::collections::HashMap;
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SPLITS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 impl AppModel {
+    /// `reencode_split` calls on this thread (tests: the bulk panel splits once per view, not once per frame).
+    #[cfg(feature = "test-hooks")]
+    pub fn reencode_splits(&self) -> u32 {
+        SPLITS.get()
+    }
+
     /// `on` writes `reencode = true`; off clears it (false is the default, never stored). One undo step; refused
     /// (no step, the reason on the status line) while `sdc.toml` is read-only.
     pub fn set_reencode(&mut self, keys: &[String], on: bool) {
@@ -68,6 +79,8 @@ impl AppModel {
 
     /// The bulk panel's split of `keys`: the skipped DDS files it can re-encode, and the names of the blocked ones.
     pub fn reencode_split(&self, keys: &[String]) -> (Vec<String>, Vec<String>) {
+        #[cfg(feature = "test-hooks")]
+        SPLITS.set(SPLITS.get() + 1);
         let writers = self.writers();
         let (mut ok, mut blocked) = (vec![], vec![]);
         for i in keys.iter().filter_map(|k| self.item(k)) {

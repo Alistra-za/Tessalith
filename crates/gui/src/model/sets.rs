@@ -2,7 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::{AppModel, ViewCache};
+use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
     is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
@@ -189,7 +189,7 @@ pub fn slot_matches(v: &SetView) -> (Vec<SlotMatch>, Vec<SlotMatch>) {
     let filled: Vec<SlotKind> = v
         .slots
         .iter()
-        .filter(|(_, f)| !matches!(f, SlotFill::Empty))
+        .filter(|(_, f)| f.is_filled())
         .map(|(k, _)| *k)
         .collect();
     let name = |n: u8| match filled.iter().find(|k| k.slot_number() == Some(n)) {
@@ -244,6 +244,21 @@ pub enum SlotFill {
         from: String,
         item: String,
     },
+}
+
+impl SlotFill {
+    /// The item this fill uses (own or borrowed), if any.
+    pub fn item(&self) -> Option<&str> {
+        match self {
+            Self::Own { item } | Self::Borrowed { item, .. } => Some(item),
+            Self::Empty => None,
+        }
+    }
+
+    /// The slot holds a file (own or borrowed).
+    pub fn is_filled(&self) -> bool {
+        !matches!(self, Self::Empty)
+    }
 }
 
 /// A line of an `[[sets]]` entry that matches nothing: the card's red "?" chip and a Problems row (Note DU).
@@ -463,7 +478,7 @@ pub struct SlotCell {
 /// only the filled slots show (F1 spec §5).
 pub fn slot_row(pick: Option<&ShaderPick>, slots: &BTreeMap<SlotKind, SlotFill>) -> Vec<SlotCell> {
     let usable = pick.map(|p| usable_slots(p.shader));
-    let filled = |k: &SlotKind| !matches!(slots.get(k), None | Some(SlotFill::Empty));
+    let filled = |k: &SlotKind| slots.get(k).is_some_and(SlotFill::is_filled);
     let mut kinds: Vec<SlotKind> = SlotKind::ALL
         .into_iter()
         .filter(|k| filled(k) || usable.as_ref().is_some_and(|u| u.contains(k)))
@@ -540,25 +555,12 @@ fn mirrored_stem(item: &TextureItem) -> String {
 
 /// Every set, in display order (audit 7, DECISIONS Note Y7): built once per change of its inputs.
 pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some(v) = &c.views {
-                return v.clone();
-            }
-        }
-    }
-    let v = Arc::new(build_views(m));
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.views = Some(v.clone());
-    v
+    super::cached(
+        m,
+        |c| c.views.clone(),
+        |c, v| c.views = Some(v),
+        || Arc::new(build_views(m)),
+    )
 }
 
 #[cfg(test)]
@@ -747,18 +749,10 @@ fn owns_of(v: &SetView, owners: &Ownership) -> Vec<SlotKind> {
         .filter_map(|((item, _), _)| {
             v.slots
                 .iter()
-                .find(|(_, f)| matches!(f, SlotFill::Own { item: i } | SlotFill::Borrowed { item: i, .. } if i == item))
+                .find(|(_, f)| f.item() == Some(item))
                 .map(|(k, _)| *k)
         })
         .collect()
-}
-
-/// The item a slot fill uses, if any.
-fn fill_item(f: &SlotFill) -> Option<&str> {
-    match f {
-        SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => Some(item),
-        SlotFill::Empty => None,
-    }
 }
 
 /// Note FL: `views` after a partial plan replaced the `scope` sets (the engine refuses any membership change, and the
@@ -817,7 +811,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {
         for f in views[i].slots.values().chain(v.slots.values()) {
-            touched.extend(fill_item(f).map(str::to_string));
+            touched.extend(f.item().map(str::to_string));
         }
     }
     for (&i, v) in affected.iter().zip(rebuilt) {
@@ -829,12 +823,12 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             views[i]
                 .slots
                 .values()
-                .any(|f| fill_item(f).is_some_and(|it| touched.contains(it)))
+                .any(|f| f.item().is_some_and(|it| touched.contains(it)))
         })
         .collect();
     let items: HashSet<&str> = marked
         .iter()
-        .flat_map(|&i| views[i].slots.values().filter_map(fill_item))
+        .flat_map(|&i| views[i].slots.values().filter_map(SlotFill::item))
         .collect();
     let owners: Ownership = owners_of(views, |it| items.contains(it));
     let owns: Vec<Vec<SlotKind>> = marked
@@ -859,12 +853,12 @@ fn owners_of(views: &[SetView], keep: impl Fn(&str) -> bool) -> Ownership {
     let mut users: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
     for v in views {
         for f in v.slots.values() {
-            if let SlotFill::Own { item } | SlotFill::Borrowed { item, .. } = f {
+            if let Some(item) = f.item() {
                 if !keep(item) {
                     continue;
                 }
                 users
-                    .entry(item.clone())
+                    .entry(item.to_string())
                     .or_default()
                     .push((v.id.clone(), v.pbr));
             }
@@ -1055,10 +1049,11 @@ pub fn shared_roughness(m: &AppModel) -> BTreeSet<String> {
     }
     let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for v in views(m).iter() {
-        if let Some(SlotFill::Own { item } | SlotFill::Borrowed { item, .. }) =
-            v.slots.get(&SlotKind::Rmaos)
-        {
-            users.entry(item.clone()).or_default().push(v.id.clone());
+        if let Some(item) = v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
+            users
+                .entry(item.to_string())
+                .or_default()
+                .push(v.id.clone());
         }
     }
     users
@@ -1428,10 +1423,17 @@ impl AppModel {
         views(self).iter().find(|v| same_id(&v.id, id)).cloned()
     }
 
+    /// Tests: `set_of_item` (the lookup stays private).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_of_item_probe(&self, item: &str) -> Option<SetView> {
+        self.set_of_item(item)
+    }
+
     fn set_of_item(&self, item: &str) -> Option<SetView> {
-        set_views(self)
-            .into_iter()
+        views(self)
+            .iter()
             .find(|v| v.members.iter().any(|k| k == item))
+            .cloned()
     }
 
     pub(crate) fn sets_editable(&self) -> bool {
@@ -2451,12 +2453,7 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
         .into_iter()
         .filter_map(|i| {
             let slot = slot_of(i)?;
-            let replaces = match v.slots.get(&slot) {
-                Some(SlotFill::Own { item } | SlotFill::Borrowed { item, .. }) => {
-                    Some(name_of(item))
-                }
-                _ => None,
-            };
+            let replaces = v.slots.get(&slot).and_then(SlotFill::item).map(name_of);
             let blocked = if slot.slot_number().is_some_and(|n| v.locks.contains(&n)) {
                 Some("locked".to_string())
             } else if !taken.insert(slot) {

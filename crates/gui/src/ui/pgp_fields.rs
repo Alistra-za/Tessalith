@@ -159,11 +159,27 @@ pub(crate) struct Ctx {
     pub(crate) locks: std::collections::BTreeSet<u8>,
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static CONTEXT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often this thread built a set's `Ctx` (tests: a folded JSON entry builds none).
+#[cfg(feature = "test-hooks")]
+pub fn context_builds() -> usize {
+    CONTEXT_BUILDS.get()
+}
+
 pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
     let all = views(model);
-    let v = all.iter().find(|v| same_id(&v.id, set));
-    let filled =
-        |v: &SetView, s: SlotKind| !matches!(v.slots.get(&s), None | Some(SlotFill::Empty));
+    context_of(model, set, all.iter().find(|v| same_id(&v.id, set)))
+}
+
+/// `context` for a caller that already holds the set's view (skips the linear id search).
+pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ctx {
+    #[cfg(feature = "test-hooks")]
+    CONTEXT_BUILDS.set(CONTEXT_BUILDS.get() + 1);
+    let filled = |v: &SetView, s: SlotKind| v.slots.get(&s).is_some_and(SlotFill::is_filled);
     let read_only = model.sets_read_only_reason();
     let own: Settings = v.as_ref().map(|v| v.settings.clone()).unwrap_or_default();
     let derived = v.as_ref().and_then(|v| v.derived_match.clone());

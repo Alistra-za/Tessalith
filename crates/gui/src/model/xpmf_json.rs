@@ -298,48 +298,37 @@ pub struct CardValues {
 
 /// `CardValues` of set `set` (an id), cached with the set views (ui-rules §9.1): the card asks every frame.
 pub fn card_values(m: &AppModel, set: &str) -> std::sync::Arc<CardValues> {
-    let key = m.view_key();
-    {
-        let c = m.views.borrow();
-        if c.key.as_ref() == Some(&key) {
-            if let Some((id, v)) = &c.xpmf_card {
-                if id == set {
-                    return v.clone();
-                }
-            }
-        }
-    }
-    // No borrow is held here: `views` fills the same cell.
-    let vs = views(m);
-    let none = || Err(format!("{set}: no such set"));
-    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    let v = std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
-        Some(e) => {
-            let profile = profile_in(m, &vs, e, false);
-            CardValues {
-                defaults: defaults_in(m, &vs, e, false),
-                refusal: profile
-                    .as_ref()
-                    .ok()
-                    .and_then(|doc| refusal(&vs, &entries, e, doc).err()),
-                profile,
-            }
-        }
-        None => CardValues {
-            defaults: none(),
-            profile: none(),
-            refusal: None,
+    super::cached(
+        m,
+        |c| {
+            let (id, v) = c.xpmf_card.as_ref()?;
+            (id == set).then(|| v.clone())
         },
-    });
-    let mut c = m.views.borrow_mut();
-    if c.key.as_ref() != Some(&key) {
-        *c = super::ViewCache {
-            key: Some(key),
-            ..Default::default()
-        };
-    }
-    c.xpmf_card = Some((set.to_string(), v.clone()));
-    v
+        |c, v| c.xpmf_card = Some((set.to_string(), v)),
+        || {
+            let vs = views(m);
+            let none = || Err(format!("{set}: no such set"));
+            let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+            std::sync::Arc::new(match entries.iter().find(|e| same_id(&e.id, set)) {
+                Some(e) => {
+                    let profile = profile_in(m, &vs, e, false);
+                    CardValues {
+                        defaults: defaults_in(m, &vs, e, false),
+                        refusal: profile
+                            .as_ref()
+                            .ok()
+                            .and_then(|doc| refusal(&vs, &entries, e, doc).err()),
+                        profile,
+                    }
+                }
+                None => CardValues {
+                    defaults: none(),
+                    profile: none(),
+                    refusal: None,
+                },
+            })
+        },
+    )
 }
 
 /// Note GI10 (X10): the profile of the set with id `set` for the MATO preview, while the set has an `[sets.xpmf]`
@@ -407,11 +396,7 @@ pub fn skipped_edids(m: &AppModel) -> Vec<(String, String, String)> {
 }
 
 fn slot_job<'a>(m: &'a AppModel, fill: Option<&SlotFill>) -> Option<&'a ResolvedJob> {
-    let item = match fill? {
-        SlotFill::Own { item } | SlotFill::Borrowed { item, .. } => item,
-        SlotFill::Empty => return None,
-    };
-    m.item(item)?.job.as_ref()
+    m.item(fill?.item()?)?.job.as_ref()
 }
 
 /// The Data-relative path of a job's output under `root`; with `vanilla`, the file the Vanilla folder gets for it
@@ -473,7 +458,7 @@ fn fold_path(p: &str) -> String {
 /// PBR Landscape set with a diffuse or a normal and no DDS member (a DDS is never re-encoded, so the derive skips the
 /// set, M9). Only such a set has Vanilla files for a profile copy to name.
 fn vanilla_keeps(m: &AppModel, v: &SetView) -> bool {
-    let filled = |k| !matches!(v.slots.get(&k), None | Some(SlotFill::Empty));
+    let filled = |k| v.slots.get(&k).is_some_and(SlotFill::is_filled);
     is_pbr_landscape(v)
         && (filled(SlotKind::Diffuse) || filled(SlotKind::Normal))
         && !v.members.iter().filter_map(|k| m.item(k)).any(|i| {
@@ -740,44 +725,36 @@ impl AppModel {
     /// `pending_xpmf` by the caller) and record their hashes (saved, like the complex-material record). Otherwise
     /// only add a note.
     pub fn finish_xpmf(&mut self, p: Option<PendingXpmf>) {
-        let Some(p) = p else {
-            return;
-        };
-        let ok = self.export.error.is_none()
-            && self
-                .export
-                .summary
-                .as_ref()
-                .is_some_and(|s| s.cancelled.is_empty() && s.failed == 0);
-        if !ok {
-            if p.folders().any(|f| !f.files.is_empty()) {
-                self.export
-                    .notes
-                    .push("XPMF profiles not written: the export did not finish".into());
-            }
-            return;
-        }
-        let recorded = match self.sets_doc.as_ref() {
-            Some(d) => d.xpmf_shas(),
-            None => return,
-        };
-        let shas = finish(&p, &recorded, &mut self.export.notes);
-        for f in p.folders() {
-            self.also_json
-                .extend(super::also::current_files(&f.root, &f.files));
-        }
-        if shas == recorded {
-            return;
-        }
-        let Some(d) = self.sets_doc.as_mut() else {
-            return;
-        };
-        let was_dirty = d.is_dirty();
-        let side = d.set_xpmf_shas(shas);
-        if d.read_only() {
-            self.export.notes.push(super::sidecar_only_note(&side));
-            return;
-        }
-        self.save_hash_record(was_dirty);
+        self.finish_guarded(p);
+    }
+}
+
+impl super::json_finish::Guarded for PendingXpmf {
+    const NAME: &'static str = "XPMF profiles";
+    // Note FW1: the PBR phase wrote the profiles' textures; the Vanilla copies skip a profile whose texture is missing.
+    const GATE: Option<engine::also::Phase> = Some(engine::also::Phase::Pbr);
+    fn has_files(&self) -> bool {
+        self.folders().any(|f| !f.files.is_empty())
+    }
+    fn recorded(d: &crate::sets_doc::SetsDoc) -> BTreeMap<String, String> {
+        d.xpmf_shas()
+    }
+    fn write(
+        &self,
+        recorded: &BTreeMap<String, String>,
+        notes: &mut Vec<String>,
+    ) -> BTreeMap<String, String> {
+        finish(self, recorded, notes)
+    }
+    fn current(&self) -> Vec<PathBuf> {
+        self.folders()
+            .flat_map(|f| super::also::current_files(&f.root, &f.files))
+            .collect()
+    }
+    fn record(
+        d: &mut crate::sets_doc::SetsDoc,
+        shas: &BTreeMap<String, String>,
+    ) -> std::io::Result<()> {
+        d.set_xpmf_shas(shas)
     }
 }

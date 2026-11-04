@@ -856,9 +856,8 @@ fn status(ui: &mut egui::Ui, model: &mut AppModel) {
                 model.cancel_open();
             }
             if !model.items.is_empty() {
-                let sel = model.selected_items();
-                let text = model.vram_text(&sel);
-                ui.weak(format!("· {text}")).on_hover_text(
+                let stats = super::columns::column_stats(ui.ctx(), model);
+                ui.weak(format!("· {}", stats.vram)).on_hover_text(
                     "File sizes of the DDS files an export writes; a compressed size is also its video memory",
                 );
             }

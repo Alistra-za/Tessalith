@@ -253,6 +253,10 @@ fn tile(
 pub struct ColumnStats {
     pub summary: Option<String>,
     pub chosen: HashSet<String>,
+    /// The selected sets (the Sets column's per-pill test).
+    pub sets: HashSet<String>,
+    /// The header's "≈ VRAM: …" line for the selection (Backlog L15).
+    pub vram: String,
 }
 
 #[derive(Clone, PartialEq)]
@@ -263,10 +267,12 @@ struct StatsKey {
     sort: SortKey,
     selection: crate::model::Selection,
     selection_rev: u64,
+    /// Bumped when header sizes land, so the VRAM text follows with the selection unchanged.
+    sizes: u64,
 }
 
 /// `changed on disk` and `undecided` stay uncounted here: they are one cheap pass and move without the items revision.
-pub fn column_stats(ctx: &egui::Context, model: &AppModel) -> Arc<ColumnStats> {
+pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStats> {
     let key = StatsKey {
         items: model.items_rev(),
         filter: model.filter.clone(),
@@ -274,6 +280,7 @@ pub fn column_stats(ctx: &egui::Context, model: &AppModel) -> Arc<ColumnStats> {
         sort: model.prefs.sort,
         selection: model.selection.clone(),
         selection_rev: model.multi.selection_rev,
+        sizes: model.sizes_rev(),
     };
     let id = egui::Id::new("column-stats");
     if let Some((k, s)) = ctx.data(|d| d.get_temp::<(StatsKey, Arc<ColumnStats>)>(id)) {
@@ -281,9 +288,14 @@ pub fn column_stats(ctx: &egui::Context, model: &AppModel) -> Arc<ColumnStats> {
             return s;
         }
     }
+    let items = model.selected_items();
+    // Asking for the sizes can start a header job; the key above then changes when it lands.
+    let vram = model.vram_text(&items);
     let s = Arc::new(ColumnStats {
         summary: model.selection_summary(false),
-        chosen: model.selected_items().into_iter().collect(),
+        chosen: items.into_iter().collect(),
+        sets: model.selected_sets().into_iter().collect(),
+        vram,
     });
     ctx.data_mut(|d| d.insert_temp(id, (key, s.clone())));
     s

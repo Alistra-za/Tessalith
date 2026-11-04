@@ -618,7 +618,7 @@ fn xpmf_shas_live_in_sidecar() {
         "00".to_string(),
     )]);
     let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
-    s.set_xpmf_shas(shas.clone()).unwrap();
+    s.set_xpmf_shas(&shas).unwrap();
     assert_eq!(s.xpmf_shas(), shas);
     let side: serde_json::Value =
         serde_json::from_slice(&std::fs::read(s.sidecar_path()).unwrap()).unwrap();
@@ -633,7 +633,7 @@ fn xpmf_shas_live_in_sidecar() {
         shas,
         "read back on open"
     );
-    s.set_xpmf_shas(BTreeMap::new()).unwrap();
+    s.set_xpmf_shas(&BTreeMap::new()).unwrap();
     assert!(s.xpmf_shas().is_empty());
     assert!(
         !s.text().contains("xpmf_sha256"),
@@ -643,7 +643,7 @@ fn xpmf_shas_live_in_sidecar() {
     let (b, mut r) = doc(Some("[[sets]\nbroken"));
     assert!(r.read_only());
     r.set_xpmf("a/one", Some(map(json!({"name": "x"}))));
-    r.set_xpmf_shas(shas.clone()).unwrap();
+    r.set_xpmf_shas(&shas).unwrap();
     assert!(!r.is_dirty() && r.entries().is_empty(), "no edit");
     assert_eq!(r.xpmf_shas(), shas);
     assert!(r.sidecar_path().is_file());

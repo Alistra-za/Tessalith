@@ -635,13 +635,6 @@ impl AppModel {
     pub fn clear_rename_cache(&self) {
         self.rename_cache.take();
     }
-    /// The open rename dialog's plan.
-    pub fn rename_plan(&self) -> Option<RenamePlan> {
-        match &self.dialog {
-            Some(Dialog::Rename(d)) => Some(plan_rename(self, d)),
-            _ => None,
-        }
-    }
 
     /// Switch the open dialog's mode; the recipe stays, the keys follow the selection.
     pub fn set_rename_mode(&mut self, mode: RenameMode) {
@@ -684,7 +677,7 @@ impl AppModel {
         };
         // AB1: each set whose own diffuse is renamed takes its sdc-project.toml entry to its new automatic id.
         let retargets: Vec<(String, String)> = match d.mode {
-            RenameMode::Inputs => super::sets::set_views(self)
+            RenameMode::Inputs => super::sets::views(self)
                 .iter()
                 .filter_map(|v| {
                     let Some(super::sets::SlotFill::Own { item }) =

@@ -10,23 +10,26 @@ mod support;
 fn column_stats_are_rebuilt_only_when_the_inputs_change() {
     let ctx = egui::Context::default();
     let mut m = AppModel::placeholder(GuiSettings::default());
-    let a = column_stats(&ctx, &m);
+    let a = column_stats(&ctx, &mut m);
     assert!(
-        Arc::ptr_eq(&a, &column_stats(&ctx, &m)),
+        Arc::ptr_eq(&a, &column_stats(&ctx, &mut m)),
         "nothing changed: shared"
     );
     m.select_item("x");
-    let b = column_stats(&ctx, &m);
+    let b = column_stats(&ctx, &mut m);
     assert!(!Arc::ptr_eq(&a, &b), "a new selection");
     assert!(b.chosen.contains("x"));
     m.search = "q".into();
-    let c = column_stats(&ctx, &m);
+    let c = column_stats(&ctx, &mut m);
     assert!(!Arc::ptr_eq(&b, &c), "a new search");
     m.filter.failed = true;
-    assert!(!Arc::ptr_eq(&c, &column_stats(&ctx, &m)), "a new filter");
-    let d = column_stats(&ctx, &m);
+    assert!(
+        !Arc::ptr_eq(&c, &column_stats(&ctx, &mut m)),
+        "a new filter"
+    );
+    let d = column_stats(&ctx, &mut m);
     m.invalidate_views();
-    assert!(!Arc::ptr_eq(&d, &column_stats(&ctx, &m)), "new items");
+    assert!(!Arc::ptr_eq(&d, &column_stats(&ctx, &mut m)), "new items");
 }
 
 /// Follow-up: every selection change bumps `multi.selection_rev`, and the cached summary follows it.
