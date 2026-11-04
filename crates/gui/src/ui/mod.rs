@@ -74,31 +74,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel) {
     TEST_STATE.with(|s| draw_with(ui, model, &mut s.borrow_mut()));
 }
 
-fn below_header_id() -> egui::Id {
-    egui::Id::new("below-header")
-}
-
 fn centre_id() -> egui::Id {
     egui::Id::new("centre-rect")
 }
 
-/// A9: the area under the header (and the scan row), as of the last frame.
-pub fn below_header(ctx: &egui::Context) -> Option<egui::Rect> {
-    ctx.data(|d| d.get_temp(below_header_id()))
-}
-
-/// A9: the CentralPanel's rect as of the last frame (the Meshes view has none: K7, it is `below_header`).
+/// A9: the area under the header and the scan row as of the last frame (K7: the Meshes view has no CentralPanel
+/// of ours, so it writes the same rect).
 pub fn centre_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     ctx.data(|d| d.get_temp(centre_id()))
 }
 
-/// Call just before `bottom::draw`. K7: the Meshes view has no CentralPanel of ours, so it writes both keys alike.
+/// Call just before `bottom::draw`.
 pub fn record_below_header(ui: &egui::Ui) {
     let r = ui.available_rect_before_wrap();
-    ui.ctx().data_mut(|d| {
-        d.insert_temp(below_header_id(), r);
-        d.insert_temp(centre_id(), r);
-    });
+    ui.ctx().data_mut(|d| d.insert_temp(centre_id(), r));
 }
 
 pub fn draw_with(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {

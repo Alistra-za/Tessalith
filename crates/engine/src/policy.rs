@@ -95,11 +95,6 @@ fn alias_parts<'a>(ctx: &ResolveCtx<'a>, f: &FileFacts) -> Option<(String, &'a s
     Some((alias, canonical, preset))
 }
 
-/// The preset whose chain resolves this file: the alias preset for an aliased file, else the batch preset.
-pub fn preset_for<'a>(ctx: &ResolveCtx<'a>, f: &FileFacts) -> &'a str {
-    alias_parts(ctx, f).map_or(ctx.preset, |(_, _, p)| p)
-}
-
 fn alias_use(ctx: &ResolveCtx, f: &FileFacts) -> Option<AliasUse> {
     alias_parts(ctx, f).map(|(alias, c, p)| AliasUse {
         alias,
