@@ -842,11 +842,19 @@ fn derive_sets_leaves_out_a_set_with_a_failed_member() {
         .unwrap();
     assert_eq!(p.failed.len(), 1, "{:?}", p.failed);
     let (sets, drop, notes) = derive_sets(&p, &BTreeSet::new());
-    assert!(sets.is_empty(), "{:?}", sets.iter().map(|s| &s.id).collect::<Vec<_>>());
+    assert!(
+        sets.is_empty(),
+        "{:?}",
+        sets.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
     assert!(!drop.is_empty());
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].id, "textures/pbr/arm/steel");
-    assert!(notes[0].why.contains("failed in the PBR export"), "{}", notes[0].why);
+    assert!(
+        notes[0].why.contains("failed in the PBR export"),
+        "{}",
+        notes[0].why
+    );
 }
 
 /// Backlog T27: `helper.invert` on a raw cavity map reaches the derived set's cavity source.
@@ -854,7 +862,12 @@ fn derive_sets_leaves_out_a_set_with_a_failed_member() {
 fn derive_sets_applies_a_cavity_maps_helper_invert() {
     let (_d, m, loc) = project(|m| {
         steel(m);
-        png(&m.join("textures/pbr/arm/steel_cavity.png"), 16, 16, [90, 90, 90, 255]);
+        png(
+            &m.join("textures/pbr/arm/steel_cavity.png"),
+            16,
+            16,
+            [90, 90, 90, 255],
+        );
     });
     let cavity = |invert: bool| {
         let mut r = request(&m, &loc.join("Mod PBR"));

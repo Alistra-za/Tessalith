@@ -271,7 +271,11 @@ pub fn derive_sets(
     for f in &pbr.failed {
         let stem = f.path.file_stem().unwrap_or_default().to_string_lossy();
         let base = crate::group::split_suffix_with(&stem, pbr.registry.alias_table()).base;
-        let dir = f.output.parent().map(crate::group::fold).unwrap_or_default();
+        let dir = f
+            .output
+            .parent()
+            .map(crate::group::fold)
+            .unwrap_or_default();
         *failed_in
             .entry(format!("{dir}/{}", base.to_lowercase()))
             .or_default() += 1;
