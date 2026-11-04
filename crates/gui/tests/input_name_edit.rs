@@ -1438,3 +1438,26 @@ fn an_unknown_tail_is_amber_with_a_hover() {
     h.get_by_label("No known texture at textures/landscape/nothere");
     assert_eq!(free(&h), format!("{DIR}nothere"), "still editable");
 }
+
+/// Backlog T20: the header Undo clicked while the input name box has focus commits the name first, so that step is
+/// the one undone and Redo is not cleared (it ran before the commit, undoing the older step and then clearing Redo).
+#[test]
+fn undo_click_commits_the_field_first() {
+    let (_d, mut h) = harness();
+    h.state_mut()
+        .0
+        .set_json_value(ROCK_SET, "specular_level", Some(serde_json::json!(0.3)));
+    h.run();
+    assert!(h.state().0.can_undo(), "an older step to undo by mistake");
+    focus(&mut h);
+    clear_and_type(&mut h, "rock02");
+    let p = h
+        .get_by_role_and_label(Role::Button, "Undo")
+        .rect()
+        .center();
+    press_release(&mut h, p, false);
+    settle(&mut h);
+    let m = &h.state().0;
+    assert!(m.can_redo(), "the committed name step was undone, so Redo holds it");
+    assert_eq!(m.input_name_of("landscape/rock02"), None, "the typed name was undone");
+}
