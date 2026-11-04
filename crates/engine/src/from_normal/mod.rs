@@ -861,6 +861,26 @@ mod tests {
         );
     }
 
+    /// Backlog R1: a 1000² torus normal, resampled to 1024², solves to the 1024² torus's height.
+    #[test]
+    fn an_npot_torus_solves_like_its_power_of_two_twin() {
+        let mut o = opts(1024, Neutral::Half);
+        o.tiling = Tiling::Wrap;
+        o.green = Some(Directx);
+        let (a, b) = (
+            height(&torus_n(1000, 1000), &o),
+            height(&torus_n(1024, 1024), &o),
+        );
+        let mean =
+            a.px.iter()
+                .zip(&b.px)
+                .map(|(x, y)| (x - y).abs())
+                .sum::<f32>()
+                / a.px.len() as f32;
+        // Measured 0.0001; the bound leaves room for the resampler, not for a slope bias.
+        assert!(mean < 0.001, "mean abs height difference {mean}");
+    }
+
     #[test]
     fn a_recipe_height_may_reach_2048() {
         // OWNER-Q1: the solve runs at SOLVE_MAX and the height is resampled up to the recipe's size.
