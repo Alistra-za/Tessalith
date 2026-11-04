@@ -23,7 +23,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, GQ
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, GQ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP
 - vfs: AV, BP, BU, CV
@@ -983,3 +983,4 @@ Fixes for the NIF-team items of the 2026-11-04 trace-debug report (owner delegat
 - **GQ2** The Shader tab's colour picker ends its undo step when its popup closes (or a drag in it is released), as the key-table swatch does. Before, only the R/G/B fields flushed, so picks from two popups merged into one undo step.
 - **GQ3** `pick_source` also skips any folder that holds Tessalith's edit document for this NIF (`<root>\.sdc\nif-edits\<path>.sdc-nifedit.toml`), extending GD28 from `sdc NIF Edits` to every earlier export folder; a folder with a document for another NIF is still a source. Before, an old export folder under another name was picked as the source and the edit applied to its own earlier output.
 - **GQ4** Meshes reads never land across a scan start or a reload, extending GC14, GC15 and GC19. `MeshesModel::store_settled` (no scan running and the store not unsettled) gates `select_nif`, the mod picker (greyed) and the texture-path click (`show_users`), so after a cancelled or failed scan they read nothing from the disabled store. `start()` drops a This-project pill read still out, and `reload()` drops a Controllers read still out, so neither lands an answer for the old store or file.
+- **GQ5** A set member edit in the set preview no longer pushes the whole scene: the member re-encodes and its new bytes are swapped in (`sync_textures`), as a cap change already was. Only a member the edit newly blocks pushes the scene, so the game's copy of its texture comes back: `Encoder::sync` sets `scene_dirty` and `SetPreview::check` takes it in the same frame. Before, every member edit pushed the scene again.

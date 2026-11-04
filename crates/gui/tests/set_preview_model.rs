@@ -1818,6 +1818,84 @@ fn an_encode_completion_on_loaded_content_swaps_the_texture_and_pushes_no_scene(
     assert!(drain(&t).is_empty());
 }
 
+fn diffuse_item(s: &SetPreview) -> String {
+    s.enc.members[&SlotKind::Diffuse].slot.item.clone()
+}
+
+/// Item 14: a member edit seen through the fingerprint (as the user makes it) re-encodes that member and swaps its
+/// texture in; the loaded scene stays.
+#[test]
+fn a_member_format_edit_swaps_its_texture_and_pushes_no_scene() {
+    use engine::config::{ColorTag, Format};
+    let mut t = live();
+    drain(&t);
+    let key0 = builtin_key(&t.s);
+    let item = diffuse_item(&t.s);
+    let now_f =
+        t.m.item(&item)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .profile
+            .format;
+    let f = if now_f == Format::Bc7 {
+        Format::Bc1
+    } else {
+        Format::Bc7
+    };
+    t.m.set_format(&item, f, ColorTag::Srgb);
+    assert!(t.m.wait_idle(Duration::from_secs(60)));
+    let now = Instant::now();
+    t.s.shown = true;
+    t.s.input = true;
+    t.s.poll_at(&t.m, now); // the edit: Diffuse goes stale, due after the debounce
+    assert!(
+        matches!(
+            t.s.enc.members[&SlotKind::Diffuse].state,
+            EncState::Stale(Some(_))
+        ),
+        "{:?}",
+        t.s.enc.members[&SlotKind::Diffuse].state
+    );
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    let tok = t.s.enc.token_of(SlotKind::Diffuse);
+    assert_ne!(tok, 0, "the edited member encodes");
+    t.s.enc.inject(SlotKind::Diffuse, tok, DEFAULT_CAP, fake());
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    t.s.v3.request_frame(64, 64); // a pushed scene's load goes out with the next frame request
+    let c = drain(&t);
+    assert_eq!(loads(&c), 0, "no scene push");
+    assert!(
+        swaps(&c, Variant::Encoded) > 0,
+        "the new encode is swapped in"
+    );
+    assert_eq!(builtin_key(&t.s), key0);
+}
+
+/// Item 14 (Review Focus 3): a member that becomes Blocked has no bytes to swap; the scene is pushed so the game's
+/// copy of its texture comes back.
+#[test]
+fn an_edit_that_blocks_a_member_pushes_the_scene() {
+    let mut t = live();
+    drain(&t);
+    let item = diffuse_item(&t.s);
+    t.m.items.iter_mut().find(|i| i.key == item).unwrap().status = ItemStatus::Error(vec![]);
+    t.m.invalidate_views();
+    poll_once(&mut t.s, &t.m);
+    assert!(matches!(
+        t.s.enc.members[&SlotKind::Diffuse].state,
+        EncState::Blocked(_)
+    ));
+    poll_once(&mut t.s, &t.m);
+    t.s.v3.request_frame(64, 64);
+    assert!(loads(&drain(&t)) >= 1, "the scene was pushed");
+}
+
 #[test]
 fn a_failed_encode_still_pushes_the_scene_so_the_games_texture_comes_back() {
     let mut t = live();
