@@ -60,7 +60,7 @@ In the GUI, a format or tag the new type does not allow is reset ([Encoding foll
 
 ### Gloss bake for a complex `_m` (opt-in)
 
-The gloss bake can also feed a complex-material `_m`'s green channel (glossiness). It is off by default. Set `mips.normal = "renormalize_bake"` (the GUI's *Normal handling: Renormalise and bake*) on the set's `_n` to turn it on: every smaller mip of the `_m` gets the detail its normal map loses, so distant surfaces shimmer less. Mip 0 is unchanged unless the normal is larger than the `_m`. The `_n` must be in the batch with power-of-two sizes of the same aspect; otherwise `SET-BAKE-RATIO` is reported and the `_m` is written unbaked. The setting lives in `sdc.toml`, so the CLI writes the same bytes. A project with this value already set on a vanilla `_n` gets a changed complex `_m` on the next export.
+The gloss bake can also feed a complex-material `_m`'s green channel (glossiness). It is off by default. Set `mips.normal = "renormalize_bake"` (the GUI's *Normal handling: Renormalise and bake*) on the set's `_n` to turn it on: every smaller mip of the `_m` gets the detail its normal map loses, so distant surfaces shimmer less. Mip 0 is unchanged unless the normal is larger than the `_m`. The `_n` must meet the bake's conditions ([Variance bake](Texture-Packing.md#variance-bake)); otherwise the `_m` is written unbaked. The setting lives in `sdc.toml`, so the CLI writes the same bytes. A project with this value already set on a vanilla `_n` gets a changed complex `_m` on the next export.
 
 ## Height maps and the artist checks
 

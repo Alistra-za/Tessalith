@@ -130,7 +130,7 @@ When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Co
 
 | Value | Behaviour |
 |---|---|
-| `if-changed` | Re-encode only when the manifest record differs ([what is compared](Validation-and-Output.md#re-runs-and-if-changed)). An output with no record is kept and reported as `OUT-UNKNOWN-EXISTING`. |
+| `if-changed` | Re-encode only when the manifest record differs ([what is compared, and an output with no record](Validation-and-Output.md#re-runs-and-if-changed)). |
 | `skip` | Keep every existing output. Counted as skipped on purpose. |
 | `overwrite` | Always re-encode. |
 

@@ -2380,6 +2380,9 @@ ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
   - **Encode versions.** Every arm stays "2.0.0" (no existing output changes). `identity.json` gains two keys and no existing key changes: `cov/textures/c/opaque_rgb8.dds` (a 64 x 64 opaque diffuse) and `cov/textures/c/wide_rgb8.dds` (32 x 16, a 2:1 mip chain). `encode_inputs.json` and `profile_hashes.json` are untouched. Schemas: the new code and the `rgb8` format id.
   - **Tests.** `dds_read::{a_24_bit_bgr_file_reads_with_its_rows_unpadded, an_a8l8_file_reads_as_grey_with_alpha, an_a8l8_file_with_an_8_bit_count_reads_the_same, an_l16_file_reads_as_grey, other_legacy_layouts_stay_unsupported, rgb8_output_round_trips_through_the_reader}`, `dds_read::{an_rgb8_cube_round_trips_with_a_legacy_header, an_rgb8_dx10_header_is_refused}`, `load::legacy_uncompressed_layouts_load_with_the_source_info_of_what_they_hold`, `out_size` (RGB8 is 3 bytes a texel; the estimate reads `pixel_format`), render3d `legacy_layouts_expand_to_rgba8_as_the_engine_decodes_them`, `policy_checks::{rgb8_is_refused_when_alpha_is_kept, rgb8_is_refused_with_an_srgb_tag}`, `allowed_encodings::rgb8_is_allowed_where_rgba8_unorm_is`, `fields::the_dropdown_offers_rgb8_where_rgba8_unorm_is_offered`, the `encode` pack unit test, the `config` classification test and the `encode_versions` coverage fixtures. The first run failed to compile (no `Rgb8`, `La8`, `R16` or `FmtRgb8Alpha`). Main-team files only except render3d's `textures.rs`.
 
+ARCHIVED (wording before the edit; superseded in part by Note FM, 2026-11-03)
+  - **Left alone.** `cs-compact` and `vanilla-compact` do not halve a Gray map (their `resize = "half"` rows list the existing grayscale types); that is a preset edit for the release task.
+
 ## Note F — BC1, sidecars, name (owner, 2026-10-08)
 
 ARCHIVED (superseded by Note FM, 2026-11-02)

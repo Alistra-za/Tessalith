@@ -29,3 +29,6 @@ f44f25a20df4	two see-also link lines to the GUI guide
 0df5213cabe1	the verbatim error message, in the key row and in the error-message table
 318eb20e5f48	two code rows (IN-ALIAS-INVALID, IN-ALIAS-STALE) link their one home in Project-Config [inputs]
 0abf7fbc4cea	false match: HDR save formats and GIMP own plug-in reading HDR are different facts
+83e0e52b2eb6	README feature bullet and the format value list of the Project-Config-Fields key table (false match on a list of format ids)
+36080a0c97ed	bc7e-tuning: two pointers to different files on branch bench (false match on the branch name)
+6b37494beb41	Diagnostic-Codes row for PACK-SIZE-MISMATCH and Texture-Packing's one-line mention of it (the row is the code's home; false match on a code name)

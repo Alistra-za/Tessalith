@@ -10,7 +10,7 @@ A PBR set under `cs` has the settings PGPatcher reads in the set editor's **Mate
 
 | Group | Settings |
 |---|---|
-| Material | Specular level, Roughness scale, and Displacement scale while Parallax is on. |
+| Material | Specular level, Roughness scale and, while Parallax is on, Displacement scale. |
 | Features | Emissive, Parallax, Hair, Multilayer (coat), Glint, Fuzz. |
 | Coat | Under the **Multilayer (coat)** checkbox: coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. |
 | Subsurface | The **Off / Standard / Foliage** selector, then colour and opacity for Standard and Foliage. |
@@ -27,7 +27,7 @@ A **PGPatcher JSON editor…** button beside the Material tab opens the [JSON ed
 **Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Glint / Fuzz "on" (or "off" while the card is kept, below), NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records".
 
 - Coat, Emissive, Glint and Fuzz are listed only while their feature is on: ticking its box adds the group, open, and unticking removes it. If the feature is off but the JSON still holds its values, the group stays, reads "off", says "kept, not used" and shows the stored values, which you can edit or reset. They are not written to the JSON while the feature is off.
-- Parallax has no group: **Displacement scale** is a row of Material, under Roughness scale, while Parallax is on. Off with a stored value, the row stays with "kept, not used".
+- Parallax has no group of its own. With Parallax off and a value still stored, the **Displacement scale** row stays in Material with "kept, not used".
 - A feature's state shows once, in its own group's header; the Features group (the ticks) has no value.
 - A feature that is on but blocked (multilayer with hair) reads "on, blocked by hair" (amber) in its own header, stays closed and stays ticked in Features.
 

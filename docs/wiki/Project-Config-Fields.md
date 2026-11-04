@@ -19,7 +19,7 @@ Every field can be set in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`,
 | `alpha.policy` | `remove`, `cutout`, `blend`, `cutout_blend`, `data` | `remove`; `data` for packed and data maps | `remove` stores opaque alpha. `cutout` is alpha testing, `blend` alpha blending, `cutout_blend` both. `data` keeps alpha as numbers with no visual meaning. |
 | `alpha.threshold` | 1 to 254 | 127 | The alpha-test threshold the mesh uses. Used for coverage preservation. |
 | `alpha.compare` | `gt`, `ge` | `gt` | Greater than, or greater than or equal, as the mesh tests. |
-| `alpha.exact_opaque` | `true`, `false` | `false`; `true` for `envmask` and `complex_material` | Guarantee that opaque alpha decodes as exactly 255 in BC7, not 254. |
+| `alpha.exact_opaque` | `true`, `false` | `false`; `true` for `envmask` and `complex_material` | Opaque alpha decodes as exactly 255 in BC7 ([Texture types](Texture-Types.md#sub-types)). |
 | `alpha.exr_straight` | `true`, `false` | `false` | An OpenEXR source with alpha is read as premultiplied (the OpenEXR standard) and its colour divided by alpha on load. `true` reads it as straight alpha, as stored. |
 
 ## Channels

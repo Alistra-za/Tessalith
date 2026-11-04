@@ -303,3 +303,4 @@ M6	M		back	FM		partial	2026-11-03		goes: channels.grayscale_source is only R or 
 M12	M		back	FM		partial	2026-11-03		goes: the provenance example names only R and luma; stays: the recipe sub-type and the pack.* keys (Note FM36)
 FM20	FM		back	FM		partial	2026-11-03		goes: `data` always blocks (Note FM39: an empty `data` alpha is accepted); stays: the rest of the item
 FM38	FM		back	FM		partial	2026-11-03		goes: FMT-RGB8-ALPHA for any alpha policy but remove (Note FM39: an empty data alpha is accepted); stays: the rest of the item
+FM¶- **Left alone.**	FM		back	FM		partial	2026-11-03		goes: cs-compact and vanilla-compact do not halve a Gray map (Note FM41: they do); stays: the rest of the item
