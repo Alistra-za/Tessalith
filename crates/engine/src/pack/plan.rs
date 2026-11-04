@@ -217,6 +217,32 @@ pub fn fail_report(
     }
 }
 
+/// Backlog T17: a recipe that failed or was cancelled has no job, so its sources besides the one that carries the
+/// `file_failed` would get no terminal event. Ends `path` as not converted unless a skip already ends it.
+/// shortcut: a source shared with another, successful recipe also gets its `packed_source`; upgrade if that shows up.
+pub fn end_failed_source(
+    skipped: &mut Vec<SkippedFile>,
+    set_key: &str,
+    kind: RecipeKind,
+    path: &Path,
+    output: &Path,
+) {
+    if skipped.iter().any(|s| s.path == path) {
+        return;
+    }
+    skipped.push(SkippedFile {
+        path: path.to_path_buf(),
+        output: output.to_path_buf(),
+        set: Some(set_key.to_string()),
+        code: Some(Code::DeriveNotConverted),
+        reason: format!(
+            "{} is not converted: its {} recipe failed",
+            name(path),
+            kind.suffix()
+        ),
+    });
+}
+
 /// The analysis pass 1 resolves a packed profile with: the packed image does not exist yet (DECISIONS Note M6).
 /// Pass 1 ignores rules that match on `alpha` (`layered_profile_placeholder`), so its alpha never decides anything.
 fn placeholder() -> (Analysis, SourceInfo) {
@@ -902,6 +928,11 @@ pub fn plan_packing(
                 report.status = RecipeStatus::Failed;
                 report.reason = Some(format!("source {} could not be read", name(bad)));
                 reports.push(report);
+                for p in &sources {
+                    if !failed.contains(p) && !cancelled.contains(p) {
+                        end_failed_source(skipped, &set.key, recipe.kind, p, &members[p].output);
+                    }
+                }
                 consumed.extend(sources.iter().cloned());
                 continue;
             }
@@ -909,6 +940,11 @@ pub fn plan_packing(
                 report.status = RecipeStatus::Failed;
                 report.reason = Some("cancelled".into());
                 reports.push(report);
+                for p in &sources {
+                    if !failed.contains(p) && !cancelled.contains(p) {
+                        end_failed_source(skipped, &set.key, recipe.kind, p, &members[p].output);
+                    }
+                }
                 consumed.extend(sources.iter().cloned());
                 continue;
             }

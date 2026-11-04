@@ -476,3 +476,50 @@ fn default_folder_names_follow_the_project_name() {
     e.names.cm = Some("Iron Lite".into());
     assert_eq!(e.folder_names("Iron")[2], "Iron Lite");
 }
+
+/// Backlog T17: a recipe that fails on one source ends its other sources too, and their `[files]` keys still
+/// name planned files.
+#[test]
+fn a_failed_recipe_ends_every_source_and_keeps_their_keys_matched() {
+    let d = fixture("[files.\"landscape/rock01_ao.png\"]\nalpha.threshold = 100\n");
+    std::fs::write(
+        d.path().join("in/landscape/rock01_roughness.png"),
+        b"not a png",
+    )
+    .unwrap();
+    let (p, ev) = plan_events(req(&d));
+    let p = p.unwrap();
+    let discovered: Vec<&str> = ev
+        .iter()
+        .filter(|e| matches!(e.kind, EventKind::FileDiscovered { .. }))
+        .filter_map(|e| e.path.as_deref())
+        .filter(|p| p.contains("rock01_"))
+        .collect();
+    assert_eq!(discovered.len(), 4, "{discovered:?}");
+    assert!(!ev
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::CfgFileUnmatched)));
+    let mut run = p;
+    run.request.dry_run = true;
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let s = Engine::new()
+        .unwrap()
+        .run(run, &rep, &CancelToken::default())
+        .unwrap();
+    let end = sink.take();
+    for path in &discovered {
+        let ended = ev.iter().chain(&end).any(|e| {
+            e.path.as_deref() == Some(*path)
+                && matches!(
+                    e.kind,
+                    EventKind::FileFailed { .. }
+                        | EventKind::FileSkipped { .. }
+                        | EventKind::FileDone { .. }
+                        | EventKind::FilePlanned { .. }
+                )
+        });
+        assert!(ended, "no terminal event for {path}");
+    }
+    assert_eq!(s.failed, 1);
+}
