@@ -1,4 +1,4 @@
-Tessalith 1.0.0
+Tessalith 2.0.0
 ===============
 
 Tessalith converts a folder of source images (PNG, TGA, TIFF, EXR, PSD) to
@@ -19,8 +19,6 @@ Requirements
 ------------
   - Windows 10 or 11, x64.
   - A graphics card for the GUI's preview windows. The CLI needs none.
-  - Optional: NVIDIA Texture Tools 3.2.5 (nvcompress.exe) as the BC7/BC6H
-    encoder. It is not bundled; install it yourself if you want it.
   - Nothing to install: unzip anywhere and run.
 
 Start
