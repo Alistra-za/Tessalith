@@ -414,6 +414,21 @@ rgbcx `cBC1Dual` (mode 4, encode only) minimises the summed NVIDIA and AMD squar
 
 Dual against Ideal: +0.20 dB on NVIDIA, +0.35 dB on AMD, -0.16 dB on an exact (Ideal) decoder; better on both vendors for 93 of 93 images. On the 7 synthetic gradients (`rgb_grad`) the gain is +1.10 dB NVIDIA and +2.28 dB AMD. Encode time is 1.6 times Ideal's (15.2 s against 9.3 s for 92.8 Mpix on 16 threads). The existing rgbcx modes stay byte-identical. Report: `F:\ai\dds\reports\bc1-dual\REPORT-dual-mode.md`.
 
+#### BC1 Dual rescore (2026-11-04)
+
+Tessalith 2.0's BC1 encode (`encoders_sys::bc1_encode_block` as the engine calls it: 3-colour blocks on, no transparent black, not perceptual) against the round-3 BC1 files of the other encoders, all decoded with rgbcx's NVIDIA and AMD models, `rgb_real` (93 images). Mean RGB PSNR, then Dual's paired Δ against each [95% CI] and wins/losses:
+
+| Encoder | NVIDIA (dB) | AMD (dB) | Dual Δ on NVIDIA | Dual Δ on AMD |
+|---|--:|--:|---|---|
+| rgbcx Dual (Tessalith 2.0) | 39.51 | 39.75 | | |
+| NVTT 3 `-highest` | 39.38 | 39.62 | +0.13 [±0.08] 92/1 | +0.13 [±0.09] 92/1 |
+| rgbcx L18, upstream | 39.32 | 39.41 | +0.19 [±0.08] 91/2 | +0.34 [±0.24] 92/1 |
+| Compressonator q1.0 | 38.83 | 38.93 | +0.68 [±0.08] 93/0 | +0.82 [±0.23] 93/0 |
+| Intel ISPC | 37.99 | 38.00 | +1.52 [±0.40] 93/0 | +1.75 [±0.60] 93/0 |
+| texconv | 37.30 | 37.30 | +2.21 [±0.39] 93/0 | +2.45 [±0.58] 93/0 |
+
+Dual is the best BC1 encoder measured on both vendors' decoders. NVTT 3 `-highest` is second, 0.13 dB behind. A throwaway engine example (not kept) produced the scores.
+
 ### Luma-weighted BC1 error (2026-10-31)
 
 rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`), and under cBC1Dual in `bc1_dual_err`. Weighting only those sums leaves the PCA axis, the least-squares fits and the cluster orderings unweighted. Tessalith ships it as `encoder.perceptual` on BC1 and BC3 colour (Rec.709, FM42; `vanilla-compact` turns it on).

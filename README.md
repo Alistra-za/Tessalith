@@ -57,13 +57,13 @@ Each format uses the encoder that measured best. The numbers behind the charts a
 
 ### BC7
 
-![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.32 dB RGB and alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. Compressonator and texconv CPU take 16 to 33 s and do not beat it. GPU encoders take 0.03 to 0.09 s and lose 1.8 to 2.8 dB.](docs/img/encoder-bc7.svg)
+![Back-to-back bar chart of BC7 encoders. Left bars show speed in seconds per megapixel on a log scale, where shorter is faster. Right bars show quality in dB against bc7e u6. Tessalith's opt-in bc7e max is best at plus 0.15 dB RGB and plus 0.04 dB alpha, about 0.6 s per megapixel. The default bc7e u5 is level with u6 at 0.22 s. NVTT Production, Compressonator and texconv CPU take 14 to 33 s and do not beat it. GPU encoders take 0.03 to 0.09 s and lose 1.4 to 2.8 dB.](docs/img/encoder-bc7.svg)
 
-`max` is opt-in and was measured on a separate sample ([Research](docs/wiki/Research.md#bc7-gpu-and-cpu-encoders-speed-and-quality)). For BC7 data maps with alpha, see the [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) chart.
+`max` is opt-in: on the chart's images it gains 0.15 dB RGB and 0.04 dB alpha over u6 ([Research](docs/wiki/Research.md#bc7-gpu-and-cpu-encoders-speed-and-quality)). NVTT is not part of Tessalith; it is charted as a reference. For BC7 data maps with alpha, see the [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) chart.
 
 ### Other formats
 
-![Bar chart of PSNR in dB grouped by format (BC1, BC3, BC4, BC5, BC6H), one striped bar per encoder. Of the encoders charted, rgbcx is best on BC1, BC3, BC4 and BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
+![Bar chart of PSNR in dB grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth and cutout alpha, BC4, BC5, BC6H), one bar per encoder, coloured and striped by encoder. Tessalith's patched rgbcx is best on BC1, BC3 and BC4 and ties NVTT 3 on BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
 
 Footnotes and per-image counts: [Research](docs/wiki/Research.md#other-formats-best-encoders-per-format).
 
