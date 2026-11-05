@@ -17,9 +17,8 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 **Encoding and checks**
 - BC1, BC3, BC4, BC5, BC6H and BC7 output, plus RGBA8, RGB8, R8 and RG8, with the [best encoder for each format](#uses-the-best-encoder-available). BC1 is encoded for NVIDIA and AMD decoders together.
 - [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) for data maps whose alpha matters.
-- Exact opaque alpha (255, not 254) for `_m` and environment masks, on by default there.
 - Every encode is decoded and checked against Skyrim's rules. DDS files made by other tools can be validated too.
-- [Artist checks](docs/wiki/GUI-Artist-Checks.md#artist-checks): warnings for a weak or clipped height map, missing UV coverage and similar. They never block an export.
+- [Artist checks](docs/wiki/GUI-Artist-Checks.md#artist-checks): warnings for a flipped normal, missing UV coverage etc... They never block an export.
 
 **Maps and packing**
 - Inputs: PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB.
