@@ -51,6 +51,7 @@ Suffixes are matched case-insensitively, longest first, so `_msn` wins over `_n`
 | `_sk` | `skin_sk` in an Advanced skin set; otherwise `backlight_tint` | High, Low |
 | `_i` | `diffuse` (multilayer inner layer) | Medium |
 | `_wet` | `skin_wet`, only in a `cs` Advanced skin set; elsewhere `_wet` is part of the base name | High |
+| `_detail_n` | `skin_detail`, only in a `cs` Advanced skin set; elsewhere it keeps its usual grouping | High |
 | `_e`, or a file under `textures\cubemaps\` | `cubemap`; the six-face suffixes `_posx` to `_negz` (or `_px` to `_nz`) after the name are cut off first | High |
 
 A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or it has a raw roughness, glossiness, metallic or AO map. A set is an Advanced skin set when it has or builds an `_rfaos`; a set whose shader you set to Advanced Skin (GUI, or `--set set:<id>.shader=advanced_skin`) builds one unless `packing.recipe` says otherwise or it has only a metallic map, and its diffuse is `skin_albedo` either way (also when written as plain `diffuse`). In the GUI, pinning the set's Diffuse slot turns this off: the set then reads and packs as it would without the shader choice, unless its diffuse is already written as `skin_albedo`. In an Advanced skin set a plain `_f` is the skin fuzz mask: a greyscale map packed into the `_rfaos` G channel and not converted on its own. A `_f` never makes a set Advanced skin by itself, and one you give a sub-type converts alone as fuzz.
@@ -110,7 +111,8 @@ There are 33 sub-types in five categories.
 | `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile. Not an RNM base: no layers blend into it. A `_detail` or `_detailnorm` file in a landscape set is read as it ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)); in other sets no suffix suggests it, so pick it on the file. |
 | `msn` | Normal | BC7 | UNORM | remove | Model-space normal. |
 | `coat_normal` | Normal | BC7 | UNORM | data | `cs` only. Normal plus coat roughness in alpha; bakes its own detail into that roughness. |
-| `skin_wet` | Normal | BC7, or BC4 for grey content | UNORM | data | `cs` Advanced skin. Grey content is read as a height map (BC4), colour as a normal with a mask in alpha (BC7). |
+| `skin_wet` | Normal | BC7 | UNORM | data | `cs` Advanced skin: a normal with a mask in alpha. A grey source is not written (`SKIN-WET-GREY`). The Community Shaders loader reads BC1, BC3, BC7 and RGBA8 only (`FMT-CS-SKIN-LOADER`, which `--allow` cannot lift). <!-- D:HB3,HB4 --> |
+| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | `cs` Advanced skin, `_detail_n`: a tangent normal with a strength mask in alpha. BC5 is allowed on it, and it is not held to the BC5 normal check. <!-- D:HB4 --> |
 | `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | Environment mask (`_m`). |
 | `height` | Grayscale | BC4 | UNORM | remove | Parallax height (`_p`). |
 | `projected_noise` | Grayscale | BC4 | UNORM | remove | `_noise`: a landscape set's projected-noise map for an XPMF profile. |

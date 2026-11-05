@@ -8,7 +8,7 @@ Things you may run into in version 2.0.0, and what to do about them.
 
 **The graphics device can be lost.** The cause is not proven; it often happens after a long session, around alt-tab or screen capture. Tessalith shows a message that the device was lost and that unsaved edits were kept, then restarts or closes. Unsaved edits come back the next time you open the folder ([crash recovery](GUI-Settings.md#when-something-goes-wrong)). The crash log is in the logs folder ([where](Installation.md#where-tessalith-keeps-its-files)); attach it if you report the crash.
 
-**The Advanced skin card does not export.** The card saves its values in the project, but nothing is written to Community Shaders. Its **Export JSON...** button is greyed out on purpose.
+**An Advanced skin set wrote no `.csskin.json`.** The set needs its own diffuse (a borrowed diffuse writes no file; the host set's card sets the material), and an amber Problems row says which case it is. See [Set materials](GUI-Set-Materials.md#advanced-skin-card).
 
 **PBR grass is approximated in the 3D preview.** The preview draws the PBR grass shader type with the normal PBR shader: no wind, no wrapped diffuse, no grass LOD. The exported files are not affected.
 

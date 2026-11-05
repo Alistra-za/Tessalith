@@ -29,7 +29,7 @@ Under `cs` every sub-type is available. Under `vanilla`, some are not:
 | `pbr_emissive` | no | `glow` |
 | `pbr_normal` | no | `normal` |
 | `pbr_subsurface`, `pbr_fuzz`, `coat_normal`, `rmaos`, `skin_rfaos` | no | none |
-| `skin_albedo`, `skin_sk`, `skin_wet` | no | none |
+| `skin_albedo`, `skin_sk`, `skin_wet`, `skin_detail` | no | none |
 | `flow`, `hdr_sky` | no | none |
 
 A file whose sub-type is unavailable is blocked with `CFG-UNAVAILABLE`. When a fallback exists, `--allow CFG-UNAVAILABLE` (or the GUI's acknowledge button) converts it as the fallback. When none exists, change the sub-type or the target.

@@ -1,0 +1,13 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- Advanced skin sub-types:	Digest	179	back	HB4	`skin_detail` joins the sub-types (HB4)	partial	2026-11-05		goes: the sub-type list without `skin_detail`; stays: the rest
+Digest¶- `_wet` is a suffix only	Digest	200	back	HB4	`_detail_n` joins an Advanced skin set like `_wet` (HB4)	partial	2026-11-05		goes: `_wet` as the only suffix joined by `join_skin_wet`; stays: the rule for `_wet` and the Set Rename clause
+Digest¶- Advanced skin sets get no PGPatcher JSON.	Digest	353	back	HB1	a skin set gets a `.csskin.json` (HB1)	partial	2026-11-05		goes: the implication that a skin set exports no material file at all (HB1 writes its `.csskin.json`); stays: no PGPatcher JSON
+Digest¶- OPEN: Community Shaders Advanced Skin override	Digest	376	back	HB1	the OPEN item is closed by HB1 (a `.csskin.json` is written on every export; the placeholder button is gone)	archive-item	2026-11-05		whole: the export is specified and built (HB1)
+Digest¶- The skin card has the 20	Digest	510	back	HB5	the card has 22 fields in six groups, old keys dropped (HB5)	partial	2026-11-05		goes: 20 fields and the five groups with SSS, unknown keys surviving; stays: storage in the reserved `skin` table, 4 decimals, undo, never bulk
+Index¶- Engine policy (formats, alpha gate, versions, writes):	Index	12	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- Presets and config:	Index	19	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- Manifest and outputs:	Index	20	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- Exports (PGPatcher, CS PBR, CM, XPMF, Also):	Index	21	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- GUI Files and Inspector:	Index	23	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- GUI Dialogs and Export:	Index	27	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+Index¶- Process and docs:	Index	34	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs

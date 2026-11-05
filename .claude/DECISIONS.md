@@ -9,29 +9,29 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY
-- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, HB
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB
 
 ## Digest
 
@@ -176,7 +176,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Suffix vocabulary follows industry names; `_normalgl`/`_normaldx` resolve automatically. [H]
 - Missing packed channels get neutral defaults plus a warning (AO white, metallic black, specular alpha white); roughness default 0.5. Fills are per packed output, `packing.fill.<role>`, 0–255. [H, M5, R-fills-2]
 - `packing.recipe` = `auto`, `rmaos` or `rfaos`; `rfaos` without fuzz uses the fuzz fill. [R-fills-1]
-- Advanced skin sub-types: `skin_albedo`, `skin_rf`, `skin_sk`, `skin_wet`. `rfaos` is not a sub-type id. [R-skin-1, R-review, FM11]
+- Advanced skin sub-types: `skin_albedo`, `skin_rf`, `skin_sk`, `skin_wet`, `skin_detail` (HB4). `rfaos` is not a sub-type id. [R-skin-1, R-review, FM11]
 - A skin `_f` fills the RFAOS fuzz mask in a set already Advanced skin by other evidence; `_f` never makes a set Advanced skin by itself; a real `_fuzz`/`_sheen` wins G. [DR1, DR2, DR3, DR7]
 - Env mask: a complex-material `_m` R is the metallic source, else specular, else the fill. [M1]
 - Raw maps without a recipe raise `PACK-UNUSED-INPUT` and are not written; with two raw maps of one role the first by path is used. [M2, M13]
@@ -197,7 +197,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Helpers are a collapsible group under the tiles, not a filter pill; helper rows take the keyboard. [FB12, FM31]
 - `SET-MISSING-COMPANION` (info): a cs PBR set with `pbr_normal` but no roughness or the reverse, `_msn` without `_s` (not Eye), `_flow` without `_n`; `SET-COMPANION-DDS` (warning) when the companion is only a DDS. Neither on a `CFG-UNAVAILABLE` job or an albedo-only PBR set. [R8, BQ12]
 - A usable `_n` is decided (Ready, or Blocked such as `FMT-BC5-NORMAL`); an Unresolved `_n` gives its members `SET-MISSING-COMPANION` ("not decided yet"); with two `pbr_normal` jobs in a GUI-built set the first by path is used. [R9]
-- `_wet` is a suffix only on `cs` in an Advanced skin set (a real `_rfaos` member or a resolved recipe building `_rfaos`); `group::join_skin_wet` (after grouping, before set edits) moves `x_wet` into set `x`, folding Unicode; elsewhere `_wet` stays in the name (`road_wet`). A set listing `wet` keeps a suffix-less `*_wet` member through a Set Rename. [I3, BP2, BV9]
+- `_wet` and `_detail_n` (HB4) are suffixes only on `cs` in an Advanced skin set (a real `_rfaos` member or a resolved recipe building `_rfaos`); `group::join_skin_wet` (after grouping, before set edits) moves `x_wet` and `x_detail_n` into set `x`, folding Unicode; elsewhere they stay in the name (`road_wet`; `x_detail_n` groups as before). A set listing `wet` keeps a suffix-less `*_wet` member through a Set Rename. [I3, BP2, BV9]
 - Skin detection uses the recipe actually chosen (a forced `rmaos` with fuzz is not skin). RFAOS is offered only where buildable (roughness, glossiness or AO source); `PACK-RECIPE-UNBUILDABLE` is attached only when `auto` would not build `_rfaos`. [I1, I2, BQ13]
 - A failed or cancelled skin `_f` fails the `_rfaos` recipe (no default G): `pack::plan::skin_f_candidate` is the one predicate, `is_skin_f` adds "no requested sub-type", and `plan_packing` takes a role from `JobStatus::PackingInput { role }` when the name has none. A skin set writes no `_f.dds`; an old one is not removed. [DR4, DR5, DR8, DR9]
 - An `_orm` source adds an optional `channel` (0..=2) to `ChannelSource::Source`, serialised only when set (other jobs keep their bytes); provenance reads `iron_orm.png:G`. `RawMap::ALL` stays the eight single-channel fill roles (a fill for `orm` is refused). `_curvature` and `_curves` read as `curves`, `_cavity` as `cavity`. [AL3, CN2]
@@ -350,7 +350,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - A MATO-only landscape set needs no RMAOS. CS does not draw the projected normal and detail samples in this build (slot hover says so); they still export. A landscape `_noise` is always ProjectedNoise; a name-prefixed `_detail` stays an RNM layer. The two new kinds have no slot number, so no slot-keyed map gets them. The card shows every refusal `prepare` can know. The preview takes the profile's textures, coverage, then MATO DATA, cycling the layer when texture paths change. [GI10, GI15, GI16, GI17, GI18, GI19, GI21, GI22, GI25, GI28, GI29]
 - Delete sections are `[[pgp_sections]]` with `delete: true`, written after every set's entry, only with a texture match; alone they never write the JSON. [AB2, AF1]
 - JSON hash records name their file, one per file name. [BV7, BR6]
-- Advanced skin sets get no PGPatcher JSON. [AG90]
+- Advanced skin sets get no PGPatcher JSON; they get a `.csskin.json` instead (HB1). [AG90]
 - Community Shaders PBR texture sets and material objects: blocks from one source, guarded by the recorded hash, refusals per file. [AD1, AD2, AD5, AD6]
 - PGPatcher complex-material JSON (`[sets.cm]`); vanilla keeps a complex `_m`. [AT1, AT2]
 - XPMF profiles: every schema key in the block, one file per set named from the set id, the vendored schema checked before every write, null or empty optional values omitted, an `xpmf_sha256` record in a writable `sdc-project.toml`. [GI1, GI2, GI7, GI8, GI23]
@@ -373,7 +373,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Vanilla/CPM borrowed slots are file copies, not tracked by the manifest; skipped with a note when the owner's output did not export. [P4, P22]
 - Krita and OpenRaster files are not read; PSD/PSB merged image and WebP are. [AC1, AC7, FM23]
 - OPEN: the CLI marks no inner-layer `_p`; a packed job is never copied under Also export. [CN]
-- OPEN: Community Shaders Advanced Skin override JSON export (the skin card's "Export JSON…" is a disabled placeholder, spec pending). [AG90]
 
 ### CLI
 
@@ -507,7 +506,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - `rename` is a file name (a `\` or `/` blocks export, one `.dds` cut); the prefix comes from the lowest active `matchN` under `textures\pbr\`. The TruePBR box: visual settings, Matching, then collapsed Advanced TruePBR settings (`path_contains`, `nif_filter`, `rename`, UV, vertex, locks, inner UV scale, coat colour). [V3, V7]
 - A set's slot cards are the picked shader's usable slots, filled or empty, plus filled slots it cannot use (amber outline, hover reason), ordered by PGPatcher slot 1-8. [V8]
 - Advanced skin card is separate from TruePBR, with non-inheritable fields and UI-only ranges. [AG79, AG81, AG83]
-- The skin card has the 20 `SkinProfile` fields in CS README order and key names, grouped Specular (5), Physical (4), Edge & detail (5), SSS (3), Fuzz (3); stored in the set's reserved `skin` table (explicit values; unknown keys survive), 4 decimals, one undo step per edit (a drag merges), never bulk; `_rfaos`, `_sk`, `_wet` members show as text. [AG80, AG82, AG84, AG85, AG89]
+- The skin card has the 22 CS Advanced Skin parameters in the contract's key names, in six groups: Specular, Physical, Edge & detail, Transmission, Fuzz, Wet (HB1, HB5); stored in the set's reserved `skin` table (explicit values; keys outside the 22 are dropped on the next edit, HB5), 4 decimals, one undo step per edit (a drag merges), never bulk; `_rfaos`, `_sk`, `_wet`, `_detail_n` members show as text. [AG80, AG82, AG84, AG85, AG89]
 - Fuzz colour starts at .04/.08 grey, fuzz strength 1 when enabled; RGB fields allow values above 1.0. [AG133]
 - Subsurface mode selector with an auto mode that can be pinned. [AG101, AG102, AG110]
 - Subsurface pitfalls are warnings: both keys on; Foliage on a set whose meshes are not Tree_Anim; Standard on Tree_Anim meshes. [AG104]
@@ -1118,3 +1117,12 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **HA2 The formats chart scores what GPUs decode.** BC1 is shown on rgbcx's NVIDIA and AMD models, BC3 alpha, BC4 and BC5 decoded rounding to nearest. Values are bench round 3 (93 to 96 images per set), and the rgbcx column is Tessalith's patched build: BC1 Dual (FM17), the wider BC4 block search (FJ1, FJ2). The BC1 row comes from a rescore of Tessalith 2.0's BC1 encode against the round-3 files ([BC1 Dual rescore](../docs/research/encoder-benchmark.md#bc1-dual-rescore-2026-11-04)). BC6H keeps its 4-HDRI source.
 - **HA3 Rows of one chart share their sample (BC6H aside, HA2).** bc7e `max` is charted at its round-1 Δ (+0.15 dB RGB, +0.04 dB premultiplied alpha) like the other BC7 rows, not the 150-texture tuning sample (+0.32); the README states its gain in place of the "separate sample" note. Colour follows the encoder in every chart (bc7e and rgbcx blue, ISPC orange, NVTT aqua, Compressonator violet, texconv magenta) in solid fills, and every bar has its value label; the stripe patterns are gone (owner, 2026-11-04). `tools/readme-charts.py` asserts that every full-width line fits the 780 px chart.
 - **HA4 The formats chart plots each format against Tessalith's encoder (owner, 2026-11-04).** Each format is scored on its own image set, so absolute dB on one shared axis invited comparisons across formats that mean nothing. Each bar is an encoder's PSNR minus Tessalith's default for that format (rgbcx for BC1 to BC5, ISPC for BC6H), which is the 0 line; the absolute values stay in the Research table, one row per format.
+
+## Note HB — CS Advanced Skin material files (main team, 2026-11-05)
+
+- **HB1 An Advanced skin set writes a `.csskin.json` on every export (owner, 2026-11-05).** Community Shaders' Advanced Skin keys a material on the diffuse texture: `<diffuse>.csskin.json` beside the exported diffuse names its parameters and its `controls` (`_rfaos`), `wet` and `detail` textures. The file is `{format: "CommunityShaders.SkinMaterial", version: 1, parameters?, textures?, authoredFor}`. `parameters` holds only the keys the user set on the card, all from the 22-name contract and in range; `textures` holds lower-case `textures/...dds` paths with `/` separators, re-based from the output under the export root; `authoredFor` is the exported diffuse's size and FNV-1a 64 hash. It is written automatically like the PGPatcher JSON: no button and no opt-out (the disabled "Export JSON…" placeholder is gone). Before writing, the recorded hash is checked with a guarded write shared with the CM JSON: an edited file is kept and a note says so. A file no skin set writes any more is left in the export folder and listed as a note, never deleted. A value outside its range (`skin::skin_value_problem`, the one validator for the red block and the writer) blocks the export with a red Problems row; it is never clamped or written. Writer: `crates/gui/src/model/cs_skin_json.rs`. Closes the OPEN item of AG90.
+- **HB2 Only the set that exports the diffuse writes the file; wet and detail slots can be borrowed (owner, 2026-11-05).** A set with no diffuse, a borrowed diffuse, or a host that is not an Advanced skin set writes no file, and gets an amber Problems row (NoDiffuse, BorrowedDiffuse, HostNotSkin, HostMissing). A texture slot that is empty, or borrowed from a host that does not produce the file, is left out of `textures` with an amber row; a path is never written for a file that does not exist. `_wet` and `_detail_n` are `SlotKind::SkinWet` = 9 and `SkinDetail` = 10, past `LAST_GAME_SLOT` = 8, so the existing locks, borrows and Share apply to them; game-facing writers use `game_slot()` and never see 9 or 10, and the slot menu offers **Clear borrow**.
+- **HB3 A grey `_wet` is not written (owner, 2026-11-05).** Community Shaders removed the grey/height wet form (CS commit 176a0083), so `skin_wet` is BC7 only (a normal with a mask in alpha) and the `skin-wet-form` fact and the BC4 exception are gone. The engine moves a grey `_wet` to `plan.skipped` with the warning `SKIN-WET-GREY`, so the CLI and GUI agree and the rest of the batch still writes. `skin_rfaos`, `skin_wet` and `skin_detail` accept only the formats CS's texture loader reads (BC1, BC3, BC7, RGBA8; BC5 too for `skin_detail`); any other explicit format is `FMT-CS-SKIN-LOADER`, a Blocking code that `--allow` cannot downgrade.
+- **HB4 `skin_detail`, suffix `_detail_n` (owner, 2026-11-05).** A new sub-type, recognised only in an Advanced skin set on `cs` (elsewhere `x_detail_n` groups as before, a normal of base `x_detail`). Its source becomes BC5 when every alpha value is 255 or it has no alpha, else BC7; an explicit format wins within the loader list. It is exempt from `FMT-BC5-NORMAL`, since BC5 is the intended form for CS's detail normal.
+- **HB5 Old skin card keys are dropped (owner, 2026-11-05).** The card edits the 22 contract parameters in six groups (Specular, Physical, Edge & detail, Transmission, Fuzz, Wet). Keys outside them (`SkinMainRoughness`, `F0`, `UseSSS`, `sssWidth`, …) are not translated and are removed from a set's `skin` table on its next edit (`SetsDoc::retain_skin`); nothing reads them.
+- **HB6 Version 2.1.0 (MINOR, DM8).** The workspace version is 2.1.0 and `RELEASED_ENGINE_VERSION` stays 2.0.0 until release. The `SkinWet` and `SkinDetail` arms of `encode_version` return `ENGINE_VERSION`: the first changes bytes and verdicts for a grey source and the loader formats, the second is new. No other arm changes; the encode-version pins changed only for those two types.

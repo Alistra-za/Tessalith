@@ -135,6 +135,27 @@ ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note HA, 2026-11-04)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM
 
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU
+
+ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -280,3 +301,18 @@ ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note FZ, 2026-11-04)
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FT, FS
+
+ARCHIVED (wording before the edit; superseded in part by Note HB4, 2026-11-05)
+- Advanced skin sub-types: `skin_albedo`, `skin_rf`, `skin_sk`, `skin_wet`. `rfaos` is not a sub-type id. [R-skin-1, R-review, FM11]
+
+ARCHIVED (wording before the edit; superseded in part by Note HB4, 2026-11-05)
+- `_wet` is a suffix only on `cs` in an Advanced skin set (a real `_rfaos` member or a resolved recipe building `_rfaos`); `group::join_skin_wet` (after grouping, before set edits) moves `x_wet` into set `x`, folding Unicode; elsewhere `_wet` stays in the name (`road_wet`). A set listing `wet` keeps a suffix-less `*_wet` member through a Set Rename. [I3, BP2, BV9]
+
+ARCHIVED (wording before the edit; superseded in part by Note HB1, 2026-11-05)
+- Advanced skin sets get no PGPatcher JSON. [AG90]
+
+ARCHIVED (superseded by Note HB1, 2026-11-05)
+- OPEN: Community Shaders Advanced Skin override JSON export (the skin card's "Export JSON…" is a disabled placeholder, spec pending). [AG90]
+
+ARCHIVED (wording before the edit; superseded in part by Note HB5, 2026-11-05)
+- The skin card has the 20 `SkinProfile` fields in CS README order and key names, grouped Specular (5), Physical (4), Edge & detail (5), SSS (3), Fuzz (3); stored in the set's reserved `skin` table (explicit values; unknown keys survive), 4 decimals, one undo step per edit (a drag merges), never bulk; `_rfaos`, `_sk`, `_wet` members show as text. [AG80, AG82, AG84, AG85, AG89]
