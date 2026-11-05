@@ -9,10 +9,7 @@ use engine::config::Subtype;
 use serde_json::{json, Value};
 
 pub const TITLE: &str = "Advanced skin (Community Shaders)";
-/// The disabled Export JSON placeholder's hover (owner, 2026-10-14).
-pub const EXPORT_HOVER: &str = "Community Shaders Advanced Skin override export - spec pending";
-const NOTE: &str =
-    "Saved in the project; not written to Community Shaders yet (export spec pending)";
+const NOTE: &str = "Written beside the diffuse as a .csskin.json on export";
 
 /// The set's skin members (`_rfaos`, `_sk`, `_wet`): CS binds them through its JSON, so they are listed, not edited.
 fn members(model: &AppModel, v: &SetView) -> Vec<String> {
@@ -63,11 +60,6 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             if let Some(why) = &off {
                 r.response.on_disabled_hover_text(why);
             }
-            // AG90: the skin set gets no PGPatcher JSON; its own export is still to be specified.
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Export JSON").strong());
-            ui.add_enabled(false, egui::Button::new("Export JSON…"))
-                .on_disabled_hover_text(EXPORT_HOVER);
         });
     for (k, v2) in edits {
         model.set_skin_value(&v.id, k, v2);

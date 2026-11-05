@@ -1,6 +1,6 @@
 //! Task 10b: the Advanced skin card's fields (Community Shaders `SkinProfile`, CS README section 4). Per set,
 //! non-inheritable: a field is either unset (nothing stored, the CS default shows as a hint) or an explicit value in
-//! the set's `skin` table of `sdc-project.toml`, under the exact CS key. Nothing is exported yet (DECISIONS AG79).
+//! the set's `skin` table of `sdc-project.toml`, under the exact CS key. Export writes it as the `.csskin.json` beside the diffuse.
 use super::AppModel;
 use crate::pgp::settings::Settings;
 use serde_json::Value;
@@ -40,41 +40,60 @@ const fn flag(key: &'static str, group: &'static str, default: bool) -> SkinFiel
     }
 }
 
-pub const GROUPS: [&str; 5] = ["Specular", "Physical", "Edge & detail", "SSS", "Fuzz"];
+pub const GROUPS: [&str; 6] = [
+    "Specular",
+    "Physical",
+    "Edge & detail",
+    "Transmission",
+    "Fuzz",
+    "Wet",
+];
 
-/// The 20 per-material `SkinProfile` fields in README order. `WetResponse` is wetness, which CS keeps global: left out.
-pub const FIELDS: [SkinField; 20] = [
-    num("SkinMainRoughness", "Specular", 0.7, 0.0, 1.0),
-    num("SkinSecondRoughness", "Specular", 0.35, 0.0, 1.0),
-    num("SkinSpecularTexMultiplier", "Specular", 1.0, 0.0, 4.0),
+/// The 22 per-material parameters of a Community Shaders `.csskin.json` (spec table order, CS ranges).
+pub const FIELDS: [SkinField; 22] = [
+    num("Roughness", "Specular", 0.7, 0.0, 1.0),
+    num("SecondaryRoughness", "Specular", 0.35, 0.0, 1.0),
+    num("SpecularTextureMultiplier", "Specular", 1.0, 0.0, 10.0),
     num("SecondarySpecularStrength", "Specular", 0.15, 0.0, 1.0),
-    num("F0", "Specular", 0.0278, 0.0, 1.0),
-    num("BaseColorMultiplier", "Physical", 1.0, 0.0, 4.0),
-    num("PhysicalMainRoughnessMultiplier", "Physical", 1.3, 0.0, 4.0),
+    num("Reflectance", "Specular", 0.0278, 0.0, 0.1),
+    num("BaseColorMultiplier", "Physical", 1.0, 0.0, 2.0),
+    num("PhysicalMainRoughnessMultiplier", "Physical", 1.3, 0.0, 2.0),
     num(
         "PhysicalSecondRoughnessMultiplier",
         "Physical",
         0.75,
         0.0,
-        4.0,
+        2.0,
     ),
-    num("PhysicalSpecularStrength", "Physical", 1.0, 0.0, 4.0),
+    num("PhysicalSpecularStrength", "Physical", 1.0, 0.0, 2.0),
     num("ExtraEdgeRoughness", "Edge & detail", 0.25, 0.0, 1.0),
-    flag("EnableSkinDetail", "Edge & detail", true),
-    num("SkinDetailStrength", "Edge & detail", 0.25, 0.0, 1.0),
-    num("SkinDetailTiling", "Edge & detail", 10.0, 0.1, 100.0),
-    num("BodyTilingMultiplier", "Edge & detail", 2.0, 0.0, 4.0),
-    num("Translucency", "SSS", 0.1, 0.0, 1.0),
-    num("sssWidth", "SSS", 0.2, 0.0, 1.0),
-    flag("UseSSS", "SSS", true),
-    num("FuzzStrength", "Fuzz", 1.0, 0.0, 1.0),
-    num("FuzzRoughness", "Fuzz", 0.35, 0.0, 1.0),
-    num("FuzzF0", "Fuzz", 0.045, 0.0, 1.0),
+    num("Fuzz", "Fuzz", 1.0, 0.0, 2.0),
+    num("FuzzRoughness", "Fuzz", 0.35, 0.1, 1.0),
+    num("FuzzF0", "Fuzz", 0.045, 0.0, 0.5),
+    flag("TransmissionEnabled", "Transmission", true),
+    num("Transmission", "Transmission", 0.1, 0.0, 1.0),
+    num("TransmissionDepth", "Transmission", 0.2, 0.0, 1.0),
+    num("SSSAmount", "Transmission", 1.0, 0.0, 1.0),
+    flag("DetailEnabled", "Edge & detail", true),
+    num("DetailStrength", "Edge & detail", 0.25, -2.0, 2.0),
+    num("DetailTiling", "Edge & detail", 10.0, 0.1, 100.0),
+    num("BodyTilingMultiplier", "Edge & detail", 2.0, 0.1, 5.0),
+    num("WetResponse", "Wet", 1.0, 0.0, 1.0),
 ];
 
+pub fn skin_field(key: &str) -> Option<&'static SkinField> {
+    FIELDS.iter().find(|f| f.key == key)
+}
+
 impl AppModel {
-    /// Set `set`'s explicit skin values (every key under `skin`, unknown ones included).
+    /// Set `set`'s explicit skin values: only keys `skin_field` knows (old key names are ignored).
     pub fn skin_values(&self, set: &str) -> Settings {
+        let mut s = self.skin_table(set);
+        s.retain(|k, _| skin_field(k).is_some());
+        s
+    }
+
+    fn skin_table(&self, set: &str) -> Settings {
         self.sets_doc
             .as_ref()
             .and_then(|d| {
@@ -97,9 +116,19 @@ impl AppModel {
             Some(f) if x.is_f64() => Value::from((f * 1e4).round() / 1e4),
             _ => x,
         });
+        // Old key names are removed in the same step: nothing reads them and the project file is ours.
+        let stale: Vec<String> = self
+            .skin_table(set)
+            .keys()
+            .filter(|k| skin_field(k).is_none())
+            .map(|k| format!("skin.{k}"))
+            .collect();
         let (s, path) = (set.to_string(), format!("skin.{key}"));
         let merge = Some(format!("{set}:{path}"));
         self.edit_docs(&format!("Change {path}"), merge, false, move |_, d| {
+            for k in &stale {
+                d.set_value(&s, k, None);
+            }
             d.set_value(&s, &path, v)
         });
     }

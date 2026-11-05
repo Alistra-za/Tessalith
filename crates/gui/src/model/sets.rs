@@ -367,8 +367,7 @@ pub const BADGE_PBR_LANDSCAPE_NONE: &str = "PBR Landscape (no JSON yet)";
 /// has an EDID, the PGPatcher entry when the set is a PGPatcher JSON set its statics rule keeps.
 pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
     if v.skin {
-        // AG90: an Advanced skin set gets no PGPatcher JSON.
-        "Advanced skin (no JSON)"
+        "Advanced skin"
     } else if is_pbr_landscape(v) {
         match (m.cs_records_written(v), m.pgp_written(v)) {
             (true, true) => BADGE_PBR_LANDSCAPE_PGP,

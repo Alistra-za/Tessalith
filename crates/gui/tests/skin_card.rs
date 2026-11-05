@@ -1,5 +1,5 @@
 //! Task 10b: the Advanced skin card (owner, 2026-10-14). Per-set, non-inheritable CS SkinProfile values kept in
-//! the set's `skin` table of `sdc-project.toml`; nothing is exported yet (AG79-AG86).
+//! the set's `skin` table of `sdc-project.toml`; the export writes them as the `.csskin.json`.
 mod support;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
@@ -38,34 +38,37 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
 }
 
 #[test]
-fn the_field_list_is_the_twenty_cs_keys_without_wetness() {
+fn the_field_list_is_the_twenty_two_cs_keys() {
     let keys: Vec<&str> = FIELDS.iter().map(|f| f.key).collect();
     assert_eq!(
         keys,
         [
-            "SkinMainRoughness",
-            "SkinSecondRoughness",
-            "SkinSpecularTexMultiplier",
+            "Roughness",
+            "SecondaryRoughness",
+            "SpecularTextureMultiplier",
             "SecondarySpecularStrength",
-            "F0",
+            "Reflectance",
             "BaseColorMultiplier",
             "PhysicalMainRoughnessMultiplier",
             "PhysicalSecondRoughnessMultiplier",
             "PhysicalSpecularStrength",
             "ExtraEdgeRoughness",
-            "EnableSkinDetail",
-            "SkinDetailStrength",
-            "SkinDetailTiling",
-            "BodyTilingMultiplier",
-            "Translucency",
-            "sssWidth",
-            "UseSSS",
-            "FuzzStrength",
+            "Fuzz",
             "FuzzRoughness",
             "FuzzF0",
+            "TransmissionEnabled",
+            "Transmission",
+            "TransmissionDepth",
+            "SSSAmount",
+            "DetailEnabled",
+            "DetailStrength",
+            "DetailTiling",
+            "BodyTilingMultiplier",
+            "WetResponse",
         ]
     );
-    assert!(!keys.contains(&"WetResponse"));
+    assert!(sdc_gui::model::skin::skin_field("Reflectance").is_some());
+    assert!(sdc_gui::model::skin::skin_field("F0").is_none());
 }
 
 #[test]
@@ -77,7 +80,11 @@ fn the_card_shows_for_a_skin_set_and_not_for_a_plain_one() {
     let mut h = harness(m);
     h.run();
     h.get_by_label_contains(TITLE);
-    h.get_by_label_contains("export spec pending");
+    h.get_by_label_contains(".csskin.json");
+    assert!(
+        h.query_by_label("Export JSON…").is_none(),
+        "the card has no export button"
+    );
 
     let d2 = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d2.path());
@@ -107,12 +114,11 @@ fn a_read_only_project_greys_the_card_with_its_reason() {
         h.query_by_label_contains(WHY).is_none(),
         "the reason is not shown before the hover"
     );
-    // The card's "set" buttons sit between its title and its own Export JSON… button.
+    // The card's "set" buttons sit below its title.
     let top = h.get_by_label_contains(TITLE).rect().max.y;
-    let bottom = h.get_by_label("Export JSON…").rect().min.y;
     let set = h
         .query_all_by_label("set")
-        .find(|n| n.rect().min.y > top && n.rect().max.y < bottom)
+        .find(|n| n.rect().min.y > top)
         .expect("a set button in the skin card");
     assert!(set.accesskit_node().is_disabled());
     set.hover();
@@ -135,6 +141,9 @@ fn an_unset_field_shows_its_default_and_stores_nothing() {
     h.run();
     h.get_by_label("default 0.7");
     h.get_by_label("default 0.0278");
+    h.get_by_label("Reflectance");
+    h.get_by_label("Secondary roughness");
+    h.get_by_label("SSS amount");
     assert!(h.state().skin_values(SKIN).is_empty());
 }
 
@@ -142,16 +151,16 @@ fn an_unset_field_shows_its_default_and_stores_nothing() {
 fn setting_resetting_and_one_undo_step_each() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
-    m.set_skin_value(SKIN, "F0", Some(json!(0.04)));
-    m.set_skin_value(SKIN, "UseSSS", Some(json!(false)));
-    assert_eq!(m.skin_values(SKIN)["F0"], json!(0.04));
+    m.set_skin_value(SKIN, "Reflectance", Some(json!(0.04)));
+    m.set_skin_value(SKIN, "TransmissionEnabled", Some(json!(false)));
+    assert_eq!(m.skin_values(SKIN)["Reflectance"], json!(0.04));
     m.undo();
-    assert!(!m.skin_values(SKIN).contains_key("UseSSS"));
-    assert_eq!(m.skin_values(SKIN)["F0"], json!(0.04));
-    m.set_skin_value(SKIN, "F0", None);
+    assert!(!m.skin_values(SKIN).contains_key("TransmissionEnabled"));
+    assert_eq!(m.skin_values(SKIN)["Reflectance"], json!(0.04));
+    m.set_skin_value(SKIN, "Reflectance", None);
     assert!(m.skin_values(SKIN).is_empty(), "reset clears it");
     m.undo();
-    assert_eq!(m.skin_values(SKIN)["F0"], json!(0.04));
+    assert_eq!(m.skin_values(SKIN)["Reflectance"], json!(0.04));
     m.undo();
     assert!(
         m.skin_values(SKIN).is_empty(),
@@ -163,19 +172,22 @@ fn setting_resetting_and_one_undo_step_each() {
 fn the_skin_table_round_trips_and_unknown_keys_survive() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
-    m.set_skin_value(SKIN, "F0", Some(json!(0.04)));
+    m.set_skin_value(SKIN, "Reflectance", Some(json!(0.04)));
     m.sets_doc
         .as_mut()
         .unwrap()
         .set_value(SKIN, "skin.Future", Some(json!("x")));
-    m.set_skin_value(SKIN, "sssWidth", Some(json!(0.3)));
+    m.set_skin_value(SKIN, "SSSAmount", Some(json!(0.3)));
     let root = m.root.clone().unwrap();
     m.sets_doc.as_mut().unwrap().save(true).unwrap();
     let s = SetsDoc::open(&root);
     let e = s.entries().iter().find(|&e| e.id == SKIN).cloned().unwrap();
-    assert_eq!(e.skin["F0"], json!(0.04));
-    assert_eq!(e.skin["sssWidth"], json!(0.3));
-    assert_eq!(e.skin["Future"], json!("x"));
+    assert_eq!(e.skin["Reflectance"], json!(0.04));
+    assert_eq!(e.skin["SSSAmount"], json!(0.3));
+    assert!(
+        !e.skin.contains_key("Future"),
+        "an unknown key goes with the next edit"
+    );
     assert!(
         e.settings.keys().all(|k| !k.starts_with("skin")),
         "skin values are not PGPatcher settings: {:?}",
@@ -196,7 +208,7 @@ fn the_set_button_stores_the_default_and_the_reset_clears_it() {
     h.run();
     h.query_all_by_label("set").next().unwrap().click();
     h.run();
-    assert_eq!(h.state().skin_values(SKIN)["SkinMainRoughness"], json!(0.7));
+    assert_eq!(h.state().skin_values(SKIN)["Roughness"], json!(0.7));
     h.get_by_label("↺").scroll_to_me();
     h.run();
     h.get_by_label("↺").click();
@@ -209,40 +221,57 @@ fn the_set_button_stores_the_default_and_the_reset_clears_it() {
 #[test]
 fn every_default_group_and_range_is_the_briefs_table() {
     use sdc_gui::model::skin::Kind;
-    let want: [(&str, &str, Kind); 20] = [
-        ("SkinMainRoughness", "Specular", n(0.7, 0.0, 1.0)),
-        ("SkinSecondRoughness", "Specular", n(0.35, 0.0, 1.0)),
-        ("SkinSpecularTexMultiplier", "Specular", n(1.0, 0.0, 4.0)),
+    let want: [(&str, &str, Kind); 22] = [
+        ("Roughness", "Specular", n(0.7, 0.0, 1.0)),
+        ("SecondaryRoughness", "Specular", n(0.35, 0.0, 1.0)),
+        ("SpecularTextureMultiplier", "Specular", n(1.0, 0.0, 10.0)),
         ("SecondarySpecularStrength", "Specular", n(0.15, 0.0, 1.0)),
-        ("F0", "Specular", n(0.0278, 0.0, 1.0)),
-        ("BaseColorMultiplier", "Physical", n(1.0, 0.0, 4.0)),
+        ("Reflectance", "Specular", n(0.0278, 0.0, 0.1)),
+        ("BaseColorMultiplier", "Physical", n(1.0, 0.0, 2.0)),
         (
             "PhysicalMainRoughnessMultiplier",
             "Physical",
-            n(1.3, 0.0, 4.0),
+            n(1.3, 0.0, 2.0),
         ),
         (
             "PhysicalSecondRoughnessMultiplier",
             "Physical",
-            n(0.75, 0.0, 4.0),
+            n(0.75, 0.0, 2.0),
         ),
-        ("PhysicalSpecularStrength", "Physical", n(1.0, 0.0, 4.0)),
+        ("PhysicalSpecularStrength", "Physical", n(1.0, 0.0, 2.0)),
         ("ExtraEdgeRoughness", "Edge & detail", n(0.25, 0.0, 1.0)),
+        ("Fuzz", "Fuzz", n(1.0, 0.0, 2.0)),
+        ("FuzzRoughness", "Fuzz", n(0.35, 0.1, 1.0)),
+        ("FuzzF0", "Fuzz", n(0.045, 0.0, 0.5)),
         (
-            "EnableSkinDetail",
+            "TransmissionEnabled",
+            "Transmission",
+            Kind::Flag { default: true },
+        ),
+        ("Transmission", "Transmission", n(0.1, 0.0, 1.0)),
+        ("TransmissionDepth", "Transmission", n(0.2, 0.0, 1.0)),
+        ("SSSAmount", "Transmission", n(1.0, 0.0, 1.0)),
+        (
+            "DetailEnabled",
             "Edge & detail",
             Kind::Flag { default: true },
         ),
-        ("SkinDetailStrength", "Edge & detail", n(0.25, 0.0, 1.0)),
-        ("SkinDetailTiling", "Edge & detail", n(10.0, 0.1, 100.0)),
-        ("BodyTilingMultiplier", "Edge & detail", n(2.0, 0.0, 4.0)),
-        ("Translucency", "SSS", n(0.1, 0.0, 1.0)),
-        ("sssWidth", "SSS", n(0.2, 0.0, 1.0)),
-        ("UseSSS", "SSS", Kind::Flag { default: true }),
-        ("FuzzStrength", "Fuzz", n(1.0, 0.0, 1.0)),
-        ("FuzzRoughness", "Fuzz", n(0.35, 0.0, 1.0)),
-        ("FuzzF0", "Fuzz", n(0.045, 0.0, 1.0)),
+        ("DetailStrength", "Edge & detail", n(0.25, -2.0, 2.0)),
+        ("DetailTiling", "Edge & detail", n(10.0, 0.1, 100.0)),
+        ("BodyTilingMultiplier", "Edge & detail", n(2.0, 0.1, 5.0)),
+        ("WetResponse", "Wet", n(1.0, 0.0, 1.0)),
     ];
+    assert_eq!(
+        sdc_gui::model::skin::GROUPS,
+        [
+            "Specular",
+            "Physical",
+            "Edge & detail",
+            "Transmission",
+            "Fuzz",
+            "Wet"
+        ]
+    );
     for (f, (key, group, kind)) in FIELDS.iter().zip(want) {
         assert_eq!((f.key, f.group, f.kind), (key, group, kind), "{key}");
     }
@@ -257,25 +286,25 @@ fn a_drag_on_one_field_is_one_undo_step_and_is_rounded() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
     for x in [0.70, 0.705, 0.7100000000000001] {
-        m.set_skin_value(SKIN, "SkinMainRoughness", Some(json!(x)));
+        m.set_skin_value(SKIN, "Roughness", Some(json!(x)));
     }
-    assert_eq!(m.skin_values(SKIN)["SkinMainRoughness"], json!(0.71));
+    assert_eq!(m.skin_values(SKIN)["Roughness"], json!(0.71));
     m.undo();
     assert!(m.skin_values(SKIN).is_empty(), "the drag was one step");
 }
 
 #[test]
-fn unknown_skin_keys_and_comments_survive_a_real_load_and_save() {
+fn unknown_skin_keys_drop_and_comments_survive_a_real_load_and_save() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
-    m.set_skin_value(SKIN, "F0", Some(json!(0.04)));
+    m.set_skin_value(SKIN, "Reflectance", Some(json!(0.04)));
     let root = m.root.clone().unwrap();
     m.sets_doc.as_mut().unwrap().save(true).unwrap();
     let path = root.join(sdc_gui::sets_doc::FILE_NAME);
     let text = std::fs::read_to_string(&path).unwrap();
     let text = text.replacen(
-        "skin.F0 = 0.04",
-        "# kept by hand\nskin.Future = \"x\"\nskin.F0 = 0.04",
+        "skin.Reflectance = 0.04",
+        "skin.Future = \"x\"\n# kept by hand\nskin.Reflectance = 0.04",
         1,
     );
     assert!(text.contains("Future"), "{text}");
@@ -283,19 +312,17 @@ fn unknown_skin_keys_and_comments_survive_a_real_load_and_save() {
     // The real load path: open the folder again.
     m.open_folder(root.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
-    assert_eq!(
-        m.skin_values(SKIN).get("Future"),
-        Some(&json!("x")),
-        "{text}
-{:?}",
+    assert!(
+        !m.skin_values(SKIN).contains_key("Future"),
+        "unknown keys are not skin values: {:?}",
         m.skin_values(SKIN)
     );
-    m.set_skin_value(SKIN, "F0", Some(json!(0.05)));
+    m.set_skin_value(SKIN, "Reflectance", Some(json!(0.05)));
     m.sets_doc.as_mut().unwrap().save(true).unwrap();
     let out = std::fs::read_to_string(&path).unwrap();
     assert!(out.contains("# kept by hand"), "{out}");
-    assert!(out.contains("Future = \"x\""), "{out}");
-    assert!(out.contains("F0 = 0.05"), "{out}");
+    assert!(!out.contains("Future"), "dropped on the edit: {out}");
+    assert!(out.contains("Reflectance = 0.05"), "{out}");
     // Not a PGPatcher setting: no JSON entry carries it.
     for (_, e) in sdc_gui::model::pbr_export::json_entries(&m) {
         assert!(
@@ -307,7 +334,7 @@ fn unknown_skin_keys_and_comments_survive_a_real_load_and_save() {
 }
 
 #[test]
-fn a_skin_set_has_no_json_entry_no_truepbr_card_and_an_export_placeholder() {
+fn a_skin_set_has_no_json_entry_no_truepbr_card_and_no_export_button() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
     assert!(sdc_gui::model::pbr_export::json_entries(&m).is_empty());
@@ -323,15 +350,9 @@ fn a_skin_set_has_no_json_entry_no_truepbr_card_and_an_export_placeholder() {
         h.query_by_label("Specular level").is_none(),
         "no TruePBR card"
     );
-    // Layout v2 A5 (K14): the card's pill says "skin" (its hover the long "Advanced skin (no JSON)").
+    // Layout v2 A5 (K14): the card's pill says "skin" (its hover "Advanced skin").
     h.get_by_label("skin");
-    {
-        use egui_kittest::kittest::NodeT;
-        assert!(h
-            .get_by_label("Export JSON…")
-            .accesskit_node()
-            .is_disabled());
-    }
+    assert!(h.query_by_label("Export JSON…").is_none());
 
     // A PBR set is unchanged.
     let d2 = tempfile::tempdir().unwrap();
@@ -397,4 +418,44 @@ fn a_skin_only_project_keeps_the_old_json_and_previews_without_an_entry() {
     );
     let fp = sdc_gui::model::set_preview::fingerprint(&m, &set_key(&m)).unwrap();
     assert!(fp.entry.is_none());
+}
+
+#[test]
+fn old_skin_keys_are_dropped_on_edit_and_never_exported() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_opened(d.path());
+    let d_ = m.sets_doc.as_mut().unwrap();
+    d_.set_value(SKIN, "skin.SkinMainRoughness", Some(json!(0.5)));
+    d_.set_value(SKIN, "skin.F0", Some(json!(0.03)));
+    assert!(m.skin_values(SKIN).is_empty(), "old keys are not values");
+    let k = set_key(&m);
+    m.select_set(&k);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("default 0.7");
+    let m = h.state_mut();
+    m.set_skin_value(SKIN, "Roughness", Some(json!(0.6)));
+    let e = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| e.id == SKIN)
+        .cloned()
+        .unwrap();
+    assert_eq!(e.skin.len(), 1, "{:?}", e.skin);
+    assert_eq!(e.skin["Roughness"], json!(0.6));
+    m.undo();
+    assert!(m.skin_values(SKIN).is_empty());
+    let raw = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| e.id == SKIN)
+        .cloned()
+        .unwrap();
+    assert_eq!(raw.skin.len(), 2, "one undo step restores the old keys");
 }

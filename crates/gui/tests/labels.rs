@@ -17,7 +17,7 @@ use support::*;
 fn schema_keys_read_as_words() {
     assert_eq!(readable("specular_enabled"), "Specular enabled");
     assert_eq!(readable("environment_map_scale"), "Environment map scale");
-    assert_eq!(readable("SkinMainRoughness"), "Skin main roughness");
+    assert_eq!(readable("SecondaryRoughness"), "Secondary roughness");
     assert_eq!(
         readable("PhysicalSecondRoughnessMultiplier"),
         "Physical second roughness multiplier"
@@ -25,8 +25,8 @@ fn schema_keys_read_as_words() {
     assert_eq!(readable("dynamic_cubemap"), "Dynamic cubemap");
     assert_eq!(readable("inner_uv_scale"), "Inner UV scale");
     // A1: SSS and F0 are initialisms.
-    assert_eq!(readable("sssWidth"), "SSS width");
-    assert_eq!(readable("UseSSS"), "Use SSS");
+    assert_eq!(readable("SSSAmount"), "SSS amount");
+    assert_eq!(readable("TransmissionEnabled"), "Transmission enabled");
     assert_eq!(readable("FuzzF0"), "Fuzz F0");
     assert_eq!(readable("F0"), "F0");
 }
@@ -88,12 +88,12 @@ fn the_skin_card_shows_labels_with_the_key_on_hover() {
     m.select_set(&k);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Skin main roughness").hover();
+    h.get_by_label("Secondary roughness").hover();
     h.run();
-    h.get_by_label("SkinMainRoughness");
+    h.get_by_label("SecondaryRoughness");
     // Only the tooltip carries the raw key; no row label does.
-    assert_eq!(h.query_all_by_label("SkinMainRoughness").count(), 1);
-    h.get_by_label("SSS width");
+    assert_eq!(h.query_all_by_label("SecondaryRoughness").count(), 1);
+    h.get_by_label("SSS amount");
 }
 
 #[test]
