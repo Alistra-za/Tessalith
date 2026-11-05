@@ -30,8 +30,6 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 .z{stroke:var(--mute);stroke-width:1;fill:none}
 .lt{opacity:.5}
 .mu{fill:var(--mute)}
-.pl{fill:var(--bg)}
-.nf{fill:var(--mute)}
 .df{fill:none;stroke:var(--ink);stroke-width:2}
 """ % (
     "".join("--c%d:%s;" % (i, s[0]) for i, s in enumerate(SLOTS)),
@@ -191,12 +189,12 @@ def chart_bc7():
 
 # ------------------------------------------------- chart 2: other formats, dB
 def chart_formats():
-    """Groups = formats. One bar per encoder: colour and stripe pattern both show the encoder."""
+    """Groups = formats. One solid-colour bar per encoder; every bar carries its value label."""
     # Bar order = colour-slot order, which passes the dataviz validator on adjacent pairs.
     ENC = ["rgbcx (Tessalith)", "Intel ISPC", "NVTT 3", "Compressonator", "texconv (CPU)"]
     COL = [BLUE, ORANGE, AQUA, VIOLET, MAGENTA]
-    PAT = [None, "px", "pd", "ph", "pv"]
     NM = "not measured"
+    NA = "not applicable (rgbcx has no BC6H)"
     G = [  # format, values in ENC order (copied from the Research table)
         # BC1: rgb_real (93); Tessalith = rgbcx Dual, the others' round-3 files; decoded as each vendor's GPU does
         ("BC1 colour, NVIDIA decode (RGB PSNR)", [39.51, 37.99, 39.38, 38.83, 37.30]),
@@ -218,18 +216,6 @@ def chart_formats():
     def sx(v):
         return x0 + (v - vmin) / (vmax - vmin) * (x1 - x0)
 
-    defs = (
-        '<defs>'
-        '<pattern id="pd" width="8" height="8" patternUnits="userSpaceOnUse" '
-        'patternTransform="rotate(45)"><rect width="3.5" height="8" class="pl"/></pattern>'
-        '<pattern id="ph" width="8" height="7" patternUnits="userSpaceOnUse">'
-        '<rect width="8" height="3" class="pl"/></pattern>'
-        '<pattern id="px" width="8" height="8" patternUnits="userSpaceOnUse">'
-        '<rect width="8" height="2.4" class="pl"/><rect width="2.4" height="8" class="pl"/>'
-        '</pattern>'
-        '<pattern id="pv" width="8" height="8" patternUnits="userSpaceOnUse">'
-        '<rect width="3.5" height="8" class="pl"/></pattern></defs>\n'
-    )
     b = text(10, 20, "Other formats: PSNR against Tessalith's encoder, in dB", "t")
     b += text(10, 38, "Each format is scored on its own images, so compare bars within a format only. "
               "0 = Tessalith default; left = worse.", "s")
@@ -238,8 +224,6 @@ def chart_formats():
         if i == 0:
             continue  # rgbcx is only ever the 0 line, never a bar
         b += '<rect x="%d" y="48" width="14" height="12" class="f%d"/>\n' % (lx, COL[i])
-        if PAT[i]:
-            b += '<rect x="%d" y="48" width="14" height="12" fill="url(#%s)"/>\n' % (lx, PAT[i])
         b += text(lx + 20, 58, name, "s")
         lx += 20 + 6 * len(name) + 18
     top = 78
@@ -258,16 +242,13 @@ def chart_formats():
                 b += text(sx(0) - 6, by + bh - 2, ENC[k].split(" (")[0] + " = 0 (Tessalith default)", "b", "end")
                 continue
             if v is None:
-                lab = NM + "†" if (ENC[k] == "Compressonator" and gi == BC6) else NM
+                lab = NA if k == 0 else NM + "†" if ENC[k] == "Compressonator" else NM
                 b += text(sx(0) - 6, by + bh - 2, lab, "s", "end")
                 continue
             d = round(v - ref, 2)
             xa, xb = sorted((sx(d), sx(0)))
             b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" class="f%d"/>\n' % (
                 xa, by, xb - xa, bh, COL[k])
-            if PAT[k]:
-                b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" fill="url(#%s)"/>\n' % (
-                    xa, by, xb - xa, bh, PAT[k])
             lab = "0.00 (tie)" if d == 0 else num(d, signed=True)
             b += text(xa - 5, by + bh - 2, lab, "s", "end") if d < 0 else text(xb + 5, by + bh - 2, lab, "s")
     b += text(10, bot + 32, "Tessalith's rgbcx is patched: BC1 endpoints scored on both the NVIDIA and AMD decoders, "
@@ -281,9 +262,9 @@ def chart_formats():
             "Each format uses its own images, so bars compare only within a format. Tessalith's patched "
             "rgbcx is best on BC1, BC3 and BC4; NVTT 3 is closest, 0.08 to 1.17 dB behind, and ties it "
             "on BC5. The largest gap is ISPC on BC3 cutout alpha, 4.57 dB behind. On BC6H, Tessalith's "
-            "Intel ISPC leads NVTT 3 by 2.38 dB and texconv by 0.76 dB. rgbcx and Compressonator BC6H "
-            "values were not measured.")
-    return svg(780, bot + 74, "Encoders compared by format, PSNR against Tessalith", desc, defs + b)
+            "Intel ISPC leads NVTT 3 by 2.38 dB and texconv by 0.76 dB. rgbcx has no BC6H encoder, "
+            "and Compressonator's BC6H was not measured on these images.")
+    return svg(780, bot + 74, "Encoders compared by format, PSNR against Tessalith", desc, b)
 
 
 # ------------------------------------- chart 3: BC3 against BC7 alpha weights

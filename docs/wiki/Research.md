@@ -49,7 +49,7 @@ Picking the right format and colour space for a texture moves quality by 5 to 15
 
 ## Encoder measurements
 
-The data behind the README charts, drawn by `tools/readme-charts.py`. "—" means not measured.
+The data behind the README charts, drawn by `tools/readme-charts.py`. "—" means not measured; "n/a" means the encoder has no such format.
 
 ### BC7: GPU and CPU encoders, speed and quality
 
@@ -99,8 +99,8 @@ NVIDIA Texture Tools 3 is not part of Tessalith; its rows are a reference.
 | BC4 masks (PSNR, dB) | 49.10 | 47.13 | 49.02 | 48.65 | 46.83 |
 | BC5 normals (RG PSNR, dB) | 47.16 | 45.32 | 47.16 | 46.87 | 45.51 |
 | BC5 normals (mean angle error) | 1.89° | 1.99° | 1.90° | 1.90° | 1.98° |
-| BC6H HDR (multi-exposure PSNR, dB) | — | 50.38 | 48.00 | —† | 49.62 |
-| BC6H brightest highlight kept (worst image) | — | 22% | 94% | 29%† | 29% |
+| BC6H HDR (multi-exposure PSNR, dB) | n/a | 50.38 | 48.00 | —† | 49.62 |
+| BC6H brightest highlight kept (worst image) | n/a | 22% | 94% | 29%† | 29% |
 
 Each row has its own image set, so compare encoders within a row, not across rows; the README chart plots each row against Tessalith's encoder. BC1 to BC5 are bench round 3 (93 colour textures, 96 with smooth alpha, 95 cutouts, 93 masks, 93 normal maps), scored the way GPUs decode: BC1 on the NVIDIA and AMD models, BC3 alpha, BC4 and BC5 rounding to nearest. The rgbcx column is Tessalith's patched build: BC1 Dual endpoints ([BC1 Dual rescore](../research/encoder-benchmark.md#bc1-dual-rescore-2026-11-04)) and the wider BC4 block search above. Its BC3 colour half in this table is the Ideal-model encode, not Dual. On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 2.2 dB lower in mPSNR (4 HDR images).
 
