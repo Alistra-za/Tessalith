@@ -85,6 +85,27 @@ pub fn skin_field(key: &str) -> Option<&'static SkinField> {
     FIELDS.iter().find(|f| f.key == key)
 }
 
+/// Known keys of `values` that CS would reject (a hand-edited `sdc-project.toml`; the card cannot make them): (key,
+/// why). Unknown keys are ignored here.
+pub fn bad_skin_values(values: &Settings) -> Vec<(String, String)> {
+    let mut out = vec![];
+    for (k, v) in values.iter() {
+        let why = match skin_field(k).map(|f| f.kind) {
+            Some(Kind::Num { lo, hi, .. }) => match v.as_f64() {
+                None => Some("not a number".to_string()),
+                Some(x) if !(lo..=hi).contains(&x) => Some(format!("{x}, outside {lo} to {hi}")),
+                Some(_) => None,
+            },
+            Some(Kind::Flag { .. }) => (!v.is_boolean()).then(|| "not true or false".to_string()),
+            None => None,
+        };
+        if let Some(w) = why {
+            out.push((k.clone(), w));
+        }
+    }
+    out
+}
+
 impl AppModel {
     /// Set `set`'s explicit skin values: only keys `skin_field` knows (old key names are ignored).
     pub fn skin_values(&self, set: &str) -> Settings {

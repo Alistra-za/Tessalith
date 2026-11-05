@@ -279,6 +279,17 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
     let mut out = vec![];
     for v in &set_views(m) {
+        // A value CS would reject voids the whole `.csskin.json`; it is not a PGPatcher entry, so it comes first.
+        if m.target == Target::Cs && v.skin {
+            for (k, why) in super::skin::bad_skin_values(&m.skin_values(&v.id)) {
+                out.push(issue(
+                    v,
+                    format!(
+                        "Skin value {k} is {why}; CS would reject the whole material file. Fix it on the skin card."
+                    ),
+                ));
+            }
+        }
         // Design §5.1: a set whose entry the statics rule drops writes no JSON, so nothing of it blocks.
         if m.target == Target::Cs && !m.pgp_entry_wanted(v) {
             continue;

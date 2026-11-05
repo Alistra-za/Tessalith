@@ -520,6 +520,25 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             )
         });
     }
+    // Advanced skin: a set that writes no `.csskin.json`, or leaves a texture out of it.
+    for (id, key, why) in super::cs_skin_json::skin_json_plan(m).1 {
+        use super::cs_skin_json::SkinSkip;
+        let text = match why {
+            SkinSkip::NoDiffuse => {
+                "Advanced skin needs a diffuse in its set; no .csskin.json is written.".into()
+            }
+            SkinSkip::BorrowedDiffuse { host } => format!(
+                "Uses {host}'s diffuse, so its material comes from {host}'s skin card; no .csskin.json is written for this set."
+            ),
+            SkinSkip::HostNotSkin { host } => format!(
+                "{host} owns this diffuse but is not an Advanced skin set; no .csskin.json is written."
+            ),
+            SkinSkip::HostMissing { slot, host } => format!(
+                "{slot} texture from {host} is not in the export folder; it is left out of the .csskin.json."
+            ),
+        };
+        out.push(row(Level::Warning, set_at(&key, &id), text, None));
+    }
     for (k, ws) in &m.rnm_notes {
         let at = views
             .iter()

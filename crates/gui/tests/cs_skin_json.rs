@@ -810,3 +810,153 @@ fn a_borrow_from_a_host_without_that_texture_is_host_missing() {
     assert_eq!(row.3.wet, None);
     assert!(row.3.controls.is_some());
 }
+
+// ---- Task 6: Problems rows and the export block ----
+
+use sdc_gui::model::bottom::{problems, At, Level};
+
+fn skin_rows(m: &AppModel, id: &str) -> Vec<(Level, String)> {
+    problems(m)
+        .iter()
+        .filter(|p| matches!(&p.at, At::Set { id: i, .. } if i == id))
+        .map(|p| (p.level, p.text.clone()))
+        .collect()
+}
+
+fn has_row(m: &AppModel, id: &str, level: Level, start: &str) {
+    let rows = skin_rows(m, id);
+    assert!(
+        rows.iter()
+            .any(|(l, t)| *l == level && t.starts_with(start)),
+        "{start}: {rows:?}"
+    );
+}
+
+#[test]
+fn set_without_diffuse_gets_an_amber_row() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    colour(&r, "q_rfaos.png");
+    let m = opened_skin(d.path());
+    let id = id_of(&m, "x/q");
+    has_row(
+        &m,
+        &id,
+        Level::Warning,
+        "Advanced skin needs a diffuse in its set",
+    );
+}
+
+#[test]
+fn borrowed_diffuse_gets_an_amber_row_naming_the_host() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_wet", "_detail_n"] {
+        colour(&r, &format!("a{s}.png"));
+    }
+    colour(&r, "b_rfaos.png");
+    let mut m = opened_skin(d.path());
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/a.png", &b);
+    has_row(&m, &b, Level::Warning, &format!("Uses {a}'s diffuse"));
+}
+
+#[test]
+fn borrowing_a_non_skin_diffuse_gets_an_amber_row() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    colour(&r, "p.png");
+    grey(&r, "p_roughness.png");
+    colour(&r, "b_rfaos.png");
+    let mut m = opened_skin(d.path());
+    let (p, b) = (id_of(&m, "x/p"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/p.png", &b);
+    has_row(
+        &m,
+        &b,
+        Level::Warning,
+        &format!("{p} owns this diffuse but is not an Advanced skin set"),
+    );
+}
+
+#[test]
+fn a_host_without_the_texture_gets_an_amber_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/b_wet.png", &a);
+    grey(&d.path().join("textures/x"), "b_wet.png");
+    m.replan();
+    idle(&mut m);
+    has_row(
+        &m,
+        &a,
+        Level::Warning,
+        &format!("wet texture from {b} is not in the export folder"),
+    );
+}
+
+#[test]
+fn bad_skin_value_blocks_export() {
+    use sdc_gui::model::pbr_export::export_blocks;
+    for (key, v, why) in [
+        ("Reflectance", json!(0.5), "outside"),
+        ("Roughness", json!("x"), "not a number"),
+        ("DetailEnabled", json!(1), "not true or false"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = skin_project(d.path(), "textures/x", &["h"]);
+        let id = id_of(&m, "x/h");
+        m.set_skin_value(&id, key, Some(v));
+        idle(&mut m);
+        let b = export_blocks(&m);
+        let mine: Vec<_> = b.iter().filter(|i| i.set_id == id).collect();
+        assert_eq!(mine.len(), 1, "{key}: {b:?}");
+        assert!(
+            mine[0].text.starts_with(&format!("Skin value {key} is "))
+                && mine[0].text.contains(why),
+            "{}",
+            mine[0].text
+        );
+        assert!(skin_rows(&m, &id)
+            .iter()
+            .any(|(l, t)| *l == Level::Blocks && t.contains(key)));
+        m.export_clicked();
+        assert!(m.review.is_some(), "{key}: Review opens");
+        m.export_from_review();
+        idle(&mut m);
+        assert!(!out(&m, "textures/x/h.csskin.json").exists(), "{key}");
+    }
+}
+
+#[test]
+fn good_skin_values_do_not_block() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    let id = id_of(&m, "x/h");
+    m.set_skin_value(&id, "Reflectance", Some(json!(0.1)));
+    idle(&mut m);
+    assert!(sdc_gui::model::pbr_export::export_blocks(&m).is_empty());
+}
+
+#[test]
+fn grey_wet_shows_skin_wet_grey_row() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_detail_n"] {
+        colour(&r, &format!("h{s}.png"));
+    }
+    grey(&r, "h_wet.png");
+    let m = opened_skin(d.path());
+    assert!(
+        problems(&m)
+            .iter()
+            .any(|p| p.code == Some(engine::codes::Code::SkinWetGrey)),
+        "{:?}",
+        problems(&m)
+    );
+}

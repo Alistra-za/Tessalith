@@ -362,8 +362,11 @@ impl PlanView {
                 status: ItemStatus::Skipped(s.reason.clone()),
                 decisions: vec![],
                 // Preflight P4: GEN-REPLACED stays on the item (Info: never a Problems row) for the rival's name.
+                // SKIN-WET-GREY is a Warning: the grey `_wet` gets no job, so its row is the only place it shows.
                 warnings: match s.code {
-                    Some(c @ Code::GenReplaced) => vec![Warning::new(c, s.reason.clone())],
+                    Some(c @ (Code::GenReplaced | Code::SkinWetGrey)) => {
+                        vec![Warning::new(c, s.reason.clone())]
+                    }
                     _ => vec![],
                 },
                 thumb: None,
