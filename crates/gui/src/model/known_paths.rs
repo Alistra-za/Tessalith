@@ -132,7 +132,7 @@ impl AppModel {
             .collect();
         for v in set_views(self) {
             for (kind, fill) in &v.slots {
-                if slot.is_some_and(|s| Some(s + 1) != kind.slot_number()) {
+                if slot.is_some_and(|s| Some(s + 1) != kind.game_slot()) {
                     continue;
                 }
                 if let SlotFill::Own { item } = fill {

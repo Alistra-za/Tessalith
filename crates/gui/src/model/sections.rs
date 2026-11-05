@@ -87,7 +87,7 @@ pub struct DeleteHit {
     pub why: String,
 }
 
-/// The game paths of set `v`'s textures, by slot number (1-based).
+/// The game paths of set `v`'s textures, by the game's slot number (1-based; the skin members have none).
 fn slot_paths(m: &AppModel, v: &SetView) -> Vec<(u8, String)> {
     v.slots
         .iter()
@@ -98,7 +98,7 @@ fn slot_paths(m: &AppModel, v: &SetView) -> Vec<(u8, String)> {
                 super::sets::SlotFill::Empty => return None,
             };
             let j = m.item(item)?.job.as_ref()?;
-            Some((kind.slot_number()?, super::sets::written_game_path(j)))
+            Some((kind.game_slot()?, super::sets::written_game_path(j)))
         })
         .collect()
 }

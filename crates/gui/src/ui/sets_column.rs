@@ -372,7 +372,9 @@ fn member_chip(
     let item = model.item(mk)?;
     let n = kind.and_then(SlotKind::slot_number);
     let locked = n.is_some_and(|n| v.locks.contains(&n));
-    let pgp = n.is_some_and(|n| crate::pgp::prefix::pgp_locked(&v.settings, n));
+    let pgp = kind
+        .and_then(SlotKind::game_slot)
+        .is_some_and(|n| crate::pgp::prefix::pgp_locked(&v.settings, n));
     let r = member(ui, item, sel_items.contains(mk), locked, pgp, thumbs, note);
     // Note DU5: an own member (`drag`) can leave the set from its chip; a borrowed one has the slot's Clear.
     if kind.is_some() || drag {
@@ -382,7 +384,7 @@ fn member_chip(
                 let entries = model.slot_menu(&v.id, k);
                 // The XPMF maps' slot menu is empty: the chip keeps only "Remove from set".
                 if !entries.is_empty() {
-                    let title = match k.slot_number() {
+                    let title = match k.game_slot() {
                         Some(n) => format!("Slot {n}: {}", k.label()),
                         None => k.label().to_string(),
                     };

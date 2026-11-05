@@ -102,7 +102,8 @@ fn slots_of(
             && v.prefix
                 .as_deref()
                 .is_some_and(|pre| path_lower(p) == path_lower(&output_rel(pre, kind.suffix())));
-        if let (true, Some(n)) = (borrowed || !at_own_path, kind.slot_number()) {
+        // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
+        if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
         }
     }
@@ -130,7 +131,7 @@ fn unresolved_slots(
             SlotFill::Own { item } => (item, None),
             SlotFill::Empty => continue,
         };
-        let Some(n) = kind.slot_number() else {
+        let Some(n) = kind.game_slot() else {
             continue;
         };
         if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {

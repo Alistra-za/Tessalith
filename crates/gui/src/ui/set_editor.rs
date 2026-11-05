@@ -464,6 +464,10 @@ fn rows(
             // The row takes the right-click; its labels are not selectable, so they do not take it.
             ui.style_mut().interaction.selectable_labels = false;
             for cell in slot_row(v.shader.as_ref(), &v.slots) {
+                // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only.
+                if !v.skin && matches!(cell.kind, SlotKind::SkinWet | SlotKind::SkinDetail) {
+                    continue;
+                }
                 let size = cell.fill.item().and_then(|i| sizes.get(i));
                 let w = row(ui, model, v, &cell, thumbs, acts, drop_at, size, file_w);
                 for (a, b) in widths.iter_mut().zip(w) {
@@ -594,7 +598,7 @@ fn row(
     }
     if let (false, Some(p)) = (cell.usable, &v.shader) {
         let what = slot
-            .slot_number()
+            .game_slot()
             .map_or_else(|| "this map".to_string(), |n| format!("slot {n}"));
         t.on_hover_text(format!(
             "{title}: the {} shader does not use {what}",
@@ -609,9 +613,7 @@ fn row(
     });
     slot_menu(&resp, model, v, slot, acts);
     // A PGPatcher-locked slot has one hover, the lock's, in place of the thumbnail's path.
-    let lock_cross = slot
-        .slot_number()
-        .is_some_and(|n| pgp_locked(&v.settings, n))
+    let lock_cross = slot.game_slot().is_some_and(|n| pgp_locked(&v.settings, n))
         && is_json_set(v, model.target);
     let resp = if lock_cross {
         pgp_lock_hover(resp, model, v, slot, acts)
@@ -870,11 +872,7 @@ fn row(
                 }
             }
             // A4: only a set that writes JSON gives PGPatcher the lock (review M2); otherwise a note.
-            if slot
-                .slot_number()
-                .is_some_and(|n| pgp_locked(&v.settings, n))
-                && !lock_cross
-            {
+            if slot.game_slot().is_some_and(|n| pgp_locked(&v.settings, n)) && !lock_cross {
                 let r = ui
                     .add(egui::Label::new(egui::RichText::new("ⓘ").weak()))
                     .on_hover_text(PGP_LOCK_UNWRITTEN);
@@ -956,7 +954,7 @@ fn pgp_lock_hover(
     acts: &mut Vec<Act>,
 ) -> egui::Response {
     // Only a PGPatcher slot is locked (`lock_cross`).
-    let Some(n) = slot.slot_number() else {
+    let Some(n) = slot.game_slot() else {
         return resp;
     };
     resp.on_hover_ui(|ui| {

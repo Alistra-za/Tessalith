@@ -189,8 +189,8 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
         match entry {
             None => paths.push(plain_path(*kind)),
             Some(e) => {
-                // The XPMF maps have no `slotN`: only their own prefix path.
-                let n = kind.slot_number();
+                // The XPMF maps and the skin members have no `slotN`: only their own prefix path.
+                let n = kind.game_slot();
                 let user = n.is_some_and(|n| {
                     v.settings
                         .get(&format!("slot{n}"))

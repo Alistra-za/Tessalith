@@ -267,6 +267,9 @@ fn slot_numbers_follow_p6() {
             // Note GI: the XPMF maps have no PGPatcher slot.
             (SlotKind::ProjectedNoise, None, "noise"),
             (SlotKind::DetailNormal, None, "detail"),
+            // Task 4b: numbers past the game's 8 (`game_slot` is None for both).
+            (SlotKind::SkinWet, Some(9), "wet"),
+            (SlotKind::SkinDetail, Some(10), "detail_n"),
         ]
     );
 }
@@ -1474,7 +1477,9 @@ fn a_pbr_set_shows_its_pbr_slots_in_slot_order() {
             SlotKind::Diffuse,
             SlotKind::Normal,
             SlotKind::SkinSk,
-            SlotKind::Rmaos
+            SlotKind::Rmaos,
+            SlotKind::SkinWet,
+            SlotKind::SkinDetail
         ])
     );
     assert_eq!(
@@ -1870,8 +1875,9 @@ fn one_card_per_pgpatcher_slot_and_the_slot_7_card_holds_cnr_or_f() {
         .collect();
     for pick in [None, Some(&pbr)] {
         let row = slot_row(pick, &both);
-        // One card per PGPatcher slot, plus the two XPMF maps (Note GI), each a card of its own.
-        let numbered = row.iter().filter(|c| c.kind.slot_number().is_some());
+        // One card per PGPatcher slot, plus the two XPMF maps (Note GI) and the two skin members (slots 9, 10, Task
+        // 4b), each a card of its own.
+        let numbered = row.iter().filter(|c| c.kind.game_slot().is_some());
         assert!(numbered.count() <= 8, "{} cards", row.len());
         let xpmf: Vec<_> = row
             .iter()

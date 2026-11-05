@@ -335,6 +335,7 @@ fn the_size_row_offers_relative_to_slots() {
 
 /// Note FM44: the engine's slot table agrees with the set editor's slot cards, both ways. The named sub-types have
 /// no card (the cubemap has no slot card; the others share a slot with a card's type), so only the engine has them.
+/// The cards' `game_slot` is compared: the skin `_wet` and `_detail_n` have cards (slots 9 and 10) but no game slot.
 #[test]
 fn the_engine_slot_table_matches_the_slot_cards() {
     use engine::config::Subtype::*;
@@ -347,7 +348,7 @@ fn the_engine_slot_table_matches_the_slot_cards() {
         (MsnSpecular, 8),
     ];
     for st in engine::config::Subtype::ALL {
-        let gui = sdc_gui::model::sets::slot_kind(st).and_then(|k| k.slot_number());
+        let gui = sdc_gui::model::sets::slot_kind(st).and_then(|k| k.game_slot());
         match engine_only.iter().find(|(s, _)| *s == st) {
             Some(&(_, n)) => {
                 assert_eq!(

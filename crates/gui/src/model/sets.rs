@@ -36,11 +36,20 @@ pub enum SlotKind {
     // Note GI (X12): the landscape sets' XPMF maps; no PGPatcher slot. Last, so the others keep their order.
     ProjectedNoise,
     DetailNormal,
+    /// The Advanced skin `_wet` (slot 9) and `_detail_n` (slot 10): numbers past the game's, so the cards, locks and
+    /// borrows (keyed by number) work on them while no game-facing writer sees them (`game_slot`).
+    SkinWet,
+    SkinDetail,
 }
+
+/// The highest slot the game (PGPatcher `slotN`, a TXST, a NIF) has; the skin members' 9 and 10 are sdc's own.
+pub const LAST_GAME_SLOT: u8 = 8;
+/// The highest slot sdc numbers (the skin `_detail_n`).
+pub const LAST_SLOT: u8 = 10;
 
 impl SlotKind {
     /// Every slot kind, in the slot commands' order. The set editor orders its cards by `slot_row` (F1 spec §5).
-    pub const ALL: [SlotKind; 11] = [
+    pub const ALL: [SlotKind; 13] = [
         SlotKind::Diffuse,
         SlotKind::Normal,
         SlotKind::Rmaos,
@@ -52,9 +61,12 @@ impl SlotKind {
         SlotKind::Fuzz,
         SlotKind::ProjectedNoise,
         SlotKind::DetailNormal,
+        SlotKind::SkinWet,
+        SlotKind::SkinDetail,
     ];
-    /// PGPatcher's 1-based `slotN` (DECISIONS P6); `None` for the XPMF maps, which no PGPatcher slot, CS TXST, NIF
-    /// slot, lock or borrow holds (Note GI).
+    /// The slot's number for the cards, locks and borrows: PGPatcher's 1-based `slotN` (DECISIONS P6), then 9 and 10
+    /// for the skin `_wet` and `_detail_n`; `None` for the XPMF maps, which no slot, lock or borrow holds (Note GI).
+    /// Anything the game reads (a `slotN`, a TXST or NIF slot, a 3D preview binding) takes `game_slot` instead.
     pub fn slot_number(self) -> Option<u8> {
         Some(match self {
             SlotKind::Diffuse => 1,
@@ -64,8 +76,14 @@ impl SlotKind {
             SlotKind::Rmaos => 6,
             SlotKind::Coat | SlotKind::Fuzz => 7,
             SlotKind::Subsurface => 8,
+            SlotKind::SkinWet => 9,
+            SlotKind::SkinDetail => 10,
             SlotKind::ProjectedNoise | SlotKind::DetailNormal => return None,
         })
+    }
+    /// The slot the game has: `slot_number` up to [`LAST_GAME_SLOT`]; `None` for the XPMF maps and the skin members.
+    pub fn game_slot(self) -> Option<u8> {
+        self.slot_number().filter(|&n| n <= LAST_GAME_SLOT)
     }
     /// One card: the same kind, or two kinds of one PGPatcher slot (3 or 7, Note AO).
     pub fn shares_card(self, o: SlotKind) -> bool {
@@ -88,6 +106,8 @@ impl SlotKind {
             SlotKind::Subsurface => "s",
             SlotKind::ProjectedNoise => "noise",
             SlotKind::DetailNormal => "detail",
+            SlotKind::SkinWet => "wet",
+            SlotKind::SkinDetail => "detail_n",
         }
     }
     /// The slot's name without the number: `label`, but a shared slot names both kinds (as `slot_label`'s empty card).
@@ -111,6 +131,8 @@ impl SlotKind {
             SlotKind::Subsurface => "Subsurface _s",
             SlotKind::ProjectedNoise => "Projected noise",
             SlotKind::DetailNormal => "Detail normal",
+            SlotKind::SkinWet => "Skin wet _wet",
+            SlotKind::SkinDetail => "Skin detail _detail_n",
         }
     }
 }
@@ -416,7 +438,7 @@ pub fn is_pbr_diffuse(st: Subtype) -> bool {
 }
 
 /// The slot card a resolved sub-type fills; `None` for sub-types without a card (env mask, complex `_m`,
-/// `msn_specular`, backlight, `skin_wet`, …). Complex grass is one file in the Diffuse card.
+/// `msn_specular`, backlight, …). Complex grass is one file in the Diffuse card.
 pub fn slot_kind(st: Subtype) -> Option<SlotKind> {
     Some(match st {
         Subtype::PbrAlbedo
@@ -436,6 +458,8 @@ pub fn slot_kind(st: Subtype) -> Option<SlotKind> {
         Subtype::PbrSubsurface => SlotKind::Subsurface,
         Subtype::ProjectedNoise => SlotKind::ProjectedNoise,
         Subtype::DetailNormal => SlotKind::DetailNormal,
+        Subtype::SkinWet => SlotKind::SkinWet,
+        Subtype::SkinDetail => SlotKind::SkinDetail,
         _ => return None,
     })
 }
@@ -1452,8 +1476,9 @@ impl AppModel {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
-        if !(1..=8).contains(&n) {
-            return Err(format!("slot{n}: there are slots 1 to 8"));
+        // sdc's pin covers the skin `_wet` and `_detail_n` (9, 10) too.
+        if !(1..=LAST_SLOT).contains(&n) {
+            return Err(format!("slot{n}: there are slots 1 to {LAST_SLOT}"));
         }
         let id = self.view_of(set).ok_or_else(|| format!("no set {set}"))?.id;
         let label = if on { "Lock" } else { "Unlock" };

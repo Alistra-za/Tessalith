@@ -1259,6 +1259,29 @@ impl AppModel {
             .as_ref()
             .and_then(|d| d.error())
             .map(|e| format!("sdc-project.toml is read-only: {e}"));
+        // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command, only the source file and
+        // sdc's pin.
+        if kind.game_slot().is_none() {
+            let mut menu = vec![];
+            if let Some(super::sets::SlotFill::Own { item }) = v.slots.get(&kind) {
+                menu.push(self.show_entry(item));
+            }
+            menu.push(MenuEntry {
+                action: MenuAction::SlotLock {
+                    set: id,
+                    n,
+                    on: !locked,
+                },
+                label: if locked {
+                    "Unpin this slot"
+                } else {
+                    "Pin this slot (always use this file)"
+                }
+                .into(),
+                disabled: read_only,
+            });
+            return menu;
+        }
         let off = read_only
             .clone()
             .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
