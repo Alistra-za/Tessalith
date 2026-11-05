@@ -947,6 +947,11 @@ pub enum MenuAction {
         n: u8,
         on: bool,
     },
+    /// Drop the `borrow.slot<n>` of a skin `_wet` or `_detail_n` slot (9, 10), which has no slot command to clear it.
+    ClearBorrow {
+        set: String,
+        n: u8,
+    },
     /// Note AN: turn slot `n`'s PGPatcher `lock_<slot>` key of `set` on or off (one undo step).
     PgpLock {
         set: String,
@@ -1259,32 +1264,86 @@ impl AppModel {
             .as_ref()
             .and_then(|d| d.error())
             .map(|e| format!("sdc-project.toml is read-only: {e}"));
-        // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command, only the source file and
-        // sdc's pin.
-        if kind.game_slot().is_none() {
-            let mut menu = vec![];
-            if let Some(super::sets::SlotFill::Own { item }) = v.slots.get(&kind) {
-                menu.push(self.show_entry(item));
-            }
-            menu.push(MenuEntry {
-                action: MenuAction::SlotLock {
-                    set: id,
-                    n,
-                    on: !locked,
-                },
-                label: if locked {
-                    "Unpin this slot"
-                } else {
-                    "Pin this slot (always use this file)"
-                }
-                .into(),
-                disabled: read_only,
-            });
-            return menu;
-        }
         let off = read_only
             .clone()
             .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
+        // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock, only a
+        // Clear for a borrow (no slot command clears it), the source file and sdc's pin.
+        let game = kind.game_slot().is_some();
+        let mut menu = if game {
+            self.slot_command_entries(v, &views, kind, n, &off)
+        } else if matches!(
+            v.slots.get(&kind),
+            Some(super::sets::SlotFill::Borrowed { .. })
+        ) {
+            vec![MenuEntry {
+                action: MenuAction::ClearBorrow { set: id.clone(), n },
+                label: "Clear".into(),
+                disabled: off,
+            }]
+        } else {
+            vec![]
+        };
+        // The member that fills this slot has a source file to show.
+        let own = v.slots.iter().find(|(k, _)| **k == kind);
+        if let Some((_, super::sets::SlotFill::Own { item })) = own {
+            menu.push(self.show_entry(item));
+        }
+        menu.push(MenuEntry {
+            action: MenuAction::SlotLock {
+                set: id.clone(),
+                n,
+                on: !locked,
+            },
+            label: if locked {
+                "Unpin this slot"
+            } else {
+                "Pin this slot (always use this file)"
+            }
+            .into(),
+            disabled: read_only.clone(),
+        });
+        if !game {
+            return menu;
+        }
+        // Note AN: PGPatcher's own lock keeps the mesh's texture in this slot (slot 5 has none: AN5).
+        if let Some(on) =
+            crate::pgp::prefix::lock_key(n).map(|_| crate::pgp::prefix::pgp_locked(&v.settings, n))
+        {
+            menu.push(MenuEntry {
+                action: MenuAction::PgpLock {
+                    set: id.clone(),
+                    n,
+                    on: !on,
+                },
+                label: if on { PGP_UNLOCK } else { PGP_LOCK }.into(),
+                disabled: read_only.or_else(|| {
+                    (!super::sets::is_json_set(v, self.target)).then(|| NO_PGP_ENTRY.into())
+                }),
+            });
+        }
+        // Note CO: after the PGPatcher lock, so the existing rows keep their places.
+        match kind {
+            SlotKind::Height => menu.push(self.gen_entry(&id, Some(GenMap::Height))),
+            SlotKind::Rmaos => menu.push(self.gen_entry(&id, Some(GenMap::Ao))),
+            _ => {}
+        }
+        // Task 7: after Generate (P12: tests find it by action).
+        menu.extend(self.delete_slot_entry(v, kind));
+        menu
+    }
+
+    /// The slot commands of a game slot's menu (From this set, Path…, Clear, From another set) and its From-another-set
+    /// links; `off` is why they are off (read-only or pinned).
+    fn slot_command_entries(
+        &self,
+        v: &super::sets::SetView,
+        views: &[super::sets::SetView],
+        kind: SlotKind,
+        n: u8,
+        off: &Option<String>,
+    ) -> Vec<MenuEntry> {
+        let id = v.id.clone();
         let current = v.settings.get(&format!("slot{n}"));
         let cmd = |cmd| MenuAction::Slot {
             set: id.clone(),
@@ -1308,7 +1367,7 @@ impl AppModel {
                     },
                     label: format!("{} — {}", o.id, it.name),
                     // Listed but off when the game would find no file there.
-                    disabled: game_path_in(self, &views, &paths, k).err(),
+                    disabled: game_path_in(self, views, &paths, k).err(),
                 })
             })
             .collect();
@@ -1343,7 +1402,7 @@ impl AppModel {
             MenuEntry {
                 action: MenuAction::FromAnotherSet,
                 label: "From another set".into(),
-                disabled: off.or_else(|| {
+                disabled: off.clone().or_else(|| {
                     links.is_empty().then(|| {
                         format!("no other set has a {}", super::sets::slot_kinds_label(kind))
                     })
@@ -1351,49 +1410,6 @@ impl AppModel {
             },
         ];
         menu.extend(links);
-        // The member that fills this slot has a source file to show.
-        let own = v.slots.iter().find(|(k, _)| **k == kind);
-        if let Some((_, super::sets::SlotFill::Own { item })) = own {
-            menu.push(self.show_entry(item));
-        }
-        menu.push(MenuEntry {
-            action: MenuAction::SlotLock {
-                set: id.clone(),
-                n,
-                on: !locked,
-            },
-            label: if locked {
-                "Unpin this slot"
-            } else {
-                "Pin this slot (always use this file)"
-            }
-            .into(),
-            disabled: read_only.clone(),
-        });
-        // Note AN: PGPatcher's own lock keeps the mesh's texture in this slot (slot 5 has none: AN5).
-        if let Some(on) =
-            crate::pgp::prefix::lock_key(n).map(|_| crate::pgp::prefix::pgp_locked(&v.settings, n))
-        {
-            menu.push(MenuEntry {
-                action: MenuAction::PgpLock {
-                    set: id.clone(),
-                    n,
-                    on: !on,
-                },
-                label: if on { PGP_UNLOCK } else { PGP_LOCK }.into(),
-                disabled: read_only.or_else(|| {
-                    (!super::sets::is_json_set(v, self.target)).then(|| NO_PGP_ENTRY.into())
-                }),
-            });
-        }
-        // Note CO: after the PGPatcher lock, so the existing rows keep their places.
-        match kind {
-            SlotKind::Height => menu.push(self.gen_entry(&id, Some(GenMap::Height))),
-            SlotKind::Rmaos => menu.push(self.gen_entry(&id, Some(GenMap::Ao))),
-            _ => {}
-        }
-        // Task 7: after Generate (P12: tests find it by action).
-        menu.extend(self.delete_slot_entry(v, kind));
         menu
     }
 
@@ -1416,6 +1432,7 @@ impl AppModel {
                 };
             }
             MenuAction::SlotLock { set, n, on } => return self.set_slot_lock(&set, n, on).err(),
+            MenuAction::ClearBorrow { set, n } => return self.clear_slot_borrow(&set, n).err(),
             MenuAction::PgpLock { set, n, on } => return self.set_pgp_lock(&set, n, on).err(),
             MenuAction::RenameInputs => self.open_rename(super::rename::RenameMode::Inputs),
             MenuAction::RenameOutputs => self.open_rename(super::rename::RenameMode::Outputs),

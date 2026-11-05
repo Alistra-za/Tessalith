@@ -146,6 +146,86 @@ fn a_wet_slot_can_be_pinned() {
     assert!(m.slot_locked("m/rock01", 9));
 }
 
+/// rock01 borrows rock02's `_wet` (slot 9).
+fn with_borrowed_wet(m: &mut AppModel) {
+    let out = m.drop_choice("m/rock02_wet.png", "m/rock01", DropChoice::Share);
+    if matches!(out, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
+        m.drop_replace("m/rock02_wet.png", "m/rock01", DropChoice::Share)
+            .unwrap();
+    }
+    idle(m);
+    assert!(matches!(
+        view(m, "m/rock01").slots.get(&SlotKind::SkinWet),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
+fn clear_entry(m: &AppModel) -> sdc_gui::model::bulk::MenuEntry {
+    m.slot_menu("m/rock01", SlotKind::SkinWet)
+        .into_iter()
+        .find(|e| {
+            matches!(
+                e.action,
+                sdc_gui::model::bulk::MenuAction::ClearBorrow { n: 9, .. }
+            )
+        })
+        .expect("a borrowed skin slot offers Clear")
+}
+
+#[test]
+fn a_borrowed_wet_can_be_cleared_from_its_menu() {
+    use sdc_gui::model::bulk::MenuAction;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    with_borrowed_wet(&mut m);
+    let e = clear_entry(&m);
+    assert_eq!(e.disabled, None);
+    assert_eq!(m.run_menu(e.action), None);
+    idle(&mut m);
+    // The borrow is gone from the view and the document, no PGPatcher setting was written, and an own slot offers no Clear.
+    let v = view(&m, "m/rock01");
+    assert!(
+        !matches!(
+            v.slots.get(&SlotKind::SkinWet),
+            Some(SlotFill::Borrowed { .. })
+        ),
+        "{:?}",
+        v.slots
+    );
+    assert!(!v.settings.keys().any(|k| k.starts_with("slot")));
+    let e = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| e.id == "m/rock01")
+        .cloned()
+        .unwrap();
+    assert!(e.borrow.is_empty(), "{:?}", e.borrow);
+    assert!(!m
+        .slot_menu("m/rock01", SlotKind::SkinWet)
+        .iter()
+        .any(|e| matches!(e.action, MenuAction::ClearBorrow { .. })));
+}
+
+#[test]
+fn a_pinned_borrowed_wet_refuses_clear() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    with_borrowed_wet(&mut m);
+    m.set_slot_lock("m/rock01", 9, true).unwrap();
+    idle(&mut m);
+    let e = clear_entry(&m);
+    assert!(e.disabled.is_some());
+    assert!(m.run_menu(e.action).is_some());
+    idle(&mut m);
+    assert!(matches!(
+        view(&m, "m/rock01").slots.get(&SlotKind::SkinWet),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
 #[test]
 fn the_wet_slot_menu_offers_no_slot_command() {
     let d = tempfile::tempdir().unwrap();
@@ -223,21 +303,23 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
 fn wet_and_detail_cards_only_in_advanced_skin_sets() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
-    // The plain set borrows the skin set's `_wet`; its view then holds the slot but is not an Advanced skin set.
-    let _ = m.drop_choice("m/rock02_wet.png", "m/plain", DropChoice::Share);
-    idle(&mut m);
+    // The plain set borrows the skin set's `_wet` and `_detail_n`; its view then holds both slots but is not an
+    // Advanced skin set.
+    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
+        let _ = m.drop_choice(item, "m/plain", DropChoice::Share);
+        idle(&mut m);
+    }
     let plain = view(&m, "m/plain");
     assert!(!plain.skin);
-    assert!(
-        plain.slots.contains_key(&SlotKind::SkinWet),
-        "{:?}",
-        plain.slots
-    );
+    for k in [SlotKind::SkinWet, SlotKind::SkinDetail] {
+        assert!(plain.slots.contains_key(&k), "{:?}", plain.slots);
+    }
     let (plain_key, skin_key) = (plain.key.clone(), view(&m, "m/rock01").key);
     m.select_set(&plain_key);
     let mut h = harness(m);
     h.run();
     assert_eq!(h.query_all_by_label("Skin wet _wet").count(), 0);
+    assert_eq!(h.query_all_by_label("Skin detail _detail_n").count(), 0);
     h.state_mut().select_set(&skin_key);
     h.run();
     h.get_by_label("Skin wet _wet");

@@ -1491,6 +1491,36 @@ impl AppModel {
         Ok(())
     }
 
+    /// Drop the borrow of slot `n` (9 or 10: the skin `_wet` and `_detail_n`, which no slot command clears) of set `set`.
+    /// Refused on a pinned slot and a read-only `sdc-project.toml`; writes no PGPatcher setting.
+    pub fn clear_slot_borrow(&mut self, set: &str, n: u8) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
+        if n <= LAST_GAME_SLOT || n > LAST_SLOT {
+            return Err(format!("slot{n} is cleared by its slot command"));
+        }
+        if v.locks.contains(&n) {
+            return Err(SLOT_LOCKED.into());
+        }
+        let borrowed = v
+            .slots
+            .iter()
+            .any(|(k, f)| k.slot_number() == Some(n) && matches!(f, SlotFill::Borrowed { .. }));
+        if !borrowed {
+            return Err(format!("slot {n} of {} borrows nothing", v.id));
+        }
+        let id = v.id;
+        self.edit_docs(
+            &format!("Clear slot {n} of {id}"),
+            None,
+            true,
+            move |_, s| s.set_borrow(&id, n, None),
+        );
+        Ok(())
+    }
+
     /// Note AN: turn slot `n`'s PGPatcher lock key of set `set` on (`true`) or off (the key removed), as one step.
     pub fn set_pgp_lock(&mut self, set: &str, n: u8, on: bool) -> Result<(), String> {
         if !self.sets_editable() {
