@@ -325,3 +325,366 @@ fn wet_and_detail_cards_only_in_advanced_skin_sets() {
     h.get_by_label("Skin wet _wet");
     h.get_by_label("Skin detail _detail_n");
 }
+
+// ---- Task 5: the `.csskin.json` writer ----
+
+use sdc_gui::model::cs_skin_json::{
+    fnv1a64, material_text, skin_json_plan, SkinMaterial, SkinSkip,
+};
+use sdc_gui::model::review::{DiskState, JsonKind};
+use serde_json::{json, Value as Json};
+use std::path::PathBuf;
+
+/// Advanced skin sets `bases` (diffuse, `_rfaos`, `_wet`, `_detail_n`, all colour) under `<dir>/<folder>`, exported to
+/// `<dir>/export`.
+fn skin_project(dir: &Path, folder: &str, bases: &[&str]) -> AppModel {
+    let r = dir.join(folder);
+    std::fs::create_dir_all(&r).unwrap();
+    for base in bases {
+        for s in ["", "_rfaos", "_wet", "_detail_n"] {
+            colour(&r, &format!("{base}{s}.png"));
+        }
+    }
+    opened_skin(dir)
+}
+
+fn opened_skin(dir: &Path) -> AppModel {
+    let settings = GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.open_folder(dir.to_path_buf());
+    idle(&mut m);
+    support::choose_export(&mut m, dir.join("export"));
+    assert_eq!(m.target, engine::config::Target::Cs);
+    m
+}
+
+fn id_of(m: &AppModel, key_end: &str) -> String {
+    let v = set_views(m)
+        .into_iter()
+        .find(|v| v.key.ends_with(key_end))
+        .unwrap_or_else(|| panic!("no set {key_end}"));
+    v.id
+}
+
+fn export_and_wait(m: &mut AppModel) {
+    idle(m);
+    support::export_through(m);
+    assert!(
+        m.wait_idle(Duration::from_secs(120)),
+        "export did not finish"
+    );
+}
+
+fn notes(m: &AppModel) -> String {
+    m.export.notes.join("\n")
+}
+
+fn out(m: &AppModel, rel: &str) -> PathBuf {
+    m.export_root().join(rel)
+}
+
+fn read_json(p: &Path) -> Json {
+    let t = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    serde_json::from_str(&t).unwrap()
+}
+
+/// Share `item` into set `to` (replacing its own occupant).
+fn share(m: &mut AppModel, item: &str, to: &str) {
+    let o = m.drop_choice(item, to, DropChoice::Share);
+    if matches!(o, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
+        m.drop_replace(item, to, DropChoice::Share).unwrap();
+    }
+    idle(m);
+}
+
+#[test]
+fn fnv1a64_matches_cs() {
+    assert_eq!(fnv1a64(b""), 0xcbf29ce484222325);
+    assert_eq!(fnv1a64(b"a"), 0xaf63dc4c8601ec8c);
+}
+
+#[test]
+fn material_text_orders_keys_and_omits_empty_members() {
+    let mut parameters = serde_json::Map::new();
+    parameters.insert("Roughness".into(), json!(0.5));
+    let m = SkinMaterial {
+        parameters,
+        controls: Some("textures/x/h_rfaos.dds".into()),
+        wet: None,
+        detail: None,
+        authored_for: Some((12, 0xab)),
+    };
+    assert_eq!(
+        material_text(&m),
+        "{\n  \"format\": \"CommunityShaders.SkinMaterial\",\n  \"version\": 1,\n  \"parameters\": {\n    \
+         \"Roughness\": 0.5\n  },\n  \"textures\": {\n    \"controls\": \"textures/x/h_rfaos.dds\"\n  },\n  \
+         \"authoredFor\": {\n    \"size\": 12,\n    \"hash\": \"00000000000000ab\"\n  }\n}\n"
+    );
+    let bare = SkinMaterial {
+        parameters: serde_json::Map::new(),
+        controls: None,
+        wet: None,
+        detail: None,
+        authored_for: None,
+    };
+    assert_eq!(
+        material_text(&bare),
+        "{\n  \"format\": \"CommunityShaders.SkinMaterial\",\n  \"version\": 1\n}\n"
+    );
+}
+
+#[test]
+fn export_writes_one_csskin_json_beside_the_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    let id = id_of(&m, "x/h");
+    m.set_skin_value(&id, "Roughness", Some(json!(0.62)));
+    m.set_skin_value(&id, "DetailEnabled", Some(json!(false)));
+    export_and_wait(&mut m);
+    let f = out(&m, "textures/x/h.csskin.json");
+    let j = read_json(&f);
+    assert_eq!(j["format"], json!("CommunityShaders.SkinMaterial"), "{j}");
+    assert_eq!(j["version"], json!(1));
+    assert_eq!(
+        j["parameters"],
+        json!({"Roughness": 0.62, "DetailEnabled": false})
+    );
+    assert_eq!(j["textures"]["controls"], json!("textures/x/h_rfaos.dds"));
+    assert_eq!(j["textures"]["wet"], json!("textures/x/h_wet.dds"));
+    assert_eq!(j["textures"]["detail"], json!("textures/x/h_detail_n.dds"));
+    for t in ["h_rfaos.dds", "h_wet.dds", "h_detail_n.dds"] {
+        assert!(out(&m, &format!("textures/x/{t}")).is_file(), "{t}");
+    }
+    let bytes = std::fs::read(out(&m, "textures/x/h.dds")).unwrap();
+    assert_eq!(j["authoredFor"]["size"], json!(bytes.len()));
+    assert_eq!(
+        j["authoredFor"]["hash"],
+        json!(format!("{:016x}", fnv1a64(&bytes)))
+    );
+    assert!(notes(&m).contains("CS skin JSON written"), "{}", notes(&m));
+}
+
+#[test]
+fn untouched_card_writes_no_parameters_member() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/h.csskin.json"));
+    assert!(j.get("parameters").is_none(), "{j}");
+    assert!(j.get("textures").is_some(), "{j}");
+}
+
+#[test]
+fn paths_inside_are_lowercase_forward_slash() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/Tex/Body", &["Hand"]);
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/Tex/Body/Hand.csskin.json"));
+    assert_eq!(
+        j["textures"]["controls"],
+        json!("textures/tex/body/hand_rfaos.dds")
+    );
+    assert_eq!(
+        j["textures"]["wet"],
+        json!("textures/tex/body/hand_wet.dds")
+    );
+    assert_eq!(
+        j["textures"]["detail"],
+        json!("textures/tex/body/hand_detail_n.dds")
+    );
+}
+
+#[test]
+fn edited_csskin_json_is_kept_with_a_note() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    export_and_wait(&mut m);
+    let f = out(&m, "textures/x/h.csskin.json");
+    std::fs::write(&f, "{}\n").unwrap();
+    let id = id_of(&m, "x/h");
+    m.set_skin_value(&id, "Roughness", Some(json!(0.5)));
+    export_and_wait(&mut m);
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "{}\n");
+    assert!(
+        notes(&m).contains("kept as edited outside Tessalith"),
+        "{}",
+        notes(&m)
+    );
+}
+
+#[test]
+fn foreign_csskin_json_is_never_overwritten() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    let f = out(&m, "textures/x/h.csskin.json");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, "{\"theirs\":1}\n").unwrap();
+    export_and_wait(&mut m);
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "{\"theirs\":1}\n");
+    assert!(
+        notes(&m).contains("kept as edited outside Tessalith"),
+        "{}",
+        notes(&m)
+    );
+}
+
+#[test]
+fn authored_for_hashes_an_unchanged_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    export_and_wait(&mut m);
+    let dds = out(&m, "textures/x/h.dds");
+    let before = std::fs::metadata(&dds).unwrap().modified().unwrap();
+    export_and_wait(&mut m);
+    // The diffuse was current, so the second export left it alone.
+    assert_eq!(std::fs::metadata(&dds).unwrap().modified().unwrap(), before);
+    let bytes = std::fs::read(&dds).unwrap();
+    let j = read_json(&out(&m, "textures/x/h.csskin.json"));
+    assert_eq!(j["authoredFor"]["size"], json!(bytes.len()));
+    assert_eq!(
+        j["authoredFor"]["hash"],
+        json!(format!("{:016x}", fnv1a64(&bytes)))
+    );
+    assert!(!notes(&m).contains("kept"), "{}", notes(&m));
+}
+
+#[test]
+fn borrowed_rfaos_points_at_the_host_output() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/b_rfaos.png", &a);
+    let v = view(&m, &a);
+    assert!(v.skin, "{:?}", v.slots);
+    assert_eq!(
+        v.slots.get(&SlotKind::Rmaos),
+        Some(&SlotFill::Borrowed {
+            from: b.clone(),
+            item: "textures/x/b_rfaos.png".into()
+        })
+    );
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/b_rfaos.dds"));
+    assert_eq!(j["textures"]["wet"], json!("textures/x/a_wet.dds"));
+}
+
+#[test]
+fn borrowed_wet_and_detail_point_at_the_host_output() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    let a = id_of(&m, "x/a");
+    share(&mut m, "textures/x/b_wet.png", &a);
+    share(&mut m, "textures/x/b_detail_n.png", &a);
+    let v = view(&m, &a);
+    for k in [SlotKind::SkinWet, SlotKind::SkinDetail] {
+        assert!(
+            matches!(v.slots.get(&k), Some(SlotFill::Borrowed { .. })),
+            "{:?}",
+            v.slots
+        );
+    }
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    assert_eq!(j["textures"]["wet"], json!("textures/x/b_wet.dds"));
+    assert_eq!(j["textures"]["detail"], json!("textures/x/b_detail_n.dds"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/a_rfaos.dds"));
+}
+
+#[test]
+fn borrowed_diffuse_writes_no_json_for_the_borrower() {
+    let d = tempfile::tempdir().unwrap();
+    // `b` has no diffuse of its own (one would leave the set as its own skin set and write its own file).
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_wet", "_detail_n"] {
+        colour(&r, &format!("a{s}.png"));
+    }
+    colour(&r, "b_rfaos.png");
+    let mut m = opened_skin(d.path());
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/a.png", &b);
+    let (plan, skips) = skin_json_plan(&m);
+    assert!(
+        skips
+            .iter()
+            .any(|(id, _, s)| *id == b && *s == SkinSkip::BorrowedDiffuse { host: a.clone() }),
+        "{skips:?}"
+    );
+    assert!(!plan.iter().any(|(id, ..)| *id == b), "{plan:?}");
+    export_and_wait(&mut m);
+    assert!(out(&m, "textures/x/a.csskin.json").is_file());
+    assert!(
+        !out(&m, "textures/x/b.csskin.json").exists(),
+        "{:?}\n{:?}",
+        skin_json_plan(&m),
+        set_views(&m)
+            .iter()
+            .map(|v| (&v.id, &v.members, v.skin, &v.slots))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn grey_wet_is_left_out_of_textures() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_detail_n"] {
+        colour(&r, &format!("h{s}.png"));
+    }
+    grey(&r, "h_wet.png");
+    let mut m = opened_skin(d.path());
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/h.csskin.json"));
+    assert!(j["textures"].get("wet").is_none(), "{j}");
+    assert_eq!(j["textures"]["controls"], json!("textures/x/h_rfaos.dds"));
+    assert!(!out(&m, "textures/x/h_wet.dds").exists());
+}
+
+#[test]
+fn a_skin_set_without_a_diffuse_is_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    colour(&r, "q_rfaos.png");
+    let m = opened_skin(d.path());
+    let (plan, skips) = skin_json_plan(&m);
+    assert!(plan.is_empty(), "{plan:?}");
+    assert!(
+        skips.iter().any(|(_, _, s)| *s == SkinSkip::NoDiffuse),
+        "{skips:?} {:?}",
+        set_views(&m)
+    );
+}
+
+#[test]
+fn review_lists_the_csskin_json() {
+    let d = tempfile::tempdir().unwrap();
+    let m = skin_project(d.path(), "textures/x", &["h"]);
+    let l: Vec<_> = m
+        .review_json()
+        .into_iter()
+        .filter(|l| l.kind == JsonKind::CsSkin)
+        .collect();
+    assert_eq!(l.len(), 1, "{:?}", m.review_json());
+    assert_eq!(l[0].path, out(&m, "textures/x/h.csskin.json"));
+    assert_eq!(l[0].state, DiskState::New);
+}
+
+#[test]
+fn second_export_records_ours() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["h"]);
+    export_and_wait(&mut m);
+    m.expire_review_json();
+    let l = m
+        .review_json()
+        .into_iter()
+        .find(|l| l.kind == JsonKind::CsSkin)
+        .expect("the CS skin line");
+    assert_eq!(l.state, DiskState::Ours);
+}

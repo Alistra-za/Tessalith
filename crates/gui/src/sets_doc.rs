@@ -50,6 +50,9 @@ const COPY_SHA: &str = "copy_sha256";
 /// XPMF profile export: `[project] xpmf_sha256` (and the sidecar table of the same name), path under the export
 /// root → hash of the profile JSON sdc last wrote there.
 const XPMF_SHA: &str = "xpmf_sha256";
+/// Advanced skin materials: `[project] cs_skin_sha256` (and the sidecar table), path under the export root → hash of
+/// the `.csskin.json` sdc last wrote there.
+const CS_SKIN_SHA: &str = "cs_skin_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 14] = [
     "id",
@@ -262,7 +265,7 @@ impl SetsDoc {
             let v = Value::from(s);
             self.set_project(LAST_SHA, Some(v));
         }
-        for k in [PGP_SHA, CS_SHA, CM_SHA, COPY_SHA, XPMF_SHA] {
+        for k in [PGP_SHA, CS_SHA, CM_SHA, COPY_SHA, XPMF_SHA, CS_SKIN_SHA] {
             if self.side.contains_key(k) {
                 let m = self.shas(k);
                 self.set_shas(k, &m);
@@ -343,6 +346,7 @@ impl SetsDoc {
         let pgp = self.doc_shas(PGP_SHA);
         let copies = self.doc_shas(COPY_SHA);
         let xpmf = self.doc_shas(XPMF_SHA);
+        let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
         let generated = self.f.doc.get(GENERATED).cloned();
         let was_generated = self.doc_generated();
@@ -358,6 +362,7 @@ impl SetsDoc {
             (CM_SHA, &cm),
             (COPY_SHA, &copies),
             (XPMF_SHA, &xpmf),
+            (CS_SKIN_SHA, &skin),
         ] {
             if self.doc_shas(k) != *m {
                 self.set_shas(k, m);
@@ -626,6 +631,14 @@ impl SetsDoc {
 
     pub fn set_xpmf_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
         self.record_shas(XPMF_SHA, shas)
+    }
+
+    pub fn cs_skin_shas(&self) -> BTreeMap<String, String> {
+        self.shas(CS_SKIN_SHA)
+    }
+
+    pub fn set_cs_skin_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
+        self.record_shas(CS_SKIN_SHA, shas)
     }
 
     pub fn copy_shas(&self) -> BTreeMap<String, String> {

@@ -2,8 +2,8 @@
 //! only what the user answered; blockers and undecided textures are read live from the model.
 use super::history::{record_key, records_at, sha256_of};
 use super::{
-    bottom::BottomTab, cm_json, cs_pbr_export, pbr_export, xpmf_json, AppModel, Continue,
-    ItemStatus,
+    bottom::BottomTab, cm_json, cs_pbr_export, cs_skin_json, pbr_export, xpmf_json, AppModel,
+    Continue, ItemStatus,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -31,6 +31,8 @@ pub enum JsonKind {
     ComplexMaterial,
     /// Note GI: an XPMF profile (`SKSE/Plugins/XPMF/tessalith_<set>.json`).
     Xpmf,
+    /// A CS Advanced skin material (`<diffuse>.csskin.json`).
+    CsSkin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +159,10 @@ impl AppModel {
                 let rels = f.files.iter().map(|(r, _)| r.clone()).collect();
                 files(JsonKind::Xpmf, f.root.clone(), rels, d.xpmf_shas());
             }
+        }
+        if let (Some(p), Some(d)) = (cs_skin_json::prepare(self), doc) {
+            let rels = p.files.into_iter().map(|f| f.rel).collect();
+            files(JsonKind::CsSkin, p.root, rels, d.cs_skin_shas());
         }
         *self.review_json_cache.borrow_mut() = Some((key, Instant::now(), lines.clone()));
         lines

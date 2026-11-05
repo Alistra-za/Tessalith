@@ -9,6 +9,7 @@ pub mod cm_json;
 pub mod code_text;
 pub mod cs_pbr;
 pub mod cs_pbr_export;
+pub mod cs_skin_json;
 pub mod cube_cross;
 pub mod encoding_follow;
 pub mod export;
@@ -277,6 +278,8 @@ pub(crate) struct ViewCache {
     pub flagged: Option<Arc<bottom::Flagged>>,
     /// Note GI: the XPMF card's values of one set (by id), `xpmf_json::card_values`.
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
+    /// `cs_skin_json::skin_json_plan`'s plan.
+    pub cs_skin: Option<Arc<cs_skin_json::Plan>>,
 }
 
 /// The replies `poll` drops as stale, counted for tests (backlog L54).
@@ -621,6 +624,8 @@ pub struct AppModel {
     pending_cm: Option<cm_json::PendingCm>,
     /// Note GI: the XPMF profiles the running export writes afterwards.
     pending_xpmf: Option<xpmf_json::PendingXpmf>,
+    /// The `.csskin.json` files the running export writes afterwards.
+    pending_cs_skin: Option<cs_skin_json::PendingCsSkin>,
     /// C4: Review's answer for the edited PGPatcher JSON, for the running export only (K12).
     pending_json_answer: Option<review::JsonAnswer>,
     /// Note FC5: the NIF edits Review lists, as `app.rs` hands them over each frame (`MeshesModel::nif_review_rows`).
@@ -867,6 +872,7 @@ impl AppModel {
             pending_cs: None,
             pending_cm: None,
             pending_xpmf: None,
+            pending_cs_skin: None,
             pending_json_answer: None,
             nif_rows: vec![],
             nif_answer_request: None,
@@ -946,6 +952,7 @@ impl AppModel {
         self.pending_cs = None;
         self.pending_cm = None;
         self.pending_xpmf = None;
+        self.pending_cs_skin = None;
         self.pending_json_answer = None;
         self.nif_export_queued = false;
         self.nif_export_due = false;
@@ -1868,6 +1875,8 @@ impl AppModel {
         self.finish_cm_json(cm);
         let xpmf = self.pending_xpmf.take();
         self.finish_xpmf(xpmf);
+        let skin = self.pending_cs_skin.take();
+        self.finish_guarded(skin);
         // Final review I2: an Also export's walk of the folders runs now, on its worker, so it counts the JSON above as
         // this export's. The export stays running (Cancel reaches the walk); `also_walked` does the rest.
         let json = std::mem::take(&mut self.also_json);
@@ -2343,6 +2352,7 @@ impl AppModel {
         self.pending_cs = cs_pbr_export::prepare(self);
         self.pending_cm = cm_json::prepare(self);
         self.pending_xpmf = xpmf_json::prepare(self);
+        self.pending_cs_skin = cs_skin_json::prepare(self);
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
         self.review_json_cache.take();
