@@ -730,6 +730,37 @@ fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
     }
 }
 
+/// Fix round 2: an input alias to another folder depth (`set_input_name`) moves the game path and the output, not the
+/// source; the JSON's paths follow the aliased name, deeper or shallower.
+#[test]
+fn input_aliases_to_another_folder_depth_keep_full_game_paths() {
+    for (src, alias, folder) in [("x", "textures/y/z/a", "y/z"), ("x/y", "textures/x/a", "x")] {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("textures").join(src);
+        std::fs::create_dir_all(&r).unwrap();
+        // Diffuse and `_rfaos` only: an input rename does not yet know the `_wet`/`_detail_n` suffixes (it refuses,
+        // mapping `a_wet` onto `a`).
+        for s in ["", "_rfaos"] {
+            colour(&r, &format!("a{s}.png"));
+        }
+        let mut m = opened_skin_at(d.path(), &d.path().join("textures"));
+        let id = id_of(&m, &format!("{src}/a"));
+        m.set_input_name(&id, alias).unwrap();
+        idle(&mut m);
+        export_and_wait(&mut m);
+        let j = read_json(&out(&m, &format!("{folder}/a.csskin.json")));
+        assert_eq!(
+            j["textures"]["controls"],
+            json!(format!("textures/{folder}/a_rfaos.dds")),
+            "{alias}: {j}"
+        );
+        assert!(
+            out(&m, &format!("{folder}/a_rfaos.dds")).is_file(),
+            "{alias}"
+        );
+    }
+}
+
 /// Fix round 1 #1: a texture with no `textures/...dds` game path is never written; the JSON leaves it out, with a note.
 #[test]
 fn a_texture_outside_textures_is_left_out_with_a_note() {

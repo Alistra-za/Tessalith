@@ -143,11 +143,15 @@ fn skin_only(st: Subtype) -> bool {
     )
 }
 
-/// The game path the game loads a job's output from: its path under the export root `out_root`, re-based on its
-/// source's game path (an output mirrors its source's place under the opened folder, which can sit above or inside
-/// `textures`, so a renamed output or a project opened at `textures` still gets `textures/...`). `Err` unless it is
-/// `textures/...dds` in lower-case ASCII with `/`: CS ignores a whole file for one bad path.
-fn output_game_path(m: &AppModel, out_root: &Path, job: &ResolvedJob) -> Result<String, String> {
+/// The game path the game loads a job's output from: its path under the export root `out_root`, re-based on the job's
+/// own game path. The engine derives both from one `rel` (the input's, or its `[inputs]` alias's: output
+/// `out_root/rel`, game path from `root/rel`), so they have the same depth below the opened folder, which can sit
+/// above or inside `textures`; a renamed output or a project opened at `textures` still gets `textures/...`. The
+/// original input path is never used: an alias keeps it. `Err` unless it is `textures/...dds` in lower-case ASCII
+/// with `/`: CS ignores a whole file for one bad path.
+/// shortcut: an output moved to another depth than its game path's `rel` (none is, for skin outputs) would get a
+/// wrong prefix; resolve such overrides first if one appears.
+fn output_game_path(out_root: &Path, job: &ResolvedJob) -> Result<String, String> {
     let comps = |p: &Path| -> Vec<String> {
         p.components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -158,11 +162,7 @@ fn output_game_path(m: &AppModel, out_root: &Path, job: &ResolvedJob) -> Result<
         .strip_prefix(out_root)
         .map(comps)
         .map_err(|_| format!("{} is outside the export folder", job.output.display()))?;
-    let src = m
-        .root
-        .as_deref()
-        .and_then(|r| job.input.strip_prefix(r).ok())
-        .map_or(out.len(), |r| r.components().count());
+    let src = out.len();
     let game: Vec<&str> = job.game_path.split('/').collect();
     let parts: Vec<String> = match game.len().checked_sub(src) {
         Some(n) => game[..n].iter().map(|s| s.to_string()).chain(out).collect(),
@@ -239,7 +239,7 @@ fn build_plan(m: &AppModel) -> Plan {
             let Some(j) = job(item) else {
                 continue;
             };
-            match output_game_path(m, &out_root, j) {
+            match output_game_path(&out_root, j) {
                 Ok(g) => {
                     *row.material.texture_mut(slot) = Some(g);
                     row.outputs.push((slot, j.output.clone()));
