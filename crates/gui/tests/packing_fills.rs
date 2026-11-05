@@ -463,7 +463,8 @@ fn the_dropdown_has_an_advanced_skin_group_after_pbr_and_other_last() {
             Subtype::SkinAlbedo,
             Subtype::SkinRfaos,
             Subtype::SkinSk,
-            Subtype::SkinWet
+            Subtype::SkinWet,
+            Subtype::SkinDetail
         ]
     );
     let last = groups.last().unwrap();

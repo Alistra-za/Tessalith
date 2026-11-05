@@ -460,6 +460,7 @@ const CS_ONLY: &[Subtype] = &[
     Subtype::SkinAlbedo,
     Subtype::SkinSk,
     Subtype::SkinWet,
+    Subtype::SkinDetail,
 ];
 
 /// Runs the fixture in `d/in` under `target` into `d/out-<prefix>` and returns the summary, the skip and fail

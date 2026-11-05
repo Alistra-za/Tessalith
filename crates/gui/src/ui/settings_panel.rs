@@ -62,7 +62,7 @@ pub const SKIN_HEADING: &str = "Advanced skin (Community Shaders)";
 pub const OTHER_HEADING: &str = "Other";
 
 /// The sub-types `keep` accepts, grouped for a dropdown: the PBR ones first (every `pbr_*`, `rmaos` and
-/// `coat_normal`) under `PBR_HEADING`, then the Advanced skin ones (skin_albedo, skin_rfaos, skin_sk, skin_wet) under `SKIN_HEADING`, then the
+/// `coat_normal`) under `PBR_HEADING`, then the Advanced skin ones (skin_albedo, skin_rfaos, skin_sk, skin_wet, skin_detail) under `SKIN_HEADING`, then the
 /// rest by category, and `ui_sky` last under `OTHER_HEADING`. Empty groups are left out.
 pub fn subtype_groups(keep: impl Fn(Subtype) -> bool) -> Vec<(&'static str, Vec<Subtype>)> {
     use engine::config::Category;
@@ -75,6 +75,7 @@ pub fn subtype_groups(keep: impl Fn(Subtype) -> bool) -> Vec<(&'static str, Vec<
         Subtype::SkinRfaos,
         Subtype::SkinSk,
         Subtype::SkinWet,
+        Subtype::SkinDetail,
     ];
     let is_skin = |s: Subtype| skin.contains(&s);
     let is_other = |s: Subtype| matches!(s, Subtype::UiSky | Subtype::Cubemap);

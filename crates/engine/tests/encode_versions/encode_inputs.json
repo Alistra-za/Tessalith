@@ -111,6 +111,10 @@
     "sha256": "0ba0f74f81a967caf8a1c32d3330e48f282ba80164a2f2f56394540646aadffc",
     "subtype": "skin_albedo"
   },
+  "textures/h/skin_detail.dds": {
+    "sha256": "a3bde4b8b5123048a2d2f17374ab00eaf6c7fe12539e4c46562408ebef28df9c",
+    "subtype": "skin_detail"
+  },
   "textures/h/skin_rfaos.dds": {
     "sha256": "9e168b1aa167d9687503daaa3ba09b211322c2ddc1c963b9ef5a75665e23098c",
     "subtype": "skin_rfaos"

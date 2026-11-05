@@ -40,6 +40,9 @@ resize_relative_to = "slot1"
 [subtypes.skin_wet]
 resize = "half"
 resize_relative_to = "slot1"
+[subtypes.skin_detail]
+resize = "half"
+resize_relative_to = "slot1"
 [subtypes.envmask]
 resize = "half"
 resize_relative_to = "slot1"

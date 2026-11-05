@@ -111,6 +111,10 @@
     "sha256": "b64d160a5f07185aa4919c9d34b3afadecb0c6234ffa62f906d0e153270c5b73",
     "subtype": "skin_albedo"
   },
+  "cs-compact/cs/skin_detail": {
+    "sha256": "57eefc89ecd557084a81ff02a2b6909b74d8c2b74ea2ae802f6fabd749678163",
+    "subtype": "skin_detail"
+  },
   "cs-compact/cs/skin_rfaos": {
     "sha256": "331128bbe152cce3440a8f70a31bf2f04199dfc72b3cb7d17ef330866a15bccc",
     "subtype": "skin_rfaos"
@@ -242,6 +246,10 @@
   "cs-compact/vanilla/skin_albedo": {
     "sha256": "fec37f49077cb9b12d585da83691c2a90068aebea0a0e8adcd6ba6960c158d84",
     "subtype": "skin_albedo"
+  },
+  "cs-compact/vanilla/skin_detail": {
+    "sha256": "dbf2a66a95a5d0474a84774c48a5013327dde07898af47768e8a1ba5d340de61",
+    "subtype": "skin_detail"
   },
   "cs-compact/vanilla/skin_rfaos": {
     "sha256": "fa72dbb3448f84afdf68c8d5e3da9c978470781c070e29c94a5278eb5ad22586",
@@ -375,6 +383,10 @@
     "sha256": "09df4a4af487977e668947e17bab413d520c9368216f7adad1f6fc1b352b6ca6",
     "subtype": "skin_albedo"
   },
+  "cs-quality/cs/skin_detail": {
+    "sha256": "f9f1ded90a3df0fec1539b25e4832d293a6e1fd4a5401b4b437d5d58ed6515a0",
+    "subtype": "skin_detail"
+  },
   "cs-quality/cs/skin_rfaos": {
     "sha256": "3a77d7c305844ac6f23b899534342723981174ee3dbf9a414d13d5075dcc6dd8",
     "subtype": "skin_rfaos"
@@ -506,6 +518,10 @@
   "cs-quality/vanilla/skin_albedo": {
     "sha256": "dd1f09351643408f7aaae2d5a17fd686f2080747f9cffbace1883c9278cf68c3",
     "subtype": "skin_albedo"
+  },
+  "cs-quality/vanilla/skin_detail": {
+    "sha256": "3f0fc4dffc7f13496a56719948083df51ce3d40f0ea75278a0580754e0c85406",
+    "subtype": "skin_detail"
   },
   "cs-quality/vanilla/skin_rfaos": {
     "sha256": "d3db28459a375a12c1f3ffcfeda89f2b55f415eb8f05533248cfa828bdb461bf",
@@ -639,6 +655,10 @@
     "sha256": "c96b25e5b0001e2a688f5f0fed34da572038850474c8c47802335241e67dec4a",
     "subtype": "skin_albedo"
   },
+  "fast-preview/cs/skin_detail": {
+    "sha256": "fe558658d8b743f3967b1e3c64b9eff9d6c6e79f484107a7b4c6da19be26c005",
+    "subtype": "skin_detail"
+  },
   "fast-preview/cs/skin_rfaos": {
     "sha256": "77ee2489f68158e106c1fee019938486003ea066fe44740f8e653f70fd1a5fb1",
     "subtype": "skin_rfaos"
@@ -770,6 +790,10 @@
   "fast-preview/vanilla/skin_albedo": {
     "sha256": "a3b62c57561cda5949188deb3b12a31673c6505ff4cf8b50fdc984812d12e081",
     "subtype": "skin_albedo"
+  },
+  "fast-preview/vanilla/skin_detail": {
+    "sha256": "f16119d8b33c062232bf03b4940b08b8c4b6117ea47037f221e8f7ac809f9ff5",
+    "subtype": "skin_detail"
   },
   "fast-preview/vanilla/skin_rfaos": {
     "sha256": "e579b19ebed7608272648066f49404c13c60612ddaac433818ed0226b530a3d0",
@@ -903,6 +927,10 @@
     "sha256": "09df4a4af487977e668947e17bab413d520c9368216f7adad1f6fc1b352b6ca6",
     "subtype": "skin_albedo"
   },
+  "sdc-base/cs/skin_detail": {
+    "sha256": "f9f1ded90a3df0fec1539b25e4832d293a6e1fd4a5401b4b437d5d58ed6515a0",
+    "subtype": "skin_detail"
+  },
   "sdc-base/cs/skin_rfaos": {
     "sha256": "3a77d7c305844ac6f23b899534342723981174ee3dbf9a414d13d5075dcc6dd8",
     "subtype": "skin_rfaos"
@@ -1034,6 +1062,10 @@
   "sdc-base/vanilla/skin_albedo": {
     "sha256": "dd1f09351643408f7aaae2d5a17fd686f2080747f9cffbace1883c9278cf68c3",
     "subtype": "skin_albedo"
+  },
+  "sdc-base/vanilla/skin_detail": {
+    "sha256": "3f0fc4dffc7f13496a56719948083df51ce3d40f0ea75278a0580754e0c85406",
+    "subtype": "skin_detail"
   },
   "sdc-base/vanilla/skin_rfaos": {
     "sha256": "d3db28459a375a12c1f3ffcfeda89f2b55f415eb8f05533248cfa828bdb461bf",
@@ -1167,6 +1199,10 @@
     "sha256": "83b54e7cdf5826a62f238357cfb93033528222cb9e7fb659c7e16a3837686acf",
     "subtype": "skin_albedo"
   },
+  "vanilla-compact/cs/skin_detail": {
+    "sha256": "57eefc89ecd557084a81ff02a2b6909b74d8c2b74ea2ae802f6fabd749678163",
+    "subtype": "skin_detail"
+  },
   "vanilla-compact/cs/skin_rfaos": {
     "sha256": "331128bbe152cce3440a8f70a31bf2f04199dfc72b3cb7d17ef330866a15bccc",
     "subtype": "skin_rfaos"
@@ -1298,6 +1334,10 @@
   "vanilla-compact/vanilla/skin_albedo": {
     "sha256": "45f13742a88af0d6510387273b04ae8b3bd7823297476cddec2b1f9242950979",
     "subtype": "skin_albedo"
+  },
+  "vanilla-compact/vanilla/skin_detail": {
+    "sha256": "dbf2a66a95a5d0474a84774c48a5013327dde07898af47768e8a1ba5d340de61",
+    "subtype": "skin_detail"
   },
   "vanilla-compact/vanilla/skin_rfaos": {
     "sha256": "fa72dbb3448f84afdf68c8d5e3da9c978470781c070e29c94a5278eb5ad22586",
@@ -1431,6 +1471,10 @@
     "sha256": "84853f9e24b8e5c06ec5f80a241888b71549de0141b2eadbdf52e159d4e1f525",
     "subtype": "skin_albedo"
   },
+  "vanilla-quality/cs/skin_detail": {
+    "sha256": "f9f1ded90a3df0fec1539b25e4832d293a6e1fd4a5401b4b437d5d58ed6515a0",
+    "subtype": "skin_detail"
+  },
   "vanilla-quality/cs/skin_rfaos": {
     "sha256": "3a77d7c305844ac6f23b899534342723981174ee3dbf9a414d13d5075dcc6dd8",
     "subtype": "skin_rfaos"
@@ -1562,6 +1606,10 @@
   "vanilla-quality/vanilla/skin_albedo": {
     "sha256": "959f69e9bdf4cae42cecac051e7b79786adb3cc598f55f09160bfb11906f8e01",
     "subtype": "skin_albedo"
+  },
+  "vanilla-quality/vanilla/skin_detail": {
+    "sha256": "3f0fc4dffc7f13496a56719948083df51ce3d40f0ea75278a0580754e0c85406",
+    "subtype": "skin_detail"
   },
   "vanilla-quality/vanilla/skin_rfaos": {
     "sha256": "d3db28459a375a12c1f3ffcfeda89f2b55f415eb8f05533248cfa828bdb461bf",

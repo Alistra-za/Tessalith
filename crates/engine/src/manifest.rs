@@ -57,7 +57,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::DetailNormal
         | Subtype::Gray => "2.0.0",
         // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
-        Subtype::SkinWet => ENGINE_VERSION,
+        // A new sub-type in 2.1.0.
+        Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
     }
 }
 
@@ -573,8 +574,8 @@ mod tests {
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
-            // 2.1.0 changed `skin_wet` alone (a grey one is not written, the CS loader formats are checked).
-            let want = if st == Subtype::SkinWet {
+            // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`.
+            let want = if matches!(st, Subtype::SkinWet | Subtype::SkinDetail) {
                 "2.1.0"
             } else {
                 "2.0.0"

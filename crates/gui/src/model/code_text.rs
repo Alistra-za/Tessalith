@@ -16,6 +16,8 @@ pub fn code_sentence(code: Code) -> &'static str {
         ChanNotGray => "This map should be grey but has colour — replace the file or convert it to grey",
         ChanNormalLength => "This normal map's blue (Z) channel doesn't match its red and green — use Rebuild Z or replace the file",
         FmtBc5Normal => "BC5 can't store this normal map the way it is set up — choose another format",
+        FmtCsSkinLoader => "Community Shaders can't load this skin map in this format — choose BC7, BC3, BC1 or RGBA8 (BC5 for a detail map)",
+        SkinWetGrey => "Community Shaders no longer reads a grey wet map, so this file is not written — use a normal map with a mask in alpha",
         FmtLandscapeBc1 => "Landscape textures can't use BC1 — choose another format",
         FmtBc1Alpha => "BC1 can't keep this texture's alpha — choose a format with alpha, remove the alpha, or for see-through alpha turn on 1-bit alpha",
         FmtRgb8Alpha => "RGB8 can't keep this texture's alpha — choose a format with alpha or remove the alpha",

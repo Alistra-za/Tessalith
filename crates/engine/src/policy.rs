@@ -726,6 +726,9 @@ fn layered_profile_with(
             GENERIC,
         );
     }
+    if st == Subtype::SkinDetail {
+        skin_detail_form(ctx, f, &mut doc, &mut prov, &mut sources);
+    }
     // M6 Track E (spec §4.3, DECISIONS Note U7): the mesh evidence, only where no explicit layer and no analysis fact
     // (a source without varying alpha) chose the policy; it is explicit itself, so the shader default below never
     // overwrites it and the alpha question is not asked.
@@ -1015,6 +1018,30 @@ fn shader_layer(
     }
 }
 
+/// A `skin_detail` map is BC7 (the Normal default) unless its alpha is strictly opaque (every texel 255, or no alpha
+/// at all): then it is BC5, as an analysis fact below every explicit layer (a layer naming `format` keeps it).
+fn skin_detail_form(
+    ctx: &ResolveCtx,
+    f: &FileFacts,
+    doc: &mut Value,
+    prov: &mut BTreeMap<String, Provenance>,
+    sources: &mut FormatSources,
+) {
+    let opaque = !f.info.has_alpha
+        || f.analysis.alpha_hist.eq255
+            == u64::from(f.analysis.width) * u64::from(f.analysis.height);
+    if opaque && !field_explicit(ctx, prov, "format") {
+        apply(
+            doc,
+            prov,
+            sources,
+            &to_patch("format", &json!("bc5")),
+            Provenance::AnalysisFact("skin-detail-opaque".into()),
+            GENERIC,
+        );
+    }
+}
+
 /// DECISIONS O2/S3: a float source with a finite R, G or B above 1.0.
 pub fn is_hdr_source(f: &FileFacts) -> bool {
     f.info.is_float && f.analysis.channels[..3].iter().any(|c| c.max > 1.0)
@@ -1144,7 +1171,7 @@ pub fn availability(t: Target, s: Subtype) -> Availability {
         (_, PbrEmissive) => un(Some(Glow)),
         (_, PbrNormal) => un(Some(Normal)),
         (_, PbrSubsurface | PbrFuzz | CoatNormal | Rmaos | SkinRfaos | Flow | HdrSky) => un(None),
-        (_, SkinAlbedo | SkinSk | SkinWet) => un(None),
+        (_, SkinAlbedo | SkinSk | SkinWet | SkinDetail) => un(None),
         _ => Availability::Available,
     }
 }
@@ -1460,7 +1487,9 @@ fn encoding_warnings(
             "UNORM on PBR colour looks washed out with linear lighting off".into(),
         );
     }
+    // CS rebuilds Z from a BC5 detail map (loader contract), so `skin_detail` is exempt.
     if category == Category::Normal
+        && st != Subtype::SkinDetail
         && matches!(format, Format::Bc4 | Format::Bc5 | Format::R8 | Format::Rg8)
     {
         add(
@@ -1632,6 +1661,12 @@ pub fn cs_skin_loader_ok(st: Subtype, f: Format) -> bool {
     match st {
         Subtype::SkinRfaos | Subtype::SkinWet => {
             matches!(f, Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8)
+        }
+        Subtype::SkinDetail => {
+            matches!(
+                f,
+                Format::Bc1 | Format::Bc3 | Format::Bc5 | Format::Bc7 | Format::Rgba8
+            )
         }
         _ => true,
     }

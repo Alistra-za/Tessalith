@@ -2293,6 +2293,7 @@
         "skin_albedo",
         "skin_sk",
         "skin_wet",
+        "skin_detail",
         "complex_grass",
         "cubemap",
         "projected_noise",

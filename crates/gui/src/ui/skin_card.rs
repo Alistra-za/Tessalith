@@ -23,7 +23,7 @@ fn members(model: &AppModel, v: &SetView) -> Vec<String> {
         .filter(|i| {
             matches!(
                 i.job.as_ref().map(|j| j.profile.subtype),
-                Some(Subtype::SkinRfaos | Subtype::SkinSk | Subtype::SkinWet)
+                Some(Subtype::SkinRfaos | Subtype::SkinSk | Subtype::SkinWet | Subtype::SkinDetail)
             )
         })
         .map(|i| i.name.clone())

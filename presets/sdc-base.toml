@@ -89,6 +89,9 @@ format = "bc4"
 # _wet is a normal with a binary mask in alpha (BC7). CS no longer reads a grey one, so that is not written.
 [subtypes.skin_wet]
 alpha = { policy = "data" }
+# A detail map is BC5 when its alpha is opaque, else BC7 (the fact is set in policy.rs).
+[subtypes.skin_detail]
+alpha = { policy = "data" }
 # A cubemap is gamma-encoded colour written UNORM (CS decodes it from game gamma).
 [subtypes.cubemap]
 color = { content = "srgb", tag = "unorm" }

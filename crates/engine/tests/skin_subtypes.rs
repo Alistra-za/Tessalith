@@ -286,6 +286,100 @@ fn cs_skin_loader_list() {
     assert!(cs_skin_loader_ok(Subtype::Diffuse, Format::Bc4));
 }
 
+fn detail_rgba(alpha: impl Fn(u32, u32) -> u8) -> DynamicImage {
+    DynamicImage::ImageRgba8(ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgba([128 + (x % 8) as u8, 128 + (y % 8) as u8, 250, alpha(x, y)])
+    }))
+}
+
+const DETAIL: &str = "file:**/d.png.subtype=skin_detail";
+
+fn detail_job_format(d: &TempDir, sets: &[&str]) -> (Format, Vec<Code>) {
+    let p = plan(d, Target::Cs, sets);
+    let j = job(&p, "d.png");
+    (
+        j.profile.format,
+        j.warnings.iter().map(|w| w.code).collect(),
+    )
+}
+
+/// An opaque `skin_detail` is BC5, and FMT-BC5-NORMAL does not fire (CS rebuilds Z from BC5).
+#[test]
+fn opaque_skin_detail_is_bc5() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d.png", detail_rgba(|_, _| 255));
+    let (f, codes) = detail_job_format(&d, &[DETAIL]);
+    assert_eq!(f, Format::Bc5);
+    assert!(!codes.contains(&Code::FmtBc5Normal), "{codes:?}");
+    assert!(!codes.contains(&Code::FmtCsSkinLoader), "{codes:?}");
+    // End to end: not blocked, and BC5 is what gets written.
+    let p = plan(&d, Target::Cs, &[DETAIL]);
+    let j = job(&p, "d.png");
+    assert!(
+        !matches!(j.status, engine::policy::JobStatus::Blocked { .. }),
+        "{:?} {:?}",
+        j.status,
+        j.warnings
+    );
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let e = Engine::new().unwrap();
+    let s = e.run(p, &rep, &CancelToken::default()).unwrap();
+    assert_eq!(s.exit_code(), 0, "{s:?}");
+    assert_eq!(out(&d, "d.dds").format, DdsPixelFormat::Bc5);
+}
+
+#[test]
+fn skin_detail_without_alpha_is_bc5() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d.png", colour(64));
+    let (f, codes) = detail_job_format(&d, &[DETAIL]);
+    assert_eq!(f, Format::Bc5);
+    assert!(!codes.contains(&Code::FmtBc5Normal), "{codes:?}");
+    let p = plan(&d, Target::Cs, &[DETAIL]);
+    let j = job(&p, "d.png");
+    assert!(
+        !matches!(j.status, engine::policy::JobStatus::Blocked { .. }),
+        "{:?} {:?}",
+        j.status,
+        j.warnings
+    );
+}
+
+#[test]
+fn skin_detail_with_any_alpha_below_255_is_bc7() {
+    let d = tempfile::tempdir().unwrap();
+    put(
+        d.path(),
+        "d.png",
+        detail_rgba(|x, y| if x == 3 && y == 5 { 254 } else { 255 }),
+    );
+    assert_eq!(detail_job_format(&d, &[DETAIL]).0, Format::Bc7);
+}
+
+#[test]
+fn explicit_format_wins_over_the_opaque_fact() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d.png", detail_rgba(|_, _| 255));
+    assert_eq!(
+        detail_job_format(&d, &[DETAIL, "file:**/d.png.format=bc7"]).0,
+        Format::Bc7
+    );
+}
+
+#[test]
+fn skin_detail_is_unavailable_on_vanilla() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d.png", detail_rgba(|_, _| 255));
+    let p = plan(&d, Target::Vanilla, &[DETAIL]);
+    let j = job(&p, "d.png");
+    assert!(
+        matches!(&j.status, engine::policy::JobStatus::Blocked { codes } if codes.contains(&Code::CfgUnavailable)),
+        "{:?} {:?}",
+        j.status,
+        j.warnings
+    );
+}
+
 /// (d) `skin_albedo` is UNORM, never sRGB.
 #[test]
 fn skin_albedo_writes_bc7_unorm() {

@@ -146,6 +146,7 @@ static ADVANCED_SKIN: ShaderSpec = ShaderSpec {
     optional: &[
         role("skin_sk", &[Subtype::SkinSk]),
         role("skin_wet", &[Subtype::SkinWet]),
+        role("skin_detail", &[Subtype::SkinDetail]),
     ],
 };
 static DEFAULT: ShaderSpec = ShaderSpec {
@@ -638,56 +639,57 @@ pub fn pick(i: &PickInput) -> ShaderPick {
             .any(|p| p.to_ascii_lowercase().starts_with("textures/landscape/"))
             || path("landscape")
     };
-    let (shader, rule) = if i.advanced_skin || has(&[SkinAlbedo, SkinRfaos, SkinSk, SkinWet]) {
-        (Shader::AdvancedSkin, AutoRule::AdvancedSkin)
-    } else if i.pbr
-        || has(&[
-            PbrAlbedo,
-            PbrEmissive,
-            PbrSubsurface,
-            PbrFuzz,
-            PbrNormal,
-            CoatNormal,
-            Rmaos,
-        ])
-    {
-        if i.gras {
-            (Shader::PbrGrass, AutoRule::PbrGrass)
-        } else if i.target == Target::Cs && (i.cs_txst || landscape_path()) {
-            // Note BM: CS only, so a vanilla PBR landscape set still falls back with `wanted: pbr` as before.
-            (Shader::PbrLandscape, AutoRule::PbrLandscape)
+    let (shader, rule) =
+        if i.advanced_skin || has(&[SkinAlbedo, SkinRfaos, SkinSk, SkinWet, SkinDetail]) {
+            (Shader::AdvancedSkin, AutoRule::AdvancedSkin)
+        } else if i.pbr
+            || has(&[
+                PbrAlbedo,
+                PbrEmissive,
+                PbrSubsurface,
+                PbrFuzz,
+                PbrNormal,
+                CoatNormal,
+                Rmaos,
+            ])
+        {
+            if i.gras {
+                (Shader::PbrGrass, AutoRule::PbrGrass)
+            } else if i.target == Target::Cs && (i.cs_txst || landscape_path()) {
+                // Note BM: CS only, so a vanilla PBR landscape set still falls back with `wanted: pbr` as before.
+                (Shader::PbrLandscape, AutoRule::PbrLandscape)
+            } else {
+                (Shader::Pbr, AutoRule::Pbr)
+            }
+        } else if has(&[ComplexGrass]) {
+            (Shader::ComplexGrass, AutoRule::ComplexGrass)
+        } else if has(&[ComplexMaterial]) {
+            (Shader::ComplexMaterial, AutoRule::ComplexM)
+        } else if sfx("p") {
+            (Shader::Parallax, AutoRule::P)
+        } else if let Some(m) = mesh_majority(i) {
+            (m, AutoRule::Mesh)
+        } else if has(&[Envmask]) || sfx("m") || sfx("em") || sfx("envmask") {
+            (Shader::Envmap, AutoRule::EnvM)
+        } else if sfx("g") {
+            (Shader::Glow, AutoRule::G)
+        } else if sfx("i") {
+            (Shader::Multilayer, AutoRule::I)
+        } else if sfx("sk") {
+            (Shader::Skin, AutoRule::Sk)
+        } else if sfx("flow") && !path("water") && !landscape_path() {
+            // Note CL35 (owner 2026-10-20): a `_flow` outside water and landscape is a hair flow map; a suffix rule, so
+            // it beats the hair/eyes path rules. Water and landscape sets fall through to the rules below as before.
+            (Shader::Hair, AutoRule::Flow)
+        } else if path("hair") {
+            (Shader::Hair, AutoRule::HairPath)
+        } else if path("eyes") {
+            (Shader::Eye, AutoRule::EyesPath)
+        } else if has(&[LandscapeDiffuse]) || landscape_path() {
+            (Shader::Landscape, AutoRule::Landscape)
         } else {
-            (Shader::Pbr, AutoRule::Pbr)
-        }
-    } else if has(&[ComplexGrass]) {
-        (Shader::ComplexGrass, AutoRule::ComplexGrass)
-    } else if has(&[ComplexMaterial]) {
-        (Shader::ComplexMaterial, AutoRule::ComplexM)
-    } else if sfx("p") {
-        (Shader::Parallax, AutoRule::P)
-    } else if let Some(m) = mesh_majority(i) {
-        (m, AutoRule::Mesh)
-    } else if has(&[Envmask]) || sfx("m") || sfx("em") || sfx("envmask") {
-        (Shader::Envmap, AutoRule::EnvM)
-    } else if sfx("g") {
-        (Shader::Glow, AutoRule::G)
-    } else if sfx("i") {
-        (Shader::Multilayer, AutoRule::I)
-    } else if sfx("sk") {
-        (Shader::Skin, AutoRule::Sk)
-    } else if sfx("flow") && !path("water") && !landscape_path() {
-        // Note CL35 (owner 2026-10-20): a `_flow` outside water and landscape is a hair flow map; a suffix rule, so
-        // it beats the hair/eyes path rules. Water and landscape sets fall through to the rules below as before.
-        (Shader::Hair, AutoRule::Flow)
-    } else if path("hair") {
-        (Shader::Hair, AutoRule::HairPath)
-    } else if path("eyes") {
-        (Shader::Eye, AutoRule::EyesPath)
-    } else if has(&[LandscapeDiffuse]) || landscape_path() {
-        (Shader::Landscape, AutoRule::Landscape)
-    } else {
-        (Shader::Default, AutoRule::Otherwise)
-    };
+            (Shader::Default, AutoRule::Otherwise)
+        };
     let (shader, provenance) = match i.explicit {
         Some(s) => (s, ShaderOrigin::Set),
         None => (shader, ShaderOrigin::Auto(rule)),

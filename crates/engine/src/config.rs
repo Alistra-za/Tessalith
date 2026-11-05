@@ -47,6 +47,7 @@ pub enum Subtype {
     SkinAlbedo,
     SkinSk,
     SkinWet,
+    SkinDetail,
     // Complex grass (design 2026-10-12): one 1:2 image, top = diffuse + alpha, bottom = normal + specular in alpha.
     // A `//` comment on purpose: a `///` doc on one variant makes schemars emit `oneOf` instead of the flat `enum`,
     // which rewrites every schema.
@@ -557,7 +558,7 @@ impl Subtype {
         }
     }
 
-    pub const ALL: [Subtype; 33] = {
+    pub const ALL: [Subtype; 34] = {
         use Subtype::*;
         [
             Diffuse,
@@ -588,6 +589,7 @@ impl Subtype {
             SkinAlbedo,
             SkinSk,
             SkinWet,
+            SkinDetail,
             ComplexGrass,
             Cubemap,
             ProjectedNoise,
@@ -603,9 +605,8 @@ impl Subtype {
             | PbrFuzz | SubsurfaceTint | BacklightTint | UiSky | SkinAlbedo | Cubemap => {
                 Category::Color
             }
-            Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | SkinWet | DetailNormal => {
-                Category::Normal
-            }
+            Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | SkinWet | SkinDetail
+            | DetailNormal => Category::Normal,
             Envmask | Height | MsnSpecular | SkinSk | ProjectedNoise | Gray => Category::Grayscale,
             ComplexMaterial | Rmaos | SkinRfaos | Flow | GenericTwoChannel | GenericData
             | ComplexGrass => Category::MixedPacked,
@@ -627,8 +628,8 @@ impl Subtype {
             Envmask | ComplexMaterial | Rmaos | SkinRfaos => Some(6),
             CoatNormal | PbrFuzz => Some(7),
             PbrSubsurface | BacklightTint | MsnSpecular => Some(8),
-            UiSky | Flow | GenericTwoChannel | GenericData | HdrSky | SkinWet | ProjectedNoise
-            | DetailNormal | Gray => None,
+            UiSky | Flow | GenericTwoChannel | GenericData | HdrSky | SkinWet | SkinDetail
+            | ProjectedNoise | DetailNormal | Gray => None,
         }
     }
 
@@ -1126,7 +1127,7 @@ mod tests {
     }
     #[test]
     fn subtype_all_order() {
-        assert_eq!(Subtype::ALL.len(), 33);
+        assert_eq!(Subtype::ALL.len(), 34);
         assert_eq!(
             Subtype::ALL[Subtype::ALL.len() - 3..],
             [

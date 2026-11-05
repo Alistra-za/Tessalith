@@ -377,6 +377,13 @@
     "subtype": "skin_albedo",
     "width": 64
   },
+  "textures/h/skin_detail.dds": {
+    "format": "Bc7 { srgb: false }",
+    "height": 64,
+    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "subtype": "skin_detail",
+    "width": 64
+  },
   "textures/h/skin_rfaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,

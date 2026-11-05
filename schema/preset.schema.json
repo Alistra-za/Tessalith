@@ -1545,6 +1545,7 @@
         "skin_albedo",
         "skin_sk",
         "skin_wet",
+        "skin_detail",
         "complex_grass",
         "cubemap",
         "projected_noise",
@@ -1701,6 +1702,9 @@
           "$ref": "#/$defs/PartialProfile"
         },
         "skin_albedo": {
+          "$ref": "#/$defs/PartialProfile"
+        },
+        "skin_detail": {
           "$ref": "#/$defs/PartialProfile"
         },
         "skin_rfaos": {
