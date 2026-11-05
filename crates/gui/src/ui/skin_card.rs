@@ -73,24 +73,32 @@ fn field_row(
     cur: Option<&Value>,
     edits: &mut Vec<(&'static str, Option<Value>)>,
 ) {
-    ui.label(readable(f.key)).on_hover_text(f.key);
+    let name = readable(f.key);
+    let label = ui.label(&name).on_hover_text(f.key);
+    let set_name = format!("Set {name}");
+    let reset_name = format!("Reset {name}");
     match (f.kind, cur) {
         (Kind::Num { default, lo, hi }, Some(c)) => {
             let mut x = c.as_f64().unwrap_or(default);
-            let r = ui.add(
-                egui::DragValue::new(&mut x)
-                    .range(lo..=hi)
-                    .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
-                    .speed(0.01)
-                    .max_decimals(4),
-            );
+            let r = ui
+                .add(
+                    egui::DragValue::new(&mut x)
+                        .range(lo..=hi)
+                        .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
+                        .speed(0.01)
+                        .max_decimals(4),
+                )
+                .labelled_by(label.id);
             if r.changed() && c.as_f64() != Some(x) {
                 edits.push((f.key, Some(json!(x))));
             }
         }
         (Kind::Flag { default }, Some(c)) => {
             let mut on = c.as_bool().unwrap_or(default);
-            if ui.checkbox(&mut on, "").changed() {
+            let r = ui.checkbox(&mut on, "");
+            let en = ui.is_enabled();
+            r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, en, on, &name));
+            if r.changed() {
                 edits.push((f.key, Some(json!(on))));
             }
         }
@@ -100,17 +108,19 @@ fn field_row(
                 Kind::Flag { default } => (json!(default), format!("default {default}")),
             };
             ui.weak(hint);
-            if ui.small_button("set").clicked() {
+            let b = ui.small_button("set");
+            let en = ui.is_enabled();
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &set_name));
+            if b.clicked() {
                 edits.push((f.key, Some(value)));
             }
             return;
         }
     }
-    if ui
-        .small_button("↺")
-        .on_hover_text("Back to not set")
-        .clicked()
-    {
+    let b = ui.small_button("↺").on_hover_text("Back to not set");
+    let en = ui.is_enabled();
+    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &reset_name));
+    if b.clicked() {
         edits.push((f.key, None));
     }
 }

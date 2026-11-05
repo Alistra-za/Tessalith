@@ -1208,6 +1208,33 @@ impl SetsDoc {
         }
     }
 
+    /// Remove every direct entry of set `id`'s `skin` table whose raw key `keep` refuses, whatever its shape (a quoted
+    /// dotted key, an empty or nested table). An emptied `skin` table goes too.
+    pub fn retain_skin(&mut self, id: &str, keep: impl Fn(&str) -> bool) {
+        if self.read_only() || self.table(id).is_none() {
+            return;
+        }
+        let t = self.table_mut(id);
+        let Some(skin) = t.get_mut("skin").and_then(Item::as_table_like_mut) else {
+            return;
+        };
+        let drop: Vec<String> = skin
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .filter(|k| !keep(k))
+            .collect();
+        if drop.is_empty() {
+            return;
+        }
+        for k in &drop {
+            skin.remove(k);
+        }
+        if skin.is_empty() {
+            t.remove("skin");
+        }
+        self.f.touch();
+    }
+
     /// Design §3: set (or with `None` remove) key `key` (dotted, `glintParameters.enabled`) of set `id`'s `kind`
     /// block, creating the block (`[sets.cs_txst]`) when missing.
     pub fn set_cs_value(&mut self, id: &str, kind: Kind, key: &str, v: Option<Json>) {

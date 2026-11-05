@@ -1,6 +1,7 @@
 //! Task 10b: the Advanced skin card (owner, 2026-10-14). Per-set, non-inheritable CS SkinProfile values kept in
 //! the set's `skin` table of `sdc-project.toml`; the export writes them as the `.csskin.json`.
 mod support;
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use engine::config::Subtype;
@@ -114,12 +115,7 @@ fn a_read_only_project_greys_the_card_with_its_reason() {
         h.query_by_label_contains(WHY).is_none(),
         "the reason is not shown before the hover"
     );
-    // The card's "set" buttons sit below its title.
-    let top = h.get_by_label_contains(TITLE).rect().max.y;
-    let set = h
-        .query_all_by_label("set")
-        .find(|n| n.rect().min.y > top)
-        .expect("a set button in the skin card");
+    let set = h.get_by_role_and_label(Role::Button, "Set Roughness");
     assert!(set.accesskit_node().is_disabled());
     set.hover();
     h.run();
@@ -204,16 +200,79 @@ fn the_set_button_stores_the_default_and_the_reset_clears_it() {
     let mut h = harness(m);
     h.run();
     // Note FB2: the card is below the slot rows in the scrolling set editor; bring the button into view.
-    h.query_all_by_label("set").next().unwrap().scroll_to_me();
+    // Every unset row has its own named button; none is a bare "set".
+    assert!(h.query_by_label("set").is_none());
+    h.get_by_role_and_label(Role::Button, "Set Roughness")
+        .scroll_to_me();
     h.run();
-    h.query_all_by_label("set").next().unwrap().click();
+    h.get_by_role_and_label(Role::Button, "Set Roughness")
+        .click();
     h.run();
     assert_eq!(h.state().skin_values(SKIN)["Roughness"], json!(0.7));
-    h.get_by_label("↺").scroll_to_me();
+    // The value input and the reset are named after the same row.
+    h.get_by_role_and_label(Role::SpinButton, "Roughness");
+    assert!(h.query_by_label("↺").is_none());
+    h.get_by_role_and_label(Role::Button, "Reset Roughness")
+        .scroll_to_me();
     h.run();
-    h.get_by_label("↺").click();
+    h.get_by_role_and_label(Role::Button, "Reset Roughness")
+        .click();
     h.run();
     assert!(h.state().skin_values(SKIN).is_empty());
+}
+
+#[test]
+fn a_flag_row_has_a_named_checkbox_that_stores_its_value() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_opened(d.path());
+    let k = set_key(&m);
+    m.select_set(&k);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Set Transmission enabled")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Set Transmission enabled")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().skin_values(SKIN)["TransmissionEnabled"],
+        json!(true)
+    );
+    h.get_by_role_and_label(Role::CheckBox, "Transmission enabled")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().skin_values(SKIN)["TransmissionEnabled"],
+        json!(false)
+    );
+}
+
+#[test]
+fn unknown_skin_entries_of_any_shape_are_removed_on_edit() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_opened(d.path());
+    m.set_skin_value(SKIN, "Reflectance", Some(json!(0.04)));
+    let root = m.root.clone().unwrap();
+    m.sets_doc.as_mut().unwrap().save(true).unwrap();
+    let path = root.join(sdc_gui::sets_doc::FILE_NAME);
+    let text = std::fs::read_to_string(&path).unwrap().replacen(
+        "skin.Reflectance = 0.04",
+        "skin.Reflectance = 0.04\nskin.\"Future.option\" = 1\nskin.Empty = {}\nskin.Nested.deep = 2",
+        1,
+    );
+    assert!(text.contains("Future.option"), "{text}");
+    std::fs::write(&path, &text).unwrap();
+    m.open_folder(root.clone());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_skin_value(SKIN, "Roughness", Some(json!(0.6)));
+    m.sets_doc.as_mut().unwrap().save(true).unwrap();
+    let out = std::fs::read_to_string(&path).unwrap();
+    for gone in ["Future", "Empty", "Nested", "deep"] {
+        assert!(!out.contains(gone), "{gone} survived: {out}");
+    }
+    assert!(out.contains("Roughness = 0.6"), "{out}");
+    assert!(out.contains("Reflectance = 0.04"), "{out}");
 }
 
 // ---- Task 10 fix round 1: the 10b review carry-over and the owner's no-JSON ruling for skin sets (AG88-AG90)

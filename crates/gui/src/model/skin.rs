@@ -116,19 +116,11 @@ impl AppModel {
             Some(f) if x.is_f64() => Value::from((f * 1e4).round() / 1e4),
             _ => x,
         });
-        // Old key names are removed in the same step: nothing reads them and the project file is ours.
-        let stale: Vec<String> = self
-            .skin_table(set)
-            .keys()
-            .filter(|k| skin_field(k).is_none())
-            .map(|k| format!("skin.{k}"))
-            .collect();
         let (s, path) = (set.to_string(), format!("skin.{key}"));
         let merge = Some(format!("{set}:{path}"));
         self.edit_docs(&format!("Change {path}"), merge, false, move |_, d| {
-            for k in &stale {
-                d.set_value(&s, k, None);
-            }
+            // Old key names go in the same step: nothing reads them and the project file is ours.
+            d.retain_skin(&s, |k| skin_field(k).is_some());
             d.set_value(&s, &path, v)
         });
     }
