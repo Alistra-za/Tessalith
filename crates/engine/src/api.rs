@@ -329,7 +329,7 @@ impl SkippedFile {
         match self.code {
             Some(Code::InDdsSkipped | Code::DeriveDdsSource) => SkipKind::DdsInput,
             Some(Code::PackConflict) => SkipKind::PackConflict,
-            Some(Code::DeriveNotConverted) => SkipKind::PackingInput,
+            Some(Code::DeriveNotConverted | Code::SkinWetGrey) => SkipKind::PackingInput,
             Some(Code::GenReplaced) => SkipKind::GeneratedReplaced,
             _ => SkipKind::Duplicate,
         }
@@ -2685,6 +2685,20 @@ impl Engine {
         // Not run on a partial: it sees only its scope's jobs. `Session::replan_sets` falls back instead when the scope
         // holds a set of the last full plan's collisions or the partial writes an output another job writes
         // (`Skeleton::writer_clash`).
+        // CS no longer reads a grey `skin_wet`: it gets no job, the rest of the batch is written (also on a partial).
+        jobs.retain(|j: &ResolvedJob| {
+            let Some(w) = j.warnings.iter().find(|w| w.code == Code::SkinWetGrey) else {
+                return true;
+            };
+            skipped.push(SkippedFile {
+                path: j.input.clone(),
+                output: j.output.clone(),
+                set: Some(j.set_key.clone()),
+                code: Some(Code::SkinWetGrey),
+                reason: w.message.clone(),
+            });
+            false
+        });
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
         jobs.retain(|j: &ResolvedJob| {
             if scope.is_some() || !matches!(j.status, JobStatus::Ready) {
@@ -2900,6 +2914,7 @@ impl Engine {
                         | Code::PackConflict
                         | Code::DeriveDdsSource
                         | Code::DeriveNotConverted
+                        | Code::SkinWetGrey
                         | Code::GenReplaced
                 )
             ) {

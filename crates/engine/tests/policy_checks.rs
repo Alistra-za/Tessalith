@@ -1909,14 +1909,15 @@ fn a_short_normal_gets_one_warning_not_two() {
 }
 
 #[test]
-fn skin_wet_height_form_is_stored_domain_and_the_normal_form_is_not() {
+fn a_grey_skin_wet_is_a_normal_and_reports_skin_wet_grey() {
     use engine::ops::{domain_for, Domain};
     let grey = Rgba32F::new(64, 64, [0.4, 0.4, 0.4, 1.0]);
     let j = run_normal("wet", grey, &[]);
     assert_eq!(j.profile.subtype, Subtype::SkinWet, "{:?}", j.warnings);
-    assert_eq!(j.profile.category, Category::Grayscale);
-    assert_eq!(domain_for(&j.profile), Domain::Stored);
+    assert_eq!(j.profile.category, Category::Normal);
+    assert_eq!(count(&j, Code::SkinWetGrey), 1, "{:?}", j.warnings);
     let j = run_normal("wet", opaque(), &[]);
+    assert_eq!(count(&j, Code::SkinWetGrey), 0, "{:?}", j.warnings);
     assert_eq!(j.profile.category, Category::Normal);
     assert_eq!(domain_for(&j.profile), Domain::Normal);
 }

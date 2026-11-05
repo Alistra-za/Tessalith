@@ -726,9 +726,6 @@ fn layered_profile_with(
             GENERIC,
         );
     }
-    if st == Subtype::SkinWet {
-        skin_wet_form(ctx, f, &mut doc, &mut prov, &mut sources);
-    }
     // M6 Track E (spec §4.3, DECISIONS Note U7): the mesh evidence, only where no explicit layer and no analysis fact
     // (a source without varying alpha) chose the policy; it is explicit itself, so the shader default below never
     // overwrites it and the alpha question is not asked.
@@ -814,8 +811,7 @@ fn layered_profile_with(
         cube_style_layer(ctx, &mut doc, &mut prov, &mut sources);
     }
     let mut profile = finish_profile(doc, ctx.target, st)?;
-    // The skin_wet height form is a grayscale map: R is taken and copied to RGB in Preprocess.
-    profile.category = category_of(st, profile.format, f.analysis.grayscale);
+    profile.category = st.category();
     emissive_hdr_choice(ctx, &mut profile, &mut prov, f);
     // Note FM43: BC6H encodes in the peak-preserving mode unless a layer above the hidden base chose the effort.
     // Runs on the final format, so an LDR emissive that fell back to BC7 keeps the base effort.
@@ -1016,43 +1012,6 @@ fn shader_layer(
                 GENERIC,
             );
         }
-    }
-}
-
-/// `skin_wet` has two forms (DECISIONS Note R-skin-1): a tangent-space normal with a binary mask in alpha (BC7, the
-/// sub-type default) and a grayscale height map (BC4). Grey content (the `VAL-M-GRAYSCALE` test) resolves the
-/// height form as an analysis fact, below every explicit layer: a preset, config, rule or `--set` that names the
-/// `format` (or the alpha policy) keeps it.
-fn skin_wet_form(
-    ctx: &ResolveCtx,
-    f: &FileFacts,
-    doc: &mut Value,
-    prov: &mut BTreeMap<String, Provenance>,
-    sources: &mut FormatSources,
-) {
-    if !f.analysis.grayscale {
-        return;
-    }
-    let fact = || Provenance::AnalysisFact("skin-wet-form".into());
-    if !field_explicit(ctx, prov, "format") {
-        apply(
-            doc,
-            prov,
-            sources,
-            &to_patch("format", &json!("bc4")),
-            fact(),
-            GENERIC,
-        );
-    }
-    if !alpha_policy_explicit(ctx, prov) {
-        apply(
-            doc,
-            prov,
-            sources,
-            &to_patch("alpha.policy", &json!("remove")),
-            fact(),
-            GENERIC,
-        );
     }
 }
 
@@ -1522,6 +1481,16 @@ fn encoding_warnings(
                 .into(),
         );
     }
+    if !cs_skin_loader_ok(st, format) {
+        add(
+            FmtCsSkinLoader,
+            format!(
+                "CS's texture loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on {}; {} loads as nothing",
+                st.id(),
+                format.id().to_uppercase()
+            ),
+        );
+    }
     // Note FM37: a Gray map is one channel, so only the one-channel formats fit.
     if st == Subtype::Gray && !matches!(format, Format::Bc4 | Format::R8) {
         add(CfgInvalid, "gray is written as BC4 or R8".into());
@@ -1657,30 +1626,30 @@ fn gray_pick_problem(pick: GraySource, a: &Analysis, has_alpha: bool) -> Option<
     Some(why)
 }
 
-/// The category a profile of `st` written as `format` has: a `skin_wet` height form (grey, or BC4) is a grayscale
-/// map (DECISIONS Note R-skin-1).
-fn category_of(st: Subtype, format: Format, grayscale: bool) -> Category {
-    if st == Subtype::SkinWet && (grayscale || format == Format::Bc4) {
-        Category::Grayscale
-    } else {
-        st.category()
+/// Whether CS's texture loader reads a `st` map written as `f`: it accepts RGBA8, BGRA8, BC1, BC2, BC3 and BC7 (and
+/// BC5 UNORM for a detail map), so a skin map in any other format loads as nothing. True for every other sub-type.
+pub fn cs_skin_loader_ok(st: Subtype, f: Format) -> bool {
+    match st {
+        Subtype::SkinRfaos | Subtype::SkinWet => {
+            matches!(f, Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8)
+        }
+        _ => true,
     }
 }
 
 /// Every (format, tag) pair a format picker may offer for `st` under `target` (owner, 2026-10-13): the pairs
 /// `check_profile` raises nothing blocking or worse for from the format and tag alone. Empty for a sub-type
-/// unavailable under `target` (CFG-UNAVAILABLE: nothing is written). A grey `skin_wet` is judged as the greyscale
-/// map it is only by [`allowed_encodings_for`].
+/// unavailable under `target` (CFG-UNAVAILABLE: nothing is written).
 pub fn allowed_encodings(st: Subtype, target: Target) -> Vec<(Format, ColorTag)> {
     allowed_encodings_for(st, target, false)
 }
 
-/// [`allowed_encodings`] for a file whose analysis is (`grayscale`) or is not greyscale, as `check_profile` judges
-/// a grey `skin_wet` (trace-debug #31, Note BQ).
+/// [`allowed_encodings`] for a file whose analysis is or is not greyscale. The flag no longer changes the answer
+/// (a grey `skin_wet` is not written); it stays for the callers that pass it.
 pub fn allowed_encodings_for(
     st: Subtype,
     target: Target,
-    grayscale: bool,
+    _grayscale: bool,
 ) -> Vec<(Format, ColorTag)> {
     if availability(target, st) != Availability::Available {
         return vec![];
@@ -1704,7 +1673,7 @@ pub fn allowed_encodings_for(
         .flat_map(|f| tags.map(|t| (f, t)))
         .filter(|&(f, t)| {
             !hdr_outside_cs(f, target)
-                && encoding_warnings(st, category_of(st, f, grayscale), target, f, t)
+                && encoding_warnings(st, st.category(), target, f, t)
                     .iter()
                     .all(|w| w.severity < Severity::Blocking)
         })
@@ -1838,6 +1807,13 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     let encoding = encoding_warnings(st, p.category, p.target, p.format, p.color.tag);
     w.extend(encoding);
     let mut add = |c: Code, m: String| w.push(Warning::new(c, m));
+    if st == Subtype::SkinWet && a.grayscale {
+        add(
+            SkinWetGrey,
+            "CS Advanced Skin no longer reads grey wet maps; supply a tangent normal with the wet mask in alpha"
+                .into(),
+        );
+    }
     if let Err(why) = crate::filter::filter_allowed(p) {
         let id = serde_json::to_value(p.mips.filter).unwrap_or_default();
         add(

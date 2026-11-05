@@ -162,36 +162,101 @@ fn outside_advanced_skin_sk_is_the_vanilla_guess_and_wet_is_a_base_name() {
     assert_eq!(top(&p, "x.png").0, Subtype::Diffuse);
 }
 
-/// (c) A grey `_wet` is a BC4 height map and a colour one BC7 with its alpha.
+/// (c) CS no longer reads a grey `_wet` (CS 176a0083): it is not written, the rest of the batch is, and the skip is
+/// reported as SKIN-WET-GREY.
 #[test]
-fn wet_form_follows_the_content() {
+fn grey_wet_is_not_written_and_reports_skin_wet_grey() {
     let d = tempfile::tempdir().unwrap();
-    put(d.path(), "g/x.png", colour(64));
-    put(d.path(), "g/x_rfaos.png", colour(64));
-    put(d.path(), "g/x_wet.png", grey(64));
-    put(d.path(), "c/y.png", colour(64));
-    put(d.path(), "c/y_rfaos.png", colour(64));
-    put(d.path(), "c/y_wet.png", wet_normal(64));
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_rfaos.png", colour(64));
+    put(d.path(), "h_wet.png", grey(64));
+    let (events, s) = run(&d);
+    assert_eq!(s.exit_code(), 0, "{s:?}");
+    assert!(!d.path().join("out/h_wet.dds").exists());
+    assert_eq!(out(&d, "h.dds").format, DdsPixelFormat::Bc7 { srgb: false });
+    assert!(d.path().join("out/h_rfaos.dds").exists());
+    let skips: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.kind,
+                EventKind::FileSkipped {
+                    code: Some(Code::SkinWetGrey),
+                    ..
+                }
+            )
+        })
+        .collect();
+    assert_eq!(skips.len(), 1, "{events:#?}");
+    assert!(skips[0]
+        .path
+        .as_deref()
+        .is_some_and(|p| p.ends_with("h_wet.png")));
+    // An explicit BC7 does not bring the grey map back.
+    let p = plan(&d, Target::Cs, &["subtype:skin_wet.format=bc7"]);
+    assert!(!p.jobs.iter().any(|j| j.input.ends_with("h_wet.png")));
+}
+
+/// (c) A coloured `_wet` is always BC7 with its alpha.
+#[test]
+fn coloured_wet_is_bc7() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "y.png", colour(64));
+    put(d.path(), "y_rfaos.png", colour(64));
+    put(d.path(), "y_wet.png", wet_normal(64));
     let (_, s) = run(&d);
     assert_eq!(s.exit_code(), 0, "{s:?}");
-    assert_eq!(out(&d, "g/x_wet.dds").format, DdsPixelFormat::Bc4);
-    let cw = out(&d, "c/y_wet.dds");
+    let cw = out(&d, "y_wet.dds");
     assert_eq!(cw.format, DdsPixelFormat::Bc7 { srgb: false });
     // Alpha kept: the mask's two halves decode apart.
     let px = texels(&cw);
     assert!(px[0][3] > 200 && px[63][3] < 50, "{:?} {:?}", px[0], px[63]);
 }
 
-/// (c) An explicit `format` overrides the analysis.
+/// CS's texture loader reads RGBA8, BGRA8, BC1, BC2, BC3 and BC7 (BC5 for a detail map only): any other format on a
+/// skin map is blocked by FMT-CS-SKIN-LOADER and nothing is written for it.
 #[test]
-fn wet_format_override_wins() {
+fn wet_format_outside_the_cs_loader_list_is_blocked() {
     let d = tempfile::tempdir().unwrap();
-    put(d.path(), "x.png", colour(64));
-    put(d.path(), "x_rfaos.png", colour(64));
-    put(d.path(), "x_wet.png", grey(64));
-    let p = plan(&d, Target::Cs, &["subtype:skin_wet.format=bc7"]);
-    let j = job(&p, "x_wet.png");
-    assert_eq!(j.profile.format, Format::Bc7);
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_rfaos.png", colour(64));
+    put(d.path(), "h_wet.png", wet_normal(64));
+    let p = plan(&d, Target::Cs, &["subtype:skin_wet.format=bc4"]);
+    let j = job(&p, "h_wet.png");
+    assert!(
+        matches!(&j.status, engine::policy::JobStatus::Blocked { codes } if codes.contains(&Code::FmtCsSkinLoader)),
+        "{:?} {:?}",
+        j.status,
+        j.warnings
+    );
+    let mut r = req(&d, Target::Cs, &["subtype:skin_wet.format=bc4"]);
+    r.on_existing = OnExisting::Overwrite;
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let e = Engine::new().unwrap();
+    let plan = e.plan(r, &rep, &CancelToken::default()).unwrap();
+    e.run(plan, &rep, &CancelToken::default()).unwrap();
+    assert!(!d.path().join("out/h_wet.dds").exists());
+    assert!(d.path().join("out/h.dds").exists());
+}
+
+/// The CS loader list is a property of the sub-type and format alone.
+#[test]
+fn cs_skin_loader_list() {
+    use engine::policy::cs_skin_loader_ok;
+    for f in [Format::Bc1, Format::Bc3, Format::Bc7, Format::Rgba8] {
+        assert!(cs_skin_loader_ok(Subtype::SkinWet, f), "{f:?}");
+        assert!(cs_skin_loader_ok(Subtype::SkinRfaos, f), "{f:?}");
+    }
+    for f in [
+        Format::Bc4,
+        Format::Bc5,
+        Format::Rgb8,
+        Format::R8,
+        Format::Rg8,
+    ] {
+        assert!(!cs_skin_loader_ok(Subtype::SkinWet, f), "{f:?}");
+    }
+    assert!(cs_skin_loader_ok(Subtype::Diffuse, Format::Bc4));
 }
 
 /// (d) `skin_albedo` is UNORM, never sRGB.

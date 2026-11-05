@@ -449,10 +449,9 @@ fn every_format_label_starts_with_its_one_name() {
     assert_eq!(format_name(Format::Bc6hUf16), "BC6H");
 }
 
-/// Trace-debug #31 (Note BS13): a grey `skin_wet` (category Grayscale) is offered what `check_profile` accepts for
-/// a greyscale map, R8 among them, and not marked `NOT_VALID`.
+/// A `skin_wet` picker never offers R8 as valid: CS's loader reads no one-channel skin map, grey source or not.
 #[test]
-fn a_grey_skin_wet_picker_offers_r8() {
+fn a_skin_wet_picker_never_offers_r8() {
     let reg = PresetRegistry::builtin().unwrap();
     let mut p = reg.base_profile(Target::Cs, Subtype::SkinWet);
     let r8 = |p: &Profile| {
@@ -462,7 +461,7 @@ fn a_grey_skin_wet_picker_offers_r8() {
     };
     assert!(!r8(&p), "a colour skin_wet has no R8");
     p.category = Category::Grayscale;
-    assert!(r8(&p));
+    assert!(!r8(&p));
 }
 
 /// Note FM: the "1-bit alpha" row sits in the Alpha group and is drawn only for BC1. Hidden, it leaves no gap: the

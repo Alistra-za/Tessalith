@@ -86,7 +86,7 @@ color = { content = "srgb", tag = "unorm" }
 # _sk keeps only the red channel.
 [subtypes.skin_sk]
 format = "bc4"
-# _wet is a normal with a binary mask in alpha (BC7); Resolve switches grey content to a BC4 height map.
+# _wet is a normal with a binary mask in alpha (BC7). CS no longer reads a grey one, so that is not written.
 [subtypes.skin_wet]
 alpha = { policy = "data" }
 # A cubemap is gamma-encoded colour written UNORM (CS decodes it from game gamma).

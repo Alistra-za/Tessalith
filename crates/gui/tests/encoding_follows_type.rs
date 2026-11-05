@@ -290,21 +290,19 @@ fn undo_after_the_encoding_cleanup_names_the_step_that_caused_it() {
     );
 }
 
-/// Trace-debug #31 (Note BS13): an explicit R8 on a texture re-typed to a grey `skin_wet` is allowed and kept; on a
-/// colour one it is cleared.
+/// An explicit R8 on a texture re-typed to a `skin_wet` is cleared, grey or not: CS's loader reads no one-channel
+/// skin map (the grey form is gone).
 #[test]
-fn a_grey_skin_wet_keeps_an_explicit_r8() {
+fn a_skin_wet_clears_an_explicit_r8_grey_or_not() {
     use sdc_gui::model::encoding_follow::{verdict, Verdict};
-    let r8 = *engine::policy::allowed_encodings_for(Subtype::SkinWet, Target::Cs, true)
-        .iter()
-        .find(|(f, _)| *f == Format::R8)
-        .unwrap();
+    let r8 = (Format::R8, ColorTag::Unorm);
     let st = Subtype::SkinWet;
-    assert_eq!(verdict(Target::Cs, st, true, r8, true, None), Verdict::Keep);
-    assert_eq!(
-        verdict(Target::Cs, st, false, r8, true, None),
-        Verdict::Clear
-    );
+    for grey in [true, false] {
+        assert_eq!(
+            verdict(Target::Cs, st, grey, r8, true, None),
+            Verdict::Clear
+        );
+    }
 }
 
 /// Note FC3 (supersedes Z11's status line): a cleared format is an Info row per texture, with Undo while its step is

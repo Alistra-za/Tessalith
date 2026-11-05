@@ -380,6 +380,8 @@
         "CHAN-NORMAL-LENGTH",
         "FMT-BC5-NORMAL",
         "FMT-LANDSCAPE-BC1",
+        "FMT-CS-SKIN-LOADER",
+        "SKIN-WET-GREY",
         "FMT-BC1-ALPHA",
         "FMT-RGB8-ALPHA",
         "FMT-PERCEPTUAL-DATA",

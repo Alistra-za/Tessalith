@@ -125,7 +125,7 @@ pub const REMOVED: &[Removed] = &[
     Removed {
         key: "allow",
         value: Some("SKIN-WET-FORM"),
-        hint: "SKIN-WET-FORM was removed in 2.0 (a `skin_wet` is still read as BC4 height or BC7 normal, silently); delete it from the list",
+        hint: "SKIN-WET-FORM was removed in 2.0; since 2.1 a skin_wet is always a BC7 normal + mask and a grey one is not written (SKIN-WET-GREY); delete it from the list",
     },
     Removed {
         key: "allow",

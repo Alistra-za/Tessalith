@@ -94,12 +94,10 @@ fn owner_rules_hold() {
                     "{st:?} {t:?}: {a:?}"
                 );
             }
-            // A grey `skin_wet` is a BC4 height map (Category::Grayscale), never BC6H.
             if st.category() == Category::Normal {
                 assert!(
-                    a.iter().all(
-                        |(f, _)| *f != Format::Bc6hUf16 && (*f != Format::Bc4 || st == SkinWet)
-                    ),
+                    a.iter()
+                        .all(|(f, _)| *f != Format::Bc6hUf16 && *f != Format::Bc4),
                     "{st:?} {t:?}: {a:?}"
                 );
             }
@@ -131,14 +129,22 @@ fn gray_allows_bc4_and_r8_only() {
     }
 }
 
-/// Trace-debug #31 (Note BQ): a grey `skin_wet` is judged as a greyscale map by `check_profile`, which accepts
-/// R8, RG8 and BC5; the picker offers them when told the map is grey, and nothing changes when it is not.
+/// CS's skin texture loader reads RGBA8, BGRA8, BC1, BC2, BC3 and BC7 only, so a `skin_wet` or `skin_rfaos` is offered
+/// nothing else; the grey flag no longer changes the answer for any sub-type.
 #[test]
-fn grey_skin_wet_allows_what_check_profile_accepts() {
+fn skin_wet_allows_only_cs_loader_formats() {
     use engine::policy::allowed_encodings_for;
-    let grey = allowed_encodings_for(Subtype::SkinWet, Target::Cs, true);
-    for f in [Format::R8, Format::Rg8, Format::Bc5, Format::Bc4] {
-        assert!(grey.iter().any(|(g, _)| *g == f), "{f:?}: {}", pairs(&grey));
+    let ok = [Format::Bc1, Format::Bc3, Format::Bc7, Format::Rgba8];
+    for st in [Subtype::SkinWet, Subtype::SkinRfaos] {
+        for grey in [false, true] {
+            let a = allowed_encodings_for(st, Target::Cs, grey);
+            assert!(!a.is_empty(), "{st:?}");
+            assert!(
+                a.iter().all(|(f, _)| ok.contains(f)),
+                "{st:?}: {}",
+                pairs(&a)
+            );
+        }
     }
     for t in [Target::Cs, Target::Vanilla] {
         for st in Subtype::ALL {
@@ -159,7 +165,9 @@ fn rgb8_is_allowed_where_rgba8_unorm_is() {
             let a = allowed_encodings(st, t);
             let rgba8 = a.contains(&(Format::Rgba8, ColorTag::Unorm));
             let rgb8 = a.contains(&(Format::Rgb8, ColorTag::Unorm));
-            assert_eq!(rgb8, rgba8, "{st:?} {t:?}: {}", pairs(&a));
+            // CS's skin loader reads no RGB8 (it has no 24-bit format).
+            let want = rgba8 && engine::policy::cs_skin_loader_ok(st, Format::Rgb8);
+            assert_eq!(rgb8, want, "{st:?} {t:?}: {}", pairs(&a));
             assert!(
                 !a.iter()
                     .any(|&(f, tag)| f == Format::Rgb8 && tag != ColorTag::Unorm),

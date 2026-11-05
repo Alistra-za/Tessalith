@@ -67,6 +67,10 @@ codes! {
     ChanNormalLength = "CHAN-NORMAL-LENGTH" => Warning,
     FmtBc5Normal = "FMT-BC5-NORMAL" => Blocking,
     FmtLandscapeBc1 = "FMT-LANDSCAPE-BC1" => Blocking,
+    // Community Shaders' texture loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on a skin map.
+    FmtCsSkinLoader = "FMT-CS-SKIN-LOADER" => Blocking,
+    // CS removed the grey/height wet form (CS 176a0083); a grey `skin_wet` is not written.
+    SkinWetGrey = "SKIN-WET-GREY" => Warning,
     FmtBc1Alpha = "FMT-BC1-ALPHA" => Blocking,
     // Note FM38: rgb8 stores no alpha, so a texture whose alpha is kept cannot be written as one.
     FmtRgb8Alpha = "FMT-RGB8-ALPHA" => Blocking,
@@ -257,7 +261,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 95);
+        assert_eq!(Code::ALL.len(), 97);
         assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);
