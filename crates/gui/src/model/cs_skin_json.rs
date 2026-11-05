@@ -2,7 +2,7 @@
 //! of each cs Advanced skin set, written after a clean export with the other JSON kinds' guard. No egui types.
 use super::history::{orphans, records_at};
 use super::sets::{views, Missing, SlotFill, SlotKind};
-use super::skin::{skin_field, Kind};
+use super::skin::skin_value_problem;
 use super::xpmf_json::data_rel;
 use super::AppModel;
 use engine::config::{Subtype, Target};
@@ -302,11 +302,7 @@ pub fn skin_json_plan(m: &AppModel) -> (Vec<PlannedFile>, Vec<SkippedSet>) {
 
 /// A value the card's range or type refuses (a hand-edited `sdc-project.toml`): CS would ignore the whole file.
 fn refused_value(k: &str, v: &Json) -> Option<String> {
-    let ok = match skin_field(k)?.kind {
-        Kind::Num { lo, hi, .. } => v.as_f64().is_some_and(|x| (lo..=hi).contains(&x)),
-        Kind::Flag { .. } => v.is_boolean(),
-    };
-    (!ok).then(|| format!("{k} = {v} is outside what CS accepts"))
+    skin_value_problem(k, v).map(|why| format!("{k} = {v} is outside what CS accepts ({why})"))
 }
 
 /// One file an export writes once it has ended.

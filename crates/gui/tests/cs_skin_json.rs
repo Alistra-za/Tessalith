@@ -955,7 +955,7 @@ fn grey_wet_shows_skin_wet_grey_row() {
     assert!(
         problems(&m)
             .iter()
-            .any(|p| p.code == Some(engine::codes::Code::SkinWetGrey)),
+            .any(|p| p.code == Some(engine::codes::Code::SkinWetGrey) && p.level == Level::Warning),
         "{:?}",
         problems(&m)
     );

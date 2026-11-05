@@ -85,25 +85,25 @@ pub fn skin_field(key: &str) -> Option<&'static SkinField> {
     FIELDS.iter().find(|f| f.key == key)
 }
 
-/// Known keys of `values` that CS would reject (a hand-edited `sdc-project.toml`; the card cannot make them): (key,
-/// why). Unknown keys are ignored here.
-pub fn bad_skin_values(values: &Settings) -> Vec<(String, String)> {
-    let mut out = vec![];
-    for (k, v) in values.iter() {
-        let why = match skin_field(k).map(|f| f.kind) {
-            Some(Kind::Num { lo, hi, .. }) => match v.as_f64() {
-                None => Some("not a number".to_string()),
-                Some(x) if !(lo..=hi).contains(&x) => Some(format!("{x}, outside {lo} to {hi}")),
-                Some(_) => None,
-            },
-            Some(Kind::Flag { .. }) => (!v.is_boolean()).then(|| "not true or false".to_string()),
-            None => None,
-        };
-        if let Some(w) = why {
-            out.push((k.clone(), w));
-        }
+/// Why CS would reject value `v` of skin key `key` (a hand-edited `sdc-project.toml`; the card cannot make it), or
+/// `None` when it is fine or the key is unknown. The one range/type decision for the red block and the writer.
+pub fn skin_value_problem(key: &str, v: &Value) -> Option<String> {
+    match skin_field(key)?.kind {
+        Kind::Num { lo, hi, .. } => match v.as_f64() {
+            None => Some("not a number".to_string()),
+            Some(x) if !(lo..=hi).contains(&x) => Some(format!("{x}, outside {lo} to {hi}")),
+            Some(_) => None,
+        },
+        Kind::Flag { .. } => (!v.is_boolean()).then(|| "not true or false".to_string()),
     }
-    out
+}
+
+/// Known keys of `values` that CS would reject: (key, why). Unknown keys are ignored here.
+pub fn bad_skin_values(values: &Settings) -> Vec<(String, String)> {
+    values
+        .iter()
+        .filter_map(|(k, v)| Some((k.clone(), skin_value_problem(k, v)?)))
+        .collect()
 }
 
 impl AppModel {
