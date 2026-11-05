@@ -164,8 +164,8 @@ pub fn apply_set_edits(
             });
         }
     }
-    // A touched set's suffixes come from its members, as `group_sets_with` derives them (a skin `_wet` member that
-    // `join_skin_wet` joined keeps its `wet`).
+    // A touched set's suffixes come from its members, as `group_sets_with` derives them (a skin `_wet` or `_detail_n` member that
+    // `join_skin_wet` / `join_skin_detail` joined keeps its `wet` / `detail_n`).
     for s in sets.iter_mut().filter(|s| touched.contains(&s.key)) {
         s.members.sort_unstable();
         let suffixes = s

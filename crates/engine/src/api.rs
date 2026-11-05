@@ -10,7 +10,9 @@ use crate::codes::{Code, Warning};
 use crate::config::*;
 use crate::discover::{canonicalise_outputs, discover_reporting, InputFile, InputKind};
 use crate::events::{EventKind, Reporter, SkipKind, Stage};
-use crate::group::{group_sets_with, join_skin_wet, member_split, SuffixSplit, TextureSet};
+use crate::group::{
+    group_sets_with, join_skin_detail, join_skin_wet, member_split, SuffixSplit, TextureSet,
+};
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
 use crate::manifest::{
@@ -1192,11 +1194,13 @@ pub(crate) fn join_members(
     // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here; move the explicit shaders up
     // if such a project needs its `_wet` joined.
     if ctx.target == Target::Cs {
-        join_skin_wet(sets, files, aliases, |s| {
+        let is_skin = |s: &TextureSet| {
             s.members
                 .first()
                 .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
-        });
+        };
+        join_skin_wet(sets, files, aliases, is_skin);
+        join_skin_detail(sets, files, aliases, is_skin);
     }
 }
 

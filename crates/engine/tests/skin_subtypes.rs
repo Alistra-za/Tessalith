@@ -900,3 +900,64 @@ fn a_fuzz_map_given_a_sub_type_does_not_make_the_set_advanced_skin() {
     assert_eq!(albedo.profile.subtype, Subtype::PbrAlbedo);
     assert!(albedo.profile.srgb_tag());
 }
+
+/// Task 3: `_detail_n` joins its cs Advanced skin set as the `skin_detail` member.
+#[test]
+fn detail_n_joins_its_advanced_skin_set_on_cs() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_rfaos.png", colour(64));
+    put(d.path(), "h_detail_n.png", wet_normal(64));
+    let p = plan(&d, Target::Cs, &[]);
+    assert_eq!(set_of(&p, "h_detail_n.png"), set_of(&p, "h.png"));
+    assert_eq!(
+        top(&p, "h_detail_n.png"),
+        (Subtype::SkinDetail, Confidence::High)
+    );
+}
+
+#[test]
+fn detail_n_outside_an_advanced_skin_set_keeps_todays_grouping() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_detail_n.png", wet_normal(64));
+    let p = plan(&d, Target::Cs, &[]);
+    assert_ne!(set_of(&p, "h_detail_n.png"), set_of(&p, "h.png"));
+    assert!(set_of(&p, "h_detail_n.png").ends_with("/h_detail"));
+    assert_ne!(top(&p, "h_detail_n.png").0, Subtype::SkinDetail);
+}
+
+#[test]
+fn detail_n_is_not_joined_on_vanilla() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_rfaos.png", colour(64));
+    put(d.path(), "h_detail_n.png", wet_normal(64));
+    let p = plan(&d, Target::Vanilla, &[]);
+    assert_ne!(set_of(&p, "h_detail_n.png"), set_of(&p, "h.png"));
+    assert_ne!(top(&p, "h_detail_n.png").0, Subtype::SkinDetail);
+}
+
+#[test]
+fn rename_keeps_the_joined_detail_n() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "x.png", colour(64));
+    put(d.path(), "x_rfaos.png", colour(64));
+    put(d.path(), "x_detail_n.png", wet_normal(64));
+    let mut r = req(&d, Target::Cs, &[]);
+    r.set_edits = vec![engine::sets::SetEdit::Rename {
+        from: "x".into(),
+        to: "x2".into(),
+    }];
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    assert!(set_of(&p, "x.png").ends_with("/x2"));
+    assert_eq!(set_of(&p, "x_detail_n.png"), set_of(&p, "x.png"));
+    assert_eq!(
+        top(&p, "x_detail_n.png"),
+        (Subtype::SkinDetail, Confidence::High)
+    );
+}

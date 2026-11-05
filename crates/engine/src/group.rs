@@ -288,6 +288,10 @@ pub fn group_sets_with(
 /// The skin `_wet` suffix (DECISIONS Note R-skin-1). Not a §6.1 suffix: see [`join_skin_wet`].
 pub const SKIN_WET: &str = "wet";
 
+/// The skin `_detail_n` member (Advanced skin detail normal). Its tail `_detail` + the §6.1 suffix `n` makes it a
+/// normal of set `x_detail` until [`join_skin_detail`] moves it into set `x`.
+pub const SKIN_DETAIL: &str = "detail_n";
+
 /// The last segment of a set key (its lower-case base name).
 fn key_base(key: &str) -> &str {
     key.rsplit_once('/').map_or(key, |(_, b)| b)
@@ -313,21 +317,40 @@ fn wet_tail_split(stem: &str) -> Option<SuffixSplit> {
     })
 }
 
+/// `x_detail_n` -> base `x`, suffix `detail_n`, whatever set it is in.
+fn detail_tail_split(stem: &str) -> Option<SuffixSplit> {
+    let tail = format!("_{SKIN_DETAIL}");
+    let lower = stem.to_ascii_lowercase();
+    lower.strip_suffix(&tail).filter(|b| !b.is_empty())?;
+    Some(SuffixSplit {
+        // The tail is ASCII, so the cut falls on a char boundary.
+        base: stem[..stem.len() - tail.len()].to_string(),
+        suffix: Some(SKIN_DETAIL.to_string()),
+        alias: None,
+    })
+}
+
 /// [`split_suffix_with`] for a member of `set`: as `split_suffix_with`, except that the skin `_wet` member of a set
 /// [`join_skin_wet`] joined it to (`x_wet` in set `x`, which then lists the suffix `wet`) splits to its base and
-/// the suffix `wet`.
+/// the suffix `wet`, and likewise `x_detail_n` (suffix `detail_n`, [`join_skin_detail`]).
 pub fn member_split(
     stem: &str,
     set: &TextureSet,
     aliases: &BTreeMap<String, String>,
 ) -> SuffixSplit {
     // The key is not checked: a Rename (`x` -> `x2`) keeps the joined `x_wet` (trace-debug 2026-10-16 #3).
-    // shortcut: any other suffix-less `*_wet` moved into a set that lists `wet` also reads as its wet map; track
+    // shortcut: any other suffix-less `*_wet` moved into a set that lists `wet` also reads as its wet map (and any
+    // `*_detail_n` in a set that lists `detail_n` as its detail normal); track
     // joined members by index if that ever matters.
     let s = split_suffix_with(stem, aliases);
     if s.suffix.is_none() && set.suffixes.contains(SKIN_WET) {
         if let Some(w) = wet_tail_split(stem) {
             return w;
+        }
+    }
+    if s.suffix.as_deref() == Some("n") && set.suffixes.contains(SKIN_DETAIL) {
+        if let Some(d) = detail_tail_split(stem) {
+            return d;
         }
     }
     s
@@ -418,6 +441,63 @@ pub fn join_skin_wet(
         sets[to].members.extend(wet);
         sets[to].members.sort_unstable();
         sets[to].suffixes.insert(SKIN_WET.to_string());
+    }
+    sets.retain(|s| !s.members.is_empty());
+}
+
+/// `_detail_n` joins an Advanced skin set as its detail normal, on the same terms as [`join_skin_wet`]: the `n`
+/// member `x_detail_n` of set `x_detail` moves into set `x` when `is_skin(x)`. Other members of `x_detail` stay;
+/// a set left empty is removed. Landscape `_detail`/`_detailnorm` (rnm) are not touched.
+pub fn join_skin_detail(
+    sets: &mut Vec<TextureSet>,
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+    is_skin: impl Fn(&TextureSet) -> bool,
+) {
+    let is_n = |i: usize| {
+        let stem = files[i]
+            .rel
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        split_suffix_with(&stem, aliases).suffix.as_deref() == Some("n")
+    };
+    let mut moves: Vec<(usize, usize, Vec<usize>)> = vec![];
+    for (from, s) in sets.iter().enumerate() {
+        let Some(base_key) = s.key.strip_suffix("_detail") else {
+            continue;
+        };
+        let Some(to) = sets.iter().position(|t| t.key == base_key) else {
+            continue;
+        };
+        let moved: Vec<usize> = s
+            .members
+            .iter()
+            .copied()
+            .filter(|&i| {
+                let stem = files[i]
+                    .rel
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                is_n(i)
+                    && detail_tail_split(&stem)
+                        .is_some_and(|d| d.base.to_lowercase() == key_base(base_key).to_lowercase())
+            })
+            .collect();
+        if !moved.is_empty() && is_skin(&sets[to]) {
+            moves.push((from, to, moved));
+        }
+    }
+    for (from, to, moved) in moves {
+        sets[from].members.retain(|i| !moved.contains(i));
+        sets[to].members.extend(moved);
+        sets[to].members.sort_unstable();
+        sets[to].suffixes.insert(SKIN_DETAIL.to_string());
+        // The source set keeps `n` only while one of its members still has it.
+        if !sets[from].members.iter().any(|&i| is_n(i)) {
+            sets[from].suffixes.remove("n");
+        }
     }
     sets.retain(|s| !s.members.is_empty());
 }

@@ -84,6 +84,11 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
             High,
             "_wet in an Advanced skin set (normal + mask or height)",
         )],
+        Some("detail_n") if c.advanced_skin => vec![s(
+            SkinDetail,
+            High,
+            "_detail_n in an Advanced skin set (detail normal)",
+        )],
         Some("cnr") | Some("crn") => {
             vec![s(CoatNormal, High, "_cnr/_crn coat normal + roughness")]
         }
