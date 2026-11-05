@@ -148,20 +148,33 @@ fn entry_or_none(m: &AppModel, id: &str) -> Option<String> {
 #[test]
 fn renamed_output_keeps_folder_and_suffix() {
     assert_eq!(
-        renamed_output("armor/wall_n.dds", "steel"),
+        renamed_output("armor/wall_n.dds", "steel", false),
         Some(PathBuf::from("armor/steel_n.dds"))
     );
     assert_eq!(
-        renamed_output("wall.dds", "steel"),
+        renamed_output("wall.dds", "steel", false),
         Some(PathBuf::from("steel.dds"))
     );
     assert_eq!(
-        renamed_output("a/b/rock_rmaos.dds", "x"),
+        renamed_output("a/b/rock_rmaos.dds", "x", false),
         Some(PathBuf::from("a/b/x_rmaos.dds"))
     );
     // An exporter term an output keeps stays too, so it never lands on the diffuse's name.
     assert_eq!(
-        renamed_output("a/rock01_roughness.dds", "x"),
+        renamed_output("a/rock01_roughness.dds", "x", false),
         Some(PathBuf::from("a/x_roughness.dds"))
+    );
+    // Final review I1: in an Advanced skin set the joined `_wet` and `_detail_n` are tails; elsewhere they are not.
+    assert_eq!(
+        renamed_output("a/body_wet.dds", "x", true),
+        Some(PathBuf::from("a/x_wet.dds"))
+    );
+    assert_eq!(
+        renamed_output("a/body_detail_n.dds", "x", true),
+        Some(PathBuf::from("a/x_detail_n.dds"))
+    );
+    assert_eq!(
+        renamed_output("a/body_detail_n.dds", "x", false),
+        Some(PathBuf::from("a/x_n.dds"))
     );
 }

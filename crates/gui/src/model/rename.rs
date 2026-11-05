@@ -2,7 +2,7 @@
 //! `sdc.toml` (the file on disk is never touched); Outputs mode gives sets an output base name (`output_name`, or
 //! the PGPatcher `rename` on a CS PBR set). One pure plan, `plan_rename`, feeds both the preview and Apply.
 use super::items::ItemKind;
-use super::sets::{check_output_name, renamed_output, slot_of, views, SetView};
+use super::sets::{check_output_name, member_tail, renamed_output, slot_of, views, SetView};
 use super::{AppModel, Dialog};
 use crate::pgp::prefix::check_file_name;
 use engine::config::Target;
@@ -160,9 +160,9 @@ pub(crate) struct PlanCache {
 const PACKED: &str = "skipped (a packed output has no file of its own)";
 const LOCKED: &str = "skipped (locked)";
 
-/// The tail a name ends in, as the kind column shows it: `_n`, `_normal`, or "colour".
-fn role_of(stem: &str) -> String {
-    match &stem[base_of(stem).len()..] {
+/// The tail a name ends in, as the kind column shows it: `_n`, `_normal`, a skin set's `_wet`, or "colour".
+fn role_of(stem: &str, skin: bool) -> String {
+    match member_tail(stem, skin) {
         "" => "colour".into(),
         t => t.to_string(),
     }
@@ -288,9 +288,16 @@ fn first_by_id(views: &[SetView]) -> HashMap<String, usize> {
 fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameRow> {
     let views = views(m);
     let locked = locked_slots(&views);
+    // The members of Advanced skin sets: their `_wet` and `_detail_n` are tails (`member_tail`).
+    let skin: HashSet<&str> = views
+        .iter()
+        .filter(|v| v.skin)
+        .flat_map(|v| v.members.iter().map(String::as_str))
+        .collect();
     let project = m.project.as_ref();
     let mut out = vec![];
     for key in &d.keys {
+        let in_skin = skin.contains(key.as_str());
         let Some(it) = m.item(key) else { continue };
         let current = project
             .and_then(|p| p.read_as(key))
@@ -307,8 +314,8 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
         let real_ext = split_ext(split_path(key).1).1.to_string();
         let (dir, name) = split_path(&current);
         let stem = split_ext(name).0;
-        // Both splits cut a tail off `stem`, so the base is a prefix of it.
-        let (base, tail) = stem.split_at(base_of(stem).len().min(stem.len()));
+        let tail = member_tail(stem, in_skin);
+        let base = &stem[..stem.len() - tail.len()];
         let new = match d.typed.get(key) {
             Some(t) => {
                 let t = t.trim().replace('\\', "/");
@@ -335,7 +342,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
             r.matched = true;
         }
         let new_stem = split_ext(split_path(&new).1).0.to_string();
-        r.kind = Some((role_of(stem), role_of(&new_stem)));
+        r.kind = Some((role_of(stem, in_skin), role_of(&new_stem, in_skin)));
         r.output = input_output(&new);
         r.problem = input_problem(&new, &real_ext);
         if r.problem.is_none() && r.kind.as_ref().is_some_and(|(a, b)| a != b) {
@@ -449,7 +456,7 @@ fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<Rename
         r.problem = check_output_name(&new).err();
         let renamed: Vec<String> = outputs
             .iter()
-            .filter_map(|(_, jk)| renamed_output(jk, &new))
+            .filter_map(|(_, jk)| renamed_output(jk, &new, v.skin))
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .collect();
         r.output = match renamed.len() {
@@ -490,7 +497,8 @@ fn set_outputs(m: &AppModel, v: &SetView) -> Vec<(String, String)> {
     outs
 }
 
-/// An output another texture writes, or two sets renamed onto one output, block.
+/// An output another texture writes, two sets renamed onto one output, or two outputs of one set renamed onto one path,
+/// block.
 fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
     let views = views(m);
     let index = first_by_id(&views);
@@ -510,13 +518,14 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
             taken.insert(lower(jk), v.id.clone());
         }
     }
-    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    // Renamed path → (set id, its current output).
+    let mut seen: BTreeMap<String, (String, String)> = BTreeMap::new();
     for r in rows.iter_mut().filter(|r| r.writes()) {
         let Some(&at) = index.get(&fold_id(&r.key)) else {
             continue;
         };
         for (_, jk) in &outs[at] {
-            let Some(p) = renamed_output(jk, &r.new) else {
+            let Some(p) = renamed_output(jk, &r.new, views[at].skin) else {
                 continue;
             };
             let l = lower(&p.to_string_lossy());
@@ -524,11 +533,22 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
                 r.problem = Some(format!("{other} already writes {}", p.display()));
                 break;
             }
-            if let Some(other) = seen.get(&l).filter(|o| **o != r.key) {
-                r.problem = Some(format!("{other} is renamed onto {} too", p.display()));
-                break;
+            match seen.get(&l) {
+                // Final review I1: two outputs of this set on one path (one output listed twice is no clash).
+                Some((id, old)) if *id == r.key && lower(old) != lower(jk) => {
+                    r.problem = Some(format!(
+                        "{old} and {jk} are both renamed onto {}",
+                        p.display()
+                    ));
+                    break;
+                }
+                Some((id, _)) if *id != r.key => {
+                    r.problem = Some(format!("{id} is renamed onto {} too", p.display()));
+                    break;
+                }
+                _ => {}
             }
-            seen.insert(l, r.key.clone());
+            seen.insert(l, (r.key.clone(), jk.clone()));
         }
     }
 }

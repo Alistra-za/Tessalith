@@ -1008,7 +1008,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             if item.job.is_none() || item.job_key.is_empty() {
                 continue;
             }
-            let Some(rel) = renamed_output(&item.job_key, name) else {
+            let Some(rel) = renamed_output(&item.job_key, name, v.skin) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1028,16 +1028,35 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
     out
 }
 
+/// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
+/// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
+/// (`group::member_split`). `""` for the colour member.
+pub fn member_tail(stem: &str, skin: bool) -> &str {
+    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
+    // `member_split` reads only the set's suffixes: a skin set may hold both joined members.
+    let set = TextureSet {
+        key: String::new(),
+        members: vec![],
+        suffixes: if skin {
+            [SKIN_WET, SKIN_DETAIL].map(String::from).into()
+        } else {
+            BTreeSet::new()
+        },
+    };
+    let base = member_split(stem, &set, &BTreeMap::new()).base;
+    // The base is a prefix of `stem`, so the cut is on a char boundary.
+    &stem[base.len().min(stem.len())..]
+}
+
 /// `job_key` (an output path relative to the export root) with its base name replaced by `name`: the folder and the
-/// suffix stay (`armor/wall_n.dds`, `steel` → `armor/steel_n.dds`). Applying it twice gives the same path,
-/// because `check_output_name` refuses a name that ends in a suffix.
-pub fn renamed_output(job_key: &str, name: &str) -> Option<PathBuf> {
+/// suffix stay (`armor/wall_n.dds`, `steel` → `armor/steel_n.dds`; in a skin set `x_wet.dds` → `steel_wet.dds`).
+/// Applying it twice gives the same path, because `check_output_name` refuses a name that ends in a suffix.
+pub fn renamed_output(job_key: &str, name: &str, skin: bool) -> Option<PathBuf> {
     let p = Path::new(job_key);
     let stem = p.file_stem()?.to_string_lossy();
     // Everything after the base stays: a Skyrim suffix, or an exporter term an output keeps (`_roughness` on a
     // target that packs nothing), so two members never land on one name.
-    let base = base_of(&stem);
-    let file = format!("{name}{}.dds", &stem[base.len().min(stem.len())..]);
+    let file = format!("{name}{}.dds", member_tail(&stem, skin));
     Some(match p.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.join(file),
         _ => PathBuf::from(file),

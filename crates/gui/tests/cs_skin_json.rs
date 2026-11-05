@@ -728,6 +728,16 @@ fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
         let rel = g.strip_prefix("textures/").unwrap_or_else(|| panic!("{g}"));
         assert!(out(&m, rel).is_file(), "{g}");
     }
+    // Final review I1: the joined skin members keep their own tails under the new name.
+    assert_eq!(j["textures"]["wet"], json!("textures/x/ay_wet.dds"), "{j}");
+    assert_eq!(
+        j["textures"]["detail"],
+        json!("textures/x/ay_detail_n.dds"),
+        "{j}"
+    );
+    for f in ["x/ay.dds", "x/ay_wet.dds", "x/ay_detail_n.dds"] {
+        assert!(out(&m, f).is_file(), "{f}");
+    }
 }
 
 /// Fix round 2: an input alias to another folder depth (`set_input_name`) moves the game path and the output, not the
@@ -738,9 +748,7 @@ fn input_aliases_to_another_folder_depth_keep_full_game_paths() {
         let d = tempfile::tempdir().unwrap();
         let r = d.path().join("textures").join(src);
         std::fs::create_dir_all(&r).unwrap();
-        // Diffuse and `_rfaos` only: an input rename does not yet know the `_wet`/`_detail_n` suffixes (it refuses,
-        // mapping `a_wet` onto `a`).
-        for s in ["", "_rfaos"] {
+        for s in ["", "_rfaos", "_wet", "_detail_n"] {
             colour(&r, &format!("a{s}.png"));
         }
         let mut m = opened_skin_at(d.path(), &d.path().join("textures"));
@@ -759,6 +767,88 @@ fn input_aliases_to_another_folder_depth_keep_full_game_paths() {
             "{alias}"
         );
     }
+}
+
+/// Final review I2: an input name keeps the skin `_wet` and `_detail_n` tails, so the detail map is still the set's
+/// `skin_detail`, not a plain `_n`.
+#[test]
+fn input_name_keeps_the_wet_and_detail_tails() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_wet", "_detail_n"] {
+        colour(&r, &format!("a{s}.png"));
+    }
+    let mut m = opened_skin(d.path());
+    let id = id_of(&m, "x/a");
+    m.set_input_name(&id, "textures/x/new").unwrap();
+    idle(&mut m);
+    for (file, alias) in [
+        ("a_wet.png", "new_wet.png"),
+        ("a_detail_n.png", "new_detail_n.png"),
+    ] {
+        assert_eq!(
+            m.read_as_of(&format!("textures/x/{file}")).as_deref(),
+            Some(format!("textures/x/{alias}").as_str()),
+            "{file}"
+        );
+    }
+    let v = view(&m, &id_of(&m, "x/new"));
+    assert_eq!(
+        v.slots.get(&SlotKind::SkinDetail),
+        Some(&SlotFill::Own {
+            item: "textures/x/a_detail_n.png".into()
+        }),
+        "{:?}",
+        v.slots
+    );
+    assert!(matches!(
+        v.slots.get(&SlotKind::SkinWet),
+        Some(SlotFill::Own { .. })
+    ));
+}
+
+/// Final review I1/I2: the Rename dialog reads the skin `_wet` and `_detail_n` as tails in both modes.
+#[test]
+fn rename_dialog_keeps_the_skin_tails() {
+    use sdc_gui::model::rename::{plan_rename, RenameDialog, RenameMode};
+    let d = tempfile::tempdir().unwrap();
+    let m = skin_project(d.path(), "textures/x", &["a"]);
+    let v = view(&m, &id_of(&m, "x/a"));
+    let mut dlg = RenameDialog {
+        mode: RenameMode::Inputs,
+        keys: v.members.clone(),
+        ..RenameDialog::default()
+    };
+    dlg.recipe.suffix = "2".into();
+    let p = plan_rename(&m, &dlg);
+    for (key, new, tail) in [
+        ("textures/x/a_wet.png", "textures/x/a2_wet.png", "_wet"),
+        (
+            "textures/x/a_detail_n.png",
+            "textures/x/a2_detail_n.png",
+            "_detail_n",
+        ),
+    ] {
+        let r = p
+            .rows
+            .iter()
+            .find(|r| r.key == key)
+            .unwrap_or_else(|| panic!("{key}: {:?}", p.rows));
+        assert_eq!(r.new, new);
+        assert_eq!(r.kind, Some((tail.to_string(), tail.to_string())));
+        assert_eq!((&r.problem, &r.warning), (&None, &None));
+    }
+    assert!(p.can_apply(), "{:?}", p.rows);
+    let mut dlg = RenameDialog {
+        mode: RenameMode::Outputs,
+        keys: vec![v.id.clone()],
+        ..RenameDialog::default()
+    };
+    dlg.typed.insert(v.id.clone(), "ay".into());
+    let p = plan_rename(&m, &dlg);
+    assert_eq!(p.rows[0].problem, None, "{:?}", p.rows);
+    assert!(p.can_apply());
 }
 
 /// Fix round 1 #1: a texture with no `textures/...dds` game path is never written; the JSON leaves it out, with a note.

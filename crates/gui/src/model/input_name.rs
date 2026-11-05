@@ -6,9 +6,8 @@ use super::items::ItemKind;
 use super::rename::{
     input_output, lower, plan_rename, split_ext, split_path, RenameDialog, RenameMode, RenameRow,
 };
-use super::sets::{views, SlotFill, SlotKind};
+use super::sets::{member_tail, views, SlotFill, SlotKind};
 use super::AppModel;
-use engine::group::base_of;
 use engine::sets::{fold_id, same_id};
 use std::ops::Range;
 
@@ -159,7 +158,7 @@ impl AppModel {
             let cur = current(k);
             let (_, name) = split_path(&cur);
             let (stem, ext) = split_ext(name);
-            let tail = &stem[base_of(stem).len()..];
+            let tail = member_tail(stem, v.skin);
             d.keys.push(k.clone());
             d.typed.insert(k.clone(), format!("{new_base}{tail}.{ext}"));
         }
