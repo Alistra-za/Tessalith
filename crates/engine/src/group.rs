@@ -304,30 +304,27 @@ fn wet_split(stem: &str, set_key: &str) -> Option<SuffixSplit> {
     wet_tail_split(stem).filter(|s| s.base.to_lowercase() == key_base(set_key).to_lowercase())
 }
 
-/// `x_wet` -> base `x`, suffix `wet`, whatever set it is in.
-fn wet_tail_split(stem: &str) -> Option<SuffixSplit> {
-    let tail = format!("_{SKIN_WET}");
+/// `x_<suffix>` -> base `x`, that suffix, whatever set it is in. `suffix` is ASCII lower-case.
+fn tail_split(stem: &str, suffix: &str) -> Option<SuffixSplit> {
+    let tail = format!("_{suffix}");
     let lower = stem.to_ascii_lowercase();
     lower.strip_suffix(&tail).filter(|b| !b.is_empty())?;
     Some(SuffixSplit {
         // The tail is ASCII, so the cut falls on a char boundary.
         base: stem[..stem.len() - tail.len()].to_string(),
-        suffix: Some(SKIN_WET.to_string()),
+        suffix: Some(suffix.to_string()),
         alias: None,
     })
 }
 
+/// `x_wet` -> base `x`, suffix `wet`, whatever set it is in.
+fn wet_tail_split(stem: &str) -> Option<SuffixSplit> {
+    tail_split(stem, SKIN_WET)
+}
+
 /// `x_detail_n` -> base `x`, suffix `detail_n`, whatever set it is in.
 fn detail_tail_split(stem: &str) -> Option<SuffixSplit> {
-    let tail = format!("_{SKIN_DETAIL}");
-    let lower = stem.to_ascii_lowercase();
-    lower.strip_suffix(&tail).filter(|b| !b.is_empty())?;
-    Some(SuffixSplit {
-        // The tail is ASCII, so the cut falls on a char boundary.
-        base: stem[..stem.len() - tail.len()].to_string(),
-        suffix: Some(SKIN_DETAIL.to_string()),
-        alias: None,
-    })
+    tail_split(stem, SKIN_DETAIL)
 }
 
 /// [`split_suffix_with`] for a member of `set`: as `split_suffix_with`, except that the skin `_wet` member of a set
