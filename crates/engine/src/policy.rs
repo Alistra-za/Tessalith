@@ -2553,10 +2553,10 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         warnings.push(Warning::new(Code::InGreenUnstated, r));
     }
     // `--allow` turns a blocking code into a warning. CFG-UNAVAILABLE is acknowledged only by accepting a
-    // fallback (above), and warnings that `check_profile` raised to error stay errors.
+    // fallback (above), FMT-CS-SKIN-LOADER never (the file would load as nothing in CS), and warnings that `check_profile` raised to error stay errors.
     for w in &mut warnings {
         if w.severity == Severity::Blocking
-            && w.code != Code::CfgUnavailable
+            && !matches!(w.code, Code::CfgUnavailable | Code::FmtCsSkinLoader)
             && allowed(ctx, f, w.code)
         {
             w.severity = Severity::Warning;

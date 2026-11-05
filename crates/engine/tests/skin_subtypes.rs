@@ -239,6 +239,33 @@ fn wet_format_outside_the_cs_loader_list_is_blocked() {
     assert!(d.path().join("out/h.dds").exists());
 }
 
+/// `--allow FMT-CS-SKIN-LOADER` cannot make an unsupported format writable: the file would load as nothing in CS.
+#[test]
+fn allowing_the_loader_code_does_not_unblock_the_format() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "h.png", colour(64));
+    put(d.path(), "h_rfaos.png", colour(64));
+    put(d.path(), "h_wet.png", wet_normal(64));
+    let mut r = req(&d, Target::Cs, &["subtype:skin_wet.format=bc4"]);
+    r.allow.insert(Code::FmtCsSkinLoader);
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let e = Engine::new().unwrap();
+    let plan = e.plan(r, &rep, &CancelToken::default()).unwrap();
+    let j = plan
+        .jobs
+        .iter()
+        .find(|j| j.input.ends_with("h_wet.png"))
+        .unwrap();
+    assert!(
+        matches!(&j.status, engine::policy::JobStatus::Blocked { codes } if codes.contains(&Code::FmtCsSkinLoader)),
+        "{:?} {:?}",
+        j.status,
+        j.warnings
+    );
+    e.run(plan, &rep, &CancelToken::default()).unwrap();
+    assert!(!d.path().join("out/h_wet.dds").exists());
+}
+
 /// The CS loader list is a property of the sub-type and format alone.
 #[test]
 fn cs_skin_loader_list() {
