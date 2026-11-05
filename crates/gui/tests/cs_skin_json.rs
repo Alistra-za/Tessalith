@@ -262,10 +262,7 @@ fn pgpatcher_json_never_names_slot_9_or_10() {
         Answer::Subtype(engine::config::Subtype::PbrAlbedo),
     );
     idle(&mut m);
-    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
-        let _ = m.drop_choice(item, "m/plain", DropChoice::Share);
-        idle(&mut m);
-    }
+    hand_borrow_skin_maps(&mut m);
     let v = view(&m, "m/plain");
     assert!(v.pbr, "plain is a JSON set");
     assert!(
@@ -299,16 +296,58 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
     h
 }
 
+/// `plain` borrows rock02's `_wet` and `_detail_n` (slots 9 and 10) through a hand-edited `sdc-project.toml`: Share
+/// refuses them into a set that is not Advanced skin.
+fn hand_borrow_skin_maps(m: &mut AppModel) {
+    m.edit_docs("borrow", None, true, |_, s| {
+        s.set_borrow("m/plain", 9, Some("m/rock02"));
+        s.set_borrow("m/plain", 10, Some("m/rock02"));
+    });
+    idle(m);
+}
+
+/// Final review M4: Share refuses a `_wet` or `_detail_n` into a set that is not Advanced skin, and a skin set still
+/// takes one.
+#[test]
+fn share_of_wet_or_detail_needs_an_advanced_skin_set() {
+    use sdc_gui::model::sets::DropOutcome;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
+        match m.drop_choice(item, "m/plain", DropChoice::Share) {
+            DropOutcome::Refused(why) => assert!(why.contains("not an Advanced skin set"), "{why}"),
+            other => panic!("{item}: {other:?}"),
+        }
+        assert!(m.drop_replace(item, "m/plain", DropChoice::Share).is_err());
+    }
+    idle(&mut m);
+    let e = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| e.id == "m/plain")
+        .cloned()
+        .unwrap_or_default();
+    assert!(e.borrow.is_empty(), "{:?}", e.borrow);
+    let plain = view(&m, "m/plain");
+    assert!(!plain.slots.contains_key(&SlotKind::SkinWet));
+    // A skin set takes it (rock01 replaces its own `_wet`).
+    share(&mut m, "m/rock02_wet.png", "m/rock01");
+    assert!(matches!(
+        view(&m, "m/rock01").slots.get(&SlotKind::SkinWet),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
 #[test]
 fn wet_and_detail_cards_only_in_advanced_skin_sets() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     // The plain set borrows the skin set's `_wet` and `_detail_n`; its view then holds both slots but is not an
     // Advanced skin set.
-    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
-        let _ = m.drop_choice(item, "m/plain", DropChoice::Share);
-        idle(&mut m);
-    }
+    hand_borrow_skin_maps(&mut m);
     let plain = view(&m, "m/plain");
     assert!(!plain.skin);
     for k in [SlotKind::SkinWet, SlotKind::SkinDetail] {
@@ -985,7 +1024,14 @@ fn a_host_without_the_texture_gets_an_amber_row() {
         &m,
         &a,
         Level::Warning,
-        &format!("wet texture from {b} is not in the export folder"),
+        &format!("The wet texture borrowed from {b} is not exported by {b};"),
+    );
+    // Final review M3: the generic borrow row names slot 9 as the card does, not `slot9`.
+    has_row(
+        &m,
+        &a,
+        Level::Warning,
+        &format!("No file matches Skin wet _wet from {b} (it has none)"),
     );
 }
 

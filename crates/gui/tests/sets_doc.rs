@@ -656,6 +656,53 @@ fn xpmf_shas_live_in_sidecar() {
     );
 }
 
+/// Advanced skin (final review M8): the `.csskin.json` hash record lives in the sidecar table `cs_skin_sha256` as XPMF's
+/// does, reads back on open, survives undo, and a read-only document takes it there and is left as it was.
+#[test]
+fn cs_skin_shas_live_in_sidecar() {
+    use std::collections::BTreeMap;
+    let shas = BTreeMap::from([("textures/x/a.csskin.json".to_string(), "00".to_string())]);
+    let (d, mut s) = doc(Some("[[sets]]\nid = \"a/one\"\n"));
+    let before = s.text();
+    s.set_cs_skin_shas(&shas).unwrap();
+    assert_eq!(s.cs_skin_shas(), shas);
+    let side: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.sidecar_path()).unwrap()).unwrap();
+    assert_eq!(side["cs_skin_sha256"]["textures/x/a.csskin.json"], "00");
+    assert!(s.text().contains("cs_skin_sha256") && s.text().contains("a.csskin.json"));
+    assert_eq!(
+        SetsDoc::open(d.path()).cs_skin_shas(),
+        shas,
+        "read back on open"
+    );
+    // Undo of a later edit keeps the record: it describes the file on disk, which undo does not change.
+    s.set_xpmf("a/one", Some(map(json!({"name": "x"}))));
+    let edited = s.text();
+    s.restore_keeping_json_sha(&before);
+    assert_ne!(s.text(), edited, "the edit is undone");
+    assert_eq!(s.cs_skin_shas(), shas, "kept across undo");
+    assert!(s.text().contains("cs_skin_sha256"), "{}", s.text());
+    s.set_cs_skin_shas(&BTreeMap::new()).unwrap();
+    assert!(s.cs_skin_shas().is_empty());
+    assert!(
+        !s.text().contains("cs_skin_sha256"),
+        "the empty table is removed"
+    );
+
+    let (b, mut r) = doc(Some("[[sets]\nbroken"));
+    assert!(r.read_only());
+    r.set_cs_skin_shas(&shas).unwrap();
+    assert!(!r.is_dirty() && r.entries().is_empty(), "no edit");
+    assert_eq!(r.cs_skin_shas(), shas);
+    let text = std::fs::read_to_string(b.path().join("sdc-project.toml")).unwrap();
+    assert_eq!(text, "[[sets]\nbroken", "the broken file is not touched");
+    assert_eq!(
+        SetsDoc::open(b.path()).cs_skin_shas(),
+        shas,
+        "the sidecar holds it"
+    );
+}
+
 /// XPMF: a hand-edited block keeps its `#` comment lines and a member the GUI cannot convert (an array of tables)
 /// when another key changes; keys absent from the wanted map are removed.
 #[test]

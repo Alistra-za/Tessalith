@@ -301,7 +301,12 @@ impl Missing {
             Missing::File(f) => f.clone(),
             Missing::Borrow { slot, from, empty } => {
                 let none = if *empty { " (it has none)" } else { "" };
-                format!("slot{slot} from {from}{none}")
+                // The skin slots past the game's have no `slotN` a user knows: name them.
+                let name = SlotKind::ALL
+                    .iter()
+                    .find(|k| *slot > LAST_GAME_SLOT && k.slot_number() == Some(*slot))
+                    .map_or_else(|| format!("slot{slot}"), |k| k.label().to_string());
+                format!("{name} from {from}{none}")
             }
         }
     }
@@ -1678,7 +1683,7 @@ impl AppModel {
                 SlotFill::Own { item: existing } | SlotFill::Borrowed { item: existing, .. },
             )) => {
                 // Checked first so a refusal (a packed map, a raw map to share) is not asked about.
-                if let Err(e) = self.choice_allowed(item, slot, choice) {
+                if let Err(e) = self.choice_allowed(item, &target, slot, choice) {
                     return DropOutcome::Refused(e);
                 }
                 return DropOutcome::AskReplace { existing };
@@ -1712,10 +1717,11 @@ impl AppModel {
         self.apply_choice(item, &target, slot, choice, existing)
     }
 
-    /// Why `choice` cannot bring `item` in, if it cannot (whatever the slot holds).
+    /// Why `choice` cannot bring `item` into `target`, if it cannot (whatever the slot holds).
     fn choice_allowed(
         &self,
         item: &str,
+        target: &SetView,
         slot: Option<SlotKind>,
         choice: DropChoice,
     ) -> Result<(), String> {
@@ -1729,6 +1735,15 @@ impl AppModel {
                 "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
                     .into(),
             ),
+            // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
+            DropChoice::Share
+                if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail)) && !target.skin =>
+            {
+                Err(format!(
+                    "{} is not an Advanced skin set; only those use a wet or detail map",
+                    target.id
+                ))
+            }
             DropChoice::Share if slot.is_none() => Err(
                 "only a finished texture can be shared; duplicate the source to use it in two sets"
                     .into(),
@@ -1752,7 +1767,7 @@ impl AppModel {
         choice: DropChoice,
         existing: Option<SlotFill>,
     ) -> Result<(), String> {
-        self.choice_allowed(item, slot, choice)?;
+        self.choice_allowed(item, target, slot, choice)?;
         let id = target.id.clone();
         match choice {
             DropChoice::Move => {
@@ -2535,7 +2550,7 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
                 // The move's own checks, as `drop_choice` makes them (a packed occupant, leaving a locked slot, …).
                 slot_conflict(&existing, slot).or_else(|| {
                     m.occupant(v, Some(slot), None)
-                        .and_then(|_| m.choice_allowed(&i.key, Some(slot), DropChoice::Move))
+                        .and_then(|_| m.choice_allowed(&i.key, v, Some(slot), DropChoice::Move))
                         .err()
                 })
             };

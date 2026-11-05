@@ -90,7 +90,7 @@ You can add your own suffixes through a preset's `suffix_aliases`. See [Presets 
 
 ## Sub-types
 
-There are 33 sub-types in five categories.
+There are 34 sub-types in five categories.
 
 | Sub-type | Category | Default format | Tag (`cs`) | Default alpha | Notes |
 |---|---|---|---|---|---|

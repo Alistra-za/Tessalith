@@ -534,7 +534,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 "{host} owns this diffuse but is not an Advanced skin set; no .csskin.json is written."
             ),
             SkinSkip::HostMissing { slot, host } => format!(
-                "{slot} texture from {host} is not in the export folder; it is left out of the .csskin.json."
+                "The {slot} texture borrowed from {host} is not exported by {host}; it is left out of the .csskin.json."
             ),
         };
         out.push(row(Level::Warning, set_at(&key, &id), text, None));

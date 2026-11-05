@@ -165,7 +165,7 @@ fn setting_resetting_and_one_undo_step_each() {
 }
 
 #[test]
-fn the_skin_table_round_trips_and_unknown_keys_survive() {
+fn the_skin_table_round_trips_and_unknown_keys_are_removed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skin_opened(d.path());
     m.set_skin_value(SKIN, "Reflectance", Some(json!(0.04)));

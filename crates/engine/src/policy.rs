@@ -1511,10 +1511,16 @@ fn encoding_warnings(
         );
     }
     if !cs_skin_loader_ok(st, format) {
+        // Only the formats Tessalith writes that CS reads (not BGRA8 or BC2).
+        let reads = if st == Subtype::SkinDetail {
+            "BC1, BC3, BC5, BC7 or RGBA8"
+        } else {
+            "BC1, BC3, BC7 or RGBA8"
+        };
         add(
             FmtCsSkinLoader,
             format!(
-                "CS's texture loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on {}; {} loads as nothing",
+                "CS's texture loader reads {} only as {reads}; {} loads as nothing",
                 st.id(),
                 format.id().to_uppercase()
             ),

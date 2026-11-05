@@ -11,3 +11,4 @@ Index¶- Exports (PGPatcher, CS PBR, CM, XPMF, Also):	Index	21	back	HB		partial	
 Index¶- GUI Files and Inspector:	Index	23	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
 Index¶- GUI Dialogs and Export:	Index	27	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
 Index¶- Process and docs:	Index	34	back	HB		partial	2026-11-05		goes: the line without HB (HB1 to HB6 govern it); final review docs
+FM¶- **The behaviours stay; only the message goes.**	FM	774	back	HB3	`skin_wet` is BC7 only and the `skin-wet-form` fact and the BC4 exception are gone (HB3)	partial	2026-11-05		goes: `skin_wet_form` still picks BC4 height or BC7 normal; stays: the other behaviours (final review M6)

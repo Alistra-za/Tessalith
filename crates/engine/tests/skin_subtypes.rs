@@ -229,6 +229,18 @@ fn wet_format_outside_the_cs_loader_list_is_blocked() {
         j.status,
         j.warnings
     );
+    // Final review M2: the message lists the formats Tessalith can write that CS reads.
+    let w = j
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::FmtCsSkinLoader)
+        .expect("the loader warning");
+    assert!(
+        w.message
+            .contains("skin_wet only as BC1, BC3, BC7 or RGBA8;"),
+        "{}",
+        w.message
+    );
     let mut r = req(&d, Target::Cs, &["subtype:skin_wet.format=bc4"]);
     r.on_existing = OnExisting::Overwrite;
     let rep = Reporter::new(Arc::new(VecSink::default()), "t");
@@ -283,6 +295,9 @@ fn cs_skin_loader_list() {
     ] {
         assert!(!cs_skin_loader_ok(Subtype::SkinWet, f), "{f:?}");
     }
+    // A detail map also loads as BC5 (CS rebuilds Z), but not as BC4.
+    assert!(cs_skin_loader_ok(Subtype::SkinDetail, Format::Bc5));
+    assert!(!cs_skin_loader_ok(Subtype::SkinDetail, Format::Bc4));
     assert!(cs_skin_loader_ok(Subtype::Diffuse, Format::Bc4));
 }
 
@@ -363,6 +378,26 @@ fn explicit_format_wins_over_the_opaque_fact() {
     assert_eq!(
         detail_job_format(&d, &[DETAIL, "file:**/d.png.format=bc7"]).0,
         Format::Bc7
+    );
+}
+
+/// Final review M2: a detail map's loader message offers BC5 too.
+#[test]
+fn bc4_skin_detail_is_blocked_and_names_bc5() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "d.png", detail_rgba(|_, _| 255));
+    let p = plan(&d, Target::Cs, &[DETAIL, "file:**/d.png.format=bc4"]);
+    let j = job(&p, "d.png");
+    let w = j
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::FmtCsSkinLoader)
+        .unwrap_or_else(|| panic!("{:?}", j.warnings));
+    assert!(
+        w.message
+            .contains("skin_detail only as BC1, BC3, BC5, BC7 or RGBA8;"),
+        "{}",
+        w.message
     );
 }
 

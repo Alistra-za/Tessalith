@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 pub const TITLE: &str = "Advanced skin (Community Shaders)";
 const NOTE: &str = "Written beside the diffuse as a .csskin.json on export";
 
-/// The set's skin members (`_rfaos`, `_sk`, `_wet`): CS binds them through its JSON, so they are listed, not edited.
+/// The set's skin members (`_rfaos`, `_sk`, `_wet`, `_detail_n`): CS binds them through its JSON, so they are listed, not edited.
 fn members(model: &AppModel, v: &SetView) -> Vec<String> {
     model
         .items
@@ -39,7 +39,7 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             ui.weak(NOTE);
             let m = members(model, v);
             ui.weak(if m.is_empty() {
-                "Skin textures: none yet (_rfaos, _sk, _wet)".to_string()
+                "Skin textures: none yet (_rfaos, _sk, _wet, _detail_n)".to_string()
             } else {
                 format!("Skin textures: {}", m.join(", "))
             });
