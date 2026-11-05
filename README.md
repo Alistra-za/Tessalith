@@ -63,7 +63,7 @@ Each format uses the encoder that measured best. The numbers behind the charts a
 
 ### Other formats
 
-![Bar chart of PSNR in dB grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth and cutout alpha, BC4, BC5, BC6H), one bar per encoder, coloured and striped by encoder. Tessalith's patched rgbcx is best on BC1, BC3 and BC4 and ties NVTT 3 on BC5. Intel ISPC is best on BC6H. Missing values are marked not measured.](docs/img/encoder-formats.svg)
+![Bar chart grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth and cutout alpha, BC4, BC5, BC6H). Each bar is an encoder's PSNR difference in dB from Tessalith's encoder for that format, which is 0; each format uses its own images, so bars compare only within a format. Tessalith's patched rgbcx is best on BC1, BC3 and BC4 and ties NVTT 3 on BC5; NVTT 3 is closest elsewhere, 0.08 to 1.17 dB behind. On BC6H Tessalith's Intel ISPC leads. Missing values are marked not measured.](docs/img/encoder-formats.svg)
 
 Footnotes and per-image counts: [Research](docs/wiki/Research.md#other-formats-best-encoders-per-format).
 

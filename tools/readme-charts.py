@@ -209,7 +209,10 @@ def chart_formats():
         ("BC6H HDR (multi-exposure PSNR)", [None, 50.38, 48.00, None, 49.62]),
     ]
     BC6 = len(G) - 1
-    x0, x1, vmin, vmax = 30, 660, 35, 51
+    # Each format has its own image set, so bars show dB against Tessalith's encoder for that
+    # format (rgbcx for BC1-BC5, ISPC for BC6H) and are compared only within a group.
+    REF = [0] * BC6 + [1]
+    x0, x1, vmin, vmax = 30, 700, -5, 0.5
     bh, step = 14, 18
 
     def sx(v):
@@ -227,11 +230,13 @@ def chart_formats():
         '<pattern id="pv" width="8" height="8" patternUnits="userSpaceOnUse">'
         '<rect width="3.5" height="8" class="pl"/></pattern></defs>\n'
     )
-    b = text(10, 20, "Best encoder per format: PSNR in dB, grouped by format", "t")
-    b += text(10, 38, "Higher is better. Bars start at 35 dB, not zero. Colour and stripe show the encoder. Bold label and outline = Tessalith default.",
-              "s")
+    b = text(10, 20, "Other formats: PSNR against Tessalith's encoder, in dB", "t")
+    b += text(10, 38, "Each format is scored on its own images, so compare bars within a format only. "
+              "0 = Tessalith default; left = worse.", "s")
     lx = 10
     for i, name in enumerate(ENC):
+        if i == 0:
+            continue  # rgbcx is only ever the 0 line, never a bar
         b += '<rect x="%d" y="48" width="14" height="12" class="f%d"/>\n' % (lx, COL[i])
         if PAT[i]:
             b += '<rect x="%d" y="48" width="14" height="12" fill="url(#%s)"/>\n' % (lx, PAT[i])
@@ -240,42 +245,45 @@ def chart_formats():
     top = 78
     gh = len(ENC) * step + 22
     bot = top + gh * len(G)
-    for t in (35, 40, 45, 50):
-        b += '<path class="g" d="M%.1f %dV%d"/>\n' % (sx(t), top, bot - 4)
-        b += text(sx(t), bot + 8, str(t), "m", "middle")
+    for t in range(-5, 1):
+        b += '<path class="%s" d="M%.1f %dV%d"/>\n' % ("z" if t == 0 else "g", sx(t), top, bot - 4)
+        b += text(sx(t), bot + 8, num(t, dec=0), "m", "middle")
     for gi, (title, vals) in enumerate(G):
         gy = top + gi * gh
+        ref = vals[REF[gi]]
         b += text(10, gy + 10, title, "b")
         for k, v in enumerate(vals):
             by = gy + 16 + k * step
+            if k == REF[gi]:
+                b += text(sx(0) - 6, by + bh - 2, ENC[k].split(" (")[0] + " = 0 (Tessalith default)", "b", "end")
+                continue
             if v is None:
                 lab = NM + "†" if (ENC[k] == "Compressonator" and gi == BC6) else NM
-                b += text(sx(vmin) + 6, by + bh - 2, lab, "s")
+                b += text(sx(0) - 6, by + bh - 2, lab, "s", "end")
                 continue
-            w = sx(v) - sx(vmin)
+            d = round(v - ref, 2)
+            xa, xb = sorted((sx(d), sx(0)))
             b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" class="f%d"/>\n' % (
-                sx(vmin), by, w, bh, COL[k])
+                xa, by, xb - xa, bh, COL[k])
             if PAT[k]:
                 b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" fill="url(#%s)"/>\n' % (
-                    sx(vmin), by, w, bh, PAT[k])
-            dflt = (k == 0 and gi < BC6) or (k == 1 and gi == BC6)  # Tessalith defaults: rgbcx BC1-5, ISPC BC6H
-            if dflt:
-                b += '<rect x="%.1f" y="%d" width="%.1f" height="%d" class="df"/>\n' % (
-                    sx(vmin), by, w, bh)
-            b += text(sx(v) + (7 if dflt else 5), by + bh - 2, "%.2f" % v, "b" if dflt else "s")
+                    xa, by, xb - xa, bh, PAT[k])
+            lab = "0.00 (tie)" if d == 0 else num(d, signed=True)
+            b += text(xa - 5, by + bh - 2, lab, "s", "end") if d < 0 else text(xb + 5, by + bh - 2, lab, "s")
     b += text(10, bot + 32, "Tessalith's rgbcx is patched: BC1 endpoints scored on both the NVIDIA and AMD decoders, "
               "and a wider BC4 block search.", "s")
     b += text(10, bot + 48, "BC3 to BC5 are decoded rounding to nearest, as GPUs do. The full table is in the wiki (Research).",
               "s")
     b += text(10, bot + 64, "† Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.", "s")
-    desc = ("Bar chart of PSNR in dB, grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth "
-            "and cutout alpha, BC4, BC5 RG, BC6H multi-exposure), one bar per encoder, with the encoder "
-            "shown by colour and stripe pattern. Tessalith's patched rgbcx is best on BC1 (39.51 NVIDIA, "
-            "39.75 AMD), BC3 (49.50 premultiplied, 50.30 cutout alpha) and BC4 (49.10), and ties NVTT 3 "
-            "on BC5 (47.16). NVTT 3 is second on most formats. Intel ISPC is best on BC6H (50.38). rgbcx "
-            "and Compressonator BC6H values were not measured. The Tessalith default encoder per format "
-            "(rgbcx for BC1 to BC5, Intel ISPC for BC6H) has an outline and a bold label.")
-    return svg(780, bot + 74, "Encoders compared by format, PSNR", desc, defs + b)
+    desc = ("Bar chart grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth and cutout "
+            "alpha, BC4, BC5 RG, BC6H multi-exposure). Each bar is an encoder's PSNR difference in dB "
+            "from Tessalith's default encoder for that format, which is 0; bars to the left are worse. "
+            "Each format uses its own images, so bars compare only within a format. Tessalith's patched "
+            "rgbcx is best on BC1, BC3 and BC4; NVTT 3 is closest, 0.08 to 1.17 dB behind, and ties it "
+            "on BC5. The largest gap is ISPC on BC3 cutout alpha, 4.57 dB behind. On BC6H, Tessalith's "
+            "Intel ISPC leads NVTT 3 by 2.38 dB and texconv by 0.76 dB. rgbcx and Compressonator BC6H "
+            "values were not measured.")
+    return svg(780, bot + 74, "Encoders compared by format, PSNR against Tessalith", desc, defs + b)
 
 
 # ------------------------------------- chart 3: BC3 against BC7 alpha weights
