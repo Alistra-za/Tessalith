@@ -349,12 +349,17 @@ fn skin_project(dir: &Path, folder: &str, bases: &[&str]) -> AppModel {
 }
 
 fn opened_skin(dir: &Path) -> AppModel {
+    opened_skin_at(dir, dir)
+}
+
+/// The project at `root` (under `dir`), exported to `<dir>/export`.
+fn opened_skin_at(dir: &Path, root: &Path) -> AppModel {
     let settings = GuiSettings {
         export_folder: Some(dir.join("export")),
         ..GuiSettings::default()
     };
     let mut m = AppModel::new(settings, None, session());
-    m.open_folder(dir.to_path_buf());
+    m.open_folder(root.to_path_buf());
     idle(&mut m);
     support::choose_export(&mut m, dir.join("export"));
     assert_eq!(m.target, engine::config::Target::Cs);
@@ -687,4 +692,90 @@ fn second_export_records_ours() {
         .find(|l| l.kind == JsonKind::CsSkin)
         .expect("the CS skin line");
     assert_eq!(l.state, DiskState::Ours);
+}
+
+/// Fix round 1 #1: a project opened at its `textures` folder writes outputs without that folder; renamed outputs
+/// (and a borrowed renamed one) still get complete `textures/...` game paths.
+#[test]
+fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for base in ["a", "b"] {
+        for s in ["", "_rfaos", "_wet", "_detail_n"] {
+            colour(&r, &format!("{base}{s}.png"));
+        }
+    }
+    let mut m = opened_skin_at(d.path(), &d.path().join("textures"));
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    m.set_output_name(&a, Some("ay")).unwrap();
+    idle(&mut m);
+    m.set_output_name(&b, Some("bee")).unwrap();
+    idle(&mut m);
+    share(&mut m, "x/b_rfaos.png", &a);
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "x/ay.csskin.json"));
+    assert_eq!(
+        j["textures"]["controls"],
+        json!("textures/x/bee_rfaos.dds"),
+        "{j}"
+    );
+    // Every path is a written file, under `textures/` (the export folder holds `x/...` here).
+    for k in ["controls", "wet", "detail"] {
+        let g = j["textures"][k]
+            .as_str()
+            .unwrap_or_else(|| panic!("{k}: {j}"));
+        let rel = g.strip_prefix("textures/").unwrap_or_else(|| panic!("{g}"));
+        assert!(out(&m, rel).is_file(), "{g}");
+    }
+}
+
+/// Fix round 1 #1: a texture with no `textures/...dds` game path is never written; the JSON leaves it out, with a note.
+#[test]
+fn a_texture_outside_textures_is_left_out_with_a_note() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("m");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos"] {
+        colour(&r, &format!("h{s}.png"));
+    }
+    let mut m = opened_skin(d.path());
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "m/h.csskin.json"));
+    assert!(j.get("textures").is_none(), "{j}");
+    assert!(
+        notes(&m).contains("controls left out of the CS skin JSON"),
+        "{}",
+        notes(&m)
+    );
+}
+
+/// R4: a borrowed slot whose host has no file there (its grey `_wet` is not exported) is a plan-time `HostMissing`,
+/// and the JSON leaves it out.
+#[test]
+fn a_borrow_from_a_host_without_that_texture_is_host_missing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    share(&mut m, "textures/x/b_wet.png", &a);
+    grey(&d.path().join("textures/x"), "b_wet.png");
+    m.replan();
+    idle(&mut m);
+    let (plan, skips) = skin_json_plan(&m);
+    assert!(
+        skips.iter().any(|(id, _, s)| *id == a
+            && *s
+                == SkinSkip::HostMissing {
+                    slot: "wet",
+                    host: b.clone()
+                }),
+        "{skips:?} {:?}",
+        view(&m, &a).missing
+    );
+    let row = plan
+        .iter()
+        .find(|(id, ..)| *id == a)
+        .expect("a still writes");
+    assert_eq!(row.3.wet, None);
+    assert!(row.3.controls.is_some());
 }

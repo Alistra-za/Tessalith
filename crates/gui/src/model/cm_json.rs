@@ -303,8 +303,7 @@ pub fn refuse_clashes(out: &mut [CmTarget], exporting: impl Fn(&str) -> bool) {
     }
 }
 
-use super::history::{orphans, record_key, recorded, records_at, remove_own_case_twin, sha256_of};
-use engine::dds::may_replace;
+use super::history::{orphans, records_at};
 
 use std::path::PathBuf;
 
@@ -394,37 +393,19 @@ pub fn finish(
     let mut written = 0;
     for (rel, text) in &p.files {
         let path = p.root.join(rel);
-        let key = record_key(&path);
-        let last = out.get(&key).cloned();
-        let last = last.as_deref();
         let dds = path.with_extension("dds");
-        // O6 (as in cs_pbr_export): a case-only rename drops sdc's own unchanged file under the old name; a hand
-        // edit stays.
-        if dds.is_file() {
-            remove_own_case_twin(&path, last);
-        }
-        let skip = if !dds.is_file() {
-            Some(format!(
+        if !dds.is_file() {
+            notes.push(format!(
                 "{}: {} was not exported; JSON not written",
                 path.display(),
                 dds.file_name().unwrap_or_default().to_string_lossy()
-            ))
-        } else if let Err(k) = may_replace(&path, text.as_bytes(), recorded(last)) {
-            Some(k.note(&path))
-        } else {
-            match engine::dds::write_atomic(&path, text.as_bytes()) {
-                Ok(()) => {
-                    written += 1;
-                    if let Some(s) = sha256_of(&path) {
-                        out.insert(key, s);
-                    }
-                    None
-                }
-                Err(e) => Some(format!("{} not written: {e}", path.display())),
-            }
-        };
-        if let Some(n) = skip {
-            notes.push(n);
+            ));
+            continue;
+        }
+        // O6 (as in cs_pbr_export): a case-only rename drops sdc's own unchanged file under the old name; a hand
+        // edit stays.
+        if super::json_finish::guarded_write(&path, text, &mut out, notes) {
+            written += 1;
         }
     }
     if written > 0 {

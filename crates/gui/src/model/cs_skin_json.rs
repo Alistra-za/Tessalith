@@ -1,14 +1,15 @@
 //! Community Shaders Advanced Skin material files (design 2026-11-05): one `<diffuse>.csskin.json` beside the diffuse
 //! of each cs Advanced skin set, written after a clean export with the other JSON kinds' guard. No egui types.
-use super::history::{orphans, record_key, recorded, records_at, remove_own_case_twin, sha256_of};
-use super::sets::{engine_inputs, game_path_in, views, SlotFill, SlotKind};
+use super::history::{orphans, records_at};
+use super::sets::{views, Missing, SlotFill, SlotKind};
 use super::skin::{skin_field, Kind};
 use super::xpmf_json::data_rel;
 use super::AppModel;
 use engine::config::{Subtype, Target};
+use engine::policy::ResolvedJob;
 use serde_json::{json, Map, Value as Json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// CS `Editor/Files.cpp` `Fingerprint`: FNV-1a 64 over the file's bytes.
@@ -142,13 +143,50 @@ fn skin_only(st: Subtype) -> bool {
     )
 }
 
+/// The game path the game loads a job's output from: its path under the export root `out_root`, re-based on its
+/// source's game path (an output mirrors its source's place under the opened folder, which can sit above or inside
+/// `textures`, so a renamed output or a project opened at `textures` still gets `textures/...`). `Err` unless it is
+/// `textures/...dds` in lower-case ASCII with `/`: CS ignores a whole file for one bad path.
+fn output_game_path(m: &AppModel, out_root: &Path, job: &ResolvedJob) -> Result<String, String> {
+    let comps = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect()
+    };
+    let out = job
+        .output
+        .strip_prefix(out_root)
+        .map(comps)
+        .map_err(|_| format!("{} is outside the export folder", job.output.display()))?;
+    let src = m
+        .root
+        .as_deref()
+        .and_then(|r| job.input.strip_prefix(r).ok())
+        .map_or(out.len(), |r| r.components().count());
+    let game: Vec<&str> = job.game_path.split('/').collect();
+    let parts: Vec<String> = match game.len().checked_sub(src) {
+        Some(n) => game[..n].iter().map(|s| s.to_string()).chain(out).collect(),
+        None => out.into_iter().skip(src - game.len()).collect(),
+    };
+    let g = parts.join("/").to_ascii_lowercase();
+    let shape = g.starts_with("textures/")
+        && g.ends_with(".dds")
+        && g.is_ascii()
+        && g.split('/').all(|c| !c.is_empty() && c != "." && c != "..");
+    if shape {
+        Ok(g)
+    } else {
+        Err(format!("{g} is not a textures/...dds game path"))
+    }
+}
+
 fn build_plan(m: &AppModel) -> Plan {
     let mut p = Plan::default();
     if m.target != Target::Cs {
         return p;
     }
     let vs = views(m);
-    let mut paths = None;
+    let out_root = m.output_root();
     for v in vs.iter() {
         let job = |k: &str| m.item(k).and_then(|i| i.job.as_ref());
         let has_skin_member = v
@@ -180,7 +218,6 @@ fn build_plan(m: &AppModel) -> Plan {
         let Some(dj) = job(diffuse) else {
             continue;
         };
-        let paths = paths.get_or_insert_with(|| engine_inputs(m).1);
         let mut row = PlanRow {
             id: v.id.clone(),
             key: v.key.clone(),
@@ -198,28 +235,30 @@ fn build_plan(m: &AppModel) -> Plan {
             let Some(item) = fill.and_then(SlotFill::item) else {
                 continue;
             };
+            // A slot's item always has a job (`slot_of`); a grey `_wet` has none, so it fills no slot.
             let Some(j) = job(item) else {
-                // R4: a host that plans no output for the slot. An own member without a job (a grey `_wet`) has its
-                // own row from the engine.
-                if let Some(SlotFill::Borrowed { from, .. }) = fill {
-                    skip(SkinSkip::HostMissing {
-                        slot,
-                        host: from.clone(),
-                    });
-                }
                 continue;
             };
-            // The PGPatcher JSON's rule for slot paths (P1, P6, P11), folded as game paths are (Note BF).
-            match game_path_in(m, &vs, paths, item) {
+            match output_game_path(m, &out_root, j) {
                 Ok(g) => {
-                    *row.material.texture_mut(slot) =
-                        Some(g.replace('\\', "/").to_ascii_lowercase());
+                    *row.material.texture_mut(slot) = Some(g);
                     row.outputs.push((slot, j.output.clone()));
                 }
                 Err(why) => row.notes.push(format!(
                     "{}: {slot} left out of the CS skin JSON: {why}",
                     v.id
                 )),
+            }
+        }
+        // R4: a borrow whose host has nothing in that slot (its grey `_wet` is not exported) or is gone.
+        for miss in &v.missing {
+            if let Missing::Borrow { slot: n, from, .. } = miss {
+                if let Some(&(slot, _)) = SLOTS.iter().find(|(_, k)| k.slot_number() == Some(*n)) {
+                    skip(SkinSkip::HostMissing {
+                        slot,
+                        host: from.clone(),
+                    });
+                }
             }
         }
         p.rows.push(row);
@@ -346,9 +385,9 @@ pub(super) fn prepare(m: &AppModel) -> Option<PendingCsSkin> {
 }
 
 /// The file's text as it is now: `authoredFor` from the diffuse on disk, textures not on disk left out (returned).
-/// `None` while the diffuse cannot be read.
-fn text_now(f: &CsSkinFile) -> Option<(String, Vec<&'static str>)> {
-    let bytes = std::fs::read(&f.diffuse).ok()?;
+/// `Err` while the diffuse cannot be read.
+fn text_now(f: &CsSkinFile) -> std::io::Result<(String, Vec<&'static str>)> {
+    let bytes = std::fs::read(&f.diffuse)?;
     let mut mat = f.material.clone();
     let mut dropped = vec![];
     for (slot, out) in &f.outputs {
@@ -358,7 +397,7 @@ fn text_now(f: &CsSkinFile) -> Option<(String, Vec<&'static str>)> {
         }
     }
     mat.authored_for = Some((bytes.len() as u64, fnv1a64(&bytes)));
-    Some((material_text(&mat), dropped))
+    Ok((material_text(&mat), dropped))
 }
 
 /// After a clean export: write each file whose diffuse is on disk, unless it was edited outside Tessalith, then report
@@ -373,13 +412,22 @@ pub(super) fn finish(
     let mut written = 0;
     for f in &p.files {
         let path = p.root.join(&f.rel);
-        let Some((text, dropped)) = text_now(f) else {
-            notes.push(format!(
-                "{}: {} was not exported; CS skin JSON not written",
-                path.display(),
-                f.diffuse.file_name().unwrap_or_default().to_string_lossy()
-            ));
-            continue;
+        let (text, dropped) = match text_now(f) {
+            Ok(t) => t,
+            Err(e) => {
+                let name = f.diffuse.file_name().unwrap_or_default().to_string_lossy();
+                notes.push(match e.kind() {
+                    std::io::ErrorKind::NotFound => format!(
+                        "{}: {name} was not exported; CS skin JSON not written",
+                        path.display()
+                    ),
+                    _ => format!(
+                        "{}: CS skin JSON not written: {name} could not be read ({e})",
+                        path.display()
+                    ),
+                });
+                continue;
+            }
         };
         for slot in dropped {
             notes.push(format!(
@@ -387,22 +435,8 @@ pub(super) fn finish(
                 path.display()
             ));
         }
-        let key = record_key(&path);
-        let last = out.get(&key).cloned();
-        let last = last.as_deref();
-        remove_own_case_twin(&path, last);
-        if let Err(k) = engine::dds::may_replace(&path, text.as_bytes(), recorded(last)) {
-            notes.push(k.note(&path));
-            continue;
-        }
-        match engine::dds::write_atomic(&path, text.as_bytes()) {
-            Ok(()) => {
-                written += 1;
-                if let Some(s) = sha256_of(&path) {
-                    out.insert(key, s);
-                }
-            }
-            Err(e) => notes.push(format!("{} not written: {e}", path.display())),
+        if super::json_finish::guarded_write(&path, &text, &mut out, notes) {
+            written += 1;
         }
     }
     if written > 0 {
@@ -442,7 +476,7 @@ impl super::json_finish::Guarded for PendingCsSkin {
         let files: Vec<(String, String)> = self
             .files
             .iter()
-            .filter_map(|f| Some((f.rel.clone(), text_now(f)?.0)))
+            .filter_map(|f| Some((f.rel.clone(), text_now(f).ok()?.0)))
             .collect();
         super::also::current_files(&self.root, &files)
     }
@@ -451,5 +485,79 @@ impl super::json_finish::Guarded for PendingCsSkin {
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
         d.set_cs_skin_shas(shas)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn pending(
+        root: &Path,
+        diffuse: PathBuf,
+        outputs: Vec<(&'static str, PathBuf)>,
+    ) -> PendingCsSkin {
+        PendingCsSkin {
+            root: root.into(),
+            files: vec![CsSkinFile {
+                rel: "textures/h.csskin.json".into(),
+                diffuse,
+                material: SkinMaterial {
+                    controls: Some("textures/h_rfaos.dds".into()),
+                    ..Default::default()
+                },
+                outputs,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// The finish-time drop: a texture the export did not leave on disk is left out, with a note; the file is written.
+    #[test]
+    fn a_texture_missing_at_the_end_is_left_out_with_a_note() {
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("textures");
+        std::fs::create_dir_all(&t).unwrap();
+        std::fs::write(t.join("h.dds"), b"DDS x").unwrap();
+        let p = pending(
+            d.path(),
+            t.join("h.dds"),
+            vec![("controls", t.join("h_rfaos.dds"))],
+        );
+        let mut notes = vec![];
+        let shas = finish(&p, &BTreeMap::new(), &mut notes);
+        let text = std::fs::read_to_string(t.join("h.csskin.json")).unwrap();
+        assert!(!text.contains("textures/h_rfaos.dds"), "{text}");
+        assert!(text.contains("authoredFor"), "{text}");
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("the controls texture is not in the export folder")),
+            "{notes:?}"
+        );
+        assert_eq!(shas.len(), 1);
+    }
+
+    /// Fix round 1 #2: a missing diffuse and an unreadable one (here a folder) say which, with the error.
+    #[test]
+    fn a_missing_diffuse_and_an_unreadable_one_get_their_own_notes() {
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("textures");
+        std::fs::create_dir_all(t.join("h.dds")).unwrap();
+        for (diffuse, want, not) in [
+            (t.join("gone.dds"), "was not exported", "could not be read"),
+            (t.join("h.dds"), "could not be read", "was not exported"),
+        ] {
+            let mut notes = vec![];
+            finish(
+                &pending(d.path(), diffuse, vec![]),
+                &BTreeMap::new(),
+                &mut notes,
+            );
+            let all = notes.join("\n");
+            assert!(all.contains(want) && !all.contains(not), "{all}");
+            assert!(!t.join("h.csskin.json").exists());
+        }
     }
 }

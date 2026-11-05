@@ -4,7 +4,39 @@ use super::{also, AppModel};
 use crate::sets_doc::SetsDoc;
 use engine::also::Phase;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// One guarded JSON write (complex material, CS skin): drop sdc's own case twin (O6), keep a file Tessalith did not
+/// write or cannot read, else write `text` atomically and record its hash in `out`. A kept or failed file adds its
+/// note. Returns whether it was written.
+pub(super) fn guarded_write(
+    path: &Path,
+    text: &str,
+    out: &mut BTreeMap<String, String>,
+    notes: &mut Vec<String>,
+) -> bool {
+    use super::history::{record_key, recorded, remove_own_case_twin, sha256_of};
+    let key = record_key(path);
+    let last = out.get(&key).cloned();
+    let last = last.as_deref();
+    remove_own_case_twin(path, last);
+    if let Err(k) = engine::dds::may_replace(path, text.as_bytes(), recorded(last)) {
+        notes.push(k.note(path));
+        return false;
+    }
+    match engine::dds::write_atomic(path, text.as_bytes()) {
+        Ok(()) => {
+            if let Some(s) = sha256_of(path) {
+                out.insert(key, s);
+            }
+            true
+        }
+        Err(e) => {
+            notes.push(format!("{} not written: {e}", path.display()));
+            false
+        }
+    }
+}
 
 /// What a kind of guarded JSON export hands the shared finisher.
 pub(super) trait Guarded {
