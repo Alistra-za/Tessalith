@@ -36,6 +36,9 @@ pub struct GuiSettings {
     /// Note FC12 (DO4–DO6): the Match selector a user chose, by project root and set id (`model::input_name::match_key`).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub match_slots: std::collections::BTreeMap<String, u8>,
+    /// Note HC4: the kinds of Problems row a user hid, by project root (lower case, `/`): code names.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub problems_hidden: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 /// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on.

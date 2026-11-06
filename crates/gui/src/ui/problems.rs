@@ -3,7 +3,10 @@
 //! is the row's button (`Problem::fix`).
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
-use crate::model::bottom::{filtered, flagged, problems, At, Fix, Level, Problem, ProblemsFilter};
+use crate::model::bottom::{
+    can_hide, filtered, flagged, kinds, problems, At, Fix, Level, Problem, ProblemsFilter,
+};
+use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::meshes::NifTab;
 use crate::model::sets::Missing;
@@ -11,6 +14,7 @@ use crate::model::shell::ShellRequest;
 use crate::model::{Answer, AppModel};
 use crate::pgp::settings::feature_key;
 use eframe::egui;
+use engine::codes::Code;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -51,28 +55,97 @@ fn row_name(p: &Problem) -> String {
 
 type Rows = Arc<Vec<Problem>>;
 
-/// `filtered` at most once per change: keyed on the (cached) problems build and the filter. Also whether the
-/// `Checks` pill shows (the set's check rows while a Set filter is on, else the project's; K6, review M2), and the
-/// project's rows with a suggestion, which "Accept all suggestions" decides (Note FB9).
-fn rows(ui: &egui::Ui, model: &AppModel) -> (Rows, usize, usize) {
+/// What the tab draws from one problems build.
+#[derive(Clone)]
+struct Listed {
+    all: Rows,
+    filter: Option<ProblemsFilter>,
+    hidden_kinds: Vec<Code>,
+    rows: Rows,
+    checks: usize,
+    suggestions: usize,
+    /// Rows the hidden kinds take out of this filter's list (Note HC4).
+    hidden: usize,
+    /// Any row of the project can be hidden, so `Kinds ▾` shows.
+    hideable: bool,
+}
+
+/// `filtered` at most once per change: keyed on the (cached) problems build, the filter and the hidden kinds. Also
+/// whether the `Checks` pill shows (the set's check rows while a Set filter is on, else the project's; K6, review M2),
+/// and the project's rows with a suggestion, which "Accept all suggestions" decides (Note FB9).
+fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let all = problems(model);
     let f = model.bottom.filter.clone();
+    let hidden_kinds = model.hidden_kinds();
     let id = egui::Id::new("problems-rows");
-    if let Some((a, ff, out, n, s)) =
-        ui.data(|d| d.get_temp::<(Rows, Option<ProblemsFilter>, Rows, usize, usize)>(id))
-    {
-        if Arc::ptr_eq(&a, &all) && ff == f {
-            return (out, n, s);
+    if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
+        if Arc::ptr_eq(&l.all, &all) && l.filter == f && l.hidden_kinds == hidden_kinds {
+            return l;
         }
     }
     let out: Rows = filtered(model, f.as_ref());
-    let n = match &f {
+    let checks = match &f {
         Some(ProblemsFilter::Set(_)) => out.iter().filter(|p| p.level == Level::Check).count(),
         _ => flagged(model).check_rows,
     };
-    let s = all.iter().filter(|p| p.suggested.is_some()).count();
-    ui.data_mut(|d| d.insert_temp(id, (all, f, out.clone(), n, s)));
-    (out, n, s)
+    let is_hidden = |p: &Problem| can_hide(p) && p.code.is_some_and(|c| hidden_kinds.contains(&c));
+    let hidden = out.iter().filter(|p| is_hidden(p)).count();
+    let rows: Rows = if hidden == 0 {
+        out
+    } else {
+        Arc::new(out.iter().filter(|p| !is_hidden(p)).cloned().collect())
+    };
+    let l = Listed {
+        suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
+        hideable: all.iter().any(can_hide),
+        all,
+        filter: f,
+        hidden_kinds: hidden_kinds.clone(),
+        rows,
+        checks,
+        hidden,
+    };
+    ui.data_mut(|d| d.insert_temp(id, l.clone()));
+    l
+}
+
+/// The `Kinds ▾` menu (Note HC4): one tick per kind of row the project has, unticked when hidden. The menu stays open,
+/// so several kinds go in one visit.
+fn kinds_menu(ui: &mut egui::Ui, model: &AppModel, hidden_rows: usize) -> Option<Act> {
+    use egui::containers::menu::{MenuButton, MenuConfig};
+    let label = match hidden_rows {
+        0 => "Kinds ▾".to_string(),
+        n => format!("Kinds ▾ ({n} hidden)"),
+    };
+    let config = MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let mut act = None;
+    let (button, _) = MenuButton::new(label).config(config).ui(ui, |ui| {
+        let hidden = model.hidden_kinds();
+        for (code, n) in kinds(model) {
+            let mut shown = !hidden.contains(&code);
+            // The sentence's first half names the kind; its second half is the fix for one row.
+            let what = code_text::code_line(code)
+                .split(" — ")
+                .next()
+                .unwrap_or_default();
+            let what = match what {
+                "" | "Tessalith reported a problem" => code.as_str(),
+                w => w,
+            };
+            if ui
+                .checkbox(&mut shown, format!("{what} ({n})"))
+                .on_hover_text(code.as_str())
+                .changed()
+            {
+                act = Some(Act::HideKind(code, !shown));
+            }
+        }
+    });
+    button.on_hover_text(
+        "Hide the kinds of warning and info row you don't need. Blocks and questions always show, and Export's review \
+         still lists every warning.",
+    );
+    act
 }
 
 /// The row that had keyboard focus and its index: when it leaves the list (its question was answered), focus goes to
@@ -92,6 +165,7 @@ enum Act {
     Apply(Fix, At),
     Filter(Option<ProblemsFilter>),
     AcceptAll,
+    HideKind(Code, bool),
 }
 
 /// The pill's state and where a click takes the filter: on with a set keeps the set (review M2).
@@ -302,7 +376,14 @@ fn fix_button(
 
 pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     // The count comes from the same cached build as the list (K6), not a count per frame.
-    let (list, checks, suggestions) = rows(ui, model);
+    let Listed {
+        rows: list,
+        checks,
+        suggestions,
+        hidden,
+        hideable,
+        ..
+    } = rows(ui, model);
     let off = model.fix_off();
     let sets_off = model.sets_read_only_reason();
     let mut act = None;
@@ -313,7 +394,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .map_or(k.clone(), |v| v.id.clone())
     };
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
-    if model.bottom.filter.is_some() || checks > 0 || suggestions > 0 {
+    if model.bottom.filter.is_some() || checks > 0 || suggestions > 0 || hideable {
         ui.horizontal(|ui| {
             // Note FB9 (owner amendment A): the project's suggestions, one undo step; written by Save.
             if suggestions > 0 {
@@ -356,10 +437,19 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     act = Some(Act::Filter(pill_to.clone()));
                 }
             }
+            if hideable {
+                if let Some(a) = kinds_menu(ui, model, hidden) {
+                    act = Some(a);
+                }
+            }
         });
     }
     if list.is_empty() {
-        ui.weak("No problems");
+        if hidden > 0 {
+            ui.weak("Every row here is hidden — see Kinds");
+        } else {
+            ui.weak("No problems");
+        }
     }
     let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let m = &*model;
@@ -560,6 +650,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::Apply(fix, at)) => apply_fix(ui, model, fix, at),
         Some(Act::Filter(f)) => model.bottom.filter = f,
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
+        Some(Act::HideKind(code, hide)) => model.set_kind_hidden(code, hide),
         None => {}
     }
 }

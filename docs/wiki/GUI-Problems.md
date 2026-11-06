@@ -81,4 +81,6 @@ A click on a texture, set or file switches to the Textures view and selects it.
 
 The list opens narrowed when you arrive from a count: **N undecided** at the foot of the Textures column (*Undecided only ×*), a set's **⚠** badge, or the set editor's "N problems in this set — Show in Problems" line (*Set: name ×*). Click the chip to see everything. The **Checks** pill narrows to check rows (click again to undo); with a set filter on, it narrows to that set's check rows and keeps the set.
 
+**Kinds ▾** hides kinds of warning and info row, such as every missing specular, in this project. It lists each kind with its row count, and shows how many rows are hidden. Hiding only shortens this list: blocks and questions can't be hidden, and Review still lists every warning before an export.
+
 A green dot marks a texture tile or set with nothing to decide. The **Export** button's states are on [Review and Export](GUI-Review-and-Export.md#export).

@@ -25,7 +25,66 @@ pub struct BottomPanel {
     pub filter: Option<ProblemsFilter>,
 }
 
+/// Note HC4: a row its kind can hide. A block or a question never hides, and hiding never touches the Review gate,
+/// which reads `problems` whole.
+pub fn can_hide(p: &Problem) -> bool {
+    p.code.is_some() && matches!(p.level, Level::Warning | Level::Info)
+}
+
+/// Note HC4: each kind the project's rows can hide and its row count, by code name.
+pub fn kinds(m: &AppModel) -> Vec<(engine::codes::Code, usize)> {
+    let mut out = std::collections::BTreeMap::new();
+    for p in problems(m).iter().filter(|p| can_hide(p)) {
+        if let Some(c) = p.code {
+            out.entry(c.as_str()).or_insert((c, 0)).1 += 1;
+        }
+    }
+    out.into_values().collect()
+}
+
 impl AppModel {
+    /// The `gui.toml` key of this project's hidden kinds (Note HC4).
+    fn problems_key(&self) -> Option<String> {
+        let root = self.root.as_ref()?;
+        Some(root.to_string_lossy().replace('\\', "/").to_lowercase())
+    }
+
+    /// The kinds of row hidden in this project (Note HC4); empty without a project.
+    pub fn hidden_kinds(&self) -> Vec<engine::codes::Code> {
+        let names = self
+            .problems_key()
+            .and_then(|k| self.settings.problems_hidden.get(&k));
+        let Some(names) = names else {
+            return vec![];
+        };
+        engine::codes::Code::ALL
+            .iter()
+            .copied()
+            .filter(|c| names.contains(c.as_str()))
+            .collect()
+    }
+
+    /// Hide or show one kind of row in this project; `gui.toml` keeps it.
+    pub fn set_kind_hidden(&mut self, code: engine::codes::Code, hidden: bool) {
+        let Some(key) = self.problems_key() else {
+            return;
+        };
+        let names = self
+            .settings
+            .problems_hidden
+            .entry(key.clone())
+            .or_default();
+        if hidden {
+            names.insert(code.as_str().to_string());
+        } else {
+            names.remove(code.as_str());
+        }
+        if names.is_empty() {
+            self.settings.problems_hidden.remove(&key);
+        }
+        self.save_settings();
+    }
+
     /// Open the panel on `tab`.
     pub fn show_tab(&mut self, tab: BottomTab) {
         self.bottom = BottomPanel {
