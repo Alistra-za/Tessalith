@@ -551,6 +551,38 @@ fn slot_textures_skip_disabled_effect_and_derived_shapes() {
     );
 }
 
+/// Note HC6: a texture only a TXST names is known, in that slot. An overridden TXST's old path and a record whose
+/// master is not loaded are not.
+#[test]
+fn a_texture_only_in_a_winning_txst_is_known_in_its_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    let s = modscan::store::Store::open(&db).unwrap();
+    s.conn()
+        .execute_batch(
+            "INSERT INTO path(id, p) VALUES (1, 'textures/txst/won.dds'), (2, 'textures/txst/won_n.dds'),
+               (3, 'textures/txst/lost.dds'), (4, 'textures/txst/orphan.dds'), (5, 'meshes/not_a_texture.nif');
+             INSERT INTO plugin(id, name, path, mtime, lo_index, light, flags, masters_json) VALUES
+               (1, 'A.esp', 'A.esp', 0, 0, 0, 0, '[]'), (2, 'B.esp', 'B.esp', 0, 1, 0, 0, '[]');
+             INSERT INTO rec(formid, local, plugin_id, sig, owner_ok) VALUES
+               (100, 100, 1, 'TXST', 1), (100, 100, 2, 'TXST', 1), (200, 200, 2, 'TXST', 0);
+             INSERT INTO rec_winner(formid, plugin_id, n_overrides) VALUES (100, 2, 2), (200, 2, 1);
+             INSERT INTO txst_slot(formid, local, plugin_id, slot, path_id) VALUES
+               (100, 100, 1, 0, 3), (100, 100, 2, 0, 1), (100, 100, 2, 1, 2), (100, 100, 2, 2, 5),
+               (200, 200, 2, 0, 4);",
+        )
+        .unwrap();
+    drop(s);
+    let known = sdc_gui::model::known_paths::read(&db).unwrap();
+    assert_eq!(
+        known.textures,
+        BTreeMap::from([
+            ("textures/txst/won.dds".to_string(), 1u16 << 0),
+            ("textures/txst/won_n.dds".to_string(), 1u16 << 1),
+        ])
+    );
+}
+
 /// Backlog T43: while the scan store is unsettled the original-textures read starts nothing, so no false "no mesh"
 /// is cached.
 #[test]

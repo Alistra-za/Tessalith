@@ -22,21 +22,29 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
     let store = Store::open_read_only(db).map_err(|e| e.to_string())?;
     let conn = store.conn();
     let mut textures: BTreeMap<String, u16> = BTreeMap::new();
-    // Lighting slots of enabled, non-derived copies only (trace-debug #42): not an effect shape's greyscale.
-    let mut st = conn
-        .prepare(&format!(
+    for sql in [
+        // Lighting slots of enabled, non-derived copies only (trace-debug #42): not an effect shape's greyscale.
+        format!(
             "SELECT DISTINCT p.p, tu.slot FROM tex_use tu JOIN path p ON p.id = tu.tex_path_id \
              JOIN texset ts ON ts.id = tu.texset_id WHERE tu.slot < 16 AND {}",
             super::used_by::LIVE_LIGHTING_TEXSET
-        ))
-        .map_err(|e| e.to_string())?;
-    let rows = st
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let (p, slot) = row.map_err(|e| e.to_string())?;
-        if p.starts_with("textures/") {
-            *textures.entry(p).or_default() |= 1 << slot;
+        ),
+        // Note HC6: the slots of each winning TXST whose master is loaded, as `txsts_matching` reads them.
+        "SELECT DISTINCT p.p, ts.slot FROM txst_slot ts JOIN path p ON p.id = ts.path_id \
+         JOIN rec_winner w ON w.formid = ts.formid AND w.plugin_id = ts.plugin_id \
+         JOIN rec r ON r.plugin_id = ts.plugin_id AND r.local = ts.local AND r.owner_ok = 1 \
+         WHERE ts.slot < 16"
+            .to_string(),
+    ] {
+        let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (p, slot) = row.map_err(|e| e.to_string())?;
+            if p.starts_with("textures/") {
+                *textures.entry(p).or_default() |= 1 << slot;
+            }
         }
     }
     let mut dirs: BTreeSet<String> = BTreeSet::new();
