@@ -570,6 +570,102 @@ fn a_sub_type_edit_on_a_twin_plans_in_full() {
     assert_eq!(json(&kept), json(&fresh));
 }
 
+/// An Advanced skin set `y` (`y_sk`, raw `y_roughness` and `y_ao` with `packing.recipe = rfaos`) with two skin `_f`
+/// twins, planned in full; the skin `_f` has no file-name raw role, so `typed` never holds it.
+fn skin_twins() -> (fast_fixture::FastFixture, Session, BatchRequest) {
+    let (fx, session, base) = planned_session();
+    let d = fx.dir.path().join("in/dir");
+    for (name, v) in [
+        ("y.png", 5u8),
+        ("y_sk.png", 6),
+        ("y_roughness.png", 7),
+        ("y_ao.png", 8),
+        ("y_f.png", 9),
+        ("y_f.tga", 10),
+    ] {
+        image::ImageBuffer::from_fn(16, 16, |x, _| {
+            image::Rgb([v.wrapping_add((x * 5) as u8); 3])
+        })
+        .save(d.join(name))
+        .unwrap();
+    }
+    let rfaos: toml::Table = toml::from_str("packing.recipe = \"rfaos\"").unwrap();
+    let req = with_entry(&base, "dir/y_rmaos", Some(&rfaos));
+    let (rep, _) = reporter();
+    let plan = session
+        .plan_and_keep(req.clone(), &rep, &CancelToken::default())
+        .unwrap();
+    assert!(
+        plan.skipped
+            .iter()
+            .all(|s| s.code != Some(engine::codes::Code::InDuplicate)
+                || !s.path.to_string_lossy().contains("y_f")),
+        "the skin twins start as no duplicates"
+    );
+    (fx, session, req)
+}
+
+/// The patch must give the verdict of the next full plan: `NeedsFull(DUPLICATE_CHANGE)`, and the full plan then
+/// lists exactly `dups` of the `y_f` twins as `IN-DUPLICATE`.
+fn assert_dup_change(
+    session: &Session,
+    kept: &BatchRequest,
+    edit: &[(String, Option<toml::Table>)],
+    dups: usize,
+) {
+    let (rep, _) = reporter();
+    let cancel = CancelToken::default();
+    let req = edited(kept, edit);
+    let got = session.replan_sets(&req, edit, &rep, &cancel);
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == DUPLICATE_CHANGE),
+        "{got:?}"
+    );
+    let full = session.plan_and_keep(req, &rep, &cancel).unwrap();
+    let n = full
+        .skipped
+        .iter()
+        .filter(|s| {
+            s.code == Some(engine::codes::Code::InDuplicate)
+                && s.path.to_string_lossy().contains("y_f")
+        })
+        .count();
+    assert_eq!(n, dups);
+}
+
+fn sub_type(key: &str) -> (String, Option<toml::Table>) {
+    (
+        key.to_string(),
+        Some(toml::from_str("subtype = \"diffuse\"").unwrap()),
+    )
+}
+
+/// Note HE7: a sub-type on a skin `_f` twin moves it in or out of the comparison with no `typed` flip.
+#[test]
+fn a_sub_type_on_a_skin_f_twin_plans_in_full() {
+    let (_fx, session, base) = skin_twins();
+    let (rep, _) = reporter();
+    let cancel = CancelToken::default();
+    // One twin typed: it writes beside the other, which still feeds the fuzz channel. Not a duplicate.
+    let a = vec![sub_type("dir/y_f.png")];
+    let req_a = edited(&base, &a);
+    session.plan_and_keep(req_a.clone(), &rep, &cancel).unwrap();
+    // The second typed: both write one output.
+    assert_dup_change(&session, &req_a, &[sub_type("dir/y_f.tga")], 2);
+}
+
+/// Note HE7: typing the raw maps unmakes the skin set, so its `_f` twins become PBR writers.
+#[test]
+fn typing_a_skin_sets_raw_maps_plans_in_full() {
+    let (_fx, session, base) = skin_twins();
+    assert_dup_change(
+        &session,
+        &base,
+        &[sub_type("dir/y_roughness.png"), sub_type("dir/y_ao.png")],
+        2,
+    );
+}
+
 /// Minor 3: a request carrying an Also export's derive step falls back before any patch work.
 #[test]
 fn a_derive_request_needs_a_full_plan() {

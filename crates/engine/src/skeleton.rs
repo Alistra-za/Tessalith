@@ -2,7 +2,7 @@
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
 use crate::api::{
     check_file_overrides, drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members,
-    predict_suffixes, reencodes, set_is_pbr, Plan, Prepared, BV2_REASON,
+    predict_suffixes, reencodes, set_is_pbr, waiting_images, Plan, Prepared, BV2_REASON,
 };
 use crate::config::Target;
 use crate::cube::plan::face_tag;
@@ -27,7 +27,8 @@ pub const REENCODE_CHANGE: &str = "reencode change";
 pub const HELPER_ROLE_CHANGE: &str = "helper.role change";
 pub const PBR_SUBTYPE: &str = "subtype on a PBR set member";
 pub const MEMBERSHIP_CHANGE: &str = "membership change";
-/// A file's typed state flipped and another file folds to its output: which of them is a duplicate changes (Note HE7).
+/// A file moved in or out of the set of images that write nothing while another file folds to its output: which of
+/// them is a duplicate changes (Note HE7).
 pub const DUPLICATE_CHANGE: &str = "duplicate change";
 pub const PBR_CHANGE: &str = "set PBR status change";
 pub const PATCHED: &str = "patched skeleton";
@@ -295,22 +296,35 @@ impl Skeleton {
                 if hand != p.hand[i] {
                     return Err(NeedsFull(HELPER_ROLE_CHANGE));
                 }
-                let now_typed = is_typed(&new_ctx, f, hand);
-                // Note HE7: a typed file writes and an untyped raw one does not, so the flip moves the duplicate
-                // verdict of every file that folds to the same output.
-                if now_typed != p.typed.contains(&i)
-                    && p.files
-                        .iter()
-                        .enumerate()
-                        .any(|(j, g)| j != i && fold(&g.output) == fold(&f.output))
-                {
-                    return Err(NeedsFull(DUPLICATE_CHANGE));
-                }
-                if now_typed {
+                if is_typed(&new_ctx, f, hand) {
                     typed.insert(i);
                 } else {
                     typed.remove(&i);
                 }
+            }
+            // Note HE7: which images write nothing (`prepare`'s `waiting_images`) decides the duplicates. Run it on
+            // the old and the new state over every set, so a skin `_f` (no `typed` flip), or a neighbour's edit
+            // that unmakes the skin set, is seen too; a file that moved in or out and shares an output with
+            // another file changes that pair's verdict.
+            let mut sets = p.sets.clone();
+            for s in typed
+                .symmetric_difference(&p.typed)
+                .map(|&i| self.set_of[i])
+                .filter(|&s| s != u32::MAX)
+                .collect::<BTreeSet<u32>>()
+            {
+                refresh_suffixes(&mut sets[s as usize], &p.files, &typed);
+            }
+            let old_waits =
+                waiting_images(&old_ctx, p.target, &p.sets, &p.files, &p.typed, &p.hand);
+            let new_waits = waiting_images(&new_ctx, p.target, &sets, &p.files, &typed, &p.hand);
+            if p.files.iter().any(|f| {
+                old_waits.contains(&f.path) != new_waits.contains(&f.path)
+                    && p.files
+                        .iter()
+                        .any(|g| g.path != f.path && fold(&g.output) == fold(&f.output))
+            }) {
+                return Err(NeedsFull(DUPLICATE_CHANGE));
             }
             // Membership check: rerun `prepare`'s joins on its grouping under the new layer; any set whose members
             // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
@@ -343,14 +357,7 @@ impl Skeleton {
             .collect();
         n.typed = typed;
         for s in flipped {
-            let set = &mut n.sets[s as usize];
-            let roles: Vec<String> = set
-                .members
-                .iter()
-                .filter_map(|&i| raw_role(&n.files[i]).map(|r| r.id()))
-                .collect();
-            set.suffixes.extend(roles);
-            drop_typed_roles(std::slice::from_mut(set), &n.files, &n.typed);
+            refresh_suffixes(&mut n.sets[s as usize], &n.files, &n.typed);
         }
         // A hit set whose PBR status flips moves output paths too (P1); decided as `set_resolved` decides it.
         for &s in &hit_sets {
@@ -391,6 +398,17 @@ impl Skeleton {
             }
         }
     }
+}
+
+/// A set whose `typed` members changed: every raw role back, then `prepare`'s drop.
+fn refresh_suffixes(set: &mut TextureSet, files: &[InputFile], typed: &BTreeSet<usize>) {
+    let roles: Vec<String> = set
+        .members
+        .iter()
+        .filter_map(|&i| raw_role(&files[i]).map(|r| r.id()))
+        .collect();
+    set.suffixes.extend(roles);
+    drop_typed_roles(std::slice::from_mut(set), files, typed);
 }
 
 /// [`Skeleton::scope`]'s partner groups (set keys; a set may sit in several).
