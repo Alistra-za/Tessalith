@@ -280,6 +280,24 @@ fn a_member_chip_shows_its_last_encode_time_even_while_stale() {
     h.get_by_label_contains("stale · last 42 ms");
 }
 
+/// Final review I3 (Note HE1): a skin set's recipe slot reads RFAOS in the member chips, not RMAOS.
+#[test]
+fn a_skin_sets_rmaos_chip_reads_rfaos() {
+    let (_d, h) = plain_rock();
+    let (m, s) = h.state();
+    let mem = s
+        .enc
+        .members
+        .values()
+        .find(|x| x.slot.kind == sdc_gui::model::sets::SlotKind::Rmaos)
+        .expect("the packed member");
+    let mut v = sdc_gui::model::sets::views(m)[0].clone();
+    let chip = |v: &_| sdc_gui::ui::set_preview::member_text(Some(v), mem);
+    assert!(chip(&v).starts_with("RMAOS: "), "{}", chip(&v));
+    v.rfaos = true;
+    assert!(chip(&v).starts_with("RFAOS: "), "{}", chip(&v));
+}
+
 #[test]
 fn every_built_in_shape_is_selectable() {
     let (_d, mut h) = plain_rock();

@@ -7,6 +7,7 @@ use crate::model::set_preview::{
     MATO_TOGGLE, MODE_LABEL_ENCODED, MODE_LABEL_SOURCE, NEEDS_CS, NO_MATCH, OFF_FEATURES, TILING,
     WAITS_FOR_EXPORT,
 };
+use crate::model::sets::SetView;
 use crate::model::AppModel;
 use eframe::egui;
 use render3d::ShapeStatus;
@@ -79,6 +80,8 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
         return;
     };
     let simulated = fp.entry.is_some();
+    let views = crate::model::sets::views(m);
+    let view = followed_set(m).and_then(|k| views.iter().find(|v| v.key == k));
     crate::ui::viewport3d::prelude(ui.ctx(), &mut s.v3);
     // One toolbar line, then what needs attention; the frame takes the rest above the collapsed Details.
     egui::Panel::top("set-3d-bar")
@@ -126,7 +129,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
             if let Candidates::Error(e) = &s.candidates {
                 ui.colored_label(RED, e);
             }
-            members(ui, s, true);
+            members(ui, s, view, true);
             shapes(ui, s, true);
             for n in &s.notices {
                 ui.colored_label(AMBER, n);
@@ -143,7 +146,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
                 }
                 ui.label(egui::RichText::new(cap_text(s.enc.cap)).small());
                 mesh_line(ui, s, simulated);
-                members(ui, s, false);
+                members(ui, s, view, false);
                 shapes(ui, s, false);
                 if emissive_shown(s) {
                     ui.label(EMISSIVE_APPROX);
@@ -229,9 +232,15 @@ fn mesh_line(ui: &mut egui::Ui, s: &SetPreview, simulated: bool) {
     }
 }
 
+/// "Slot: state" for one member; the slot reads the set's own name for it (an RFAOS on a skin set, Note HE1).
+pub fn member_text(view: Option<&SetView>, m: &crate::model::set_preview::Member) -> String {
+    let slot = view.map_or_else(|| m.slot.kind.label(), |v| v.slot_text(m.slot.kind));
+    format!("{slot}: {}", m.state.label())
+}
+
 /// The maps' encode states: with `attention`, the failed, stale and blocked ones (above the frame); else the others
 /// (Details).
-fn members(ui: &mut egui::Ui, s: &SetPreview, attention: bool) {
+fn members(ui: &mut egui::Ui, s: &SetPreview, view: Option<&SetView>, attention: bool) {
     let shown: Vec<_> = s
         .enc
         .members
@@ -249,7 +258,7 @@ fn members(ui: &mut egui::Ui, s: &SetPreview, attention: bool) {
     }
     ui.horizontal_wrapped(|ui| {
         for m in shown {
-            let mut text = format!("{}: {}", m.slot.kind.label(), m.state.label());
+            let mut text = member_text(view, m);
             // The time of the bytes on show, so the two modes can be compared (Fresh already says it).
             if let (false, Some(e)) = (matches!(m.state, EncState::Fresh(_)), m.state.shown()) {
                 text += &format!(" · last {:.0} ms", e.ms);
