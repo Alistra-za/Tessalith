@@ -52,6 +52,9 @@ pub fn baked_roughness(mean_alpha: f32, add: f32) -> f32 {
 /// not bake (`SET-BAKE-RATIO`, DECISIONS R5). Both bases must be powers of two with one aspect, so every footprint
 /// is whole texels of one pyramid level.
 pub fn bake_shift(normal: (u32, u32), member: (u32, u32)) -> Result<i32, String> {
+    if normal == member {
+        return Ok(0);
+    }
     let pot = |(w, h): (u32, u32)| w.is_power_of_two() && h.is_power_of_two();
     if !pot(normal) || !pot(member) {
         return Err(format!(
@@ -115,6 +118,12 @@ impl LengthPyramid {
             base: (base.width, base.height),
             levels,
         }
+    }
+
+    /// The pyramid of a `base` that does not pair with a `member` of another shape or size: the mean of the written
+    /// vectors over each member texel, not renormalised, so the lengths mean the same as in [`build`](Self::build).
+    pub fn fitted(base: &Rgba32F, member: (u32, u32)) -> LengthPyramid {
+        LengthPyramid::build(&crate::mips::area_resample(base, member, false))
     }
 
     /// Level `m` (>= 1), or `None` for 0 or past the last level.
@@ -183,6 +192,9 @@ pub struct BakeJob {
     /// own encode writes it, after the layers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rnm: Option<crate::rnm::RnmJob>,
+    /// The member's post-resize size when it does not pair with the `_n`; the lengths are fitted to it, and `shift` is 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<(u32, u32)>,
 }
 
 impl BakeJob {
@@ -198,14 +210,18 @@ impl BakeJob {
         } else {
             serde_json::json!([np.resize, np.resize_floor])
         };
-        crate::manifest::sha256_json(&(
+        let base = (
             &np.channels,
             np.alpha.policy,
             np.mips.normal_base,
             self.shift,
             resize,
             self.rnm.as_ref().map(|_| &np.rnm),
-        ))
+        );
+        match self.fit {
+            None => crate::manifest::sha256_json(&base),
+            Some(fit) => crate::manifest::sha256_json(&(base, fit)),
+        }
         .expect("a tuple of plain config values serialises")
     }
 
@@ -219,6 +235,7 @@ impl BakeJob {
             crate::ops::SourceTransfer::of(&info),
             &self.normal_profile,
             self.rnm.as_ref(),
+            self.fit,
         )
     }
 
@@ -233,7 +250,11 @@ impl BakeJob {
             let np = &self.normal_profile;
             Some(r.admission_bytes(&np.rnm, crate::resize::target_dims(dims, np)))
         };
-        decode_peak(&self.normal) + layers().unwrap_or(0)
+        // A fit also holds the member-sized resample and its pyramid (~23 per member texel).
+        let fit = self
+            .fit
+            .map_or(0, |(w, h)| u64::from(w) * u64::from(h) * 23);
+        decode_peak(&self.normal) + layers().unwrap_or(0) + fit
     }
 
     /// Peak bytes of baking a `w`×`h` `_n` whose decoded texels are `decoded` bytes wide. The peak is inside
@@ -257,6 +278,7 @@ pub fn lengths_from(
     transfer: crate::ops::SourceTransfer,
     normal_profile: &Profile,
     rnm: Option<&crate::rnm::RnmJob>,
+    fit: Option<(u32, u32)>,
 ) -> Result<LengthPyramid, String> {
     let mut work = crate::ops::preprocess_with(img, normal_profile, transfer);
     if let Some(r) = rnm {
@@ -267,7 +289,10 @@ pub fn lengths_from(
             crate::mips::normalize_vector(px, work.domain);
         }
     }
-    Ok(LengthPyramid::build(&work.img))
+    Ok(match fit {
+        Some(member) => LengthPyramid::fitted(&work.img, member),
+        None => LengthPyramid::build(&work.img),
+    })
 }
 
 /// `load::load_image`'s peak on `path`, from its header: [`BakeJob::peak_bytes`] of its size and decoded texel width.
@@ -459,6 +484,99 @@ mod tests {
         assert_eq!(bake_shift((2048, 1024), (1024, 512)), Ok(1));
         assert!(bake_shift((64, 64), (64, 32)).is_err()); // aspect mismatch
         assert!(bake_shift((96, 96), (48, 48)).is_err()); // NPOT
+        assert_eq!(bake_shift((48, 24), (48, 24)), Ok(0)); // equal sizes always pair
+    }
+
+    #[test]
+    fn a_fitted_pyramid_has_a_level_for_every_member_mip_below_0() {
+        for (n, m) in [
+            ((64, 64), (64, 32)),
+            ((64, 64), (32, 64)),
+            ((48, 48), (32, 32)),
+            ((32, 32), (48, 24)),
+            ((16, 16), (64, 8)),
+        ] {
+            let base = Rgba32F::new(n.0, n.1, [0.0, 0.0, 1.0, 1.0]);
+            let p = LengthPyramid::fitted(&base, m);
+            assert_eq!(p.base, m);
+            let dims: Vec<_> = p.levels.iter().map(|l| (l.width, l.height)).collect();
+            // The member chain's sizes below mip 0: `downsample` halves each axis, floored at 1.
+            let mut want = vec![];
+            let mut d = m;
+            while d != (1, 1) {
+                d = ((d.0 / 2).max(1), (d.1 / 2).max(1));
+                want.push(d);
+            }
+            assert_eq!(dims, want, "{n:?} over {m:?}");
+        }
+    }
+
+    /// `_n` 32x32 under a member 32x16: member mip 1 (16x8) covers 2x4 `_n` texels.
+    #[test]
+    fn a_fitted_bake_reads_each_member_texels_footprint() {
+        let normals = written(preprocess(bumpy(32), &profile(Subtype::PbrNormal)));
+        let nv =
+            NormalVariance::new(LengthPyramid::fitted(&normals, (32, 16)), (32, 16), 0.25).unwrap();
+        assert_eq!(nv.shift(), 0);
+        let mut widened = 0;
+        for y in 0..8u32 {
+            for x in 0..16u32 {
+                let mut s = [0.0f64; 3];
+                for j in y * 4..y * 4 + 4 {
+                    for i in x * 2..x * 2 + 2 {
+                        let q = normals.at(i, j);
+                        for c in 0..3 {
+                            s[c] += f64::from(q[c]);
+                        }
+                    }
+                }
+                let len =
+                    ((s[0] / 8.0).powi(2) + (s[1] / 8.0).powi(2) + (s[2] / 8.0).powi(2)).sqrt();
+                let got = nv.add_at(1, x, y);
+                assert!(
+                    (got - variance_add(len as f32, 0.25)).abs() < 1e-4,
+                    "({x},{y})"
+                );
+                widened += usize::from(got > 0.0);
+            }
+        }
+        assert!(widened > 0);
+        assert_eq!(nv.add_at(0, 3, 3), 0.0);
+    }
+
+    #[test]
+    fn a_flat_normal_fits_with_no_variance() {
+        let flat = preprocess(
+            Rgba32F::new(48, 48, [0.5, 0.5, 1.0, 1.0]),
+            &profile(Subtype::PbrNormal),
+        )
+        .img;
+        let pr = profile(Subtype::Rmaos);
+        let rough = preprocess(ramp(32), &pr);
+        let nv =
+            NormalVariance::new(LengthPyramid::fitted(&flat, (32, 32)), (32, 32), 0.25).unwrap();
+        assert_eq!(
+            build_chain_with(&rough, &pr, Some(&nv)),
+            build_chain(&rough, &pr)
+        );
+    }
+
+    #[test]
+    fn a_fit_adds_its_pyramid_to_admission() {
+        let d = tempfile::tempdir().unwrap();
+        let n = d.path().join("a_n.png");
+        ::image::RgbImage::new(64, 32).save(&n).unwrap();
+        let mut job = BakeJob {
+            normal: n,
+            normal_profile: profile(Subtype::PbrNormal),
+            shift: 0,
+            stamp: None,
+            rnm: None,
+            fit: None,
+        };
+        let plain = job.estimated_bytes();
+        job.fit = Some((512, 256));
+        assert_eq!(job.estimated_bytes() - plain, 512 * 256 * 23);
     }
 
     #[test]
@@ -556,6 +674,7 @@ mod tests {
             shift: 0,
             stamp: None,
             rnm: None,
+            fit: None,
         };
         // 8-bit RGB: the decoded image (3) + its `into_rgba32f` conversion (16) per texel.
         let rgb8 = d.path().join("rgb8_n.png");
@@ -595,6 +714,7 @@ mod tests {
             shift: 0,
             stamp: None,
             rnm: None,
+            fit: None,
         };
         let base = job.estimated_bytes();
         let mut small = layer("small.png", 32);
@@ -614,6 +734,7 @@ mod tests {
             shift: 0,
             stamp: None,
             rnm: None,
+            fit: None,
         };
         let mut moved = b.clone();
         moved.normal = "b/iron_n.png".into();
@@ -632,6 +753,28 @@ mod tests {
         assert_ne!(b.identity_sha256(), keep.identity_sha256());
     }
 
+    #[test]
+    fn a_bake_identity_follows_fit() {
+        let b = BakeJob {
+            normal: "a/iron_n.png".into(),
+            normal_profile: profile(Subtype::PbrNormal),
+            shift: 0,
+            stamp: None,
+            rnm: None,
+            fit: None,
+        };
+        assert_eq!(
+            b.identity_sha256(),
+            "4601ca0e9449fc8e6ae19ec9f0eb557b7c2532c4d9488821f460039552018b7b"
+        );
+        let with = |fit| BakeJob { fit, ..b.clone() };
+        assert_ne!(
+            with(Some((64, 32))).identity_sha256(),
+            with(Some((32, 16))).identity_sha256()
+        );
+        assert_ne!(with(Some((64, 32))).identity_sha256(), b.identity_sha256());
+    }
+
     /// Note W18: RNM settings join the identity only when the bake carries a blend.
     #[test]
     fn identity_includes_rnm_only_when_layers_apply() {
@@ -641,6 +784,7 @@ mod tests {
             shift: 0,
             stamp: None,
             rnm: None,
+            fit: None,
         };
         let mut layered = b.clone();
         layered.rnm = Some(crate::rnm::RnmJob {
@@ -665,6 +809,7 @@ mod tests {
             shift: 0,
             stamp: None,
             rnm: None,
+            fit: None,
         };
         let mut resized = b.clone();
         resized.normal_profile.resize = crate::config::ResizeMode::Half;

@@ -232,26 +232,50 @@ fn size_ratios_give_the_level_shift() {
     }
 }
 
-/// Review Focus 1.
 #[test]
-fn an_aspect_mismatch_is_set_bake_ratio_and_does_not_bake() {
+fn an_aspect_mismatch_fits_and_bakes() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
     rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 32);
     let (p, ev) = plan(req(d.path(), &[]));
     let m = job(&p, "iron_rmaos.png");
-    assert!(m.bake.is_none());
-    let w = m
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::SetBakeRatio)
-        .expect("SET-BAKE-RATIO");
-    assert_eq!(w.severity, Severity::Warning);
-    assert_eq!(w.data["member"], serde_json::json!([64, 32]));
-    assert!(!bake_flag(&ev, "textures/pbr/iron"));
+    let b = m.bake.as_ref().unwrap();
+    assert_eq!((b.shift, b.fit), (0, Some((64, 32))));
+    assert!(!codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
+    assert!(bake_flag(&ev, "textures/pbr/iron"));
     assert_eq!(
         job(&p, "iron_n.png").profile.mips.normal,
-        NormalMips::Renormalize
+        NormalMips::RenormalizeBake
+    );
+}
+
+#[test]
+fn a_pair_that_lines_up_stays_on_the_shift_path() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 128, 128);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 32, 32);
+    let (p, _) = plan(req(d.path(), &[]));
+    let b = job(&p, "iron_rmaos.png").bake.as_ref().unwrap();
+    assert_eq!((b.shift, b.fit), (2, None));
+}
+
+#[test]
+fn a_packed_rfaos_fits_to_its_canvas() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/actors/skin/b_n.png", 64, 32);
+    gray(d.path(), "textures/actors/skin/b_roughness.png", 120);
+    gray(d.path(), "textures/actors/skin/b_fuzz.png", 30);
+    let (p, _) = plan(req(d.path(), &[]));
+    let b = p
+        .jobs
+        .iter()
+        .find(|j| j.pack.is_some())
+        .expect("a packed rfaos");
+    assert_eq!(
+        b.bake.as_ref().unwrap().fit,
+        Some((64, 64)),
+        "{:?}",
+        b.warnings
     );
 }
 
@@ -438,7 +462,7 @@ fn a_borrowed_n_bakes_the_borrowers_own_roughness() {
 
 /// The usual rules hold for a borrowed `_n`: the size ratio.
 #[test]
-fn a_borrowed_n_of_another_aspect_is_set_bake_ratio() {
+fn a_borrowed_n_of_another_aspect_fits() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
     rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 32);
@@ -446,8 +470,23 @@ fn a_borrowed_n_of_another_aspect_is_set_bake_ratio() {
     borrow(&mut r, &[("textures/pbr/steel", "textures/pbr/iron")]);
     let (p, _) = plan(r);
     let s = job(&p, "steel_rmaos.png");
+    assert_eq!(s.bake.as_ref().unwrap().fit, Some((64, 32)));
+    assert!(set_codes(s).is_empty(), "{:?}", s.warnings);
+}
+
+/// R7 still wins at any size: a shared roughness slot never fits either.
+#[test]
+fn a_shared_roughness_never_fits() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 32);
+    let mut r = req(d.path(), &[]);
+    borrow(&mut r, &[("textures/pbr/steel", "textures/pbr/iron")]);
+    r.shared_roughness = ["textures/pbr/steel".to_string()].into_iter().collect();
+    let (p, _) = plan(r);
+    let s = job(&p, "steel_rmaos.png");
     assert!(s.bake.is_none());
-    assert_eq!(set_codes(s), vec![Code::SetBakeRatio]);
+    assert!(set_codes(s).is_empty(), "{:?}", s.warnings);
 }
 
 /// R7 still wins: a shared roughness slot never bakes, even from a borrowed `_n`.
@@ -690,8 +729,9 @@ fn resized_npot_pair_bakes_on_post_resize_sizes() {
             );
             assert!(!codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
         } else {
-            assert!(m.bake.is_none());
-            assert!(codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
+            let fit = m.bake.as_ref().expect("bakes").fit;
+            assert!(fit.is_some_and(|(w, h)| w != 48 || h != 48), "{fit:?}");
+            assert!(!codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
         }
     }
 }

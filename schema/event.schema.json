@@ -118,6 +118,27 @@
     "BakeJob": {
       "description": "How a roughness member bakes its set's `_n` (`ResolvedJob::bake`, spec §6.2). Set by `plan::plan_bakes`.",
       "properties": {
+        "fit": {
+          "description": "The member's post-resize size when it does not pair with the `_n`; the lengths are fitted to it, and `shift` is 0.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "normal": {
           "description": "The set's `pbr_normal` source.",
           "type": "string"

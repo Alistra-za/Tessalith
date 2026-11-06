@@ -14,6 +14,7 @@
 - Fixed: textures named only in a texture set record (TXST) were not offered by the path pickers.
 - Fixed: **Clear** and **From this set** did nothing on a borrowed slot, and each click only swapped which of the two was greyed. Both now drop the borrow.
 - The variance bake no longer changes mip 0 of an `_rmaos`, `_rfaos` or complex `_m`, which matters when it is smaller than its `_n`. These types re-encode once.
+- An `_rmaos`, `_rfaos` or complex `_m` of another shape or a non-power-of-two size than its `_n` now gets the variance bake instead of `SET-BAKE-RATIO`.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 
 ## 2.0.0

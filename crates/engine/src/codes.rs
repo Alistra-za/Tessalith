@@ -101,6 +101,7 @@ codes! {
     ResizeNoReference = "RESIZE-NO-REFERENCE" => Info,
     SetMissingCompanion = "SET-MISSING-COMPANION" => Info,
     SetCompanionDds = "SET-COMPANION-DDS" => Warning,
+    // Never raised since Note HD2; kept so an `allow` list naming it still loads.
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
     SetEditStale = "SET-EDIT-STALE" => Info,
     SugLowConfidence = "SUG-LOW-CONFIDENCE" => Blocking,

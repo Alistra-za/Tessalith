@@ -71,6 +71,7 @@ fn plan(dir: &Path, rough: &Path, normal: &Path, bake: bool, flip_green: bool) -
             shift: 0,
             stamp: SourceStamp::of(normal),
             rnm: None,
+            fit: None,
         }),
         shader: None,
         rnm: None,
@@ -153,6 +154,54 @@ fn a_two_to_one_normal_leaves_mip_0_as_authored() {
     p.jobs[0].bake.as_mut().unwrap().shift = 1;
     assert_eq!(run(p).0.converted, 1);
     assert!(mean_r(d.path(), 0) < 102.0, "{}", mean_r(d.path(), 0));
+}
+
+/// A 64x32 `_rmaos` over a 64x64 `_n`: the planned job fits the `_n` to the member (Note HD2).
+fn fitted_plan(d: &Path, bake: bool) -> Plan {
+    let n = bumpy_n(d, 64, 0.0);
+    let r = d.join("in/iron_rmaos.png");
+    ImageBuffer::from_fn(64, 32, |_, _| Rgba([100u8, 0, 255, 255]))
+        .save(&r)
+        .unwrap();
+    let mut p = plan(d, &r, &n, bake, false);
+    if let Some(b) = p.jobs[0].bake.as_mut() {
+        b.fit = Some((64, 32));
+    }
+    p
+}
+
+#[test]
+fn a_fitted_bake_widens_the_written_roughness() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for (d, bake) in [(&a, true), (&b, false)] {
+        let (s, ev) = run(fitted_plan(d.path(), bake));
+        assert_eq!(s.converted, 1, "{ev:#?}");
+    }
+    let (baked, plain) = (mean_r(a.path(), 1), mean_r(b.path(), 1));
+    assert!(baked > plain + 2.0, "mip 1: {baked} vs {plain}");
+    assert!((mean_r(a.path(), 0) - mean_r(b.path(), 0)).abs() < 1.0);
+}
+
+#[test]
+fn a_fitted_bake_is_up_to_date_on_a_second_run() {
+    let d = tempfile::tempdir().unwrap();
+    assert_eq!(run(fitted_plan(d.path(), true)).0.converted, 1);
+    let (s, _) = run(fitted_plan(d.path(), true));
+    assert_eq!((s.converted, s.up_to_date), (0, 1));
+}
+
+#[test]
+fn a_stale_fit_fails_instead_of_baking() {
+    let d = tempfile::tempdir().unwrap();
+    let mut p = fitted_plan(d.path(), true);
+    p.jobs[0].bake.as_mut().unwrap().fit = Some((32, 16));
+    let (s, ev) = run(p);
+    assert_eq!((s.converted, s.failed), (0, 1), "{ev:#?}");
+    assert!(
+        ev.iter().any(|e| matches!(&e.kind,
+            EventKind::FileFailed { error, .. } if error.contains("size changed"))),
+        "{ev:#?}"
+    );
 }
 
 /// Controller correction to R1: the bake reads the `_n`'s mip 0 as written. A uniformly short flat `_n` (|n| = 0.5,

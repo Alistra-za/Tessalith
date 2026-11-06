@@ -284,8 +284,8 @@ pub enum BakeDecision {
     Bake { shift: i32 },
     /// Never, silently: the `_n` opted out (DECISIONS R6) or the member is sRGB (R10).
     Never,
-    /// `SET-BAKE-RATIO`: the sizes cannot bake.
-    Off(Warning),
+    /// The sizes do not pair: bake from the `_n` fitted to the member's size (Note HD2).
+    Fit,
 }
 
 /// The bake rule for one roughness `member`: `normal_opted_out` is `bake_set`'s R6 check (false in memory, which has
@@ -303,14 +303,7 @@ pub fn decide_bake(
     }
     match bake_shift(ndims, mdims) {
         Ok(shift) => BakeDecision::Bake { shift },
-        Err(why) => BakeDecision::Off(
-            Warning::new(Code::SetBakeRatio, format!("variance bake off: {why}")).with_data(
-                json!({
-                    "normal": [ndims.0, ndims.1],
-                    "member": [mdims.0, mdims.1],
-                }),
-            ),
-        ),
+        Err(_) => BakeDecision::Fit,
     }
 }
 
@@ -322,11 +315,11 @@ pub fn mark_normal_baking(p: &mut Profile) -> bool {
     changed
 }
 
-/// Attach a `BakeJob` from the `_n` at `n` to every member whose size allows it; `SET-BAKE-RATIO` on the others.
+/// Attach a `BakeJob` from the `_n` at `n` to every member, fitted to the member's size when it does not pair.
 /// Returns whether any member bakes.
 fn attach(jobs: &mut [ResolvedJob], n: usize, members: &[usize], opted_out: bool) -> bool {
     let nj = &jobs[n];
-    // S-mips-7: both sizes are the post-resize ones Preprocess writes, so SET-BAKE-RATIO's data reports those too.
+    // S-mips-7: both sizes are the post-resize ones Preprocess writes, and the fit takes the member's.
     let Some(ndims) = post_resize_dims(nj) else {
         return false;
     };
@@ -337,20 +330,20 @@ fn attach(jobs: &mut [ResolvedJob], n: usize, members: &[usize], opted_out: bool
         let Some(mdims) = post_resize_dims(&jobs[m]) else {
             continue;
         };
-        match decide_bake(opted_out, ndims, &jobs[m].profile, mdims) {
-            BakeDecision::Never => {}
-            BakeDecision::Bake { shift } => {
-                jobs[m].bake = Some(BakeJob {
-                    normal: normal.clone(),
-                    normal_profile: normal_profile.clone(),
-                    shift,
-                    stamp,
-                    rnm: rnm.clone(),
-                });
-                any = true;
-            }
-            BakeDecision::Off(w) => jobs[m].warnings.push(w),
-        }
+        let (shift, fit) = match decide_bake(opted_out, ndims, &jobs[m].profile, mdims) {
+            BakeDecision::Never => continue,
+            BakeDecision::Bake { shift } => (shift, None),
+            BakeDecision::Fit => (0, Some(mdims)),
+        };
+        jobs[m].bake = Some(BakeJob {
+            normal: normal.clone(),
+            normal_profile: normal_profile.clone(),
+            shift,
+            stamp,
+            rnm: rnm.clone(),
+            fit,
+        });
+        any = true;
     }
     any
 }

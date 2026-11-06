@@ -573,8 +573,16 @@ mod tests {
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
-            // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`.
-            let want = if matches!(st, Subtype::SkinWet | Subtype::SkinDetail) {
+            // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`;
+            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1).
+            let want = if matches!(
+                st,
+                Subtype::SkinWet
+                    | Subtype::SkinDetail
+                    | Subtype::Rmaos
+                    | Subtype::SkinRfaos
+                    | Subtype::ComplexMaterial
+            ) {
                 "2.1.0"
             } else {
                 "2.0.0"

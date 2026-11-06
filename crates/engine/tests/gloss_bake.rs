@@ -229,7 +229,7 @@ fn the_normal_itself_is_unchanged_by_the_opt_in() {
 }
 
 #[test]
-fn a_size_mismatch_reports_set_bake_ratio_and_does_not_bake() {
+fn a_size_mismatch_fits_and_bakes() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     for d in [a.path(), b.path()] {
         put(d, "wall_n.png", normal(1024, 1024, |_| true));
@@ -243,17 +243,11 @@ fn a_size_mismatch_reports_set_bake_ratio_and_does_not_bake() {
         &allow,
     ));
     let m = job(&p, "wall_m.png");
-    assert!(m.bake.is_none());
-    let w = m
-        .warnings
-        .iter()
-        .find(|w| w.code == Code::SetBakeRatio)
-        .unwrap_or_else(|| panic!("{:?}", m.warnings));
-    // Review M1: the message names the member, not a roughness map.
+    assert_eq!(m.bake.as_ref().map(|b| b.fit), Some(Some((1024, 512))));
     assert!(
-        w.message.contains("member 1024x512") && !w.message.contains("roughness"),
-        "{}",
-        w.message
+        !m.warnings.iter().any(|w| w.code == Code::SetBakeRatio),
+        "{:?}",
+        m.warnings
     );
     convert(request(a.path(), Target::Vanilla, &[CM, FAST], &allow));
     convert(request(
@@ -262,7 +256,7 @@ fn a_size_mismatch_reports_set_bake_ratio_and_does_not_bake() {
         &[CM, OPT_IN, FAST],
         &allow,
     ));
-    assert!(out(a.path(), "wall_m.dds") == out(b.path(), "wall_m.dds"));
+    assert!(out(a.path(), "wall_m.dds") != out(b.path(), "wall_m.dds"));
 }
 
 #[test]

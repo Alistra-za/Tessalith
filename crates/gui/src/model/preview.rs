@@ -879,6 +879,7 @@ mod tests {
                 shift: 1,
                 stamp: stamped(2),
                 rnm: None,
+                fit: None,
             }),
             shader: None,
             rnm: None,

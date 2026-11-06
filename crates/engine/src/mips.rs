@@ -125,7 +125,7 @@ fn downsample_area(prev: &Rgba32F, weighted: bool) -> Rgba32F {
     )
 }
 
-/// Area-exact box resample of `prev` to `w`×`h` (no upscaling), accumulated in f64. Weighted RGB uses
+/// Area-exact box resample of `prev` to `w`×`h` (any size, enlarging an axis included: `axis_weights`), accumulated in f64. Weighted RGB uses
 /// area x alpha as the weight.
 pub(crate) fn area_resample(prev: &Rgba32F, (w, h): (u32, u32), weighted: bool) -> Rgba32F {
     let (wx, wy) = (axis_weights(prev.width, w), axis_weights(prev.height, h));
@@ -1338,8 +1338,10 @@ mod tests {
                 img.at_mut(x, y)[1] = 0.3 + 0.6 * ((x * 5 + y * 3) % W) as f32 / W as f32;
             }
         }
-        // M3: a float source above 1 at mip 0 bakes as gloss 1.
-        img.at_mut(3, 2)[1] = 1.2;
+        // M3: a 2x2 block of float gloss above 1 averages above 1 at mip 1, which bakes as gloss 1 (mip 0 is as authored).
+        for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
+            img.at_mut(x, y)[1] = 1.5;
+        }
         let wk = work(img, Domain::Stored, false);
         let nv = NormalVariance::new(LengthPyramid::build(&written), (W, W), t).unwrap();
         assert_eq!(nv.shift(), 1);

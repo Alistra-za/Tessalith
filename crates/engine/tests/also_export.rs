@@ -570,6 +570,7 @@ fn same_identity_fails_when_any_compared_field_differs() {
                     shift: 0,
                     stamp: None,
                     rnm: None,
+                    fit: None,
                 })
             }),
         ),
