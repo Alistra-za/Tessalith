@@ -50,6 +50,8 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             }
         }
     }
+    // Only the missing-map warnings depend on these; a failing query must not blank the pickers (final review K1).
+    let supplies = (|| -> Result<BTreeMap<String, u16>, String> {
     let mut supplies: BTreeMap<String, u16> = BTreeMap::new();
     for sql in [
         // A mesh's texture set: bit N when its slot N is filled. Not a self-join of `tex_use` (no index on texset_id).
@@ -78,6 +80,9 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             }
         }
     }
+    Ok(supplies)
+    })()
+    .unwrap_or_default();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut st = conn
         .prepare("SELECT p.p FROM nif_winner w JOIN path p ON p.id = w.path_id")

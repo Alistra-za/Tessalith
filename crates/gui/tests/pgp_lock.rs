@@ -608,6 +608,23 @@ fn no_original_textures_read_starts_while_the_scan_store_is_unsettled() {
     assert!(m.used_by_pending(), "a settled store reads");
 }
 
+/// Final review K1: a failing supplies query leaves the picker paths alone; only the warnings stay.
+#[test]
+fn a_supplies_query_error_keeps_the_picker_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    db_with_filtered_users(&db);
+    let s = modscan::store::Store::open(&db).unwrap();
+    // The supplies query reads `texset.t7`; the paths queries never do.
+    s.conn()
+        .execute_batch("ALTER TABLE texset RENAME COLUMN t7 TO t7_gone;")
+        .unwrap();
+    drop(s);
+    let known = sdc_gui::model::known_paths::read(&db).unwrap();
+    assert!(!known.textures.is_empty());
+    assert!(known.supplies.is_empty());
+}
+
 /// Note HE4: a mesh's texture set (live lighting shapes only) and a winning TXST each list the slots they fill beside
 /// their diffuse. A disabled mod's set, a TXST an override replaced and a record whose master is not loaded add none.
 #[test]
