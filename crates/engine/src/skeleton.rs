@@ -27,6 +27,8 @@ pub const REENCODE_CHANGE: &str = "reencode change";
 pub const HELPER_ROLE_CHANGE: &str = "helper.role change";
 pub const PBR_SUBTYPE: &str = "subtype on a PBR set member";
 pub const MEMBERSHIP_CHANGE: &str = "membership change";
+/// A file's typed state flipped and another file folds to its output: which of them is a duplicate changes (Note HE7).
+pub const DUPLICATE_CHANGE: &str = "duplicate change";
 pub const PBR_CHANGE: &str = "set PBR status change";
 pub const PATCHED: &str = "patched skeleton";
 /// An Also export's derive step reads its PBR sets as a whole (`plan_derived`, `report_unread`).
@@ -293,7 +295,18 @@ impl Skeleton {
                 if hand != p.hand[i] {
                     return Err(NeedsFull(HELPER_ROLE_CHANGE));
                 }
-                if is_typed(&new_ctx, f, hand) {
+                let now_typed = is_typed(&new_ctx, f, hand);
+                // Note HE7: a typed file writes and an untyped raw one does not, so the flip moves the duplicate
+                // verdict of every file that folds to the same output.
+                if now_typed != p.typed.contains(&i)
+                    && p.files
+                        .iter()
+                        .enumerate()
+                        .any(|(j, g)| j != i && fold(&g.output) == fold(&f.output))
+                {
+                    return Err(NeedsFull(DUPLICATE_CHANGE));
+                }
+                if now_typed {
                     typed.insert(i);
                 } else {
                     typed.remove(&i);

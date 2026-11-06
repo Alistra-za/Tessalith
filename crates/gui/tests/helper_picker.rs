@@ -209,6 +209,40 @@ fn picking_b_removes_channel_from_a() {
     );
 }
 
+/// Note HE7: two raw maps of one name are not duplicates; both are listed, each keeps its own row, and the pick moves
+/// the channel from the first by path to the other.
+#[test]
+fn picker_can_switch_between_twins() {
+    let d = tempfile::tempdir().unwrap();
+    let m = fixture(
+        d.path(),
+        &["x.png", "x_roughness.png", "x_ao.png", "x_ao.tga"],
+        "",
+    );
+    assert_eq!(source_of(&m, 2).as_deref(), Some("x_ao.png"));
+    let rows = |m: &AppModel, n: &str| m.items.iter().filter(|i| i.name == n).count();
+    assert_eq!((rows(&m, "x_ao.png"), rows(&m, "x_ao.tga")), (1, 1));
+    let mut h = editor(m, egui::vec2(1400.0, 900.0));
+    let opts = options(&mut h, AO_SOURCE);
+    assert!(
+        opts.iter().any(|o| o == "x_ao.png") && opts.iter().any(|o| o == "x_ao.tga"),
+        "{opts:?}"
+    );
+    pick(&mut h, AO_SOURCE, "x_ao.tga");
+    assert_eq!(source_of(h.state(), 2).as_deref(), Some("x_ao.tga"));
+    let unused = h
+        .state()
+        .items
+        .iter()
+        .find(|i| i.name == "x_ao.png")
+        .is_some_and(|i| {
+            i.warnings
+                .iter()
+                .any(|w| w.code == engine::codes::Code::PackUnusedInput)
+        });
+    assert!(unused, "x_ao.png should be unused after the pick");
+}
+
 #[test]
 fn picking_value_removes_channel_from_all_helpers() {
     let d = tempfile::tempdir().unwrap();

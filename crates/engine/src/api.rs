@@ -1628,8 +1628,35 @@ impl Engine {
                 },
             );
         }
+        // Note HE7: an image that writes nothing of its own (a raw map, a normal layer, a skin `_f`) is consumed or
+        // reported unused, so two of one name are not duplicates. The first by path feeds the channel (M13).
+        // shortcut: a file a `[[rules]]` entry types is invisible here (rules need the analysis); the BV2 writer
+        // dedupe catches two of those, so none writes twice. Revisit if a rule needs the pre-pass to see it.
+        let mut waits: BTreeSet<PathBuf> = BTreeSet::new();
+        for set in &sets {
+            let mut predicted = set.clone();
+            predict_suffixes(&mut predicted, target, false, &files, &typed, &hand);
+            for &i in set.members.iter().filter(|i| !typed.contains(i)) {
+                let f = &files[i];
+                let writes_nothing = match hand[i] {
+                    Some(r) => matches!(
+                        r,
+                        crate::helper::HelperRole::Raw(_) | crate::helper::HelperRole::Layer(_)
+                    ),
+                    None => {
+                        pack::plan::raw_role(f).is_some()
+                            || pack::plan::is_skin_f(&ctx, &predicted, f)
+                    }
+                };
+                if f.kind == InputKind::Image && writes_nothing {
+                    waits.insert(f.path.clone());
+                }
+            }
+        }
         let dups = crate::group::duplicate_outputs_with(&files, |f| {
-            !losers.contains(&f.path) && (f.kind != InputKind::Dds || reencodes(&ctx, f))
+            !losers.contains(&f.path)
+                && !waits.contains(&f.path)
+                && (f.kind != InputKind::Dds || reencodes(&ctx, f))
         });
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {

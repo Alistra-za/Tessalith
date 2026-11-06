@@ -7,8 +7,8 @@ use engine::api::{BatchRequest, CancelToken, Plan};
 use engine::events::{EngineEvent, EventKind, Reporter, VecSink};
 use engine::session::{Partial, Session};
 use engine::skeleton::{
-    BAD_ENTRY, CANCELLED, DERIVE, HELPER_ROLE_CHANGE, HITS_NOTHING, MEMBERSHIP_CHANGE, PBR_CHANGE,
-    PBR_SUBTYPE, RECIPE_CHANGE, REENCODE_CHANGE, WRITER_CLASH,
+    BAD_ENTRY, CANCELLED, DERIVE, DUPLICATE_CHANGE, HELPER_ROLE_CHANGE, HITS_NOTHING,
+    MEMBERSHIP_CHANGE, PBR_CHANGE, PBR_SUBTYPE, RECIPE_CHANGE, REENCODE_CHANGE, WRITER_CLASH,
 };
 use fast_fixture::{fast_fixture, with_entry};
 use serde_json::{json, Value};
@@ -524,6 +524,50 @@ fn a_cancelled_partial_needs_a_full_plan() {
         matches!(got, Err(Partial::NeedsFull(why)) if why == CANCELLED),
         "{got:?}"
     );
+}
+
+/// Note HE7: a sub-type on one of two raw twins makes it write, so which of them is a duplicate changes.
+#[test]
+fn a_sub_type_edit_on_a_twin_plans_in_full() {
+    let (fx, session, base_req) = planned_session();
+    let d = fx.dir.path().join("in/dir");
+    for (name, v) in [
+        ("t.png", 5u8),
+        ("t_rough.png", 6),
+        ("t_ao.png", 7),
+        ("t_ao.tga", 8),
+    ] {
+        image::ImageBuffer::from_fn(16, 16, |x, _| {
+            image::Rgb([v.wrapping_add((x * 5) as u8); 3])
+        })
+        .save(d.join(name))
+        .unwrap();
+    }
+    let cancel = CancelToken::default();
+    let (rep, _) = reporter();
+    session
+        .plan_and_keep(base_req.clone(), &rep, &cancel)
+        .unwrap();
+    let edit = vec![(
+        "dir/t_ao.png".to_string(),
+        Some(toml::from_str("subtype = \"diffuse\"").unwrap()),
+    )];
+    let req = edited(&base_req, &edit);
+    let got = session.replan_sets(&req, &edit, &rep, &cancel);
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == DUPLICATE_CHANGE),
+        "{got:?}"
+    );
+    // The full plan the GUI then runs equals a fresh one.
+    let kept = session.plan_and_keep(req.clone(), &rep, &cancel).unwrap();
+    let fresh = Session::new().unwrap().plan(req, &rep, &cancel).unwrap();
+    let json = |p: &Plan| {
+        (
+            serde_json::to_value(&p.jobs).unwrap(),
+            format!("{:?}", p.skipped),
+        )
+    };
+    assert_eq!(json(&kept), json(&fresh));
 }
 
 /// Minor 3: a request carrying an Also export's derive step falls back before any patch work.

@@ -25,7 +25,7 @@ C:\Work\IronPlate\                          C:\Work\IronPlate-out\
 
 The output root and any `_sdc` folder are never read as input, so an output folder inside the source folder is safe.
 
-Two inputs that would write the same output (for example `rock.png` and `rock.tga`) are both blocked with `IN-DUPLICATE`. Rename or remove one.
+Two inputs that would write the same output (for example `rock.png` and `rock.tga`) are both blocked with `IN-DUPLICATE`. Rename or remove one. A raw map writes no file of its own, so two of one name (`mouth_ao.psd` and `mouth_ao.png`) are not duplicates: the first by path feeds the channel, and the other is not converted unless you pick it as the source by hand.
 
 ### Atomic writes
 
