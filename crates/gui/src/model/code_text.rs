@@ -191,10 +191,23 @@ pub fn without_codes(text: &str) -> String {
     out
 }
 
-/// What a row or line shows for `code` and its engine `text` (Note FB8): the code's sentence, else the engine's
+/// Note HC2 (amends FB8): the codes whose engine text names the map, channel or file at fault, which their sentence
+/// cannot.
+fn names_its_map(code: Code) -> bool {
+    matches!(
+        code,
+        Code::PackDefaulted
+            | Code::PackConflict
+            | Code::PackUnusedInput
+            | Code::ShaderExtraMap
+            | Code::ShaderMissingMap
+    )
+}
+
+/// What a row or line shows for `code` and its engine `text` (Notes FB8, HC2): the code's sentence, else the engine's
 /// text without its code.
 pub fn shown_for(code: Option<Code>, text: &str) -> std::borrow::Cow<'_, str> {
-    match code.map(code_sentence) {
+    match code.filter(|c| !names_its_map(*c)).map(code_sentence) {
         Some(s) if !s.is_empty() => s.into(),
         _ => without_codes(text).into(),
     }
@@ -231,6 +244,28 @@ mod tests {
                 "{s} names a code"
             );
         }
+    }
+
+    /// Note HC2: "add the missing map" never said which map.
+    #[test]
+    fn a_row_about_a_missing_map_names_the_map() {
+        for (code, text) in [
+            (
+                Code::PackDefaulted,
+                "eye_rmaos.dds A: no specular source; neutral default 0.04",
+            ),
+            (
+                Code::ShaderMissingMap,
+                "the pbr shader needs _rmaos; none is in the set (nothing is generated)",
+            ),
+        ] {
+            assert_eq!(shown_for(Some(code), text), text);
+        }
+        // Every other code keeps its action sentence.
+        assert_eq!(
+            shown_for(Some(Code::ChanNotGray), "engine text"),
+            code_sentence(Code::ChanNotGray)
+        );
     }
 
     #[test]

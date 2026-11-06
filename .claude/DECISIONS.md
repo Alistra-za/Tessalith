@@ -20,11 +20,11 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -396,7 +396,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - The GUI writes the same bytes as the CLI: export saves `sdc.toml` first, so `sdc convert <folder>` reproduces the last export; the GUI re-resolves unsaved edits in memory. [N4]
 - The GUI's automatic decisions (High accepts, evidence-driven sub-type and alpha) are recorded in the project. [FC1]
 - Anything the user must act on is a Problems row with its action; hand remedies are row buttons; a feature clash offers to turn off either feature. [FC3, FC10, FN5]
-- No codes in the UI: rows and banners say what to do; the code is on hover and in the Messages log. [FB8]
+- No codes in the UI: rows and banners say what to do; the code is on hover and in the Messages log. A row about a missing or unused map says which. [FB8, HC2]
 - One word per concept (Words section in `docs/gui.md`), one accent colour. [FC9]
 - No surprising defaults or silent data effects. [FC12]
 - Every edit control on the texture panel waits for its (partial) plan; navigation does not. [FK2, FK3, FL6]
@@ -1130,3 +1130,4 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 ## Note HC — 2.1 bug batch (main team, 2026-11-05)
 
 - **HC1 A specular fills the flat alpha of a pre-packed `_rmaos`/`_rfaos` image (owner, 2026-11-05).** Before, the image won under `packing.prefer = prepacked` and the specular read "not used", even with a hand-set `rmaos.a` fill. Now, when the set's only other loose map is a specular (a generated AO the image's empty B takes may join it) and the image's alpha is flat, the image joins the recipe as CO104 does: A from the specular, the other channels from the image. "Flat" is the alpha verdict `plan_fills` reads (`AlphaFacts::empty`), so any constant counts, not only 255. An alpha with content, or another loose map, keeps the M9 result. A pre-packed DDS is never joined (images only, as CO103). No `encode_version` arm moves: the recipe and its bytes for given sources are unchanged, and the new source list re-encodes that set by itself. Tests `generated_files::a_specular_fills_the_flat_alpha_of_a_prepacked_rmaos` and its neighbours.
+- **HC2 A row about a missing or unused map says which (owner, 2026-11-05; amends FB8).** "Add the missing map" never named the map, and the name was only on the hover. `PACK-DEFAULTED`, `PACK-CONFLICT`, `PACK-UNUSED-INPUT`, `SHADER-EXTRA-MAP` and `SHADER-MISSING-MAP` show the engine's text, without its code: "x_rmaos.dds A: no specular source; neutral default 0.04". Every other code keeps its action sentence, and the table keeps these five for lines with no engine text (`code_line`, banners). Test `code_text::a_row_about_a_missing_map_names_the_map`.
