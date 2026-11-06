@@ -269,8 +269,15 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             }
         }
     };
-    let unknown =
-        |t: &str| !paths.is_empty() && !t.trim().is_empty() && !known.contains(&fold_path(t));
+    // Note HC3: the known paths are whole file names, so the diffuse's suffix counts too (`body` is known as
+    // `body_albedo`).
+    let tail = model.input_name_tail(&v.id);
+    let unknown = |t: &str| {
+        !paths.is_empty()
+            && !t.trim().is_empty()
+            && !known.contains(&fold_path(t))
+            && !known.contains(&fold_path(&format!("{}{tail}", t.trim())))
+    };
     let mut open_menu = false;
     ui.add_enabled_ui(why.is_none(), |ui| {
         let focused = ui.memory(|m| m.has_focus(edit_id));

@@ -90,15 +90,31 @@ impl AppModel {
         list
     }
 
-    /// The current input name of set `set_id`: its own diffuse's game path without extension.
-    pub fn input_name_of(&self, set_id: &str) -> Option<String> {
+    /// The current input name of set `set_id` and the suffix its own diffuse keeps under any name: the diffuse's game
+    /// path without extension, split (Note HC3: `body_albedo` is the name `body` and `_albedo`).
+    fn input_name_parts(&self, set_id: &str) -> Option<(String, String)> {
         let views = views(self);
         let v = views.iter().find(|v| same_id(&v.id, set_id))?;
         let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Diffuse) else {
             return None;
         };
         let j = self.item(item)?.job.as_ref()?;
-        Some(no_ext(&j.game_path).to_string())
+        let full = no_ext(&j.game_path);
+        let tail = member_tail(split_path(full).1, v.skin);
+        let name = &full[..full.len() - tail.len()];
+        Some((name.to_string(), tail.to_string()))
+    }
+
+    /// The current input name of set `set_id`, without its diffuse's suffix.
+    pub fn input_name_of(&self, set_id: &str) -> Option<String> {
+        self.input_name_parts(set_id).map(|(name, _)| name)
+    }
+
+    /// The suffix set `set_id`'s own diffuse keeps under any input name; empty when it has none.
+    pub fn input_name_tail(&self, set_id: &str) -> String {
+        self.input_name_parts(set_id)
+            .map(|(_, tail)| tail)
+            .unwrap_or_default()
     }
 
     /// The plan for giving set `set_id` the input name `chosen` (a game path such as `textures/landscape/rock02`,
@@ -134,11 +150,14 @@ impl AppModel {
             .to_string();
         let chosen = lower(chosen.trim()).replace('\\', "/");
         let chosen = super::known_paths::strip_dds(&chosen).trim_matches('/');
+        // Note HC3: the diffuse keeps its suffix, so a name typed with it must not double it.
+        let tail = lower(&self.input_name_tail(set_id));
+        let chosen = chosen.strip_suffix(tail.as_str()).unwrap_or(chosen);
         if chosen.is_empty() {
             return Err("type or pick a path".into());
         }
         // T35: the set's own name in another case would only write a case-only alias.
-        if chosen == game {
+        if format!("{chosen}{tail}") == game {
             return Err("the set already has this name".into());
         }
         let Some(new_base) = chosen.strip_prefix(prefix.as_str()) else {

@@ -71,9 +71,9 @@ The table shows each old name, the kind its new name reads as, and the output it
 
 ### Input name box
 
-On the set editor heading, the **input name** box shows the path the set's textures are read as, and you can type a new one.
+On the set editor heading, the **input name** box shows the path the set's textures are read as, without the diffuse's own suffix (`body` for `body_albedo.png`), and you can type a new one. A name typed with that suffix does not get it twice.
 
-- While you type, the best known texture path shows in grey after the text. The known paths are every path the last mod scan saw in a mesh's diffuse slot, plus this project's own diffuse paths. **Tab** takes the grey text up to the next `/`, Tab again keeps going, and **Right arrow** at the end takes all of it.
+- While you type, the best known texture path shows in grey after the text. The known paths are every path the last mod scan saw in the diffuse slot of a mesh or a texture set record, plus this project's own diffuse paths. A name that isn't one of them turns amber, which is only a warning: it can still be used. **Tab** takes the grey text up to the next `/`, Tab again keeps going, and **Right arrow** at the end takes all of it.
 - A list of up to 12 matching paths opens under the box as you type; its bold top row is the grey completion. **Up/Down** highlight a row, **Enter** uses the highlighted row (or what you typed when none is), and clicking a row uses it. The first **Esc** closes the list; Esc again puts the old name back.
 - **Enter**, or clicking away, gives every member of the set an `[inputs]` alias with its own suffix and extension, as one undo step. Clicking away from an invalid or unchanged name also puts the old one back. The set's TruePBR settings, pins and borrows follow it.
 - A name that cannot be used (outside the project's folder, a name another file already has, a pinned slot) gets a red outline, with the reason on hover, and is never applied.
