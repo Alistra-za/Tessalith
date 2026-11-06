@@ -413,6 +413,9 @@ fn input_collisions(m: &AppModel, rows: &mut [RenameRow]) {
             r.problem = Some(format!("{other} already writes {}", r.output));
         } else if let Some(other) = seen.get(&l) {
             r.problem = Some(format!("{other} is renamed to this name too"));
+        } else if !m.item(&r.key).is_some_and(|i| !i.job_key.is_empty()) {
+            // A raw twin writes nothing of its own (Note HE7), so it shares no output.
+            seen.insert(l, r.key.clone());
         } else if let Some(other) = seen_out.get(&lower(&r.output)) {
             // Different names (a.png, b.tga), one output (x.dds).
             r.problem = Some(format!("{other} is renamed to write {} too", r.output));

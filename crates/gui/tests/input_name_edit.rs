@@ -1562,6 +1562,55 @@ fn rename_inputs_moves_the_input_name_box() {
     );
 }
 
+/// A set whose AO map has a raw twin (`x_ao.png` + `x_ao.tga`, Note HE7): the twin writes nothing, so it must not
+/// collide with the first on their one shared output.
+fn twins_opened(dir: &std::path::Path) -> AppModel {
+    use image::{ImageBuffer, Luma, Rgb};
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(dir.join("x.png"))
+        .unwrap();
+    for n in ["x_roughness.png", "x_ao.png", "x_ao.tga"] {
+        ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+            .save(dir.join(n))
+            .unwrap();
+    }
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(dir.to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+#[test]
+fn a_set_with_raw_twins_takes_an_input_name_and_a_bulk_rename() {
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = twins_opened(d.path());
+    let v = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.members.iter().any(|k| k == "x.png"))
+        .expect("the x set")
+        .clone();
+    // The input name box.
+    let plan = m.input_name_plan(&v.id, "new");
+    assert!(plan.is_ok(), "{:?}", plan.err());
+    // `Rename inputs…`.
+    m.click_set(&v.key, false, false);
+    m.open_rename(RenameMode::Inputs);
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_ref() else {
+        panic!("the rename dialog")
+    };
+    let mut dlg = dlg.clone();
+    dlg.recipe.prefix = "new_".into();
+    let plan = sdc_gui::model::rename::plan_rename(&m, &dlg);
+    let problems: Vec<_> = plan.rows.iter().map(|r| &r.problem).collect();
+    assert!(plan.can_apply(), "{problems:?}");
+}
+
 /// `Rename…` (the set) and `Rename outputs…` change what the files are written as; the input name box keeps showing
 /// the name the files are read under.
 #[test]
