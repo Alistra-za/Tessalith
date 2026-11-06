@@ -16,6 +16,32 @@ pub fn set_base(h: &HelperReport) -> String {
         .into_owned()
 }
 
+/// A fill target's name as the user sees it: the stem of the planned output that ends in the target's suffix, minus
+/// the suffix (so it matches the `Show …` button), else the set's base name when the target did not land.
+pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
+    use engine::helper::AlphaTarget as A;
+    let suffix = match t {
+        FillTarget::Alpha(A::Diffuse) => None,
+        FillTarget::Alpha(A::N) => Some("n"),
+        FillTarget::Alpha(A::F) => Some("f"),
+        FillTarget::Alpha(A::S) => Some("s"),
+        FillTarget::Alpha(A::Cnr) => Some("cnr"),
+        FillTarget::Packed { suffix, .. } => Some(suffix),
+        FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some("cnr"),
+        FillTarget::Rnm(_) => Some("n"),
+    };
+    let base = set_base(h);
+    let Some(tail) = suffix.map(|s| format!("_{s}")) else {
+        return t.label(&base);
+    };
+    let stem = h
+        .outputs
+        .iter()
+        .filter_map(|o| o.file_stem()?.to_str())
+        .find_map(|s| s.strip_suffix(tail.as_str()));
+    t.label(stem.unwrap_or(&base))
+}
+
 /// The `helper.fills` entries of the report's fills: layer blends (`Rnm`) are reports only, never written.
 pub fn written_fills(h: &HelperReport) -> Vec<FillTarget> {
     h.fills

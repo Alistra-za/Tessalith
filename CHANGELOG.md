@@ -18,6 +18,7 @@
 - Fixed: an Advanced skin set's packed roughness slot said RMAOS on its tile, in the slot menu and on its card. It now says RFAOS; a PBR set still says RMAOS.
 - A set line (`add` or `remove`) that names a file deleted from disk now clears itself, with an Info line in Messages, instead of leaving a red **?** chip. It is not an undo step. Nothing is cleared while the plan has no files or the project folder is missing, and borrows keep their chip.
 - A set no longer warns `SHADER-MISSING-MAP` for a map that a scanned mesh or a winning texture set record already supplies beside the set's diffuse (GUI only; the CLI has no scan). The scan is not asked whether the game uses it.
+- Fixed: the helper panel's Fills rows were out of line: the target names sat off the combos' left edge, the ✕ and `Reset` lined up with nothing, and a long target name widened the panel. Each target now has its own line under the combo column, with `Reset` on the Add line. A packed target is named by its output (`bake_1001_rmaos R`), the same name as the `Show …` button, not by the set's key.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 
 ## 2.0.0

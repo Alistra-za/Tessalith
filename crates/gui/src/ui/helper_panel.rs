@@ -1,6 +1,6 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
-use crate::model::helpers::set_base;
+use crate::model::helpers::target_label;
 use crate::model::AppModel;
 use eframe::egui;
 use engine::config::RnmTarget;
@@ -69,7 +69,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     let Some(item) = model.item(key) else { return };
     let (name, set_key) = (item.name.clone(), item.set_key.clone());
     let ro = model.toml_read_only_reason();
-    let base = set_base(h);
     let mut edits = vec![];
     if let Some(sk) = set_key.filter(|k| model.sets.iter().any(|s| &s.key == k)) {
         let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
@@ -91,13 +90,13 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
                     Some(t) => layer_row(ui, key, t, &ro, &mut edits),
                     None => {
                         let now = model.current_fills(key, h);
-                        fills_rows(ui, key, h, now, &base, &ro, &mut edits);
+                        fills_rows(ui, key, h, now, &ro, &mut edits);
                         read_rows(ui, key, h, &ro, &mut edits);
                     }
                 }
             });
         for (t, reason) in &h.skipped_targets {
-            ui.weak(format!("Skipped {}: {reason}", t.label(&base)));
+            ui.weak(format!("Skipped {}: {reason}", target_label(h, *t)));
         }
     });
     for (k, shown) in output_items(ui.ctx(), model, key, h) {
@@ -148,7 +147,7 @@ fn output_items(
 }
 
 fn hint(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).small().weak());
+    ui.add(egui::Label::new(egui::RichText::new(text).small().weak()).truncate());
 }
 
 fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
@@ -237,42 +236,75 @@ fn layer_row(
     ui.end_row();
 }
 
+/// One Grid row per line (`Fills | name ✕ | hint`, then `Add ▾ Reset`), so nothing is centred on a tall cell and the
+/// Reset and ✕ share the role row's column. The name is as wide as the combo and inset to its text.
 fn fills_rows(
     ui: &mut egui::Ui,
     key: &str,
     h: &HelperReport,
     // Final review M1: the `sdc.toml` list when hand-set (DY18b), so ✕ on one target never drops one that did not land.
     now: Vec<FillTarget>,
-    base: &str,
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    ui.label("Fills");
-    ui.vertical(|ui| {
-        for t in &now {
-            let label = t.label(base);
-            ui.horizontal(|ui| {
-                ui.label(&label);
-                let hover = format!("Stop filling {label}");
-                let r = ui.small_button("✕");
-                named(&r, egui::WidgetType::Button, &hover, None);
-                if why(r.on_hover_text(&hover), ro).clicked() {
-                    // Removing one fill writes the rest as hand-set: the list is the user's from now on.
-                    let rest = now.iter().copied().filter(|x| x != t).collect();
-                    edits.push(Edit::Fills(Some(rest)));
-                }
-            });
+    let (row_h, pad) = (ui.spacing().interact_size.y, ui.spacing().button_padding.x);
+    let hint_text = if h.fills_hand_set {
+        "set by you"
+    } else {
+        "suggested"
+    };
+    let mut first = true;
+    let lead = |ui: &mut egui::Ui, first: &mut bool| {
+        ui.label(if *first { "Fills" } else { "" });
+        *first = false;
+    };
+    for t in &now {
+        let label = target_label(h, *t);
+        let was_first = first;
+        lead(ui, &mut first);
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(COMBO_W, row_h),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_size(egui::vec2(COMBO_W, row_h));
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(pad);
+                    ui.add(egui::Label::new(&label).truncate());
+                },
+            );
+            let hover = format!("Stop filling {label}");
+            let r = ui.small_button("✕");
+            named(&r, egui::WidgetType::Button, &hover, None);
+            if why(r.on_hover_text(&hover), ro).clicked() {
+                // Removing one fill writes the rest as hand-set: the list is the user's from now on.
+                let rest = now.iter().copied().filter(|x| x != t).collect();
+                edits.push(Edit::Fills(Some(rest)));
+            }
+        });
+        if was_first {
+            hint(ui, hint_text);
         }
-        let more: Vec<FillTarget> = h
-            .options
-            .iter()
-            .copied()
-            .filter(|o| !now.contains(o))
-            .collect();
-        if !more.is_empty() {
+        ui.end_row();
+    }
+    let more: Vec<FillTarget> = h
+        .options
+        .iter()
+        .copied()
+        .filter(|o| !now.contains(o))
+        .collect();
+    if more.is_empty() && !h.fills_hand_set && !now.is_empty() {
+        return;
+    }
+    let was_first = first;
+    lead(ui, &mut first);
+    ui.horizontal(|ui| {
+        if more.is_empty() {
+            ui.allocate_space(egui::vec2(COMBO_W, row_h));
+        } else {
             let r = combo(ui, (key, "helper-add-fill"), "Add target", |ui| {
                 for o in &more {
-                    if ui.selectable_label(false, o.label(base)).clicked() {
+                    if ui.selectable_label(false, target_label(h, *o)).clicked() {
                         let mut next = now.clone();
                         next.push(*o);
                         edits.push(Edit::Fills(Some(next)));
@@ -287,17 +319,15 @@ fn fills_rows(
             );
             why(r, ro);
         }
-    });
-    if h.fills_hand_set {
-        if reset(ui, "Reset fills", "Use the suggested targets", ro) {
+        if h.fills_hand_set && reset(ui, "Reset fills", "Use the suggested targets", ro) {
             edits.push(Edit::Fills(None));
         }
-    } else {
-        hint(ui, "suggested");
+    });
+    if was_first {
+        hint(ui, hint_text);
     }
     ui.end_row();
 }
-
 fn read_rows(
     ui: &mut egui::Ui,
     key: &str,
