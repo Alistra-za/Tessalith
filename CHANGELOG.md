@@ -7,6 +7,7 @@
 - New sub-type `skin_detail`, suffix `_detail_n`, recognised only in an Advanced skin set on `cs`. It encodes as BC5 when its source is opaque and BC7 otherwise, and is not held to `FMT-BC5-NORMAL`. A set's `_wet` and `_detail_n` have slots 9 and 10 in the GUI, so another Advanced skin set can borrow them and clear the borrow as for the game slots; they never reach a PGPatcher JSON or a texture set.
 - `skin_wet` is always BC7 (a normal with a mask in alpha); the BC4 height form is gone. A grey `_wet` is not written (new warning `SKIN-WET-GREY`) and the rest of the batch still writes. `skin_rfaos`, `skin_wet` and `skin_detail` accept only the formats the Community Shaders loader reads (BC1, BC3, BC7, RGBA8, plus BC5 for `skin_detail`); another format is `FMT-CS-SKIN-LOADER`, which `--allow` cannot lift. Existing `skin_wet` outputs re-encode once; no other type's bytes change.
 - Fixed: renaming an Advanced skin set's outputs, or giving it an input name, left its `_wet` under the old name (or refused the input name) and read a `_detail_n` as a plain `_n`. Both now keep their suffix, and Rename refuses two outputs of one set landing on one name.
+- Fixed: a pre-packed `_rmaos` or `_rfaos` image with a flat alpha rejected a separate specular. The specular now fills that alpha, and the other channels come from the image. An alpha with content, or another loose map beside the image, still keeps the file.
 
 ## 2.0.0
 

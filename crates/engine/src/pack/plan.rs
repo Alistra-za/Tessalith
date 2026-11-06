@@ -306,6 +306,82 @@ fn prepacked_member<'a>(
     })
 }
 
+/// Note HC1: a specular beside a pre-packed `_rmaos`/`_rfaos` image whose alpha is flat (cs): the image joins `raw` as
+/// `RawMap::Rmaos` and `recipes_for_with` takes A from the specular, the other channels as CO104. A generated AO that
+/// `prepacked_b` kept fills B too. Any other loose source, or an alpha with content, keeps today's M9 result.
+// shortcut: a pre-packed DDS is never joined (images only, as CO103), upgrade if users ask for a specular beside one.
+fn prepacked_a<'a>(
+    ctx: &ResolveCtx,
+    set: &TextureSet,
+    files: &'a [InputFile],
+    flat_a: &BTreeSet<PathBuf>,
+    raw: &mut Vec<RawInput>,
+    members: &mut BTreeMap<PathBuf, &'a InputFile>,
+) {
+    let stem = |p: &Path| {
+        p.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    };
+    let loose_ok = |r: &RawInput| match r.role {
+        RawMap::Specular => true,
+        RawMap::Ao => crate::group::is_generated(&stem(&r.path)),
+        RawMap::Roughness | RawMap::Glossiness | RawMap::Metallic | RawMap::Fuzz | RawMap::Orm => {
+            false
+        }
+        _ => true,
+    };
+    if !raw.iter().any(|r| r.role == RawMap::Specular)
+        || raw.iter().any(|r| r.role == RawMap::Rmaos)
+        || !raw.iter().all(loose_ok)
+    {
+        return;
+    }
+    let Some(img) = prepacked_image(ctx, set, files) else {
+        return;
+    };
+    if flat_a.contains(&img.path) && !prepacked_aliased(ctx, img) {
+        raw.push(RawInput {
+            path: img.path.clone(),
+            role: RawMap::Rmaos,
+        });
+        members.insert(img.path.clone(), img);
+    }
+}
+
+/// The set's pre-packed `_rmaos`/`_rfaos` image, by name.
+fn prepacked_image<'a>(
+    ctx: &ResolveCtx,
+    set: &TextureSet,
+    files: &'a [InputFile],
+) -> Option<&'a InputFile> {
+    set.members.iter().map(|&i| &files[i]).find(|f| {
+        f.kind == InputKind::Image
+            && raw_role(f).is_none()
+            && matches!(
+                split_suffix_with(
+                    &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                    ctx.registry.alias_table()
+                )
+                .suffix
+                .as_deref(),
+                Some("rmaos" | "rfaos")
+            )
+    })
+}
+
+/// CO107: the recipe kind and `virtual_stem` read the built-in suffix only, so an aliased image is never joined.
+// shortcut: an aliased `_rmaos`/`_rfaos` image always keeps its own job; pass the alias table to the recipe and
+// `virtual_stem` if users ask for AO on aliased pre-packed images.
+fn prepacked_aliased(ctx: &ResolveCtx, img: &InputFile) -> bool {
+    let stem = img.rel.file_stem().unwrap_or_default().to_string_lossy();
+    crate::group::split_suffix(&stem).1.as_deref()
+        != split_suffix_with(&stem, ctx.registry.alias_table())
+            .suffix
+            .as_deref()
+}
+
 /// Note CO103: a generated AO beside a pre-packed `_rmaos`/`_rfaos` image of the set (cs). When the image's B holds
 /// AO (or was not analysed), the generated AO is skipped `GEN-REPLACED` and leaves `raw`. When it is empty and the
 /// AO is the set's only `_rmaos`/`_rfaos` source, the image joins `raw` as `RawMap::Rmaos` and `recipes_for_with`
@@ -334,25 +410,10 @@ fn prepacked_b<'a>(
     else {
         return;
     };
-    let Some(img) = set.members.iter().map(|&i| &files[i]).find(|f| {
-        f.kind == InputKind::Image
-            && raw_role(f).is_none()
-            && matches!(
-                split_suffix_with(&stem(&f.rel), ctx.registry.alias_table())
-                    .suffix
-                    .as_deref(),
-                Some("rmaos" | "rfaos")
-            )
-    }) else {
+    let Some(img) = prepacked_image(ctx, set, files) else {
         return;
     };
-    // CO107: the recipe kind and `virtual_stem` read the built-in suffix only, so an aliased image is never joined.
-    // shortcut: an aliased `_rmaos`/`_rfaos` image always keeps its own job; pass the alias table to the recipe and
-    // `virtual_stem` if users ask for AO on aliased pre-packed images.
-    let aliased = crate::group::split_suffix(&stem(&img.rel)).1.as_deref()
-        != split_suffix_with(&stem(&img.rel), ctx.registry.alias_table())
-            .suffix
-            .as_deref();
+    let aliased = prepacked_aliased(ctx, img);
     if aliased || !flat_b.contains(&img.path) {
         let ao = raw.remove(ai).path;
         let f = members.remove(&ao).expect("a raw member");
@@ -709,7 +770,8 @@ pub fn skin_f_candidate(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bo
 /// `packed_outputs` holds explicit GUI output paths of packed outputs by (set key, suffix), M3b. `derive_heights`
 /// holds the raw heights of the landscape sets a Vanilla derive converts (Note CN26, O6): each gets the cs
 /// `Parallax` recipe, which the vanilla target otherwise never plans. It is empty without `derive` (C6).
-/// `flat_b` holds the pass-1 images whose B is empty (`!pack::b_has_content`, Note CO103).
+/// `flat_b` holds the pass-1 images whose B is empty (`!pack::b_has_content`, Note CO103), `flat_a` those whose alpha
+/// is flat (Note HC1).
 #[allow(clippy::too_many_arguments)]
 pub fn plan_packing(
     ctx: &ResolveCtx,
@@ -722,6 +784,7 @@ pub fn plan_packing(
     packed_outputs: &BTreeMap<(String, String), PathBuf>,
     derive_heights: &BTreeSet<PathBuf>,
     flat_b: &BTreeSet<PathBuf>,
+    flat_a: &BTreeSet<PathBuf>,
     fills: &crate::helper::plan::FillPlan,
 ) -> PackPlan {
     let (pa, pinfo) = placeholder();
@@ -811,6 +874,7 @@ pub fn plan_packing(
                 skipped,
                 &mut out,
             );
+            prepacked_a(ctx, set, files, flat_a, &mut raw, &mut members);
         }
         if raw.is_empty() {
             continue;

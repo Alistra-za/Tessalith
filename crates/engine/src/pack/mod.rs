@@ -395,9 +395,8 @@ pub fn recipes_for_sel(
             } else {
                 &[Roughness, Glossiness, Ao, Metallic, Orm]
             };
-            // Note CO104 (Track A R1): `plan_packing` passes a pre-packed `_rmaos`/`_rfaos` image only beside a lone
-            // generated AO, when the image's B is empty. R, G (metallic, or fuzz on `_rfaos`) and A come from the
-            // image, B from the AO.
+            // Note CO104 (Track A R1), HC1: `plan_packing` passes a pre-packed `_rmaos`/`_rfaos` image only beside a
+            // generated AO for its empty B and/or a specular for its flat A. Every other channel comes from the image.
             if let (Some(img), Some(kind)) = (by_role.get(&Rmaos), prepacked) {
                 let ch = |slot: Slot| ChannelNeed::Source {
                     path: img.path.clone(),
@@ -410,8 +409,8 @@ pub fn recipes_for_sel(
                     channels: [
                         ch(Slot::Roughness),
                         ch(Slot::Metallic),
-                        src(Ao, false).unwrap_or(Missing(Slot::Ao)),
-                        ch(Slot::Specular),
+                        src(Ao, false).unwrap_or_else(|| ch(Slot::Ao)),
+                        src(Specular, false).unwrap_or_else(|| ch(Slot::Specular)),
                     ],
                 });
             } else if triggers.iter().copied().any(has) || forced.contains(&cs_pack) {

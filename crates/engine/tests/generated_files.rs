@@ -1016,6 +1016,125 @@ fn a_prepacked_rmaos_with_baked_ao_keeps_its_b() {
     assert_eq!(ao.channel, 2);
 }
 
+// ---- A separate specular beside a pre-packed image with a flat alpha (Note HC1) ----
+
+/// rock.png, rock_rmaos.png (R 120, G 30, B 200, A `a`) and rock_specular.png.
+fn prepacked_with_specular(dir: &Path, a: impl Fn(u32, u32) -> u8) {
+    put(dir, "rock.png", 16, |x, _| x as u8 * 8);
+    put_rgba(dir, "rock_rmaos.png", 16, |x, y| [120, 30, 200, a(x, y)]);
+    put(dir, "rock_specular.png", 16, |x, y| (x * 8 + y * 4) as u8);
+}
+
+#[test]
+fn a_specular_fills_the_flat_alpha_of_a_prepacked_rmaos() {
+    for flat in [0u8, 128, 255] {
+        let d = tempfile::tempdir().unwrap();
+        prepacked_with_specular(d.path(), |_, _| flat);
+        let (p, ev) = plan(d.path(), Target::Cs, &[]);
+        let jobs = rmaos_jobs(&p);
+        assert_eq!(jobs.len(), 1, "one _rmaos job: {:?}", p.jobs);
+        let j = jobs[0];
+        let pk = j.pack.as_ref().expect("a packed _rmaos");
+        // R, G and B from the image, A from the specular.
+        let asm = engine::pack::assemble::assemble(pk, pk.gray).unwrap();
+        for (i, px) in asm.image.px.iter().enumerate() {
+            let (x, y) = (i as u32 % 16, i as u32 / 16);
+            let q = px.map(|v| (v * 255.0).round() as u8);
+            assert_eq!(q, [120, 30, 200, (x * 8 + y * 4) as u8], "texel ({x}, {y})");
+        }
+        assert_eq!(
+            j.provenance["pack.b"],
+            Provenance::Source("rock_rmaos.png:B".into())
+        );
+        assert_eq!(
+            j.provenance["pack.a"],
+            Provenance::Source("rock_specular.png:R".into())
+        );
+        assert!(!all_codes(&p).contains(&Code::PackConflict));
+        assert!(!all_codes(&p).contains(&Code::PackUnusedInput));
+        assert!(!warning_codes(&ev).contains(&Code::PackConflict));
+    }
+}
+
+/// The owner's case: the specular is hand-set to fill the image's A.
+#[test]
+fn a_hand_set_fill_lands_on_the_flat_alpha_of_a_prepacked_rmaos() {
+    let d = tempfile::tempdir().unwrap();
+    prepacked_with_specular(d.path(), |_, _| 255);
+    let (p, _) = plan(
+        d.path(),
+        Target::Cs,
+        &["file:**/rock_specular.png.helper.fills=[\"rmaos.a\"]"],
+    );
+    let jobs = rmaos_jobs(&p);
+    assert_eq!(jobs.len(), 1, "{:?}", p.jobs);
+    let j = jobs[0];
+    assert!(j.pack.is_some(), "{:?}", all_codes(&p));
+    assert_eq!(
+        j.provenance["pack.a"],
+        Provenance::Source("rock_specular.png:R".into())
+    );
+    assert!(!all_codes(&p).contains(&Code::PackUnusedInput));
+}
+
+/// An alpha with content is the artist's specular: the file still wins (Note M9).
+#[test]
+fn a_prepacked_alpha_with_content_keeps_the_conflict() {
+    let d = tempfile::tempdir().unwrap();
+    prepacked_with_specular(d.path(), |x, _| x as u8 * 8);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    let jobs = rmaos_jobs(&p);
+    assert_eq!(jobs.len(), 1, "{:?}", p.jobs);
+    assert!(jobs[0].pack.is_none(), "the file's own job");
+    assert!(all_codes(&p).contains(&Code::PackUnusedInput));
+    // A hand-set fill asks for the recipe, so the same set is a conflict the file wins.
+    let (p, _) = plan(
+        d.path(),
+        Target::Cs,
+        &["file:**/rock_specular.png.helper.fills=[\"rmaos.a\"]"],
+    );
+    let jobs = rmaos_jobs(&p);
+    assert_eq!(jobs.len(), 1, "{:?}", p.jobs);
+    assert!(jobs[0].pack.is_none(), "the file's own job");
+    assert!(all_codes(&p).contains(&Code::PackConflict));
+}
+
+/// Only a specular is taken: another loose map beside the image keeps the conflict (Note CO105).
+#[test]
+fn a_flat_alpha_with_another_loose_map_keeps_the_conflict() {
+    let d = tempfile::tempdir().unwrap();
+    prepacked_with_specular(d.path(), |_, _| 0);
+    put(d.path(), "rock_roughness.png", 16, |x, _| x as u8 * 4);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    let jobs = rmaos_jobs(&p);
+    assert_eq!(jobs.len(), 1, "{:?}", p.jobs);
+    assert!(jobs[0].pack.is_none(), "the file's own job");
+    assert!(all_codes(&p).contains(&Code::PackConflict));
+}
+
+/// Both empty channels are filled in one recipe: B from the generated AO, A from the specular.
+#[test]
+fn a_flat_b_and_flat_alpha_take_both_sources() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "rock.png", 16, |x, _| x as u8 * 8);
+    put_rgba(d.path(), "rock_rmaos.png", 16, |_, _| [120, 30, 255, 0]);
+    put(d.path(), "rock_ao_generated.png", 16, |x, _| x as u8 * 4);
+    put(d.path(), "rock_specular.png", 16, |_, y| y as u8 * 8);
+    let (p, _) = plan(d.path(), Target::Cs, &[]);
+    let jobs = rmaos_jobs(&p);
+    assert_eq!(jobs.len(), 1, "{:?}", p.jobs);
+    let j = jobs[0];
+    assert!(j.pack.is_some(), "{:?}", all_codes(&p));
+    assert_eq!(
+        j.provenance["pack.b"],
+        Provenance::Source("rock_ao_generated.png:R".into())
+    );
+    assert_eq!(
+        j.provenance["pack.a"],
+        Provenance::Source("rock_specular.png:R".into())
+    );
+}
+
 // ---- Task 11 review fixes (CO106-CO109) ----
 
 #[test]

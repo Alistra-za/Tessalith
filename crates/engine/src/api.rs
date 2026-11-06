@@ -2016,6 +2016,12 @@ impl Engine {
                 (work[*wi].1.path.clone(), facts)
             })
             .collect();
+        // Note HC1: images whose alpha is flat, for a specular beside a pre-packed `_rmaos` (pack planning).
+        let flat_a: BTreeSet<PathBuf> = alpha_facts
+            .iter()
+            .filter(|(_, f)| f.empty)
+            .map(|(p, _)| p.clone())
+            .collect();
         // The load fact a filled target's re-analysis cannot see (it loads pixels only): the DDS format.
         let load_meta: BTreeMap<PathBuf, Option<u32>> = pass1
             .iter()
@@ -2123,6 +2129,7 @@ impl Engine {
             &p.packed_outputs,
             &derive_heights,
             &flat_b,
+            &flat_a,
             &fills,
         );
         // As step 3b drops its losers, so later steps (the RNM bent AO) never read a replaced generated AO.
