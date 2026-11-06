@@ -768,3 +768,31 @@ fn an_eye_shader_msn_is_not_set_missing_companion() {
         assert_eq!(set_codes(n), vec![], "{t:?}");
     }
 }
+
+/// Note HD5: the bake adds nothing to mip 0, so a member with one level (`levels = none`, which also keeps an NPOT
+/// size, or `levels = 1`) gets no `BakeJob`. A companion with mips still bakes and the set reports it.
+#[test]
+fn a_member_with_no_mips_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 48, 48);
+    rough(d.path(), "textures/pbr/iron_rfaos.png", 64, 64);
+    let (p, ev) = plan(req(d.path(), &["file:**/iron_rmaos.png.mips.levels=none"]));
+    assert!(job(&p, "iron_rmaos.png").bake.is_none());
+    assert!(job(&p, "iron_rfaos.png").bake.is_some());
+    assert!(bake_flag(&ev, "textures/pbr/iron"));
+
+    // Every member one level: nothing bakes and the set is not reported as baked.
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rfaos.png", 48, 48);
+    let sets = [
+        "file:**/iron_rmaos.png.mips.levels=1",
+        "file:**/iron_rfaos.png.mips.levels=none",
+    ];
+    let (p, ev) = plan(req(d.path(), &sets));
+    assert!(job(&p, "iron_rmaos.png").bake.is_none());
+    assert!(job(&p, "iron_rfaos.png").bake.is_none());
+    assert!(!bake_flag(&ev, "textures/pbr/iron"));
+}

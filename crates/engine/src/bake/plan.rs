@@ -330,6 +330,10 @@ fn attach(jobs: &mut [ResolvedJob], n: usize, members: &[usize], opted_out: bool
         let Some(mdims) = post_resize_dims(&jobs[m]) else {
             continue;
         };
+        // Note HD5: mip 0 gains nothing (HD1), so a member with one level has nothing to bake.
+        if crate::mips::level_count(mdims.0, mdims.1, &jobs[m].profile.mips.levels) == 1 {
+            continue;
+        }
         let (shift, fit) = match decide_bake(opted_out, ndims, &jobs[m].profile, mdims) {
             BakeDecision::Never => continue,
             BakeDecision::Bake { shift } => (shift, None),
