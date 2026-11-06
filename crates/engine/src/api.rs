@@ -1135,7 +1135,8 @@ pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
 }
 
-/// Note HE7: the images that write nothing of their own (a raw map, a normal layer, a skin `_f`): pack planning
+/// Note HE7: the images that write nothing of their own (a raw map, a hand-set normal layer, a skin `_f`; a normal
+/// layer found by its name is not counted, so two of those stay `IN-DUPLICATE`): pack planning
 /// consumes them or reports them unused, so two of one name are not duplicates and `prepare` leaves them out of the
 /// `IN-DUPLICATE` comparison. The first by path feeds the channel (M13). The fast re-plan runs this on the old and the
 /// new state, so an edit that moves any file in or out is seen.

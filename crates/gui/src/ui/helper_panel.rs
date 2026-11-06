@@ -328,6 +328,7 @@ fn fills_rows(
     }
     ui.end_row();
 }
+
 fn read_rows(
     ui: &mut egui::Ui,
     key: &str,

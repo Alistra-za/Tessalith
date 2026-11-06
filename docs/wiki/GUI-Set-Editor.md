@@ -20,7 +20,7 @@ What the Material tab holds depends on the set: the [PGPatcher settings](GUI-PGP
 
 ## Slot rows
 
-Each PGPatcher slot is one row, in slot order, so there are at most 8: Diffuse, Normal, Emissive _g (or Skin _sk), Height, RMAOS, **Coat normal / Fuzz (slot 7)**, Subsurface. Only the slots the set's shader can use are shown. A filled slot the shader cannot use stays, with an amber outline, and its title says why on hover. The cubemap slot has no row; set it with a slot command.
+Each PGPatcher slot is one row, in slot order, so there are at most 8: Diffuse, Normal, Emissive _g (or Skin _sk), Height, RMAOS (RFAOS on an Advanced skin set), **Coat normal / Fuzz (slot 7)**, Subsurface. Only the slots the set's shader can use are shown. A filled slot the shader cannot use stays, with an amber outline, and its title says why on hover. The cubemap slot has no row; set it with a slot command.
 
 - A Landscape or PBR Landscape set also has **Projected noise** and **Detail normal** rows. They are not PGPatcher slots ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)).
 - Slot 7 holds the set's `_cnr` or `_f`, whichever it has. With both, the row shows the conflict in red (PGPatcher has one slot 7), lists both files with a ✕ each to take one out of the set, and export warns "_cnr and _f both use slot 7". Its slot commands, file drop and PGPatcher lock (`lock_cnr`) are slot 7's. The same holds for a set with both a `_g` and an `_sk` on slot 3.

@@ -20,7 +20,7 @@ A card's first row has:
 
 Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.
 
-The **shader** combo under the first row takes the card's whole width. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S):
+The **shader** combo under the first row takes the card's whole width. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS: <!-- D:HE1 -->
 
 | Chip | Meaning |
 |---|---|
