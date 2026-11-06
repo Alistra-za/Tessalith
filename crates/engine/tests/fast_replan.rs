@@ -666,6 +666,30 @@ fn typing_a_skin_sets_raw_maps_plans_in_full() {
     );
 }
 
+/// Final review: a `packing.recipe` edit that flips a set's skin status never patches (the verdict is a full plan, and
+/// that plan equals a fresh one), so the skin `_f` twins' duplicate verdict cannot go stale.
+#[test]
+fn a_recipe_edit_that_flips_skin_plans_in_full() {
+    let (_fx, session, base) = skin_twins();
+    let (rep, _) = reporter();
+    let cancel = CancelToken::default();
+    // The recipe back to the default RMAOS: the set is no longer an Advanced skin set.
+    let edit = vec![("dir/y_rmaos".to_string(), None)];
+    let req = edited(&base, &edit);
+    let got = session.replan_sets(&req, &edit, &rep, &cancel);
+    // The more specific reason wins (here the `_f` twins turn into writers); RECIPE_CHANGE is the last resort.
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == DUPLICATE_CHANGE || why == RECIPE_CHANGE),
+        "{got:?}"
+    );
+    let kept = session.plan_and_keep(req.clone(), &rep, &cancel).unwrap();
+    let fresh = Session::new().unwrap().plan(req, &rep, &cancel).unwrap();
+    assert_eq!(
+        format!("{:?}", kept.skipped),
+        format!("{:?}", fresh.skipped)
+    );
+}
+
 /// Minor 3: a request carrying an Also export's derive step falls back before any patch work.
 #[test]
 fn a_derive_request_needs_a_full_plan() {
