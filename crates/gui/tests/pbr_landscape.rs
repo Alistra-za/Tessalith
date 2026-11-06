@@ -314,6 +314,37 @@ fn differing_blocks_load_as_unsynced() {
     assert_eq!(glint(h.state(), Kind::Txst), Some(json!({"enabled": true})));
 }
 
+/// Note HC5 (owner's screenshot): a lone `_f` picks the PBR shader, so its pill must not say vanilla. It writes no
+/// JSON, as it has no albedo, and the pill says that too.
+#[test]
+fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
+    use sdc_gui::model::sets::kind_text;
+    let d = tempfile::tempdir().unwrap();
+    let root = support::mod_folder(d.path());
+    let r = root.join("landscape");
+    std::fs::copy(r.join("rock01.png"), r.join("lonely_f.png")).unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(d.path().join("export")),
+        ..Default::default()
+    };
+    let mut m = sdc_gui::model::AppModel::new(settings, None, support::session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(root);
+    settle(&mut m);
+    let v = set_views(&m)
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k.ends_with("lonely_f.png")))
+        .expect("the lone _f's set");
+    assert!(sdc_gui::model::also::is_pbr_set(&v), "{:?}", v.shader);
+    assert!(!v.pbr, "no albedo, so no JSON");
+    assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+    assert!(badge_text(&m, &v).contains("no JSON"));
+    // A set the shader pick calls vanilla still says so.
+    let mut other = v.clone();
+    other.shader = None;
+    assert_eq!(kind_text(&m, &other), "vanilla");
+}
+
 /// A plain PBR set keeps the collapsed "Advanced: CS PBR records" panel and no card.
 #[test]
 fn a_plain_pbr_set_still_reaches_the_advanced_records_panel() {

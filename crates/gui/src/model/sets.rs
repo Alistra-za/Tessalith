@@ -402,10 +402,13 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
             (false, true) => BADGE_PBR_LANDSCAPE_PGP_ONLY,
             (false, false) => BADGE_PBR_LANDSCAPE_NONE,
         }
-    } else if !is_json_set(v, m.target) {
-        "vanilla set (no JSON)"
-    } else {
+    } else if is_json_set(v, m.target) {
         "PBR → JSON"
+    } else if super::also::is_pbr_set(v) {
+        // Note HC5: the shader pick reads any PBR map, the JSON needs a `pbr_albedo` diffuse.
+        "PBR set without a PBR albedo (no JSON)"
+    } else {
+        "vanilla set (no JSON)"
     }
 }
 
@@ -417,6 +420,8 @@ pub fn kind_text(m: &AppModel, v: &SetView) -> &'static str {
         "PBR Landscape"
     } else if is_json_set(v, m.target) {
         "PBR → JSON"
+    } else if super::also::is_pbr_set(v) {
+        "PBR, no JSON"
     } else {
         "vanilla"
     }
