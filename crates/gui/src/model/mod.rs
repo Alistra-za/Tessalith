@@ -332,6 +332,8 @@ pub(crate) struct ViewKey {
     scan_db: Option<PathBuf>,
     /// Its stamp as of the last `poll` (an external CLI scan shows on the next frame).
     scan: cs_pbr::Stamp,
+    /// `AppModel::known_rev`: the scan's `supplies` decide which missing-map warnings a view keeps.
+    known_rev: u64,
 }
 
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
@@ -415,6 +417,9 @@ pub struct AppModel {
     /// GUI tweaks G1/G5: the texture and mesh paths of the last scan, for the path pickers. Written only through
     /// `set_known`: the cached `export_asks` is keyed on the `evidence_rev` it bumps.
     pub known: Arc<known_paths::KnownPaths>,
+    /// Bumped by `set_known` when `known` changes; part of `ViewKey`, so a scan landing after the plan updates the
+    /// set views (their missing-map warnings read `known.supplies`) without a new plan (Note HE4).
+    known_rev: u64,
     /// Item 9: the selected texture's "Used by meshes" read (`used_by_for`).
     pub used_by: used_by::UsedByState,
     /// Note AN: the hover lists of PGPatcher-locked slots.
@@ -776,6 +781,7 @@ impl AppModel {
             gras_diffuses: Default::default(),
             gras_all_diffuses: Default::default(),
             known: Default::default(),
+            known_rev: 0,
             used_by: Default::default(),
             original: Default::default(),
             json_editor_open: false,
@@ -3095,6 +3101,7 @@ impl AppModel {
         if *self.known != k {
             self.known = Arc::new(k);
             self.evidence_rev += 1;
+            self.known_rev += 1;
         }
     }
 
@@ -3123,6 +3130,7 @@ impl AppModel {
             target: self.target,
             scan_db: self.scan_db.clone(),
             scan: self.scan_stamp,
+            known_rev: self.known_rev,
         }
     }
 

@@ -23,7 +23,7 @@ Each set is made for one Skyrim shader. The shader decides which maps the set sh
 | `landscape` | diffuse, `_n` | |
 | `complex_grass` | the complex-grass texture | |
 
-A missing required map gives `SHADER-MISSING-MAP`; a member the shader does not use gives `SHADER-EXTRA-MAP`. Both are warnings, and extra members still convert.
+A missing required map gives `SHADER-MISSING-MAP`; a member the shader does not use gives `SHADER-EXTRA-MAP`. Both are warnings, and extra members still convert. The GUI drops the first for a map that a scanned mesh or texture set record already fills beside the set's diffuse.
 
 ### How the shader is picked
 

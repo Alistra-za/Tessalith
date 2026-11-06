@@ -1454,7 +1454,7 @@ fn the_matching_rows_and_the_plus_menu_follow_the_filled_slots() {
 fn a_pbr_set_shows_its_pbr_slots_in_slot_order() {
     use engine::shader::Shader;
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened_plain(d.path());
+    let mut m = pbr_without_rmaos(d.path());
     idle(&mut m);
     let v = view(&set_views(&m), "landscape/rock01").clone();
     assert_eq!(v.shader.as_ref().map(|p| p.shader), Some(Shader::Pbr));
@@ -2223,4 +2223,110 @@ fn output_game_paths_includes_a_skipped_dds() {
         .item("textures/Rock/Rock.dds")
         .is_some_and(|i| i.job.is_none()));
     assert_eq!(m.output_game_paths().1, ["textures/rock/rock.dds"]);
+}
+
+/// The `pbr_opened_plain` set with no RMAOS: its roughness and AO sources are gone, so it lacks a map.
+fn pbr_without_rmaos(dir: &std::path::Path) -> sdc_gui::model::AppModel {
+    let mut m = pbr_opened_plain(dir);
+    for n in ["rock01_roughness.png", "rock01_ao.png"] {
+        std::fs::remove_file(dir.join("textures/landscape").join(n)).unwrap();
+    }
+    m.replan();
+    idle(&mut m);
+    m
+}
+/// The labels of the missing-map warnings the view of `id` carries.
+fn missing_maps(m: &sdc_gui::model::AppModel, id: &str) -> Vec<String> {
+    use engine::codes::Code;
+    view(&set_views(m), id)
+        .set_warnings
+        .iter()
+        .filter(|w| w.code == Code::ShaderMissingMap)
+        .map(|w| w.data["map"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+fn supplying(path: &str, bits: u16) -> sdc_gui::model::known_paths::KnownPaths {
+    sdc_gui::model::known_paths::KnownPaths {
+        supplies: [(path.to_string(), bits)].into(),
+        ..Default::default()
+    }
+}
+
+/// Note HE4: a map a mesh or TXST fills beside the set's diffuse is not "missing". `set_known` alone takes the
+/// warning away (no new plan), from the set and from the Problems list; a map nobody supplies still warns.
+#[test]
+fn a_map_a_mesh_supplies_raises_no_missing_map() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_without_rmaos(d.path());
+    idle(&mut m);
+    let rock = "textures/landscape/rock01.dds";
+    assert_eq!(missing_maps(&m, "landscape/rock01"), ["_rmaos"]);
+    let rows = |m: &sdc_gui::model::AppModel| {
+        sdc_gui::model::bottom::problems(m)
+            .iter()
+            .filter(|p| p.text.contains("needs _rmaos"))
+            .count()
+    };
+    assert_eq!(rows(&m), 1, "a Problems row to begin with");
+    let generation = m.generation();
+    m.set_known(supplying(rock, 1 << 1)); // only a normal map
+    assert_eq!(
+        missing_maps(&m, "landscape/rock01"),
+        ["_rmaos"],
+        "other slot"
+    );
+    m.set_known(supplying(rock, 1 << 5));
+    assert!(missing_maps(&m, "landscape/rock01").is_empty());
+    assert_eq!(m.generation(), generation, "no new plan");
+    assert_eq!(rows(&m), 0, "no Problems row");
+    m.set_known(Default::default());
+    assert_eq!(missing_maps(&m, "landscape/rock01"), ["_rmaos"], "back");
+}
+
+/// A set read under an alias is looked up by the alias, the name the meshes and TXSTs use.
+#[test]
+fn an_aliased_set_looks_up_the_alias() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_without_rmaos(d.path());
+    m.set_input_name("landscape/rock01", "textures/landscape/stone")
+        .unwrap();
+    idle(&mut m);
+    let id = "landscape/stone";
+    assert_eq!(missing_maps(&m, id), ["_rmaos"]);
+    m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
+    assert_eq!(
+        missing_maps(&m, id),
+        ["_rmaos"],
+        "the file's own name is not asked"
+    );
+    m.set_known(supplying("textures/landscape/stone.dds", 1 << 5));
+    assert!(missing_maps(&m, id).is_empty());
+}
+
+#[test]
+fn no_scan_warns_as_before() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_without_rmaos(d.path());
+    idle(&mut m);
+    assert!(m.known.supplies.is_empty());
+    assert_eq!(missing_maps(&m, "landscape/rock01"), ["_rmaos"]);
+}
+
+/// A role the check can name has a slot to look up, or is the diffuse itself.
+#[test]
+fn every_required_role_has_a_slot() {
+    use engine::{config::Target, shader::Shader};
+    let diffuse_like = ["albedo", "diffuse", "skin_albedo", "complex_grass"];
+    for s in Shader::ALL {
+        for t in [Target::Cs, Target::Vanilla] {
+            for r in s.spec_for(t).required {
+                assert!(
+                    map_slot(r.label).is_some() || diffuse_like.contains(&r.label),
+                    "{s:?} {t:?}: {}",
+                    r.label
+                );
+            }
+        }
+    }
 }

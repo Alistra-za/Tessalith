@@ -15,6 +15,9 @@ pub struct KnownPaths {
     pub textures: BTreeMap<String, u16>,
     /// Every folder that holds a winning mesh, and its parent folders, without `meshes/` (`architecture/whiterun`).
     pub mesh_dirs: Vec<String>,
+    /// Diffuse path (with `.dds`) → the slots (0-based bits, 1..=7) a live mesh's texture set or a winning TXST fills
+    /// beside it. A set's missing-map warning is dropped for such a map (Note HE4).
+    pub supplies: BTreeMap<String, u16>,
 }
 
 /// Read the known paths from scan database `db`.
@@ -47,6 +50,34 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             }
         }
     }
+    let mut supplies: BTreeMap<String, u16> = BTreeMap::new();
+    for sql in [
+        // A mesh's texture set: bit N when its slot N is filled. Not a self-join of `tex_use` (no index on texset_id).
+        format!(
+            "SELECT d.p, (ts.t1 IS NOT NULL) * 2 + (ts.t2 IS NOT NULL) * 4 + (ts.t3 IS NOT NULL) * 8 \
+             + (ts.t4 IS NOT NULL) * 16 + (ts.t5 IS NOT NULL) * 32 + (ts.t6 IS NOT NULL) * 64 \
+             + (ts.t7 IS NOT NULL) * 128 FROM texset ts JOIN path d ON d.id = ts.t0 WHERE {}",
+            super::used_by::LIVE_LIGHTING_TEXSET
+        ),
+        // A winning TXST (HC6's conditions on its diffuse row): the other slots of the same record.
+        "SELECT d.p, 1 << o.slot FROM txst_slot d0 JOIN path d ON d.id = d0.path_id \
+         JOIN rec_winner w ON w.formid = d0.formid AND w.plugin_id = d0.plugin_id \
+         JOIN rec r ON r.plugin_id = d0.plugin_id AND r.local = d0.local AND r.owner_ok = 1 \
+         JOIN txst_slot o ON o.plugin_id = d0.plugin_id AND o.local = d0.local \
+         WHERE d0.slot = 0 AND o.slot BETWEEN 1 AND 7"
+            .to_string(),
+    ] {
+        let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (p, bits) = row.map_err(|e| e.to_string())?;
+            if p.starts_with("textures/") && bits != 0 {
+                *supplies.entry(p).or_default() |= bits as u16;
+            }
+        }
+    }
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut st = conn
         .prepare("SELECT p.p FROM nif_winner w JOIN path p ON p.id = w.path_id")
@@ -68,6 +99,7 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
     Ok(KnownPaths {
         textures,
         mesh_dirs: dirs.into_iter().collect(),
+        supplies,
     })
 }
 

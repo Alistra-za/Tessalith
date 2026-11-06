@@ -298,6 +298,7 @@ fn a_rescan_refreshes_the_editor_without_an_edit() {
         .set_known(sdc_gui::model::known_paths::KnownPaths {
             textures: [("textures/dlc/landscape/rock01.dds".to_string(), 1u16)].into(),
             mesh_dirs: vec![],
+            ..Default::default()
         });
     h.run();
     assert_eq!(

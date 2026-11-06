@@ -607,3 +607,47 @@ fn no_original_textures_read_starts_while_the_scan_store_is_unsettled() {
     m.ask_original_textures(SET, 2);
     assert!(m.used_by_pending(), "a settled store reads");
 }
+
+/// Note HE4: a mesh's texture set (live lighting shapes only) and a winning TXST each list the slots they fill beside
+/// their diffuse. A disabled mod's set, a TXST an override replaced and a record whose master is not loaded add none.
+#[test]
+fn read_lists_the_slots_a_mesh_or_txst_fills_beside_a_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    let s = modscan::store::Store::open(&db).unwrap();
+    s.conn()
+        .execute_batch(
+            "INSERT INTO path(id, p) VALUES (1, 'textures/m/d.dds'), (2, 'textures/m/d_n.dds'), (3, 'textures/m/d_rmaos.dds'),
+               (4, 'textures/off/d.dds'), (5, 'textures/off/d_n.dds'),
+               (6, 'textures/t/won.dds'), (7, 'textures/t/won_n.dds'), (8, 'textures/t/won_p.dds'),
+               (9, 'textures/t/lost.dds'), (10, 'textures/t/lost_n.dds'),
+               (11, 'textures/t/orphan.dds'), (12, 'textures/t/orphan_n.dds'),
+               (20, 'meshes/a.nif'), (21, 'meshes/b.nif');
+             INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES
+               (1, 1, 'On', 'on', 1, 1), (2, 1, 'Off', 'off', 2, 0);
+             INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (1, 20, 1, 0, 0), (2, 21, 2, 0, 0);
+             INSERT INTO texset(id, n, t0, t1, t5) VALUES (1, 6, 1, 2, 3);
+             INSERT INTO texset(id, n, t0, t1) VALUES (2, 2, 4, 5);
+             INSERT INTO shape(copy_id, block, kind, shader_kind, texset_id) VALUES
+               (1, 0, 'BSTriShape', 1, 1), (2, 0, 'BSTriShape', 1, 2);
+             INSERT INTO plugin(id, name, path, mtime, lo_index, light, flags, masters_json) VALUES
+               (1, 'A.esp', 'A.esp', 0, 0, 0, 0, '[]'), (2, 'B.esp', 'B.esp', 0, 1, 0, 0, '[]');
+             INSERT INTO rec(formid, local, plugin_id, sig, owner_ok) VALUES
+               (100, 100, 1, 'TXST', 1), (100, 100, 2, 'TXST', 1), (200, 200, 2, 'TXST', 0);
+             INSERT INTO rec_winner(formid, plugin_id, n_overrides) VALUES (100, 2, 2), (200, 2, 1);
+             INSERT INTO txst_slot(formid, local, plugin_id, slot, path_id) VALUES
+               (100, 100, 1, 0, 9), (100, 100, 1, 1, 10),
+               (100, 100, 2, 0, 6), (100, 100, 2, 1, 7), (100, 100, 2, 3, 8),
+               (200, 200, 2, 0, 11), (200, 200, 2, 1, 12);",
+        )
+        .unwrap();
+    drop(s);
+    let known = sdc_gui::model::known_paths::read(&db).unwrap();
+    assert_eq!(
+        known.supplies,
+        BTreeMap::from([
+            ("textures/m/d.dds".to_string(), (1u16 << 1) | (1 << 5)),
+            ("textures/t/won.dds".to_string(), (1u16 << 1) | (1 << 3)),
+        ])
+    );
+}

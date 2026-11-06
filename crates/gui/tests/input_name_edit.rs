@@ -85,6 +85,7 @@ fn harness_with(dt: f32, known: &[&str]) -> (tempfile::TempDir, H) {
     m.set_known(KnownPaths {
         textures: known.iter().map(|p| (format!("{p}.dds"), 1u16)).collect(),
         mesh_dirs: vec![],
+        ..Default::default()
     });
     (d, harness_on(m, ROCK_SET, dt))
 }
@@ -702,6 +703,7 @@ fn pbr_output_paths_are_never_offered() {
         ]
         .into(),
         mesh_dirs: vec![],
+        ..Default::default()
     });
     let list = h.state().0.input_name_candidates();
     assert!(list.iter().any(|p| p == "textures/landscape/rock02"));
@@ -1408,6 +1410,7 @@ fn a_set_under_textures_pbr_is_not_amber() {
     m.set_known(KnownPaths {
         textures: [("textures/landscape/rock02.dds".to_string(), 1u16)].into(),
         mesh_dirs: vec![],
+        ..Default::default()
     });
     let mut h = harness_on(m, "pbr/landscape/rock01", 0.25);
     assert_eq!(free(&h), "textures/pbr/landscape/rock01");
@@ -1516,4 +1519,89 @@ fn a_focused_box_scans_the_paths_once_per_text() {
         n + 1,
         "one scan for one keystroke"
     );
+}
+
+/// Settles planning and returns the id of the set holding the rock diffuse.
+fn rock_set_id(m: &mut AppModel) -> String {
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.members.iter().any(|k| k == "landscape/rock01.png"))
+        .expect("the rock set")
+        .id
+        .clone()
+}
+
+/// Item 2 of the owner's bulk-rename question: `Rename inputs…` moves the input name box with the new read-as name.
+#[test]
+fn rename_inputs_moves_the_input_name_box() {
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let set = rock_set_id(&mut m);
+    assert_eq!(set, ROCK_SET);
+    assert_eq!(m.input_name_of(&set).as_deref(), Some(ROCK01));
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == set)
+        .unwrap()
+        .key
+        .clone();
+    m.click_set(&key, false, false);
+    m.open_rename(RenameMode::Inputs);
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_mut() else {
+        panic!("the rename dialog")
+    };
+    dlg.recipe.prefix = "steel_".into();
+    assert!(m.apply_rename());
+    let new_set = rock_set_id(&mut m);
+    assert_eq!(new_set, "landscape/steel_rock01");
+    assert_eq!(
+        m.input_name_of(&new_set).as_deref(),
+        Some("textures/landscape/steel_rock01")
+    );
+}
+
+/// `Rename…` (the set) and `Rename outputs…` change what the files are written as; the input name box keeps showing
+/// the name the files are read under.
+#[test]
+fn rename_outputs_and_rename_set_leave_the_input_name_alone() {
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let set = rock_set_id(&mut m);
+    let before = m.input_name_of(&set);
+    assert_eq!(before.as_deref(), Some(ROCK01));
+    let output = |m: &AppModel| {
+        m.item("landscape/rock01.png")
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .output
+            .clone()
+    };
+    let out_before = output(&m);
+
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == set)
+        .unwrap()
+        .key
+        .clone();
+    m.click_set(&key, false, false);
+    m.open_rename(RenameMode::Outputs);
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_mut() else {
+        panic!("the rename dialog")
+    };
+    dlg.recipe.prefix = "x_".into();
+    assert!(m.apply_rename());
+    let after = rock_set_id(&mut m);
+    assert_ne!(output(&m), out_before, "the outputs rename took effect");
+    assert_eq!(m.input_name_of(&after), before, "Rename outputs…");
+
+    m.rename_set(&after, "landscape/stone01").unwrap();
+    let renamed = rock_set_id(&mut m);
+    assert_eq!(renamed, "landscape/stone01");
+    assert_eq!(m.input_name_of(&renamed), before, "Rename… (the set)");
 }

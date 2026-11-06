@@ -1139,6 +1139,7 @@ fn a_renamed_set_whose_name_the_scan_knows_elsewhere_asks_before_export() {
     m.set_known(sdc_gui::model::known_paths::KnownPaths {
         textures: [("textures/dlc/landscape/rock01.dds".to_string(), 1u16)].into(),
         mesh_dirs: vec![],
+        ..Default::default()
     });
     assert!(asks(&m), "{:?}", export_asks(&m));
 }

@@ -9,7 +9,7 @@ use crate::pgp::prefix::{
 };
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc};
-use engine::codes::Warning;
+use engine::codes::{Code, Warning};
 use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
 use engine::overrides::path_key_matches;
@@ -750,7 +750,52 @@ fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
                 .or_insert(SlotFill::Own { item: mk.clone() });
         }
     }
+    drop_supplied_missing_maps(m, &mut v);
     v
+}
+
+/// The lighting-shader slot (1-based, as `SlotKind::slot_number`) a required map of `Shader::spec` goes in, from
+/// `MapRole::label`; `None` for the diffuse-like roles, which are never the missing one beside a diffuse.
+pub fn map_slot(label: &str) -> Option<u8> {
+    match label {
+        "_n" | "_n/_msn" | "_n (model-space)" => Some(2),
+        "_g" => Some(3),
+        "_p" => Some(4),
+        "_rmaos" | "skin_rfaos" | "_m complex" => Some(6),
+        // Multilayer's inner layer: texture slot t6, no `SlotKind` (it has no subtype).
+        "_i" => Some(7),
+        _ => None,
+    }
+}
+
+/// Note HE4: a missing-map warning goes when a live mesh's texture set or a winning TXST that names this set's
+/// diffuse (under the name the set is read as) has that map's slot filled. The scan is not asked whether the game
+/// uses it (owner's word).
+fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
+    if m.known.supplies.is_empty() {
+        return;
+    }
+    let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Diffuse) else {
+        return;
+    };
+    let Some(job) = m.item(item).and_then(|i| i.job.as_ref()) else {
+        return;
+    };
+    let diffuse = format!(
+        "{}.dds",
+        super::input_name::no_ext(&job.game_path).to_ascii_lowercase()
+    );
+    let Some(&bits) = m.known.supplies.get(&diffuse) else {
+        return;
+    };
+    v.set_warnings.retain(|w| {
+        let supplied = w.code == Code::ShaderMissingMap
+            && w.data["map"]
+                .as_str()
+                .and_then(map_slot)
+                .is_some_and(|n| bits & (1 << (n - 1)) != 0);
+        !supplied
+    });
 }
 
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`

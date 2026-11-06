@@ -17,6 +17,7 @@
 - An `_rmaos`, `_rfaos` or complex `_m` of another shape or a non-power-of-two size than its `_n` now gets the variance bake instead of `SET-BAKE-RATIO`. The bake reaches members that have mips: an NPOT `_n` over a member with mips bakes, and a member with one mip level is not baked.
 - Fixed: an Advanced skin set's packed roughness slot said RMAOS on its tile, in the slot menu and on its card. It now says RFAOS; a PBR set still says RMAOS.
 - A set line (`add` or `remove`) that names a file deleted from disk now clears itself, with an Info line in Messages, instead of leaving a red **?** chip. It is not an undo step. Nothing is cleared while the plan has no files or the project folder is missing, and borrows keep their chip.
+- A set no longer warns `SHADER-MISSING-MAP` for a map that a scanned mesh or a winning texture set record already supplies beside the set's diffuse (GUI only; the CLI has no scan). The scan is not asked whether the game uses it.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 
 ## 2.0.0
