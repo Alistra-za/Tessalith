@@ -144,14 +144,15 @@ fn a_baked_member_is_rougher_and_records_its_normal() {
 }
 
 #[test]
-fn a_two_to_one_normal_bakes_into_mip_0_too() {
+fn a_two_to_one_normal_leaves_mip_0_as_authored() {
+    // Note HD1: the bake adds nothing to mip 0, even at shift 1.
     let d = tempfile::tempdir().unwrap();
     let n = bumpy_n(d.path(), 64, 0.0);
     let r = rmaos(d.path(), 32);
     let mut p = plan(d.path(), &r, &n, true, false);
     p.jobs[0].bake.as_mut().unwrap().shift = 1;
     assert_eq!(run(p).0.converted, 1);
-    assert!(mean_r(d.path(), 0) > 102.0, "{}", mean_r(d.path(), 0));
+    assert!(mean_r(d.path(), 0) < 102.0, "{}", mean_r(d.path(), 0));
 }
 
 /// Controller correction to R1: the bake reads the `_n`'s mip 0 as written. A uniformly short flat `_n` (|n| = 0.5,

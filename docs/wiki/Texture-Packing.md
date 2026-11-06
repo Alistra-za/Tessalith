@@ -98,7 +98,7 @@ A helper that fills nothing is reported, never a failure: `PACK-UNUSED-INPUT` (o
 
 ## Variance bake
 
-In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail that the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces do not look too shiny. The amount is limited by `mips.bake_clamp`. A `_cnr` bakes its own detail into its coat roughness.
+In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail that the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces do not look too shiny. Mip 0 stays as authored. The amount is limited by `mips.bake_clamp`. A `_cnr` bakes its own detail into its coat roughness.
 
 The bake needs both files in the batch, with power-of-two sizes of the same aspect. If not, it is skipped and reported: `SET-MISSING-COMPANION`, `SET-COMPANION-DDS` or `SET-BAKE-RATIO`. A companion that is only on disk, outside the batch, skips the bake without a message. A shared `_rmaos` (borrowed by several sets in the GUI) is never baked.
 

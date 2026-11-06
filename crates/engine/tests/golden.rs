@@ -278,8 +278,8 @@ fn reference_roughness(
     }
     alpha /= f64::from(f * f);
     let m = level as i32 + shift;
-    let add = if m < 1 {
-        0.0
+    let add = if level == 0 || m < 1 {
+        0.0 // Note HD1: mip 0 stays as authored
     } else {
         let g = 1u32 << m;
         reference_add((0..g * g).map(|k| decoded_normal(n.get_pixel(x * g + k % g, y * g + k / g))))

@@ -39,9 +39,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::PbrNormal
         | Subtype::Msn
         | Subtype::CoatNormal
-        | Subtype::ComplexMaterial
-        | Subtype::Rmaos
-        | Subtype::SkinRfaos
         | Subtype::GenericData
         | Subtype::ComplexGrass
         | Subtype::Cubemap
@@ -59,6 +56,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
         // A new sub-type in 2.1.0.
         Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
+        // 2.1.0: the variance bake adds nothing to mip 0 (Note HD1).
+        Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => ENGINE_VERSION,
     }
 }
 

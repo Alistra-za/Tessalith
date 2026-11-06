@@ -151,10 +151,10 @@ impl NormalVariance {
     }
 
     /// `min(2v, t²)` for texel (x, y) of the member's mip `level`; 0 where the footprint covers at most one `_n`
-    /// texel (`level + shift <= 0`).
+    /// texel (`level + shift <= 0`). Mip 0 stays as authored (Note HD1).
     pub fn add_at(&self, level: usize, x: u32, y: u32) -> f32 {
         let m = level as i64 + i64::from(self.shift);
-        if m < 1 {
+        if level == 0 || m < 1 {
             return 0.0;
         }
         match self.lengths.level(m as usize) {
@@ -362,7 +362,7 @@ mod tests {
         }
         alpha /= f64::from(f * f);
         let m = level as i32 + shift;
-        let add = if m < 1 {
+        let add = if level == 0 || m < 1 {
             0.0
         } else {
             let g = 1u32 << m;
@@ -400,6 +400,24 @@ mod tests {
             crate::mips::normalize_vector(px, w.domain);
         }
         img
+    }
+
+    /// Note HD1 (owner): a member smaller than its `_n` keeps mip 0 as authored; mip 1 still widens.
+    #[test]
+    fn nothing_is_added_to_mip_0_of_a_smaller_member() {
+        let normals = written(preprocess(bumpy(32), &profile(Subtype::PbrNormal)));
+        let pr = profile(Subtype::Rmaos);
+        let rough = preprocess(ramp(16), &pr);
+        let nv = NormalVariance::new(LengthPyramid::build(&normals), (16, 16), 0.25).unwrap();
+        assert_eq!(nv.shift(), 1);
+        let baked = build_chain_with(&rough, &pr, Some(&nv));
+        let plain = build_chain(&rough, &pr);
+        assert_eq!(baked[0], plain[0]);
+        assert!(baked[1]
+            .px
+            .iter()
+            .zip(&plain[1].px)
+            .any(|(b, p)| b[0] > p[0] + 1e-3));
     }
 
     fn close(a: f32, b: f64) -> bool {

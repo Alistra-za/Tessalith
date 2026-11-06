@@ -280,15 +280,8 @@ pub fn build_chain_with(work: &Work, p: &Profile, bake: Option<&NormalVariance>)
     let coat = coat_self_bake(work, p);
     let filt = effective_filter(work, p);
     let mut out = Vec::with_capacity(n as usize);
-    let mut base = base_level(work, p);
-    if let Some(b) = rough {
-        let src = &work.img;
-        bake_roughness(&mut base, 0, b, |i| src.px[i][0] * src.px[i][0]);
-    }
-    if let Some(b) = gloss {
-        bake_gloss(&mut base, 0, b);
-    }
-    out.push(base);
+    // Mip 0 stays as authored (Note HD1).
+    out.push(base_level(work, p));
     // `acc` is the unnormalised accumulation level; the first step reads the base directly unless roughness needs
     // squaring, so the base is not cloned a second time.
     let mut acc: Option<Rgba32F> = None;
@@ -1316,7 +1309,7 @@ mod tests {
         assert_eq!(baked, build_chain_with(&rw, &pk, Some(&nv)));
     }
 
-    /// Note CL40 (review I1, M3): with a `_n` twice the `_m`'s size (shift 1), every level's G, mip 0 included, is
+    /// Note CL40 (review I1, M3): with a `_n` twice the `_m`'s size (shift 1), every level's G from mip 1 on (mip 0 stays as authored, Note HD1) is
     /// `1 − ((1 − g)⁴ + add)^¼` where add > 0, g the plain chain's G clamped to [0, 1]; the add restated in f64 from
     /// the written `_n`'s footprint (the `_m` level + 1). R, B and A are untouched.
     #[test]
@@ -1354,6 +1347,9 @@ mod tests {
         let baked = build_chain_with(&wk, &p, Some(&nv));
         assert_eq!(plain.len(), baked.len());
         let add_ref = |level: u32, x: u32, y: u32| {
+            if level == 0 {
+                return 0.0; // Note HD1: mip 0 stays as authored
+            }
             let f = 1u32 << (level + 1);
             let mut s = [0.0f64; 3];
             for j in 0..f {
@@ -1373,7 +1369,6 @@ mod tests {
                 (0.5 / kappa).min(t * t)
             }
         };
-        let mut changed_at_mip0 = 0;
         for (level, (u, v)) in plain.iter().zip(&baked).enumerate() {
             for y in 0..u.height {
                 for x in 0..u.width {
@@ -1392,14 +1387,11 @@ mod tests {
                         "mip {level} ({x}, {y}): {} vs {want} (add {add})",
                         b[1]
                     );
-                    if level == 0 && add > 0.0 && b[1] != a[1] {
-                        changed_at_mip0 += 1;
-                    }
                 }
             }
         }
-        assert!(changed_at_mip0 > W * W / 2, "{changed_at_mip0}");
-        assert!(add_ref(0, 3, 2) > 0.0); // the 1.2 texel is baked
+        assert_eq!(baked[0], plain[0]); // Note HD1
+        assert!(add_ref(1, 0, 0) > 0.0); // and mip 1 still bakes
     }
 
     #[test]
