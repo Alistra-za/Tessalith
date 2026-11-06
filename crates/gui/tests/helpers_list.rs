@@ -285,7 +285,12 @@ fn helper_row_stays_inside_column_at_1100() {
         .filter(|n| n.accesskit_node().bounding_box().is_some())
     {
         let r = n.rect();
-        if r.center().y > rect.min.y && r.center().y < rect.max.y && r.min.x >= panel.min.x {
+        // Starts in the column: a Sets card to its right can share the row's height.
+        if r.center().y > rect.min.y
+            && r.center().y < rect.max.y
+            && r.min.x >= panel.min.x
+            && r.min.x < panel.max.x
+        {
             on_row += 1;
             assert!(
                 r.max.x <= panel.max.x,

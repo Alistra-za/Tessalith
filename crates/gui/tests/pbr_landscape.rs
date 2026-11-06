@@ -321,8 +321,10 @@ fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
     use sdc_gui::model::sets::kind_text;
     let d = tempfile::tempdir().unwrap();
     let root = support::mod_folder(d.path());
-    let r = root.join("landscape");
-    std::fs::copy(r.join("rock01.png"), r.join("lonely_f.png")).unwrap();
+    // Outside `landscape`: there the pick is PBR Landscape, and the pill says so.
+    let r = root.join("armor");
+    std::fs::create_dir_all(&r).unwrap();
+    std::fs::copy(root.join("landscape/rock01.png"), r.join("lonely_f.png")).unwrap();
     let settings = sdc_gui::settings::GuiSettings {
         export_folder: Some(d.path().join("export")),
         ..Default::default()
