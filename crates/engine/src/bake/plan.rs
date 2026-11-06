@@ -490,7 +490,7 @@ pub(crate) fn gloss_bake_opted(nj: &ResolvedJob) -> bool {
 /// Opt-in gloss bake (DECISIONS Note CL40, superseding R6 for this case only), any target: a set whose `normal` has
 /// an explicit `mips.normal = renormalize_bake` (provenance not built-in) bakes that `_n`'s footprint variance into
 /// the gloss (G) of each writable, non-DDS `complex_material` job of the set, a packed one included. Sizes follow
-/// `bake_shift` (`SET-BAKE-RATIO` on the `_m`, as `bake_set`). The `_n`'s profile is left as the user set it. An
+/// `bake_shift`, or a fit to the `_m`'s size when they do not pair (as `bake_set`). The `_n`'s profile is left as the user set it. An
 /// undecided `_n` bakes nothing, silently; a derived CM `_m` (Track A) has no `_n` in its plan, so it never bakes.
 /// A borrowed Normal slot is not followed. Returns the keys of the sets that bake (`set_resolved.bake`).
 pub fn plan_gloss_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
