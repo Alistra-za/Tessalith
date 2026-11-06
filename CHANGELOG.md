@@ -12,6 +12,7 @@
 - Fixed: the input name box showed the diffuse's suffix, so typing `body` for `body_albedo` snapped back and typing a name ending in the suffix doubled it. The box now shows `body`.
 - Fixed: a set with a PBR map but no PBR albedo (a lone `_f`) showed PBR in its shader box over a "vanilla" pill. The pill now says "PBR, no JSON".
 - Fixed: textures named only in a texture set record (TXST) were not offered by the path pickers.
+- Fixed: **Clear** and **From this set** did nothing on a borrowed slot, and each click only swapped which of the two was greyed. Both now drop the borrow.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 
 ## 2.0.0

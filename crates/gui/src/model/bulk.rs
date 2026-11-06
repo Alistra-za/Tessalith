@@ -1372,13 +1372,15 @@ impl AppModel {
             })
             .collect();
         let gives = slot_gives(self, &id, n);
+        // Note HC7: on a borrowed slot From this set and Clear both drop the borrow, so both are on.
+        let borrowed = v.borrows_slot(n);
         let mut menu = vec![
             MenuEntry {
                 action: cmd(SlotCommand::FromSet),
                 label: format!("From this set ({gives})"),
                 // Note FI11 (D13): a slot the set has no file for says so, not "already".
                 disabled: off.clone().or_else(|| {
-                    current.is_none().then(|| {
+                    (current.is_none() && !borrowed).then(|| {
                         if gives == NOTHING {
                             "This set has no file for this slot".into()
                         } else {
@@ -1396,7 +1398,7 @@ impl AppModel {
                 action: cmd(SlotCommand::Clear),
                 label: "Clear".into(),
                 disabled: off.clone().or_else(|| {
-                    (current == Some(&Value::from(""))).then(|| "already cleared".into())
+                    (!borrowed && current == Some(&Value::from(""))).then(|| "already cleared".into())
                 }),
             },
             MenuEntry {

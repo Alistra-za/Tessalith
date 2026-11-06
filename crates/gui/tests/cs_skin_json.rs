@@ -616,6 +616,46 @@ fn borrowed_rfaos_points_at_the_host_output() {
     assert_eq!(j["textures"]["wet"], json!("textures/x/a_wet.dds"));
 }
 
+/// The owner's question (Note HC7): a skin set that borrows its `_n` bakes its `_rfaos` from the host's, and the export
+/// writes the host's `_n` only. The material file names no normal: the game reads the one the mesh names.
+#[test]
+fn a_borrowed_normal_bakes_the_skin_rfaos_and_exports_one_normal() {
+    use engine::config::GreenConvention;
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for f in ["a.png", "a_n.png", "a_rfaos.png", "b.png", "b_rfaos.png"] {
+        colour(&r, f);
+    }
+    let mut m = opened_skin(d.path());
+    m.decide("textures/x/a_n.png", Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    let b = id_of(&m, "x/b");
+    share(&mut m, "textures/x/a_n.png", &b);
+    let v = view(&m, &b);
+    assert!(v.skin, "{:?}", v.slots);
+    assert!(matches!(
+        v.slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    let bake = m
+        .items
+        .iter()
+        .find(|i| i.key == "textures/x/b_rfaos.png")
+        .and_then(|i| i.job.as_ref())
+        .and_then(|j| j.bake.as_ref())
+        .expect("the borrower's rfaos bakes");
+    assert!(bake.normal.ends_with("a_n.png"), "{:?}", bake.normal);
+    export_and_wait(&mut m);
+    assert!(out(&m, "textures/x/b_rfaos.dds").is_file(), "{}", notes(&m));
+    assert!(out(&m, "textures/x/a_n.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/x/b_n.dds").exists(), "no second normal");
+    let j = read_json(&out(&m, "textures/x/b.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/b_rfaos.dds"));
+    assert!(j["textures"].get("normal").is_none(), "{j}");
+}
+
 #[test]
 fn borrowed_wet_and_detail_point_at_the_host_output() {
     let d = tempfile::tempdir().unwrap();

@@ -126,6 +126,51 @@ fn a_filled_slot_offers_the_slot_commands_other_sets_and_lock() {
     assert_eq!(slot_value(&m, ROCK_SET, 1), Some(json!("")));
 }
 
+/// Note HC7 (owner's screenshots): a slot command only wrote `slotN`, so on a borrowed slot neither Clear nor From this
+/// set took the texture away, and each pick only greyed one and lit the other. Both now drop the borrow.
+#[test]
+fn clear_and_from_this_set_both_drop_a_borrow() {
+    for pick in [SlotCommand::Clear, SlotCommand::FromSet] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = pbr_opened(d.path());
+        idle(&mut m);
+        let borrowed = |m: &AppModel| {
+            set_views(m)
+                .into_iter()
+                .find(|v| v.id == LEAF_SET)
+                .unwrap()
+                .slots
+                .values()
+                .any(|f| matches!(f, SlotFill::Borrowed { .. }))
+        };
+        assert_eq!(
+            m.drop_choice(
+                "landscape/rock01_normal.png",
+                LEAF_SET,
+                DropChoice::Share
+            ),
+            DropOutcome::Joined
+        );
+        idle(&mut m);
+        assert!(borrowed(&m));
+        assert_eq!(borrowed_normal(&m).len(), 1);
+        // A blank command an earlier click left behind goes with the borrow.
+        m.set_json_value(LEAF_SET, "slot2", Some(json!("")));
+        let menu = m.slot_menu(LEAF_SET, SlotKind::Normal);
+        assert_eq!(menu[0].disabled, None, "{}", menu[0].label);
+        assert_eq!(menu[2].disabled, None, "{}", menu[2].label);
+        assert_eq!(m.run_menu(cmd(LEAF_SET, 2, pick.clone())), None);
+        idle(&mut m);
+        assert!(!borrowed(&m), "{pick:?} leaves the slot borrowed");
+        assert!(borrowed_normal(&m).is_empty(), "{pick:?}");
+        assert_eq!(slot_value(&m, LEAF_SET, 2), None, "{pick:?}");
+        m.undo();
+        idle(&mut m);
+        assert!(borrowed(&m), "{pick:?}: one undo step");
+        assert_eq!(slot_value(&m, LEAF_SET, 2), Some(json!("")), "{pick:?}");
+    }
+}
+
 /// Note FI11 (D13): From this set on a slot the set has no file for says so; a slot that has one keeps "already".
 #[test]
 fn an_empty_slot_says_the_set_has_no_file() {

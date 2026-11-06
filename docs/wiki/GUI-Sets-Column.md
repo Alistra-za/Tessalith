@@ -80,7 +80,7 @@ The moved set scrolls into view and keeps the selection.
 
 Right-clicking a slot row in the set editor, or a member chip on a card, opens a menu for that slot:
 
-- The slot commands *From this set*, *Path* and *Clear*. Each is one undo step.
+- The slot commands *From this set*, *Path* and *Clear*. Each is one undo step. On a borrowed slot, *From this set* and *Clear* both drop the borrow and any slot command stored with it. <!-- D:HC7 -->
 - *From another set*: links the slot to a map of another set. The link writes that map's output path when it has one (a TruePBR set's packed output), otherwise the `textures\...` path its export writes (the source's folder with the output's name, so `leaf_normal.png` links as `leaf_n.dds`). A map with neither is greyed out, so a link never points at nothing. A link needs the same slot kind, so the shared slots (glow / skin_sk, coat / fuzz) never offer the other kind.
 - *Pin this slot (always use this file)* / *Unpin this slot* (hover: "Pinned slots refuse other files (sdc.toml pin)"). A pinned slot shows a lock icon and keeps its fill in Tessalith; the Slot commands window has a box per slot named *Pin slot N (always use this file)*, with "locked" on hover.
   - It refuses a drag in or out and the slot commands. Bulk edits skip it with the reason *slot locked*, or *slot locked in <set>* when the fill is borrowed from another set.

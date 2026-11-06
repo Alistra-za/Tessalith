@@ -370,6 +370,13 @@ impl SetView {
             recipes: vec![],
         }
     }
+
+    /// Whether slot number `n` holds a texture borrowed from another set.
+    pub(crate) fn borrows_slot(&self, n: u8) -> bool {
+        self.slots
+            .iter()
+            .any(|(k, f)| k.slot_number() == Some(n) && matches!(f, SlotFill::Borrowed { .. }))
+    }
 }
 
 /// Whether `v` is written as PGPatcher JSON: a PBR set under Community Shaders (the set card badge). An Advanced
@@ -1533,11 +1540,7 @@ impl AppModel {
         if v.locks.contains(&n) {
             return Err(SLOT_LOCKED.into());
         }
-        let borrowed = v
-            .slots
-            .iter()
-            .any(|(k, f)| k.slot_number() == Some(n) && matches!(f, SlotFill::Borrowed { .. }));
-        if !borrowed {
+        if !v.borrows_slot(n) {
             return Err(format!("slot {n} of {} borrows nothing", v.id));
         }
         let id = v.id;
@@ -2363,6 +2366,21 @@ impl AppModel {
             return Err(SLOT_LOCKED.into());
         }
         let key = format!("slot{slot}");
+        // Note HC7: `slotN` alone leaves a borrow in the slot. The plan reads borrows (the bake), so this one re-plans.
+        let borrower = self.view_of(set).filter(|v| v.borrows_slot(slot));
+        if let (Some(v), SlotCommand::FromSet | SlotCommand::Clear) = (borrower, &cmd) {
+            let id = v.id;
+            self.edit_docs(
+                &format!("Clear slot {slot} of {id}"),
+                None,
+                true,
+                move |_, d| {
+                    d.set_borrow(&id, slot, None);
+                    d.set_value(&id, &key, None);
+                },
+            );
+            return Ok(());
+        }
         let v = match cmd {
             SlotCommand::FromSet => None,
             SlotCommand::Clear => Some(Value::from("")),

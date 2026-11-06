@@ -600,6 +600,56 @@ fn an_advanced_skin_rfaos_bakes_from_its_n() {
     }
 }
 
+/// The owner's question (Note HC7): an Advanced skin `_rfaos` bakes from a borrowed `_n` like any roughness member, and
+/// that `_n` is the only normal planned. A vanilla `_n` lent to it is no `pbr_normal`, so it does not bake, and says so.
+#[test]
+fn a_skin_rfaos_bakes_from_a_borrowed_n_with_one_normal_planned() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/actors/skin/a_n.png", 64, 64);
+    rough(d.path(), "textures/actors/skin/a_rfaos.png", 64, 64);
+    rough(d.path(), "textures/actors/skin/b_rfaos.png", 32, 32);
+    let mut r = req(d.path(), &[]);
+    borrow(
+        &mut r,
+        &[("textures/actors/skin/b", "textures/actors/skin/a")],
+    );
+    let (p, ev) = plan(r);
+    let b = job(&p, "b_rfaos.png");
+    assert_eq!(b.profile.subtype, Subtype::SkinRfaos);
+    let baked = b.bake.as_ref().expect("the borrower's rfaos bakes");
+    assert!(baked.normal.ends_with("a_n.png"));
+    assert_eq!(baked.shift, 1);
+    assert!(set_codes(b).is_empty(), "{:?}", b.warnings);
+    assert!(bake_flag(&ev, "skin/b"));
+    let normals: Vec<_> = p
+        .jobs
+        .iter()
+        .filter(|j| j.profile.subtype == Subtype::PbrNormal)
+        .collect();
+    assert_eq!(normals.len(), 1, "one normal is written");
+    assert!(normals[0].input.ends_with("a_n.png"));
+}
+
+#[test]
+fn a_vanilla_n_lent_to_a_skin_rfaos_does_not_bake_and_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    rough(d.path(), "textures/armor/x.png", 64, 64);
+    normal(d.path(), "textures/armor/x_n.png", 64, 64);
+    rough(d.path(), "textures/actors/skin/b_rfaos.png", 64, 64);
+    let mut r = req(d.path(), &[]);
+    borrow(&mut r, &[("textures/actors/skin/b", "textures/armor/x")]);
+    let (p, _) = plan(r);
+    assert_eq!(job(&p, "x_n.png").profile.subtype, Subtype::Normal);
+    let b = job(&p, "b_rfaos.png");
+    assert!(b.bake.is_none());
+    assert_eq!(set_codes(b), vec![Code::SetMissingCompanion]);
+    assert!(
+        b.warnings.last().unwrap().message.contains("no usable"),
+        "{:?}",
+        b.warnings
+    );
+}
+
 /// A borrowed Normal slot whose owner set has no usable `_n` says so, instead of "no _n in this PBR set".
 #[test]
 fn a_borrowed_n_from_a_set_without_one_is_set_missing_companion() {
