@@ -20,7 +20,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ
@@ -1144,3 +1144,7 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **HD3 Nothing is dropped from the mip tail (agent ruling, 2026-11-05; the owner suggested dropping tails, and there is no spare tail to drop).** The DDS chain length is unchanged and every member mip below 0 has a pyramid level: both chains halve each axis (floored at 1) and reach 1x1 together, so there is no spare tail to drop.
 - **HD4 No row or note says a bake was fitted (agent ruling, 2026-11-05).** `set_resolved.bake` shows the set baked, which is all the user needs. The fit assumes the `_n` and the member share UVs, as every borrowed `_n` already does.
 - **HD5 A member with one mip level does not bake (agent ruling from HD1, 2026-11-05).** HD1 leaves mip 0 as authored, so a member whose chain is only mip 0 (`mips.levels = "none"`, which also exempts it from the power-of-two resize, or `levels = 1`) would gain nothing. The planner gives it no `BakeJob` (`bake::plan::attach`), it does not record the `_n` as a source or decode it, and it does not make `set_resolved.bake` true. Test `a_member_with_no_mips_does_not_bake`.
+
+## Note HE — 2.1 leftovers (main team, 2026-11-06)
+
+- **HE1 A slot holding an RFAOS says RFAOS (owner, 2026-11-06: "Skin tiles and rows saying RMAOS when the recipe is RFAOS: yes, fix").** The Rmaos slot's chip, empty-chip hover, `owns` line, slot-menu title (`Slot 6: RFAOS`), card title and Assign/context menu titles said RMAOS for a skin set. `SetView::rfaos` is true when the slot's item (own or borrowed) has an `Rfaos` pack or the `skin_rfaos` sub-type; with an empty slot it follows the shader (Advanced Skin). `SetView::slot_text` and `SetView::slot_label` give the name; the coat rule of `slot_label` is unchanged. My calls (agent ruling): the Matching header's slot name follows it too; `SlotKind::label` itself stays RMAOS, so the Kind filter chips and the refusal messages (not per set) keep it; the recipe picker already says "RFAOS (skin)". Tests `cs_skin_json::an_rfaos_slot_reads_rfaos_everywhere`, `a_borrowed_rfaos_reads_rfaos`.

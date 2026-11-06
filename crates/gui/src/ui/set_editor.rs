@@ -18,8 +18,8 @@ use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::rnm::{rnm_active, rnm_rows};
 use crate::model::sets::{
-    card_title, is_json_set, shows_json_panel, slot_clash_text, slot_label, slot_of, slot_row,
-    views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
+    card_title, is_json_set, shows_json_panel, slot_clash_text, slot_of, slot_row, views, SetView,
+    SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
 use crate::pgp::prefix::{
@@ -547,8 +547,10 @@ fn row(
     };
     let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
     let title = match fill.item() {
-        Some(item) => card_title(slot, item, v.shader.as_ref().map(|p| p.shader)),
-        None => slot_label(slot, ""),
+        Some(item) if slot != SlotKind::Rmaos => {
+            card_title(slot, item, v.shader.as_ref().map(|p| p.shader))
+        }
+        _ => v.slot_label(slot, ""),
     };
     let (item_key, borrowed) = match fill {
         SlotFill::Own { item } => (Some(item.clone()), None),
@@ -702,7 +704,7 @@ fn row(
             if item.is_none() {
                 let menu = ui.menu_button("Assign…", |ui| {
                     // C14: the slot label once ("Emissive / Skin (slot 3)").
-                    bulk_menu(ui, slot_label(slot, ""), &model.slot_menu(&v.id, slot))
+                    bulk_menu(ui, v.slot_label(slot, ""), &model.slot_menu(&v.id, slot))
                 });
                 if let Some(Some(a)) = menu.inner {
                     acts.push(Act::Slot(a));
@@ -994,7 +996,7 @@ fn slot_menu(
         return;
     }
     resp.context_menu(|ui| {
-        if let Some(a) = bulk_menu(ui, slot_label(slot, ""), &model.slot_menu(&v.id, slot)) {
+        if let Some(a) = bulk_menu(ui, v.slot_label(slot, ""), &model.slot_menu(&v.id, slot)) {
             acts.push(Act::Slot(a));
         }
     });

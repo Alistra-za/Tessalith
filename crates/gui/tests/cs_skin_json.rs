@@ -2,6 +2,7 @@
 //! game-facing writer (PGPatcher `slotN`, TXST, NIF) ever sees.
 mod support;
 use eframe::egui;
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use image::{ImageBuffer, Luma, Rgb};
@@ -1138,4 +1139,60 @@ fn grey_wet_shows_skin_wet_grey_row() {
         "{:?}",
         problems(&m)
     );
+}
+
+/// Skin sets name the roughness slot's pack an RFAOS (Note HE1, owner): the chip, the rows and the slot menu say so,
+/// while a PBR set in the same folder keeps RMAOS.
+#[test]
+fn an_rfaos_slot_reads_rfaos_everywhere() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    let r = d.path().join("m");
+    for f in ["lava.png", "lava_n.png", "lava_rmaos.png"] {
+        colour(&r, f);
+    }
+    m.open_folder(d.path().to_path_buf());
+    idle(&mut m);
+    let (skin, pbr) = (view(&m, "m/rock01"), view(&m, "m/lava"));
+    assert!(skin.skin && !skin.pbr, "{:?}", skin.slots);
+    assert!(pbr.pbr, "{:?}", pbr.slots);
+    assert_eq!(skin.slot_text(SlotKind::Rmaos), "RFAOS");
+    assert_eq!(pbr.slot_text(SlotKind::Rmaos), "RMAOS");
+    let (skin_key, pbr_key) = (skin.key.clone(), pbr.key.clone());
+    m.select_set(&skin_key);
+    let mut h = harness(m);
+    h.run();
+    // The column's chips: the two skin sets' say RFAOS, the PBR set's and `plain`'s keep RMAOS; the open set's card
+    // title (a label) says RFAOS.
+    let count = |h: &Harness<'_, AppModel>, role, text: &str| {
+        h.query_all_by_role_and_label(role, text).count()
+    };
+    assert_eq!(count(&h, Role::Button, "RFAOS"), 2);
+    assert_eq!(count(&h, Role::Button, "RMAOS"), 2);
+    assert_eq!(count(&h, Role::Label, "RFAOS"), 1);
+    assert_eq!(count(&h, Role::Label, "RMAOS"), 0);
+    h.query_all_by_role_and_label(Role::Button, "RFAOS")
+        .next()
+        .unwrap()
+        .click_secondary();
+    h.run();
+    h.get_by_label("Slot 6: RFAOS");
+    h.key_press(egui::Key::Escape);
+    h.state_mut().select_set(&pbr_key);
+    h.run();
+    assert_eq!(count(&h, Role::Label, "RFAOS"), 0);
+    assert_eq!(count(&h, Role::Label, "RMAOS"), 1);
+}
+/// A skin set that borrows the host's `_rfaos` reads RFAOS too.
+#[test]
+fn a_borrowed_rfaos_reads_rfaos() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    share(&mut m, "m/rock02_rfaos.png", "m/rock01");
+    let v = view(&m, "m/rock01");
+    assert!(matches!(
+        v.slots.get(&SlotKind::Rmaos),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert_eq!(v.slot_text(SlotKind::Rmaos), "RFAOS");
 }

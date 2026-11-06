@@ -182,9 +182,10 @@ const STATUS_DOT: f32 = 8.0;
 const CHIP: f32 = 32.0;
 
 /// A chip's letter (A3): the slot's suffix in capitals, "D" for the diffuse.
-fn chip_letter(k: SlotKind) -> String {
+fn chip_letter(v: &SetView, k: SlotKind) -> String {
     match k.suffix() {
         "" => "D".to_string(),
+        _ if k == SlotKind::Rmaos => v.slot_text(k).to_string(),
         s => s.to_uppercase(),
     }
 }
@@ -232,7 +233,7 @@ fn pill_hover(model: &AppModel, v: &SetView, blocked: bool) -> String {
     if blocked {
         lines.push("blocked".to_string());
     }
-    lines.extend(v.owns.iter().map(|s| format!("owns {}", s.label())));
+    lines.extend(v.owns.iter().map(|s| format!("owns {}", v.slot_text(*s))));
     lines.extend(
         v.missing
             .iter()
@@ -385,8 +386,8 @@ fn member_chip(
                 // The XPMF maps' slot menu is empty: the chip keeps only "Remove from set".
                 if !entries.is_empty() {
                     let title = match k.game_slot() {
-                        Some(n) => format!("Slot {n}: {}", k.label()),
-                        None => k.label().to_string(),
+                        Some(n) => format!("Slot {n}: {}", v.slot_text(k)),
+                        None => v.slot_text(k).to_string(),
                     };
                     if let Some(a) = bulk_menu(ui, &title, &entries) {
                         acts.push(Act::Slot(a));
@@ -1235,13 +1236,13 @@ fn pill(
                         let mut chipped: HashSet<&str> = HashSet::new();
                         for cell in &row {
                             let k = cell.kind;
-                            let letter = chip_letter(k);
+                            let letter = chip_letter(v, k);
                             let (mk, from) = match &cell.fill {
                                 SlotFill::Own { item } => (item, None),
                                 SlotFill::Borrowed { from, item } => (item, Some(from)),
                                 SlotFill::Empty => {
                                     letter_box(ui, &letter, None)
-                                        .on_hover_text(format!("{} (empty)", k.label()));
+                                        .on_hover_text(format!("{} (empty)", v.slot_text(k)));
                                     continue;
                                 }
                             };

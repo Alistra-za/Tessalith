@@ -13,6 +13,7 @@ use engine::codes::Warning;
 use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
 use engine::overrides::path_key_matches;
+use engine::pack::RecipeKind;
 use engine::presets::Provenance;
 use engine::sets::{fold_id, same_id, set_id, OutputKey, SetEdit};
 use engine::shader::{Shader, ShaderPick};
@@ -215,7 +216,7 @@ pub fn slot_matches(v: &SetView) -> (Vec<SlotMatch>, Vec<SlotMatch>) {
         .map(|(k, _)| *k)
         .collect();
     let name = |n: u8| match filled.iter().find(|k| k.slot_number() == Some(n)) {
-        Some(k) => k.label().to_string(),
+        Some(k) => v.slot_text(*k).to_string(),
         None if n == 1 => SlotKind::Diffuse.label().to_string(),
         None if n == 2 => SlotKind::Normal.label().to_string(),
         None => format!("Slot {n}"),
@@ -325,6 +326,8 @@ pub struct SetView {
     pub pbr: bool,
     /// The diffuse resolves to `skin_albedo`: an Advanced skin set (no JSON, the skin card, AG90).
     pub skin: bool,
+    /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
+    pub rfaos: bool,
     pub created: bool,
     /// `add`/`remove` entries of `sdc-project.toml` that match no file (Review focus 1).
     pub missing: Vec<Missing>,
@@ -356,6 +359,7 @@ impl SetView {
             slots: BTreeMap::new(),
             pbr: false,
             skin: false,
+            rfaos: false,
             created: false,
             missing: vec![],
             owns: vec![],
@@ -368,6 +372,24 @@ impl SetView {
             set_warnings: vec![],
             locks: BTreeSet::new(),
             recipes: vec![],
+        }
+    }
+
+    /// The slot's name in this set: `SlotKind::label`, but the Rmaos slot of an RFAOS set says RFAOS (Note HE1).
+    pub fn slot_text(&self, k: SlotKind) -> &'static str {
+        if k == SlotKind::Rmaos && self.rfaos {
+            "RFAOS"
+        } else {
+            k.label()
+        }
+    }
+
+    /// `slot_label` for this set: the Rmaos slot reads `slot_text`; the coat rule stays `slot_label`'s.
+    pub fn slot_label(&self, slot: SlotKind, key: &str) -> &'static str {
+        if slot == SlotKind::Rmaos {
+            self.slot_text(slot)
+        } else {
+            slot_label(slot, key)
         }
     }
 
@@ -771,6 +793,17 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
+    // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
+    v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
+        Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
+            j.pack.as_ref().is_some_and(|p| p.kind == RecipeKind::Rfaos)
+                || j.profile.subtype == Subtype::SkinRfaos
+        }),
+        None => v
+            .shader
+            .as_ref()
+            .is_some_and(|p| p.shader == Shader::AdvancedSkin),
+    };
     if is_pbr_grass(v) {
         crate::pgp::settings::grass_view(&mut v.settings);
     }
