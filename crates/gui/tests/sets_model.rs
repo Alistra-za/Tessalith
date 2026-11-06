@@ -2307,12 +2307,17 @@ fn an_aliased_set_looks_up_the_written_name() {
 fn a_renamed_output_looks_up_the_written_name() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_without_rmaos(d.path());
-    m.set_output_name("landscape/rock01", Some("steel")).unwrap();
+    m.set_output_name("landscape/rock01", Some("steel"))
+        .unwrap();
     idle(&mut m);
     let id = "landscape/rock01";
     assert_eq!(missing_maps(&m, id), ["_rmaos"]);
     m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
-    assert_eq!(missing_maps(&m, id), ["_rmaos"], "the read-as name is not asked");
+    assert_eq!(
+        missing_maps(&m, id),
+        ["_rmaos"],
+        "the read-as name is not asked"
+    );
     m.set_known(supplying("textures/landscape/steel.dds", 1 << 5));
     assert!(missing_maps(&m, id).is_empty());
 }
