@@ -8,6 +8,7 @@ use engine::config::Subtype;
 use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::bottom::{problems, Fix};
+use sdc_gui::model::messages::Severity;
 use sdc_gui::model::sets::{set_views, Missing};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
@@ -17,7 +18,10 @@ use std::time::Duration;
 use support::{pbr_opened, session};
 
 const ROCK: &str = "landscape/rock01";
-const GONE: &str = "landscape/gone.png";
+/// A file that is on disk but is no texture, so no plan lists it: its `add` line stays a red "?" chip (Note HE2).
+const GONE: &str = "landscape/notes.txt";
+/// A texture deleted from disk: its line clears itself (Note HE2).
+const DELETED: &str = "landscape/deleted.png";
 
 fn idle(m: &mut AppModel) {
     assert!(
@@ -41,9 +45,10 @@ fn missing_of(m: &AppModel, id: &str) -> Vec<Missing> {
         .missing
 }
 
-/// rock01 with an `add` entry naming a file that is not there.
+/// rock01 with an `add` entry naming a file that is on disk but no plan lists.
 fn with_gone(dir: &Path) -> AppModel {
     let mut m = pbr_opened(dir);
+    std::fs::write(m.root.clone().unwrap().join(GONE), "notes").unwrap();
     m.edit_docs("t", None, true, |_, s| s.add_member(ROCK, GONE));
     idle(&mut m);
     assert_eq!(missing_of(&m, ROCK), vec![Missing::File(GONE.into())]);
@@ -85,7 +90,7 @@ fn a_missing_add_entry_is_removed_in_one_step() {
         .expect("removed");
     idle(&mut m);
     assert!(missing_of(&m, ROCK).is_empty());
-    assert!(!m.sets_doc.as_ref().unwrap().text().contains("gone.png"));
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("notes.txt"));
     assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
     m.undo();
     idle(&mut m);
@@ -97,12 +102,141 @@ fn a_missing_add_entry_is_removed_in_one_step() {
 fn a_missing_remove_entry_is_removed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
+    std::fs::write(m.root.clone().unwrap().join(GONE), "notes").unwrap();
     m.edit_docs("t", None, true, |_, s| s.remove_member(ROCK, GONE));
     idle(&mut m);
     assert_eq!(missing_of(&m, ROCK), vec![Missing::File(GONE.into())]);
     m.remove_missing(ROCK, &Missing::File(GONE.into())).unwrap();
     idle(&mut m);
     assert!(missing_of(&m, ROCK).is_empty());
+}
+
+// ---- A deleted file's line clears itself (Note HE2) ----
+
+fn info_lines(m: &AppModel, file: &str) -> Vec<String> {
+    m.messages
+        .entries()
+        .filter(|e| e.severity == Severity::Info && e.text.contains(file))
+        .map(|e| e.text.clone())
+        .collect()
+}
+
+/// A project with a list line (`add` or `remove`) naming `DELETED`, which is not on disk; the line is cleared by the
+/// plan the edit starts, with no undo step of its own.
+fn with_deleted(dir: &Path, remove: bool) -> (AppModel, usize) {
+    let mut m = pbr_opened(dir);
+    m.edit_docs("t", None, true, |_, s| {
+        if remove {
+            s.remove_member(ROCK, DELETED)
+        } else {
+            s.add_member(ROCK, DELETED)
+        }
+    });
+    let steps = m.history.undo.len();
+    idle(&mut m);
+    (m, steps)
+}
+
+fn assert_cleared(m: &AppModel, steps: usize) {
+    assert!(missing_of(m, ROCK).is_empty(), "the chip is gone");
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("deleted.png"));
+    let info = info_lines(m, "deleted.png");
+    assert_eq!(info.len(), 1, "{info:?}");
+    assert!(info[0].contains(ROCK), "names the set: {}", info[0]);
+    assert_eq!(m.history.undo.len(), steps, "the clear is no undo step");
+}
+
+#[test]
+fn a_deleted_add_line_is_cleared_with_an_info_line() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, steps) = with_deleted(d.path(), false);
+    assert_cleared(&m, steps);
+}
+
+#[test]
+fn a_deleted_remove_line_is_cleared() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, steps) = with_deleted(d.path(), true);
+    assert_cleared(&m, steps);
+}
+
+/// Undo keeps its redo step through the clear; redo brings the line back and the next plan clears it again, once.
+#[test]
+fn undo_brings_the_line_back_and_it_is_cleared_again() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, steps) = with_deleted(d.path(), false);
+    m.undo();
+    idle(&mut m);
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("deleted.png"));
+    assert_eq!(m.history.redo.len(), 1, "the clear loses no redo");
+    m.redo();
+    idle(&mut m);
+    assert!(missing_of(&m, ROCK).is_empty(), "cleared again");
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("deleted.png"));
+    assert_eq!(info_lines(&m, "deleted.png").len(), 2, "one line per clear");
+    assert_eq!(m.history.undo.len(), steps, "still no step of its own");
+}
+
+/// A project file that does not parse takes no write and says nothing: the file on disk is left as the user has it.
+/// (A read-only document holds no entries, so no chip can exist here; the guard is a second line of defence.)
+#[test]
+fn a_read_only_project_keeps_the_line_and_the_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_gone(d.path());
+    let root = m.root.clone().unwrap();
+    let broken = "[[sets]\nbroken";
+    std::fs::write(root.join("sdc-project.toml"), broken).unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    std::fs::remove_file(root.join(GONE)).unwrap();
+    m.replan();
+    idle(&mut m);
+    assert!(m.sets_doc.as_ref().unwrap().read_only(), "read-only");
+    assert!(info_lines(&m, "notes.txt").is_empty());
+    assert_eq!(
+        std::fs::read_to_string(root.join("sdc-project.toml")).unwrap(),
+        broken
+    );
+    let e = m
+        .remove_missing(ROCK, &Missing::File(GONE.into()))
+        .unwrap_err();
+    assert!(e.contains("read-only"), "{e}");
+}
+
+/// A file on disk that no plan lists (not a texture this project reads) keeps its chip, Problems row and menu.
+#[test]
+fn a_file_on_disk_outside_the_plan_keeps_its_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_gone(d.path());
+    assert!(info_lines(&m, "notes.txt").is_empty());
+    assert!(problems(&m)
+        .iter()
+        .any(|p| p.fix == Some(Fix::RemoveMissing(Missing::File(GONE.into())))));
+    m.remove_missing(ROCK, &Missing::File(GONE.into()))
+        .expect("removed");
+    idle(&mut m);
+    assert!(missing_of(&m, ROCK).is_empty());
+}
+
+/// A plan with no items (a drive briefly gone) must not wipe the lines.
+#[test]
+fn no_clear_when_the_plan_has_no_items() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member(ROCK, "landscape/leaf.png")
+    });
+    idle(&mut m);
+    let root = m.root.clone().unwrap();
+    for f in std::fs::read_dir(root.join("landscape")).unwrap() {
+        std::fs::remove_file(f.unwrap().path()).unwrap();
+    }
+    m.replan();
+    idle(&mut m);
+    assert!(m.items.is_empty(), "the plan has no items");
+    let text = m.sets_doc.as_ref().unwrap().text();
+    assert!(text.contains("leaf.png"), "the line stays: {text}");
+    assert!(info_lines(&m, "leaf.png").is_empty());
 }
 
 /// DU2: a borrow from a set that does not exist is dropped.

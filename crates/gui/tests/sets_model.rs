@@ -279,14 +279,16 @@ fn a_member_that_vanished_shows_as_missing_and_is_reported() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
+    // On disk but no texture, so no plan lists it; a deleted file's line clears itself (Note HE2).
+    std::fs::write(m.root.clone().unwrap().join("landscape/notes.txt"), "x").unwrap();
     m.edit_docs("t", None, true, |_, s| {
-        s.add_member("landscape/rock01", "landscape/gone.png")
+        s.add_member("landscape/rock01", "landscape/notes.txt")
     });
     idle(&mut m);
     let v = set_views(&m);
     assert_eq!(
         view(&v, "landscape/rock01").missing,
-        vec![Missing::File("landscape/gone.png".to_string())]
+        vec![Missing::File("landscape/notes.txt".to_string())]
     );
     assert!(
         m.sets_doc
@@ -294,7 +296,7 @@ fn a_member_that_vanished_shows_as_missing_and_is_reported() {
             .unwrap()
             .entries()
             .iter()
-            .any(|e| e.add.contains(&"landscape/gone.png".to_string())),
+            .any(|e| e.add.contains(&"landscape/notes.txt".to_string())),
         "never dropped"
     );
 }

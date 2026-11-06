@@ -235,8 +235,10 @@ fn a_chip_keeps_the_member_behaviours() {
 fn the_long_badge_text_is_on_the_pill_hover() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
+    // On disk but no texture, so no plan lists it and the chip stays (a deleted file's line clears: Note HE2).
+    std::fs::write(m.root.clone().unwrap().join("landscape/notes.txt"), "x").unwrap();
     m.edit_docs("t", None, true, |_, s| {
-        s.add_member(ROCK, "landscape/gone.png")
+        s.add_member(ROCK, "landscape/notes.txt")
     });
     idle(&mut m);
     let mut h = harness(m);
@@ -251,7 +253,7 @@ fn the_long_badge_text_is_on_the_pill_hover() {
     h.get_by_label_contains(BADGE_PBR_LANDSCAPE_PGP_ONLY);
     // The recipe and missing-entry lines follow on the same hover.
     h.get_by_label_contains("rmaos: run");
-    h.get_by_label_contains("no file matches landscape/gone.png");
+    h.get_by_label_contains("no file matches landscape/notes.txt");
 }
 
 /// K12: an `add` entry that matches no file is a red "?" chip with the reason on its hover.
@@ -259,19 +261,20 @@ fn the_long_badge_text_is_on_the_pill_hover() {
 fn a_missing_entry_is_a_question_mark_chip() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
+    std::fs::write(m.root.clone().unwrap().join("landscape/notes.txt"), "x").unwrap();
     m.edit_docs("t", None, true, |_, s| {
-        s.add_member(ROCK, "landscape/gone.png")
+        s.add_member(ROCK, "landscape/notes.txt")
     });
     idle(&mut m);
     let mut h = harness(m);
     h.run();
     // Note DU1: the chip is a button named by its entry.
-    let q = on_card(&h, "Missing: landscape/gone.png");
+    let q = on_card(&h, "Missing: landscape/notes.txt");
     assert_eq!(q.len(), 1, "one chip per missing entry");
     q[0].hover();
     h.run();
     h.run();
-    h.get_by_label("no file matches landscape/gone.png");
+    h.get_by_label("no file matches landscape/notes.txt");
 }
 
 /// Press on `at` and move past the drag threshold: whether a texture is now in flight. The payload is cleared before

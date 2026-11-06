@@ -718,6 +718,25 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     views
 }
 
+/// Whether set-line key `key` (project-relative, possibly without an extension) names something on disk under `root`.
+/// A folder that cannot be read for a reason other than "not found" counts as present: a line is never cleared on a
+/// guess.
+fn key_on_disk(root: &Path, key: &str) -> bool {
+    if root.join(key).exists() {
+        return true;
+    }
+    let (dir, prefix) = match key.rsplit_once('/') {
+        Some((d, _)) => (root.join(d), format!("{d}/")),
+        None => (root.to_path_buf(), String::new()),
+    };
+    match std::fs::read_dir(dir) {
+        Ok(rd) => rd.flatten().any(|e| {
+            path_key_matches(key, &format!("{prefix}{}", e.file_name().to_string_lossy()))
+        }),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 /// A set's view from its plan alone: members, shader pick, warnings, recipes and its own (unborrowed) slots.
 fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     let mut v = SetView::new(s.key.clone(), set_id(root, &s.key), s.members.clone());
@@ -2104,6 +2123,48 @@ impl AppModel {
             s.remove_member(&i, &it)
         });
         Ok(())
+    }
+
+    /// Note HE2: a set line (`add` or `remove`) naming a file that is gone from disk clears itself, with an Info line
+    /// in Messages and no undo step of its own (undoing a clear would clear again at once). Run at the end of a full
+    /// plan. Guards, so a drive or folder that is briefly away never wipes lines: the file must be editable, the plan
+    /// must list items, the root must exist, and the file must really be absent. Borrows and `NoFilesLeft` keep their
+    /// chips (Note HE3). One re-plan follows when a line went; it clears nothing more, so it cannot loop.
+    pub(super) fn clear_deleted_lines(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if !self.sets_editable() || self.items.is_empty() || !root.exists() {
+            return;
+        }
+        let gone: Vec<(String, String)> = views(self)
+            .iter()
+            .flat_map(|v| {
+                v.missing.iter().filter_map(|m| match m {
+                    Missing::File(f) if !key_on_disk(&root, f) => Some((v.id.clone(), f.clone())),
+                    _ => None,
+                })
+            })
+            .collect();
+        let mut cleared = false;
+        for (id, f) in gone {
+            let Some(doc) = self.sets_doc.as_mut() else {
+                return;
+            };
+            let before = doc.text();
+            doc.drop_entry(&id, &f);
+            if doc.text() == before {
+                continue;
+            }
+            cleared = true;
+            self.messages.log(
+                super::messages::Severity::Info,
+                format!("{id}: {f} no longer exists, so it was cleared from the set"),
+            );
+        }
+        if cleared {
+            self.replan_after_edit(false);
+        }
     }
 
     /// Note DU1-DU2: drop entry `m` of set `id` that matches no file, as one step: a path leaves `add`/`remove`, a

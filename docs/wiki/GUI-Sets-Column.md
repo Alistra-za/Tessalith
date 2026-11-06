@@ -27,7 +27,7 @@ The **shader** combo under the first row takes the card's whole width. Under it 
 | Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
 | Dim box with the letter | An empty slot. |
 | Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
-| Red **?** | A file the set expects that no file matches. |
+| Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
 
 Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`remove` path or a borrow) out of `sdc-project.toml` as one undo step. When none of the set's files is left it offers **Delete set** instead. Each such line is also a row in Problems with the same button. A member's own chip has **Remove from set** in its menu too; a borrowed chip uses the slot's **Clear**. While `sdc-project.toml` is read-only they are off, and their hover says why.
 
