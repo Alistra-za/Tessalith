@@ -719,8 +719,8 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
 }
 
 /// Whether set-line key `key` (project-relative, possibly without an extension) names something on disk under `root`.
-/// A folder that cannot be read for a reason other than "not found" counts as present: a line is never cleared on a
-/// guess.
+/// A key whose folder cannot be read (renamed, unplugged, permission) counts as present: a line is cleared only when
+/// its folder is there and the file is not (Note HE3).
 fn key_on_disk(root: &Path, key: &str) -> bool {
     if root.join(key).exists() {
         return true;
@@ -733,7 +733,7 @@ fn key_on_disk(root: &Path, key: &str) -> bool {
         Ok(rd) => rd.flatten().any(|e| {
             path_key_matches(key, &format!("{prefix}{}", e.file_name().to_string_lossy()))
         }),
-        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        Err(_) => true,
     }
 }
 
@@ -2163,7 +2163,9 @@ impl AppModel {
             );
         }
         if cleared {
-            self.replan_after_edit(false);
+            // Not `replan_after_edit`: that claims a user edit (it clears the encoding note and the pending type
+            // note). The document is marked dirty by `drop_entry`, so the usual save covers it.
+            self.replan();
         }
     }
 

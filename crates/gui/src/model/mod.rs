@@ -2720,8 +2720,9 @@ impl AppModel {
         }
         // Output paths depend on this plan's sub-types (DECISIONS P1): plan once more when they changed. Bounded.
         // `export_after_plan` survives the return: export starts when the final plan lands.
-        self.refresh_mesh_votes(true);
+        // Note HE2: before the votes, so an export queued behind this plan starts on the plan after the clear.
         self.clear_deleted_lines();
+        self.refresh_mesh_votes(true);
     }
 
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.

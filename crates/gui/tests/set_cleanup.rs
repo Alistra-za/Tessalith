@@ -149,8 +149,14 @@ fn assert_cleared(m: &AppModel, steps: usize) {
 #[test]
 fn a_deleted_add_line_is_cleared_with_an_info_line() {
     let d = tempfile::tempdir().unwrap();
-    let (m, steps) = with_deleted(d.path(), false);
+    let (mut m, steps) = with_deleted(d.path(), false);
     assert_cleared(&m, steps);
+    // The clear is an unsaved edit like any other: dirty, and Save writes it.
+    assert!(m.sets_doc.as_ref().unwrap().is_dirty());
+    m.save().expect("saved");
+    let on_disk =
+        std::fs::read_to_string(m.root.clone().unwrap().join("sdc-project.toml")).unwrap();
+    assert!(!on_disk.contains("deleted.png"), "{on_disk}");
 }
 
 #[test]
@@ -216,6 +222,81 @@ fn a_file_on_disk_outside_the_plan_keeps_its_chip() {
         .expect("removed");
     idle(&mut m);
     assert!(missing_of(&m, ROCK).is_empty());
+}
+
+/// A renamed or unplugged folder must not lose the lines under it: nothing is cleared, the chips stay and work, and
+/// with the folder back the set reads as before (Note HE3).
+#[test]
+fn a_missing_folder_keeps_its_lines() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    let sub = root.join("sub");
+    let names = ["sub/a.txt", "sub/b.txt"];
+    std::fs::create_dir_all(&sub).unwrap();
+    for n in names {
+        std::fs::write(root.join(n), "x").unwrap();
+    }
+    m.edit_docs("t", None, true, |_, s| {
+        for n in names {
+            s.add_member(ROCK, n)
+        }
+    });
+    idle(&mut m);
+    let want: Vec<Missing> = names.iter().map(|n| Missing::File((*n).into())).collect();
+    assert_eq!(missing_of(&m, ROCK), want);
+    let text = m.sets_doc.as_ref().unwrap().text();
+    let moved = d.path().join("sub-away");
+    std::fs::rename(&sub, &moved).unwrap();
+    m.replan();
+    idle(&mut m);
+    assert_eq!(missing_of(&m, ROCK), want, "the chips stay");
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), text, "no line lost");
+    assert!(info_lines(&m, "sub/").is_empty());
+    std::fs::rename(&moved, &sub).unwrap();
+    m.replan();
+    idle(&mut m);
+    assert_eq!(missing_of(&m, ROCK), want, "the set reads as before");
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), text);
+    // The chip works while the folder is away too.
+    std::fs::rename(&sub, &moved).unwrap();
+    m.replan();
+    idle(&mut m);
+    m.remove_missing(ROCK, &want[0]).expect("removed");
+    idle(&mut m);
+    assert_eq!(missing_of(&m, ROCK), want[1..].to_vec());
+}
+
+/// Every set with a deleted file in a folder that is still there is cleared, not only the first.
+#[test]
+fn a_clear_reaches_every_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let other = "landscape/leaf";
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member(ROCK, DELETED);
+        s.add_member(other, "landscape/deleted2.png");
+    });
+    idle(&mut m);
+    for (id, file) in [(ROCK, "deleted.png"), (other, "deleted2.png")] {
+        assert!(missing_of(&m, id).is_empty(), "{id} still has a chip");
+        assert_eq!(info_lines(&m, file).len(), 1, "{file}");
+    }
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("deleted"));
+}
+
+/// An entry with settings and no files keeps its "no files left" chip (Note HE3): it holds the user's settings.
+#[test]
+fn an_entry_left_empty_keeps_its_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_shader("mine/ghost", Some(Shader::Pbr))
+    });
+    idle(&mut m);
+    assert_eq!(missing_of(&m, "mine/ghost"), vec![Missing::NoFilesLeft]);
+    assert!(m.sets_doc.as_ref().unwrap().text().contains("mine/ghost"));
+    assert!(info_lines(&m, "ghost").is_empty());
 }
 
 /// A plan with no items (a drive briefly gone) must not wipe the lines.
