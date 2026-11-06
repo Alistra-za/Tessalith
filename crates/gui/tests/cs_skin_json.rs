@@ -629,7 +629,10 @@ fn a_borrowed_normal_bakes_the_skin_rfaos_and_exports_one_normal() {
         colour(&r, f);
     }
     let mut m = opened_skin(d.path());
-    m.decide("textures/x/a_n.png", Answer::Green(GreenConvention::Directx));
+    m.decide(
+        "textures/x/a_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
     idle(&mut m);
     let b = id_of(&m, "x/b");
     share(&mut m, "textures/x/a_n.png", &b);

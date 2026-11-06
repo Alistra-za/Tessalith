@@ -144,11 +144,7 @@ fn clear_and_from_this_set_both_drop_a_borrow() {
                 .any(|f| matches!(f, SlotFill::Borrowed { .. }))
         };
         assert_eq!(
-            m.drop_choice(
-                "landscape/rock01_normal.png",
-                LEAF_SET,
-                DropChoice::Share
-            ),
+            m.drop_choice("landscape/rock01_normal.png", LEAF_SET, DropChoice::Share),
             DropOutcome::Joined
         );
         idle(&mut m);

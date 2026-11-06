@@ -1398,7 +1398,8 @@ impl AppModel {
                 action: cmd(SlotCommand::Clear),
                 label: "Clear".into(),
                 disabled: off.clone().or_else(|| {
-                    (!borrowed && current == Some(&Value::from(""))).then(|| "already cleared".into())
+                    (!borrowed && current == Some(&Value::from("")))
+                        .then(|| "already cleared".into())
                 }),
             },
             MenuEntry {
