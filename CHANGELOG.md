@@ -8,6 +8,11 @@
 - `skin_wet` is always BC7 (a normal with a mask in alpha); the BC4 height form is gone. A grey `_wet` is not written (new warning `SKIN-WET-GREY`) and the rest of the batch still writes. `skin_rfaos`, `skin_wet` and `skin_detail` accept only the formats the Community Shaders loader reads (BC1, BC3, BC7, RGBA8, plus BC5 for `skin_detail`); another format is `FMT-CS-SKIN-LOADER`, which `--allow` cannot lift. Existing `skin_wet` outputs re-encode once; no other type's bytes change.
 - Fixed: renaming an Advanced skin set's outputs, or giving it an input name, left its `_wet` under the old name (or refused the input name) and read a `_detail_n` as a plain `_n`. Both now keep their suffix, and Rename refuses two outputs of one set landing on one name.
 - Fixed: a pre-packed `_rmaos` or `_rfaos` image with a flat alpha rejected a separate specular. The specular now fills that alpha, and the other channels come from the image. An alpha with content, or another loose map beside the image, still keeps the file.
+- Fixed: Problems rows about a packed channel or a shader's map now say which map and channel, not "add the missing map".
+- Fixed: the input name box showed the diffuse's suffix, so typing `body` for `body_albedo` snapped back and typing a name ending in the suffix doubled it. The box now shows `body`.
+- Fixed: a set with a PBR map but no PBR albedo (a lone `_f`) showed PBR in its shader box over a "vanilla" pill. The pill now says "PBR, no JSON".
+- Fixed: textures named only in a texture set record (TXST) were not offered by the path pickers.
+- Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 
 ## 2.0.0
 
