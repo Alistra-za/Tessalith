@@ -468,10 +468,17 @@ fn a_packed_target_is_named_by_its_output() {
         sdc_gui::model::helpers::target_label(&rep, rmaos),
         "steel_rmaos R"
     );
+    // Final review M4: a target that did not land is named by the outputs' base name, like the rows beside it.
     assert_eq!(
         sdc_gui::model::helpers::target_label(&rep, lost),
-        lost.label(&sdc_gui::model::helpers::set_base(&rep)),
-        "no output: the set's name"
+        lost.label("steel"),
+        "no output of its own: another output's base name"
+    );
+    // Final review K2: the colour output has no suffix, and its stem is the base too.
+    let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
+    assert_eq!(
+        sdc_gui::model::helpers::target_label(&rep, colour),
+        colour.label("steel")
     );
     let h = app(m, "x_roughness.png");
     h.get_by_role_and_label(Role::Button, "Stop filling steel_rmaos R");

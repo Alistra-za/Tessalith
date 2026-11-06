@@ -30,16 +30,20 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
         FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some("cnr"),
         FillTarget::Rnm(_) => Some("n"),
     };
-    let base = set_base(h);
-    let Some(tail) = suffix.map(|s| format!("_{s}")) else {
-        return t.label(&base);
+    let stems = || h.outputs.iter().filter_map(|o| o.file_stem()?.to_str());
+    let named = suffix
+        .map(|s| format!("_{s}"))
+        .and_then(|tail| stems().find_map(|s| s.strip_suffix(tail.as_str())));
+    // A target with no output (or the colour one, which has no suffix) takes any output's base name, so a renamed
+    // set reads `steel` beside the rows that read `steel_rmaos R`.
+    let any = || {
+        stems().next().map(|s| {
+            let tail = super::sets::member_tail(s, true).len();
+            &s[..s.len() - tail]
+        })
     };
-    let stem = h
-        .outputs
-        .iter()
-        .filter_map(|o| o.file_stem()?.to_str())
-        .find_map(|s| s.strip_suffix(tail.as_str()));
-    t.label(stem.unwrap_or(&base))
+    let base = set_base(h);
+    t.label(named.or_else(any).unwrap_or(&base))
 }
 
 /// The `helper.fills` entries of the report's fills: layer blends (`Rnm`) are reports only, never written.
