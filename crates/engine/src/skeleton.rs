@@ -12,7 +12,7 @@ use crate::manifest::output_key;
 use crate::overrides::{project_rel, KeyForms, Scope, SetOverride, SUBTYPE_FIELD};
 use crate::pack::plan::raw_role;
 use crate::policy::JobStatus;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 /// Why an edit cannot be patched in: the caller plans in full.
@@ -66,6 +66,8 @@ pub struct Skeleton {
     pub(crate) writers: Arc<HashMap<String, u32>>,
     /// Keys of the sets in a BV2 writer collision of the full plan, winners and losers alike.
     pub(crate) clash_sets: Arc<BTreeSet<String>>,
+    /// Two files fold to one output path: only then can which image writes nothing change a duplicate verdict.
+    pub(crate) shared_output: bool,
 }
 
 impl Skeleton {
@@ -147,7 +149,10 @@ impl Skeleton {
                 clash_sets.insert(prepared.sets[w as usize].key.clone());
             }
         }
+        let mut outs = HashSet::new();
+        let shared_output = !prepared.files.iter().all(|f| outs.insert(fold(&f.output)));
         Skeleton {
+            shared_output,
             req_sig: prepared.req.sig_without_files(),
             partners: Arc::new(partner_groups(&prepared)),
             prepared,
@@ -306,25 +311,28 @@ impl Skeleton {
             // the old and the new state over every set, so a skin `_f` (no `typed` flip), or a neighbour's edit
             // that unmakes the skin set, is seen too; a file that moved in or out and shares an output with
             // another file changes that pair's verdict.
-            let mut sets = p.sets.clone();
-            for s in typed
-                .symmetric_difference(&p.typed)
-                .map(|&i| self.set_of[i])
-                .filter(|&s| s != u32::MAX)
-                .collect::<BTreeSet<u32>>()
-            {
-                refresh_suffixes(&mut sets[s as usize], &p.files, &typed);
-            }
-            let old_waits =
-                waiting_images(&old_ctx, p.target, &p.sets, &p.files, &p.typed, &p.hand);
-            let new_waits = waiting_images(&new_ctx, p.target, &sets, &p.files, &typed, &p.hand);
-            if p.files.iter().any(|f| {
-                old_waits.contains(&f.path) != new_waits.contains(&f.path)
-                    && p.files
-                        .iter()
-                        .any(|g| g.path != f.path && fold(&g.output) == fold(&f.output))
-            }) {
-                return Err(NeedsFull(DUPLICATE_CHANGE));
+            if self.shared_output {
+                let mut sets = p.sets.clone();
+                for s in typed
+                    .symmetric_difference(&p.typed)
+                    .map(|&i| self.set_of[i])
+                    .filter(|&s| s != u32::MAX)
+                    .collect::<BTreeSet<u32>>()
+                {
+                    refresh_suffixes(&mut sets[s as usize], &p.files, &typed);
+                }
+                let old_waits =
+                    waiting_images(&old_ctx, p.target, &p.sets, &p.files, &p.typed, &p.hand);
+                let new_waits =
+                    waiting_images(&new_ctx, p.target, &sets, &p.files, &typed, &p.hand);
+                if p.files.iter().any(|f| {
+                    old_waits.contains(&f.path) != new_waits.contains(&f.path)
+                        && p.files
+                            .iter()
+                            .any(|g| g.path != f.path && fold(&g.output) == fold(&f.output))
+                }) {
+                    return Err(NeedsFull(DUPLICATE_CHANGE));
+                }
             }
             // Membership check: rerun `prepare`'s joins on its grouping under the new layer; any set whose members
             // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
