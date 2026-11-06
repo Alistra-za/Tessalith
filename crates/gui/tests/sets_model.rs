@@ -2284,9 +2284,10 @@ fn a_map_a_mesh_supplies_raises_no_missing_map() {
     assert_eq!(missing_maps(&m, "landscape/rock01"), ["_rmaos"], "back");
 }
 
-/// A set read under an alias is looked up by the alias, the name the meshes and TXSTs use.
+/// A set read under an alias is looked up by the name it writes (final review I2: the meshes name the output), which
+/// an input name leaves alone, so the alias itself is not asked.
 #[test]
-fn an_aliased_set_looks_up_the_alias() {
+fn an_aliased_set_looks_up_the_written_name() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_without_rmaos(d.path());
     m.set_input_name("landscape/rock01", "textures/landscape/stone")
@@ -2294,13 +2295,25 @@ fn an_aliased_set_looks_up_the_alias() {
     idle(&mut m);
     let id = "landscape/stone";
     assert_eq!(missing_maps(&m, id), ["_rmaos"]);
-    m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
-    assert_eq!(
-        missing_maps(&m, id),
-        ["_rmaos"],
-        "the file's own name is not asked"
-    );
     m.set_known(supplying("textures/landscape/stone.dds", 1 << 5));
+    assert_eq!(missing_maps(&m, id), ["_rmaos"], "the alias is not asked");
+    m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
+    assert!(missing_maps(&m, id).is_empty());
+}
+
+/// Note HE4 (final review I2): the meshes name what the set writes, so a set with an `output_name` is looked up by
+/// that name, not by the name it is read as.
+#[test]
+fn a_renamed_output_looks_up_the_written_name() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_without_rmaos(d.path());
+    m.set_output_name("landscape/rock01", Some("steel")).unwrap();
+    idle(&mut m);
+    let id = "landscape/rock01";
+    assert_eq!(missing_maps(&m, id), ["_rmaos"]);
+    m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
+    assert_eq!(missing_maps(&m, id), ["_rmaos"], "the read-as name is not asked");
+    m.set_known(supplying("textures/landscape/steel.dds", 1 << 5));
     assert!(missing_maps(&m, id).is_empty());
 }
 

@@ -781,10 +781,10 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
     let Some(job) = m.item(item).and_then(|i| i.job.as_ref()) else {
         return;
     };
-    let diffuse = format!(
-        "{}.dds",
-        super::input_name::no_ext(&job.game_path).to_ascii_lowercase()
-    );
+    let Some(stem) = job.output.file_stem().map(|s| s.to_string_lossy()) else {
+        return;
+    };
+    let diffuse = format!("{}.dds", engine::shader::mesh_key(&job.game_path, &stem));
     let Some(&bits) = m.known.supplies.get(&diffuse) else {
         return;
     };
