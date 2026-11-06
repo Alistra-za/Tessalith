@@ -1,5 +1,5 @@
 //! Set-level bake decisions (spec §6.2–6.3, DECISIONS R6–R10): which roughness member bakes which `_n`, and the
-//! four `SET-*` codes. `Engine::plan` runs this after packing, so a packed `_rmaos`/`_rfaos` is a member like a
+//! two `SET-*` codes it raises (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). `Engine::plan` runs this after packing, so a packed `_rmaos`/`_rfaos` is a member like a
 //! pre-packed one, and before `set_resolved` and `file_planned`, so both show the decision.
 use super::{bake_shift, BakeJob};
 use crate::codes::{Code, Warning};

@@ -730,7 +730,8 @@ fn resized_npot_pair_bakes_on_post_resize_sizes() {
             assert!(!codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
         } else {
             let fit = m.bake.as_ref().expect("bakes").fit;
-            assert!(fit.is_some_and(|(w, h)| w != 48 || h != 48), "{fit:?}");
+            // The 48 px member is written at 32 px (`pot_dims`); the `_n` keeps 48.
+            assert_eq!(fit, Some((32, 32)));
             assert!(!codes(m).contains(&Code::SetBakeRatio), "{:?}", m.warnings);
         }
     }

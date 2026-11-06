@@ -1130,8 +1130,8 @@ fn rfaos_is_bc7_unorm_with_data_alpha() {
     );
 }
 
-/// Spec §11.1 2:1 sets: a 128 px `_n` with a 64 px roughness member. 2:1 is a power-of-two ratio, so SET-BAKE-RATIO
-/// (§10) does not fire and both sets bake (flat normals, so the roughness is unchanged).
+/// Spec §11.1 2:1 sets: a 128 px `_n` with a 64 px roughness member. 2:1 is a power-of-two ratio, so the pair keeps
+/// the level shift and both sets bake (flat normals, so the roughness is unchanged).
 #[test]
 fn two_to_one_sets_keep_their_own_chains() {
     let d = tempfile::tempdir().unwrap();

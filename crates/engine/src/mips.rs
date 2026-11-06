@@ -351,7 +351,7 @@ fn bake_gloss(level: &mut Rgba32F, index: usize, b: &NormalVariance) {
         let add = b.add_at(index, i as u32 % w, i as u32 / w);
         if add > 0.0 {
             // shortcut: g is the level's mean gloss, not the mean of α = (1 − g)²; average α if banding shows.
-            // Mip 0 is stored as authored, so a float source can hold G outside [0, 1] (review M3).
+            // A float source can hold G outside [0, 1], and a mip that averages it can too (review M3).
             let r = 1.0 - px[1].clamp(0.0, 1.0);
             px[1] = 1.0 - baked_roughness(r * r, add);
         }
@@ -1338,7 +1338,7 @@ mod tests {
                 img.at_mut(x, y)[1] = 0.3 + 0.6 * ((x * 5 + y * 3) % W) as f32 / W as f32;
             }
         }
-        // M3: a 2x2 block of float gloss above 1 averages above 1 at mip 1, which bakes as gloss 1 (mip 0 is as authored).
+        // M3: a 2x2 block of float gloss 1.5 averages to 1.5 at mip 1, where the bake clamps it to gloss 1 (mip 0 is not baked).
         for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
             img.at_mut(x, y)[1] = 1.5;
         }

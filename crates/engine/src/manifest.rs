@@ -20,7 +20,8 @@ pub const RELEASED_ENGINE_VERSION: &str = "2.0.0";
 
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
-/// changes no arm. 2.0.0 re-encodes everything once, so every type shares one version (Note FM9). No `_` arm: a new
+/// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
+/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0. No `_` arm: a new
 /// `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -569,7 +570,7 @@ mod tests {
         }
     }
 
-    /// Note FM9: every sub-type has the one encode version, 2.0.0.
+    /// Note FM9: every sub-type has the one encode version, 2.0.0, except the five that changed in 2.1.0 (comment below).
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {

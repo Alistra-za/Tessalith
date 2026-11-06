@@ -48,9 +48,10 @@ pub fn baked_roughness(mean_alpha: f32, add: f32) -> f32 {
     }
 }
 
-/// log2 of the `_n` : roughness-member size ratio (1 for a 2:1 `_n`, −1 for a half-size one), or why the set does
-/// not bake (`SET-BAKE-RATIO`, DECISIONS R5). Both bases must be powers of two with one aspect, so every footprint
-/// is whole texels of one pyramid level.
+/// log2 of the `_n` : roughness-member size ratio (1 for a 2:1 `_n`, −1 for a half-size one). Both bases must be
+/// powers of two with one aspect, so every footprint is whole texels of one pyramid level. An `Err` is a pair that
+/// does not line up: the planner then fits the `_n` to the member (Note HD2), and at run time it means the file's
+/// size changed since the plan.
 pub fn bake_shift(normal: (u32, u32), member: (u32, u32)) -> Result<i32, String> {
     if normal == member {
         return Ok(0);
@@ -241,8 +242,9 @@ impl BakeJob {
 
     /// Peak bytes the bake holds, for `--mem-budget` admission (DECISIONS R4, Task 7 review I2): the `_n`'s
     /// [`decode_peak`], plus (Note BB) its RNM layers' [`crate::rnm::RnmJob::admission_bytes`] at the `_n`'s
-    /// preprocessed size, which `load_lengths` blends into. 0 when the header cannot be read (the load then fails
-    /// with its own error).
+    /// preprocessed size, which `load_lengths` blends into, plus the fit term (`w * h * 23` for a member-sized
+    /// resample and pyramid when `fit` is set). Each part is 0 when the `_n`'s header cannot be read (the load then
+    /// fails with its own error).
     pub fn estimated_bytes(&self) -> u64 {
         let layers = || {
             let r = self.rnm.as_ref()?;
