@@ -18,6 +18,22 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
 - **PGPatcher JSON schemas** `crates/gui/assets/pbr.schema.json` and `crates/gui/assets/complex_material.schema.json` (https://github.com/hakasapl/PGPatcher, (c) hakasapl and contributors, GPL-3.0), vendored unmodified and embedded in the GUI to validate exported JSON. `pbr.schema.json` was fetched from `main` on 2026-10-09; `complex_material.schema.json` is upstream commit 0176567.
 - **XPMF profile schema** `crates/gui/assets/xpmf_profile.schema.json` (https://github.com/hakasapl/xpmf, (c) hakasapl, GPL-3.0 with modding exception), vendored unmodified and embedded in the GUI to validate exported XPMF profiles; upstream 0.8.1, commit 8078e1f.
 - **PBR landscape template values** in `crates/gui/assets/cs_pbr_templates.json`: values by Faultier (see `docs/CREDITS.md`). Used with Faultier's permission; no licence attached.
+- **Community Shaders HLSL** `crates/render3d/shaders/cs/` (CS `d2026.10.11.0`, https://github.com/doodlum/skyrim-community-shaders), the 57 shader files in the include closure of `Lighting.hlsl`, `DeferredCompositeCS.hlsl` and `DynamicCubemaps/SpecularIrradianceCS.hlsl`, plus CS's `SettingsDefault.json`. Copied unchanged by `tools/cs-bundle.py` and embedded in the GUI for the 3D preview. Every licence in it is compatible with GPL-3.0-or-later (checked 2026-11-06):
+  - Community Shaders, Copyright (c) 2022 Ilya Perapechka, MIT (`LICENSES/CommunityShaders-LICENSE-MIT.txt`).
+  - `Common/Color.hlsli`: Copyright 2019 Google LLC, Apache-2.0 (the Apache-2.0 text is `LICENSES/Apache-2.0-bc7e.txt`).
+  - `Common/Color.hlsli`: code adapted from Luma Framework (https://github.com/Filoppi/Luma-Framework), Copyright (c) 2024+ Filippo Tarpini, MIT (text below).
+  - `DynamicCubemaps/SpecularIrradianceCS.hlsl`: Copyright (c) 2017-2018 Michał Siejak, MIT, from https://github.com/Nadrin/PBR. The shader's header names no licence; that it comes from that repository is inferred from the matching copyright line and header.
+  - `WetnessEffects/WetnessEffects.hlsli`: BelmuTM, Noble (https://github.com/BelmuTM/Noble), GPL-3.0 (`LICENSE`, Tessalith's own licence text).
+  - `WetnessEffects/optimized-ggx.hlsli`: John Hable, Unlicense.
+  - `Common/Spherical Harmonics/`: Copyright (c) 2018 SebH, MIT (`LICENSES/SphericalHarmonics-SebH-LICENSE-MIT.txt`).
+
+  The MIT text for Siejak (Nadrin/PBR) and Tarpini (Luma Framework), whose repositories' licence files are not in this repository:
+
+  > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+  >
+  > The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+  >
+  > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - The icons (`tessalith.ico`, `tessalith-256.png`, `sdc.ico`), the emblem (`docs/assets/tessalith-emblem.png`) and the shader `preview.wgsl` are Tessalith's own; the icon and emblem art was made by the project author.
 
 Tessalith uses the Windows system fonts (Segoe UI, Segoe UI Symbol, Segoe UI Emoji, Consolas) at run time and ships no fonts (egui's bundled default fonts are disabled).
