@@ -886,7 +886,7 @@ fn session(le: bool) -> (tempfile::TempDir, MeshesModel) {
 }
 
 /// Stands in for the render thread.
-fn attach(m: &mut MeshesModel, _root: &Path) -> Receiver<V3Cmd> {
+fn attach(m: &mut MeshesModel) -> Receiver<V3Cmd> {
     m.v3.attach_test_thread()
 }
 
@@ -934,8 +934,8 @@ fn open_edit_loads_the_source_and_previews_parsed() {
 
 #[test]
 fn glossiness_edit_reaches_the_viewport_without_a_reload() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     assert_eq!(loads(&cmds).len(), 1, "the first LoadParsed");
@@ -975,8 +975,8 @@ fn glossiness_edit_reaches_the_viewport_without_a_reload() {
 
 #[test]
 fn new_texture_path_reloads_the_same_view() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     let first = loads(&cmds);
@@ -1013,8 +1013,8 @@ fn new_texture_path_reloads_the_same_view() {
 /// Note GP9: a drag tick on a float field names no texture, so it queries no store.
 #[test]
 fn a_float_edit_makes_no_store_query() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     assert_eq!(loads(&cmds).len(), 1, "the first LoadParsed");
@@ -1127,8 +1127,8 @@ fn a_failed_texture_lookup_is_retried_on_the_next_change() {
 
 #[test]
 fn le_file_opens_without_preview() {
-    let (d, mut m) = session(true);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(true);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     let e = m.edit.as_ref().expect("an LE NIF opens read-only");
@@ -5196,7 +5196,7 @@ fn session_on(nif: &[u8]) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>) {
     let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
     m.procs = sdc_gui::model::meshes::no_procs;
     scan_and_select(&mut m, d.path());
-    let cmds = attach(&mut m, d.path());
+    let cmds = attach(&mut m);
     m.open_edit();
     assert_eq!(m.error, None);
     m.tick_anim(0.0); // makes the clock

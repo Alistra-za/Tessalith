@@ -309,8 +309,8 @@ fn every_built_in_shape_is_selectable() {
 fn the_cap_is_2048_and_settings_round_trip() {
     let d = tempfile::tempdir().unwrap();
     let s = sdc_gui::settings::GuiSettings::default();
-    assert_eq!(SetPreview::from_settings(&s, None).enc.cap, DEFAULT_CAP);
-    assert!(SetPreview::from_settings(&s, None).enabled);
+    assert_eq!(SetPreview::from_settings(None).enc.cap, DEFAULT_CAP);
+    assert!(SetPreview::from_settings(None).enabled);
     let p = d.path().join("gui.toml");
     s.save(&p).unwrap();
     assert_eq!(sdc_gui::settings::GuiSettings::load(&p), (s, None));
@@ -427,7 +427,7 @@ set_preview_max = 4096
     .unwrap();
     let (s, err) = sdc_gui::settings::GuiSettings::load(&p);
     assert_eq!(err, None);
-    assert_eq!(SetPreview::from_settings(&s, None).enc.cap, DEFAULT_CAP);
+    assert_eq!(SetPreview::from_settings(None).enc.cap, DEFAULT_CAP);
     assert_eq!(DEFAULT_CAP, 2048);
     // Saving drops the key.
     s.save(&p).unwrap();

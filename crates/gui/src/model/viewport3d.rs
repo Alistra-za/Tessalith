@@ -628,6 +628,9 @@ pub enum V3Cmd {
     },
     /// A finished background compile, sent by the pool into the render loop's own queue.
     Compiled(CompileDone),
+    /// Test seam: the next render fails as a lost device, so the render thread rebuilds it and replays its logs.
+    #[cfg(feature = "test-hooks")]
+    LoseDevice,
     /// The model is gone: end the loop (the pool's sink holds a sender to the loop's queue, so the channel no
     /// longer closes by itself).
     Quit,
@@ -863,6 +866,14 @@ impl Viewport3d {
     #[cfg(feature = "test-hooks")]
     pub fn use_shader_folder(&mut self, folder: PathBuf) {
         self.source = render3d::ShaderSource::Folder(folder);
+    }
+
+    /// Test seam: the render thread's next render fails as a lost device (a rebuild follows).
+    #[cfg(feature = "test-hooks")]
+    pub fn lose_device_for_test(&mut self) {
+        if let Some(t) = &self.thread {
+            let _ = t.send(V3Cmd::LoseDevice);
+        }
     }
 
     /// Test seam: stands in for the render thread; the returned receiver gets the commands.
@@ -1668,7 +1679,7 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
 }
 
 /// The render thread's texture state (P1-B A/B): the variant the load resolver's bytes count as, and the swaps and
-/// flips made since the content's own load. A reload (shaders, features or device change) loads the content's own
+/// flips made since the content's own load. A device rebuild loads the content's own
 /// bytes again, so they are applied again, exactly as `edits` are. A device rebuild drops the renderer's texture
 /// cache, so the log holds both variants of every path swapped.
 #[derive(Default)]
@@ -1857,6 +1868,8 @@ fn render_loop(
     // The look's deferred choice (the last SetDeferred): a shaders, features or settings change retries it after a
     // fallback (D-P36). A failed retry is told by the check after render only when its error is new.
     let mut want_deferred = false;
+    #[cfg(feature = "test-hooks")]
+    let mut lose_device = false;
     // A material-object layer not applied yet: it waits for content, whose texture map resolves its textures.
     let mut layer_due: Vec<Option<ProjectedLayer>> = vec![];
     // The skin card's picks (Note GN): applied after every load of `last`.
@@ -1876,6 +1889,11 @@ fn render_loop(
         for c in std::iter::once(first).chain(rx.try_iter()) {
             let content = match c {
                 V3Cmd::Quit => return,
+                #[cfg(feature = "test-hooks")]
+                V3Cmd::LoseDevice => {
+                    lose_device = true;
+                    None
+                }
                 V3Cmd::Compiled(done) => {
                     compiled_changed |= r.apply_compiled(done);
                     None
@@ -2122,6 +2140,10 @@ fn render_loop(
         let mut scene = look.scene(camera, r.bounds());
         scene.time = time;
         let mut result = r.render(&scene, w, h);
+        #[cfg(feature = "test-hooks")]
+        if std::mem::take(&mut lose_device) {
+            result = Err(format!("{}: test", render3d::device::DEVICE_REMOVED));
+        }
         if let Err(e) = &result {
             if e.starts_with(render3d::device::DEVICE_REMOVED) {
                 // Device lost (TDR, driver update): a new device (maybe WARP), the content again, one retry.

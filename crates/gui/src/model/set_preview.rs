@@ -2887,10 +2887,7 @@ impl SetPreview {
 
 impl SetPreview {
     /// The app's instance: the scan DB path and the D5 cap. No IO.
-    pub fn from_settings(
-        _s: &crate::settings::GuiSettings,
-        store_path: Option<PathBuf>,
-    ) -> SetPreview {
+    pub fn from_settings(store_path: Option<PathBuf>) -> SetPreview {
         SetPreview::new(store_path, DEFAULT_CAP)
     }
 }

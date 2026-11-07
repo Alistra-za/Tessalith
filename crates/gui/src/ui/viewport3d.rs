@@ -446,11 +446,17 @@ fn problems(ui: &mut egui::Ui, v: &mut Viewport3d) {
     }
 }
 
+/// The "Off in this preview" line (Note GT4): one row, cut with an ellipsis, the whole list on hover. The label's
+/// text, and so its accessible name, stays complete.
+pub fn off_label(ui: &mut egui::Ui, text: egui::RichText) {
+    ui.add(egui::Label::new(text).truncate());
+}
+
 fn footer(ui: &mut egui::Ui, v: &Viewport3d) {
+    if let Some(off) = off_line(&v.off_in_preview) {
+        off_label(ui, egui::RichText::new(off).weak());
+    }
     ui.horizontal_wrapped(|ui| {
-        if let Some(off) = off_line(&v.off_in_preview) {
-            ui.weak(off);
-        }
         if let Some((name, warp)) = &v.adapter {
             if *warp {
                 ui.colored_label(AMBER, format!("· {name} (software renderer)"));

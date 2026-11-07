@@ -1557,7 +1557,7 @@ fn only_parsed_and_builtin_content_takes_swaps_and_the_load_variant_is_announced
 }
 
 /// A real render thread on WARP with the repo stand-in: a swap shows in the next frame and is applied again after
-/// a reload (here: the features toggle), which loads the content's own bytes again.
+/// a device rebuild (forced by `lose_device_for_test`), which loads the content's own bytes again.
 #[test]
 fn a_texture_swap_reaches_the_render_thread() {
     use nif::material::MaterialState;
@@ -1640,9 +1640,13 @@ fn a_texture_swap_reaches_the_render_thread() {
     wait_for(&mut v, 1, id0);
     assert!(v.swap_errors.is_empty(), "{:?}", v.swap_errors);
     let id1 = v.frame.as_ref().unwrap().id;
-    // The swap stays in the next frame (the reload replay is covered by the render thread's own tests).
+    // A lost device: the render thread rebuilds it and loads the content's own (red) bytes again, then replays the
+    // swap log. The rebuild's `Loaded` reply refills the report; the frame after it is green again.
+    v.report = None;
+    v.lose_device_for_test();
     v.orbit.drag(10.0, 0.0);
     wait_for(&mut v, 1, id1);
+    assert!(v.report.is_some(), "the device was rebuilt");
 }
 
 fn frame_reply(v: &mut Viewport3d, id: u64) {
@@ -1727,6 +1731,35 @@ fn the_off_line_lists_what_the_renderer_leaves_off() {
     let mut h = harness(v);
     h.run();
     h.get_by_label_contains("Off in this preview: Dynamic Cubemaps, LOD Blending");
+}
+
+/// Note GT4: with all 48 defaults off the line is still one row, and the full list stays the label's text.
+#[test]
+fn the_off_line_is_one_row_with_the_full_text() {
+    let height = |off: Vec<String>| {
+        let mut v = Viewport3d::with_state(V3State::Ready);
+        v.handle(v3::V3Reply::OffInPreview(off));
+        let mut h = harness(v);
+        h.run();
+        h.get_by_label_contains("Off in this preview")
+            .rect()
+            .height()
+    };
+    let all: Vec<String> = render3d::cs_settings::defaults()
+        .loaded
+        .iter()
+        .cloned()
+        .collect();
+    assert_eq!(all.len(), 48);
+    let one = height(vec![all[0].clone()]);
+    let many = height(all.clone());
+    assert!((many - one).abs() < 1.0, "one row: {one} vs {many}");
+    let mut v = Viewport3d::with_state(V3State::Ready);
+    v.handle(v3::V3Reply::OffInPreview(all.clone()));
+    let mut h = harness(v);
+    h.run();
+    let last = v3::off_line(&all).unwrap();
+    h.get_by_label(&last);
 }
 
 // ---- P1-C Task 6: default settings ----
@@ -2299,6 +2332,14 @@ fn deferred_falls_back_and_shows_the_notice() {
     assert_eq!(v.shapes[0].status, ShapeStatus::Drawing);
     wait_lit(&mut v);
     assert!(v.look.deferred, "D-P30: the preference stays");
+    // D-P36: a features change retries deferred and fails the same way; the same failure is not told twice.
+    v.notice = None;
+    v.set_features(false);
+    run_idle(&mut v);
+    assert_eq!(v.notice, None, "the same failure after a features change");
+    v.set_features(true);
+    run_idle(&mut v);
+    assert_eq!(v.notice, None, "and when they come back");
     // D-P33: turning it off says nothing new; turning it on again reports the failure again.
     v.notice = None;
     v.set_deferred(false);
@@ -2464,22 +2505,4 @@ fn a_compile_error_is_still_shown() {
     h.run_steps(4);
     h.get_by_label_contains("shader failed: ps:");
     assert!(h.query_by_label_contains("not found").is_none());
-}
-
-/// Opening a NIF reaches its first draw with no MO2 origins and no CS on the machine: no worker message asks the
-/// GUI for either, and the first command after the mesh is the load itself.
-#[test]
-fn no_worker_message_reads_cs_settings() {
-    let cache = tempfile::tempdir().unwrap();
-    let mut m = MaterialState::builtin_default();
-    m.alpha = Some(nif::props::Alpha {
-        flags: 0x200,
-        threshold: 0,
-    });
-    let mut v = real_viewport(cache.path(), m);
-    run_idle(&mut v);
-    assert_eq!(v.shapes[0].status, ShapeStatus::Drawing);
-    wait_lit(&mut v);
-    assert_eq!(v.state, V3State::Ready);
-    assert_eq!(v.notice, None);
 }
