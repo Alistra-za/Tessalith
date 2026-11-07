@@ -1,11 +1,11 @@
 //! The UI driver's own tests, on tiny UIs. The journeys that drive the real app come later.
-#![allow(dead_code)] // the shared manifest has fields only the doc shots read
 
 mod app_harness;
 #[path = "ui_drive/fixtures.rs"]
 mod fixtures;
 #[path = "ui_drive/frame.rs"]
 mod frame;
+#[allow(dead_code)] // fields only the doc shots read
 #[path = "doc_shots/manifest.rs"]
 mod manifest;
 #[path = "ui_drive/steps.rs"]
@@ -379,7 +379,9 @@ fn the_open_folder_entry_asks_the_fake_dialog() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     app_harness::settle(&mut h, 2);
-    assert_eq!(run.picker.asked.lock().unwrap().len(), 1);
+    let asked = run.picker.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(asked[0], "folder: cancel");
     assert_eq!(h.state().model.root, root, "the fake answered Cancel");
 }
 

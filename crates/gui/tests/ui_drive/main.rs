@@ -7,7 +7,8 @@
 //!       [--size <W>x<H>] [--theme dark|light]
 //!   cargo test --offline -p sdc-gui --test ui_drive -- --list      fixture names
 //!   Any other arguments (cargo test's own, e.g. --skip render_): prints one line and exits 0.
-//! Exit 0: every step ran. 1: a step failed (its frame and run.json are still written). 2: bad arguments or fixture.
+//! Exit 0: every step ran. 1: a step failed (its frame and run.json are still written). 2: bad arguments or fixture,
+//! or a frame could not be written (run.json is still written, with that step marked failed).
 //!
 //! Steps, one JSON object per line (`op` picks the kind; a target names exactly one of `label`, `starts`,
 //! `placeholder`, plus optional `role` and `index`, 0 = first in reading order):
@@ -22,15 +23,14 @@
 //! Output in --out: `00` is the settled start, `NN` follows step NN. Per frame `NN.tree.txt` (the AccessKit tree, with
 //! focused/disabled/hovered/clipped/offscreen marks) and `NN.png`. `steps.jsonl` is the script; `run.json` holds
 //! {fixture, size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms, error, note}],
-//! dialogs, shell: [{step, request}]}. Screenshots are comparable with the doc shots only when the adapter is the
+//! dialogs, shell: [{step, request}]}. `ms_fixture` is the fixture build, app start and first settle. Screenshots are comparable with the doc shots only when the adapter is the
 //! one in shots.toml; the driver says so when it is not.
-
-#![allow(dead_code)] // the shared manifest has fields only the doc shots read
 
 #[path = "../app_harness/mod.rs"]
 mod app_harness;
 mod fixtures;
 mod frame;
+#[allow(dead_code)] // fields only the doc shots read
 #[path = "../doc_shots/manifest.rs"]
 mod manifest;
 mod steps;
@@ -147,12 +147,7 @@ fn run(a: Args) -> Result<i32, String> {
     let text = std::fs::read_to_string(&a.script)
         .map_err(|e| format!("cannot read {}: {e}", a.script.display()))?;
     let script = steps::parse_script(&text)?;
-    if !fixtures::FIXTURES.iter().any(|(n, _)| *n == a.fixture) {
-        // start() builds the message; ask it before any temp folder exists
-        return Err(fixtures::start(&a.fixture, Path::new("."), false)
-            .err()
-            .unwrap_or_default());
-    }
+    fixtures::lookup(&a.fixture)?;
     std::fs::create_dir_all(&a.out).map_err(|e| e.to_string())?;
     clear_out(&a.out);
     let copy = a.out.join("steps.jsonl");
@@ -186,10 +181,15 @@ fn run(a: Args) -> Result<i32, String> {
     if !comparable {
         println!("screenshots not comparable: adapter {adapter}");
     }
-    write_frame(&mut h, &a.out, 0)?;
-
-    let (mut rows, mut shell, mut failed) = (vec![], vec![], false);
+    let (mut rows, mut shell, mut code) = (vec![], vec![], 0);
+    let mut start_error = write_frame(&mut h, &a.out, 0).err();
+    if start_error.is_some() {
+        code = 2;
+    }
     for (i, (line, step)) in script.iter().enumerate() {
+        if code != 0 {
+            break;
+        }
         let n = i + 1;
         let t = Instant::now();
         let res = fixtures::app_step(&mut h, &run, step);
@@ -198,20 +198,34 @@ fn run(a: Args) -> Result<i32, String> {
         for r in log.into_iter().flatten() {
             shell.push(json!({"step": n, "request": format!("{r:?}")}));
         }
-        write_frame(&mut h, &a.out, n)?;
-        let (ok, error, note) = match res {
+        let written = write_frame(&mut h, &a.out, n);
+        let (mut ok, mut error, note) = match res {
             Ok(note) => (true, None, note),
             Err(e) => (false, Some(e), None),
         };
+        if !ok {
+            code = 1;
+        }
+        if let Err(e) = written {
+            // exit 2 outranks a failed step: the frame, not the script, is what broke
+            ok = false;
+            code = 2;
+            error = Some(match error {
+                Some(s) => format!("{s}; frame not written: {e}"),
+                None => format!("frame not written: {e}"),
+            });
+        }
         println!("{n:02} {} {line}", if ok { "ok" } else { "FAIL" });
         if let Some(e) = &error {
             println!("    {e}");
         }
         rows.push(json!({"n": n, "line": line, "ok": ok, "ms": ms, "error": error, "note": note}));
         if !ok {
-            failed = true;
             break;
         }
+    }
+    if let Some(e) = &start_error {
+        eprintln!("ui_drive: frame 00 not written: {e}");
     }
     let s = h.ctx.content_rect().size();
     let summary = json!({
@@ -225,13 +239,14 @@ fn run(a: Args) -> Result<i32, String> {
         "steps": rows,
         "dialogs": *run.picker.asked.lock().unwrap(),
         "shell": shell,
+        "error": start_error.take(),
     });
     std::fs::write(
         a.out.join("run.json"),
         serde_json::to_string_pretty(&summary).unwrap(),
     )
     .map_err(|e| e.to_string())?;
-    Ok(i32::from(failed))
+    Ok(code)
 }
 
 fn main() {

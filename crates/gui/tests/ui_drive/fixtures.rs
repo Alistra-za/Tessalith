@@ -1,10 +1,9 @@
-#![allow(dead_code)]
 //! The projects the UI driver runs on, the fake file dialog and the app-level steps (`pick`).
 
 use crate::app_harness::{self, harness, plain_harness, settle, H};
 use crate::steps::{ui_step, Step};
 use crate::support;
-use sdc_gui::model::picker::{PickerBackend, PickerSpec};
+use sdc_gui::model::picker::{PickerBackend, PickerKind, PickerSpec};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
 use std::collections::VecDeque;
@@ -32,14 +31,12 @@ impl DriverPicker {
 impl PickerBackend for DriverPicker {
     fn pick(&self, spec: &PickerSpec) -> Option<PathBuf> {
         let answer = self.answers.lock().unwrap().pop_front();
-        let what = match spec.title {
-            Some(t) => t.to_string(),
-            None => format!("{:?}", spec.kind)
-                .split([' ', '{'])
-                .next()
-                .unwrap_or_default()
-                .to_string(),
-        };
+        // the backend sees the spec, not the purpose: the title when it has one, else the kind of dialog
+        let what = spec.title.unwrap_or(match spec.kind {
+            PickerKind::Folder => "folder",
+            PickerKind::File { .. } => "file",
+            PickerKind::Save { .. } => "save",
+        });
         let shown = answer
             .as_ref()
             .map_or("cancel".to_string(), |p| p.display().to_string());
@@ -77,16 +74,21 @@ fn demo_opened(dir: &Path) -> AppModel {
     m
 }
 
+/// The fixture called `name`, or an error listing the known ones.
+pub fn lookup(name: &str) -> Result<Fixture, String> {
+    FIXTURES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, f)| *f)
+        .ok_or_else(|| {
+            let known: Vec<&str> = FIXTURES.iter().map(|(n, _)| *n).collect();
+            format!("unknown fixture \"{name}\"; known: {}", known.join(", "))
+        })
+}
+
 /// Build the fixture in `dir` and start the app on it; `wgpu` false skips the GPU (no `render()`).
 pub fn start(fixture: &str, dir: &Path, wgpu: bool) -> Result<(H, Run), String> {
-    let Some((_, make)) = FIXTURES.iter().find(|(n, _)| *n == fixture) else {
-        let known: Vec<&str> = FIXTURES.iter().map(|(n, _)| *n).collect();
-        return Err(format!(
-            "unknown fixture \"{fixture}\"; known: {}",
-            known.join(", ")
-        ));
-    };
-    let m = make(dir);
+    let m = lookup(fixture)?(dir);
     let picker = Arc::new(DriverPicker::default());
     m.picker.set_backend(picker.clone());
     let mut h = if wgpu { harness(m) } else { plain_harness(m) };
