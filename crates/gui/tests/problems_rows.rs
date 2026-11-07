@@ -1,7 +1,7 @@
 //! Note FC3: every result the user must act on is a Problems row with its action as the row's button; checks are one
-//! count, not amber. The rows whose fixtures live elsewhere are pinned there:
-//! CHK-GREEN-GUESS in `checks.rs`, the post-Rebuild-Z row in `bottom_panel.rs`, the cube layout in `cubemap_gui.rs`,
-//! the dropped fill in `packing_fills.rs` and the cleared format in `encoding_follows_type.rs`.
+//! count, not amber. The rows whose fixtures live elsewhere are pinned there: CHK-GREEN-GUESS in `checks.rs`, the
+//! post-Rebuild-Z row in `bottom_panel.rs`, the cube layout in `cubemap_gui.rs`, the dropped fill in
+//! `packing_fills.rs` and the cleared format in `encoding_follows_type.rs`.
 mod support;
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};

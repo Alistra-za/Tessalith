@@ -127,8 +127,8 @@ pub struct SetsDoc {
     f: TomlFile,
     entries_cache: RefCell<Option<(u64, Arc<Vec<SetEntry>>)>>,
     /// Note FC11: `<project root>/_sdc/generated.json` as last read or written: the records kept outside the undo
-    /// history (the JSON hash tables), under the same keys as in this document. Written when a
-    /// record is made, so it holds even when the document is never saved; a table it holds wins over the document's.
+    /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
+    /// holds even when the document is never saved; a table it holds wins over the document's.
     side: serde_json::Map<String, Json>,
 }
 

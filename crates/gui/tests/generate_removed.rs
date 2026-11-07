@@ -101,6 +101,11 @@ fn card_menu(h: &mut egui_kittest::Harness<'static, AppModel>, id: &str) {
         .unwrap()
         .click_secondary();
     h.run();
+    // Positive control: the menu is open, so an entry it always has is there and "no Generate" means something.
+    assert!(
+        h.query_all_by_label("Edit match…").next().is_some(),
+        "the card menu did not open"
+    );
 }
 
 const ENTRIES: [&str; 6] = [
@@ -152,6 +157,7 @@ fn the_generate_entries_are_gone() {
     select_rock(&mut m);
     let mut h = harness(m);
     h.run();
+    slot_rect(&h, "Height _p"); // positive control: the editor drew the row
     for l in ENTRIES {
         assert!(
             h.query_all_by_label(l).next().is_none(),
@@ -201,6 +207,13 @@ fn a_generated_file_is_a_plain_row() {
         .expect("the File cell");
     h.hover_at(file.center());
     h.run();
+    // Positive control: the File cell's hover drew (it names the file on a line of its own).
+    assert!(
+        h.query_all_by_label_contains("rock01_p_generated.png\n")
+            .next()
+            .is_some(),
+        "the File cell's hover did not draw"
+    );
     assert!(
         h.query_all_by_label_contains("Generated from")
             .next()
@@ -217,7 +230,10 @@ fn an_old_generated_table_loads_and_stays() {
     let d = tempfile::tempdir().unwrap();
     let mut m = rock_with_old_table(d.path());
     assert!(m.dialog.is_none());
-    assert_eq!(m.status_line, "8 textures, 3 sets", "no message about it");
+    for e in m.messages.entries() {
+        let t = e.text.to_lowercase();
+        assert!(!t.contains("generated"), "a message about the table: {t}");
+    }
     assert!(!m.sets_doc.as_ref().unwrap().is_dirty(), "loads quietly");
     let tail = |d: &Path| {
         let t = std::fs::read_to_string(toml_path(d)).unwrap();

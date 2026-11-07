@@ -2507,8 +2507,9 @@ impl AppModel {
         }
     }
 
-    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes; P14): saves `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next
-    /// Save. True when it deferred.
+    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes; P14): saves
+    /// `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next Save. True when it
+    /// deferred.
     pub(crate) fn save_record(&mut self, was_dirty: bool) -> bool {
         if was_dirty {
             return true;
