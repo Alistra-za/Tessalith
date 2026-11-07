@@ -28,7 +28,7 @@ pub const FEATURES_LABEL: &str = "Community Shaders features";
 /// The View menu's deferred toggle (v2 D8, on by default): opaque shapes through CS's deferred pass.
 pub const DEFERRED_LABEL: &str = "Accurate (deferred)";
 
-/// `DynamicCubemaps` → `Dynamic Cubemaps`, `LODBlending` → `LOD Blending` (Info.ini short names as CS's menu
+/// `DynamicCubemaps` → `Dynamic Cubemaps`, `LODBlending` → `LOD Blending` (CS feature short names as CS's menu
 /// spells them).
 fn spaced(name: &str) -> String {
     let c: Vec<char> = name.chars().collect();
@@ -45,7 +45,7 @@ fn spaced(name: &str) -> String {
     out
 }
 
-/// The panel's off-in-preview line: the user's loaded CS features this preview does not compile
+/// The panel's off-in-preview line: the bundled CS's visual features this preview does not compile
 /// (`Renderer::off_in_preview`); `None` when nothing is off (D-P31).
 pub fn off_line(off: &[String]) -> Option<String> {
     if off.is_empty() {
@@ -562,7 +562,7 @@ impl DebugView {
 
 /// The status line when render3d cannot draw the selected debug view any more (`DebugSupport(false)`).
 pub const DEBUG_UNSUPPORTED: &str =
-    "These Community Shaders have no debug-view anchor in Lighting.hlsl: back to Lit";
+    "Lighting.hlsl has no debug-view anchor for this view: back to Lit";
 
 /// Commands to the render thread.
 pub enum V3Cmd {
@@ -695,12 +695,6 @@ pub enum V3Reply {
     ProjectedMissing(Vec<String>),
 }
 
-/// Where the render thread reads shaders from: always the bundled tree in a release build; a test can pick a folder.
-#[cfg(feature = "test-hooks")]
-type ShaderSrc = render3d::ShaderSource;
-#[cfg(not(feature = "test-hooks"))]
-type ShaderSrc = std::marker::PhantomData<()>;
-
 /// `%LOCALAPPDATA%\sdc\shader-cache`.
 pub fn default_cache_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|a| PathBuf::from(a).join("sdc").join("shader-cache"))
@@ -716,7 +710,7 @@ pub struct Viewport3d {
     pub look: Look,
     pub report: Option<LoadReport>,
     pub features_on: bool,
-    /// The user's loaded CS features this preview leaves off (`V3Reply::OffInPreview`), for the panel line.
+    /// The bundled CS's visual features this preview leaves off (`V3Reply::OffInPreview`), for the panel line.
     pub off_in_preview: Vec<String>,
     pub notice: Option<String>,
     /// The last frame.
@@ -787,7 +781,7 @@ pub struct Viewport3d {
     busy_since: Option<Instant>,
     thread: Option<Sender<V3Cmd>>,
     /// Where the render thread reads shader text: the bundle, or a test's stand-in folder.
-    source: ShaderSrc,
+    source: render3d::ShaderSource,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
     #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
@@ -847,7 +841,7 @@ impl Viewport3d {
             next_id: 0,
             busy_since: None,
             thread: None,
-            source: ShaderSrc::default(),
+            source: render3d::ShaderSource::Bundled,
             #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
@@ -1147,10 +1141,7 @@ impl Viewport3d {
     fn spawn_render_thread(&self, cache: PathBuf) -> Sender<V3Cmd> {
         let (ctx, crx) = channel();
         let features = self.features_on;
-        #[cfg(feature = "test-hooks")]
         let source = self.source.clone();
-        #[cfg(not(feature = "test-hooks"))]
-        let source = self.source;
         let me = ctx.clone();
         spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
             render_loop(crx, me, tx, source, cache, features)
@@ -1790,7 +1781,7 @@ fn render_loop(
     rx: Receiver<V3Cmd>,
     self_tx: Sender<V3Cmd>,
     tx: &Sender<WorkerMsg>,
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))] source: ShaderSrc,
+    source: render3d::ShaderSource,
     cache: PathBuf,
     features: bool,
 ) {
@@ -1798,10 +1789,7 @@ fn render_loop(
         let _ = tx.send(WorkerMsg::Viewport3d(r));
     };
     let make = |features: bool| -> Result<Renderer, String> {
-        #[cfg(feature = "test-hooks")]
         let mut r = Renderer::with_source(source.clone(), cache.clone())?;
-        #[cfg(not(feature = "test-hooks"))]
-        let mut r = Renderer::new(cache.clone())?;
         r.set_async_compile(true);
         // AU3: render3d's fill (GUI suggestions item 3): colour slots only, so a missing normal no longer tints.
         r.set_missing_texture(Some([255, 0, 255, 255]));
@@ -1865,8 +1853,7 @@ fn render_loop(
     let mut backdrop_told = false;
     // The deferred failure last reported (`Renderer::deferred_error`), so a late fallback is told once.
     let mut deferred_told: Option<String> = None;
-    // The look's deferred choice (the last SetDeferred): a shaders, features or settings change retries it after a
-    // fallback (D-P36). A failed retry is told by the check after render only when its error is new.
+    // The look's deferred choice (the last SetDeferred): a features change retries it after a fallback (D-P36). A failed retry is told by the check after render only when its error is new.
     let mut want_deferred = false;
     #[cfg(feature = "test-hooks")]
     let mut lose_device = false;
@@ -2161,7 +2148,7 @@ fn render_loop(
                 send(V3Reply::Notice(format!("Studio backdrop unavailable: {e}")));
             }
         }
-        // A shaders, features or settings change can turn deferred off during render (late fallback).
+        // A features change can turn deferred off during render (late fallback).
         if let Some(e) = r.deferred_error() {
             if deferred_told.as_deref() != Some(e) {
                 send(V3Reply::Notice(e.to_owned()));

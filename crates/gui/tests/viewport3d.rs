@@ -2322,7 +2322,9 @@ const DEFERRED_NOTICE: &str = "Deferred preview unavailable: ";
 
 #[test]
 fn deferred_falls_back_and_shows_the_notice() {
-    let shaders = standin_copy(Some("this is not hlsl"));
+    // No composite file at first: a missing file is not memoised, so a later retry reads the folder again.
+    let shaders = standin_copy(None);
+    std::fs::remove_file(shaders.path().join("DeferredCompositeCS.hlsl")).unwrap();
     let cache = tempfile::tempdir().unwrap();
     let mut v = viewport_on(shaders.path(), cache.path());
     assert!(v.look.deferred);
@@ -2349,6 +2351,20 @@ fn deferred_falls_back_and_shows_the_notice() {
     run_idle(&mut v);
     let again = v.notice.clone().expect("the notice is back");
     assert!(again.starts_with(DEFERRED_NOTICE), "{again}");
+    // D-P36: the retry really runs. The composite now exists but is broken, so it fails differently; only a retried
+    // deferred can tell it.
+    std::fs::write(
+        shaders.path().join("DeferredCompositeCS.hlsl"),
+        "this is not hlsl",
+    )
+    .unwrap();
+    v.notice = None;
+    v.set_features(false);
+    run_idle(&mut v);
+    let retried = v.notice.clone().expect("the retry failed anew and said so");
+    assert!(retried.starts_with(DEFERRED_NOTICE), "{retried}");
+    assert_ne!(retried, again, "a new failure, so a new notice");
+    let again = retried;
     let mut h = harness(v);
     h.run_steps(4);
     h.get_by_label(&again);

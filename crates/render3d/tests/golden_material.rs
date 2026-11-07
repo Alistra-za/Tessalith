@@ -820,7 +820,7 @@ fn trace_values_match_unit_functions() {
     let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
     assert!(
         ren.debug_supported(),
-        "the installed Lighting.hlsl has no debug anchor"
+        "the bundled Lighting.hlsl has no debug anchor"
     );
     // D-P24: a trace counts only when its fragment is the one the replay keeps (depth within 2 D24 ulps).
     ren.set_replay_depth_readback(true);

@@ -1,5 +1,5 @@
 //! Sun brightness and the one point light, on WARP with the stand-in shader (which reads the same vanilla
-//! point-light fields as CS's forward permutation), plus the real-CS check (ignored, needs SDC_ACHERUS).
+//! point-light fields as CS's forward permutation), plus the same light on the bundled CS lighting.
 mod common;
 use common::renderer;
 use nif::material::MaterialState;
@@ -134,21 +134,18 @@ fn point_light_pixels_match_the_by_name_writer() {
     same(&s, "sun and radius");
 }
 
-/// The same light on the user's real Community Shaders `Lighting.hlsl` (forward permutation, no
-/// LIGHT_LIMIT_FIX, so the vanilla `PointLightPosition` loop): a point light must brighten the sphere.
-/// `$env:SDC_ACHERUS='<your MO2 instance>'; cargo test -p render3d --test lights -- --ignored`
+/// The same light on the bundled CS `Lighting.hlsl` (forward permutation, no LIGHT_LIMIT_FIX, so the vanilla
+/// `PointLightPosition` loop): a point light must brighten the sphere.
 #[test]
-#[ignore = "needs SDC_ACHERUS (MO2 instance root) with the CS 2026-10-03 mod"]
-fn point_light_brightens_the_real_cs_lighting() {
+fn bundled_cs_point_light_brightens_the_sphere() {
     use render3d::device::Gpu;
-    let root = std::env::var("SDC_ACHERUS").expect("set SDC_ACHERUS to the MO2 instance root");
-    let shaders = std::path::PathBuf::from(format!(
-        "{root}/mods/CommunityShaders_AIO-2026-10-03T06-46Z/Shaders"
-    ));
-    let fp = render3d::ShaderSource::Folder(shaders.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
-        .unwrap();
+    let mut r = Renderer::with_gpu_source(
+        Gpu::new_warp().unwrap(),
+        render3d::ShaderSource::Bundled,
+        cache.path().to_path_buf(),
+    )
+    .unwrap();
     let rep = r.load_builtin(Builtin::Sphere, MaterialState::builtin_default(), &|_| None);
     assert!(
         rep.errors.is_empty() && rep.compile_errors.is_empty(),

@@ -355,3 +355,36 @@ fn an_old_shaders_key_is_ignored() {
         "{text}"
     );
 }
+
+/// Note GT4: the app's own save (`save_merged`) with the file changed since `base` runs the merge branch; the old
+/// key is gone from the text and the hand-edited field survives.
+#[test]
+fn an_old_shaders_key_is_dropped_by_the_merging_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(
+        &p,
+        "live_encode = true\n[render3d.shaders]\nroot = 'C:\\CS'\n",
+    )
+    .unwrap();
+    let (mut s, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    let mut base = Some((s.clone(), engine::policy::SourceStamp::of(&p)));
+    // A hand edit while the app runs: still carries the old key.
+    std::fs::write(
+        &p,
+        "live_encode = true\nadvanced_open = true\n[render3d.shaders]\nroot = 'C:\\CS\\Shaders'\nhash = 'ab12'\n",
+    )
+    .unwrap();
+    s.live_encode = false;
+    s.save_merged(&p, &mut base).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        !text.contains("render3d") && !text.contains("shaders"),
+        "{text}"
+    );
+    let back = GuiSettings::load(&p).0;
+    assert!(back.advanced_open, "the hand-edited field survives: {text}");
+    assert!(!back.live_encode, "the app's change is written: {text}");
+}

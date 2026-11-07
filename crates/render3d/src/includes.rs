@@ -29,7 +29,7 @@ impl ShaderSource {
     }
 
     /// What error messages and `Expanded::files` call `rel`: the bundle's `rel` itself, or a test folder's path.
-    pub fn path_of(&self, rel: &str) -> PathBuf {
+    pub(crate) fn path_of(&self, rel: &str) -> PathBuf {
         match self {
             ShaderSource::Bundled => PathBuf::from(rel),
             #[cfg(feature = "test-hooks")]

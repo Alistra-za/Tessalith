@@ -111,6 +111,9 @@ fn srgb_readback_and_timing() {
 fn render_bundled_tree_draws_with_no_cs() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = render3d::Renderer::new(cache.path().to_path_buf()).unwrap();
+    // The shipped renderer compiles the pinned CS under its default settings.
+    let defaults = render3d::cs_settings::preview_defines(render3d::cs_settings::defaults(), true);
+    assert_eq!(r.features(), defaults.as_slice());
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_Furniture_Col_SE.nif"

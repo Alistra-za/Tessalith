@@ -149,6 +149,36 @@ fn off_in_preview_lists_loaded_but_uncompiled_features() {
     assert_eq!(r.settings(), &s);
 }
 
+/// Note GT5: with the 48 pinned defaults loaded, the off list names real visual gaps and none of the tools,
+/// display or performance features.
+#[test]
+fn off_in_preview_for_the_pinned_defaults_names_only_visual_features() {
+    let cache = tempfile::tempdir().unwrap();
+    let source = render3d::ShaderSource::Folder(standin_root());
+    let r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), source, cache.path().to_path_buf())
+        .unwrap();
+    let off = r.off_in_preview();
+    for tool in [
+        "CSEditor",
+        "Effects11",
+        "NRD",
+        "PerformanceOverlay",
+        "RemoteControl",
+        "RenderDoc",
+        "SceneManager",
+        "Screenshot",
+        "Upscaling",
+    ] {
+        assert!(
+            !off.iter().any(|n| n == tool),
+            "{tool} is not visual: {off:?}"
+        );
+    }
+    for visual in ["LightLimitFix", "Skylighting", "ScreenSpaceShadows"] {
+        assert!(off.iter().any(|n| n == visual), "{visual} draws: {off:?}");
+    }
+}
+
 /// Trace 2026-11-04 #45: CS_GAME_GAMMA is a settings define: a new value replaces the old one, back to 1.6 drops it.
 #[test]
 fn game_gamma_define_follows_the_settings() {

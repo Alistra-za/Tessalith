@@ -24,7 +24,7 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
   - `Common/Color.hlsli`: code adapted from Luma Framework (https://github.com/Filoppi/Luma-Framework), Copyright (c) 2024+ Filippo Tarpini, MIT (text below).
   - `DynamicCubemaps/SpecularIrradianceCS.hlsl`: Copyright (c) 2017-2018 Michał Siejak, MIT, from https://github.com/Nadrin/PBR. The shader's header names no licence; that it comes from that repository is inferred from the matching copyright line and header.
   - `WetnessEffects/WetnessEffects.hlsli`: BelmuTM, Noble (https://github.com/BelmuTM/Noble), GPL-3.0 (`LICENSE`, Tessalith's own licence text).
-  - `WetnessEffects/optimized-ggx.hlsli`: John Hable, Unlicense.
+  - `WetnessEffects/optimized-ggx.hlsli`: John Hable, Unlicense (`LICENSES/Unlicense-optimized-ggx.txt`).
   - `Common/Spherical Harmonics/`: Copyright (c) 2018 SebH, MIT (`LICENSES/SphericalHarmonics-SebH-LICENSE-MIT.txt`).
 
   The MIT text for Siejak (Nadrin/PBR) and Tarpini (Luma Framework), whose repositories' licence files are not in this repository:

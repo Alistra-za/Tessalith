@@ -18,6 +18,8 @@ ENTRIES = [
     "DeferredCompositeCS.hlsl",
     "DynamicCubemaps/SpecularIrradianceCS.hlsl",
 ]
+# shortcut: this walk and `includes::expand` differ on `..`/`.` segments and on `<...>` includes; this pin is
+# unaffected, and the closure tests catch a difference at the next pin update.
 INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
 
 

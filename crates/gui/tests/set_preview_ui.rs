@@ -75,7 +75,8 @@ fn without_a_scan_db_the_panel_says_so_and_shows_the_simulated_sphere() {
     h.get_by_label(&cap_text(2048));
     h.get_by_label_contains("Diffuse: fresh");
     h.get_by_label("Built-in shape: patched as PGPatcher would");
-    h.get_by_label_contains("Off in this preview");
+    // No render thread has answered, so there is no off line yet (no stand-in list flashes first).
+    assert!(h.query_by_label_contains("Off in this preview").is_none());
     // One mesh combo, always shown (no scan DB here): Auto, then the built-ins after a separator.
     h.get_by_role(eframe::egui::accesskit::Role::ComboBox)
         .click();

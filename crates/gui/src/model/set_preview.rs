@@ -975,14 +975,10 @@ pub const NO_SCAN: &str = "Scan your mods in the Meshes view to preview on a rea
 pub const NO_MATCH: &str = "No scanned mesh uses this diffuse";
 pub const NO_BUILTIN_MATCH: &str =
     "A built-in shape cannot match this entry's match keys: it shows the plain textures; pick a game mesh";
-/// D4: the CS features the preview leaves off (03 §3.2 "off" rows), under the single CS toggle.
 /// Design §7: the landscape plane's preview-only tiling slider.
 pub const TILING: &str = "Tiling (preview only)";
 pub const LE_ONLY: &str =
     "Every mesh using this diffuse is an LE mesh, which is not drawn: showing a built-in shape";
-pub const OFF_FEATURES: &str = "Off in this preview: Light Limit Fix, Skylighting, Screen-Space Shadows, \
-Subsurface Scattering, Image-Based Lighting, Physical Sky, Wetness, Cloud Shadows, terrain effects, \
-water, fog, Volumetric Shadows";
 /// How often the fingerprint is checked when no input arrived (02 §3.2).
 pub const THROTTLE: Duration = Duration::from_millis(200);
 /// Rows asked of the scan DB; `shape_matches` (with `nif_filter`) thins them out afterwards.

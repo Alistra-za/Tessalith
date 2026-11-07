@@ -28,6 +28,7 @@ pub mod textures;
 pub use builtin::{builtin_mesh, Builtin};
 pub use composite::Composite;
 pub use debug::{Availability, DebugOutput};
+pub use includes::ShaderSource;
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
@@ -41,7 +42,6 @@ use compile::{cached, program_key, CompiledPair, ProgramKey, SrvKind};
 use cs_settings::CsSettings;
 use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
-pub use includes::ShaderSource;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
 use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
@@ -49,11 +49,6 @@ pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
 use source::{ExpandedSource, SourceSet};
 
-/// Every path in the embedded CS tree, for the test that it holds only the include closure.
-#[cfg(feature = "test-hooks")]
-pub fn bundled_names() -> Vec<&'static str> {
-    bundled::names().collect()
-}
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -464,14 +459,12 @@ impl Renderer {
     }
 
     /// [`Renderer::new`] on another shader source (a stand-in folder in tests).
-    #[cfg(feature = "test-hooks")]
     pub fn with_source(source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
         cache::prune_in_background(cache_dir.clone());
         Renderer::build(Gpu::new()?, source, cache_dir)
     }
 
     /// [`Renderer::with_gpu`] on another shader source.
-    #[cfg(feature = "test-hooks")]
     pub fn with_gpu_source(
         gpu: Gpu,
         source: ShaderSource,
@@ -633,10 +626,12 @@ impl Renderer {
         &self.features
     }
 
-    /// Applies the user CS settings (P1-C C11). The FeatureData values are recomputed per draw. If the settings
-    /// defines are unchanged, the static block of every drawing shape is rewritten (a cbuffer edit, next
-    /// frame). If they changed, every shape goes through the permutation path, and the old draws keep drawing
-    /// with their old constants until their programs land. The display sRGB encode follows `ENABLE_LL`.
+    /// Test seam: replaces the bundled default CS settings (P1-C C11). The FeatureData values are recomputed per
+    /// draw. If the settings defines are unchanged, the static block of every drawing shape is rewritten (a
+    /// cbuffer edit, next frame). If they changed, every shape goes through the permutation path, and the old
+    /// draws keep drawing with their old constants until their programs land. The display sRGB encode follows
+    /// `ENABLE_LL`.
+    #[cfg(feature = "test-hooks")]
     pub fn set_settings(&mut self, s: CsSettings) {
         self.settings = s;
         self.apply_settings_defines();
@@ -653,9 +648,10 @@ impl Renderer {
         self.apply_settings_defines();
     }
 
-    /// Features CS loaded (the bundled feature list) that this preview does not compile, in name order, for
+    /// Features of the bundled CS (the pinned feature list) that this preview does not compile, in name order, for
     /// the panel "off in preview" line. TruePBR is never listed: it has no define (TRUE_PBR is per material)
-    /// and its settings are always written. Features in `NON_VISUAL` (no shader/visual effect in this preview) are never listed either.
+    /// and its settings are always written. Features in `NON_VISUAL` (tools, display, performance: nothing a
+    /// frame shows) are never listed either.
     pub fn off_in_preview(&self) -> Vec<String> {
         self.settings
             .loaded
@@ -2641,6 +2637,12 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
             }
         })
         .collect()
+}
+
+/// Every path in the embedded CS tree, for the test that it holds only the include closure.
+#[cfg(feature = "test-hooks")]
+pub fn bundled_names() -> Vec<&'static str> {
+    bundled::names().collect()
 }
 
 /// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a
