@@ -25,13 +25,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC, HE
-- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
+- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS
 
 ## Digest
 
@@ -1163,3 +1163,16 @@ The owner removed clip editing from NIF Edit; clip playback and clip key edits s
 - **GR3 The nif crate has no clip edit ops.** `Op` has no AddSequence, RemoveSequence, RenameSequence, SetSequenceTiming or ConvertChainToClips, and `ClipTrack`, `convert_check`, `clip_key` and `timing_problem` are gone. The clip handling the spec lists under "Stays" is kept: `SetKeys` with a clip, SplitAlpha on clip-driven controllers, `nif::clips`, playback and binding in `anim`, the empty-manager check on source files and compaction's clip layouts. `anim::CONVERT_NAME` ("SpecialIdle") is the clip that plays by itself under Free chains.
 - **GR4 The user docs describe no clip editing.** GUI-NIF-Animation.md documents the open "Clips (N · showing X)" section at the top of the Controllers tab (Preview picker only; a file with no clips has no section), the "In clip" key tables and Split alpha on a clip-driven alpha (in GUI-NIF-Edit.md). The 3.0.0 CHANGELOG entry records the removal.
 - **GR5 Rows that depended on a dropped clip op, and the retarget path (agent ruling, 2026-11-06).** A clip key edit that named a clip a dropped op made (an AddSequence or Convert) is not applied: its row turns red (Conflict or Refused), the bytes stay the source's, the export waits, and Revert clears it. The Messages line counts only the dropped ops, because the dependent rows cannot be counted without applying them; GUI-NIF-Edit.md ("Older edits") says such a row turns red and Revert clears it. An export-folder change reaches Messages through the same open path when an untouched session reopens from the new folder; a touched session loads nothing into its own document (the new folder's document is kept aside whole at the next save), so it has no line to push.
+
+## Note HK — Guards from the 2.1 retro (owner's "fix 1 - 7", 2026-11-06; wording is agent rulings)
+
+- **HK1 `txst_slot.slot` is the raw TXST index.** A schema comment says so and `modscan::plugin_store::TX_TO_NIF` is now public, because `model/known_paths.rs` read the raw index as a lighting slot. A comment doesn't change `SCHEMA_VERSION`, so no scan is lost. Changed in a NIF team crate with the owner's OK.
+- **HK2 `.githooks/pre-commit`** checks fmt when `.rs` files are staged, control bytes in added lines (vendored objects and test fixtures excepted), and duplicate note headings in `DECISIONS.md` and `DECISIONS-ARCHIVE.md`. CI already runs fmt; the hook catches it before the commit. It's off until a clone sets `core.hooksPath`.
+- **HK3 `CODING_STANDARDS.md` holds judgement rules for reviewers;** anything a machine can check goes to a check, not there. Every review dispatch names it.
+- **HK4 `tools/scan-query.py` opens the scan database with `mode=ro`.** Its TXST listing prints the mapping key from Note HG's spec: defining plugin plus `0x` FormID from `rec.local`.
+
+## Note GS — Guards from the v3 chunk A retro (owner's "implement all", 2026-11-06; wording is agent rulings)
+
+- **GS1 `tools/gate.ps1` is the one full gate.** CLAUDE.md points to it instead of listing commands. It runs the doc checks too, stops before the tests when fmt or clippy fails, and refuses to start below 20 GB free. The full gate runs after the final review's fixes, because a fix wave invalidates an earlier run.
+- **GS2 CI runs `tools/doc-dupes.py` and `tools/doc-markers.ps1`.** Both ran only by hand before a push, so a failure could sit unseen. `doc-dupes.py` exits 2 when it reads no sentences, which is what a wrong working folder looks like; it used to report 0 failures and exit 0.
+- **GS3 `cargo fmt --all --check` works in worktrees again.** The os error 206 workaround (fmt per package) didn't reproduce on 2026-11-06, including on a 51-character worktree path, so the gate, CI and the hook all use the same command. If 206 comes back it fails loudly, and the per-package loop is the fix.

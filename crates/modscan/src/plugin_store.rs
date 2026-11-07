@@ -419,7 +419,8 @@ fn swap_row(r: &rusqlite::Row, at: usize) -> rusqlite::Result<ShapeSwap> {
 
 /// TXST `TX0n` for each NIF `BSShaderTextureSet` slot (TX02 = env mask = NIF 5, TX03 = glow = NIF 2, ...), and back.
 const NIF_TO_TX: [i64; 8] = [0, 1, 3, 4, 5, 2, 6, 7];
-const TX_TO_NIF: [u32; 8] = [0, 1, 5, 2, 3, 4, 6, 7];
+/// 0-based NIF slot for each raw `txst_slot.slot`; add 1 for the name of a lighting slot.
+pub const TX_TO_NIF: [u32; 8] = [0, 1, 5, 2, 3, 4, 6, 7];
 
 impl Store {
     /// Winning TXSTs whose slot matches `key` with PGPatcher's rule (ruling R9), by EDID; at most `limit`.
