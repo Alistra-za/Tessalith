@@ -671,6 +671,147 @@ fn unmapping_restores_the_named_folder() {
     assert!(out(&m, "textures/a/x.png").ends_with("/textures/a/steel.dds"));
 }
 
+/// A packed output takes its named folder from its first source, not from where a removed mapping put it.
+#[test]
+fn unmapping_a_packed_output_restores_its_named_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let id = "textures/a/q";
+    let rec = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot6 = \"textures/b/z_rfaos.dds\"\n";
+    let toml = skin_set(id, "output_name = \"steel\"\n") + rec;
+    let mut m = project_toml(
+        d.path(),
+        &["textures/a/q.png", "textures/a/q_roughness.png"],
+        &toml,
+    );
+    let packed = |m: &AppModel| {
+        let i = m
+            .items
+            .iter()
+            .find(|i| i.kind == sdc_gui::model::items::ItemKind::Packed)
+            .expect("a packed output");
+        i.job
+            .as_ref()
+            .unwrap()
+            .output
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    assert!(
+        packed(&m).ends_with("/textures/b/z_rfaos.dds"),
+        "{}",
+        packed(&m)
+    );
+    m.unmap_record(id).unwrap();
+    idle(&mut m);
+    assert!(
+        packed(&m).ends_with("/textures/a/steel_rfaos.dds"),
+        "{}",
+        packed(&m)
+    );
+    m.undo();
+    idle(&mut m);
+    assert!(
+        packed(&m).ends_with("/textures/b/z_rfaos.dds"),
+        "{}",
+        packed(&m)
+    );
+    m.unmap_record(id).unwrap();
+    idle(&mut m);
+    m.map_record(id, record(&[(6, "textures/b/z_rfaos.dds")]))
+        .unwrap();
+    idle(&mut m);
+    m.undo();
+    idle(&mut m);
+    assert!(
+        packed(&m).ends_with("/textures/a/steel_rfaos.dds"),
+        "{}",
+        packed(&m)
+    );
+}
+
+/// An input renamed into another folder moves the named output with it, even when a mapping held it elsewhere.
+#[test]
+fn unmapping_after_an_input_rename_uses_the_new_folder() {
+    use sdc_gui::model::rename::{RenameDialog, RenameMode};
+    let d = tempfile::tempdir().unwrap();
+    let toml = skin_set("textures/a/x", "output_name = \"steel\"\n");
+    let mut m = project_toml(d.path(), &["textures/a/x.png"], &toml);
+    let mut dlg = RenameDialog {
+        mode: RenameMode::Inputs,
+        keys: vec!["textures/a/x.png".into()],
+        ..RenameDialog::default()
+    };
+    dlg.typed
+        .insert("textures/a/x.png".into(), "textures/c/x.png".into());
+    m.dialog = Some(sdc_gui::model::Dialog::Rename(dlg));
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(
+        m.read_as_of("textures/a/x.png").as_deref(),
+        Some("textures/c/x.png")
+    );
+    let id = set_views(&m)
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k == "textures/a/x.png"))
+        .unwrap()
+        .id;
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/c/steel.dds"));
+    m.map_record(&id, record(&[(1, "textures/b/body.dds")]))
+        .unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    m.unmap_record(&id).unwrap();
+    idle(&mut m);
+    assert!(
+        out(&m, "textures/a/x.png").ends_with("/textures/c/steel.dds"),
+        "{}",
+        out(&m, "textures/a/x.png")
+    );
+}
+
+/// A project opened with a mapping and an output name, then unmapped.
+#[test]
+fn a_reopened_mapped_and_named_set_unmaps_to_its_named_path() {
+    let d = tempfile::tempdir().unwrap();
+    let id = "textures/a/x";
+    let rec = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"textures/b/body.dds\"\n";
+    let toml = skin_set(id, "output_name = \"steel\"\n") + rec;
+    drop(project_toml(d.path(), &["textures/a/x.png"], &toml));
+    let mut m = project_toml(d.path(), &["textures/a/x.png"], &toml);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    m.unmap_record(id).unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/a/steel.dds"));
+}
+
+/// The derivation reproduces the engine's own default output for files and packed outputs it is not moved from.
+#[test]
+fn the_default_output_matches_the_plan_when_nothing_moves_it() {
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped_free(d.path());
+    let mut n = 0;
+    for it in m
+        .items
+        .iter()
+        .filter(|i| i.job.is_some() && !i.job_key.is_empty())
+    {
+        assert_eq!(
+            sdc_gui::model::sets::default_output_key(&m, it).as_deref(),
+            Some(it.job_key.as_str()),
+            "{}",
+            it.key
+        );
+        n += 1;
+    }
+    assert!(n >= 4, "{n} items compared");
+}
+
+fn mapped_free(dir: &Path) -> AppModel {
+    let mut files = M_FILES.to_vec();
+    files.extend(["textures/s/q.png", "textures/s/q_roughness.png"]);
+    let toml = skin_set(M, "") + &skin_set("textures/s/q", "");
+    project_toml(dir, &files, &toml)
+}
 /// A set of raw packing maps with no diffuse builds `_rmaos`; slot 6 of its record moves it.
 #[test]
 fn a_packed_rmaos_follows_slot_six() {

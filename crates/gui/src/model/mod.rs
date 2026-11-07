@@ -674,9 +674,6 @@ pub struct AppModel {
     close_ready: bool,
     /// The engine inputs the latest plan was requested with (DECISIONS P1: two-pass planning).
     last_inputs: Option<EngineInputs>,
-    /// Note HG: item key → the output key (`TextureItem::job_key`) its file had in the last plan that gave it no
-    /// explicit path: its default, unaffected by an `output_name` or a record mapping. Plain files only.
-    pub(crate) plain_keys: std::collections::HashMap<String, String>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
     /// Task 9 (Z11): plans of an undo, redo, open or reload do not clean up encodings; the next settled plan ends it.
@@ -925,7 +922,6 @@ impl AppModel {
             auto_note: None,
             missing_preset_id: None,
             last_inputs: None,
-            plain_keys: Default::default(),
             auto_replans: 0,
             follow_off: false,
             type_pending: None,
@@ -2672,10 +2668,8 @@ impl AppModel {
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
-        let target_moved = self.target != view.target;
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
-        self.note_plain_keys(target_moved);
         self.refresh_game_paths();
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
@@ -2740,32 +2734,6 @@ impl AppModel {
         // Note HE2: before the votes, so an export queued behind this plan starts on the plan after the clear.
         self.clear_deleted_lines();
         self.refresh_mesh_votes(true);
-    }
-
-    /// Note HG: remember each plain file's default output key from a plan that gave it no explicit path, so what an
-    /// `output_name` derives its folder from never carries a record mapping that was removed. An entry survives
-    /// plans that did give the file a path, and goes with a target change or a vanished file.
-    fn note_plain_keys(&mut self, target_moved: bool) {
-        let old = if target_moved {
-            Default::default()
-        } else {
-            std::mem::take(&mut self.plain_keys)
-        };
-        let last = self.last_inputs.as_ref().map(|l| &l.output_paths);
-        let mut now = std::collections::HashMap::new();
-        for it in &self.items {
-            if it.kind == ItemKind::Packed || it.job.is_none() || it.job_key.is_empty() {
-                continue;
-            }
-            let explicit = last
-                .is_some_and(|l| l.contains_key(&engine::sets::OutputKey::File(it.key.clone())));
-            if !explicit {
-                now.insert(it.key.clone(), it.job_key.clone());
-            } else if let Some(v) = old.get(&it.key) {
-                now.insert(it.key.clone(), v.clone());
-            }
-        }
-        self.plain_keys = now;
     }
 
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.

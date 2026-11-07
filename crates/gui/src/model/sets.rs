@@ -1223,9 +1223,12 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             if item.job.is_none() || item.job_key.is_empty() {
                 continue;
             }
-            // Note HG: the default output, not the last plan's, which a record mapping may have moved.
-            let from = m.plain_keys.get(&item.key).unwrap_or(&item.job_key);
-            let Some(rel) = renamed_output(from, name, v.skin || v.shared) else {
+            // Note HG: the default output of the file as it is now, never the last plan's `job_key`, which a record
+            // mapping or an earlier name may have moved.
+            let Some(from) = default_output_key(m, item) else {
+                continue;
+            };
+            let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1243,6 +1246,41 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
         }
     }
     out
+}
+
+/// Note HG: the output key (`/`, lower case, relative to the export root) `item` gets when no output path is sent
+/// for it, from what is true now: its key, its `[inputs]` alias and the suffix aliases, by the engine's own steps
+/// (`apply_read_as`, `canonicalise_outputs`); a packed output is named after its first source by
+/// `pack::plan::virtual_input`. No output name or record mapping can reach it. `None` without a root or a pack job.
+pub fn default_output_key(m: &AppModel, item: &TextureItem) -> Option<String> {
+    use engine::discover::{apply_read_as, canonicalise_outputs, InputFile, InputKind};
+    let (root, out_root) = (m.root.as_deref()?, m.sets_root.as_deref()?);
+    let input = |key: &str| {
+        let rel = PathBuf::from(key);
+        let mut f = InputFile {
+            path: root.join(&rel),
+            output: out_root.join(&rel).with_extension("dds"),
+            game_path: String::new(),
+            rel,
+            kind: InputKind::Image,
+            real_rel: None,
+        };
+        if let Some(path) = m.read_as_of(key) {
+            let alias = BTreeMap::from([(key.to_string(), engine::presets::ReadAs { path })]);
+            apply_read_as(std::slice::from_mut(&mut f), root, out_root, &alias);
+        }
+        canonicalise_outputs(std::slice::from_mut(&mut f), &m.suffix_aliases);
+        f
+    };
+    let output = if item.kind == ItemKind::Packed {
+        let pk = item.job.as_ref()?.pack.as_ref()?;
+        let first = pk.sources.first()?.path.strip_prefix(root).ok()?;
+        let first = input(&first.to_string_lossy().replace('\\', "/"));
+        engine::pack::plan::virtual_input(&first, pk.kind).output
+    } else {
+        input(&item.key).output
+    };
+    Some(engine::manifest::output_key(out_root, &output))
 }
 
 /// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
