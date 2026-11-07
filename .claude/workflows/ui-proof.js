@@ -152,7 +152,7 @@ Spec: <paths>. Owner: "<quote>" (<date>)
 (more goals, g2, g3 ...)
 ## Filters and controls
 | Control | Option | Shows exactly | Source |
-Rules: 3 to 8 goals. A goal without a source is not written. A goal from taste is not written. Each goal is something a user does, stated as an outcome the app's state can show.
+Rules: 3 to 8 goals. A goal without a source is not written. A goal from taste is not written. Each goal is something a user does, stated as an outcome the app's state can show. A goal's check names the outcome, not one example of it (a goal 'Open a set' accepts any set: use a check or an \`expect\` on what every open set has).
 ${SHELL}
 Return the file path and the goals (id, sentence, source).`,
     { label: 'goals', phase: 'Goals', schema: GOALS })

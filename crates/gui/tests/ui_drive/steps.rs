@@ -416,8 +416,9 @@ pub fn ui_step<S>(h: &mut Harness<'static, S>, step: &Step) -> Result<(), String
             }
         }
         Step::Drag { from, to } => {
-            let (_, a) = aim(h, from)?;
             let (_, b) = aim(h, to)?;
+            // `to` first: scrolling it into view may move `from`, so `from` is found after it
+            let (_, a) = aim(h, from)?;
             let (p, q) = (visible_centre(&a), visible_centre(&b));
             // the house drag (sets_filter.rs): hover, press, 8 interpolated moves a frame each, release
             h.event(egui::Event::PointerMoved(p));
