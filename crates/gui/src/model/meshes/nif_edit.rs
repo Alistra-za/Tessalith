@@ -415,13 +415,6 @@ pub fn op_label(op: &Op, m: &NifModel) -> String {
         Op::SetKeys { at, .. } => ("Edit keys".into(), at),
         Op::AddController { at, .. } => ("Add controller".into(), at),
         Op::RemoveController { at } => ("Remove controller".into(), at),
-        Op::AddSequence { at, name, .. } => (format!("Add clip {name}"), at),
-        Op::RemoveSequence { at, name, .. } => (format!("Remove clip {name}"), at),
-        Op::RenameSequence {
-            at, name, new_name, ..
-        } => (format!("Rename clip {name} to {new_name}"), at),
-        Op::SetSequenceTiming { at, name, .. } => (format!("Set clip timing {name}"), at),
-        Op::ConvertChainToClips { at, name } => (format!("Convert to clip {name}"), at),
     };
     match &at.shape {
         Some(s) => format!("{s}: {what}"),
@@ -526,11 +519,6 @@ pub fn op_name(op: &Op) -> String {
         Op::SetKeys { .. } => "Edit keys".into(),
         Op::AddController { .. } => "Add controller".into(),
         Op::RemoveController { .. } => "Remove controller".into(),
-        Op::AddSequence { .. } => "Add clip".into(),
-        Op::RemoveSequence { .. } => "Remove clip".into(),
-        Op::RenameSequence { .. } => "Rename clip".into(),
-        Op::SetSequenceTiming { .. } => "Set clip timing".into(),
-        Op::ConvertChainToClips { .. } => "Convert to clip".into(),
     }
 }
 
@@ -557,11 +545,6 @@ fn anchor_mut(op: &mut Op) -> &mut Anchor {
         | Op::RemoveExtra { at }
         | Op::AddController { at, .. }
         | Op::RemoveController { at }
-        | Op::AddSequence { at, .. }
-        | Op::RemoveSequence { at, .. }
-        | Op::RenameSequence { at, .. }
-        | Op::SetSequenceTiming { at, .. }
-        | Op::ConvertChainToClips { at, .. }
         | Op::SetKeys { at, .. } => at,
     }
 }

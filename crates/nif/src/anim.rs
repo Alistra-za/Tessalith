@@ -8,6 +8,9 @@ use crate::model::NifModel;
 use crate::props::LightingTrailer;
 use std::collections::BTreeMap;
 
+/// The clip that plays by itself under Free chains (matched ASCII case-insensitively).
+pub const CONVERT_NAME: &str = "SpecialIdle";
+
 /// NifSkope `Controller::ctrlTime` (glcontroller.cpp:246-290), then Play Backwards (bit 4) as
 /// `start + stop - ct`. shortcut: bit 4 is this project's reading of G8 (direction checked, phase not); upgrade
 /// if an engine capture shows a different phase.
@@ -230,7 +233,7 @@ pub fn free_tracks_in(m: &NifModel, h: &Header, b: &[u8], prop: u32) -> Vec<Trac
         .filter(|s| {
             s.name
                 .as_deref()
-                .is_some_and(|n| n.eq_ignore_ascii_case(crate::edit::CONVERT_NAME))
+                .is_some_and(|n| n.eq_ignore_ascii_case(CONVERT_NAME))
         })
         .flat_map(|s| clip_tracks_in(m, h, b, s.block, prop))
         .collect();

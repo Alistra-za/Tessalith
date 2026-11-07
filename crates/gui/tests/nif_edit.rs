@@ -6638,24 +6638,134 @@ fn clip_preview_swaps_interpolators_only_while_selected() {
 const IDLE_FIRST: [f32; 3] = [0.9, 0.3, 0.1];
 const IDLE_LAST: [f32; 3] = [0.1, 0.2, 0.3];
 
-/// [`playing_session`] with an LSCC (key 1 `IDLE_FIRST`, key 2 `IDLE_LAST`, 0..1) added to the lit shape, then the
-/// shader chain (U offset and the LSCC) converted into one clip `name`. Returns the session, the shape and the
-/// sequence block.
-fn idle_session(name: &str) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>, u32, u32) {
-    let (d, mut m, cmds) = playing_session();
-    let (shape, lsp) = lit_shape(m.edit.as_ref().unwrap());
-    add_colour_ctrl(&mut m, shape, IDLE_FIRST, IDLE_LAST);
-    let e = m.edit.as_ref().unwrap();
-    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
-    m.edit_push(
-        vec![Op::ConvertChainToClips {
-            at,
-            name: name.into(),
-        }],
-        None,
+/// The skinned fixture with, first in the lit shape's chain, a manager-controlled LSCC "Emissive colour" (var 1, flags
+/// 0x68, a NiBlendPoint3Interpolator) driven by a NiControllerSequence `name` (one CB bound by ref, NiPosData LINEAR
+/// `IDLE_FIRST` at 0 and `IDLE_LAST` at 1; Loop, frequency 1, 0 to 1) that a NiControllerManager on the root lists.
+fn with_idle_clip(name: &str) -> Vec<u8> {
+    let bytes = fixture("TestNifFile_Skinned_SE.nif");
+    let m = nif::model::read_model(&bytes).unwrap();
+    let (shape, lsp) = m
+        .shapes
+        .iter()
+        .find_map(|s| {
+            s.shader
+                .filter(|b| m.lighting.contains_key(b))
+                .map(|b| (s, b))
+        })
+        .unwrap();
+    let net = m.lighting[&lsp].prop.net.clone();
+    let root = m.root.unwrap();
+    let root_net = m.root_net.clone().unwrap();
+    let mut doc = nif::write::NifDoc::open(&bytes).unwrap();
+    let at = net.controller_at() - doc.header().offsets()[lsp as usize];
+    let inv = f32::from_bits(0xFF7F_FFFF);
+    let blend = doc
+        .append(
+            b"NiBlendPoint3Interpolator",
+            nif::clips::encode_blend_interp("NiBlendPoint3Interpolator", &[inv; 3]).unwrap(),
+        )
+        .unwrap();
+    let ctrl = doc
+        .append(
+            b"BSLightingShaderPropertyColorController",
+            scenes::ctrl_body(
+                net.controller,
+                0x68,
+                lsp as i32,
+                builder::W::default().i32(blend as i32).u32(1),
+            ),
+        )
+        .unwrap();
+    doc.patch(lsp, at, &(ctrl as i32).to_le_bytes()).unwrap();
+    let key = |time: f32, value: [f32; 3]| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    let keys = KeyData::Pos(KeyGroup {
+        key_type: Some(1),
+        keys: vec![key(0.0, IDLE_FIRST), key(1.0, IDLE_LAST)],
+    });
+    let data = doc
+        .append(b"NiPosData", nif::keys::encode_data(&keys))
+        .unwrap();
+    let interp = doc
+        .append(
+            b"NiPoint3Interpolator",
+            builder::W::default().fs(&IDLE_FIRST).i32(data as i32).0,
+        )
+        .unwrap();
+    let s = |doc: &mut nif::write::NifDoc, x: &[u8]| doc.string(x).unwrap();
+    let (start, end) = (s(&mut doc, b"start"), s(&mut doc, b"end"));
+    let tk = doc
+        .append(
+            b"NiTextKeyExtraData",
+            builder::W::default()
+                .i32(-1)
+                .u32(2)
+                .f(0.0)
+                .i32(start)
+                .f(1.0)
+                .i32(end)
+                .0,
+        )
+        .unwrap();
+    let (name, prop, ctype, cid) = (
+        s(&mut doc, name.as_bytes()),
+        s(&mut doc, b"BSLightingShaderProperty"),
+        s(&mut doc, b"BSLightingShaderPropertyColorController"),
+        s(&mut doc, b"1"),
     );
+    let seq = builder::W::default()
+        .i32(name)
+        .u32(1)
+        .u32(0)
+        .i32(interp as i32)
+        .i32(ctrl as i32)
+        .u8(0)
+        .i32(shape.net.name)
+        .i32(prop)
+        .i32(ctype)
+        .i32(cid)
+        .i32(-1)
+        .f(1.0)
+        .i32(tk as i32)
+        .u32(0)
+        .fs(&[1.0, 0.0, 1.0])
+        .i32(-1)
+        .i32(-1)
+        .u16(0)
+        .0;
+    let seq = doc.append(b"NiControllerSequence", seq).unwrap();
+    let manager = doc
+        .append(
+            b"NiControllerManager",
+            scenes::ctrl_body(
+                root_net.controller,
+                0x48,
+                root as i32,
+                builder::W::default().u8(0).u32(1).i32(seq as i32).i32(-1),
+            ),
+        )
+        .unwrap();
+    let at = root_net.controller_at() - doc.header().offsets()[root as usize];
+    doc.patch(root, at, &(manager as i32).to_le_bytes())
+        .unwrap();
+    let out = doc.bytes();
+    let back = nif::model::read_model(&out).unwrap();
+    assert!(back.problems.is_empty(), "{:?}", back.problems);
+    assert!(back.managed(ctrl));
+    assert_eq!(back.sequences.len(), 1);
+    out
+}
+
+/// [`with_idle_clip`] `name` in a scanned session. Returns the session, the shape and the sequence block.
+fn idle_session(name: &str) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>, u32, u32) {
+    let (d, m, cmds) = session_on(&with_idle_clip(name));
     let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
+    let (shape, lsp) = lit_shape(e);
     assert_eq!(e.playing, Playing::Free);
     assert_ne!(
         e.model.lighting[&lsp].lighting.params.emissive_color,
@@ -6704,7 +6814,7 @@ fn an_idle_clip_previews_its_first_key() {
 /// spans it.
 #[test]
 fn a_special_idle_clip_plays_under_free_chains() {
-    let (_d, mut m, _cmds, shape, _) = idle_session(nif::edit::CONVERT_NAME);
+    let (_d, mut m, _cmds, shape, _) = idle_session(nif::anim::CONVERT_NAME);
     assert_eq!(emissive_at(&m, shape, 0.0), IDLE_FIRST);
     assert_eq!(emissive_at(&m, shape, 1.0), IDLE_LAST);
     let mid = emissive_at(&m, shape, 0.5);

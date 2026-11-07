@@ -28,7 +28,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
-- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ
+- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB
@@ -657,10 +657,8 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Clock: a new clock is paused at the start, looping, 1x; Speed 0.1x-4x; one frame advances at most 1/30 s. The preview animates LSCF 20-23, 11, 9, 10, 12, LSCC 0 and 1 and TestRef; LSCF 8 changes only an Environment Map shader. [CM4, CM8]
 - Amber no-effect warnings (row and worklist, never blocking): Specular off or strength 0 when the mesh loads (LSCF 9, 10, LSCC 0), alpha test off, refraction strength, two controllers on one variable. Specular is fixed at load, so those controllers do nothing on a shape loaded without it. [CM22, CM26]
 - Env map scale (LSCF 8) on a PBR shape crashes the game: an export-blocking Error; on a shape PGPatcher makes PBR it is a red In game line plus an amber Warning (cached simulation), not blocking. An empty RMAOS slot is an amber row (CS's default RMAOS is fully metallic). [CM25, GD6, CM27, CM32]
-- Named clips: the MTTC is kept; Convert to clips; removing the last clip unlinks the manager from the root's own chain; clip names decode as Windows-1252; clip timing is editable (`SetSequenceTiming`, one undo step). [CR5, CR8, CU8, CU10, GD8, CY3]
 - `nif::clips` encoding: a Float or Colour block's Controller ID is the variable in decimal; a TestRef's Controller ID and every Interpolator ID are null; Node Name is the shape's own name index. A nameless or duplicate-named shape, and an empty, non-Windows-1252 or sibling-equal (ASCII folded) clip name, are refused. The object palette lists each animated shape once, entries never removed; a shape rename patches CB Node Names and the palette together. [CR2, CR3, CR4]
-- `read_model` lists only live sequences (those a manager lists, or all when there is no manager). Remove unlinks the clip, leaves the block, and releases controllers no other live clip drives (clears 0x20, restores the interpolator ref). Adding a clip appends fresh interpolators, sets root BSX bit 0, refuses a track on a shared alpha, and appends nothing until every check passes. [CR6, CR7]
-- `root_manager` walks the whole root chain; an unreadable entry, an unreadable manager payload, a loop or a stray link refuses Add, Remove and Rename ("The root's controller chain cannot be read.") with the bytes unchanged. Remove binds controllers once per sequence (`anim::bound_map`). [CU4, CU9, CY5, GP4]
+- `read_model` lists only live sequences (those a manager lists, or all when there is no manager). [CR6, CR7]
 - Clips UI: the Controllers tab offers no clip editing; the picked clip stays picked only while a sequence at that block keeps its name, else the preview returns to Free chains. [CU1, GR1]
 - Preview of clips: a clip named SpecialIdle (ASCII case-insensitive) plays with its own frequency, range and cycle and wins; every other managed controller holds the first key of the first listed clip. Two managers or two SpecialIdle clips on one controller: both play, the track applied last wins. [CR11, CR12, CU5]
 - Pinned, no code: new-clip ticks clear on a shape change; the var-8 check runs outside the simulation cache. [CU6, CU7]
@@ -1160,5 +1158,6 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 
 The owner removed clip editing from NIF Edit; clip playback and clip key edits stay (owner, 2026-11-05).
 
-- **GR1 The Controllers tab has no clip editing.** There is no New clip, Remove clip, clip rename, clip timing (cycle, frequency, start, stop) or Convert to clips. The Preview picker stays, inside an open "Clips (N · showing X)" section at the top of the tab, and so do the "In clip" key tables. Reverting an op drops only that op. The nif crate keeps the five clip ops until a later task removes them.
+- **GR1 The Controllers tab has no clip editing.** There is no New clip, Remove clip, clip rename, clip timing (cycle, frequency, start, stop) or Convert to clips. The Preview picker stays, inside an open "Clips (N · showing X)" section at the top of the tab, and so do the "In clip" key tables. Reverting an op drops only that op.
 - **GR2 A saved edit document drops its clip ops on load.** `EditDoc::from_text` removes the five clip ops (AddSequence, RemoveSequence, RenameSequence, SetSequenceTiming, ConvertChainToClips) and counts them; opening the NIF puts "<path>: N clip edit(s) dropped: NIF Edit no longer edits clips." in Messages. An exported document with only clip ops opens empty and pending, and the file on disk changes at the next normal save. The document version stays 1.
+- **GR3 The nif crate has no clip edit ops.** `Op` has no AddSequence, RemoveSequence, RenameSequence, SetSequenceTiming or ConvertChainToClips, and `ClipTrack`, `convert_check`, `clip_key` and `timing_problem` are gone. The clip handling the spec lists under "Stays" is kept: `SetKeys` with a clip, SplitAlpha on clip-driven controllers, `nif::clips`, playback and binding in `anim`, the empty-manager check on source files and compaction's clip layouts. `anim::CONVERT_NAME` ("SpecialIdle") is the clip that plays by itself under Free chains.
