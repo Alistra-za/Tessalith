@@ -1240,6 +1240,48 @@ fn a_removed_layout_is_refused_everywhere() {
     }
 }
 
+/// Note GU3: `cubemap.ground_fill` and `cubemap.horizon` are refused with the removal message in a project's defaults,
+/// a `[files]` entry, a rule, a user preset and `--set` (with and without `file:`); the kept keys still load.
+#[test]
+fn ground_fill_and_horizon_are_refused() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (key, val) in [("ground_fill", "\"gradient\""), ("horizon", "-5.0")] {
+        let table = format!("cubemap = {{ {key} = {val} }}");
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.hdr\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"sky.hdr\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        for set in [
+            format!("cubemap.{key}={val}"),
+            format!("file:sky.hdr.cubemap.{key}={val}"),
+        ] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains(&format!("cubemap.{key}")) && e.contains("removed in 3.0"),
+                "{key}: {e}"
+            );
+        }
+    }
+    ConfigFile::parse("[defaults]\ncubemap = { yaw = 90.0 }\n", "sdc.toml").unwrap();
+}
 #[test]
 fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {

@@ -227,38 +227,6 @@ fn yaw_edit_writes_the_dotted_key() {
 }
 
 #[test]
-fn ground_fill_colour_writes_codes() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = section(d.path(), CUBE);
-    h.get_by_label("Cubemap ground fill").click();
-    h.run();
-    h.query_all_by_label("Colour").last().unwrap().click();
-    h.run();
-    settle(&mut h);
-    assert_eq!(
-        file_value(&h, "cubemap.ground_fill"),
-        Some(serde_json::json!([40, 30, 20]))
-    );
-    // With a fill the horizon row opens and the colour button shows.
-    assert!(!h
-        .get_by_label("Cubemap horizon")
-        .accesskit_node()
-        .is_disabled());
-    assert_eq!(h.query_all_by_label("Cubemap ground colour").count(), 1);
-}
-
-#[test]
-fn horizon_is_disabled_without_a_fill() {
-    let d = tempfile::tempdir().unwrap();
-    let h = section(d.path(), CUBE);
-    assert!(h
-        .get_by_label("Cubemap horizon")
-        .accesskit_node()
-        .is_disabled());
-    assert_eq!(h.query_all_by_label("needs a ground fill").count(), 1);
-}
-
-#[test]
 fn out_of_range_yaw_shows_the_engine_message() {
     let d = tempfile::tempdir().unwrap();
     let mut h = section(d.path(), CUBE);

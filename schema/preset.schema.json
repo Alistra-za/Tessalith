@@ -278,17 +278,6 @@
             "null"
           ]
         },
-        "ground_fill": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GroundFill"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Fill below the horizon line; unset = no fill (the horizon alone does nothing)."
-        },
         "highlight_clamp": {
           "description": "Highlights above this (linear) are clamped; at least 1.",
           "format": "double",
@@ -296,11 +285,6 @@
             "number",
             "null"
           ]
-        },
-        "horizon": {
-          "description": "Horizon elevation in degrees, -45..=45; read only with ground_fill.",
-          "format": "double",
-          "type": "number"
         },
         "layout": {
           "anyOf": [
@@ -524,31 +508,6 @@
       "enum": [
         "directx",
         "opengl"
-      ],
-      "type": "string"
-    },
-    "GroundFill": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/GroundMode"
-        },
-        {
-          "items": {
-            "format": "uint8",
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "maxItems": 3,
-          "minItems": 3,
-          "type": "array"
-        }
-      ],
-      "description": "What fills the cube below `cubemap.horizon`: `\"gradient\"` or `[r, g, b]` code values (game gamma, like `tint`)."
-    },
-    "GroundMode": {
-      "enum": [
-        "gradient"
       ],
       "type": "string"
     },
@@ -902,17 +861,6 @@
             "null"
           ]
         },
-        "ground_fill": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GroundFill"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Fill below the horizon line; unset = no fill (the horizon alone does nothing)."
-        },
         "highlight_clamp": {
           "description": "Highlights above this (linear) are clamped; at least 1.",
           "format": "double",
@@ -920,11 +868,6 @@
             "number",
             "null"
           ]
-        },
-        "horizon": {
-          "description": "Horizon elevation in degrees, -45..=45; read only with ground_fill.",
-          "format": "double",
-          "type": "number"
         },
         "layout": {
           "anyOf": [

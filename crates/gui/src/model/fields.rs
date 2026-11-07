@@ -123,7 +123,7 @@ pub const ADVANCED_FIELDS: [(&str, &str); 6] = [
 ];
 
 /// The cubemap section's fields in display order (Note DT7), in the groups `ui::cube_section` draws them in.
-pub const CUBE_FIELDS: [(&str, &str); 18] = [
+pub const CUBE_FIELDS: [(&str, &str); 16] = [
     ("cubemap.layout", "Layout"),
     ("cubemap.face_size", "Face size"),
     ("cubemap.vcross_negz_rotate", "Turn -Z upright"),
@@ -138,14 +138,9 @@ pub const CUBE_FIELDS: [(&str, &str); 18] = [
     ("cubemap.saturation", "Saturation"),
     ("cubemap.tint", "Tint"),
     ("cubemap.highlight_clamp", "Highlight clamp"),
-    ("cubemap.ground_fill", "Ground fill"),
-    ("cubemap.horizon", "Horizon"),
     ("cubemap.style", "Style"),
     ("cubemap.blur", "Blur"),
 ];
-
-/// Why the horizon row is disabled without a ground fill (the engine reads the horizon only with one).
-pub const NEEDS_GROUND_FILL: &str = "needs a ground fill";
 
 /// The cubemap section's field views (value, provenance, own entry, lock).
 pub fn cube_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
@@ -303,7 +298,6 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "mips.edge" if p.mips.filter == MipFilter::Box => {
             Some("only tent, Mitchell and Kaiser read the edge")
         }
-        "cubemap.horizon" if p.cubemap.ground_fill.is_none() => Some(NEEDS_GROUND_FILL),
         _ => None,
     }
 }

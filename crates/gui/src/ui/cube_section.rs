@@ -6,7 +6,7 @@ use super::settings_panel::{combo, options_of, Options};
 use crate::model::fields::{cube_views, provenance_text, FieldView};
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::{CubeLayout, FaceFlip, GroundFill, GroundMode, Subtype};
+use engine::config::{CubeLayout, FaceFlip, Subtype};
 use engine::policy::ResolvedJob;
 use serde_json::{json, Value};
 use std::ops::RangeInclusive;
@@ -17,8 +17,6 @@ pub type Edits = Vec<(String, String, Option<Value>)>;
 /// A field's edit: `Some(Some(v))` sets it, `Some(None)` clears it, `None` leaves it.
 type Edit = Option<Option<Value>>;
 
-/// The first ground colour a "Colour" pick writes: a dark earth brown, raw 0..255 codes (Note DT10).
-const FIRST_GROUND: [u8; 3] = [40, 30, 20];
 /// What ticking "Highlight clamp" or "Blur" first writes (Note DT10): the engine's own examples.
 const FIRST_CLAMP: f64 = 4.0;
 const FIRST_BLUR: f64 = 0.35;
@@ -381,53 +379,6 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                         (tick.map(|_| None).or(p.map(|v| Some(json!(v)))), r2)
                     })
                     .inner
-                });
-                put(f.field, e);
-            });
-            grid(ui, &cx, "Ground", |ui| {
-                let f = find(&views, "cubemap.ground_fill");
-                let e = cx.row(ui, f, |ui| {
-                    ui.horizontal(|ui| {
-                        let cur = match c.ground_fill {
-                            None => "none",
-                            Some(GroundFill::Mode(GroundMode::Gradient)) => "gradient",
-                            Some(GroundFill::Color(_)) => "colour",
-                        };
-                        let (p, r) =
-                            named_combo(ui, cx.id(f.field), &json!(cur), &opts(f.field), &name(f));
-                        let mut edit: Edit = p.map(|v| match v.as_str() {
-                            Some("gradient") => Some(json!("gradient")),
-                            Some("colour") => Some(json!(FIRST_GROUND)),
-                            _ => None,
-                        });
-                        if let Some(GroundFill::Color(rgb)) = c.ground_fill {
-                            let (q, _) = colour(
-                                ui,
-                                cx.busy,
-                                cx.id("cubemap.ground_colour"),
-                                rgb,
-                                "Cubemap ground colour",
-                            );
-                            edit = edit.or(q.map(|v| Some(json!(v))));
-                        }
-                        (edit, r)
-                    })
-                    .inner
-                });
-                put(f.field, e);
-                let f = find(&views, "cubemap.horizon");
-                let e = cx.row(ui, f, |ui| {
-                    let (p, r) = num(
-                        ui,
-                        cx.busy,
-                        cx.id(f.field),
-                        c.horizon,
-                        -45.0..=45.0,
-                        0.5,
-                        "°",
-                        &name(f),
-                    );
-                    (p.map(|v| Some(json!(v))), r)
                 });
                 put(f.field, e);
             });

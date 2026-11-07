@@ -306,7 +306,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .iter()
             .map(|(m, l)| opt(json!(m), l))
             .collect(),
-        // Cubemap (Note DT7). Auto is the unset layout, "none" the unset style / ground fill.
+        // Cubemap (Note DT7). Auto is the unset layout, "none" the unset style.
         "cubemap.layout" => std::iter::once(opt(json!("auto"), "Auto"))
             // Faces is detected from a six-file set, never chosen.
             .chain(
@@ -332,11 +332,6 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             opt(json!(FaceFlip::None), "No flip"),
             opt(json!(FaceFlip::H), "Flip H"),
             opt(json!(FaceFlip::V), "Flip V"),
-        ],
-        "cubemap.ground_fill" => vec![
-            opt(json!("none"), "None"),
-            opt(json!("gradient"), "Gradient"),
-            opt(json!("colour"), "Colour"),
         ],
         _ => return None,
     })

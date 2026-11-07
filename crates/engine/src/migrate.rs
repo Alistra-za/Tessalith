@@ -332,6 +332,18 @@ pub const REMOVED: &[Removed] = &[
         hint: "convert it to six faces, a cross or a strip first",
         since: "3.0",
     },
+    Removed {
+        key: "cubemap.ground_fill",
+        value: None,
+        hint: "a cube's lower half is the source's own pixels; delete the key",
+        since: "3.0",
+    },
+    Removed {
+        key: "cubemap.horizon",
+        value: None,
+        hint: "a cube's lower half is the source's own pixels; delete the key",
+        since: "3.0",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {
