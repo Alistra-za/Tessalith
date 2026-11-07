@@ -14,14 +14,7 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim`. It works on `nif/*` branches; the owner merges `nif/main` into `main`. Change those crates only when the task says so. Record what you changed in a DECISIONS note and in a line for the NIF team's handoff file (see CLAUDE.local.md).
 
 ## Gates
-During a plan: `cargo fmt --all --check`, both clippy lines workspace-wide, and tests of the changed crates only. Once at plan end and before a merge into `main`, run the full list (owner, 2026-10-29):
-```
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy --workspace -- -D warnings
-cargo test --workspace -- --skip render_ --test-threads=4
-cargo test --workspace -- render_ --test-threads=1
-```
+During a plan: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy --workspace -- -D warnings`, and tests of the changed crates only (owner, 2026-10-29). Once at plan end, after the final review's fixes, and before a merge into `main`, run `tools\gate.ps1 -Out <log folder>`. It adds the whole test suite, `render_` alone and the doc checks, and prints PASS or FAIL per step.
 - **`.githooks/pre-commit`** checks fmt, control bytes and duplicate note headings. Turn it on in a clone with `git config core.hooksPath .githooks`.
 - **GPU tests (`render_*`) run alone.** They can hang for 30+ minutes when the GPU is busy.
 - **`cargo test -p engine --test golden`** is a quick pre-check; the workspace run already includes it.

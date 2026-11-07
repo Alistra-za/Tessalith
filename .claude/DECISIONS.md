@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS
 
 ## Digest
 
@@ -1162,3 +1162,9 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 - **HK2 `.githooks/pre-commit`** checks fmt when `.rs` files are staged, control bytes in added lines (vendored objects and test fixtures excepted), and duplicate note headings in `DECISIONS.md` and `DECISIONS-ARCHIVE.md`. CI already runs fmt; the hook catches it before the commit. It's off until a clone sets `core.hooksPath`.
 - **HK3 `CODING_STANDARDS.md` holds judgement rules for reviewers;** anything a machine can check goes to a check, not there. Every review dispatch names it.
 - **HK4 `tools/scan-query.py` opens the scan database with `mode=ro`.** Its TXST listing prints the mapping key from Note HG's spec: defining plugin plus `0x` FormID from `rec.local`.
+
+## Note GS — Guards from the v3 chunk A retro (owner's "implement all", 2026-11-06; wording is agent rulings)
+
+- **GS1 `tools/gate.ps1` is the one full gate.** CLAUDE.md points to it instead of listing commands. It runs the doc checks too, stops before the tests when fmt or clippy fails, and refuses to start below 20 GB free. The full gate runs after the final review's fixes, because a fix wave invalidates an earlier run.
+- **GS2 CI runs `tools/doc-dupes.py` and `tools/doc-markers.ps1`.** Both ran only by hand before a push, so a failure could sit unseen. `doc-dupes.py` exits 2 when it reads no sentences, which is what a wrong working folder looks like; it used to report 0 failures and exit 0.
+- **GS3 `cargo fmt --all --check` works in worktrees again.** The os error 206 workaround (fmt per package) didn't reproduce on 2026-11-06, including on a 51-character worktree path, so the gate, CI and the hook all use the same command. If 206 comes back it fails loudly, and the per-package loop is the fix.
