@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Fixtures', detail: 'mode run: fixtures, oracles and one journey per goal (test code), then the shortest paths' },
     { title: 'Explore', detail: 'one blind agent per goal drives the app through the wrapper' },
     { title: 'Visual', detail: 'frame checks merged, then one agent reviews the frames against the rules' },
-    { title: 'Verify', detail: 'one skeptic replays every finding and writes REPORT.md' },
+    { title: 'Verify', detail: 'one skeptic replays every finding and returns the report text' },
   ],
 }
 
@@ -20,7 +20,9 @@ export const meta = {
 //                 source, a fixture, one check line and a shortest path). 1 agent. Edits no code.
 //                 The owner reads and approves goals.md. Nothing in mode "run" starts without that approval.
 //   mode "run"    fixtures (1 agent: test code, one commit), explorers (one blind agent per goal, at most 5), visual (1),
-//                 verify (1, writes <out>\REPORT.md and <out>\shots\). At most 8 agents.
+//                 verify (1, writes <out>\shots\ and returns the report text). At most 8 agents.
+//                 The caller saves the result's `report` as <out>\REPORT.md: the harness refuses report files
+//                 written by subagents (first run, 2026-11-07).
 //
 // Args (all absolute paths): mode, feature (kebab-case), worktree, out (<repo>\.superpowers\ui-proof\<feature>).
 //   goals mode: spec (a path or an array of paths), owner (quoted owner messages, optional).
@@ -208,12 +210,12 @@ if (!visual) throw new Error('visual reviewer returned nothing')
 
 phase('Verify')
 const verify = await agent(
-  `You are the skeptic for the UI proof of "${a.feature}" (worktree ${W}, fixtures commit ${fx.commit}, sizes ${SIZES.join(', ')}, explorer size ${EXPLORE_SIZE}). Write ${OUT}\\REPORT.md.
+  `You are the skeptic for the UI proof of "${a.feature}" (worktree ${W}, fixtures commit ${fx.commit}, sizes ${SIZES.join(', ')}, explorer size ${EXPLORE_SIZE}). You write the report as markdown text and return it in \`report\`; the caller saves it as ${OUT}\\REPORT.md (the harness refuses report files written by subagents).
 Inputs. Path failures (intent failures): ${JSON.stringify(failures.map(g => ({ id: g.id, sentence: g.sentence, error: g.path_error })))}. Blocked goals: ${JSON.stringify(fx.goals.filter(g => g.blocked).map(g => ({ id: g.id, why: g.blocked })))}. Goals not explored: ${JSON.stringify(dropped.map(g => g.id))}. Shortest paths: ${JSON.stringify(picked.map(g => ({ id: g.id, shortest_steps: g.shortest_steps })))}. Explorer results: ${JSON.stringify(explored)}. Mechanical findings: ${OUT}\\mechanical.md. Visual findings: ${JSON.stringify(visual.findings)}.
 Method: re-run each visual finding with \`pwsh -NoProfile -File ${WRAP} -Replay <its repro.dir> -Upto <its repro.step> -Out ${OUT}\\verify\\<id>\` and keep it only if the new frame, tree or checks still show it and it names a rule or a measured cost. Drop it when unsure. Drop mechanical findings the screenshot shows are harmless, with the reason. Grep ${W}\\.claude\\DECISIONS.md for the area (never read it whole): a finding that contradicts a ruling names it. Copy each kept finding's frame to ${OUT}\\shots\\<NN>-<id>.png.
 REPORT.md, in this shape: a header (feature, worktree commit, fixtures, sizes, adapter and whether the screenshots are comparable, from run.json); **Goals** (Goal | Reached | Steps: explorer / shortest | Dead ends | Hovers needed); **Findings, ranked** (# | Where | What happens | Why it hurts | Proposed fix | Ruling), intent failures first, then by measured cost and by rules that block use (off-window, overlap), then polish, each with its screenshot; **Painted-only text** (the widgets whose text is painted rather than in the tree, for the follow-up plan); **Dropped** (one line each, with the reason).
 ${SHELL}
-Return report (the path), kept, dropped, intent_failures.`,
+Return report (the whole markdown, starting at its "# " title), kept, dropped, intent_failures.`,
   { label: 'verify', phase: 'Verify', schema: VERIFY })
 if (!verify) throw new Error('verifier returned nothing')
 
