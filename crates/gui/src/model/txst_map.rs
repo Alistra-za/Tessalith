@@ -91,32 +91,40 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
             continue;
         };
-        if v.pbr && m.target == Target::Cs {
+        if m.record_ignored(v) {
             continue;
         }
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
-            let Some(path) = record_slot(item).and_then(|s| txst.slots.get(&s)) else {
-                continue;
-            };
-            let Some(rel) = record_rel(root, &item.key, path) else {
-                continue;
-            };
-            let k = if item.kind == ItemKind::Packed {
-                let Some(suffix) = recipe_suffix(item) else {
-                    continue;
-                };
-                OutputKey::Packed {
-                    set: v.id.clone(),
-                    suffix,
-                }
-            } else {
-                OutputKey::File(item.key.clone())
-            };
-            out.push((v.id.clone(), k, rel));
+            if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots) {
+                out.push((v.id.clone(), k, rel));
+            }
         }
     }
     out
+}
+
+/// R1, the one rule for "this member of set `v`, under a record with `slots`, writes this path": the output key, the
+/// record's path as stored, and where it goes under the export folder. `None` when the file keeps its own path: the
+/// record names no slot for it, it has no job (a kept DDS), a packing source or a helper, or `record_rel` refuses the
+/// path. `record_entries` (the plan) and `record_preview` (the picker) both call it.
+fn member_write<'a>(
+    root: &Path,
+    v: &SetView,
+    item: &TextureItem,
+    slots: &'a BTreeMap<u8, String>,
+) -> Option<(OutputKey, &'a String, PathBuf)> {
+    let path = slots.get(&record_slot(item)?)?;
+    let rel = record_rel(root, &item.key, path)?;
+    let k = if item.kind == ItemKind::Packed {
+        OutputKey::Packed {
+            set: v.id.clone(),
+            suffix: recipe_suffix(item)?,
+        }
+    } else {
+        OutputKey::File(item.key.clone())
+    };
+    Some((k, path, rel))
 }
 
 /// `record_entries` without the owners: the explicit paths `engine_inputs` sends.
@@ -418,14 +426,21 @@ impl AppModel {
         })
     }
 
+    /// Whether the plan ignores `v`'s mapping: a PGPatcher PBR set on Community Shaders names its outputs in the JSON
+    /// (`record_entries`, the menu, the picker and the record rows all ask this).
+    pub fn record_ignored(&self, v: &SetView) -> bool {
+        v.pbr && self.target == Target::Cs
+    }
+
     /// What mapping set `set` to `r` would do, for the picker: each file the set writes (its name) and the record path
-    /// it would write (`None`: the record names no slot for it, or the path can't be written from this project, so
-    /// the file keeps its own). Raw packing sources and helpers write nothing and are left out.
+    /// it would write (`None`: it keeps its own). It asks `member_write`, the rule `record_entries` plans with, so a
+    /// packed output is listed and a kept DDS with no job is not. Raw packing sources and helpers write nothing and
+    /// are left out. A path another set also writes is a collision row after mapping, not predicted here.
     pub fn record_preview(&self, set: &str, r: &TxstRecord) -> Vec<(String, Option<String>)> {
-        let Some(v) = self.view_of(set) else {
+        let (Some(v), Some(root)) = (self.view_of(set), self.root.as_deref()) else {
             return vec![];
         };
-        let off = v.pbr && self.target == Target::Cs;
+        let off = self.record_ignored(&v);
         v.members
             .iter()
             .filter_map(|k| self.item(k))
@@ -433,16 +448,9 @@ impl AppModel {
                 !matches!(i.status, ItemStatus::PackedInto(_)) && i.kind != ItemKind::Helper
             })
             .map(|i| {
-                let path = record_slot(i)
-                    .and_then(|s| r.slots.get(&s))
-                    .filter(|p| {
-                        !off && self
-                            .root
-                            .as_deref()
-                            .and_then(|root| record_rel(root, &i.key, p))
-                            .is_some()
-                    })
-                    .cloned();
+                let path = member_write(root, &v, i, &r.slots)
+                    .filter(|_| !off)
+                    .map(|(_, p, _)| p.clone());
                 (i.name.clone(), path)
             })
             .collect()
@@ -479,8 +487,49 @@ impl AppModel {
             return Err(format!("no set {set}"));
         };
         let (id, label) = (v.id.clone(), format!("Map {} to {}", v.id, map.edid));
-        self.edit_docs(&label, None, true, move |_, d| d.set_txst(&id, Some(&map)));
+        // Another record starts with every fill on: a slot turned off under one record says nothing about another's.
+        // The same key (plugin + FormID, ASCII-folded; "Use new paths", Change record to its own) keeps them.
+        let off = self.stored_txst(&id).map_or_else(
+            || self.stored_no_fill(&id),
+            |t| {
+                let same = t.plugin.eq_ignore_ascii_case(&map.plugin)
+                    && t.formid.eq_ignore_ascii_case(&map.formid);
+                if same {
+                    vec![]
+                } else {
+                    self.stored_no_fill(&id)
+                }
+            },
+        );
+        self.edit_docs(&label, None, true, move |_, d| {
+            d.set_txst(&id, Some(&map));
+            for n in off {
+                d.set_no_fill(&id, n, false);
+            }
+        });
         Ok(())
+    }
+
+    fn stored_txst(&self, id: &str) -> Option<TxstMap> {
+        self.sets_doc
+            .as_ref()?
+            .entries()
+            .iter()
+            .find(|e| same_id(&e.id, id))?
+            .txst
+            .clone()
+    }
+
+    fn stored_no_fill(&self, id: &str) -> Vec<u8> {
+        self.sets_doc
+            .as_ref()
+            .and_then(|d| {
+                d.entries()
+                    .iter()
+                    .find(|e| same_id(&e.id, id))
+                    .map(|e| e.no_fill.iter().copied().collect())
+            })
+            .unwrap_or_default()
     }
 
     /// Remove set `set`'s record mapping; its outputs go back to their default names.
@@ -492,7 +541,13 @@ impl AppModel {
             return Err(format!("no set {set}"));
         };
         let (id, label) = (v.id.clone(), format!("Remove record mapping from {}", v.id));
-        self.edit_docs(&label, None, true, move |_, d| d.set_txst(&id, None));
+        let off = self.stored_no_fill(&id);
+        self.edit_docs(&label, None, true, move |_, d| {
+            d.set_txst(&id, None);
+            for n in off {
+                d.set_no_fill(&id, n, false);
+            }
+        });
         Ok(())
     }
 }

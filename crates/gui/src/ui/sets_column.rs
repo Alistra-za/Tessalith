@@ -1262,7 +1262,7 @@ fn pill(
                         });
                     }
                     if let Some(map) = &v.txst {
-                        record_line(ui, map);
+                        record_line(ui, v, map);
                     }
                     if !v.key.is_empty() {
                         shader_combo(ui, model, v, editing, acts);
@@ -1663,7 +1663,7 @@ fn menu(
     // Note HG: one reason at a time; the scan comes first, as the PBR refusal can't be fixed by scanning.
     let why_not = if model.known.records.is_empty() {
         Some("Scan your mods first")
-    } else if v.pbr && model.target == engine::config::Target::Cs {
+    } else if model.record_ignored(v) {
         Some("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs")
     } else {
         None
@@ -2083,11 +2083,28 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
         &buttons,
         &hovers,
         |ui| {
+            // Before the field, so it does not move its cursor with them (as Move to… does). They only move the
+            // highlight; Enter still maps nothing.
+            let (up, down) = ui.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                )
+            });
             let field = ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text("EDID, plugin, FormID or path")
                     .desired_width(f32::INFINITY),
             );
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    field.id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                )
+            });
             field.widget_info(|| egui::WidgetInfo {
                 label: Some("Search texture set records".into()),
                 ..egui::WidgetInfo::text_edit(
@@ -2110,19 +2127,50 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
             }
             ui.weak(format!("{} of {} records", hits.len(), known.records.len()));
             let row_h = ui.spacing().interact_size.y;
-            egui::ScrollArea::vertical()
+            let mut moved = None;
+            if up || down {
+                let at = sel
+                    .as_ref()
+                    .and_then(|s| hits.iter().position(|&i| known.records.get(i) == Some(s)));
+                let next = match (at, down) {
+                    (None, _) => 0,
+                    (Some(p), true) => (p + 1).min(hits.len().saturating_sub(1)),
+                    (Some(p), false) => p.saturating_sub(1),
+                };
+                if let Some(r) = hits.get(next).and_then(|&i| known.records.get(i)) {
+                    *sel = Some(r.clone());
+                    moved = Some(next);
+                }
+            }
+            // `show_rows` builds only the rows on screen, so a moved highlight scrolls by offset, from last frame's
+            // offset and view height.
+            let view_id = egui::Id::new("map-record-list-view");
+            let (off, view) = ui
+                .data(|d| d.get_temp::<(f32, f32)>(view_id))
+                .unwrap_or((0.0, row_h * 9.0));
+            let mut area = egui::ScrollArea::vertical()
+                .id_salt("map-record-list")
                 .max_height(row_h * 9.0)
-                .auto_shrink([false, true])
-                .show_rows(ui, row_h, hits.len(), |ui, range| {
-                    for n in range {
-                        let Some(r) = hits.get(n).and_then(|&i| known.records.get(i)) else {
-                            continue;
-                        };
-                        if record_row(ui, r, sel.as_ref() == Some(r)).clicked() {
-                            *sel = Some(r.clone());
-                        }
+                .auto_shrink([false, true]);
+            if let Some(n) = moved {
+                let top = n as f32 * (row_h + ui.spacing().item_spacing.y);
+                if top < off {
+                    area = area.vertical_scroll_offset(top);
+                } else if top + row_h > off + view {
+                    area = area.vertical_scroll_offset(top + row_h - view);
+                }
+            }
+            let out = area.show_rows(ui, row_h, hits.len(), |ui, range| {
+                for n in range {
+                    let Some(r) = hits.get(n).and_then(|&i| known.records.get(i)) else {
+                        continue;
+                    };
+                    if record_row(ui, r, sel.as_ref() == Some(r)).clicked() {
+                        *sel = Some(r.clone());
                     }
-                });
+                }
+            });
+            ui.data_mut(|d| d.insert_temp(view_id, (out.state.offset.y, out.inner_rect.height())));
             if let Some(r) = sel.as_ref() {
                 ui.separator();
                 let head = format!("{} ({}, {})", r.edid, r.formid, r.plugin);
@@ -2164,18 +2212,24 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
     }
 }
 
-/// The card's record line (Note HG); its hover lists the stored slots.
-fn record_line(ui: &mut egui::Ui, map: &TxstMap) {
+/// The card's record line (Note HG); its hover lists the stored slots, marking the ones no set writes (`supplied`: the
+/// Advanced skin editor has no `_s` row to say so). Small, not weak: it is the only card text that says where outputs go.
+fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap) {
     let text = format!("Record: {} ({}, {})", map.edid, map.formid, map.plugin);
     let r = ui.add(
-        egui::Label::new(egui::RichText::new(&text).small().weak())
+        egui::Label::new(egui::RichText::new(&text).small())
             .truncate()
             .show_tooltip_when_elided(false),
     );
     r.on_hover_ui(|ui| {
         ui.label(&text);
         for (n, p) in &map.slots {
-            ui.label(format!("slot{n}: {p}"));
+            let from = if v.record_supplied.contains_key(n) {
+                " (from the record)"
+            } else {
+                ""
+            };
+            ui.label(format!("slot{n}: {p}{from}"));
         }
     });
 }

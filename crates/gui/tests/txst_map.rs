@@ -2053,6 +2053,201 @@ fn the_problems_row_uses_new_paths() {
         "the row is gone"
     );
 }
+// ---- Task 6 fix round 1 (Note HG) ----
+
+fn norm(p: &std::path::Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
+/// Every `Some(path)` the picker previews for `set` is the path the plan writes once the record is mapped.
+fn preview_matches_plan(mut m: AppModel, set: &str, rec: &TxstRecord) -> usize {
+    let prev = m.record_preview(set, rec);
+    // A packed output is renamed by its record path, so find each item by key from before the mapping.
+    let keys: Vec<String> = prev
+        .iter()
+        .map(|(n, _)| m.items.iter().find(|i| &i.name == n).unwrap().key.clone())
+        .collect();
+    m.map_record(set, rec.to_map()).unwrap();
+    idle(&mut m);
+    let mut checked = 0;
+    for ((name, path), key) in prev.iter().zip(&keys) {
+        let Some(p) = path else { continue };
+        let item = m.item(key).unwrap_or_else(|| panic!("no item {name}"));
+        let o = norm(&item.job.as_ref().expect("a job").output);
+        assert!(
+            o.to_lowercase().ends_with(&p.to_lowercase()),
+            "{name}: previewed {p}, the plan writes {o}"
+        );
+        checked += 1;
+    }
+    checked
+}
+
+#[test]
+fn the_preview_is_what_the_plan_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = mapped_free(d.path());
+    let rec = trec(
+        "Rec",
+        "R.esp",
+        "0x9",
+        &[
+            (1, "textures/s/e/femalebody.dds"),
+            (2, "textures/s/body_n.dds"),
+            (6, "textures/s/z_rmaos.dds"),
+        ],
+    );
+    scan(&mut m, vec![rec.clone()]);
+    // Pin the packed output: the set of raw maps on its own is previewed at slot 6.
+    let q = "textures/s/q";
+    let prev = m.record_preview(q, &rec);
+    assert!(
+        prev.iter()
+            .any(|(_, p)| p.as_deref() == Some("textures/s/z_rmaos.dds")),
+        "{prev:?}"
+    );
+    assert!(preview_matches_plan(m, q, &rec) >= 1);
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped_free(d.path());
+    assert!(preview_matches_plan(m, M, &rec) >= 2);
+}
+
+#[test]
+fn a_kept_dds_and_a_refused_path_keep_their_own_path() {
+    let d = tempfile::tempdir().unwrap();
+    support::bc1_dds(&d.path().join("textures/s/e/x_n.dds"));
+    let m = project_toml(
+        d.path(),
+        &["textures/s/e/x.png", "textures/s/e/x_rfaos.png"],
+        &skin_set(M, ""),
+    );
+    let rec = trec(
+        "Rec",
+        "R.esp",
+        "0x9",
+        &[
+            (1, "meshes/x.nif"),
+            (2, "textures/s/body_n.dds"),
+            (6, "textures/s/z.dds"),
+        ],
+    );
+    let prev = m.record_preview(M, &rec);
+    let of = |n: &str| prev.iter().find(|(k, _)| k == n).map(|(_, p)| p.clone());
+    assert_eq!(of("x_n.dds"), Some(None), "no job: {prev:?}");
+    assert_eq!(of("x.png"), Some(None), "a refused path");
+    assert_eq!(of("x_rfaos.png"), Some(Some("textures/s/z.dds".into())));
+}
+
+#[test]
+fn a_new_record_starts_with_every_fill_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2));
+    // The same key keeps it (Use new paths, Change record to its own).
+    let own = entry(&m, M).txst.unwrap();
+    m.map_record(M, own).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2), "same record");
+    // Another record clears it, in one undo step.
+    let other = TxstMap {
+        plugin: "b.esp".into(),
+        formid: "2".into(),
+        edid: "B".into(),
+        slots: [(2, BODY_N.to_string())].into(),
+    };
+    m.map_record(M, other).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.is_empty(), "new record");
+    m.undo();
+    idle(&mut m);
+    let e = entry(&m, M);
+    assert_eq!(e.txst.unwrap().plugin, "a.esp");
+    assert!(e.no_fill.contains(&2), "undo restores it in one step");
+    // Unmapping clears it too.
+    m.unmap_record(M).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.is_empty(), "unmapped");
+    m.undo();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2));
+}
+
+#[test]
+fn the_arrow_keys_move_the_highlight_and_enter_maps_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let m = unmapped(d.path());
+    let mut h = harness(m, 1280.0);
+    h.run();
+    open_picker(&mut h);
+    h.key_press(egui::Key::ArrowDown);
+    h.run();
+    h.get_by_label("x.png → textures/s/e/femalebody.dds");
+    h.key_press(egui::Key::ArrowDown);
+    h.run();
+    h.get_by_label("x.png: keeps its own path");
+    h.key_press(egui::Key::ArrowUp);
+    h.run();
+    h.get_by_label("x.png → textures/s/e/femalebody.dds");
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert!(entry(h.state(), M).txst.is_none(), "Enter maps nothing");
+    assert!(h.query_all_by_label(ROW).next().is_some(), "still open");
+}
+
+#[test]
+fn the_arrow_keys_scroll_the_highlight_into_view() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
+    let many: Vec<TxstRecord> = (0..5000)
+        .map(|n| trec(&format!("Rec{n:04}"), "Big.esp", &format!("0x{n:X}"), &[]))
+        .collect();
+    scan(&mut m, many);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    open_picker(&mut h);
+    for _ in 0..30 {
+        h.key_press(egui::Key::ArrowDown);
+        h.run();
+    }
+    h.run();
+    assert!(h
+        .query_all_by_label("Rec0029 (0x1D, Big.esp)")
+        .next()
+        .is_some());
+}
+
+#[test]
+fn the_card_hover_marks_a_supplied_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(r(d.path()), 1280.0);
+    h.run();
+    let n = h.query_all_by_label_contains("Record:").count();
+    assert!(n >= 1);
+    let mut found = false;
+    for i in 0..n {
+        h.query_all_by_label_contains("Record:")
+            .nth(i)
+            .unwrap()
+            .hover();
+        h.run();
+        if h.query_by_label("slot8: textures/s/e/body_s.dds (from the record)")
+            .is_some()
+        {
+            found = true;
+            assert!(
+                h.query_by_label("slot1: textures/s/e/femalebody.dds (from the record)")
+                    .is_none(),
+                "M writes its own diffuse"
+            );
+            break;
+        }
+    }
+    assert!(found, "the supplied slot is marked in the hover");
+}
+
 /// Screenshots for the Task 6 review (`TXST_SHOTS_DIR` names the folder): the card and editor with a mapped set, the
 /// picker with long EDIDs and paths, and the Problems rows. Not a gate.
 #[test]
