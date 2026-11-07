@@ -49,6 +49,7 @@ pub mod sets_filter;
 pub mod shell;
 pub mod skin;
 pub mod texture_view;
+pub mod txst_map;
 pub mod used_by;
 pub mod uv_coverage;
 pub mod view;

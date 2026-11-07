@@ -30,14 +30,19 @@ fn colour(dir: &Path, rel: &str) {
 /// A project at `dir` holding `files` (PNGs), `textures/s/x` marked Advanced skin in `sdc-project.toml`, exported to
 /// `<dir>/export`. Tasks 4-6 extend this.
 pub fn project(dir: &Path, files: &[&str]) -> AppModel {
+    project_toml(
+        dir,
+        files,
+        &format!("[[sets]]\nid = \"{X}\"\nshader = \"advanced_skin\"\n"),
+    )
+}
+
+/// `project` with the whole text of `sdc-project.toml` given.
+pub fn project_toml(dir: &Path, files: &[&str], toml: &str) -> AppModel {
     for f in files {
         colour(dir, f);
     }
-    std::fs::write(
-        dir.join("sdc-project.toml"),
-        format!("[[sets]]\nid = \"{X}\"\nshader = \"advanced_skin\"\n"),
-    )
-    .unwrap();
+    std::fs::write(dir.join("sdc-project.toml"), toml).unwrap();
     let settings = GuiSettings {
         export_folder: Some(dir.join("export")),
         ..GuiSettings::default()
@@ -382,6 +387,289 @@ fn the_editor_of_a_shared_set_has_rows_for_its_maps_only() {
     assert_eq!(h.query_all_by_label("RMAOS").count(), 0);
 }
 
+// ---- Task 4: a mapped set writes to its record's paths ----
+
+use engine::sets::OutputKey;
+use sdc_gui::model::pbr_export::path_collisions;
+use sdc_gui::model::sets::engine_inputs;
+use sdc_gui::sets_doc::TxstMap;
+
+pub const M: &str = "textures/s/e/x";
+const REC: &str = "[sets.txst]\nplugin = \"Skyrim.esm\"\nformid = \"000800\"\nedid = \"MyBody\"\n\
+    slot1 = \"textures/s/e/femalebody.dds\"\nslot2 = \"textures/s/body_n.dds\"\n";
+const M_FILES: &[&str] = &[
+    "textures/s/e/x.png",
+    "textures/s/e/x_n.png",
+    "textures/s/e/x_rfaos.png",
+    "textures/s/e/x_wet.png",
+];
+
+fn skin_set(id: &str, extra: &str) -> String {
+    format!("[[sets]]\nid = \"{id}\"\nshader = \"advanced_skin\"\n{extra}")
+}
+
+fn mapped(dir: &Path, extra: &str) -> AppModel {
+    project_toml(dir, M_FILES, &(skin_set(M, extra) + REC))
+}
+
+fn out(m: &AppModel, key: &str) -> String {
+    m.item(key)
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|| panic!("no job for {key}"))
+}
+
+fn record(slots: &[(u8, &str)]) -> TxstMap {
+    TxstMap {
+        plugin: "Skyrim.esm".into(),
+        formid: "000800".into(),
+        edid: "MyBody".into(),
+        slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+    }
+}
+
+fn entry(m: &AppModel, id: &str) -> sdc_gui::sets_doc::SetEntry {
+    m.sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| engine::sets::same_id(&e.id, id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no entry {id}"))
+}
+
+#[test]
+fn a_file_writes_to_its_records_path() {
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped(d.path(), "");
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/femalebody.dds"));
+    assert!(out(&m, "textures/s/e/x_n.png").ends_with("/textures/s/body_n.dds"));
+    assert_eq!(
+        engine_inputs(&m)
+            .1
+            .get(&OutputKey::File("textures/s/e/x.png".into())),
+        Some(&std::path::PathBuf::from("textures/s/e/femalebody.dds"))
+    );
+}
+
+#[test]
+fn the_material_file_follows_the_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped(d.path(), "");
+    let rows = skin_json_plan(&m).0;
+    let row = rows.iter().find(|r| r.0 == M).expect("a plan row");
+    let json = row.2.to_string_lossy().replace('\\', "/");
+    assert!(
+        json.ends_with("/textures/s/e/femalebody.csskin.json"),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_file_with_no_record_slot_keeps_its_path() {
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped(d.path(), "");
+    assert!(out(&m, "textures/s/e/x_rfaos.png").ends_with("/textures/s/e/x_rfaos.dds"));
+    assert!(out(&m, "textures/s/e/x_wet.png").ends_with("/textures/s/e/x_wet.dds"));
+    let d2 = tempfile::tempdir().unwrap();
+    let plain = project_toml(d2.path(), M_FILES, &skin_set(M, ""));
+    let texts =
+        |m: &AppModel| -> Vec<String> { problems(m).iter().map(|p| p.text.clone()).collect() };
+    assert_eq!(texts(&m), texts(&plain), "no new warning");
+}
+
+#[test]
+fn a_packed_output_follows_slot_six() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = "[[sets]]\nid = \"textures/s/q\"\nshader = \"advanced_skin\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"Q\"\n\
+        slot6 = \"textures/s/z_rfaos.dds\"\n";
+    let m = project_toml(
+        d.path(),
+        &["textures/s/q.png", "textures/s/q_roughness.png"],
+        toml,
+    );
+
+    let packed = m
+        .items
+        .iter()
+        .find(|i| i.kind == sdc_gui::model::items::ItemKind::Packed)
+        .expect("a packed output");
+    let o = packed
+        .job
+        .as_ref()
+        .unwrap()
+        .output
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(o.ends_with("/textures/s/z_rfaos.dds"), "{o}");
+}
+
+#[test]
+fn the_record_beats_output_name() {
+    let d = tempfile::tempdir().unwrap();
+    // `output_name` belongs to the set table, so it goes before `[sets.txst]`.
+    let toml = skin_set(M, "output_name = \"steel\"\n") + REC;
+    let m = project_toml(d.path(), M_FILES, &toml);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/femalebody.dds"));
+    assert!(out(&m, "textures/s/e/x_rfaos.png").ends_with("/textures/s/e/steel_rfaos.dds"));
+}
+
+#[test]
+fn an_input_name_is_untouched() {
+    use sdc_gui::model::rename::{plan_rename, RenameDialog, RenameMode};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path(), M_FILES);
+    let mut dlg = RenameDialog {
+        mode: RenameMode::Inputs,
+        keys: view(&m, M).members.clone(),
+        ..RenameDialog::default()
+    };
+    dlg.recipe.suffix = "2".into();
+    let _ = plan_rename(&m, &dlg);
+    m.dialog = Some(sdc_gui::model::Dialog::Rename(dlg));
+    assert!(m.apply_rename());
+    idle(&mut m);
+    let key = "textures/s/e/x_rfaos.png";
+    let alias = m.read_as_of(key);
+    assert_eq!(alias.as_deref(), Some("textures/s/e/x2_rfaos.png"));
+    let id = set_views(&m)
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k == key))
+        .unwrap()
+        .id;
+    m.map_record(&id, record(&[(1, "textures/s/e/femalebody.dds")]))
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(m.read_as_of(key), alias);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("femalebody.dds"));
+}
+
+#[test]
+fn two_sets_on_one_record_path_are_a_collision() {
+    let d = tempfile::tempdir().unwrap();
+    let rec = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"textures/s/same.dds\"\n";
+    let toml = format!(
+        "{}{rec}{}{rec}",
+        skin_set("textures/s/a", ""),
+        skin_set("textures/s/b", "")
+    );
+    let m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
+    let rows = path_collisions(&m);
+    assert!(rows.iter().any(|r| r.text.contains("same.dds")), "{rows:?}");
+    let n = engine_inputs(&m)
+        .1
+        .values()
+        .filter(|p| p.ends_with("same.dds"))
+        .count();
+    assert_eq!(n, 1, "the engine sees one of them");
+}
+
+#[test]
+fn a_pbr_set_ignores_its_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    let before = engine_inputs(&m).1;
+    let out_before = out(&m, "landscape/rock01.png");
+    let map = record(&[(1, "textures/landscape/zzz.dds")]);
+    m.edit_docs("map", None, true, |_, s| {
+        s.set_txst("landscape/rock01", Some(&map))
+    });
+    idle(&mut m);
+    assert!(entry(&m, "landscape/rock01").txst.is_some());
+    assert_eq!(engine_inputs(&m).1, before);
+    assert_eq!(out(&m, "landscape/rock01.png"), out_before);
+}
+
+#[test]
+fn a_bad_record_path_is_never_written() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = skin_set(M, "") + "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot2 = \"meshes/x.nif\"\n";
+    let m = project_toml(d.path(), M_FILES, &toml);
+    assert!(out(&m, "textures/s/e/x_n.png").ends_with("/textures/s/e/x_n.dds"));
+}
+
+/// Pin: the mapping is read from the project file, not from a scan.
+#[test]
+fn a_mapping_survives_an_empty_scan() {
+    let d = tempfile::tempdir().unwrap();
+    let m = mapped(d.path(), "");
+    assert!(out(&m, "textures/s/e/x.png").ends_with("femalebody.dds"));
+}
+
+#[test]
+fn undoing_a_mapping_restores_the_names() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path(), M_FILES);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/x.dds"));
+    m.map_record(M, record(&[(1, "textures/s/e/femalebody.dds")]))
+        .unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("femalebody.dds"));
+    m.undo();
+    idle(&mut m);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/x.dds"));
+    assert!(entry_opt(&m, M).is_none_or(|e| e.txst.is_none()));
+    m.redo();
+    idle(&mut m);
+    m.unmap_record(M).unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/x.dds"));
+}
+
+fn entry_opt(m: &AppModel, id: &str) -> Option<sdc_gui::sets_doc::SetEntry> {
+    m.sets_doc
+        .as_ref()?
+        .entries()
+        .iter()
+        .find(|e| engine::sets::same_id(&e.id, id))
+        .cloned()
+}
+
+#[test]
+fn a_renamed_set_keeps_its_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = mapped(d.path(), "");
+    m.rename_set(M, "textures/s/e/renamed").unwrap();
+    idle(&mut m);
+    let e = entry(&m, "textures/s/e/renamed");
+    assert_eq!(e.txst.unwrap().edid, "MyBody");
+}
+
+#[test]
+fn a_mapping_round_trips_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    let map = record(&[(1, "textures/a/b.dds"), (6, "textures/a/b_rmaos.dds")]);
+    s.set_txst("a/x", Some(&map));
+    s.save(false).unwrap();
+    let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
+    let mut s = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    assert_eq!(s.entries()[0].txst.as_ref(), Some(&map));
+    s.set_txst("a/x", Some(&map));
+    s.save(false).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn no_fill_round_trips() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    s.set_no_fill("a/x", 2, true);
+    s.save(false).unwrap();
+    let mut s = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    assert_eq!(
+        s.entries()[0].no_fill.iter().copied().collect::<Vec<_>>(),
+        [2]
+    );
+    s.set_no_fill("a/x", 2, false);
+    s.save(false).unwrap();
+    let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
+    assert!(!text.contains("no_fill"), "{text}");
+}
 /// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test txst_map -- --ignored render_`: the card and the editor of the
 /// shared set at 1100, 1280 and 1600 px wide.
 #[test]

@@ -2,6 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
+use super::txst_map::record_paths;
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
@@ -1095,7 +1096,7 @@ fn output_suffix(item: &TextureItem, slot: SlotKind) -> &'static str {
 }
 
 /// The recipe suffix of a packed item (`rmaos`, `rfaos`, `p`, `m`).
-fn recipe_suffix(i: &TextureItem) -> Option<String> {
+pub(super) fn recipe_suffix(i: &TextureItem) -> Option<String> {
     let pk = i.job.as_ref()?.pack.as_ref()?;
     Some(pk.kind.suffix().to_string())
 }
@@ -1132,8 +1133,11 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
     let named = output_name_paths(m, &views);
+    // Note HG: a mapped set's record paths beat its output name.
+    let record = record_paths(m, &views);
     if m.target != Target::Cs {
         paths.extend(named);
+        paths.extend(record);
         return (edits, paths);
     }
     let candidates = output_candidates(m, &views);
@@ -1142,6 +1146,7 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     // `path_collisions` reports it.
     let mut explicit: BTreeSet<&OutputKey> = candidates.iter().map(|(_, c, _)| c).collect();
     explicit.extend(named.iter().map(|(c, _)| c));
+    explicit.extend(record.iter().map(|(c, _)| c));
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
     let owners = packed_owners(&views);
     let mirrored: BTreeSet<String> = m
@@ -1166,6 +1171,13 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         // both as IN-DUPLICATE, the sets would stop being PBR sets, the paths would vanish, and the two-pass planning
         // would flip between two plans.)
         if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+            paths.insert(key, rel);
+        }
+    }
+    // The same checks, then the record path replaces any other value for its key.
+    for (key, rel) in record {
+        let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+        if !mirrored.contains(&low) && seen.insert(low) {
             paths.insert(key, rel);
         }
     }
@@ -1403,14 +1415,17 @@ pub(crate) mod linear {
         let mut paths = BTreeMap::new();
         let views = views(m);
         let named = output_name_paths(m, &views);
+        let record = record_paths(m, &views);
         if m.target != Target::Cs {
             paths.extend(named);
+            paths.extend(record);
             return (edits, paths);
         }
         let candidates = output_candidates(m, &views);
         let explicit = |k: &OutputKey| {
             candidates.iter().any(|(_, c, _)| c == k)
                 || named.iter().any(|(c, _)| c == k)
+                || record.iter().any(|(c, _)| c == k)
                 || m.last_inputs
                     .as_ref()
                     .is_some_and(|l| l.output_paths.contains_key(k))
@@ -1432,6 +1447,12 @@ pub(crate) mod linear {
                 continue;
             }
             if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+                paths.insert(key, rel);
+            }
+        }
+        for (key, rel) in record {
+            let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+            if !mirrored.contains(&low) && seen.insert(low) {
                 paths.insert(key, rel);
             }
         }
@@ -1508,7 +1529,7 @@ pub enum SlotCommand {
     Clear,
 }
 
-const READ_ONLY: &str = "sdc-project.toml is read-only";
+pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
 const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.

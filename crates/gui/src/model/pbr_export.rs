@@ -6,6 +6,7 @@ use super::sets::{
     engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
     set_views, SetView, SlotFill, SlotKind,
 };
+use super::txst_map::record_entries;
 use super::AppModel;
 use crate::pgp::prefix::{
     check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
@@ -412,7 +413,11 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
             .map(|v| v.key.clone())
             .unwrap_or_default()
     };
-    let candidates = output_candidates(m, &views);
+    // Note HG: a record path replaces any other path for its key.
+    let record = record_entries(m, &views);
+    let mut candidates = output_candidates(m, &views);
+    candidates.retain(|(_, k, _)| !record.iter().any(|(_, r, _)| r == k));
+    candidates.extend(record);
     let mut seen: BTreeMap<String, (String, OutputKey)> = BTreeMap::new();
     let mut out = vec![];
     for (owner, k, p) in &candidates {
