@@ -1249,24 +1249,6 @@ impl NifEdit {
         self.drag = merge.clone().map(|k| (k, n + usize::from(lead)));
         let label = ops.first().map(op_name).unwrap_or_default();
         self.history.record(self.doc.to_text(), &label, merge);
-        // Note CU1: a rename of the picked clip keeps it picked (the block stays; its name follows)
-        if let Playing::Clip(seq) = self.playing {
-            for op in &ops {
-                if let Op::RenameSequence {
-                    name,
-                    nth,
-                    new_name,
-                    ..
-                } = op
-                {
-                    if nif::edit::clip_key(&self.patched, &self.model, seq)
-                        == Some((name.clone(), *nth))
-                    {
-                        self.playing_name = Some(new_name.clone());
-                    }
-                }
-            }
-        }
         let mut old: Vec<DocOp> = match same_drag {
             true => self.doc.ops.split_off(self.doc.ops.len() - tail),
             false => vec![],
@@ -1343,24 +1325,7 @@ impl NifEdit {
         self.restore(t)
     }
 
-    /// The later SetSequenceTiming ops on the clip op `i` adds (AddSequence, Convert): reverting `i` drops them too
-    /// (Note GD8, CR6). Clip names are unique on a manager ignoring ASCII case, so the name finds the clip.
-    // shortcut: a Rename between the two leaves the timing op to conflict after the revert; follow renames if users
-    // rename and retime a new clip and then revert it.
-    pub fn timing_dependents(&self, i: usize) -> Vec<usize> {
-        let added = match self.doc.ops.get(i).map(|d| &d.op) {
-            Some(Op::AddSequence { name, .. } | Op::ConvertChainToClips { name, .. }) => name,
-            _ => return vec![],
-        };
-        (i + 1..self.doc.ops.len())
-            .filter(|&k| {
-                matches!(&self.doc.ops[k].op, Op::SetSequenceTiming { name, .. }
-                    if name.eq_ignore_ascii_case(added))
-            })
-            .collect()
-    }
-
-    /// Drops op `i`, and the clip timing that goes with it (one undo step).
+    /// Drops op `i` (one undo step).
     pub fn revert(&mut self, i: usize) {
         if i >= self.doc.ops.len() {
             return;
@@ -1368,9 +1333,6 @@ impl NifEdit {
         self.drag = None;
         let label = format!("Revert: {}", op_name(&self.doc.ops[i].op));
         self.history.record(self.doc.to_text(), &label, None);
-        for k in self.timing_dependents(i).into_iter().rev() {
-            self.doc.ops.remove(k);
-        }
         self.doc.ops.remove(i);
         self.reapply();
         self.save();
