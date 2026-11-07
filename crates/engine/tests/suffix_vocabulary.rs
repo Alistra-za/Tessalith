@@ -82,6 +82,7 @@ fn resolve_img(
         key: "textures/armor/iron".into(),
         members: vec![0],
         suffixes,
+        shared_skin: false,
     };
     let a = analyse(img, info);
     resolve_file(

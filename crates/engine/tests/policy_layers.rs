@@ -62,6 +62,7 @@ fn explicit_set_decides_subtype_and_beats_presets() {
         key: "x".into(),
         members: vec![0],
         suffixes: ["n".to_string()].into(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -93,6 +94,7 @@ fn suggestions_decide_only_when_high_and_accepted() {
         key: "x".into(),
         members: vec![0],
         suffixes: ["rmaos".to_string()].into(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -171,6 +173,7 @@ fn rules_and_project_config_layer_in_order() {
         key: "i".into(),
         members: vec![0],
         suffixes: BTreeSet::new(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -205,6 +208,7 @@ fn set_scopes_rank_above_command_line_order() {
         key: "x".into(),
         members: vec![0],
         suffixes: ["n".to_string()].into(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -302,6 +306,7 @@ fn content_of(
         key: "x".into(),
         members: vec![0],
         suffixes: [suffix.to_string()].into(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -463,6 +468,7 @@ fn every_matching_rule_of_a_source_layers_in_file_order() {
         key: "i".into(),
         members: vec![0],
         suffixes: BTreeSet::new(),
+        shared_skin: false,
     };
     let facts = FileFacts {
         input: &f,
@@ -510,6 +516,7 @@ fn two_channel_dds_normal_turns_on_reconstruct_z() {
             key: "x".into(),
             members: vec![0],
             suffixes: ["n".to_string()].into(),
+            shared_skin: false,
         };
         let facts = FileFacts {
             input: &f,

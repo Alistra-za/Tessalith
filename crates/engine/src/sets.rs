@@ -102,6 +102,7 @@ pub fn apply_set_edits(
                         key: set_key(output_root, set),
                         members: vec![],
                         suffixes: BTreeSet::new(),
+                        shared_skin: false,
                     });
                     Ok(())
                 }
@@ -152,6 +153,7 @@ pub fn apply_set_edits(
                         key,
                         members: vec![f],
                         suffixes: BTreeSet::new(),
+                        shared_skin: false,
                     });
                     Ok(())
                 }

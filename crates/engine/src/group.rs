@@ -242,6 +242,8 @@ pub struct TextureSet {
     pub members: Vec<usize>,
     /// Recognised suffixes present in the set (lower-case; the colour member has none).
     pub suffixes: BTreeSet<String>,
+    /// Note HG: maps other skin sets use; no colour member. Set by `mark_shared_skin`.
+    pub shared_skin: bool,
 }
 
 /// A path compared case-insensitively: '/'-separated and lower-cased.
@@ -276,6 +278,7 @@ pub fn group_sets_with(
             key,
             members: vec![],
             suffixes: BTreeSet::new(),
+            shared_skin: false,
         });
         set.members.push(i);
         if let Some(s) = suffix {
@@ -497,6 +500,53 @@ pub fn join_skin_detail(
         }
     }
     sets.retain(|s| !s.members.is_empty());
+}
+
+fn stem_of(f: &InputFile) -> String {
+    f.rel
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) whose members are all `_n` or `_sk`
+/// has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs before the `_wet` and
+/// `_detail_n` joins, which add members a shared set may hold.
+pub fn mark_shared_skin(
+    sets: &mut [TextureSet],
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+    explicit: &BTreeMap<String, crate::shader::Shader>,
+) {
+    for s in sets.iter_mut() {
+        s.shared_skin = explicit.get(&s.key) == Some(&crate::shader::Shader::AdvancedSkin)
+            && !s.members.is_empty()
+            && s.members.iter().all(|&i| {
+                matches!(
+                    split_suffix_with(&stem_of(&files[i]), aliases)
+                        .suffix
+                        .as_deref(),
+                    Some("n" | "sk")
+                )
+            });
+    }
+}
+
+/// Note HG2: after set edits a shared set that gained another kind of member (a colour map, say), or holds nothing,
+/// is shared no longer. Uses [`member_split`]: a joined `x_wet` has no suffix of its own.
+pub fn unmark_shared_after_edits(
+    sets: &mut [TextureSet],
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+) {
+    for s in sets.iter_mut().filter(|s| s.shared_skin) {
+        s.shared_skin = !s.members.is_empty()
+            && s.members.iter().all(|&i| {
+                let suffix = member_split(&stem_of(&files[i]), s, aliases).suffix;
+                matches!(suffix.as_deref(), Some("n" | "sk" | SKIN_WET | SKIN_DETAIL))
+            });
+    }
 }
 
 /// Groups of two or more inputs that map to one output path, compared case-insensitively, among the inputs

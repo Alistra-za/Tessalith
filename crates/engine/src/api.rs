@@ -1222,20 +1222,26 @@ pub(crate) fn join_members(
     aliases: &BTreeMap<String, String>,
     ctx: &ResolveCtx,
     hand: &[Option<crate::helper::HelperRole>],
+    explicit: &BTreeMap<String, Shader>,
 ) {
     // Note DY: a hand-set helper with no recognised suffix (`x_mask`) joins set `x` when it exists.
     crate::group::join_helpers(sets, files, aliases, |i| {
         hand[i].is_some_and(|r| r != crate::helper::HelperRole::NotHelper)
     });
     // Final review I3 (DECISIONS Note R): `x_wet` joins set `x` as its skin `_wet` member only on cs and only
-    // when `x` is Advanced skin. Before set edits, so they see the joined set like any automatic one.
-    // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here; move the explicit shaders up
-    // if such a project needs its `_wet` joined.
+    // when `x` is Advanced skin: shared (Note HG2), explicitly chosen, or by its maps. Before set edits, so they see
+    // the joined set like any automatic one.
     if ctx.target == Target::Cs {
+        crate::group::mark_shared_skin(sets, files, aliases, explicit);
         let is_skin = |s: &TextureSet| {
-            s.members
-                .first()
-                .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
+            s.shared_skin
+                || match explicit.get(&s.key) {
+                    Some(x) => *x == Shader::AdvancedSkin,
+                    None => s
+                        .members
+                        .first()
+                        .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i])),
+                }
         };
         join_skin_wet(sets, files, aliases, is_skin);
         join_skin_detail(sets, files, aliases, is_skin);
@@ -1569,7 +1575,15 @@ impl Engine {
         // The skeleton keeps the grouping before the joins, so a patch can rerun them (fast re-plan).
         let grouped = sets.clone();
         drop_typed_roles(&mut sets, &files, &typed);
-        join_members(&mut sets, &files, registry.alias_table(), &ctx, &hand);
+        let (explicit, _) = explicit_shaders(req, &sets);
+        join_members(
+            &mut sets,
+            &files,
+            registry.alias_table(),
+            &ctx,
+            &hand,
+            &explicit,
+        );
         let joined = sets.clone();
         let stale = crate::sets::apply_set_edits(
             &mut sets,
@@ -1581,6 +1595,7 @@ impl Engine {
         );
         // A touched set's suffixes were rebuilt from its members' names.
         drop_typed_roles(&mut sets, &files, &typed);
+        crate::group::unmark_shared_after_edits(&mut sets, &files, registry.alias_table());
         for s in &stale {
             rep.emit(
                 None,
@@ -2787,16 +2802,19 @@ impl Engine {
             let mut warnings = vec![];
             if let Some(p) = &pick {
                 warnings = crate::shader::pick_notes(p, target);
-                let maps = map_members(
-                    &ctx,
-                    set,
-                    files,
-                    &index,
-                    &skipped,
-                    registry.alias_table(),
-                    target,
-                );
-                warnings.extend(crate::shader::check_maps(p, target, &maps));
+                // Note HG2: a shared set holds only the maps other skin sets use, so no map is missing or extra.
+                if !set.shared_skin {
+                    let maps = map_members(
+                        &ctx,
+                        set,
+                        files,
+                        &index,
+                        &skipped,
+                        registry.alias_table(),
+                        target,
+                    );
+                    warnings.extend(crate::shader::check_maps(p, target, &maps));
+                }
             }
             rep.emit(
                 Some(&set.key),

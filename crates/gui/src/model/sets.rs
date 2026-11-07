@@ -1156,6 +1156,7 @@ pub fn member_tail(stem: &str, skin: bool) -> &str {
         } else {
             BTreeSet::new()
         },
+        shared_skin: false,
     };
     let base = member_split(stem, &set, &BTreeMap::new()).base;
     // The base is a prefix of `stem`, so the cut is on a char boundary.

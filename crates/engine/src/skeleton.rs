@@ -338,14 +338,18 @@ impl Skeleton {
             // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
             let mut joined = p.grouped.clone();
             drop_typed_roles(&mut joined, &p.files, &typed);
+            let explicit = explicit_shaders(&next.prepared.req, &joined).0;
             join_members(
                 &mut joined,
                 &p.files,
                 p.registry.alias_table(),
                 &new_ctx,
                 &p.hand,
+                &explicit,
             );
-            let same = |a: &TextureSet, b: &TextureSet| a.key == b.key && a.members == b.members;
+            let same = |a: &TextureSet, b: &TextureSet| {
+                a.key == b.key && a.members == b.members && a.shared_skin == b.shared_skin
+            };
             if joined.len() != p.joined.len()
                 || !joined.iter().zip(&p.joined).all(|(a, b)| same(a, b))
             {
@@ -751,6 +755,42 @@ mod tests {
             Some(NeedsFull(GLOBAL_CHANGE))
         );
         assert!(Skeleton::patch_sig(Some(&s), sig, &[]).is_ok());
+    }
+
+    /// Note HG2: a shader choice that makes a colourless set shared changes no member, only the flag, and still plans
+    /// in full. A request's shader choice is part of its signature, so this edits the kept request as a patch would
+    /// see it after a shader change.
+    #[test]
+    fn a_shader_edit_that_makes_a_shared_set_needs_a_full_plan() {
+        let fx = fast_fixture();
+        for f in ["w_normal", "w_sk"] {
+            image::RgbImage::new(16, 16)
+                .save(fx.dir.path().join(format!("in/dir/{f}.png")))
+                .unwrap();
+        }
+        let s = skeleton(&fx.req);
+        let mut shaded = s.clone();
+        shaded
+            .prepared
+            .req
+            .set_shaders
+            .insert("dir/w".into(), crate::shader::Shader::AdvancedSkin);
+        assert_eq!(
+            shaded
+                .patch(&[(
+                    "dir/w_sk.png".into(),
+                    Some(table("alpha.policy = \"cutout\""))
+                )])
+                .err(),
+            Some(NeedsFull(MEMBERSHIP_CHANGE))
+        );
+        // Without the choice the same edit patches.
+        assert!(s
+            .patch(&[(
+                "dir/w_sk.png".into(),
+                Some(table("alpha.policy = \"cutout\""))
+            )])
+            .is_ok());
     }
 
     #[test]

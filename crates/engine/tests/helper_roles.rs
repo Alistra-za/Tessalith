@@ -305,6 +305,7 @@ fn hand_role_warning_points_to_none() {
         key: "textures/a/x_mask".into(),
         members: vec![0],
         suffixes: Default::default(),
+        shared_skin: false,
     };
     let img = engine::image::Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 1.0]);
     let info = engine::image::SourceInfo {
