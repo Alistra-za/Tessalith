@@ -297,6 +297,12 @@ pub const REMOVED: &[Removed] = &[
         since: "2.0",
     },
     Removed {
+        key: "allow",
+        value: Some("GEN-STALE"),
+        hint: "GEN-STALE was removed in 3.0 (Tessalith no longer generates maps); delete it from the list",
+        since: "3.0",
+    },
+    Removed {
         key: "resize",
         value: Some("pot-down"),
         hint: "the power of two is automatic; delete the key",

@@ -1336,6 +1336,25 @@ fn removed_check_codes_in_allow_lists_are_named() {
     assert!(Code::parse_allow("CHK-PARALLAX").is_ok());
 }
 
+/// Note GV2: GEN-STALE went with the solver. An allow list that names it gets the 3.0 removal message from config,
+/// `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn gen_stale_in_allow_is_refused() {
+    assert!(
+        Code::parse("GEN-STALE").is_none(),
+        "GEN-STALE is still a code"
+    );
+    let e = ConfigFile::parse("allow = [\"GEN-STALE\"]\n", "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("removed in 3.0"), "{e}");
+    let e = Code::parse_allow("GEN-STALE").unwrap_err();
+    assert!(
+        e.contains("GEN-STALE") && e.contains("removed in 3.0"),
+        "{e}"
+    );
+    let e = engine::overrides::parse_set("allow=[\"GEN-STALE\"]").unwrap_err();
+    assert!(e.contains("removed in 3.0"), "{e}");
+}
+
 /// Trace-debug #15: a quoted dotted key under `[files."x"]` used to pass the field check and then read as null (the
 /// value silently dropped). It is refused with the way to write it; the unquoted form still works.
 #[test]

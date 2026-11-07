@@ -3,10 +3,17 @@
 //! Check 3 (fake resolution) is measured on the export chain instead: [`detail_ratio`], [`low_detail_eligible`].
 use crate::analyse::{code8, AnalyseHints};
 use crate::config::{Category, MipKeyword, MipLevels, Profile, ResizeMode, Subtype};
-use crate::from_normal::texel_slope;
 use crate::image::Rgba32F;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Image-space slopes `(p, q)` (y down) of a stored normal, DirectX green: x and y decoded from R and G, z rebuilt
+/// (B is ignored, so BC5's zero blue reads like BC1/3/7) and clamped to at least 0.1. Used by [`curl`].
+pub(crate) fn texel_slope(px: [f32; 4]) -> (f64, f64) {
+    let (x, y) = (f64::from(px[0]) * 2.0 - 1.0, f64::from(px[1]) * 2.0 - 1.0);
+    let z = (1.0 - x * x - y * y).max(0.0).sqrt().max(0.1);
+    (-x / z, -y / z)
+}
 
 /// A neighbour step of this many codes or more is steep.
 pub const STEEP_CODES: u8 = 32;

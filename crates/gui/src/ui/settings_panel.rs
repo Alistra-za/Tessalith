@@ -1147,7 +1147,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         item.kind,
         item.status.clone(),
     );
-    // The texture's own list shows its check results, Info included (preflight K5, X3), and GEN-STALE (Note CO).
+    // The texture's own list shows its check results, Info included (preflight K5, X3).
     let (decisions, warnings, job) = (
         item.decisions.clone(),
         model.item_messages(key),

@@ -1280,3 +1280,26 @@ fn a_curves_member_changes_the_vanilla_diffuse() {
     };
     assert_ne!(diffuse(false), diffuse(true));
 }
+
+/// Note GV2: a `_curves_generated` file (written by Tessalith 2.x) is still a source; the Also export reads it as the
+/// set's `_curves`. A pin of existing behaviour: the engine no longer writes such files.
+#[test]
+fn curves_generated_reaches_also() {
+    let diffuse = |curves: bool| {
+        let (_d, m, loc) = project(|m| {
+            steel(m);
+            if curves {
+                png(
+                    &m.join("textures/pbr/arm/steel_curves_generated.png"),
+                    16,
+                    16,
+                    [240, 240, 240, 255],
+                );
+            }
+        });
+        let (s, _ev) = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]));
+        assert_eq!(s.unwrap().exit_code(), 0);
+        std::fs::read(loc.join("Mod Vanilla/textures/arm/steel.dds")).unwrap()
+    };
+    assert_ne!(diffuse(false), diffuse(true));
+}

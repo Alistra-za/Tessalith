@@ -144,7 +144,6 @@
         "DERIVE-NIF-SUGGEST",
         "ALSO-PHASE-FAILED",
         "GEN-REPLACED",
-        "GEN-STALE",
         "GEN-AO",
         "CUBE-FACES",
         "CUBE-NO-MIPS"
