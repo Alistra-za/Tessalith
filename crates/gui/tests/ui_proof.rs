@@ -789,3 +789,41 @@ fn painted_only_matches_whole_words_and_skips_glyphs() {
     );
     assert_eq!(p[0].subject.label, "N");
 }
+
+/// run.json `size` is where the run started and `final_size` where it ended. Needs the ui_drive exe (built by
+/// `cargo test --test ui_drive --no-run`) and a GPU, so it is opt-in.
+#[test]
+#[ignore = "needs the built ui_drive exe and a GPU"]
+fn run_json_records_the_start_size_and_the_final_size() {
+    let deps = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let exe = std::fs::read_dir(&deps)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let n = p.file_name().unwrap().to_string_lossy().into_owned();
+            n.starts_with("ui_drive-") && n.ends_with(".exe")
+        })
+        .max_by_key(|p| p.metadata().unwrap().modified().unwrap())
+        .expect("no ui_drive exe; run `cargo test --test ui_drive --no-run`");
+    let d = tempfile::tempdir().unwrap();
+    let script = d.path().join("steps.jsonl");
+    std::fs::write(&script, "{\"op\":\"resize\",\"w\":1100,\"h\":700}\n").unwrap();
+    let out = d.path().join("out");
+    let status = std::process::Command::new(exe)
+        .args(["--fixture", "demo", "--size", "1300x800", "--script"])
+        .arg(&script)
+        .arg("--out")
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "ui_drive exited {status}");
+    let run: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("run.json")).unwrap()).unwrap();
+    assert_eq!(run["size"], serde_json::json!([1300.0, 800.0]));
+    assert_eq!(run["final_size"], serde_json::json!([1100.0, 700.0]));
+}

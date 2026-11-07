@@ -39,7 +39,7 @@
 //! Output in --out: `00` is the settled start, `NN` follows step NN. Per frame `NN.tree.txt` (the AccessKit tree, with
 //! focused/disabled/hovered/clipped/offscreen marks), `NN.state.json`, `NN.checks.json` (the mechanical checks of
 //! checks.rs plus a `filter` finding for a check step's note) and `NN.png`; run.json `findings` counts them per check. `steps.jsonl` is the script;
-//! `run.json` holds {fixture, size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms,
+//! `run.json` holds {fixture, size (at the start, after --size), final_size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms,
 //! error, note}], dialogs, shell: [{step, request}], goal}. `ms_fixture` is the fixture build, app start and first settle. Screenshots are comparable with the doc shots only when the adapter is the
 //! one in shots.toml; the driver says so when it is not.
 
@@ -235,6 +235,7 @@ fn run(a: Args) -> Result<i32, String> {
         h.set_size(eframe::egui::vec2(w, hh));
         settle(&mut h, 4);
     }
+    let start = h.ctx.content_rect().size(); // run.json `size`: what -Replay and -Collect start from
     let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
     let light = a.light.unwrap_or(render.theme == "light");
     if a.light.is_some() {
@@ -312,10 +313,11 @@ fn run(a: Args) -> Result<i32, String> {
     if let Some(e) = &start_error {
         eprintln!("ui_drive: frame 00 not written: {e}");
     }
-    let s = h.ctx.content_rect().size();
+    let end = h.ctx.content_rect().size();
     let summary = json!({
         "fixture": a.fixture,
-        "size": [s.x, s.y],
+        "size": [start.x, start.y],
+        "final_size": [end.x, end.y],
         "theme": if light { "light" } else { "dark" },
         "adapter": adapter,
         "comparable": comparable,
