@@ -1017,3 +1017,482 @@ fn render_shared_set_shots() {
             .unwrap();
     }
 }
+
+// ---- Task 5: record slots fill from the project (Note HG) ----
+
+use sdc_gui::model::bulk::MenuAction;
+use sdc_gui::model::sets::SlotFill;
+
+const R_FILES: &[&str] = &[
+    "textures/s/x_normal.png",
+    "textures/s/x_sk.png",
+    "textures/s/x_wet.png",
+    "textures/s/e/x.png",
+    "textures/s/e/x_rfaos.png",
+];
+const OTHER: &str = "textures/s/o";
+const BODY_N: &str = "textures/s/body_n.dds";
+
+fn txst(slots: &[(u8, &str)]) -> String {
+    let mut s = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\n".to_string();
+    for (n, p) in slots {
+        s += &format!("slot{n} = \"{p}\"\n");
+    }
+    s
+}
+
+/// Fixture R: the shared-map set `H` (`X`) and the skin set `C` (`M`), both mapped to the same body record, `C` with
+/// slot 8 as well. `h` and `c` are extra lines for each set's table.
+fn r_toml(h: &str, c: &str) -> String {
+    let h_rec = txst(&[
+        (1, "textures/s/e/femalebody.dds"),
+        (2, BODY_N),
+        (3, "textures/s/body_sk.dds"),
+    ]);
+    let c_rec = txst(&[
+        (1, "textures/s/e/femalebody.dds"),
+        (2, BODY_N),
+        (3, "textures/s/body_sk.dds"),
+        (8, "textures/s/e/body_s.dds"),
+    ]);
+    format!(
+        "[[sets]]\nid = \"{X}\"\n{h}{h_rec}[[sets]]\nid = \"{M}\"\nshader = \"advanced_skin\"\n{c}{c_rec}"
+    )
+}
+
+fn r_with(dir: &Path, files: &[&str], h: &str, c: &str) -> AppModel {
+    project_toml(dir, files, &r_toml(h, c))
+}
+
+fn r(dir: &Path) -> AppModel {
+    r_with(dir, R_FILES, "", "")
+}
+
+fn borrowed_from(v: &SetView, k: SlotKind) -> Option<String> {
+    match v.slots.get(&k) {
+        Some(SlotFill::Borrowed { from, .. }) => Some(from.clone()),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_record_slot_another_set_writes_is_borrowed() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let c = view(&m, M);
+    assert_eq!(borrowed_from(&c, SlotKind::Normal).as_deref(), Some(X));
+    assert_eq!(borrowed_from(&c, SlotKind::SkinSk).as_deref(), Some(X));
+    assert!(c.filled.contains_key(&2) && c.filled.contains_key(&3));
+}
+
+#[test]
+fn a_fill_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    let before = std::fs::read(d.path().join("sdc-project.toml")).unwrap();
+    assert!(!view(&m, M).filled.is_empty());
+    m.save().unwrap();
+    assert_eq!(
+        std::fs::read(d.path().join("sdc-project.toml")).unwrap(),
+        before
+    );
+    assert_eq!(before, r_toml("", "").as_bytes());
+}
+
+#[test]
+fn one_normal_is_written() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let paths = engine_inputs(&m).1;
+    let n = paths
+        .values()
+        .filter(|p| p.to_string_lossy().replace('\\', "/") == BODY_N)
+        .count();
+    assert_eq!(n, 1, "{paths:?}");
+    // C's rfaos bakes from the borrowed normal, so the engine is told about the borrow.
+    assert_eq!(
+        sdc_gui::model::sets::borrowed_normal(&m)
+            .get(M)
+            .map(String::as_str),
+        Some(X)
+    );
+    let mut outs = m.items.iter().filter_map(|i| i.job.as_ref()).filter(|j| {
+        j.output
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("/textures/s/body_n.dds")
+    });
+    assert!(outs.next().is_some() && outs.next().is_none());
+}
+
+#[test]
+fn a_record_slot_nothing_writes_is_supplied() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let c = view(&m, M);
+    assert_eq!(
+        c.record_supplied.get(&8).map(String::as_str),
+        Some("textures/s/e/body_s.dds")
+    );
+    assert!(!c.filled.contains_key(&8));
+    assert!(c.slots.keys().all(|k| k.slot_number() != Some(8)));
+}
+
+/// A vanilla set with no `_n` and a record naming a slot-2 path: the missing-map warning goes with no scan.
+#[test]
+fn a_supplied_slot_clears_its_missing_map() {
+    let d = tempfile::tempdir().unwrap();
+    let plain = project_toml(
+        d.path(),
+        &["textures/v/a.png"],
+        "[[sets]]\nid = \"textures/v/a\"\nshader = \"pbr_landscape\"\n",
+    );
+    let warned = |m: &AppModel| {
+        view(m, "textures/v/a")
+            .set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")
+    };
+    assert!(
+        warned(&plain),
+        "{:?}",
+        view(&plain, "textures/v/a").set_warnings
+    );
+    let d2 = tempfile::tempdir().unwrap();
+    let toml = format!(
+        "[[sets]]\nid = \"textures/v/a\"\nshader = \"pbr_landscape\"\n{}",
+        txst(&[(2, "textures/black.dds")])
+    );
+    let m = project_toml(d2.path(), &["textures/v/a.png"], &toml);
+    let v = view(&m, "textures/v/a");
+    assert!(v.record_supplied.contains_key(&2));
+    assert!(!warned(&m), "{:?}", v.set_warnings);
+}
+
+#[test]
+fn colour_is_never_borrowed() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let h = view(&m, X);
+    assert!(!h.slots.contains_key(&SlotKind::Diffuse));
+    assert!(!h.filled.contains_key(&1) && !h.record_supplied.contains_key(&1));
+    assert!(h.shared);
+}
+
+#[test]
+fn a_shared_map_set_of_a_skin_set_is_skin() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let h = view(&m, X);
+    assert!(h.shared, "{:?}", h.slots);
+    let job = |k: &str| {
+        m.item(k)
+            .and_then(|i| i.job.as_ref())
+            .map(|j| j.profile.subtype)
+    };
+    assert_eq!(
+        job("textures/s/x_normal.png"),
+        Some(engine::config::Subtype::PbrNormal)
+    );
+    assert!(h.slots.contains_key(&SlotKind::SkinWet));
+    // R7 is a request to the engine, not a line in the project file.
+    assert_eq!(
+        sdc_gui::model::sets::set_shaders(&m).get(X),
+        Some(&engine::shader::Shader::AdvancedSkin)
+    );
+}
+
+#[test]
+fn a_chosen_shader_on_it_wins() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r_with(d.path(), R_FILES, "shader = \"skin\"\n", "");
+    assert!(!view(&m, X).shared);
+    assert_eq!(
+        sdc_gui::model::sets::set_shaders(&m).get(X),
+        Some(&engine::shader::Shader::Skin)
+    );
+}
+
+#[test]
+fn wet_comes_with_the_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    let c = view(&m, M);
+    assert_eq!(borrowed_from(&c, SlotKind::SkinWet).as_deref(), Some(X));
+    assert!(c.filled.contains_key(&9));
+    let rows = skin_json_plan(&m).0;
+    let row = rows.iter().find(|r| r.0 == M).expect("a plan row");
+    assert_eq!(row.3.wet.as_deref(), Some("textures/s/x_wet.dds"));
+}
+
+#[test]
+fn its_own_wet_wins() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.push("textures/s/e/x_wet.png");
+    let m = r_with(d.path(), &files, "", "");
+    let c = view(&m, M);
+    assert!(matches!(
+        c.slots.get(&SlotKind::SkinWet),
+        Some(SlotFill::Own { .. })
+    ));
+    assert!(!c.filled.contains_key(&9));
+}
+
+#[test]
+fn an_explicit_borrow_of_wet_wins() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.extend([
+        "textures/s/o.png",
+        "textures/s/o_rfaos.png",
+        "textures/s/o_wet.png",
+    ]);
+    let toml = r_toml("", &format!("borrow = {{ slot9 = \"{OTHER}\" }}\n"))
+        + &format!("[[sets]]\nid = \"{OTHER}\"\nshader = \"advanced_skin\"\n");
+    let m = project_toml(d.path(), &files, &toml);
+    let c = view(&m, M);
+    assert_eq!(borrowed_from(&c, SlotKind::SkinWet).as_deref(), Some(OTHER));
+    assert!(!c.filled.contains_key(&9));
+}
+
+#[test]
+fn a_host_with_no_wet_fills_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r_with(
+        d.path(),
+        &[
+            "textures/s/x_normal.png",
+            "textures/s/x_sk.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        "",
+        "",
+    );
+    let c = view(&m, M);
+    assert!(!c.slots.contains_key(&SlotKind::SkinWet) && !c.filled.contains_key(&9));
+    assert!(c.missing.is_empty());
+}
+
+#[test]
+fn an_explicit_borrow_wins() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.extend(["textures/s/o.png", "textures/s/o_n.png"]);
+    let m = r_with(
+        d.path(),
+        &files,
+        "",
+        &format!("borrow = {{ slot2 = \"{OTHER}\" }}\n"),
+    );
+    let c = view(&m, M);
+    assert_eq!(borrowed_from(&c, SlotKind::Normal).as_deref(), Some(OTHER));
+    assert!(!c.filled.contains_key(&2));
+}
+
+#[test]
+fn a_pinned_empty_slot_stays_empty() {
+    let d = tempfile::tempdir().unwrap();
+    let m = r_with(d.path(), R_FILES, "", "lock = [\"slot2\"]\n");
+    let c = view(&m, M);
+    assert!(!c.slots.contains_key(&SlotKind::Normal) && !c.filled.contains_key(&2));
+    assert!(c.filled.contains_key(&3), "the other slot still fills");
+}
+
+#[test]
+fn its_own_file_wins() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.push("textures/s/e/x_n.png");
+    let m = r_with(d.path(), &files, "", "");
+    let c = view(&m, M);
+    assert!(matches!(
+        c.slots.get(&SlotKind::Normal),
+        Some(SlotFill::Own { .. })
+    ));
+    assert!(!c.filled.contains_key(&2));
+    // H also writes body_n: the existing duplicate row.
+    assert!(
+        path_collisions(&m)
+            .iter()
+            .any(|c| format!("{c:?}").contains("body_n.dds")),
+        "{:?}",
+        path_collisions(&m)
+    );
+}
+
+#[test]
+fn clear_turns_a_fill_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2));
+    assert!(!entry(&m, M).settings.contains_key("slot2"));
+    let c = view(&m, M);
+    assert!(!c.slots.contains_key(&SlotKind::Normal) && !c.filled.contains_key(&2));
+    assert_eq!(c.fill_off.get(&2).map(String::as_str), Some(X));
+    m.save().unwrap();
+    let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
+    assert!(
+        text.contains("no_fill") && !text.contains("slot2 = \"\""),
+        "{text}"
+    );
+}
+
+#[test]
+fn clear_on_a_wet_fill_turns_it_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    assert!(view(&m, M).filled.contains_key(&9));
+    m.clear_slot_borrow(M, 9).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&9));
+    let c = view(&m, M);
+    assert!(!c.slots.contains_key(&SlotKind::SkinWet));
+    assert_eq!(c.fill_off.get(&9).map(String::as_str), Some(X));
+}
+
+#[test]
+fn a_turned_off_fill_stays_off_after_reopen() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    m.save().unwrap();
+    let mut m2 = AppModel::new(
+        GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..GuiSettings::default()
+        },
+        None,
+        session(),
+    );
+    m2.accept = engine::policy::AcceptSuggestions::None;
+    m2.open_folder(d.path().to_path_buf());
+    idle(&mut m2);
+    assert!(view(&m2, M).fill_off.contains_key(&2));
+    assert!(!view(&m2, M).slots.contains_key(&SlotKind::Normal));
+}
+
+#[test]
+fn restore_turns_it_back_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    assert!(m.restore_fill(M, 2).is_err(), "nothing is off yet");
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    m.restore_fill(M, 2).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.is_empty());
+    assert!(view(&m, M).filled.contains_key(&2));
+    m.save().unwrap();
+    let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
+    assert!(!text.contains("no_fill"), "{text}");
+}
+
+#[test]
+fn the_menu_offers_restore() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    let restore = |m: &AppModel| -> Vec<String> {
+        m.slot_menu(M, SlotKind::Normal)
+            .into_iter()
+            .filter(|e| matches!(e.action, MenuAction::RestoreFill { .. }))
+            .map(|e| e.label)
+            .collect()
+    };
+    assert!(restore(&m).is_empty());
+    // The only command on a wet slot.
+    m.clear_slot_borrow(M, 9).unwrap();
+    idle(&mut m);
+    let wet = m.slot_menu(M, SlotKind::SkinWet);
+    assert!(wet
+        .iter()
+        .any(|e| matches!(e.action, MenuAction::RestoreFill { n: 9, .. })));
+    m.restore_fill(M, 9).unwrap();
+    idle(&mut m);
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(restore(&m), [format!("From {X}")]);
+    assert!(m
+        .run_menu(MenuAction::RestoreFill {
+            set: M.into(),
+            n: 2
+        })
+        .is_none());
+    idle(&mut m);
+    assert!(restore(&m).is_empty());
+}
+
+#[test]
+fn a_deleted_host_map_goes_quietly() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    assert!(view(&m, M).filled.contains_key(&9));
+    std::fs::remove_file(d.path().join("textures/s/x_wet.png")).unwrap();
+    m.replan();
+    idle(&mut m);
+    let c = view(&m, M);
+    assert!(!c.filled.contains_key(&9) && !c.slots.contains_key(&SlotKind::SkinWet));
+    assert!(c.missing.is_empty(), "{:?}", c.missing);
+    assert!(
+        problems(&m)
+            .iter()
+            .all(|p| p.level != sdc_gui::model::bottom::Level::Blocks),
+        "{:?}",
+        problems(&m)
+    );
+}
+
+#[test]
+fn a_case_difference_still_matches() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = r_toml("", "").replace(
+        "slot2 = \"textures/s/body_n.dds\"\nslot3 = \"textures/s/body_sk.dds\"\n[[sets]]",
+        "slot2 = \"textures/s/Body_N.dds\"\nslot3 = \"textures/s/body_sk.dds\"\n[[sets]]",
+    );
+    assert_ne!(toml, r_toml("", ""), "the H record was edited");
+    let m = project_toml(d.path(), R_FILES, &toml);
+    assert!(
+        view(&m, M).filled.contains_key(&2),
+        "{:?}",
+        view(&m, M).record_supplied
+    );
+}
+
+#[test]
+fn a_partial_plan_equals_a_fresh_build() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    let before = sdc_gui::model::sets::views(&m);
+    // A scoped re-plan of C splices its view; a mapped project rebuilds every view, so it equals a fresh build.
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    let spliced = sdc_gui::model::sets::views(&m);
+    assert_ne!(*before, *spliced);
+    m.invalidate_views();
+    assert_eq!(*spliced, *sdc_gui::model::sets::views(&m));
+}
+
+#[test]
+fn a_mapped_skin_project_settles() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    let marks = m.plan_marks();
+    let inputs = engine_inputs(&m);
+    m.replan();
+    idle(&mut m);
+    assert_eq!(
+        m.plan_marks().0,
+        marks.0,
+        "no inputs changed on a fresh plan"
+    );
+    assert_eq!(engine_inputs(&m), inputs);
+}

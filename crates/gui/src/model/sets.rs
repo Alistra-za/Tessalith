@@ -2,7 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::txst_map::record_paths;
+use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
@@ -330,6 +330,13 @@ pub struct SetView {
     /// A shared skin set (Note HG): marked Advanced skin, holding no diffuse and no Rmaos, only the maps other skin
     /// sets use. Derived in the GUI by [`is_shared`].
     pub shared: bool,
+    /// Slots (record numbering, 1-based) an empty slot of the set's texture set record took from the set that writes
+    /// that path: slot → that set's id. Each is also a `SlotFill::Borrowed` in `slots` (Note HG).
+    pub filled: BTreeMap<u8, String>,
+    /// Slots the user turned a record fill off for (`no_fill`) while a set still writes the path: slot → that set's id.
+    pub fill_off: BTreeMap<u8, String>,
+    /// Slots the record names that no set in the project writes: slot → the record path. They count as supplied.
+    pub record_supplied: BTreeMap<u8, String>,
     /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
     pub rfaos: bool,
     pub created: bool,
@@ -364,6 +371,9 @@ impl SetView {
             pbr: false,
             skin: false,
             shared: false,
+            filled: BTreeMap::new(),
+            fill_off: BTreeMap::new(),
+            record_supplied: BTreeMap::new(),
             rfaos: false,
             created: false,
             missing: vec![],
@@ -666,7 +676,7 @@ const SLOT7_CLASH: &str =
 const SLOT3_CLASH: &str =
     "a set cannot hold both an emissive map (_g) and a skin _sk map: both use slot 3";
 
-fn entry_of<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a SetEntry> {
+pub(super) fn entry_of<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a SetEntry> {
     entries.iter().find(|e| same_id(&e.id, id))
 }
 
@@ -780,6 +790,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             entry_view(m, v, e, own);
         }
     }
+    fill_from_records(m, &mut views, &entries, &own_slots);
     // PBR, derived match, prefix.
     for v in &mut views {
         finish_view(m, v);
@@ -974,12 +985,14 @@ fn owns_of(v: &SetView, owners: &Ownership) -> Vec<SlotKind> {
 pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTreeSet<String>) {
     // shortcut: the lookups below are linear in the sets per scope set; a partial over many sets (a bulk edit)
     // builds every view instead. Index the sets by key if a big bulk edit's frame shows in a profile.
-    if scope.len() > 32 {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
+    // project with many mapped sets shows it in a profile.
+    if scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
         *views = build_views(m);
         return;
     }
     let root = m.sets_root();
-    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let scope_ids: Vec<String> = views
         .iter()
         .filter(|v| scope.contains(&v.key))
@@ -1421,10 +1434,18 @@ pub fn borrowed_normal(m: &AppModel) -> BTreeMap<String, String> {
 /// Entry id → the saved shader choice (M6, `BatchRequest::set_shaders`).
 pub fn set_shaders(m: &AppModel) -> BTreeMap<String, Shader> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    entries
+    let mut out: BTreeMap<String, Shader> = entries
         .iter()
         .filter_map(|e| Some((e.id.clone(), e.shader?)))
-        .collect()
+        .collect();
+    // Note HG (R7): a set with no colour map, mapped to a record whose colour a skin set writes, is skin too. A
+    // `shader` the user chose is in `out` already and wins.
+    if entries.iter().any(|e| e.txst.is_some()) {
+        for id in record_shared_sets(m, &views(m)) {
+            out.entry(id).or_insert(Shader::AdvancedSkin);
+        }
+    }
+    out
 }
 
 /// Note BM: the ids of the sets with a `[sets.cs_txst]` block (sent as `BatchRequest::cs_txst_sets`).
@@ -1835,12 +1856,43 @@ impl AppModel {
         if !v.borrows_slot(n) {
             return Err(format!("slot {n} of {} borrows nothing", v.id));
         }
+        // Note HG: a record fill is turned off; there is no borrow line to drop.
+        let fill = v.filled.contains_key(&n);
         let id = v.id;
         self.edit_docs(
             &format!("Clear slot {n} of {id}"),
             None,
             true,
-            move |_, s| s.set_borrow(&id, n, None),
+            move |_, s| {
+                if fill {
+                    s.set_no_fill(&id, n, true);
+                } else {
+                    s.set_borrow(&id, n, None);
+                }
+            },
+        );
+        Ok(())
+    }
+
+    /// Note HG: turn slot `n`'s record fill of set `set` back on (the `no_fill` key removed), re-planned. Refused on a
+    /// pinned slot, a read-only `sdc-project.toml`, and a slot whose fill is not off.
+    pub fn restore_fill(&mut self, set: &str, n: u8) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
+        if v.locks.contains(&n) {
+            return Err(SLOT_LOCKED.into());
+        }
+        if !v.fill_off.contains_key(&n) {
+            return Err(format!("slot {n} of {} is not turned off", v.id));
+        }
+        let id = v.id;
+        self.edit_docs(
+            &format!("Use slot {n} from the record"),
+            None,
+            true,
+            move |_, d| d.set_no_fill(&id, n, false),
         );
         Ok(())
     }
@@ -2706,6 +2758,17 @@ impl AppModel {
         // Note HC7: `slotN` alone leaves a borrow in the slot. The plan reads borrows (the bake), so this one re-plans.
         let borrower = self.view_of(set).filter(|v| v.borrows_slot(slot));
         if let (Some(v), SlotCommand::FromSet | SlotCommand::Clear) = (borrower, &cmd) {
+            // Note HG: a record fill is turned off, not written as a setting (`slotN = ""` is a PGPatcher command).
+            if v.filled.contains_key(&slot) {
+                let id = v.id;
+                self.edit_docs(
+                    &format!("Clear slot {slot} of {id}"),
+                    None,
+                    true,
+                    move |_, d| d.set_no_fill(&id, slot, true),
+                );
+                return Ok(());
+            }
             let id = v.id;
             self.edit_docs(
                 &format!("Clear slot {slot} of {id}"),

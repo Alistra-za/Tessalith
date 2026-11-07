@@ -2,12 +2,17 @@
 //! record's 1-based lighting slots (`Subtype::txst_slot`, `TxstMap::slots` keys), never `SlotKind` indexes.
 
 use super::items::{ItemKind, ItemStatus, TextureItem};
-use super::sets::{recipe_suffix, SetView, READ_ONLY};
+use super::sets::{
+    entry_of, map_slot, recipe_suffix, SetView, SlotFill, SlotKind, LAST_GAME_SLOT, READ_ONLY,
+};
 use super::AppModel;
 use crate::pgp::prefix::check_rel_path;
-use crate::sets_doc::TxstMap;
-use engine::config::Target;
+use crate::sets_doc::{SetEntry, TxstMap};
+use engine::codes::Code;
+use engine::config::{Subtype, Target};
 use engine::sets::{same_id, OutputKey};
+use engine::shader::Shader;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Where an output of the file `item_key` (relative to the input `root`) goes under the export folder so that its game
@@ -118,6 +123,226 @@ pub fn record_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, PathBuf)
     record_entries(m, views)
         .into_iter()
         .map(|(_, k, p)| (k, p))
+        .collect()
+}
+
+/// Whether a set holding `slots` is a PGPatcher PBR set on CS, whose mapping is ignored (`record_entries`). `finish_view`
+/// has not run yet, so this reads the diffuse's subtype.
+fn pbr_on_cs(m: &AppModel, slots: &BTreeMap<SlotKind, SlotFill>) -> bool {
+    m.target == Target::Cs
+        && slots
+            .get(&SlotKind::Diffuse)
+            .and_then(SlotFill::item)
+            .and_then(|k| m.item(k))
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| j.profile.subtype == Subtype::PbrAlbedo)
+}
+
+/// Where each set's own files are written: ASCII-folded output path under the export folder → (set id, item key). A
+/// file in a slot its set's record names is at the record's path, else at its last plan's `job_key`. The first writer
+/// in display order keeps a path two sets write (that is the duplicate row's business).
+fn written_index<'a>(
+    m: &AppModel,
+    entries: &[SetEntry],
+    sets: impl Iterator<Item = (&'a str, &'a BTreeMap<SlotKind, SlotFill>)>,
+) -> HashMap<String, (String, String)> {
+    let mut out = HashMap::new();
+    for (id, slots) in sets {
+        let txst = entry_of(entries, id)
+            .and_then(|e| e.txst.as_ref())
+            .filter(|_| !pbr_on_cs(m, slots));
+        for item in slots.values().filter_map(|f| match f {
+            SlotFill::Own { item } => Some(item),
+            _ => None,
+        }) {
+            let Some(it) = m.item(item) else { continue };
+            let rel = txst
+                .zip(m.root.as_deref())
+                .and_then(|(t, root)| {
+                    let path = t.slots.get(&record_slot(it)?)?;
+                    record_rel(root, &it.key, path)
+                })
+                .map(|p| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
+                .or_else(|| {
+                    (!it.job_key.is_empty())
+                        .then(|| it.job_key.replace('\\', "/").to_ascii_lowercase())
+                });
+            if let Some(rel) = rel {
+                out.entry(rel).or_insert((id.to_string(), item.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// A key to resolve `record_rel` against for set `v`: its first file that is not a packed output (the rule reads the
+/// folder it sits in).
+fn key_of(m: &AppModel, v: &SetView) -> String {
+    v.members
+        .iter()
+        .find(|k| m.item(k).is_some_and(|i| i.kind != ItemKind::Packed))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The path `record` names for set `v`, as `written_index` spells it.
+fn record_key(m: &AppModel, v: &SetView, record: &str) -> Option<String> {
+    let rel = record_rel(m.root.as_deref()?, &key_of(m, v), record)?;
+    Some(
+        rel.to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase(),
+    )
+}
+
+/// Note HG: empty record slots of each mapped set borrow from the set that writes that path, or count as supplied.
+/// Runs after `entry_view`, so an explicit borrow, a `slotN` and a pin are already there to win. `own_slots` are the
+/// sets' own files by id, as the plan has them (before any borrow).
+pub(super) fn fill_from_records(
+    m: &AppModel,
+    views: &mut [SetView],
+    entries: &[SetEntry],
+    own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
+) {
+    if !entries.iter().any(|e| e.txst.is_some()) {
+        return;
+    }
+    let written = written_index(m, entries, own_slots.iter().map(|(i, s)| (i.as_str(), s)));
+    let host_slots = |id: &str| {
+        own_slots
+            .iter()
+            .find(|(i, _)| same_id(i, id))
+            .map(|(_, s)| s)
+    };
+    for v in views.iter_mut() {
+        let Some(e) = entry_of(entries, &v.id) else {
+            continue;
+        };
+        let Some(txst) = &e.txst else { continue };
+        if pbr_on_cs(m, &v.slots) {
+            continue;
+        }
+        // A slot another source already decided: its own file, an explicit borrow, a pin, or a `slotN` setting.
+        let decided = |v: &SetView, n: u8| {
+            v.slots.keys().any(|k| k.slot_number() == Some(n))
+                || e.borrow.contains_key(&n)
+                || v.locks.contains(&n)
+                || (n <= LAST_GAME_SLOT && v.settings.contains_key(&format!("slot{n}")))
+        };
+        for (&n, path) in txst.slots.iter().filter(|(n, _)| **n >= 2) {
+            if decided(v, n) {
+                continue;
+            }
+            let writer = record_key(m, v, path)
+                .and_then(|k| written.get(&k))
+                .filter(|(w, _)| !same_id(w, &v.id));
+            if e.no_fill.contains(&n) {
+                if let Some((w, _)) = writer {
+                    v.fill_off.insert(n, w.clone());
+                }
+                continue;
+            }
+            let kind = writer.and_then(|(w, item)| {
+                host_slots(w)?
+                    .iter()
+                    .find(|(k, f)| {
+                        k.slot_number() == Some(n)
+                            && matches!(f, SlotFill::Own { item: i } if i == item)
+                    })
+                    .map(|(k, _)| (*k, w.clone(), item.clone()))
+            });
+            match kind {
+                Some((kind, from, item)) => {
+                    v.filled.insert(n, from.clone());
+                    v.slots.insert(kind, SlotFill::Borrowed { from, item });
+                }
+                None => {
+                    v.record_supplied.insert(n, path.clone());
+                }
+            }
+        }
+        wet_with_the_normal(v, e, &host_slots);
+    }
+    for v in views.iter_mut() {
+        let (filled, supplied) = (&v.filled, &v.record_supplied);
+        v.set_warnings.retain(|w| {
+            let n = (w.code == Code::ShaderMissingMap)
+                .then(|| w.data["map"].as_str().and_then(map_slot))
+                .flatten();
+            !n.is_some_and(|n| filled.contains_key(&n) || supplied.contains_key(&n))
+        });
+    }
+}
+
+/// R8: a skin set whose normal came from a shared-map set `H` through its record also takes `H`'s `_wet` and
+/// `_detail_n`, when `H` has them. Its own, an explicit borrow and a pin win, as for any fill.
+fn wet_with_the_normal<'a>(
+    v: &mut SetView,
+    e: &SetEntry,
+    host_slots: &impl Fn(&str) -> Option<&'a BTreeMap<SlotKind, SlotFill>>,
+) {
+    let Some(host) = v.filled.get(&2).cloned() else {
+        return;
+    };
+    let skin = v
+        .shader
+        .as_ref()
+        .is_some_and(|p| p.shader == Shader::AdvancedSkin)
+        && v.slots.contains_key(&SlotKind::Diffuse);
+    let Some(hs) = host_slots(&host).filter(|hs| skin && !hs.contains_key(&SlotKind::Diffuse))
+    else {
+        return;
+    };
+    for kind in [SlotKind::SkinWet, SlotKind::SkinDetail] {
+        let Some(n) = kind.slot_number() else {
+            continue;
+        };
+        let Some(SlotFill::Own { item }) = hs.get(&kind) else {
+            continue;
+        };
+        if v.slots.contains_key(&kind) || e.borrow.contains_key(&n) || v.locks.contains(&n) {
+            continue;
+        }
+        if e.no_fill.contains(&n) {
+            v.fill_off.insert(n, host.clone());
+            continue;
+        }
+        v.filled.insert(n, host.clone());
+        v.slots.insert(
+            kind,
+            SlotFill::Borrowed {
+                from: host.clone(),
+                item: item.clone(),
+            },
+        );
+    }
+}
+
+/// R7: the ids of the sets mapped to a record, with no `shader` of their own and no colour map, whose record's colour
+/// path a skin set in the project writes. `set_shaders` marks them Advanced skin. `v.skin` is the last plan's, so
+/// this settles through the `EngineInputs` compare.
+pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String> {
+    let Some(doc) = m.sets_doc.as_ref() else {
+        return vec![];
+    };
+    let entries = doc.entries();
+    if !entries.iter().any(|e| e.txst.is_some()) {
+        return vec![];
+    }
+    let written = written_index(m, &entries, views.iter().map(|v| (v.id.as_str(), &v.slots)));
+    entries
+        .iter()
+        .filter(|e| e.shader.is_none())
+        .filter_map(|e| {
+            let path = e.txst.as_ref()?.slots.get(&1)?;
+            let v = views.iter().find(|v| same_id(&v.id, &e.id))?;
+            if v.slots.contains_key(&SlotKind::Diffuse) {
+                return None;
+            }
+            let (writer, _) = written.get(&record_key(m, v, path)?)?;
+            let w = views.iter().find(|w| same_id(&w.id, writer))?;
+            (w.skin && !same_id(&w.id, &v.id)).then(|| e.id.clone())
+        })
         .collect()
 }
 

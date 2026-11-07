@@ -551,6 +551,58 @@ fn views_after_a_partial_equal_a_fresh_build() {
     assert_eq!(*spliced, *views(&m));
 }
 
+/// Note HG: a project with texture set records builds every view again after a plan (a fill reads other sets' paths),
+/// so the views a partial splices equal a fresh build. The wet map of the shared set goes; the skin set that took it
+/// through its record loses it too, though it never borrowed from the shared set by a `borrow` line.
+#[test]
+fn views_after_a_partial_equal_a_fresh_build_on_a_mapped_project() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("proj");
+    for f in [
+        "textures/s/x_normal.png",
+        "textures/s/x_sk.png",
+        "textures/s/x_wet.png",
+        "textures/s/e/x.png",
+        "textures/s/e/x_rfaos.png",
+    ] {
+        let p = root.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+        })
+        .save(p)
+        .unwrap();
+    }
+    let rec = |extra: &str| {
+        format!(
+            "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\n\
+             slot1 = \"textures/s/e/femalebody.dds\"\nslot2 = \"textures/s/body_n.dds\"\n\
+             slot3 = \"textures/s/body_sk.dds\"\n{extra}"
+        )
+    };
+    std::fs::write(
+        root.join("sdc-project.toml"),
+        format!(
+            "[[sets]]\nid = \"textures/s/x\"\n{}[[sets]]\nid = \"textures/s/e/x\"\nshader = \"advanced_skin\"\n{}",
+            rec(""),
+            rec("")
+        ),
+    )
+    .unwrap();
+    let mut m = fresh(d.path(), root);
+    m.hold_plan_results = true;
+    assert!(view_of(&m, "textures/s/e/x").filled.contains_key(&9));
+    m.decide("textures/s/x_wet.png", Answer::Subtype(Subtype::Height));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    assert!(
+        !view_of(&m, "textures/s/e/x").filled.contains_key(&9),
+        "the skin set follows the host's wet"
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+}
 /// Final fix I2: a full plan builds again only the views of the sets it changed, with no whole build, and the result
 /// equals a fresh build. An edit of the sets document, or a plan that changes the engine inputs, builds them whole.
 #[test]
