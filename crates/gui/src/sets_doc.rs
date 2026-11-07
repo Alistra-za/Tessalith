@@ -223,10 +223,8 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             slots: b
                 .iter()
                 .filter_map(|(k, v)| {
-                    Some((
-                        k.strip_prefix("slot")?.parse().ok()?,
-                        v.as_str()?.to_string(),
-                    ))
+                    let n: u8 = k.strip_prefix("slot")?.parse().ok()?;
+                    (1..=8).contains(&n).then_some((n, v.as_str()?.to_string()))
                 })
                 .collect(),
         }
@@ -1199,6 +1197,11 @@ impl SetsDoc {
         match map {
             None => {
                 t.remove("txst");
+                // A table holding only its id says nothing; an entry with no mapping is no entry.
+                if t.len() == 1 {
+                    let lower = fold_id(id);
+                    self.tables_mut().retain(|t| !is_id(t, &lower));
+                }
             }
             Some(m) => {
                 let mut b = Table::new();

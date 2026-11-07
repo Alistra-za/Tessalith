@@ -510,9 +510,29 @@ fn stem_of(f: &InputFile) -> String {
         .into_owned()
 }
 
-/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) whose members are all `_n` or `_sk`
-/// has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs before the `_wet` and
-/// `_detail_n` joins, which add members a shared set may hold.
+/// Note HG2: the tail of `stem` when a hand move put it in set `key` as a `_wet` or `_detail_n` map, which
+/// [`member_split`] reads only in a set already listing that suffix. A file that names its own set (`road_wet` in set
+/// `road_wet`, `x_detail_n` in set `x_detail`) is that set's colour member or normal, not this.
+pub fn hand_added_tail(
+    stem: &str,
+    key: &str,
+    aliases: &BTreeMap<String, String>,
+) -> Option<&'static str> {
+    let s = split_suffix_with(stem, aliases);
+    if s.base.to_lowercase() == key_base(key).to_lowercase() {
+        return None;
+    }
+    match s.suffix.as_deref() {
+        None => wet_tail_split(stem).map(|_| SKIN_WET),
+        Some("n") => detail_tail_split(stem).map(|_| SKIN_DETAIL),
+        _ => None,
+    }
+}
+
+/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) whose members are all `_n`, `_sk`,
+/// `_wet` or `_detail_n` has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs
+/// before the `_wet` and `_detail_n` joins, which see the flag, and again after set edits on the edited sets, which
+/// decides it. A shared set lists a hand-added tail, so its member types as that map.
 pub fn mark_shared_skin(
     sets: &mut [TextureSet],
     files: &[InputFile],
@@ -520,32 +540,28 @@ pub fn mark_shared_skin(
     explicit: &BTreeMap<String, crate::shader::Shader>,
 ) {
     for s in sets.iter_mut() {
-        s.shared_skin = explicit.get(&s.key) == Some(&crate::shader::Shader::AdvancedSkin)
-            && !s.members.is_empty()
-            && s.members.iter().all(|&i| {
-                matches!(
-                    split_suffix_with(&stem_of(&files[i]), aliases)
-                        .suffix
-                        .as_deref(),
-                    Some("n" | "sk")
+        s.shared_skin = false;
+        if explicit.get(&s.key) != Some(&crate::shader::Shader::AdvancedSkin)
+            || s.members.is_empty()
+        {
+            continue;
+        }
+        let stems: Vec<String> = s.members.iter().map(|&i| stem_of(&files[i])).collect();
+        let tails: Vec<&str> = stems
+            .iter()
+            .filter_map(|stem| hand_added_tail(stem, &s.key, aliases))
+            .collect();
+        let shared = stems.iter().all(|stem| {
+            hand_added_tail(stem, &s.key, aliases).is_some()
+                || matches!(
+                    member_split(stem, s, aliases).suffix.as_deref(),
+                    Some("n" | "sk" | SKIN_WET | SKIN_DETAIL)
                 )
-            });
-    }
-}
-
-/// Note HG2: after set edits a shared set that gained another kind of member (a colour map, say), or holds nothing,
-/// is shared no longer. Uses [`member_split`]: a joined `x_wet` has no suffix of its own.
-pub fn unmark_shared_after_edits(
-    sets: &mut [TextureSet],
-    files: &[InputFile],
-    aliases: &BTreeMap<String, String>,
-) {
-    for s in sets.iter_mut().filter(|s| s.shared_skin) {
-        s.shared_skin = !s.members.is_empty()
-            && s.members.iter().all(|&i| {
-                let suffix = member_split(&stem_of(&files[i]), s, aliases).suffix;
-                matches!(suffix.as_deref(), Some("n" | "sk" | SKIN_WET | SKIN_DETAIL))
-            });
+        });
+        if shared {
+            s.shared_skin = true;
+            s.suffixes.extend(tails.into_iter().map(String::from));
+        }
     }
 }
 

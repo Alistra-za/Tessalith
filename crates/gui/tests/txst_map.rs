@@ -1507,6 +1507,294 @@ fn a_fill_clears_the_missing_map_warning_and_clear_brings_it_back() {
     assert!(!missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
 }
 
+// ---- Final review: a created or renamed host (HG2), and the small fixes (HG9) ----
+
+// Sorts before `M`, so it comes first in the writer index for the path its `_wet` writes before R7.
+const H: &str = "textures/s/a";
+const BODY_S: &str = "textures/s/e/body_s.dds";
+
+/// A hand-made host `H` holding `add` and the skin set `M`, both mapped to one record that names slot 8.
+fn created_host(dir: &Path, files: &[&str], add: &[&str]) -> AppModel {
+    let rec = txst(&[
+        (1, "textures/s/e/femalebody.dds"),
+        (2, BODY_N),
+        (3, "textures/s/body_sk.dds"),
+        (8, BODY_S),
+    ]);
+    let add = add
+        .iter()
+        .map(|f| format!("\"{f}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let toml = format!(
+        "[[sets]]\nid = \"{H}\"\ncreated = true\nadd = [{add}]\n{rec}\
+         [[sets]]\nid = \"{M}\"\nshader = \"advanced_skin\"\n{rec}"
+    );
+    project_toml(dir, files, &toml)
+}
+
+fn sub_of(m: &AppModel, key: &str) -> Option<engine::config::Subtype> {
+    m.item(key)
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.profile.subtype)
+}
+
+fn writers(m: &AppModel, path: &str) -> usize {
+    m.items
+        .iter()
+        .filter_map(|i| i.job.as_ref())
+        .filter(|j| {
+            j.output
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(&format!("/{path}"))
+        })
+        .count()
+}
+
+#[test]
+fn a_created_host_mapped_beside_a_skin_set() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let m = created_host(
+        d.path(),
+        &[
+            "textures/s/x_normal.png",
+            "textures/s/x_sk.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &["textures/s/x_normal.png", "textures/s/x_sk.png"],
+    );
+    let h = view(&m, H);
+    assert!(h.shared, "{:?}", h.slots);
+    assert_eq!(
+        sdc_gui::model::sets::set_shaders(&m).get(H),
+        Some(&engine::shader::Shader::AdvancedSkin),
+        "R7 gives the shader"
+    );
+    assert_eq!(
+        sub_of(&m, "textures/s/x_normal.png"),
+        Some(Subtype::PbrNormal)
+    );
+    assert_eq!(sub_of(&m, "textures/s/x_sk.png"), Some(Subtype::SkinSk));
+    assert_eq!(writers(&m, BODY_N), 1, "one _n");
+    assert!(out(&m, "textures/s/x_sk.png").ends_with("/textures/s/body_sk.dds"));
+    assert_eq!(
+        writers(&m, BODY_S),
+        0,
+        "the host's _sk is not the record's _s"
+    );
+    assert_eq!(
+        sdc_gui::model::sets::borrowed_normal(&m)
+            .get(M)
+            .map(String::as_str),
+        Some(H),
+        "the skin set's bake reads the host's normal"
+    );
+    assert!(!missing_n(&view(&m, M)));
+}
+
+/// The owner's layout: the hand-made host holds its `_wet` too. Before R7 the plan reads that `_wet` as the set's colour
+/// map and writes it at the record's slot 1, which must not stop R7.
+#[test]
+fn a_created_host_with_a_hand_added_wet_is_shared() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let m = created_host(
+        d.path(),
+        &[
+            "textures/s/x_normal.png",
+            "textures/s/x_sk.png",
+            "textures/s/x_wet.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &[
+            "textures/s/x_normal.png",
+            "textures/s/x_sk.png",
+            "textures/s/x_wet.png",
+        ],
+    );
+    let h = view(&m, H);
+    assert!(h.shared, "{:?}", h.slots);
+    assert_eq!(sub_of(&m, "textures/s/x_wet.png"), Some(Subtype::SkinWet));
+    assert!(out(&m, "textures/s/x_wet.png").ends_with("/textures/s/x_wet.dds"));
+    assert_eq!(writers(&m, "textures/s/e/femalebody.dds"), 1);
+    assert_eq!(
+        borrowed_from(&view(&m, M), SlotKind::SkinWet).as_deref(),
+        Some(H),
+        "R8"
+    );
+}
+
+#[test]
+fn a_renamed_host_stays_shared() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    assert!(view(&m, X).shared);
+    let y = "textures/s/y";
+    m.rename_set(X, y).unwrap();
+    idle(&mut m);
+    let v = view(&m, y);
+    assert!(v.shared, "{:?}", v.slots);
+    assert_eq!(
+        sub_of(&m, "textures/s/x_normal.png"),
+        Some(Subtype::PbrNormal)
+    );
+    assert_eq!(sub_of(&m, "textures/s/x_wet.png"), Some(Subtype::SkinWet));
+    assert!(
+        matches!(v.slots.get(&SlotKind::SkinWet), Some(SlotFill::Own { .. })),
+        "{:?}",
+        v.slots
+    );
+    assert_eq!(entry(&m, y).txst.unwrap().edid, "E", "the mapping is kept");
+    let c = view(&m, M);
+    assert_eq!(borrowed_from(&c, SlotKind::Normal).as_deref(), Some(y));
+    assert_eq!(borrowed_from(&c, SlotKind::SkinWet).as_deref(), Some(y));
+    assert_eq!(writers(&m, BODY_N), 1);
+}
+
+/// A fill turned off whose host has since stopped writing the path can still be turned back on.
+#[test]
+fn a_stale_no_fill_can_be_undone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    std::fs::remove_file(d.path().join("textures/s/x_normal.png")).unwrap();
+    m.replan();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2));
+    assert!(missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
+    let labels: Vec<String> = m
+        .slot_menu(M, SlotKind::Normal)
+        .into_iter()
+        .filter(|e| matches!(e.action, MenuAction::RestoreFill { .. }))
+        .map(|e| e.label)
+        .collect();
+    assert_eq!(labels, ["Use the record's slot"]);
+    assert!(m
+        .run_menu(MenuAction::RestoreFill {
+            set: M.into(),
+            n: 2
+        })
+        .is_none());
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.is_empty());
+    assert_eq!(
+        view(&m, M).record_supplied.get(&2).map(String::as_str),
+        Some(BODY_N)
+    );
+    assert!(!missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
+}
+
+#[test]
+fn slot_keys_outside_the_game_slots_are_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = skin_set(M, "")
+        + &txst(&[
+            (0, "textures/s/zero.dds"),
+            (1, "textures/s/e/femalebody.dds"),
+            (8, BODY_S),
+            (9, "textures/s/nine.dds"),
+            (10, "textures/s/ten.dds"),
+        ]);
+    let m = project_toml(d.path(), &["textures/s/e/x.png"], &toml);
+    let slots = entry(&m, M).txst.unwrap().slots;
+    assert_eq!(slots.keys().copied().collect::<Vec<u8>>(), [1, 8]);
+    let v = view(&m, M);
+    assert_eq!(
+        v.record_supplied.keys().copied().collect::<Vec<u8>>(),
+        [8],
+        "only slot 8 is supplied"
+    );
+}
+
+#[test]
+fn the_card_says_a_pbr_sets_mapping_is_ignored() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    let id = "landscape/rock01";
+    m.map_record(id, record(&[(1, "textures/b/body.dds")]))
+        .unwrap();
+    idle(&mut m);
+    assert!(view(&m, id).pbr);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    let line = "Record: MyBody (000800, Skyrim.esm) (ignored: PGPatcher PBR set)";
+    h.get_by_label(line).hover();
+    h.run();
+    h.get_by_label("slot1: textures/b/body.dds");
+}
+
+/// Unmapping takes a table that then holds nothing but its id with it; a table holding anything else stays.
+#[test]
+fn unmapping_leaves_no_bare_table() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = format!(
+        "[[sets]]\nid = \"{M}\"\nno_fill = [\"slot2\"]\n{}",
+        txst(&[(2, BODY_N)])
+    );
+    let mut m = project_toml(d.path(), &["textures/s/e/x.png"], &toml);
+    m.unmap_record(M).unwrap();
+    idle(&mut m);
+    assert!(entry_opt(&m, M).is_none(), "{:?}", entry_opt(&m, M));
+    m.undo();
+    idle(&mut m);
+    assert!(entry(&m, M).txst.is_some() && entry(&m, M).no_fill.contains(&2));
+
+    let mut s = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    s.set_txst("a/x", Some(&record(&[(1, "textures/a/b.dds")])));
+    s.set_txst("a/x", None);
+    assert!(s.entries().iter().all(|e| e.id != "a/x"));
+    s.set_txst("a/y", Some(&record(&[(1, "textures/a/b.dds")])));
+    s.set_shader("a/y", Some(engine::shader::Shader::Hair));
+    s.set_txst("a/y", None);
+    assert!(s
+        .entries()
+        .iter()
+        .any(|e| e.id == "a/y" && e.txst.is_none()));
+}
+
+/// FormIDs compare as numbers, however they are written; text that isn't one matches only itself.
+#[test]
+fn a_formid_compares_as_hex() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
+    scan(
+        &mut m,
+        vec![arch(), trec("Odd", "Arch_Resources.esp", "zzz", &[])],
+    );
+    let edid_of = |m: &AppModel, formid: &str| {
+        let map = TxstMap {
+            formid: formid.into(),
+            ..arch().to_map()
+        };
+        m.record_of(&map).map(|r| r.edid.clone())
+    };
+    for f in ["0x814", "0x0814", "0X814"] {
+        assert_eq!(edid_of(&m, f).as_deref(), Some(ARCH), "{f}");
+    }
+    assert_eq!(edid_of(&m, "0x815"), None);
+    assert_eq!(edid_of(&m, "zzz").as_deref(), Some("Odd"));
+    assert_eq!(edid_of(&m, "zz"), None);
+    // The same record under another spelling keeps a turned-off fill, as "Use new paths" does.
+    m.map_record(M, arch().to_map()).unwrap();
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| s.set_no_fill(M, 2, true));
+    idle(&mut m);
+    let map = TxstMap {
+        formid: "0x0814".into(),
+        ..arch().to_map()
+    };
+    m.map_record(M, map).unwrap();
+    idle(&mut m);
+    assert!(entry(&m, M).no_fill.contains(&2));
+}
+
 /// The index compares game paths: a host in another mod folder still writes the consumer's record path.
 #[test]
 fn a_host_in_another_mod_folder_is_borrowed() {

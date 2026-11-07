@@ -1,6 +1,7 @@
-//! Note HG2: an explicit Advanced skin on a colourless set (`_n`, `_sk`, its joined `_wet`) marks it shared: the maps
-//! other skin sets use. Its members are typed as skin members, no diffuse or `_rfaos` is looked for, and a hand edit
-//! that gives it a colour map or another kind of member unmarks it.
+//! Note HG2: an explicit Advanced skin on a colourless set (`_n`, `_sk`, its `_wet` and `_detail_n`) marks it shared:
+//! the maps other skin sets use. Its members are typed as skin members, no diffuse or `_rfaos` is looked for, a created
+//! or renamed set is shared by the same rule, and a hand edit that gives it a colour map or another kind of member
+//! unmarks it.
 use engine::api::*;
 use engine::codes::Code;
 use engine::config::{Subtype, Target};
@@ -71,18 +72,23 @@ fn sub(p: &Plan, input: &str) -> Subtype {
 
 /// The `SetResolved` event of the set `textures/s/x`: its pick and warning codes.
 fn resolved(events: &[EngineEvent]) -> (Option<Shader>, Vec<Code>) {
+    resolved_of(events, X)
+}
+
+/// The `SetResolved` event of set `id`: its pick and warning codes.
+fn resolved_of(events: &[EngineEvent], id: &str) -> (Option<Shader>, Vec<Code>) {
     events
         .iter()
         .find_map(|e| match &e.kind {
             EventKind::SetResolved {
                 shader, warnings, ..
-            } if e.set.as_deref().is_some_and(|s| s.ends_with(X)) => Some((
+            } if e.set.as_deref().is_some_and(|s| s.ends_with(id)) => Some((
                 shader.as_ref().map(|p| p.shader),
                 warnings.iter().map(|w| w.code).collect(),
             )),
             _ => None,
         })
-        .expect("a SetResolved for textures/s/x")
+        .unwrap_or_else(|| panic!("a SetResolved for {id}"))
 }
 
 fn same_set(p: &Plan, a: &str, b: &str) -> bool {
@@ -156,19 +162,137 @@ fn a_set_holding_another_map_is_not_shared() {
     assert!(not_shared(&resolved(&ev).1));
 }
 
+/// Note HG3: outside a shared set an explicit shader has no say in the join, so both cases plan as in 2.0: an
+/// explicit Advanced set with a colour map and no `_rfaos` leaves `x_wet` a set of its own, and an explicit
+/// non-Advanced set with a real `_rfaos` joins its `_wet`.
 #[test]
-fn an_explicit_skin_set_joins_its_own_wet() {
-    let d = tempfile::tempdir().unwrap();
-    put(d.path(), "textures/s/e/x.png");
-    put(d.path(), "textures/s/e/x_wet.png");
-    let (p, _) = plan_with(
-        &d,
+fn an_explicit_shader_does_not_change_the_wet_join() {
+    let colour = tempfile::tempdir().unwrap();
+    put(colour.path(), "textures/s/e/x.png");
+    put(colour.path(), "textures/s/e/x_wet.png");
+    let (c, _) = plan_with(
+        &colour,
         Target::Cs,
         &[("textures/s/e/x", Shader::AdvancedSkin)],
         vec![],
     );
-    // Joined only: the set has no `_rfaos` source, so `set_is_advanced_skin` does not type the member (not this note).
-    assert!(same_set(&p, "x.png", "x_wet.png"));
+    let rfaos = tempfile::tempdir().unwrap();
+    put(rfaos.path(), "textures/s/e/x.png");
+    put(rfaos.path(), "textures/s/e/x_rfaos.png");
+    put(rfaos.path(), "textures/s/e/x_wet.png");
+    let (r, _) = plan_with(
+        &rfaos,
+        Target::Cs,
+        &[("textures/s/e/x", Shader::Skin)],
+        vec![],
+    );
+    assert_eq!(
+        (
+            same_set(&c, "x.png", "x_wet.png"),
+            same_set(&r, "x.png", "x_wet.png")
+        ),
+        (false, true),
+        "(Advanced with a colour map joins, Skin with an _rfaos joins)"
+    );
+    assert_eq!(sub(&c, "x_wet.png"), Subtype::Diffuse);
+    assert_eq!(sub(&r, "x_wet.png"), Subtype::SkinWet);
+}
+
+const Y: &str = "textures/s/y";
+
+/// Move `files` under `textures/s` into `set`, created first.
+fn create_with(set: &str, files: &[&str]) -> Vec<SetEdit> {
+    let mut edits = vec![SetEdit::Create { set: set.into() }];
+    edits.extend(files.iter().map(|f| SetEdit::Move {
+        file: format!("textures/s/{f}"),
+        to: set.into(),
+    }));
+    edits
+}
+
+fn in_set(p: &Plan, set: &str) -> Vec<Subtype> {
+    p.jobs
+        .iter()
+        .filter(|j| j.set_key.ends_with(set))
+        .map(|j| j.profile.subtype)
+        .collect()
+}
+
+#[test]
+fn a_created_set_of_n_and_sk_is_shared() {
+    let d = shared_files();
+    let edits = create_with(Y, &["x_normal.png", "x_sk.png"]);
+    let (p, ev) = plan_with(&d, Target::Cs, &[(Y, Shader::AdvancedSkin)], edits);
+    assert_eq!(sub(&p, "x_normal.png"), Subtype::PbrNormal);
+    assert_eq!(sub(&p, "x_sk.png"), Subtype::SkinSk);
+    let (pick, codes) = resolved_of(&ev, Y);
+    assert_eq!(pick, Some(Shader::AdvancedSkin));
+    assert!(!codes.contains(&Code::ShaderMissingMap), "{codes:?}");
+    assert!(!codes.contains(&Code::ShaderExtraMap), "{codes:?}");
+    // No diffuse is looked for or written: the set is its two maps.
+    let mut got = in_set(&p, Y);
+    got.sort_by_key(|s| format!("{s:?}"));
+    assert_eq!(got, [Subtype::PbrNormal, Subtype::SkinSk]);
+}
+
+/// A hand-added `_wet` or `_detail_n` has no suffix of its own in a created set: `apply_set_edits` rebuilds the set's
+/// suffixes through `member_split`, which reads those two tails only in a set already listing them.
+#[test]
+fn a_hand_added_wet_and_detail_type_as_skin_maps() {
+    let d = shared_files();
+    put(d.path(), "textures/s/x_detail_n.png");
+    let edits = create_with(
+        Y,
+        &["x_normal.png", "x_sk.png", "x_wet.png", "x_detail_n.png"],
+    );
+    let (p, ev) = plan_with(&d, Target::Cs, &[(Y, Shader::AdvancedSkin)], edits);
+    assert_eq!(sub(&p, "x_normal.png"), Subtype::PbrNormal);
+    assert_eq!(sub(&p, "x_sk.png"), Subtype::SkinSk);
+    assert_eq!(sub(&p, "x_wet.png"), Subtype::SkinWet);
+    assert_eq!(sub(&p, "x_detail_n.png"), Subtype::SkinDetail);
+    let codes = resolved_of(&ev, Y).1;
+    assert!(!codes.contains(&Code::ShaderMissingMap), "{codes:?}");
+}
+
+/// The shader is stored under the new id, so the join before set edits finds it through the Rename.
+#[test]
+fn a_renamed_host_stays_shared() {
+    let d = shared_files();
+    let edits = vec![SetEdit::Rename {
+        from: X.into(),
+        to: Y.into(),
+    }];
+    let (p, ev) = plan_with(&d, Target::Cs, &[(Y, Shader::AdvancedSkin)], edits);
+    assert_eq!(sub(&p, "x_normal.png"), Subtype::PbrNormal);
+    assert_eq!(sub(&p, "x_sk.png"), Subtype::SkinSk);
+    assert_eq!(sub(&p, "x_wet.png"), Subtype::SkinWet);
+    assert!(job(&p, "x_wet.png").set_key.ends_with(Y));
+    assert!(!resolved_of(&ev, Y).1.contains(&Code::ShaderMissingMap));
+}
+
+/// Pin: a Rename that goes stale leaves the set under its old id, which the shader on the taken id does not name.
+#[test]
+fn a_stale_rename_does_not_lend_its_shader() {
+    let d = shared_files();
+    put(d.path(), "textures/s/y.png");
+    let edits = vec![SetEdit::Rename {
+        from: X.into(),
+        to: Y.into(),
+    }];
+    let (p, _) = plan_with(&d, Target::Cs, &[(Y, Shader::AdvancedSkin)], edits);
+    assert_eq!(sub(&p, "x_normal.png"), Subtype::Normal);
+    assert!(!same_set(&p, "x_normal.png", "x_wet.png"));
+}
+
+/// Pin: a file named `_wet` that names its set is that set's colour member, whatever shader the set has.
+#[test]
+fn a_set_named_after_its_wet_file_keeps_its_colour() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/s/road_wet.png");
+    let id = "textures/s/road_wet";
+    let (p, ev) = plan_with(&d, Target::Cs, &[(id, Shader::AdvancedSkin)], vec![]);
+    assert_eq!(sub(&p, "road_wet.png"), Subtype::SkinAlbedo);
+    assert!(not_shared(&resolved_of(&ev, id).1));
 }
 
 #[test]
@@ -177,6 +301,11 @@ fn nothing_is_shared_off_cs() {
     let (p, _) = plan_with(&d, Target::Vanilla, &[(X, Shader::AdvancedSkin)], vec![]);
     assert_eq!(sub(&p, "x_normal.png"), Subtype::Normal);
     assert!(!same_set(&p, "x_normal.png", "x_wet.png"));
+    // Nor a created set, which is marked after set edits.
+    let edits = create_with(Y, &["x_normal.png", "x_sk.png"]);
+    let (p, ev) = plan_with(&d, Target::Vanilla, &[(Y, Shader::AdvancedSkin)], edits);
+    assert_eq!(sub(&p, "x_normal.png"), Subtype::Normal);
+    assert!(not_shared(&resolved_of(&ev, Y).1));
 }
 
 #[test]

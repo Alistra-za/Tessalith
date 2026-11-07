@@ -333,7 +333,8 @@ pub struct SetView {
     /// Slots (record numbering, 1-based) an empty slot of the set's texture set record took from the set that writes
     /// that path: slot → that set's id. Each is also a `SlotFill::Borrowed` in `slots` (Note HG).
     pub filled: BTreeMap<u8, String>,
-    /// Slots the user turned a record fill off for (`no_fill`) while a set still writes the path: slot → that set's id.
+    /// Slots the user turned a record fill off for (`no_fill`): slot → the id of the set that writes the path, empty
+    /// when no set does any more.
     pub fill_off: BTreeMap<u8, String>,
     /// Slots the record names that no set in the project writes: slot → the record path. They count as supplied.
     pub record_supplied: BTreeMap<u8, String>,
@@ -608,7 +609,7 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
 }
 
 /// A shared skin set: marked Advanced skin, with members, and every one of them a map a shared set may hold. That
-/// is the engine's rule (`group::unmark_shared_after_edits`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
+/// is the engine's rule (`group::mark_shared_skin`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
 /// unmarked after a hand edit (a `_p`, a diffuse, an `_rfaos`) is not shared here either. A lone `_rfaos` is not shared.
 fn is_shared(v: &SetView, aliases: &BTreeMap<String, String>) -> bool {
     let allowed = |k: &SlotKind| {

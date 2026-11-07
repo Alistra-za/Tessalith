@@ -901,7 +901,7 @@ pub fn draw(
                 // A mapped set opens on its current record, when the scan still has it.
                 let sel = crate::model::sets::views(model)
                     .iter()
-                    .find(|v| v.id == id)
+                    .find(|v| engine::sets::same_id(&v.id, &id))
                     .and_then(|v| v.txst.as_ref())
                     .and_then(|t| model.record_of(t))
                     .cloned();
@@ -1262,7 +1262,7 @@ fn pill(
                         });
                     }
                     if let Some(map) = &v.txst {
-                        record_line(ui, v, map);
+                        record_line(ui, v, map, model.record_ignored(v));
                     }
                     if !v.key.is_empty() {
                         shader_combo(ui, model, v, editing, acts);
@@ -2214,8 +2214,16 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
 
 /// The card's record line (Note HG); its hover lists the stored slots, marking the ones no set writes (`supplied`: the
 /// Advanced skin editor has no `_s` row to say so). Small, not weak: it is the only card text that says where outputs go.
-fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap) {
-    let text = format!("Record: {} ({}, {})", map.edid, map.formid, map.plugin);
+fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
+    let ignored = if ignored {
+        " (ignored: PGPatcher PBR set)"
+    } else {
+        ""
+    };
+    let text = format!(
+        "Record: {} ({}, {}){ignored}",
+        map.edid, map.formid, map.plugin
+    );
     let r = ui.add(
         egui::Label::new(egui::RichText::new(&text).small())
             .truncate()

@@ -96,9 +96,9 @@ An empty slot of a mapped set reads one of three ways:
 | Grey **From record: body_s.dds** | No set writes the path. The slot counts as supplied: no missing-map warning, and the file is not checked. |
 | **empty** | The record names nothing for the slot. |
 
-A file the set has, an explicit borrow and a pin win over a fill. A record's colour map is never borrowed. **Clear** on a filled slot turns the fill off, and its missing-map warning returns; **From {set}** in the slot's menu turns it back on. <!-- D:HG7 -->
+A file the set has, an explicit borrow and a pin win over a fill. A record's colour map is never borrowed. **Clear** on a filled slot turns the fill off, and its missing-map warning returns; **From {set}** in the slot's menu turns it back on, or **Use the record's slot** once no set writes that path. <!-- D:HG7,HG9 -->
 
-After a scan, a mapped set whose stored paths differ from the record's winning copy gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from a non-empty scan gets an Info row, and the mapping stays; an empty scan says nothing. <!-- D:HG8 --> `sdc convert` does not read `sdc-project.toml`, so it ignores mappings.
+After a scan, a mapped set whose stored paths differ from the record's winning copy gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from a non-empty scan gets an Info row, and the mapping stays; an empty scan says nothing. <!-- D:HG8 --> `sdc convert` does not read `sdc-project.toml`, so it has no mappings or fills: an `_rfaos` bakes without the shared normal, and a shared set's maps type as `normal` and `backlight_tint`.
 
 ## Slot menus
 

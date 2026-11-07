@@ -252,9 +252,8 @@ pub(super) fn fill_from_records(
                 .and_then(|k| written.get(&k))
                 .filter(|(w, _)| !same_id(w, &v.id));
             if e.no_fill.contains(&n) {
-                if let Some((w, _)) = writer {
-                    v.fill_off.insert(n, w.clone());
-                }
+                let host = writer.map_or_else(String::new, |(w, _)| w.clone());
+                v.fill_off.insert(n, host);
                 continue;
             }
             let kind = writer.and_then(|(w, item)| {
@@ -344,21 +343,49 @@ pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String>
     if !entries.iter().any(|e| e.txst.is_some()) {
         return vec![];
     }
-    let written = written_index(m, &entries, views.iter().map(|v| (v.id.as_str(), &v.slots)));
     entries
         .iter()
         .filter(|e| e.shader.is_none())
         .filter_map(|e| {
             let path = e.txst.as_ref()?.slots.get(&1)?;
             let v = views.iter().find(|v| same_id(&v.id, &e.id))?;
-            if v.slots.contains_key(&SlotKind::Diffuse) {
+            // Until the set is skin the plan lists a hand-added `x_wet` as its diffuse, and writes it at the record's
+            // slot 1: it is no colour map, and the writer to find is another set's.
+            if v.slots
+                .get(&SlotKind::Diffuse)
+                .is_some_and(|f| !f.item().is_some_and(|k| is_hand_added_wet(m, v, k)))
+            {
                 return None;
             }
+            let others = views
+                .iter()
+                .filter(|w| !same_id(&w.id, &v.id))
+                .map(|w| (w.id.as_str(), &w.slots));
+            let written = written_index(m, &entries, others);
             let (writer, _) = written.get(&record_key(m, v, path)?)?;
             let w = views.iter().find(|w| same_id(&w.id, writer))?;
-            (w.skin && !same_id(&w.id, &v.id)).then(|| e.id.clone())
+            w.skin.then(|| e.id.clone())
         })
         .collect()
+}
+
+fn is_hand_added_wet(m: &AppModel, v: &SetView, key: &str) -> bool {
+    let stem = Path::new(key).file_stem().unwrap_or_default();
+    engine::group::hand_added_tail(&stem.to_string_lossy(), &v.key, &m.suffix_aliases)
+        == Some(engine::group::SKIN_WET)
+}
+
+/// Whether two stored FormIDs are one: compared as hex numbers, `0x` optional, in any case. One that doesn't parse
+/// matches only its own text.
+fn formid_eq(a: &str, b: &str) -> bool {
+    let number = |s: &str| {
+        let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
+        u32::from_str_radix(hex.unwrap_or(s), 16).ok()
+    };
+    match (number(a), number(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a.eq_ignore_ascii_case(b),
+    }
 }
 
 /// The FormID a mapping stores and the picker shows: the plugin's own `local` without its master digits, `0x`, upper
@@ -419,10 +446,11 @@ impl TxstRecord {
 }
 
 impl AppModel {
-    /// The winning record `map` names, by plugin + FormID (ASCII-folded), not by EDID or by the winning plugin.
+    /// The winning record `map` names, by plugin (ASCII-folded) + FormID (`formid_eq`), not by EDID or by the winning
+    /// plugin.
     pub fn record_of(&self, map: &TxstMap) -> Option<&TxstRecord> {
         self.known.records.iter().find(|r| {
-            r.plugin.eq_ignore_ascii_case(&map.plugin) && r.formid.eq_ignore_ascii_case(&map.formid)
+            r.plugin.eq_ignore_ascii_case(&map.plugin) && formid_eq(&r.formid, &map.formid)
         })
     }
 
@@ -488,12 +516,12 @@ impl AppModel {
         };
         let (id, label) = (v.id.clone(), format!("Map {} to {}", v.id, map.edid));
         // Another record starts with every fill on: a slot turned off under one record says nothing about another's.
-        // The same key (plugin + FormID, ASCII-folded; "Use new paths", Change record to its own) keeps them.
+        // The same key (plugin ASCII-folded + FormID; "Use new paths", Change record to its own) keeps them.
         let off = self.stored_txst(&id).map_or_else(
             || self.stored_no_fill(&id),
             |t| {
-                let same = t.plugin.eq_ignore_ascii_case(&map.plugin)
-                    && t.formid.eq_ignore_ascii_case(&map.formid);
+                let same =
+                    t.plugin.eq_ignore_ascii_case(&map.plugin) && formid_eq(&t.formid, &map.formid);
                 if same {
                     vec![]
                 } else {
@@ -542,11 +570,12 @@ impl AppModel {
         };
         let (id, label) = (v.id.clone(), format!("Remove record mapping from {}", v.id));
         let off = self.stored_no_fill(&id);
+        // `no_fill` first: `set_txst(None)` removes a table left with only its id, and a later edit would make it again.
         self.edit_docs(&label, None, true, move |_, d| {
-            d.set_txst(&id, None);
             for n in off {
                 d.set_no_fill(&id, n, false);
             }
+            d.set_txst(&id, None);
         });
         Ok(())
     }

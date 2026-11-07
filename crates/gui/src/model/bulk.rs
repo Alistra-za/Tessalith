@@ -1307,7 +1307,11 @@ impl AppModel {
                 at,
                 MenuEntry {
                     action: MenuAction::RestoreFill { set: id.clone(), n },
-                    label: format!("From {host}"),
+                    label: if host.is_empty() {
+                        "Use the record's slot".into()
+                    } else {
+                        format!("From {host}")
+                    },
                     disabled: off.clone(),
                 },
             );
