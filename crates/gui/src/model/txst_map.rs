@@ -138,7 +138,7 @@ fn pbr_on_cs(m: &AppModel, slots: &BTreeMap<SlotKind, SlotFill>) -> bool {
             .is_some_and(|j| j.profile.subtype == Subtype::PbrAlbedo)
 }
 
-/// Where each set's own files are written: ASCII-folded output path under the export folder → (set id, item key). A
+/// Where each set's own files are written: game path (`game_key`) → (set id, item key). A
 /// file in a slot its set's record names is at the record's path, else at its last plan's `job_key`. The first writer
 /// in display order keeps a path two sets write (that is the duplicate row's business).
 fn written_index<'a>(
@@ -162,11 +162,8 @@ fn written_index<'a>(
                     let path = t.slots.get(&record_slot(it)?)?;
                     record_rel(root, &it.key, path)
                 })
-                .map(|p| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
-                .or_else(|| {
-                    (!it.job_key.is_empty())
-                        .then(|| it.job_key.replace('\\', "/").to_ascii_lowercase())
-                });
+                .map(|p| game_key(&p.to_string_lossy()))
+                .or_else(|| (!it.job_key.is_empty()).then(|| game_key(&it.job_key)));
             if let Some(rel) = rel {
                 out.entry(rel).or_insert((id.to_string(), item.clone()));
             }
@@ -188,11 +185,20 @@ fn key_of(m: &AppModel, v: &SetView) -> String {
 /// The path `record` names for set `v`, as `written_index` spells it.
 fn record_key(m: &AppModel, v: &SetView, record: &str) -> Option<String> {
     let rel = record_rel(m.root.as_deref()?, &key_of(m, v), record)?;
-    Some(
-        rel.to_string_lossy()
-            .replace('\\', "/")
-            .to_ascii_lowercase(),
-    )
+    Some(game_key(&rel.to_string_lossy()))
+}
+
+/// Agent ruling (Note HG): the index compares game paths, as R2 says. `rel` is a path under the export folder; this
+/// folds it (`/`, ASCII lower case) and cuts everything before its first `textures` folder, so a host in another mod
+/// folder (`mod_a/textures/s/x_n.dds`) matches the consumer's record path resolved under its own
+/// (`mod_b/textures/s/x_n.dds`). With no `textures` folder (the root is at or inside it) every rel has the same shape
+/// and stays whole.
+fn game_key(rel: &str) -> String {
+    let rel = rel.replace('\\', "/").to_ascii_lowercase();
+    match rel.split('/').position(|c| c == "textures") {
+        Some(i) => rel.split('/').skip(i).collect::<Vec<_>>().join("/"),
+        None => rel,
+    }
 }
 
 /// Note HG: empty record slots of each mapped set borrow from the set that writes that path, or count as supplied.

@@ -2962,6 +2962,18 @@ impl AppModel {
         (self.inputs_rev, self.check_state.plans_applied)
     }
 
+    /// Tests (Note HG): the re-plans in a row the engine inputs forced (`finish_plan` stops at 2), and whether the
+    /// last plan was made from the inputs the model would send now.
+    #[cfg(feature = "test-hooks")]
+    pub fn auto_replans(&self) -> u8 {
+        self.auto_replans
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn inputs_settled(&self) -> bool {
+        self.last_inputs.as_ref() == Some(&EngineInputs::of(self))
+    }
+
     /// Note FI15: every item's output game path (a skipped DDS included), from its `textures/` component on, with
     /// `/`, lowercased by the engine's output-key fold (equal to the ASCII fold for ASCII paths), sorted and
     /// deduplicated; paths with no `textures/` component are left out. The `u64` changes only when the list does,
@@ -3070,12 +3082,18 @@ impl AppModel {
             return None;
         }
         let mut changed = BTreeSet::new();
+        // Note HG: a record fill reads other sets' output paths (`job_key`), so in a mapped project a moved output is
+        // a change of its set (`splice_views` then builds every view).
+        let mapped = self
+            .sets_doc
+            .as_ref()
+            .is_some_and(|d| d.entries().iter().any(|e| e.txst.is_some()));
         // Both lists are sorted the same way (`PlanView::build`), so a pairwise compare finds any key change.
         for (a, b) in old_items.iter().zip(&self.items) {
             if a.key != b.key || a.set_key != b.set_key {
                 return None;
             }
-            if sets::view_reads(a) != sets::view_reads(b) {
+            if sets::view_reads(a) != sets::view_reads(b) || (mapped && a.job_key != b.job_key) {
                 changed.extend(b.set_key.clone());
             }
         }

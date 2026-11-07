@@ -1467,32 +1467,173 @@ fn a_case_difference_still_matches() {
 }
 
 #[test]
-fn a_partial_plan_equals_a_fresh_build() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = r(d.path());
-    let before = sdc_gui::model::sets::views(&m);
-    // A scoped re-plan of C splices its view; a mapped project rebuilds every view, so it equals a fresh build.
-    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
-        .unwrap();
-    idle(&mut m);
-    let spliced = sdc_gui::model::sets::views(&m);
-    assert_ne!(*before, *spliced);
-    m.invalidate_views();
-    assert_eq!(*spliced, *sdc_gui::model::sets::views(&m));
-}
-
-#[test]
 fn a_mapped_skin_project_settles() {
     let d = tempfile::tempdir().unwrap();
     let mut m = r(d.path());
+    // The plan on screen was made from the inputs the model sends now, within the re-plan bound.
+    assert!(m.inputs_settled());
+    assert!(m.auto_replans() < 2);
     let marks = m.plan_marks();
     let inputs = engine_inputs(&m);
     m.replan();
     idle(&mut m);
+    assert!(m.inputs_settled() && m.auto_replans() < 2);
     assert_eq!(
         m.plan_marks().0,
         marks.0,
         "no inputs changed on a fresh plan"
     );
     assert_eq!(engine_inputs(&m), inputs);
+}
+
+fn missing_n(v: &SetView) -> bool {
+    v.set_warnings
+        .iter()
+        .any(|w| w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n/_msn")
+}
+
+/// R2 and R9: a borrowed fill removes C's missing-`_n` warning, Clear brings it back, and restoring removes it again.
+#[test]
+fn a_fill_clears_the_missing_map_warning_and_clear_brings_it_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    assert!(view(&m, M).filled.contains_key(&2));
+    assert!(!missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    assert!(missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
+    m.restore_fill(M, 2).unwrap();
+    idle(&mut m);
+    assert!(!missing_n(&view(&m, M)), "{:?}", view(&m, M).set_warnings);
+}
+
+/// The index compares game paths: a host in another mod folder still writes the consumer's record path.
+#[test]
+fn a_host_in_another_mod_folder_is_borrowed() {
+    let d = tempfile::tempdir().unwrap();
+    let h = "mod_a/textures/s/x";
+    let c = "mod_b/textures/s/e/x";
+    let toml = format!(
+        "[[sets]]\nid = \"{h}\"\n{}[[sets]]\nid = \"{c}\"\nshader = \"advanced_skin\"\n{}",
+        txst(&[(1, "textures/s/e/femalebody.dds"), (2, BODY_N)]),
+        txst(&[(1, "textures/s/e/femalebody.dds"), (2, BODY_N)]),
+    );
+    let m = project_toml(
+        d.path(),
+        &[
+            "mod_a/textures/s/x_normal.png",
+            "mod_b/textures/s/e/x.png",
+            "mod_b/textures/s/e/x_rfaos.png",
+        ],
+        &toml,
+    );
+    let v = view(&m, c);
+    assert_eq!(borrowed_from(&v, SlotKind::Normal).as_deref(), Some(h));
+    assert!(v.record_supplied.is_empty(), "{:?}", v.record_supplied);
+    assert!(!missing_n(&v));
+}
+
+/// An unmapped host is indexed by its last plan's output path, folded: a mixed-case name still matches.
+#[test]
+fn an_unmapped_writer_matches_by_its_folded_output_path() {
+    let d = tempfile::tempdir().unwrap();
+    let host = "textures/s/Body";
+    let toml = format!(
+        "[[sets]]\nid = \"{host}\"\n[[sets]]\nid = \"{M}\"\nshader = \"advanced_skin\"\n{}",
+        txst(&[(1, "textures/s/e/femalebody.dds"), (2, BODY_N)]),
+    );
+    let m = project_toml(
+        d.path(),
+        &[
+            "textures/s/Body_n.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &toml,
+    );
+    let written = out(&m, "textures/s/Body_n.png");
+    assert!(written.ends_with("/textures/s/Body_n.dds"), "{written}");
+    let v = view(&m, M);
+    // Set ids fold case; the file's own spelling is what the index folds.
+    assert!(borrowed_from(&v, SlotKind::Normal).is_some_and(|f| f.eq_ignore_ascii_case(host)));
+}
+
+/// A PGPatcher PBR set on CS ignores its mapping, so it writes where its plan puts the file, and a record naming
+/// that path fills from it.
+#[test]
+fn a_pbr_set_on_cs_is_a_writer_by_its_output_path() {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::Answer;
+    let pbr = |m: &mut AppModel| {
+        m.decide("textures/v/a.png", Answer::Subtype(Subtype::PbrAlbedo));
+        m.decide(
+            "textures/v/a_normal.png",
+            Answer::Subtype(Subtype::PbrNormal),
+        );
+        m.decide(
+            "textures/v/a_normal.png",
+            Answer::Green(GreenConvention::Directx),
+        );
+        idle(m);
+    };
+    let host = |extra: &str| format!("[[sets]]\nid = \"textures/v/a\"\n{extra}");
+    let d = tempfile::tempdir().unwrap();
+    let mut probe = project_toml(
+        d.path(),
+        &["textures/v/a.png", "textures/v/a_normal.png"],
+        &host(""),
+    );
+    pbr(&mut probe);
+    assert!(view(&probe, "textures/v/a").pbr, "a PBR set");
+    let path = probe
+        .item("textures/v/a_normal.png")
+        .unwrap()
+        .job_key
+        .replace('\\', "/");
+    assert!(path.ends_with(".dds"), "{path}");
+    // The record on the PBR set names somewhere else; the consumer names where the file really goes.
+    let d2 = tempfile::tempdir().unwrap();
+    let toml =
+        host(&txst(&[(2, "textures/elsewhere/zzz_n.dds")])) + &skin_set(M, &txst(&[(2, &path)]));
+    let mut m = project_toml(
+        d2.path(),
+        &[
+            "textures/v/a.png",
+            "textures/v/a_normal.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &toml,
+    );
+    pbr(&mut m);
+    assert!(view(&m, "textures/v/a").pbr);
+    let v = view(&m, M);
+    assert_eq!(
+        borrowed_from(&v, SlotKind::Normal).as_deref(),
+        Some("textures/v/a"),
+        "{:?} {path}",
+        v.record_supplied
+    );
+}
+#[test]
+fn restore_is_refused_on_a_pinned_slot_and_a_read_only_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_slot_command(M, 2, sdc_gui::model::sets::SlotCommand::Clear)
+        .unwrap();
+    idle(&mut m);
+    m.set_slot_lock(M, 2, true).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        m.restore_fill(M, 2),
+        Err(sdc_gui::model::sets::SLOT_LOCKED.into())
+    );
+    assert!(entry(&m, M).no_fill.contains(&2), "nothing was written");
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), R_FILES, "this is = = not toml\n");
+    assert!(m.sets_doc.as_ref().unwrap().read_only());
+    let e = m.restore_fill(M, 2).unwrap_err();
+    assert!(e.contains("read-only"), "{e}");
 }

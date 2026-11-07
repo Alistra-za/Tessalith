@@ -603,6 +603,7 @@ fn views_after_a_partial_equal_a_fresh_build_on_a_mapped_project() {
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
 }
+
 /// Final fix I2: a full plan builds again only the views of the sets it changed, with no whole build, and the result
 /// equals a fresh build. An edit of the sets document, or a plan that changes the engine inputs, builds them whole.
 #[test]
