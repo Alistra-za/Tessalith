@@ -12,8 +12,6 @@ Things you may run into in version 2.0.0, and what to do about them.
 
 **PBR grass is approximated in the 3D preview.** The preview draws the PBR grass shader type with the normal PBR shader: no wind, no wrapped diffuse, no grass LOD. The exported files are not affected.
 
-**Debug views depend on your Community Shaders build.** The 3D preview's **Debug view** follows the installed build, so a view may differ from the game or be missing.
-
 **Renaming a colour map's output path loses the shader suggestion.** The suggestion looks meshes up by the new path, and no mesh uses it. Pick the shader by hand.
 
 **Reporting a problem.** Open an issue on the Tessalith GitHub page with the Tessalith version (the exe's file properties, or `sdc --version`), your GPU and driver, your Community Shaders and PGPatcher versions, the crash log if the app crashed, the project's `sdc.toml`, and what you did, what you expected and what happened.
@@ -113,7 +111,7 @@ It needs the Windows system font Segoe UI (`segoeui.ttf`) and says so if it is m
 
 ### The 3D preview shows plain textures
 
-What the PGPatcher simulation needs is in [What it assumes](GUI-Set-Preview-3D.md#what-it-assumes). If "Community Shaders not found" shows, use **Shader folder…** to point at your Community Shaders mod folder.
+What the PGPatcher simulation needs is in [What it assumes](GUI-Set-Preview-3D.md#what-it-assumes).
 
 ### Leftover .sdc-*.tmp files
 

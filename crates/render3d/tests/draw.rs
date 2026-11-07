@@ -20,22 +20,16 @@ fn slot_register_tables() {
     assert_eq!(register_for_slot(0, true, false, 4), None);
 }
 
-fn shaders() -> Option<std::path::PathBuf> {
-    std::env::var("SDC_CS_SHADERS").ok().map(Into::into)
-}
-
 fn lit(px: &[u8]) -> usize {
     px.chunks(4)
         .filter(|p| p[0] as u32 + p[1] as u32 + p[2] as u32 > 30)
         .count()
 }
 
-/// Needs the installed CS: `SDC_CS_SHADERS=... cargo test -p render3d -- --ignored`
+/// Note GT: the bundled CS tree.
 #[test]
-#[ignore]
 fn renders_fixture_nonblack_with_defaults() {
-    let root = shaders().unwrap();
-    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
     let mut r = render3d::Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(
@@ -56,10 +50,8 @@ fn renders_fixture_nonblack_with_defaults() {
 }
 
 #[test]
-#[ignore]
 fn missing_textures_use_defaults() {
-    let root = shaders().unwrap();
-    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
     let mut r = render3d::Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(
@@ -76,10 +68,8 @@ fn missing_textures_use_defaults() {
 }
 
 #[test]
-#[ignore]
 fn le_mesh_is_skipped() {
-    let root = shaders().unwrap();
-    let fp = render3d::ShaderSource::Folder(root);
+    let fp = render3d::ShaderSource::Bundled;
     let mut r = render3d::Renderer::with_source(fp, tempfile::tempdir().unwrap().keep()).unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -93,10 +83,8 @@ fn le_mesh_is_skipped() {
 
 /// B8: the display encode brightens the same frame, and the timing is filled in.
 #[test]
-#[ignore]
 fn srgb_readback_and_timing() {
-    let root = shaders().unwrap();
-    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
     let mut r = render3d::Renderer::with_source(fp.clone(), cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(

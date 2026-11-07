@@ -388,7 +388,7 @@ fn warnings_stay_above_the_viewport_outside_details() {
     };
     h.run_steps(3);
     let failed = h.get_by_label(&label).rect();
-    // The new line pushes the frame down: compare with where it is now.
+    // The failure line sits above the frame (the off line is one truncated row): compare with where the frame is now.
     let frame = h.get_by_label(FRAME_LABEL).rect();
     assert!(failed.max.y <= frame.min.y + 0.5);
     assert!(!sdc_gui::ui::viewport3d::details_open(

@@ -195,15 +195,11 @@ fn the_fill_survives_a_device_rebuild() {
     );
 }
 
-/// Opt-in: an env-mapped shape (type 1) whose cube map is missing gets a cube of the fill at t4 on the installed CS
-/// (the stand-in reflects no TextureCube). `SDC_CS_SHADERS=…\Shaders cargo test -p render3d --release --test missing_fill -- --ignored`
+/// An env-mapped shape (type 1) whose cube map is missing gets a cube of the fill at t4 on the bundled CS
+/// (the stand-in reflects no TextureCube).
 #[test]
-#[ignore]
-fn installed_cs_fills_a_missing_env_cube_with_a_cube() {
-    let root = std::path::PathBuf::from(
-        std::env::var("SDC_CS_SHADERS").expect("set SDC_CS_SHADERS to the CS Shaders folder"),
-    );
-    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
+fn bundled_cs_fills_a_missing_env_cube_with_a_cube() {
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
     let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
         .unwrap();

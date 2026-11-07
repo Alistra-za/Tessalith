@@ -277,16 +277,10 @@ fn deferred_edit_from_opaque_to_blended_repermutes() {
     assert!(!has_deferred(&mut r, 0));
 }
 
-/// Opt-in: the installed CS compiles its DEFERRED permutation for an opaque plane and writes NormalGlossiness.
-/// `SDC_CS_SHADERS=…\Shaders cargo test -p render3d --release --test deferred -- --ignored --nocapture`
+/// The bundled CS compiles its DEFERRED permutation for an opaque plane and writes NormalGlossiness.
 #[test]
-#[ignore]
-fn installed_cs_deferred_plane_smoke() {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
-    let fp = render3d::ShaderSource::Folder((std::path::Path::new(&shaders)).to_path_buf());
+fn bundled_cs_deferred_plane_smoke() {
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
     let mut r = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     println!("adapter: {} (warp: {})", r.gpu().adapter, r.gpu().warp);
@@ -316,7 +310,7 @@ fn installed_cs_deferred_plane_smoke() {
         r.composite().map(|c| &c.unbound)
     );
     // Warm: a fresh renderer on the same disk cache.
-    let fp = render3d::ShaderSource::Folder((std::path::Path::new(&shaders)).to_path_buf());
+    let fp = render3d::ShaderSource::Bundled;
     let mut w = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     w.load_parsed(&parsed, &|_| None);
     let t = std::time::Instant::now();

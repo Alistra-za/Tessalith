@@ -1,12 +1,14 @@
 # The 3D preview
 
-The 3D view of a set on a mesh, rendered with Direct3D 11 and your own Community Shaders shader files. The Meshes view's 3D panel works the same way. For anyone checking a material in something close to the game before exporting.
+The 3D view of a set on a mesh, rendered with Direct3D 11 and the Community Shaders shader files built into Tessalith. The Meshes view's 3D panel works the same way. For anyone checking a material in something close to the game before exporting.
+
+The preview uses Community Shaders d2026.10.11.0 with default settings, whatever CS you run. Your own CS settings or a newer CS can look different in game. <!-- D:GT4 -->
 
 ## Set preview (3D)
 
 **Layout.** The panel has one toolbar line, the frame in all the height left, and a **Details** footer under it, collapsed until you open it (each panel remembers it in `gui.toml`). The view does no work while it is hidden.
 
-The toolbar holds, for a set, *Encoded (exact export)* | *Source (faster, no compression)* and the **Mesh** list, then for both panels **View ▾**, **Copy image** and **Shader folder…**:
+The toolbar holds, for a set, *Encoded (exact export)* | *Source (faster, no compression)* and the **Mesh** list, then for both panels **View ▾** and **Copy image**:
 
 | Control | What it does |
 |---|---|
@@ -15,9 +17,8 @@ The toolbar holds, for a set, *Encoded (exact export)* | *Source (faster, no com
 | **Material object layer** | Shown for a set with a material object block (CS PBR records). On, the preview draws the snow/ash layer the game puts on statics that use the object, from the block's values and the DATA of the object's record in the load order (the first of the block's EDIDs that the scan knows, read in the background). Coverage goes on non-skinned shapes that are not parallax (shader type 3), multi-layer parallax (type 11 or the Multi_Layer_Parallax flag), FaceGen (types 4 and 5), sparkle snow (type 14), eye (type 16) or model-space-normal shapes; the block's material values (colour scale, roughness, specular, glint) change PBR shapes only. Skinned shapes and the other shapes listed draw as before, without the layer. Grey lines under the toolbar say what the preview had to guess: no record in the load order (it then shows default coverage), non-PBR shapes in the mesh, and each of the four layer textures (textures\effects\projecteddiffuse.dds, projectednormal.dds, projectednormaldetail.dds, projectednoise.dds) the load order lacks (a plain fallback is drawn). Off at every start. When the set has an [XPMF profile](XPMF-Profiles.md), the layer takes the profile's four texture paths (resolved like the set's own textures, so this session's unsaved outputs show) and its `falloffScale`, `falloffBias` and `noiseUVScale` in place of the load order's textures and the record's values; changing one of those texture paths redraws the layer at once. A rescan that changes the winning record shows at once; changed load-order layer textures, or new DATA under the same record, show after you turn the layer off and on. <!-- D:GI10,GI17 --> |
 | **View ▾** | The debug view, **Accurate (deferred)**, *Background* (*Solid* with a colour swatch and hex box, any colour; or *Studio HDRI*, Poly Haven, CC0), *Sun brightness*, *Point light brightness* and *Point light radius*, and **Reset view**. It stays open while you use it, the colour picker included. |
 | **Copy image** | Copies the last frame to the clipboard (also **Ctrl+Shift+C**), at the size it was rendered; the panel says "Copied 3D view (W×H)". |
-| **Shader folder…** | Points at your Community Shaders mod folder or its `Shaders` folder when it is not found automatically ("Community Shaders not found", **Choose folder…**). |
 
-What needs attention shows as a line between the toolbar and the frame, never in Details: a map that failed, is stale or is blocked, a skipped shape or a patch badge, a shader that failed, an error, a missing texture (in magenta, with *Open in Textures*), "PGPatcher preview needs the CS target and a PBR set", Community Shaders not found, and the notices.
+What needs attention shows as a line between the toolbar and the frame, never in Details: a map that failed, is stale or is blocked, a skipped shape or a patch badge, a shader that failed, an error, a missing texture (in magenta, with *Open in Textures*), "PGPatcher preview needs the CS target and a PBR set", and the notices.
 
 Details holds the rest: "Assumes your Tessalith JSON wins…", the preview size, the mesh line ("No scanned mesh uses this diffuse"), each map's encode time, the built-in shape line, the emissive note, the **Community Shaders features** toggle (on by default; off compiles the shaders without the CS feature defines) and "Off in this preview: …".
 
@@ -37,8 +38,8 @@ While the switch is on 3D, selecting any texture of a set (from the set or strai
 
 ## View options
 
-- **Debug view** (in *View ▾*, or **V** to step through): *Lit* is the normal Community Shaders render. *Albedo*, *Normals*, *Roughness*, *Metallic* and *AO* show one channel of the material. They are offered only when the Community Shaders build in use allows it and a loaded shape has that channel; where a shape has only a stand-in (non-PBR roughness as 1 − specular mask, vertex AO), the hover names it.
-- **Accurate (deferred)** (in *View ▾*, on by default): opaque shapes draw through Community Shaders' own deferred pass and composite, as in game; blended shapes still draw on top the forward way. Off uses the forward path. If your Community Shaders build cannot run it, the view stays forward and a notice says why. The setting is remembered.
+- **Debug view** (in *View ▾*, or **V** to step through): *Lit* is the normal Community Shaders render. *Albedo*, *Normals*, *Roughness*, *Metallic* and *AO* show one channel of the material. They are offered only when a loaded shape has that channel; where a shape has only a stand-in (non-PBR roughness as 1 − specular mask, vertex AO), the hover names it.
+- **Accurate (deferred)** (in *View ▾*, on by default): opaque shapes draw through Community Shaders' own deferred pass and composite, as in game; blended shapes still draw on top the forward way. Off uses the forward path. If it cannot run, the view stays forward and a notice says why. The setting is remembered.
 - **Missing textures** show in solid magenta in the frame (colour slots only; a missing normal, glow, specular or RMAOS map draws neutral), and are listed above it in magenta. A path that is a texture of the open folder has an *Open in Textures* button that selects it in the Textures view. A missing cube map (an environment map) keeps the renderer's plain stand-in instead, because a flat colour cannot go in a cube slot. In a NIF edit's **Source** view, a path that no mod ships but that PGPatcher's JSON replaces at run time (a PBR mod whose NIF still names the old path) is not listed as missing: one grey line says "1 texture path is replaced by PGPatcher at run time: switch to In game to see them", with the paths on hover; the frame still draws those slots in magenta. A path nothing supplies is still listed as missing.
 
 ## What it assumes

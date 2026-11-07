@@ -159,6 +159,12 @@ ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
 ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA
 
+ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ
+
+ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -319,3 +325,19 @@ ARCHIVED (superseded by Note HB1, 2026-11-05)
 
 ARCHIVED (wording before the edit; superseded in part by Note HB5, 2026-11-05)
 - The skin card has the 20 `SkinProfile` fields in CS README order and key names, grouped Specular (5), Physical (4), Edge & detail (5), SSS (3), Fuzz (3); stored in the set's reserved `skin` table (explicit values; unknown keys survive), 4 decimals, one undo step per edit (a drag merges), never bulk; `_rfaos`, `_sk`, `_wet` members show as text. [AG80, AG82, AG84, AG85, AG89]
+
+ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
+- Golden fixtures come from the golden-capture workflow (`SDC_GOLDEN`, folder `cs-1.9.0-d2026.10.11.0`), keyed by CS version; scene WhiterunDragonsReach01 (hour 7.5, Linear Lighting on); skin and hair specular follow the user's CS settings. [CJ1, CJ2, CJ3]
+
+ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
+- Deferred frames run the user's `DeferredCompositeCS.hlsl` (`CSHADER`) into RT0; blended shapes draw forward on top; debug views skip it; a failed build keeps forward with "Deferred preview unavailable: <error>". A late composite failure rebuilds forward programs synchronously; async deferred-off keeps the target while any draw holds DEFERRED; no DEFERRED draw means a forward frame. [CJ6, CJ7]
+
+## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
+
+ARCHIVED (superseded by Note GT, 2026-11-06)
+- **GQ6** The preview compiles the user's Game Gamma: `preview_defines` adds `CS_GAME_GAMMA=<f32 to 9 decimals>` (CS's own form, `1.600000024`) only when Linear Lighting is on (the shaders read it only under `ENABLE_LL`, TransferFunctions.hlsli) and `"Linear Lighting".gameGamma` is a usable value other than 1.6, so default users and LL-off users keep their defines and program keys; the Lighting programs and the composite share it through the feature list, and `settings_define` treats it as a settings define. `ENABLE_ACESCG` stays uncompiled (shortcut: the readback has no ACEScg conversion). A non-UTF-8 Info.ini is now a note with the Features-ini fallback, like an unreadable one, not a parse failure that kept the old settings.
+
+## Note FT — backlog batch B4: gui model 2 (main team, 2026-11-04)
+
+ARCHIVED (superseded by Note GT, 2026-11-06)
+- **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.

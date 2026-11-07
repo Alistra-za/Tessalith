@@ -52,19 +52,10 @@ fn include_cycle_is_capped() {
     assert!(folder(d.path(), "a.hlsli").is_err());
 }
 
-/// Real-CS check; skips cleanly when the folder is absent.
+/// The bundled CS Lighting.hlsl expands with no include left.
 #[test]
-#[ignore]
-fn real_cs_lighting_expands() {
-    let Some(root) = std::env::var_os("SDC_CS_SHADERS").map(std::path::PathBuf::from) else {
-        eprintln!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
-    if !root.join("Lighting.hlsl").is_file() {
-        eprintln!("skip: CS not present");
-        return;
-    }
-    let e = folder(&root, "Lighting.hlsl").unwrap();
+fn bundled_cs_lighting_expands() {
+    let e = expand(&ShaderSource::Bundled, "Lighting.hlsl").unwrap();
     let left: Vec<&str> = e
         .text
         .lines()
@@ -83,9 +74,7 @@ fn real_cs_lighting_expands() {
         e.text.len(),
         left.len()
     );
-    for l in &left {
-        eprintln!("UNEXPANDED: {l}");
-    }
+    assert!(left.is_empty(), "unexpanded: {left:?}");
 }
 
 #[test]

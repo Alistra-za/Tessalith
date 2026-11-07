@@ -294,7 +294,7 @@ used_by = ["GUI-Set-Materials.md"]
 [[exempt]]
 what = "3D set preview content"
 page = "GUI-Set-Preview-3D"
-reason = "needs Community Shaders' shader files (SDC_CS_SHADERS) and a D3D11 device"
+reason = "needs a D3D11 device"
 
 [[exempt]]
 what = "Complex grass and PBR grass sets"

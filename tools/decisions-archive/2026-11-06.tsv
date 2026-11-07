@@ -1,0 +1,7 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- Golden fixtures come from the golden-capture workflow	Digest	684	back	GT	it draws CS's defaults, so a user who changed them sees the default look (GT4)	partial	2026-11-06		goes: skin and hair specular follow the user's CS settings (CJ3); stays: the fixture source, the CS version key, the scene
+Digest¶- Deferred frames run the user's	Digest	686	back	GT	The preview compiles the bundled tree with cs_settings::defaults() and never locates the user's CS (GT4)	partial	2026-11-06		goes: the composite is the user's own DeferredCompositeCS.hlsl (CJ6); stays: CSHADER into RT0, forward blended shapes, fallback rules
+GQ6	GQ	1012	back	GT	This supersedes GQ6 (the Game Gamma define) (GT4)	archive-item	2026-11-06		whole: the preview no longer reads the user's Game Gamma or Info.ini
+FT6	FT	1072	back	GT	the gui.toml render3d.shaders key are gone (GT4)	archive-item	2026-11-06		whole: the render3d.shaders key no longer exists
+Index¶- GUI Preview and 3D:	Index	26	back	GT		partial	2026-11-06		goes: the line without GT (GT1 to GT5 govern it)
+Index¶- render3d:	Index	32	back	GT		partial	2026-11-06		goes: the line without GT (GT1 to GT5 govern it)
