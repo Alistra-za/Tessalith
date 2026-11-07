@@ -35,6 +35,9 @@ macro_rules! journey {
     };
 }
 
+#[path = "ui_proof/sets_column.rs"]
+mod sets_column;
+
 /// Replays `lines` on `fixture` without wgpu; panics "step N `<line>`: <error>" at the first failing step.
 pub fn run_journey(fixture: &str, lines: &[&str]) {
     app_data();
