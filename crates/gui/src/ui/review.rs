@@ -68,7 +68,7 @@ pub fn undecided_row(
                 Some((code_line(*code).to_string(), Some(code.as_str())))
             }
             // Note GU2: no menu, only what a cube source is; the type picker on the row is the way out.
-            Decision::CubeLayout => Some((not_a_cube(item.job.as_ref()), None)),
+            Decision::NotACubeSource => Some((not_a_cube(item.job.as_ref()), None)),
             Decision::Subtype { .. } => None,
         })
         .collect();
@@ -138,16 +138,21 @@ fn fix_buttons_on(
             match d {
                 // Note FB9 (owner amendment A): `[Set type: {suggestion} ✓] ▾`, the main part accepts, ▾ opens the
                 // picker; without a suggestion the plain "Set type…" opens it.
-                Decision::Subtype { suggested } => {
+                // A not-a-cube source has only this answer too: a different sub-type (no suggestion).
+                d @ (Decision::Subtype { .. } | Decision::NotACubeSource) => {
+                    let suggested = match d {
+                        Decision::Subtype { suggested } => *suggested,
+                        _ => None,
+                    };
                     let opener = match suggested {
                         Some(st) => {
-                            let (accept, arrow) = split_button(ui, &accept_text(*st));
+                            let (accept, arrow) = split_button(ui, &accept_text(st));
                             if accept
                                 .on_hover_text("Use the suggested type")
                                 .on_disabled_hover_text(why)
                                 .clicked()
                             {
-                                pick = Some(RowPick::Decide(key.to_string(), *st));
+                                pick = Some(RowPick::Decide(key.to_string(), st));
                             }
                             // ▾ is what the plain button was: the picker, so it keeps its name.
                             arrow.widget_info(|| {
@@ -165,7 +170,7 @@ fn fix_buttons_on(
                     let id = egui::Id::new(("set-type-picker", key));
                     let kind = TypeKind::SetType;
                     let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
-                    let (t, s) = (model.target, *suggested);
+                    let (t, s) = (model.target, suggested);
                     if let Some(st) = type_picker::show(ui, id, &opener, None, s, kind, t, grass) {
                         pick = Some(RowPick::Decide(key.to_string(), st));
                     }
@@ -180,7 +185,6 @@ fn fix_buttons_on(
                         }
                     }
                 }
-                Decision::CubeLayout => {}
                 Decision::Acknowledge(code) => {
                     if ui
                         .button(if surface == "Review" {

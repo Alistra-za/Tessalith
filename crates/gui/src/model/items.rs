@@ -43,7 +43,7 @@ pub enum Decision {
     },
     AlphaMeaning,
     /// A single image that is not six faces, a cross or a strip (`Need::CubeLayout`); its only answer is a sub-type.
-    CubeLayout,
+    NotACubeSource,
     Acknowledge(Code),
 }
 
@@ -142,7 +142,7 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
                     suggested: job.suggestions.first().map(|s| s.subtype),
                 },
                 Need::AlphaMeaning => Decision::AlphaMeaning,
-                Need::CubeLayout => Decision::CubeLayout,
+                Need::CubeLayout => Decision::NotACubeSource,
             });
         }
     }

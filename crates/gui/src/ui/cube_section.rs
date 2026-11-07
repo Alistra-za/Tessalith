@@ -3,11 +3,12 @@
 //! `AppModel::set_field` / `clear_field`, so sdc.toml stays the only place a setting is written.
 use super::columns::RED;
 use super::settings_panel::{combo, options_of, Options};
+use crate::model::code_text::not_a_cube;
 use crate::model::fields::{cube_views, provenance_text, FieldView};
 use crate::model::AppModel;
 use eframe::egui;
 use engine::config::{CubeLayout, FaceFlip, Subtype};
-use engine::policy::ResolvedJob;
+use engine::policy::{JobStatus, Need, ResolvedJob};
 use serde_json::{json, Value};
 use std::ops::RangeInclusive;
 
@@ -276,7 +277,18 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                         return (None, r);
                     }
                     let cur = c.layout.map_or(json!("auto"), |l| json!(l));
-                    let (p, r) = named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f));
+                    // Note GU2: not a cube source, so no layout can help; the row stays, disabled, and says why.
+                    let not_cube = matches!(&job.status, JobStatus::Unresolved { needs, .. } if needs.contains(&Need::CubeLayout));
+                    let (p, r) = ui
+                        .add_enabled_ui(!not_cube, |ui| {
+                            named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f))
+                        })
+                        .inner;
+                    let r = if not_cube {
+                        r.on_disabled_hover_text(not_a_cube(Some(&job)))
+                    } else {
+                        r
+                    };
                     // Auto is the unset layout.
                     (p.map(|v| (v != json!("auto")).then_some(v)), r)
                 });

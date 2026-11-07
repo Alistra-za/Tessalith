@@ -249,7 +249,7 @@ fn out_of_range_yaw_shows_the_engine_message() {
     );
 }
 
-// ---- the unclear-layout decision (Task 4) ----
+// ---- the not-a-cube-source decision (Task 4) ----
 
 const UNCLEAR: &str = "a/room_e.png";
 
@@ -271,20 +271,23 @@ fn unclear_model(d: &std::path::Path) -> AppModel {
 }
 
 #[test]
-fn unclear_cube_offers_a_layout_decision() {
+fn not_a_cube_source_offers_the_decision() {
     let d = tempfile::tempdir().unwrap();
     let m = unclear_model(d.path());
     let it = m.item(UNCLEAR).expect("item");
     assert_eq!(it.status, sdc_gui::model::items::ItemStatus::NeedsDecision);
     assert!(
         it.decisions
-            .contains(&sdc_gui::model::items::Decision::CubeLayout),
+            .contains(&sdc_gui::model::items::Decision::NotACubeSource),
         "{:?}",
         it.decisions
     );
-    assert_eq!(it.decisions, [sdc_gui::model::items::Decision::CubeLayout]);
+    assert_eq!(
+        it.decisions,
+        [sdc_gui::model::items::Decision::NotACubeSource]
+    );
     let flat = &m.item("a/flat.png").unwrap().decisions;
-    assert!(!flat.contains(&sdc_gui::model::items::Decision::CubeLayout));
+    assert!(!flat.contains(&sdc_gui::model::items::Decision::NotACubeSource));
 }
 
 const NOT_A_CUBE: &str = "six faces, a cross or a strip";
@@ -326,6 +329,22 @@ fn a_square_cube_has_no_layout_combo() {
             .count(),
         0
     );
+    // The section's own Layout combo is disabled for the square cube (nothing to set), enabled for a 6:1 strip.
+    for n in h.query_all_by_label("Cubemap layout") {
+        assert!(
+            n.accesskit_node().is_disabled(),
+            "square cube: Layout combo is disabled"
+        );
+    }
+    let d2 = tempfile::tempdir().unwrap();
+    let strip = section(d2.path(), CUBE);
+    assert!(
+        !strip
+            .get_by_label("Cubemap layout")
+            .accesskit_node()
+            .is_disabled(),
+        "a strip's Layout combo is enabled"
+    );
     // The Review row: the same sentence, and no menu.
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
@@ -339,6 +358,8 @@ fn a_square_cube_has_no_layout_combo() {
     h.run();
     assert_eq!(h.query_all_by_label_contains(NOT_A_CUBE).count(), 1);
     assert_eq!(h.query_all_by_label("Set layout ▾").count(), 0);
+    // The row's one answer is a different sub-type: the same Set type… picker as an unsuggested Subtype row.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Set type…");
 }
 
 /// Changing the sub-type is the one answer: it resolves only that file.
@@ -351,12 +372,16 @@ fn changing_the_subtype_resolves_only_that_file() {
     let it = m.item(UNCLEAR).unwrap();
     assert!(
         !it.decisions
-            .contains(&sdc_gui::model::items::Decision::CubeLayout),
+            .contains(&sdc_gui::model::items::Decision::NotACubeSource),
         "{:?}",
         it.decisions
     );
     assert_eq!(it.status, sdc_gui::model::items::ItemStatus::Ready);
     let p = m.project.as_ref().unwrap();
+    assert_eq!(
+        p.file_value(UNCLEAR, "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
     assert_eq!(p.file_value("a/flat.png", "subtype"), None);
 }
 

@@ -1,5 +1,5 @@
 //! Batch planning of cube jobs (cubemap support v1, DECISIONS DS8): six face files merge into one job, and a single
-//! cross, strip or cube DDS gets its layout or an unclear-layout verdict.
+//! cross, strip or cube DDS gets its layout or a not-a-cube-source verdict.
 use super::{CubeJob, CubeSource, FACES};
 use crate::api::SkippedFile;
 use crate::codes::{Code, Warning};
@@ -110,7 +110,12 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
         let verdict = match layout {
             None => JobStatus::Unresolved {
                 reasons: vec![format!(
-                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's sub-type."
+                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's sub-type.{}",
+                    if w == 2 * h {
+                        " 3.0 no longer reads panoramas: convert it to six faces, a cross or a strip first."
+                    } else {
+                        ""
+                    }
                 )],
                 needs: vec![crate::policy::Need::CubeLayout],
             },

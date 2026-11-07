@@ -4179,6 +4179,7 @@ fn cube_hdr_faces() {
         );
         dds(d.path(), "textures/cubemaps/sky.dds")
     };
+    // The face-position asserts below pin the strip's cell order; the clamp roll-off is the point of the test.
     // Texels of +X mip 0 at full red, and where the brightest texel of all six faces is.
     let sun = |f: &DdsFile| {
         let s = surfaces(f);

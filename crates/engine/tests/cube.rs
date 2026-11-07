@@ -766,6 +766,8 @@ fn a_2_to_1_image_names_the_accepted_sources() {
         r.contains("2048x1024 is not six faces, a cross or a strip"),
         "{r}"
     );
+    assert!(r.contains("3.0 no longer reads panoramas"), "{r}");
+    assert!(!refused_reason(64, 64).contains("panoramas"));
 }
 
 /// A pin of existing behaviour: an explicit layout the image does not fit stays a CUBE-FACES error. `fits` wants the
@@ -1251,9 +1253,9 @@ fn square_images_are_never_auto_detected() {
     assert_eq!(layout::source_cell(CubeLayout::Hstrip, (3072, 512)), 512);
 }
 
-/// DT1: a square single image with no layout waits for a layout choice.
+/// DT1 (Note GU2): a square single image typed as a cube is not a cube source.
 #[test]
-fn unclear_cube_needs_a_layout() {
+fn square_image_is_not_a_cube_source() {
     let d = tempfile::tempdir().unwrap();
     let dir = d.path().join("in/textures/a");
     std::fs::create_dir_all(&dir).unwrap();

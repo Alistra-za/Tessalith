@@ -15,6 +15,7 @@ Then come where it is (a texture, set or file you can click; "Project" for a pro
 | A blocker the export would stop on, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …*, a texture that failed to plan | — |
 | *Undecided: sub-type; <the warning's sentence>* | The [type buttons](#deciding-in-problems) and **Acknowledge**. A question that is an acknowledgement shows its warning's sentence, for example "This texture is too small for its format — use a bigger image". |
+| *Undecided: not a cube source (…)*, a square or 2:1 image typed as a cube | **Set type…**, the type picker: the only answer is a different sub-type. The cube section's Layout row is greyed with the reason. |
 | *Alpha: Cutout (proposed) — confirm* | The **Alpha type** dropdown ([how it works](GUI-Texture-Panel.md#deciding)). A row with only this question has no *Undecided:* prefix. <!-- D:FM35 --> |
 | Export pitfalls, texture and set warnings | **Go to set** on a set's row. They are ordinary warnings: they never hold back Export or open Review. |
 | A file's export warnings, once the export has ended | Click the file to select it. |

@@ -9,7 +9,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
@@ -23,7 +23,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK
 - vfs: AV, BP, BU, CV
@@ -1203,4 +1203,4 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 - **GU1 Each removed key names its version.** Every `REMOVED` row in `engine::migrate` carries `since`, the version that removed it, and the message reads `<dotted path>: removed in <since>; <hint>`. Rows from 2.0 say `2.0` and their messages are unchanged.
 - **GU2 A cube source is six faces, a cross or a strip.** A cube source is six faces, a cross or a strip (exact 4:3, 3:4, 6:1, 1:6 proportions), or a cube DDS; a square or 2:1 image typed as a cube is Unresolved with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type.", and the GUI shows that sentence with no layout combo and no **Set layout** menu. `cubemap.layout` = `equirect`, `mirror_ball`, `angular` or `photo` is refused in config, presets and `--set` with "removed in 3.0; convert it to six faces, a cross or a strip first".
 - **GU3 Ground fill and horizon are gone.** A cube's lower half is the source's own pixels: the engine and the GUI no longer fill below a horizon. `cubemap.ground_fill` and `cubemap.horizon` are refused in config, presets and `--set` with "removed in 3.0", and a project that has neither key loads as before.
-- **GU4 The cube sources and knobs of 3.0 reverse the 2.0 pick "kept on purpose: cubemap knobs" (owner, 2026-11-07).** The pick is item #14 of `reports/debloat-2.0/engine-cli.md`, which has no ruling ID. It is superseded by GU2 and GU3. Edited to the current rule, with the old wording archived: the digest lines on the world-to-cube basis (DS14-DS17, DS26 go; DS13 and yaw and mirror stay), on admission (DS19), on cube DDS admission (DS19), on the cube section's row count (16, DT7-DT10) and on the OPEN taps (the panorama importer is gone), and the FM sub-bullets on `export_asks`, the Warnings rows and the exempt-texture example (FC12's portrait photo row, DS26). Archived whole: the digest lines on the single-image decision (DT14, DT32) and on the unclear-layout reason (DS22, DS25). Kept: DS13, DT13 (the layout box still never offers six face files) and FC12's digest line, which is not about cubes.
+- **GU4 The 3.0 cube removals reverse the 2.0 debloat review's "kept on purpose: cubemap knobs" (item 14; not in the repo), owner 2026-11-07.** GU2 and GU3 supersede that pick: the panorama importer is gone, and the archive table lists each digest line and sub-bullet it cut. DS13, DT13 (the layout box never offers six face files) and FC12's digest line stay.

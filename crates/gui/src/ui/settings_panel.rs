@@ -960,7 +960,7 @@ fn decision_box(
                         }
                     }
                     // Note GU2: no layout answer is left; the sub-type picker above is the way out.
-                    Decision::CubeLayout => {
+                    Decision::NotACubeSource => {
                         ui.label(not_a_cube(Some(cx.job)));
                     }
                     Decision::Acknowledge(code) => {

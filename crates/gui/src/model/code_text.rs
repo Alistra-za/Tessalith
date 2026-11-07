@@ -100,7 +100,7 @@ pub fn code_sentence(code: Code) -> &'static str {
 
 /// Note GU2: the engine's reason a cube-typed image is no cube source (so the two cannot drift), else a plain line.
 pub fn not_a_cube(job: Option<&engine::policy::ResolvedJob>) -> String {
-    match job.map(|j| &j.status) {
+    let s = match job.map(|j| &j.status) {
         Some(engine::policy::JobStatus::Unresolved { reasons, .. }) if !reasons.is_empty() => {
             reasons.join("; ")
         }
@@ -108,7 +108,10 @@ pub fn not_a_cube(job: Option<&engine::policy::ResolvedJob>) -> String {
             "not a cube source: it must be {}",
             engine::cube::plan::CUBE_SOURCES
         ),
-    }
+    };
+    let mut c = s.chars();
+    c.next()
+        .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
 }
 
 /// [`code_sentence`], or a plain line for a code with none (a place that has no engine message to fall back on).

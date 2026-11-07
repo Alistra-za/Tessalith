@@ -16,7 +16,7 @@ A file is treated as a cubemap when its name ends in `_e` (for example `chrome_e
 
 Only a crisp shape is a cube source: 4:3, 3:4, 6:1 or 1:6. A square or 2:1 image typed as a cube is Unresolved and skipped, with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type." A panorama, mirror ball, angular map or photo has to be turned into six faces, a cross or a strip first; the sister program Texalith is meant for that.
 
-You can set the layout yourself when the shape doesn't settle it:
+The shape always settles the layout. `cubemap.layout` is for trusting a 4:3 or 3:4 image whose empty cells are not flat (it is refused otherwise), or for `faces`. For example:
 
 ```toml
 [files."textures/cubemaps/studio_e.png"]

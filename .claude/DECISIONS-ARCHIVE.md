@@ -186,6 +186,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC, HE
 
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)

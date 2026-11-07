@@ -22,7 +22,7 @@ pub enum MigrateError {
     Removed(String),
 }
 
-/// One key or value that a removed version no longer reads. `key` is dot-separated segments compared with the last segments of
+/// One key or value that a later version no longer reads. `key` is dot-separated segments compared with the last segments of
 /// each key's path, so `encoder.backend` matches under `[defaults]`, `[subtypes.X]`, `[files."k"]` and `[[rules]]`
 /// tables alike (array indices are not segments; a file key that contains dots is one segment). A table key matches
 /// too (`subtypes.rfaos`). `value: None` matches any value; `Some(v)` matches a string equal to `v` or an array
@@ -38,7 +38,7 @@ pub struct Removed {
 }
 
 /// `<dotted path>: removed in <since>; <hint>`.
-pub fn removed_line(path: &str, r: &Removed) -> String {
+pub(crate) fn removed_line(path: &str, r: &Removed) -> String {
     format!("{path}: removed in {}; {}", r.since, r.hint)
 }
 
