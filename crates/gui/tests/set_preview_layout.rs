@@ -37,7 +37,7 @@ fn harness_with(
     m.settings.set_view_3d = three_d;
     prep(&mut m);
     let state = State {
-        set3d: SetPreview::new(None, None, None, DEFAULT_CAP),
+        set3d: SetPreview::new(None, DEFAULT_CAP),
         ..State::default()
     };
     let mut h = Harness::builder()
@@ -218,7 +218,7 @@ fn harness_on(mut m: AppModel, size: egui::Vec2, prep: impl FnOnce(&mut AppModel
     m.settings.set_view_3d = true;
     prep(&mut m);
     let state = State {
-        set3d: SetPreview::new(None, None, None, DEFAULT_CAP),
+        set3d: SetPreview::new(None, DEFAULT_CAP),
         ..State::default()
     };
     let mut h = Harness::builder().with_size(size).build_ui_state(
@@ -388,6 +388,8 @@ fn warnings_stay_above_the_viewport_outside_details() {
     };
     h.run_steps(3);
     let failed = h.get_by_label(&label).rect();
+    // The new line pushes the frame down: compare with where it is now.
+    let frame = h.get_by_label(FRAME_LABEL).rect();
     assert!(failed.max.y <= frame.min.y + 0.5);
     assert!(!sdc_gui::ui::viewport3d::details_open(
         &h.ctx,

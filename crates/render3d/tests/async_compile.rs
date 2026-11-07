@@ -531,13 +531,12 @@ fn a_panicked_job_is_not_memoised() {
     assert_eq!(r.take_jobs().len(), 1, "retried, not served from the memo");
 }
 
-/// Sync mode compiles inline: a `Textures` edit after `set_shaders` (programs dropped) still works.
+/// Sync mode compiles inline: a `Textures` edit on a loaded model still works.
 #[test]
-fn a_sync_texture_edit_after_set_shaders_compiles_inline() {
+fn a_sync_texture_edit_compiles_inline() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), FLAT);
     r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
-    r.set_shaders(render3d::locate::fingerprint(&common::standin_root(), None).unwrap());
     let red = common::dds_rgba8(1, 1, &[[255, 0, 0, 255]]);
     let resolve = |p: &str| (p == "textures/standin/red.dds").then(|| red.clone());
     let mut m = material(&r, CYL1);

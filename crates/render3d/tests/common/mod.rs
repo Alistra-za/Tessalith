@@ -30,8 +30,9 @@ pub fn renderer(cache: &Path, features: &[&str]) -> Renderer {
 
 /// [`renderer`] on the shaders in `root` (a modified copy of the stand-in).
 pub fn renderer_at(root: &Path, cache: &Path, features: &[&str]) -> Renderer {
-    let fp = render3d::locate::fingerprint(root, None).unwrap();
-    let mut r = Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.to_path_buf()).unwrap();
+    let source = render3d::ShaderSource::Folder(root.to_path_buf());
+    let mut r =
+        Renderer::with_gpu_source(Gpu::new_warp().unwrap(), source, cache.to_path_buf()).unwrap();
     r.set_features(features.iter().map(|s| s.to_string()).collect());
     r
 }

@@ -2922,7 +2922,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "vfs",
- "walkdir",
  "windows",
 ]
 

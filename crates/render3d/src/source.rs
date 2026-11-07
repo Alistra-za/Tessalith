@@ -1,8 +1,7 @@
-//! The include-expanded entry file (`Lighting.hlsl`) of one CS `Shaders` folder, expanded once and memoised,
+//! The include-expanded entry file (`Lighting.hlsl`) of the shader source, expanded once and memoised,
 //! with the SHA-256 of the expansion: the content half of the shader cache key (03 §5). The expansion does not
 //! depend on the defines (the expander follows every `#include`, also inside `#if 0`), so one `ExpandedSource`
-//! serves every permutation. The memo lives as long as the `SourceSet`: `Renderer::set_shaders` (a moved or
-//! updated CS, which the GUI sends for `Change::Updated` too) makes a new one.
+//! serves every permutation. The memo lives as long as the `SourceSet`, which a `Renderer` makes once.
 use crate::includes::{expand, ShaderSource};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

@@ -18,8 +18,6 @@ pub enum PickerPurpose {
     ScanFolder,
     /// Export drawer: where to write the report.
     SaveReport,
-    /// 3D preview: the Community Shaders folder.
-    ShaderFolder,
     /// Review's Also section: where the PBR, Vanilla and CM folders go (TA10).
     AlsoLocation,
     /// Export to ▾: where the marker cube is saved.
@@ -244,7 +242,7 @@ pub fn button(ui: &mut egui::Ui, picker: &Picker, b: egui::Button<'_>) -> bool {
 impl PickerPurpose {
     /// The purposes whose result belongs to the opened folder: it is dropped if the folder changed meanwhile.
     /// OpenFolder is not one: the folder picked is the user's latest choice whatever was open (AG129).
-    /// The others (a scan source, the shader folder) mean the same whatever folder is open.
+    /// The others (a scan source) mean the same whatever folder is open.
     fn folder_scoped(self) -> bool {
         matches!(
             self,
@@ -341,8 +339,8 @@ impl AppModel {
             PickerPurpose::AlsoLocation => self.set_also_location(&path),
             PickerPurpose::SaveReport => self.save_report(path),
             PickerPurpose::MakeMarker => self.marker_picked(&path),
-            // The meshes and 3D models handle their own.
-            PickerPurpose::ChooseMo2 | PickerPurpose::ScanFolder | PickerPurpose::ShaderFolder => {}
+            // The meshes model handles its own.
+            PickerPurpose::ChooseMo2 | PickerPurpose::ScanFolder => {}
         }
     }
 }

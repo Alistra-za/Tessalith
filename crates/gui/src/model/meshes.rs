@@ -632,7 +632,7 @@ impl MeshesModel {
             folder_items: HashMap::new(),
             open_in_textures: None,
             folder_items_for: (vec![], u64::MAX),
-            v3: Viewport3d::new(None),
+            v3: Viewport3d::new(),
             edit: None,
             doc_badges: HashMap::new(),
             nif_export_root: None,
@@ -691,7 +691,6 @@ impl MeshesModel {
             }
         }
         self.read_profiles();
-        self.v3.locate(self.target.clone());
         if let Some(p) = self.store_path.clone() {
             match Store::open(&p) {
                 Ok(store) => {
@@ -880,13 +879,6 @@ impl MeshesModel {
     pub fn cancel_scan(&self) {
         if let Some(c) = &self.cancel {
             c.store(true, Ordering::Relaxed);
-        }
-    }
-
-    /// Window focus: look for Community Shaders again (00 §6.4); nothing before the view was first opened.
-    pub fn relocate(&mut self) {
-        if self.activated {
-            self.v3.locate(self.target.clone());
         }
     }
 

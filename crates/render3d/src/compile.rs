@@ -98,9 +98,8 @@ const FLAGS: u32 = D3DCOMPILE_OPTIMIZATION_LEVEL3;
 /// old entries miss.
 const REFLECT_VERSION: u32 = 3;
 
-/// Names one compiled stage by what was compiled. The root path and the saved fingerprint are not part of it:
-/// two CS folders with identical sources share entries, and a stale fingerprint cannot file a new compile
-/// under an old name.
+/// Names one compiled stage by what was compiled. The source's location is not part of it:
+/// two folders with identical sources share entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProgramKey(pub String);
 

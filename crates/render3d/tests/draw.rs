@@ -35,9 +35,9 @@ fn lit(px: &[u8]) -> usize {
 #[ignore]
 fn renders_fixture_nonblack_with_defaults() {
     let root = shaders().unwrap();
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r = render3d::Renderer::new(fp, cache.path().to_path_buf()).unwrap();
+    let mut r = render3d::Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_Furniture_Col_SE.nif"
@@ -59,9 +59,9 @@ fn renders_fixture_nonblack_with_defaults() {
 #[ignore]
 fn missing_textures_use_defaults() {
     let root = shaders().unwrap();
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r = render3d::Renderer::new(fp, cache.path().to_path_buf()).unwrap();
+    let mut r = render3d::Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_Skinned_SE.nif"
@@ -79,11 +79,8 @@ fn missing_textures_use_defaults() {
 #[ignore]
 fn le_mesh_is_skipped() {
     let root = shaders().unwrap();
-    let mut r = render3d::Renderer::new(
-        render3d::locate::fingerprint(&root, None).unwrap(),
-        tempfile::tempdir().unwrap().keep(),
-    )
-    .unwrap();
+    let fp = render3d::ShaderSource::Folder(root);
+    let mut r = render3d::Renderer::with_source(fp, tempfile::tempdir().unwrap().keep()).unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_Animated_LE.nif"
@@ -94,14 +91,14 @@ fn le_mesh_is_skipped() {
     assert_eq!(rep.shapes, 0);
 }
 
-/// B8: the display encode brightens the same frame, `set_shaders` recompiles, and the timing is filled in.
+/// B8: the display encode brightens the same frame, and the timing is filled in.
 #[test]
 #[ignore]
-fn srgb_readback_timing_and_set_shaders() {
+fn srgb_readback_and_timing() {
     let root = shaders().unwrap();
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r = render3d::Renderer::new(fp.clone(), cache.path().to_path_buf()).unwrap();
+    let mut r = render3d::Renderer::with_source(fp.clone(), cache.path().to_path_buf()).unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_Furniture_Col_SE.nif"
@@ -118,8 +115,32 @@ fn srgb_readback_timing_and_set_shaders() {
         t.draw_ms >= 0.0 && t.gpu_ms >= 0.0 && t.readback_ms > 0.0,
         "{t:?}"
     );
-    r.set_shaders(fp);
+}
+
+/// Note GT: `Renderer::new` compiles the CS tree embedded in the exe. No `SDC_CS_SHADERS` and no MO2 variable is
+/// read (run it with them unset: the constructor takes no folder), and the furniture's centre is lit.
+#[test]
+fn render_bundled_tree_draws_with_no_cs() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = render3d::Renderer::new(cache.path().to_path_buf()).unwrap();
+    let nif = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../nif/tests/fixtures/TestNifFile_Furniture_Col_SE.nif"
+    ))
+    .unwrap();
     let rep = r.load(&nif, &|_| None);
-    assert!(rep.shapes > 0 && rep.compile_errors.is_empty(), "{rep:?}");
-    assert!(r.render(&Scene::neutral(), 128, 128).is_ok());
+    assert!(rep.compile_errors.is_empty(), "{:?}", rep.compile_errors);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(rep.shapes > 0);
+    let px = r.render(&Scene::neutral(), 256, 256).unwrap();
+    // The furniture has a gap at the exact centre pixel: the central 64x64 block must be lit, a third of it here.
+    let block = (96..160usize)
+        .flat_map(|y| (96..160usize).map(move |x| (y * 256 + x) * 4))
+        .filter(|&i| px[i..i + 3].iter().map(|&v| v as u32).sum::<u32>() > 30)
+        .count();
+    assert!(
+        block > 64 * 64 / 10,
+        "the centre is lit, got {block} of 4096"
+    );
+    assert!(lit(&px) > 256 * 256 / 50);
 }

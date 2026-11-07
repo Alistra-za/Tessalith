@@ -1,8 +1,6 @@
 //! P1-D: shape-keyed CS settings rules (`feature_data`) over the four CS builds the owner had
 //! (03-cs-settings-drift.md). Fixtures = name lists extracted by the P1-D plan Task 1 (no CS source, no CS values).
-use render3d::cs_settings::{
-    feature_data, linear_lighting_on, read_settings, CsSettings, SettingsPaths,
-};
+use render3d::cs_settings::{feature_data, linear_lighting_on, CsSettings};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -25,14 +23,14 @@ fn fields_of(tag: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// The build's reflected names and its SettingsDefault key set, read like a real settings file.
+/// The build's reflected names and its SettingsDefault key set. `nexus191`'s file is empty: no JSON until CS first runs.
 fn build(tag: &str) -> (BTreeSet<String>, CsSettings) {
-    let s = read_settings(&SettingsPaths {
-        default: Some(dir(tag).join("keys.json")),
-        ..Default::default()
-    });
-    assert!(!s.parse_failed, "{tag}: {:?}", s.notes);
-    (fields_of(tag), s)
+    let bytes = std::fs::read(dir(tag).join("keys.json")).unwrap();
+    let json = serde_json::from_slice(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes));
+    (
+        fields_of(tag),
+        with(json.unwrap_or_else(|e| panic!("{tag}: {e}"))),
+    )
 }
 
 fn value(fd: &[(String, Vec<f64>)], name: &str) -> Vec<f64> {
@@ -96,7 +94,7 @@ fn the_installed_build_keeps_the_p1c_values() {
     );
 }
 
-/// Settings as `read_settings` would give them for a file with exactly `json`.
+/// Settings for a file with exactly `json`.
 fn with(json: serde_json::Value) -> CsSettings {
     let merged = json.as_object().unwrap().clone();
     let linear_lighting = merged
@@ -259,19 +257,14 @@ fn flat_skin_settings_are_read_like_cs_does() {
     );
 }
 
-/// Golden, capture 11178 (owner settings, installed build): body b7 skinDetailParams (20, 2, 0.25, 0) at ev 4386,
+/// Golden, capture 11178 (its settings: tiling 10 x body 2, strength 0.25, detail off): body b7 skinDetailParams (20, 2, 0.25, 0) at ev 4386,
 /// head (FaceGen, ev 4182) (10, 1, 0.25, 0); FeatureData b6 stays the body value for both (GetCommonBufferData).
 #[test]
 fn new_packing_premultiplies_and_heads_use_tiling_one() {
-    let owner = PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/cs_settings"
-    ));
-    let s = read_settings(&SettingsPaths {
-        user: Some(owner.join("SettingsUser.json")),
-        default: Some(owner.join("SettingsDefault.json")),
-        ..Default::default()
-    });
+    let s = with(serde_json::json!({"Advanced Skin": {"DefaultProfile": {
+        "SkinDetailTiling": 10.0, "BodyTilingMultiplier": 2.0, "SkinDetailStrength": 0.25,
+        "EnableSkinDetail": false
+    }}}));
     let f = fields_of("aio190");
     let body = feature_data(&s, &f, true, false);
     let head = feature_data(&s, &f, true, true);

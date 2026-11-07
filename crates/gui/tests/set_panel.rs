@@ -23,7 +23,7 @@ fn drawer_drawn(h: &H) -> bool {
 fn harness_with(m: AppModel, w: f32, h: f32, three_d: bool) -> H {
     let state = State {
         set3d: if three_d {
-            SetPreview::new(None, None, None, DEFAULT_CAP)
+            SetPreview::new(None, DEFAULT_CAP)
         } else {
             SetPreview::default()
         },

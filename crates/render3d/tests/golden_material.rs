@@ -492,8 +492,8 @@ fn fmt_v(v: &[f32]) -> String {
 #[ignore]
 fn extraction_matches_capture() {
     let Some(env) = env() else { return };
-    let fp = render3d::locate::fingerprint(&env.shaders, None).unwrap();
-    let mut ren = Renderer::new(fp, env.cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Folder(env.shaders.to_path_buf());
+    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
     let noise = Noise::load(
         &env.root
             .join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
@@ -822,8 +822,8 @@ const WANTED: [&str; 5] = [
 #[ignore]
 fn trace_values_match_unit_functions() {
     let Some(env) = env() else { return };
-    let fp = render3d::locate::fingerprint(&env.shaders, None).unwrap();
-    let mut ren = Renderer::new(fp, env.cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Folder(env.shaders.to_path_buf());
+    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
     assert!(
         ren.debug_supported(),
         "the installed Lighting.hlsl has no debug anchor"

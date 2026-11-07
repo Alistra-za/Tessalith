@@ -195,7 +195,7 @@ fn no_record_line() {
     m.add_cs_block(ROCK, Kind::Mato);
     let key = rock_key(&m);
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     assert_eq!(s.v3.projected(), None, "off by default");
     assert!(s.mato_lines().is_empty(), "no lines while off");
@@ -234,7 +234,7 @@ fn value_edit_reaches_the_layer_next_frame() {
     m.add_cs_block(ROCK, Kind::Mato);
     let key = rock_key(&m);
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     s.set_mato_layer(true);
     run(&mut s, &m);
     assert_eq!(s.v3.projected().map(|l| l.roughness), Some(1.0));
@@ -250,7 +250,7 @@ fn switching_sets_follows_block() {
     let mut m = support::pbr_opened_plain(dir.path());
     m.add_cs_block(ROCK, Kind::Mato);
     let (a, b) = (rock_key(&m), other_key(&m));
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     s.set_mato_layer(true);
     m.select_set(&a);
     run(&mut s, &m);
@@ -281,7 +281,7 @@ fn pbr_only_line() {
         .id;
     m.add_cs_block(&id, Kind::Mato);
     m.select_set(&b);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     s.set_mato_layer(true);
     run(&mut s, &m);
     assert!(!s.rows[0].material.is_pbr());
@@ -361,7 +361,7 @@ fn record_data_lands_and_is_cached() {
     );
     let (a, b) = (rock_key(&m), other_key(&m));
     m.select_set(&a);
-    let mut s = SetPreview::new(None, None, Some(db), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     s.set_mato_layer(true);
     run(&mut s, &m);
     let want = ProjectedLayer {
@@ -396,7 +396,7 @@ fn missing_texture_lines() {
     let mut m = support::pbr_opened_plain(dir.path());
     m.add_cs_block(ROCK, Kind::Mato);
     m.select_set(&rock_key(&m));
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     s.set_mato_layer(true);
     run(&mut s, &m);
     s.v3.handle(sdc_gui::model::viewport3d::V3Reply::ProjectedMissing(vec![
@@ -427,10 +427,9 @@ fn the_layer_resolves_through_the_content_map() {
         env!("CARGO_MANIFEST_DIR"),
         "/../render3d/tests/fixtures/standin"
     ));
-    let f = render3d::locate::fingerprint(&standin, None).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let mut v = Viewport3d::new(Some(f.clone()));
-    v.on_located(Ok(Some(f)));
+    let mut v = Viewport3d::new();
+    v.use_shader_folder(standin);
     v.cache_dir = Some(cache.path().to_path_buf());
     let mut mat = nif::material::MaterialState::builtin_default();
     // DO_ALPHA_TEST: the stand-in's pixel permutation compiles.
@@ -495,7 +494,7 @@ fn snow_preview(db: &Path, dir: &Path) -> (AppModel, SetPreview) {
     m.set_cs_edids(ROCK, Kind::Mato, &["SnowMat1P".to_string()]);
     let a = rock_key(&m);
     m.select_set(&a);
-    let s = SetPreview::new(None, None, Some(db.to_path_buf()), DEFAULT_CAP);
+    let s = SetPreview::new(Some(db.to_path_buf()), DEFAULT_CAP);
     (m, s)
 }
 
@@ -741,7 +740,7 @@ fn panel(m: AppModel) -> H {
         .with_size(eframe::egui::vec2(520.0, 1000.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, SetPreview)| sdc_gui::ui::set_preview::draw(ui, m, s),
-            (m, SetPreview::new(None, None, None, DEFAULT_CAP)),
+            (m, SetPreview::new(None, DEFAULT_CAP)),
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h

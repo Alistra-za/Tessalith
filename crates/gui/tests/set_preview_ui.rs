@@ -67,10 +67,7 @@ fn rock_selected(d: &std::path::Path) -> AppModel {
 #[test]
 fn without_a_scan_db_the_panel_says_so_and_shows_the_simulated_sphere() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     h.get_by_label(FRAME_LABEL);
     h.get_by_label(NO_SCAN);
@@ -96,7 +93,7 @@ fn a_set_the_simulation_cannot_preview_shows_plain_textures_and_the_notice() {
     let mut m = rock_selected(d.path());
     m.set_target(engine::config::Target::Vanilla);
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let mut h = harness(m, SetPreview::new(None, None, None, DEFAULT_CAP));
+    let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     h.get_by_label(NEEDS_CS);
     assert!(h.query_by_label(JSON_WINS).is_none());
@@ -115,7 +112,7 @@ fn no_matching_mesh_falls_back_to_a_built_in_shape_the_user_can_change() {
     drop(modscan::store::Store::open(&db).unwrap()); // an empty v3 database
     let mut h = harness(
         rock_selected(d.path()),
-        SetPreview::new(None, None, Some(db), DEFAULT_CAP),
+        SetPreview::new(Some(db), DEFAULT_CAP),
     );
     settle(&mut h);
     h.get_by_label(NO_MATCH);
@@ -140,10 +137,7 @@ fn no_matching_mesh_falls_back_to_a_built_in_shape_the_user_can_change() {
 #[test]
 fn a_skipped_shape_gets_the_red_line_and_patched_shapes_list_their_badges() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     h.state_mut().1.rows = vec![
         ShapeRow {
@@ -172,7 +166,7 @@ fn nothing_but_a_hint_without_a_followed_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     m.selection = sdc_gui::model::Selection::None;
-    let mut h = harness(m, SetPreview::new(None, None, None, DEFAULT_CAP));
+    let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
     h.run_steps(4);
     h.get_by_label("Select a set to preview it in 3D.");
     assert!(!sdc_gui::ui::set_preview::wanted(&h.state().0));
@@ -189,10 +183,7 @@ fn pick_mesh(h: &mut H, name: &str) {
 
 fn plain_rock() -> (tempfile::TempDir, H) {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     (d, h)
 }
@@ -331,7 +322,7 @@ fn the_textures_view_shows_the_panel_for_a_set_only_when_the_app_enables_it() {
     let d = tempfile::tempdir().unwrap();
     let m = rock_selected(d.path());
     let state = State {
-        set3d: SetPreview::new(None, None, None, DEFAULT_CAP),
+        set3d: SetPreview::new(None, DEFAULT_CAP),
         ..State::default()
     };
     let mut h = Harness::builder()
@@ -399,10 +390,7 @@ fn the_emissive_label_ignores_a_hidden_material_and_follows_the_viewport_shapes(
 #[test]
 fn hiding_the_panel_during_work_lets_the_app_go_idle_and_the_scene_lands_on_re_show() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     h.run_steps(2);
     {
         let (m, s) = h.state_mut();
@@ -497,7 +485,7 @@ fn a_texture_set_block_shows_tiling_instead_of_the_mesh_picker() {
     let d = tempfile::tempdir().unwrap();
     let mut m = rock_selected(d.path());
     m.add_cs_block("landscape/rock01", sdc_gui::model::cs_pbr::Kind::Txst);
-    let mut h = harness(m, SetPreview::new(None, None, None, DEFAULT_CAP));
+    let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     assert!(
         h.get_all_by_label_contains(TILING).count() >= 1,
@@ -512,17 +500,14 @@ fn a_texture_set_block_shows_tiling_instead_of_the_mesh_picker() {
 #[test]
 fn a_pbr_grass_set_shows_the_approximation_badge() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     assert!(h.query_by_label(GRASS_APPROX).is_none());
     let d = tempfile::tempdir().unwrap();
     let mut m = rock_selected(d.path());
     m.set_shader("landscape/rock01", Some(engine::shader::Shader::PbrGrass));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let mut h = harness(m, SetPreview::new(None, None, None, DEFAULT_CAP));
+    let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     h.get_by_label(GRASS_APPROX);
 }
@@ -531,10 +516,7 @@ fn a_pbr_grass_set_shows_the_approximation_badge() {
 #[test]
 fn the_approximation_badge_follows_the_shader_in_the_same_preview() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(
-        rock_selected(d.path()),
-        SetPreview::new(None, None, None, DEFAULT_CAP),
-    );
+    let mut h = harness(rock_selected(d.path()), SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     assert!(h.query_by_label(GRASS_APPROX).is_none());
     for (shader, shown) in [

@@ -26,8 +26,6 @@ pub struct GuiSettings {
     pub advanced_open: bool,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.
     pub meshes: MeshesSettings,
-    /// The Meshes view's 3D panel (plan B Task B8), `[render3d]` in the file.
-    pub render3d: Render3dSettings,
     /// The window and arrangement the app comes back to, `[layout]` in the file (DECISIONS AG3).
     #[serde(deserialize_with = "layout::lenient")]
     pub layout: LayoutSettings,
@@ -60,13 +58,6 @@ impl Default for ChecksSettings {
             uv: true,
         }
     }
-}
-
-/// `[render3d]`: the Community Shaders `Shaders` folder last used, re-checked on start and on focus.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Render3dSettings {
-    pub shaders: Option<render3d::locate::Fingerprint>,
 }
 
 /// `[meshes]`: the MO2 instance and profile the Meshes view scans, or the folder chosen instead.
@@ -131,7 +122,6 @@ impl GuiSettings {
         ] {
             *p = p.take().filter(ok);
         }
-        s.render3d.shaders = s.render3d.shaders.take().filter(|f| ok(&f.root));
         let text = toml::to_string_pretty(&s).map_err(std::io::Error::other)?;
         engine::dds::write_atomic(path, text.as_bytes())?;
         Ok(unreadable.then_some(kept))

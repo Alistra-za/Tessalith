@@ -120,7 +120,6 @@ fn the_flags_survive_a_value_only_settings_change() {
     let ambient = |a: f64| {
         let merged = serde_json::json!({"Linear Lighting": {"ambientMult": a}});
         CsSettings {
-            hash: format!("ambient {a}"),
             merged: merged.as_object().unwrap().clone(),
             ..CsSettings::default()
         }
@@ -213,20 +212,19 @@ fn an_srgb_tagged_rfaos_is_sampled_linear() {
     assert_eq!(channel(&srgb, 0), channel(&linear, 0));
 }
 
-/// Diagnosis (owner data, read-only): the Arch head on the INSTALLED CS shaders with the owner's settings, features
+/// Diagnosis (owner data, read-only): the Arch head on the bundled CS shaders and settings, features
 /// on. Prints the PS defines, the t71 / b7 reflection, the RFAOS candidate and its binding, the b7 bytes, and renders
 /// the head with and without the RFAOS (PNGs in %TEMP%\sdc-rfaos-diag).
 #[test]
 #[ignore]
-fn diag_arch_head_on_installed_cs() {
+fn diag_arch_head_on_bundled_cs() {
     let root = PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");
-    let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
     let settings = render3d::cs_settings::defaults().clone();
     println!(
-        "settings: ll={} loaded={:?} notes={:?}",
-        settings.linear_lighting, settings.loaded, settings.notes
+        "settings: ll={} loaded={:?}",
+        settings.linear_lighting, settings.loaded
     );
     let mut roots = vec![arch.clone()];
     roots.extend(
@@ -246,10 +244,8 @@ fn diag_arch_head_on_installed_cs() {
     let out = std::env::temp_dir().join("sdc-rfaos-diag");
     std::fs::create_dir_all(&out).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let fp = render3d::locate::fingerprint(&cs.join("Shaders"), None).unwrap();
     let mut r = Renderer::with_gpu(
         render3d::device::Gpu::new().unwrap(),
-        fp,
         cache.path().to_path_buf(),
     )
     .unwrap();
@@ -356,34 +352,31 @@ fn diag_arch_head_on_installed_cs() {
     );
 }
 
-/// Diagnosis (owner data, read-only): the Arch scalp (hair, flow map in the backlight slot) on the INSTALLED CS
+/// Diagnosis (owner data, read-only): the Arch scalp (hair, flow map in the backlight slot) on the bundled CS
 /// shaders, once with the bundled default settings (CS_HAIR on) and once with
 /// `CsSettings::default()` (ENABLE_LL only). Prints the scalp's flags, slots → registers, PS defines and the
 /// written `hairSpecularSettings.Enabled`; PNGs in %TEMP%\sdc-rfaos-diag.
 #[test]
 #[ignore]
-fn diag_arch_scalp_on_installed_cs() {
+fn diag_arch_scalp_on_bundled_cs() {
     let root = PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");
-    let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
-    let owner = render3d::cs_settings::defaults().clone();
+    let bundled = render3d::cs_settings::defaults().clone();
     let resolve = |norm: &str| std::fs::read(arch.join(norm.replace('/', "\\"))).ok();
     let nif = std::fs::read(arch.join(r"meshes\arch\head\hair\scalp.nif")).unwrap();
     let out = std::env::temp_dir().join("sdc-rfaos-diag");
     std::fs::create_dir_all(&out).unwrap();
     for (label, settings) in [
-        ("bundled_default_settings", owner),
+        ("bundled_default_settings", bundled),
         (
             "gui_default_settings",
             render3d::cs_settings::CsSettings::default(),
         ),
     ] {
         let cache = tempfile::tempdir().unwrap();
-        let fp = render3d::locate::fingerprint(&cs.join("Shaders"), None).unwrap();
         let mut r = Renderer::with_gpu(
             render3d::device::Gpu::new().unwrap(),
-            fp,
             cache.path().to_path_buf(),
         )
         .unwrap();

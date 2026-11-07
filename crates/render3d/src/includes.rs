@@ -1,11 +1,13 @@
 //! Textual #include expansion so D3DCompile sees one buffer; CS includes are root-relative ("Common/x.hlsli").
 use std::path::PathBuf;
 
-/// Where shader text is read from: the tree embedded in the exe, or a folder on disk.
+/// Where shader text is read from: the tree embedded in the exe. Tests can also read a folder (stand-ins, the
+/// owner's CS for comparisons).
 #[derive(Clone, Debug, Default)]
 pub enum ShaderSource {
     #[default]
     Bundled,
+    #[cfg(feature = "test-hooks")]
     Folder(PathBuf),
 }
 
@@ -13,6 +15,7 @@ impl ShaderSource {
     fn read(&self, rel: &str) -> Option<Vec<u8>> {
         match self {
             ShaderSource::Bundled => crate::bundled::read(rel).map(<[u8]>::to_vec),
+            #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => std::fs::read(root.join(rel)).ok(),
         }
     }
@@ -20,14 +23,16 @@ impl ShaderSource {
     fn has(&self, rel: &str) -> bool {
         match self {
             ShaderSource::Bundled => crate::bundled::read(rel).is_some(),
+            #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => root.join(rel).is_file(),
         }
     }
 
-    /// What error messages and `Expanded::files` call `rel`: the folder path, or `rel` itself for the bundle.
+    /// What error messages and `Expanded::files` call `rel`: the bundle's `rel` itself, or a test folder's path.
     pub fn path_of(&self, rel: &str) -> PathBuf {
         match self {
             ShaderSource::Bundled => PathBuf::from(rel),
+            #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => root.join(rel),
         }
     }

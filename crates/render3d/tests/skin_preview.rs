@@ -173,15 +173,14 @@ fn a_non_skin_shape_ignores_the_preview() {
     assert_eq!(frame(&mut r), before);
 }
 
-/// Owner data, read-only: the Arch head on the INSTALLED CS shaders with the owner's settings. `WETNESS_EFFECTS`
+/// Owner data, read-only: the Arch head on the bundled CS shaders with the bundled settings. `WETNESS_EFFECTS`
 /// compiles for the skin shapes; on with nothing wet (a picked map, slider 0) it draws like the shape as loaded;
 /// slider 1 changes the pixels. PNGs in %TEMP%\sdc-skin-preview.
 #[test]
 #[ignore]
-fn installed_cs_wetness_compiles_is_neutral_when_dry_and_shows_when_wet() {
+fn bundled_cs_wetness_compiles_is_neutral_when_dry_and_shows_when_wet() {
     let root = std::path::PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");
-    let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
     let settings = render3d::cs_settings::defaults().clone();
     let resolve = |norm: &str| std::fs::read(arch.join(norm.replace('/', "\\"))).ok();
@@ -189,10 +188,8 @@ fn installed_cs_wetness_compiles_is_neutral_when_dry_and_shows_when_wet() {
     let out = std::env::temp_dir().join("sdc-skin-preview");
     std::fs::create_dir_all(&out).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let fp = render3d::locate::fingerprint(&cs.join("Shaders"), None).unwrap();
     let mut r = Renderer::with_gpu(
         render3d::device::Gpu::new().unwrap(),
-        fp,
         cache.path().to_path_buf(),
     )
     .unwrap();

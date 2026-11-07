@@ -740,7 +740,7 @@ fn without_a_scan_db_the_set_shows_patched_on_the_sphere_and_json_edits_encode_n
     let mut m = pbr_opened_plain(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     assert_eq!(s.candidates, Candidates::NoStore(NO_SCAN.into()));
     let Some(Content::Builtin {
@@ -781,7 +781,7 @@ fn a_crashing_json_makes_the_set_preview_red_and_unpatched() {
     let key = rock(&m).0.key;
     let mut m = m;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     let line = r"In game: PGPatcher 2.3 crashes on this JSON: match_diffuse is not a string (PBRNifPatcher\z.json).";
     s.set_crashes(vec![line.to_string()]);
@@ -917,7 +917,7 @@ fn exists_accepts_sdc_outputs_and_any_vfs_winner_including_bsa_only_textures() {
         s.set_textures(&[(pid, (bsa, 1))].into_iter().collect())
             .unwrap();
     }
-    let mut s = SetPreview::new(None, None, Some(db), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     run(&mut s, &m);
     assert!(
         s.exists(r"textures\clutter\vanilla_m.dds"),
@@ -941,7 +941,7 @@ fn a_scanned_mesh_is_listed_and_an_unreadable_one_falls_back_to_the_sphere() {
     let key = rock(&m).0.key;
     m.select_set(&key);
     let db = scan_db(dir.path(), &[r"textures\landscape\rock01.dds"]);
-    let mut s = SetPreview::new(None, None, Some(db), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     run(&mut s, &m);
     let Candidates::Ready(list) = &s.candidates else {
         panic!("{:?}", s.candidates)
@@ -1234,7 +1234,7 @@ fn a_shape_keeping_a_bsa_only_slot_is_patched_not_skipped_with_the_panels_exists
     let mut m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, Some(bsa_db(dir.path())), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(bsa_db(dir.path())), DEFAULT_CAP);
     run(&mut s, &m);
     let d = default_block();
     let e = entry_node(&rock(&m).1).to_value();
@@ -1264,7 +1264,7 @@ fn a_store_error_never_reads_as_a_missing_texture() {
     m.select_set(&key);
     let bad = dir.path().join("scan.db");
     std::fs::write(&bad, b"this is not a database, just text to break sqlite").unwrap();
-    let mut s = SetPreview::new(None, None, Some(bad), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(bad), DEFAULT_CAP);
     run(&mut s, &m);
     assert!(
         s.exists(r"textures\clutter\vanilla_m.dds"),
@@ -1284,7 +1284,7 @@ fn an_unchanged_frame_within_the_throttle_does_no_work() {
     let mut m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     let checks = s.checks;
     let content = s.v3.content().cloned();
@@ -1312,7 +1312,7 @@ fn stale_query_and_nif_results_are_dropped() {
     let key = rock(&m).0.key;
     m.select_set(&key);
     let db = scan_db(dir.path(), &[r"textures\landscape\rock01.dds"]);
-    let mut s = SetPreview::new(None, None, Some(db), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     s.shown = true;
     s.input = true;
     s.poll(&m);
@@ -1338,7 +1338,7 @@ fn a_vanished_set_clears_the_scene_and_settles() {
     let mut m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     assert!(s.v3.content().is_some());
     m.select_set("no/such/set");
@@ -1360,7 +1360,7 @@ fn only_le_meshes_say_why_the_sphere_is_shown() {
     let key = rock(&m).0.key;
     m.select_set(&key);
     let db = scan_db_with(dir.path(), &[r"textures\landscape\rock01.dds"], true);
-    let mut s = SetPreview::new(None, None, Some(db), DEFAULT_CAP);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     run(&mut s, &m);
     assert!(matches!(
         s.v3.content(),
@@ -1382,7 +1382,7 @@ fn a_hidden_panel_with_a_debounced_encode_goes_idle_and_encodes_when_shown_again
     let key = v.key.clone();
     let mut m = m;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     let before = shown_ids(&s);
     // An edit marks a member Stale, due DEBOUNCE ahead; the user switches view before then.
@@ -1426,19 +1426,8 @@ fn a_material_edit_naming_a_new_slot_path_pushes_the_scene_instead_of_set_materi
     let mut m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let fp = render3d::locate::Fingerprint {
-        root: dir.path().to_path_buf(),
-        owner_mod: Some("CS".into()),
-        hash: "a".into(),
-    };
-    let mut s = SetPreview::new(Some(fp.clone()), None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
-    // `poll` started a real locate (nothing to find here): let it end, then confirm the shaders.
-    while s.v3.locating() {
-        poll_once(&mut s, &m);
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    s.v3.on_located(Ok(Some(fp)));
     let cmds = s.v3.attach_test_thread();
     s.v3.request_frame(64, 64);
     let id = cmds
@@ -1707,19 +1696,9 @@ fn live() -> Live {
     let mut m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let fp = render3d::locate::Fingerprint {
-        root: dir.path().to_path_buf(),
-        owner_mod: Some("CS".into()),
-        hash: "a".into(),
-    };
-    let mut s = SetPreview::new(Some(fp.clone()), None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     s.enc.hold_workers(true);
-    poll_once(&mut s, &m); // starts the locate; the pump hands every member a held encode
-    while s.v3.locating() {
-        poll_once(&mut s, &m);
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    s.v3.on_located(Ok(Some(fp)));
+    poll_once(&mut s, &m); // the pump hands every member a held encode
     let cmds = s.v3.attach_test_thread();
     finish(&mut s, DEFAULT_CAP);
     poll_once(&mut s, &m); // Fresh → the scene is pushed
@@ -2033,10 +2012,7 @@ fn members_sharing_a_path_with_one_other_copy_do_not_swap_and_drop_every_frame()
 
 #[test]
 fn the_set_preview_tags_its_viewport() {
-    assert_eq!(
-        SetPreview::new(None, None, None, DEFAULT_CAP).v3.panel,
-        "set_preview"
-    );
+    assert_eq!(SetPreview::new(None, DEFAULT_CAP).v3.panel, "set_preview");
 }
 
 /// Note AO9 (owner, 2026-10-15): the Mesh list puts loose meshes before BSA ones, and ground models (`gnd` in the
@@ -2074,7 +2050,7 @@ fn mesh_candidates_prefer_loose_then_leave_ground_and_first_person_last() {
     let mut m = pbr_opened_plain(dir.path());
     let key = rock(&m).0.key;
     m.select_set(&key);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     s.candidates = Candidates::Ready(list);
     assert_eq!(s.choice(), MeshChoice::Auto);
@@ -2116,7 +2092,7 @@ fn a_texture_set_block_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
     m.select_set(&key);
     m.set_json_value("landscape/rock01", "uv_scale", Some(json!(2.0)));
     m.add_cs_block("landscape/rock01", Kind::Txst);
-    let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
     run(&mut s, &m);
     let uv = |s: &SetPreview| match s.v3.content() {
         Some(Content::Builtin {

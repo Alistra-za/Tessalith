@@ -1,10 +1,10 @@
-//! P1-C (03 §3, T-S1/T-S2): the user's CS settings files → merged settings, loaded features, change hash and
-//! preview defines. File I/O on fixtures and tempdirs only: never the owner's real files, no GPU.
+//! P1-C (03 §3, T-S1/T-S3): the CS settings the preview uses (Note GT3) → preview defines and FeatureData values.
+//! The owner-shaped fixture files (capture 11178) are read here and merged by the test itself; no GPU.
 use render3d::cs_settings::{
-    defaults, diffuse_curve, feature_data, linear_lighting_on, preview_defines, read_settings,
-    CsSettings, SettingsPaths,
+    defaults, diffuse_curve, feature_data, linear_lighting_on, preview_defines, CsSettings,
 };
 use render3d::scene::{FEATURE_FLOATS, FEATURE_UINTS};
+use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -15,32 +15,45 @@ fn fixtures() -> PathBuf {
     ))
 }
 
-/// The owner-shaped fixture files (each optional) and a features folder.
-fn paths(user: bool, default: bool, info: bool, features: Option<&Path>) -> SettingsPaths {
-    let f = fixtures();
-    SettingsPaths {
-        user: user.then(|| f.join("SettingsUser.json")),
-        default: default.then(|| f.join("SettingsDefault.json")),
-        info_ini: info.then(|| f.join("Info.ini")),
-        features_dir: features.map(Path::to_path_buf),
+fn from_json(v: Value) -> CsSettings {
+    let merged = v.as_object().unwrap().clone();
+    let linear_lighting = merged
+        .get("Linear Lighting")
+        .and_then(|l| l.get("enableLinearLighting"))
+        .and_then(Value::as_f64)
+        .is_none_or(|x| x != 0.0);
+    CsSettings {
+        merged,
+        linear_lighting,
+        ..CsSettings::default()
     }
 }
 
-/// A `Shaders/Features` folder with one CS feature ini per name.
-fn features_dir(names: &[&str]) -> tempfile::TempDir {
-    let d = tempfile::tempdir().unwrap();
-    for n in names {
-        std::fs::write(
-            d.path().join(format!("{n}.ini")),
-            "[Info]\nVersion = 1-0-0\n",
-        )
-        .unwrap();
+/// `top` over `base` per key, nested objects per key too.
+fn overlay(base: &mut Map<String, Value>, top: Map<String, Value>) {
+    for (k, v) in top {
+        match (base.get_mut(&k), v) {
+            (Some(Value::Object(b)), Value::Object(t)) => overlay(b, t),
+            (Some(slot), v) => *slot = v,
+            (None, v) => {
+                base.insert(k, v);
+            }
+        }
     }
-    d
 }
 
-fn names_set(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|s| s.to_string()).collect()
+/// The owner-shaped fixture (capture 11178): `SettingsUser.json` over `SettingsDefault.json` when `user`, else
+/// `SettingsDefault.json` alone.
+fn owner_shaped(user: bool) -> CsSettings {
+    let read = |n: &str| match serde_json::from_slice(&std::fs::read(fixtures().join(n)).unwrap()) {
+        Ok(Value::Object(m)) => m,
+        _ => panic!("{n} is not a JSON object"),
+    };
+    let mut merged = read("SettingsDefault.json");
+    if user {
+        overlay(&mut merged, read("SettingsUser.json"));
+    }
+    from_json(Value::Object(merged))
 }
 
 /// The installed CS 1.9.0's reflected FeatureData/b7 names (P1-D fixture): the build these tests describe.
@@ -56,22 +69,10 @@ fn aio190() -> BTreeSet<String> {
     .collect()
 }
 
-/// Info.ini fixture sections with `Enabled = true` (UnifiedWater is false, `[Cache]` is not a feature).
-const INFO_LOADED: &[&str] = &[
-    "ExtendedMaterials",
-    "ExtendedTranslucency",
-    "HairSpecular",
-    "LinearLighting",
-    "Skin",
-    "TruePBR",
-    "VanillaFresnel",
-];
-
 /// Note GT3: the preview's settings are the bundled `SettingsDefault.json` of the pinned CS with every feature loaded.
 #[test]
 fn bundled_defaults_give_the_expected_defines() {
     let s = defaults();
-    assert!(!s.parse_failed, "{:?}", s.notes);
     assert_eq!(
         preview_defines(s, true),
         [
@@ -115,219 +116,46 @@ fn feature_names_equal_the_pinned_features_folder() {
     assert_eq!(stems, names);
 }
 
-/// T-S1: per key, User over Default; a key in neither is left out of `merged` (the built-in table fills it).
+/// T-S1: a key the settings lack is left out of `merged`, and `feature_data` fills it from the built-in table.
 #[test]
-fn settings_overlay_user_over_default_over_builtin() {
-    let d = tempfile::tempdir().unwrap();
-    let (user, default) = (
-        d.path().join("SettingsUser.json"),
-        d.path().join("SettingsDefault.json"),
+fn a_key_the_settings_lack_keeps_the_builtin_constant() {
+    let s = from_json(
+        serde_json::json!({"Linear Lighting": {"glowmapMult": 0.5, "ambientMult": 2.0}, "Version": "1-9-0-0"}),
     );
-    std::fs::write(
-        &default,
-        r#"{"Linear Lighting": {"glowmapMult": 0.25, "ambientMult": 2.0}, "Version": "1-9-0-0"}"#,
-    )
-    .unwrap();
-    std::fs::write(&user, r#"{"Linear Lighting": {"glowmapMult": 0.5}}"#).unwrap();
-    let s = read_settings(&SettingsPaths {
-        user: Some(user),
-        default: Some(default),
-        ..Default::default()
-    });
-    let ll = &s.merged["Linear Lighting"];
-    assert_eq!(ll["glowmapMult"].as_f64(), Some(0.5), "User wins");
-    assert_eq!(
-        ll["ambientMult"].as_f64(),
-        Some(2.0),
-        "Default fills a key User lacks"
-    );
-    assert!(ll.get("directionalLightMult").is_none(), "in neither file");
-    assert_eq!(s.merged["Version"].as_str(), Some("1-9-0-0"));
-    assert!(
-        !s.parse_failed && s.notes.is_empty(),
-        "T-S1 notes: {:?}",
-        s.notes
-    );
+    assert!(s.merged["Linear Lighting"]
+        .get("directionalLightMult")
+        .is_none());
     let fd = feature_data(&s, &aio190(), true, false);
     assert_eq!(value(&fd, "linearLightingSettings.glowmapMult"), [0.5]);
     assert_eq!(value(&fd, "linearLightingSettings.ambientMult"), [2.0]);
     assert_eq!(
         value(&fd, "linearLightingSettings.directionalLightMult"),
         [1.0],
-        "built-in (capture 11178) when neither file has it"
+        "built-in (capture 11178) when the settings lack it"
     );
-    // Owner shape: the nested DefaultProfile merges per key; User's "Disable at Boot" object replaces Default's null.
-    let o = read_settings(&paths(true, true, false, None));
-    let profile = &o.merged["Advanced Skin"]["DefaultProfile"];
-    assert_eq!(profile["EnableSkinDetail"].as_bool(), Some(false));
-    assert_eq!(profile["SkinDetailTiling"].as_f64(), Some(10.0));
-    assert_eq!(
-        o.merged["Disable at Boot"]["UnifiedWater"].as_bool(),
-        Some(true)
-    );
-    let only_default = read_settings(&paths(false, true, false, None));
-    assert!(only_default.merged["Disable at Boot"].is_null());
-    assert_eq!(
-        only_default.merged["Advanced Skin"]["DefaultProfile"]["EnableSkinDetail"].as_bool(),
-        Some(true)
-    );
-}
-
-/// T-S2: Info.ini decides; feature inis it does not list (Upscaling) or disables (UnifiedWater) do not count.
-#[test]
-fn info_ini_wins() {
-    let f = features_dir(&["HairSpecular", "Skin", "UnifiedWater", "Upscaling"]);
-    let s = read_settings(&paths(true, true, true, Some(f.path())));
-    assert_eq!(s.loaded, names_set(INFO_LOADED));
-    assert!(!s.loaded.contains("Cache"));
-    assert!(s.notes.is_empty(), "{:?}", s.notes);
-}
-
-/// T-S2: no Info.ini → `Features/*.ini` minus "Disable at Boot" (User's object; Default's null disables nothing).
-#[test]
-fn fallback_to_feature_inis_minus_disable_at_boot() {
-    let f = features_dir(&["HairSpecular", "Skin", "UnifiedWater", "VanillaFresnel"]);
-    let s = read_settings(&paths(true, true, false, Some(f.path())));
-    assert_eq!(
-        s.loaded,
-        names_set(&["HairSpecular", "Skin", "VanillaFresnel"])
-    );
-    assert!(
-        s.notes.iter().any(|n| n.contains("Info.ini")),
-        "{:?}",
-        s.notes
-    );
-    assert!(!s.parse_failed);
-    let d = read_settings(&paths(false, true, false, Some(f.path())));
-    assert_eq!(
-        d.loaded,
-        names_set(&["HairSpecular", "Skin", "UnifiedWater", "VanillaFresnel"])
-    );
-}
-
-/// The owner's Info.ini starts with a UTF-8 BOM before `[Cache]`; a BOM before a feature section must not hide it.
-#[test]
-fn info_ini_bom_and_cache_section() {
-    let bytes = std::fs::read(fixtures().join("Info.ini")).unwrap();
-    assert_eq!(
-        &bytes[..3],
-        &[0xEF, 0xBB, 0xBF],
-        "the fixture must keep its BOM"
-    );
-    let s = read_settings(&paths(false, false, true, None));
-    assert_eq!(s.loaded, names_set(INFO_LOADED));
-    let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("Info.ini");
-    std::fs::write(
-        &p,
-        "\u{feff}[TruePBR]\r\nEnabled = true\r\n\r\n[Skin]\r\nEnabled = false\r\n",
-    )
-    .unwrap();
-    let s = read_settings(&SettingsPaths {
-        info_ini: Some(p),
-        ..Default::default()
-    });
-    assert_eq!(s.loaded, names_set(&["TruePBR"]));
-}
-
-/// C10: same bytes → same hash; any byte, or present-but-empty vs absent → a different hash; nothing found =
-/// `CsSettings::default()` exactly (so the GUI sends nothing).
-#[test]
-fn hash_is_stable_and_changes_with_any_byte() {
-    let d = tempfile::tempdir().unwrap();
-    for n in ["SettingsUser.json", "SettingsDefault.json", "Info.ini"] {
-        std::fs::copy(fixtures().join(n), d.path().join(n)).unwrap();
-    }
-    let info = d.path().join("Info.ini");
-    let p = SettingsPaths {
-        user: Some(d.path().join("SettingsUser.json")),
-        default: Some(d.path().join("SettingsDefault.json")),
-        info_ini: Some(info.clone()),
-        features_dir: None,
-    };
-    let a = read_settings(&p);
-    assert_eq!(a.hash.len(), 64);
-    assert_eq!(read_settings(&p).hash, a.hash);
-    let mut b = std::fs::read(&info).unwrap();
-    *b.last_mut().unwrap() ^= 1;
-    std::fs::write(&info, &b).unwrap();
-    assert_ne!(read_settings(&p).hash, a.hash);
-    std::fs::write(&info, b"").unwrap();
-    let empty = read_settings(&p).hash;
-    std::fs::remove_file(&info).unwrap();
-    assert_ne!(read_settings(&p).hash, empty);
-    assert_eq!(
-        read_settings(&SettingsPaths::default()),
-        CsSettings::default()
-    );
-}
-
-/// C10: a file CS is half-way through writing → a note naming it, `parse_failed`, and the bad file contributes
-/// nothing (no value from a previous read either); the other file still applies; its bytes still change the hash.
-#[test]
-fn malformed_json_notes_and_falls_back() {
-    let d = tempfile::tempdir().unwrap();
-    let user = d.path().join("SettingsUser.json");
-    std::fs::write(&user, "{\"Linear Lighting\": {\"enableLinearLighting\": 0,").unwrap();
-    let s = read_settings(&SettingsPaths {
-        user: Some(user),
-        default: Some(fixtures().join("SettingsDefault.json")),
-        ..Default::default()
-    });
-    assert!(s.parse_failed);
-    assert!(
-        s.notes.iter().any(|n| n.contains("SettingsUser.json")),
-        "{:?}",
-        s.notes
-    );
-    assert!(
-        s.linear_lighting,
-        "the bad file's enableLinearLighting 0 is not applied"
-    );
-    assert_eq!(
-        s.merged["Advanced Skin"]["DefaultProfile"]["EnableSkinDetail"].as_bool(),
-        Some(true)
-    );
-    let good = read_settings(&paths(false, true, false, None));
-    assert_ne!(s.hash, good.hash);
 }
 
 /// C8: defines from loaded features and their own switches; LL from the setting; off toggle → none.
 #[test]
 fn preview_defines_follow_loaded_and_switches() {
-    let s = read_settings(&paths(true, true, true, None));
-    assert_eq!(
-        preview_defines(&s, true),
-        [
-            "CS_HAIR",
-            "CS_SKIN",
-            "ENABLE_LL",
-            "EXTENDED_MATERIALS",
-            "EXTENDED_TRANSLUCENCY",
-            "VANILLA_FRESNEL"
-        ]
-    );
-    assert!(preview_defines(&s, false).is_empty());
-    // No files: exactly today's default (Part B's set_features_on relies on it).
-    assert_eq!(
-        preview_defines(&CsSettings::default(), true),
-        render3d::DEFAULT_FEATURES
-    );
+    let s = defaults();
+    assert!(preview_defines(s, false).is_empty());
+    // A blank slate: exactly the Linear Lighting default (the renderer's `set_features_on` relies on it).
+    assert_eq!(preview_defines(&CsSettings::default(), true), ["ENABLE_LL"]);
     let mut off = s.clone();
     off.merged.get_mut("Hair Specular").unwrap()["Enabled"] = 0.into();
     off.merged.get_mut("Vanilla Fresnel").unwrap()["Enable"] = 0.into();
     off.linear_lighting = false;
     assert_eq!(
         preview_defines(&off, true),
-        ["CS_SKIN", "EXTENDED_MATERIALS", "EXTENDED_TRANSLUCENCY"]
+        [
+            "CS_SKIN",
+            "DYNAMIC_CUBEMAPS",
+            "EXTENDED_MATERIALS",
+            "EXTENDED_TRANSLUCENCY"
+        ]
     );
-    let d = tempfile::tempdir().unwrap();
-    let user = d.path().join("SettingsUser.json");
-    std::fs::write(&user, r#"{"Linear Lighting": {"enableLinearLighting": 0}}"#).unwrap();
-    let ll_off = read_settings(&SettingsPaths {
-        user: Some(user),
-        ..Default::default()
-    });
+    let ll_off = from_json(serde_json::json!({"Linear Lighting": {"enableLinearLighting": 0}}));
     assert!(!ll_off.linear_lighting);
     assert!(preview_defines(&ll_off, true).is_empty());
 }
@@ -335,12 +163,12 @@ fn preview_defines_follow_loaded_and_switches() {
 /// D5 (R1): Dynamic Cubemaps has no master switch (its ini has only [Info]): loaded means DYNAMIC_CUBEMAPS.
 #[test]
 fn dynamic_cubemaps_loaded_adds_the_define() {
-    let mut s = read_settings(&paths(true, true, true, None));
-    assert!(!preview_defines(&s, true)
+    let mut s = defaults().clone();
+    assert!(preview_defines(&s, true)
         .iter()
         .any(|d| d == "DYNAMIC_CUBEMAPS"));
-    s.loaded.insert("DynamicCubemaps".into());
-    assert!(preview_defines(&s, true)
+    s.loaded.remove("DynamicCubemaps");
+    assert!(!preview_defines(&s, true)
         .iter()
         .any(|d| d == "DYNAMIC_CUBEMAPS"));
     assert!(preview_defines(&s, false).is_empty());
@@ -351,54 +179,37 @@ fn dynamic_cubemaps_loaded_adds_the_define() {
 /// unusable value or LL off adds nothing.
 #[test]
 fn game_gamma_from_settings_is_a_define() {
-    let user = |json: &str| {
-        let d = tempfile::tempdir().unwrap();
-        let p = d.path().join("SettingsUser.json");
-        std::fs::write(&p, json).unwrap();
-        read_settings(&SettingsPaths {
-            user: Some(p),
-            ..Default::default()
-        })
-    };
+    let with = |json: &str| from_json(serde_json::from_str(json).unwrap());
     assert_eq!(
-        preview_defines(&user(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), true),
+        preview_defines(&with(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), true),
         ["CS_GAME_GAMMA=2.200000048", "ENABLE_LL"]
     );
-    assert!(preview_defines(&user(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), false).is_empty());
+    assert!(preview_defines(&with(r#"{"Linear Lighting": {"gameGamma": 2.2}}"#), false).is_empty());
     for json in [
         r#"{"Linear Lighting": {"gameGamma": 1.600000023841858}}"#,
         r#"{"Linear Lighting": {"gameGamma": 1.6}}"#,
         r#"{"Linear Lighting": {}}"#,
     ] {
-        assert_eq!(
-            preview_defines(&user(json), true),
-            render3d::DEFAULT_FEATURES,
-            "{json}"
-        );
+        assert_eq!(preview_defines(&with(json), true), ["ENABLE_LL"], "{json}");
     }
     // Not a usable gamma (0, negative, past f32): the shaders keep their 1.6.
     for g in ["0", "-1", "1e39"] {
         let json = format!(r#"{{"Linear Lighting": {{"gameGamma": {g}}}}}"#);
-        assert_eq!(
-            preview_defines(&user(&json), true),
-            render3d::DEFAULT_FEATURES,
-            "{json}"
-        );
+        assert_eq!(preview_defines(&with(&json), true), ["ENABLE_LL"], "{json}");
     }
     // Linear Lighting off: the shaders ignore CS_GAME_GAMMA, so the defines (and program keys) do not change.
     assert_eq!(
         preview_defines(
-            &user(r#"{"Linear Lighting": {"enableLinearLighting": 0, "gameGamma": 2.2}}"#),
+            &with(r#"{"Linear Lighting": {"enableLinearLighting": 0, "gameGamma": 2.2}}"#),
             true
         ),
         preview_defines(
-            &user(r#"{"Linear Lighting": {"enableLinearLighting": 0}}"#),
+            &with(r#"{"Linear Lighting": {"enableLinearLighting": 0}}"#),
             true
         )
     );
-    // The owner-shaped fixture (gameGamma 1.600000023841858 in both files): no CS_GAME_GAMMA.
-    let s = read_settings(&paths(true, true, true, None));
-    assert!(!preview_defines(&s, true)
+    // The bundled defaults (gameGamma 1.600000023841858): no CS_GAME_GAMMA.
+    assert!(!preview_defines(defaults(), true)
         .iter()
         .any(|d| d.starts_with("CS_GAME_GAMMA")));
 }
@@ -450,7 +261,7 @@ fn diffuse_curve_without_a_white_mid_gap_keeps_the_default() {
 /// T-S3: the owner-shaped files reproduce every capture-11178 value; pointLightMult stays π although the file says 1.
 #[test]
 fn owner_settings_reproduce_capture_values() {
-    let s = read_settings(&paths(true, true, true, None));
+    let s = owner_shaped(true);
     assert_eq!(
         s.merged["Linear Lighting"]["pointLightMult"].as_f64(),
         Some(1.0)
@@ -494,12 +305,7 @@ fn default_settings_reproduce_todays_constants() {
 /// C5: section → struct prefix with the renamed keys; skin packing from the profile.
 #[test]
 fn owner_section_keys_map_to_struct_fields() {
-    let fd = feature_data(
-        &read_settings(&paths(true, true, false, None)),
-        &aio190(),
-        true,
-        false,
-    );
+    let fd = feature_data(&owner_shaped(true), &aio190(), true, false);
     assert_eq!(
         value(&fd, "extendedTranslucencySettings.MaterialModel"),
         [3.0]
@@ -520,74 +326,6 @@ fn owner_section_keys_map_to_struct_fields() {
         [20.0, 2.0, 0.25, 0.0]
     );
     // Default alone has EnableSkinDetail true: detail on.
-    let d = feature_data(
-        &read_settings(&paths(false, true, false, None)),
-        &aio190(),
-        true,
-        false,
-    );
+    let d = feature_data(&owner_shaped(false), &aio190(), true, false);
     assert_eq!(value(&d, "skinData.skinDetailParams")[3], 1.0);
-}
-
-#[test]
-fn an_unreadable_settings_file_is_parse_failed_with_a_note() {
-    // A directory where the file should be: a read error that is not NotFound.
-    let d = tempfile::tempdir().unwrap();
-    let mut p = paths(false, true, true, None);
-    p.user = Some(d.path().to_path_buf());
-    let s = read_settings(&p);
-    assert!(s.parse_failed);
-    assert!(
-        s.notes
-            .iter()
-            .any(|n| n.contains(&d.path().display().to_string())),
-        "{:?}",
-        s.notes
-    );
-    // Info.ini unreadable stays a note only.
-    let mut p = paths(true, true, false, None);
-    p.info_ini = Some(d.path().to_path_buf());
-    assert!(!read_settings(&p).parse_failed);
-}
-
-/// Trace 2026-11-04 #46: a UTF-16 Info.ini is a note like an unreadable one: the settings files still apply and
-/// the Features inis stand in.
-#[test]
-fn a_non_utf8_info_ini_is_a_note_not_a_parse_failure() {
-    let d = tempfile::tempdir().unwrap();
-    let info = d.path().join("Info.ini");
-    let mut utf16 = vec![0xFF, 0xFE];
-    utf16.extend(
-        "[Skin]\r\nEnabled = true\r\n"
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes),
-    );
-    std::fs::write(&info, utf16).unwrap();
-    let feats = features_dir(&["HairSpecular"]);
-    let mut p = paths(true, true, false, Some(feats.path()));
-    p.info_ini = Some(info);
-    let s = read_settings(&p);
-    assert!(!s.parse_failed, "{:?}", s.notes);
-    assert!(
-        s.notes.iter().any(|n| n.contains("not UTF-8")),
-        "{:?}",
-        s.notes
-    );
-    assert_eq!(s.loaded, names_set(&["HairSpecular"]));
-    let good = read_settings(&paths(true, true, false, None));
-    assert_eq!(s.merged, good.merged, "SettingsUser values kept");
-}
-
-/// Task 8 fix round 2: the hash covers the loaded feature set, so features found only through the Features
-/// folder (no settings file) differ from `CsSettings::default()`.
-#[test]
-fn the_hash_covers_the_loaded_features() {
-    let d = tempfile::tempdir().unwrap();
-    std::fs::write(d.path().join("Skin.ini"), "[Info]\n").unwrap();
-    let s = read_settings(&SettingsPaths {
-        features_dir: Some(d.path().to_path_buf()),
-        ..Default::default()
-    });
-    assert!(s.loaded.contains("Skin"));
-    assert_ne!(s.hash, CsSettings::default().hash);
 }

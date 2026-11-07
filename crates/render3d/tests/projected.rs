@@ -384,8 +384,8 @@ fn cs_renderer(cache: &std::path::Path) -> Option<Renderer> {
         println!("skipped: set SDC_CS_SHADERS");
         return None;
     };
-    let fp = render3d::locate::fingerprint(std::path::Path::new(&shaders), None).unwrap();
-    Some(Renderer::new(fp, cache.to_path_buf()).unwrap())
+    let fp = render3d::ShaderSource::Folder((std::path::Path::new(&shaders)).to_path_buf());
+    Some(Renderer::with_source(fp, cache.to_path_buf()).unwrap())
 }
 
 /// The built-in plane turned to face +Z (x, y, z) → (x, −z, y): normals, tangents and bitangents together, so the

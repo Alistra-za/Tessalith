@@ -14,7 +14,6 @@ pub mod glint_noise;
 pub mod golden;
 pub mod hdri;
 pub mod includes;
-pub mod locate;
 pub mod material;
 pub mod mesh;
 pub mod parse;
@@ -43,7 +42,6 @@ use cs_settings::CsSettings;
 use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
 pub use includes::ShaderSource;
-use locate::Fingerprint;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
 use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
@@ -75,14 +73,6 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_TEXTURE_ADDRESS_WRAP, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16_UINT;
-
-/// CS feature defines compiled by default. The owner's installed CS 1.9 has Linear Lighting on
-/// (answers.md: `SettingsUser.json` `enableLinearLighting: 1`), and Linear Lighting is the compile-time
-/// define `ENABLE_LL` (`Common/ColorManagement.hlsli:13,133`). P0 does no other installed-feature detection;
-/// the GUI's "Community Shaders features" toggle clears this list (`Renderer::set_features`).
-///
-/// This is the owner's CS SettingsUser.json / frame-11178 value; P1 reads the enabled features per user.
-pub const DEFAULT_FEATURES: &[&str] = &["ENABLE_LL"];
 
 /// Result of [`Renderer::load`].
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -350,23 +340,24 @@ fn wet_candidates(m: &MaterialState) -> Vec<String> {
 /// into a sidecar process. Single-threaded, like [`Gpu`].
 pub struct Renderer {
     gpu: Gpu,
-    shaders: Fingerprint,
+    /// Where the shader text comes from; kept for [`Renderer::rebuild_device_on`].
+    source: ShaderSource,
     cache_dir: PathBuf,
     /// The CS feature defines every program is compiled with. `set_features` replaces it whole; `set_settings`
     /// and `set_features_on` replace only the settings defines (`ENABLE_LL` and [`cs_settings::PREVIEW_FEATURES`]).
     features: Vec<String>,
-    /// The user CS settings last applied (P1-C C11); default = no settings files found.
+    /// The CS settings in force (P1-C C11): [`cs_settings::defaults`] until a test replaces them.
     settings: CsSettings,
     /// The "Community Shaders features" toggle (C8): off, the settings add no define.
     features_on: bool,
-    /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source, reset by `set_shaders`.
+    /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source.
     old_ll: std::cell::OnceCell<bool>,
-    /// One expanded `Lighting.hlsl` per shaders folder (03 §5); dropped with the folder by `set_shaders`.
+    /// The expanded entry files of the shader source (03 §5).
     sources: SourceSet,
-    /// Device objects by pair key; dropped by `set_shaders` and by a device rebuild.
+    /// Device objects by pair key; dropped by a device rebuild.
     programs: HashMap<ProgramKey, Result<Program, String>>,
     /// Plain-data results by pair key (a worker's answer or a disk hit). Content-addressed, so they survive
-    /// `set_shaders` and a device rebuild: a rebuilt device compiles nothing.
+    /// a device rebuild: a rebuilt device compiles nothing.
     compiled: HashMap<ProgramKey, Result<Arc<CompiledPair>, String>>,
     /// Keys whose job was queued and has not been applied yet.
     inflight: HashSet<ProgramKey>,
@@ -461,17 +452,35 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates the device (hardware, else WARP; see [`Gpu::new`]) and the fixed pipeline states.
-    pub fn new(shaders: Fingerprint, cache_dir: PathBuf) -> Result<Renderer, String> {
+    /// Creates the device (hardware, else WARP; see [`Gpu::new`]) and the fixed pipeline states, on the bundled
+    /// shaders and CS's default settings.
+    pub fn new(cache_dir: PathBuf) -> Result<Renderer, String> {
         cache::prune_in_background(cache_dir.clone());
-        Renderer::with_gpu(Gpu::new()?, shaders, cache_dir)
+        Renderer::with_gpu(Gpu::new()?, cache_dir)
     }
 
-    pub fn with_gpu(
+    pub fn with_gpu(gpu: Gpu, cache_dir: PathBuf) -> Result<Renderer, String> {
+        Renderer::build(gpu, ShaderSource::Bundled, cache_dir)
+    }
+
+    /// [`Renderer::new`] on another shader source (a stand-in folder in tests).
+    #[cfg(feature = "test-hooks")]
+    pub fn with_source(source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
+        cache::prune_in_background(cache_dir.clone());
+        Renderer::build(Gpu::new()?, source, cache_dir)
+    }
+
+    /// [`Renderer::with_gpu`] on another shader source.
+    #[cfg(feature = "test-hooks")]
+    pub fn with_gpu_source(
         gpu: Gpu,
-        shaders: Fingerprint,
+        source: ShaderSource,
         cache_dir: PathBuf,
     ) -> Result<Renderer, String> {
+        Renderer::build(gpu, source, cache_dir)
+    }
+
+    fn build(gpu: Gpu, source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
         let sd = D3D11_SAMPLER_DESC {
             Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
             AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
@@ -573,12 +582,11 @@ impl Renderer {
             glint_noise: None,
             glint_noise_logged: false,
             gpu,
-            sources: SourceSet::new(ShaderSource::Folder(shaders.root.clone())),
-            shaders,
+            sources: SourceSet::new(source.clone()),
+            source,
             cache_dir,
-            // = preview_defines(&CsSettings::default(), true): the P0 Linear Lighting default.
-            features: DEFAULT_FEATURES.iter().map(|s| s.to_string()).collect(),
-            settings: CsSettings::default(),
+            features: cs_settings::preview_defines(cs_settings::defaults(), true),
+            settings: cs_settings::defaults().clone(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
             programs: HashMap::new(),
@@ -645,7 +653,7 @@ impl Renderer {
         self.apply_settings_defines();
     }
 
-    /// Features CS loaded (Info.ini, or the Features inis) that this preview does not compile, in name order, for
+    /// Features CS loaded (the bundled feature list) that this preview does not compile, in name order, for
     /// the panel "off in preview" line. TruePBR is never listed: it has no define (TRUE_PBR is per material)
     /// and its settings are always written. Features in `NON_VISUAL` (no shader/visual effect in this preview) are never listed either.
     pub fn off_in_preview(&self) -> Vec<String> {
@@ -804,22 +812,6 @@ impl Renderer {
         }
         self.default_srv(kind, textures::projected_default(reg))
             .map(Some)
-    }
-
-    /// Replaces the shaders (a moved or updated CS): the expansion memo and the device programs are dropped (`compiled` is content-addressed and stays valid). The loaded model still uses the old programs until the next [`Renderer::load`].
-    pub fn set_shaders(&mut self, shaders: Fingerprint) {
-        self.sources = SourceSet::new(ShaderSource::Folder(shaders.root.clone()));
-        self.shaders = shaders;
-        self.programs.clear();
-        self.composite = None;
-        (self.prefilter, self.env) = (None, None);
-        self.old_ll = std::cell::OnceCell::new();
-        // The LL generation may have changed, so the display encode (follows linear_lighting) must be re-derived.
-        self.encode_srgb = self.linear_lighting();
-    }
-
-    pub fn shaders(&self) -> &Fingerprint {
-        &self.shaders
     }
 
     #[cfg(feature = "test-hooks")]
@@ -1001,8 +993,8 @@ impl Renderer {
         self.deferred && !self.fixed_pipeline && pipe(m).blend.is_none()
     }
 
-    /// The loaded CS `Lighting.hlsl` has the single `return psout;` and the names the debug block reads. After
-    /// `set_shaders` to a build without them, `debug_output()` keeps the request but every shape compiles Lit.
+    /// The shader source's `Lighting.hlsl` has the single `return psout;` and the names the debug block reads.
+    /// Without them (a test stand-in), `debug_output()` keeps the request but every shape compiles Lit.
     pub fn debug_supported(&self) -> bool {
         self.sources.get_debug(Path::new("Lighting.hlsl")).is_ok()
     }
@@ -1533,7 +1525,7 @@ impl Renderer {
     /// dir, features, CS settings and toggle, sRGB mode and `compiled` results. Everything that lived on the old
     /// device is gone, including the loaded model: load it again, and every program comes from `compiled` with no compile.
     pub fn rebuild_device_on(&mut self, gpu: Gpu) -> Result<(), String> {
-        let mut n = Renderer::with_gpu(gpu, self.shaders.clone(), self.cache_dir.clone())?;
+        let mut n = Renderer::build(gpu, self.source.clone(), self.cache_dir.clone())?;
         n.features = std::mem::take(&mut self.features);
         n.settings = std::mem::take(&mut self.settings);
         n.features_on = self.features_on;
@@ -1867,7 +1859,7 @@ impl Renderer {
             let program = match self.lookup(&w) {
                 Lookup::Ready(p) => p,
                 Lookup::Failed(e) => return Err(e),
-                // Sync mode (no pool) compiles inline, as the old `program()` did, e.g. after `set_shaders`.
+                // Sync mode (no pool) compiles inline, as the old `program()` did.
                 Lookup::Waiting if !self.async_compile => {
                     let d = run_job(w.job(&self.cache_dir, &self.load_epoch));
                     self.compiled.insert(d.key, d.result);

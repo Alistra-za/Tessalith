@@ -145,10 +145,10 @@ fn point_light_brightens_the_real_cs_lighting() {
     let shaders = std::path::PathBuf::from(format!(
         "{root}/mods/CommunityShaders_AIO-2026-10-03T06-46Z/Shaders"
     ));
-    let fp = render3d::locate::fingerprint(&shaders, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(shaders.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
     let rep = r.load_builtin(Builtin::Sphere, MaterialState::builtin_default(), &|_| None);
     assert!(
         rep.errors.is_empty() && rep.compile_errors.is_empty(),

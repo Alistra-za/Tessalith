@@ -82,8 +82,8 @@ fn replay_matches_capture_per_mrt() {
     };
     let root = Path::new(&root);
     let cache = tempfile::tempdir().unwrap();
-    let fp = render3d::locate::fingerprint(Path::new(&shaders), None).unwrap();
-    let mut ren = Renderer::new(fp, cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Folder((Path::new(&shaders)).to_path_buf());
+    let mut ren = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let noise = Noise::load(
         &root.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
     )

@@ -19,10 +19,10 @@ fn standin_root() -> PathBuf {
 #[test]
 fn standin_renders_on_warp_with_one_failing_permutation() {
     let root = standin_root();
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../nif/tests/fixtures/TestNifFile_DeepGraph_SE.nif"
@@ -69,10 +69,10 @@ fn standin_renders_on_warp_with_one_failing_permutation() {
 /// diffuse alpha below 1 would show the panel through an opaque mesh.
 #[test]
 fn opaque_shapes_read_back_with_alpha_255() {
-    let fp = render3d::locate::fingerprint(&standin_root(), None).unwrap();
+    let fp = render3d::ShaderSource::Folder(standin_root());
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
     r.set_features(vec!["STANDIN_OPAQUE_OK".into()]);
     let nif = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),

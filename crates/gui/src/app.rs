@@ -61,8 +61,7 @@ impl SdcApp {
             model.scan_db.clone(),
             model.settings.meshes.clone(),
         );
-        meshes.v3 =
-            crate::model::viewport3d::Viewport3d::new(model.settings.render3d.shaders.clone());
+        meshes.v3 = crate::model::viewport3d::Viewport3d::new();
         let mut set3d = crate::model::set_preview::SetPreview::from_settings(
             &model.settings,
             model.scan_db.clone(),
@@ -277,8 +276,6 @@ impl SdcApp {
     /// The window regained focus: the place to look for source files that changed meanwhile.
     fn focus_regained(&mut self) {
         self.model.check_sources();
-        self.meshes.relocate();
-        self.state.set3d.relocate();
     }
 }
 
@@ -411,10 +408,6 @@ impl eframe::App for SdcApp {
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
             crate::ui::meshes::show(ui, &mut self.meshes);
-            if let Some(fp) = self.meshes.v3.take_shaders_changed() {
-                self.model.settings.render3d.shaders = Some(fp);
-                self.model.save_settings();
-            }
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
@@ -447,10 +440,6 @@ impl eframe::App for SdcApp {
         }
         if let Some(s) = self.meshes.take_settings() {
             self.model.settings.meshes = s;
-            self.model.save_settings();
-        }
-        if let Some(fp) = self.state.set3d.v3.take_shaders_changed() {
-            self.model.settings.render3d.shaders = Some(fp);
             self.model.save_settings();
         }
 

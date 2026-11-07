@@ -571,7 +571,6 @@ fn bad_documents_are_refused() {
 
 mod support;
 use modscan::store::PathCopy;
-use render3d::locate::Fingerprint;
 use sdc_gui::model::meshes::nif_edit::*;
 use sdc_gui::model::meshes::MeshesModel;
 use sdc_gui::model::viewport3d::{Content, V3Cmd};
@@ -864,7 +863,7 @@ fn scan_and_select(m: &mut MeshesModel, root: &Path) {
     m.start();
     let t = Instant::now();
     m.poll();
-    while m.scanning() || m.v3.locating() {
+    while m.scanning() {
         assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
         std::thread::sleep(Duration::from_millis(10));
         m.poll();
@@ -886,13 +885,8 @@ fn session(le: bool) -> (tempfile::TempDir, MeshesModel) {
     (d, m)
 }
 
-/// Confirms shaders and stands in for the render thread.
-fn attach(m: &mut MeshesModel, root: &Path) -> Receiver<V3Cmd> {
-    m.v3.on_located(Ok(Some(Fingerprint {
-        root: root.join("CS"),
-        owner_mod: None,
-        hash: "h".into(),
-    })));
+/// Stands in for the render thread.
+fn attach(m: &mut MeshesModel, _root: &Path) -> Receiver<V3Cmd> {
     m.v3.attach_test_thread()
 }
 
@@ -2343,7 +2337,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
         frame3d.width() > 100.0 && frame3d.height() > 100.0,
         "{frame3d:?}"
     );
-    let folder = h.get_by_label("Shader folder…").rect();
+    let folder = h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).rect();
     assert!(
         folder.max.x <= edit.min.x,
         "3D toolbar pushed under the panel"
@@ -9910,7 +9904,7 @@ fn cards_stay_when_the_controller_read_fails() {
     m.start();
     let t = Instant::now();
     m.poll();
-    while m.scanning() || m.v3.locating() {
+    while m.scanning() {
         assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
         std::thread::sleep(Duration::from_millis(10));
         m.poll();
@@ -11507,7 +11501,7 @@ fn the_set_preview_has_no_export_menu() {
             |ui, (m, s): &mut (sdc_gui::model::AppModel, SetPreview)| {
                 sdc_gui::ui::set_preview::draw(ui, m, s)
             },
-            (m, SetPreview::new(None, None, None, DEFAULT_CAP)),
+            (m, SetPreview::new(None, DEFAULT_CAP)),
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     for _ in 0..3 {

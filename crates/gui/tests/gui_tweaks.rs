@@ -272,7 +272,7 @@ type H = Harness<'static, (AppModel, State)>;
 fn harness(m: AppModel, preview: bool) -> H {
     let state = State {
         set3d: if preview {
-            SetPreview::new(None, None, None, DEFAULT_CAP)
+            SetPreview::new(None, DEFAULT_CAP)
         } else {
             SetPreview::default()
         },

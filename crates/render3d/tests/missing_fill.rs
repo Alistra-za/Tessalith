@@ -203,10 +203,10 @@ fn installed_cs_fills_a_missing_env_cube_with_a_cube() {
     let root = std::path::PathBuf::from(
         std::env::var("SDC_CS_SHADERS").expect("set SDC_CS_SHADERS to the CS Shaders folder"),
     );
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
     r.set_missing_texture(Some(MAGENTA));
     let mut m = nif::material::MaterialState::builtin_default();
     m.shader_type = 1;

@@ -5,7 +5,6 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::{MeshesModel, ScanTarget};
 use sdc_gui::model::picker::{Picker, PickerBackend, PickerPurpose, PickerSpec, BUSY_HOVER};
-use sdc_gui::model::viewport3d::Viewport3d;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::{GuiSettings, MeshesSettings};
 use std::path::PathBuf;
@@ -162,17 +161,6 @@ fn each_purpose_reaches_its_own_handler() {
     );
     meshes.poll();
     assert!(meshes.error.is_some(), "an MO2 instance was tried");
-
-    // The 3D preview takes the shader folder.
-    let mut v = Viewport3d::new(None);
-    ask(
-        &v.picker,
-        PickerPurpose::ShaderFolder,
-        None,
-        Some(d.path().to_path_buf()),
-    );
-    assert!(v.poll());
-    assert!(v.locating(), "the chosen folder is being checked");
 }
 
 #[test]
@@ -266,26 +254,6 @@ fn the_actions_and_buttons_are_disabled_while_a_dialog_is_open() {
         .accesskit_node()
         .is_disabled());
     assert_eq!(BUSY_HOVER, "A file dialog is already open");
-}
-
-#[test]
-fn a_shader_folder_pick_reaches_the_viewport_that_asked() {
-    use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
-    let d = tempfile::tempdir().unwrap();
-    let mut meshes = MeshesModel::new(None, MeshesSettings::default());
-    let mut set = SetPreview::new(None, None, None, DEFAULT_CAP);
-    // The set preview's 3D panel asks.
-    ask(
-        &set.v3.picker,
-        PickerPurpose::ShaderFolder,
-        None,
-        Some(d.path().to_path_buf()),
-    );
-    // The Meshes viewport polls first, as in the app, and gets nothing.
-    meshes.poll();
-    assert!(!meshes.v3.locating());
-    assert!(set.v3.poll());
-    assert!(set.v3.locating());
 }
 
 #[test]

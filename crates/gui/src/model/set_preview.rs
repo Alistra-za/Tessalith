@@ -6,7 +6,6 @@
 //! during an export. Results come back on this module's own channel, so `worker.rs` needs no new message.
 use crate::model::cs_pbr::{self, CsBlock};
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
-use crate::model::meshes::ScanTarget;
 use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
 use crate::model::sets::set_views;
@@ -18,7 +17,6 @@ use crate::model::Selection;
 use crate::pgp::prefix::output_rel;
 use crate::pgp::writer::EntryInput;
 use crate::pgp::writer::{document, entry_node};
-use crate::settings::MeshesSettings;
 use engine::api::CancelToken;
 use engine::config::Format;
 use engine::dds::{
@@ -1028,19 +1026,6 @@ pub fn followed_set(m: &AppModel) -> Option<String> {
     }
 }
 
-/// The scan target `[meshes]` names, read as `MeshesModel::activate_with` reads it (`meshes.rs:304-311`): the
-/// Meshes view may never have been opened, so its `target` may still be `None`.
-pub fn target_of(s: &MeshesSettings) -> Option<ScanTarget> {
-    match (&s.instance, &s.profile, &s.folder) {
-        (Some(root), Some(profile), _) => Some(ScanTarget::Mo2 {
-            root: root.clone(),
-            profile: profile.clone(),
-        }),
-        (_, _, Some(f)) => Some(ScanTarget::Folder(f.clone())),
-        _ => None,
-    }
-}
-
 /// Everything the preview depends on, for one set (02 §3.2).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetFingerprint {
@@ -1655,8 +1640,6 @@ pub struct SetPreview {
     /// Off in `SetPreview::default()` (so `ui::draw`'s test state keeps the existing layout); on from `new`.
     pub enabled: bool,
     pub store_path: Option<PathBuf>,
-    /// What the CS locate searches.
-    pub target: Option<ScanTarget>,
     pub fp: Option<SetFingerprint>,
     pub candidates: Candidates,
     /// The mesh per set key, this session only (spec §8).
@@ -1694,7 +1677,6 @@ pub struct SetPreview {
     querying: Option<u64>,
     loading: Option<(u64, i64)>,
     last_check: Option<Instant>,
-    located: bool,
     next: u64,
     store: RefCell<Option<Store>>,
     store_tried: Cell<bool>,
@@ -1739,33 +1721,27 @@ pub struct SetPreview {
 }
 
 impl Default for SetPreview {
-    /// No IO and no threads: no store path, no saved shaders, disabled.
+    /// No IO and no threads: no store path, disabled.
     fn default() -> SetPreview {
-        let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+        let mut s = SetPreview::new(None, DEFAULT_CAP);
         s.enabled = false;
         s
     }
 }
 
 impl SetPreview {
-    /// `shaders`: `[render3d] shaders` from `gui.toml`; `store_path`: the scan DB. Opens nothing until shown.
-    pub fn new(
-        shaders: Option<render3d::locate::Fingerprint>,
-        target: Option<ScanTarget>,
-        store_path: Option<PathBuf>,
-        cap: u32,
-    ) -> SetPreview {
+    /// `store_path`: the scan DB. Opens nothing until shown.
+    pub fn new(store_path: Option<PathBuf>, cap: u32) -> SetPreview {
         let (tx, rx) = channel();
         SetPreview {
             v3: {
-                let mut v = Viewport3d::new(shaders);
+                let mut v = Viewport3d::new();
                 v.panel = "set_preview";
                 v
             },
             enc: Encoder::new(cap),
             enabled: true,
             store_path,
-            target,
             fp: None,
             candidates: Candidates::NotAsked,
             choice: HashMap::new(),
@@ -1792,7 +1768,6 @@ impl SetPreview {
             querying: None,
             loading: None,
             last_check: None,
-            located: false,
             next: 0,
             store: RefCell::new(None),
             store_tried: Cell::new(false),
@@ -1894,13 +1869,6 @@ impl SetPreview {
         self.poll_at(m, Instant::now())
     }
 
-    /// Window focus (`app.rs`): look for CS and re-read its settings again, once this panel has located it.
-    pub fn relocate(&mut self) {
-        if self.located {
-            self.v3.locate(self.target.clone());
-        }
-    }
-
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
         self.v3.poll();
@@ -1917,10 +1885,6 @@ impl SetPreview {
         self.visible = shown;
         if !shown || !self.enabled {
             return;
-        }
-        if !self.located {
-            self.located = true;
-            self.v3.locate(self.target.clone());
         }
         let key = followed_set(m);
         let due = input
@@ -2922,16 +2886,11 @@ impl SetPreview {
 }
 
 impl SetPreview {
-    /// The app's instance: the saved shaders, the `[meshes]` target, the scan DB path and the D5 cap. No IO.
+    /// The app's instance: the scan DB path and the D5 cap. No IO.
     pub fn from_settings(
-        s: &crate::settings::GuiSettings,
+        _s: &crate::settings::GuiSettings,
         store_path: Option<PathBuf>,
     ) -> SetPreview {
-        SetPreview::new(
-            s.render3d.shaders.clone(),
-            target_of(&s.meshes),
-            store_path,
-            DEFAULT_CAP,
-        )
+        SetPreview::new(store_path, DEFAULT_CAP)
     }
 }

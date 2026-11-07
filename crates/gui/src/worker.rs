@@ -140,7 +140,7 @@ pub enum WorkerMsg {
     },
     /// Meshes view: the scan ended. The error keeps its kind (`PgpRunning`, `Cancelled`, a database error).
     Scanned(Result<modscan::scan::Report, modscan::ScanError>),
-    /// Meshes view 3D panel (plan B Task B8): a reply of the render thread or the CS locate worker.
+    /// Meshes view 3D panel (plan B Task B8): a reply of the render thread.
     Viewport3d(crate::model::viewport3d::V3Reply),
     /// A Save report write ended (AG130): the path and the error, if any.
     ReportSaved {

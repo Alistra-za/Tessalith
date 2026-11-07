@@ -42,10 +42,10 @@ fn installed_cs_reads_rmaos_back_as_its_values() {
     let root = std::path::PathBuf::from(
         std::env::var("SDC_CS_SHADERS").expect("set SDC_CS_SHADERS to the CS Shaders folder"),
     );
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+    let fp = render3d::ShaderSource::Folder(root.to_path_buf());
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
     assert!(r.debug_supported(), "the installed CS has the anchor");
     let mut m = MaterialState::builtin_default();
     m.slsf2 |= SLSF2_TRUE_PBR;
