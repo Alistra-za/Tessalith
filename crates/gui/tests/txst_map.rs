@@ -300,6 +300,35 @@ fn a_kept_dds_member_leaves_a_set_shared() {
     statics_are_off(m);
 }
 
+/// A kept `x_zz9.dds` named by a preset's `[suffix_aliases] zz9 = "n"` leaves the set shared: the engine groups with
+/// the loaded aliases, so the GUI reads the member by them too.
+#[test]
+fn an_aliased_kept_dds_member_leaves_a_set_shared() {
+    let d = tempfile::tempdir().unwrap();
+    support::bc1_dds(&d.path().join("textures/s/x_zz9.dds"));
+    let presets = d.path().join("user-presets");
+    std::fs::create_dir_all(&presets).unwrap();
+    std::fs::write(
+        presets.join("mine.toml"),
+        "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n\n\
+         [suffix_aliases]\nzz9 = \"n\"\n",
+    )
+    .unwrap();
+    let mut m = project(d.path(), &["textures/s/x_sk.png"]);
+    m.user_presets = Some(presets);
+    m.replan();
+    idle(&mut m);
+    let v = view(&m, X);
+    let kept = v
+        .members
+        .iter()
+        .find(|k| k.ends_with("x_zz9.dds"))
+        .unwrap_or_else(|| panic!("{:?}", v.members));
+    assert!(m.item(kept).is_some_and(|i| i.job.is_none()), "no job");
+    assert!(v.shared, "{:?}", v.slots);
+    assert!(skin_json_plan(&m).1.iter().all(|(id, ..)| id != X));
+}
+
 fn statics_are_off(mut m: AppModel) {
     use sdc_gui::model::cs_pbr::{Kind, Statics};
     m.add_cs_block(X, Kind::Txst);

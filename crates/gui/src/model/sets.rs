@@ -596,7 +596,7 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
 /// A shared skin set: marked Advanced skin, with members, and every one of them a map a shared set may hold. That
 /// is the engine's rule (`group::unmark_shared_after_edits`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
 /// unmarked after a hand edit (a `_p`, a diffuse, an `_rfaos`) is not shared here either. A lone `_rfaos` is not shared.
-fn is_shared(v: &SetView) -> bool {
+fn is_shared(v: &SetView, aliases: &BTreeMap<String, String>) -> bool {
     let allowed = |k: &SlotKind| {
         matches!(
             k,
@@ -620,13 +620,13 @@ fn is_shared(v: &SetView) -> bool {
                 .map(|(k, _)| k);
             match slot {
                 Some(k) => allowed(k),
-                None => kept_member_is_shared_map(m),
+                None => kept_member_is_shared_map(m, aliases),
             }
         })
 }
 
 /// A member with no slot reads as `_n`, `_sk`, `_wet` or `_detail_n` by its file name (the engine's member rule).
-fn kept_member_is_shared_map(key: &str) -> bool {
+fn kept_member_is_shared_map(key: &str, aliases: &BTreeMap<String, String>) -> bool {
     use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
     let set = TextureSet {
         key: String::new(),
@@ -638,7 +638,7 @@ fn kept_member_is_shared_map(key: &str) -> bool {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let suffix = member_split(&stem, &set, &BTreeMap::new()).suffix;
+    let suffix = member_split(&stem, &set, aliases).suffix;
     matches!(suffix.as_deref(), Some("n" | "sk" | SKIN_WET | SKIN_DETAIL))
 }
 
@@ -930,7 +930,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
-    v.shared = is_shared(v);
+    v.shared = is_shared(v, &m.suffix_aliases);
     // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
     v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
         Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {

@@ -93,6 +93,8 @@ pub struct PlanView {
     pub preset_id: String,
     /// `(id, file)` of every user preset the plan's registry loaded.
     pub user_presets: Vec<(String, String)>,
+    /// The plan registry's suffix aliases (the table the engine grouped with), for reading kept members by name.
+    pub suffix_aliases: std::collections::BTreeMap<String, String>,
     /// `(file, reason)` of every user preset file the plan skipped (CFG-PRESET-SKIPPED).
     pub skipped_user_presets: Vec<(String, String)>,
     /// Note FC3 (Y4): the batch's IN-UNREADABLE warnings (entries the discovery skipped).
@@ -470,6 +472,7 @@ impl PlanView {
                 .into_iter()
                 .map(|(id, src)| (id.to_string(), src.to_string()))
                 .collect(),
+            suffix_aliases: plan.registry.alias_table().clone(),
             skipped_user_presets,
             unreadable,
             items,

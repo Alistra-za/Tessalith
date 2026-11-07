@@ -371,6 +371,8 @@ pub struct AppModel {
     pub user_presets: Option<PathBuf>,
     /// `(id, file)` of the user presets the last plan loaded (the preset inspector lists them).
     pub loaded_user_presets: Vec<(String, String)>,
+    /// The last plan's suffix aliases (`PlanView::suffix_aliases`).
+    pub suffix_aliases: std::collections::BTreeMap<String, String>,
     /// `(file, reason)` of the user preset files the last plan skipped (CFG-PRESET-SKIPPED; the inspector lists them).
     pub skipped_user_presets: Vec<(String, String)>,
     /// Note FC3 (Y4): the last plan's IN-UNREADABLE warnings, one Problems row each.
@@ -763,6 +765,7 @@ impl AppModel {
             user_config: None,
             user_presets: None,
             loaded_user_presets: vec![],
+            suffix_aliases: Default::default(),
             skipped_user_presets: vec![],
             unreadable: vec![],
             read_only_flags: vec![],
@@ -2678,6 +2681,7 @@ impl AppModel {
         self.rnm_keys = view.rnm_keys;
         self.batch_preset = view.preset_id;
         self.loaded_user_presets = view.user_presets;
+        self.suffix_aliases = view.suffix_aliases;
         self.skipped_user_presets = view.skipped_user_presets;
         self.unreadable = view.unreadable;
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
