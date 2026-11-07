@@ -223,24 +223,7 @@ fn diag_arch_head_on_installed_cs() {
     let mods = root.join("mods");
     let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
-    let origins = vec![
-        ("CS".to_string(), cs.clone(), 0),
-        ("overwrite".to_string(), root.join("overwrite"), i32::MAX),
-    ];
-    let paths = render3d::locate::settings_paths(Some(&origins), &cs.join("Shaders"));
-    println!("settings paths: {paths:?}");
-    let settings = render3d::cs_settings::read_settings(&paths);
-    let no_origins = render3d::cs_settings::read_settings(&render3d::locate::settings_paths(
-        None,
-        &cs.join("Shaders"),
-    ));
-    println!(
-        "hash (12): with origins {} / no origins {} / default {}; no-origins loaded {:?}",
-        &settings.hash[..12],
-        &no_origins.hash[..12],
-        &render3d::cs_settings::CsSettings::default().hash[..12],
-        no_origins.loaded
-    );
+    let settings = render3d::cs_settings::defaults().clone();
     println!(
         "settings: ll={} loaded={:?} notes={:?}",
         settings.linear_lighting, settings.loaded, settings.notes
@@ -374,8 +357,8 @@ fn diag_arch_head_on_installed_cs() {
 }
 
 /// Diagnosis (owner data, read-only): the Arch scalp (hair, flow map in the backlight slot) on the INSTALLED CS
-/// shaders, once with the owner's MO2 settings (CS_HAIR on) and once with the settings the GUI log shows it used
-/// (`CsSettings::default()`, ENABLE_LL only). Prints the scalp's flags, slots → registers, PS defines and the
+/// shaders, once with the bundled default settings (CS_HAIR on) and once with
+/// `CsSettings::default()` (ENABLE_LL only). Prints the scalp's flags, slots → registers, PS defines and the
 /// written `hairSpecularSettings.Enabled`; PNGs in %TEMP%\sdc-rfaos-diag.
 #[test]
 #[ignore]
@@ -384,20 +367,13 @@ fn diag_arch_scalp_on_installed_cs() {
     let mods = root.join("mods");
     let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
-    let origins = vec![
-        ("CS".to_string(), cs.clone(), 0),
-        ("overwrite".to_string(), root.join("overwrite"), i32::MAX),
-    ];
-    let owner = render3d::cs_settings::read_settings(&render3d::locate::settings_paths(
-        Some(&origins),
-        &cs.join("Shaders"),
-    ));
+    let owner = render3d::cs_settings::defaults().clone();
     let resolve = |norm: &str| std::fs::read(arch.join(norm.replace('/', "\\"))).ok();
     let nif = std::fs::read(arch.join(r"meshes\arch\head\hair\scalp.nif")).unwrap();
     let out = std::env::temp_dir().join("sdc-rfaos-diag");
     std::fs::create_dir_all(&out).unwrap();
     for (label, settings) in [
-        ("owner_settings", owner),
+        ("bundled_default_settings", owner),
         (
             "gui_default_settings",
             render3d::cs_settings::CsSettings::default(),

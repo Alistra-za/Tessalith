@@ -1,7 +1,8 @@
 //! P1-C (03 §3, T-S1/T-S2): the user's CS settings files → merged settings, loaded features, change hash and
 //! preview defines. File I/O on fixtures and tempdirs only: never the owner's real files, no GPU.
 use render3d::cs_settings::{
-    diffuse_curve, feature_data, preview_defines, read_settings, CsSettings, SettingsPaths,
+    defaults, diffuse_curve, feature_data, linear_lighting_on, preview_defines, read_settings,
+    CsSettings, SettingsPaths,
 };
 use render3d::scene::{FEATURE_FLOATS, FEATURE_UINTS};
 use std::collections::BTreeSet;
@@ -65,6 +66,54 @@ const INFO_LOADED: &[&str] = &[
     "TruePBR",
     "VanillaFresnel",
 ];
+
+/// Note GT3: the preview's settings are the bundled `SettingsDefault.json` of the pinned CS with every feature loaded.
+#[test]
+fn bundled_defaults_give_the_expected_defines() {
+    let s = defaults();
+    assert!(!s.parse_failed, "{:?}", s.notes);
+    assert_eq!(
+        preview_defines(s, true),
+        [
+            "CS_HAIR",
+            "CS_SKIN",
+            "DYNAMIC_CUBEMAPS",
+            "ENABLE_LL",
+            "EXTENDED_MATERIALS",
+            "EXTENDED_TRANSLUCENCY",
+            "VANILLA_FRESNEL"
+        ]
+    );
+    assert!(linear_lighting_on(s, false, true));
+    assert_eq!(
+        s.merged["Linear Lighting"]["gameGamma"].as_f64().unwrap() as f32,
+        1.6
+    );
+    assert!(preview_defines(s, false).is_empty());
+    assert!(
+        s.merged["Disable at Boot"].is_null(),
+        "no feature is switched off"
+    );
+}
+
+/// Gated on the pinned CS Shaders folder (read-only owner data): `FEATURE_NAMES` is its `Features/*.ini` stems.
+#[test]
+fn feature_names_equal_the_pinned_features_folder() {
+    let Ok(root) = std::env::var("SDC_CS_SHADERS") else {
+        eprintln!("SDC_CS_SHADERS unset: skipped");
+        return;
+    };
+    let mut stems: Vec<String> = std::fs::read_dir(Path::new(&root).join("Features"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ini"))
+        .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+        .collect();
+    stems.sort();
+    let mut names: Vec<&str> = render3d::cs_settings::FEATURE_NAMES.to_vec();
+    names.sort();
+    assert_eq!(stems, names);
+}
 
 /// T-S1: per key, User over Default; a key in neither is left out of `merged` (the built-in table fills it).
 #[test]

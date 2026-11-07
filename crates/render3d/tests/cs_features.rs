@@ -3,9 +3,9 @@
 //! and a hair (HAIR) mesh must compile, draw, and add no NaN pixels. A row that fails is deleted from
 //! `PREVIEW_FEATURES` and the plan records it. Ignored: reads the MO2 instance read-only; panics without it.
 //! `$env:SDC_ACHERUS='<your MO2 instance>'; cargo test -p render3d --release --test cs_features -- --ignored --nocapture`
-use render3d::cs_settings::{preview_defines, read_settings, CsSettings, PREVIEW_FEATURES};
+use render3d::cs_settings::{defaults, preview_defines, CsSettings, PREVIEW_FEATURES};
 use render3d::device::Gpu;
-use render3d::locate::{fingerprint, settings_paths, Fingerprint};
+use render3d::locate::{fingerprint, Fingerprint};
 use render3d::scene::{Background, Scene};
 use render3d::{parse, Renderer};
 use std::path::{Path, PathBuf};
@@ -32,14 +32,9 @@ fn acherus() -> PathBuf {
     PathBuf::from(std::env::var("SDC_ACHERUS").expect("set SDC_ACHERUS to the MO2 instance root"))
 }
 
-/// The owner's settings the way the GUI finds them: overwrite over the CS mod (no scan, C12 tuples).
-fn owner_settings(root: &Path) -> CsSettings {
-    let origins = vec![
-        (CS_MOD.to_string(), root.join("mods").join(CS_MOD), 0),
-        ("overwrite".to_string(), root.join("overwrite"), i32::MAX),
-    ];
-    let shaders = root.join("mods").join(CS_MOD).join("Shaders");
-    let s = read_settings(&settings_paths(Some(&origins), &shaders));
+/// The bundled default settings (Note GT3): the settings the preview uses, whoever's CS is installed.
+fn owner_settings(_root: &Path) -> CsSettings {
+    let s = defaults().clone();
     assert!(!s.parse_failed, "{:?}", s.notes);
     s
 }

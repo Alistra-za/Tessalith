@@ -61,6 +61,82 @@ pub const PREVIEW_FEATURES: &[(&str, &str)] = &[
     ("DynamicCubemaps", "DYNAMIC_CUBEMAPS"),
 ];
 
+/// The `Shaders/Features/*.ini` stems of the pinned CS (`d2026.10.11.0`): every feature counts as loaded in the
+/// bundled defaults. The test `feature_names_equal_the_pinned_features_folder` compares it with the folder.
+pub const FEATURE_NAMES: &[&str] = &[
+    "CloudShadows",
+    "CSEditor",
+    "DynamicCubemaps",
+    "Effects11",
+    "ExponentialHeightFog",
+    "ExtendedMaterials",
+    "ExtendedTranslucency",
+    "GrassCollision",
+    "GrassLighting",
+    "GrassOptimizations",
+    "HairSpecular",
+    "HDRDisplay",
+    "HorizonFix",
+    "ImageBasedLighting",
+    "InteriorSun",
+    "InverseSquareLighting",
+    "LightLimitFix",
+    "LinearLighting",
+    "LODBlending",
+    "NRD",
+    "PerformanceOverlay",
+    "PhysicalSky",
+    "PostProcessing",
+    "PseudoSunBounce",
+    "RemoteControl",
+    "RenderDoc",
+    "SceneManager",
+    "Screenshot",
+    "ScreenSpaceGI",
+    "ScreenSpacePointLightShadows",
+    "ScreenSpaceReflections",
+    "ScreenSpaceShadows",
+    "Skin",
+    "Skylighting",
+    "SkySync",
+    "SubsurfaceScattering",
+    "TerrainBlending",
+    "TerrainHelper",
+    "TerrainShadows",
+    "TerrainVariation",
+    "TruePBR",
+    "UnifiedWater",
+    "Upscaling",
+    "VanillaFresnel",
+    "VolumetricLighting",
+    "VolumetricShadows",
+    "WaterEffects",
+    "WetnessEffects",
+];
+
+/// The preview's settings (Note GT3): the pinned CS's `SettingsDefault.json` from the embedded tree, with every
+/// [`FEATURE_NAMES`] feature loaded. Its `"Disable at Boot"` is null, so none is switched off.
+pub fn defaults() -> &'static CsSettings {
+    static D: std::sync::OnceLock<CsSettings> = std::sync::OnceLock::new();
+    D.get_or_init(|| {
+        let bytes =
+            crate::bundled::read("SettingsDefault.json").expect("bundled SettingsDefault.json");
+        let Ok(Value::Object(merged)) = serde_json::from_slice(strip_bom(bytes)) else {
+            panic!("bundled SettingsDefault.json is not a JSON object");
+        };
+        let loaded: BTreeSet<String> = FEATURE_NAMES.iter().map(|n| n.to_string()).collect();
+        CsSettings {
+            hash: settings_hash(None, Some(bytes), None, &loaded),
+            linear_lighting: setting(&merged, "Linear Lighting", "enableLinearLighting")
+                .is_none_or(|x| x != 0.0),
+            loaded,
+            merged,
+            notes: vec![],
+            parse_failed: false,
+        }
+    })
+}
+
 /// Reads and merges the settings. Absent files are skipped; a settings file that does not parse is skipped with a
 /// note and `parse_failed`, but its bytes still count in the hash. An Info.ini that is unreadable or not UTF-8 gives
 /// a note only (the Features inis stand in).
@@ -339,144 +415,9 @@ const SECTIONS: &[Section] = &[
     ),
 ];
 
-/// Settings keys with no FeatureData field by design (03 report 3, 6.3): CPU-only (`SkinnedOnly`, the sweat
-/// timers, `DetailTexture`, `EnableVerboseJsonLogging`), consumed by a derivation (`diffuseMidReflectance` ->
-/// diffuseCurve, `enableLinearLighting` -> the LL switch, `gameGamma` -> the `CS_GAME_GAMMA` define), not compiled
-/// by the preview (`enableACEScg`: CS's ENABLE_ACESCG define) or unused by the shader (1.9 `emitColorMult`,
-/// `UseDynamicWetness`).
-#[cfg(feature = "test-hooks")]
-const NO_FIELD_KEYS: &[&str] = &[
-    "SkinnedOnly",
-    "enableACEScg",
-    "gameGamma",
-    "emitColorMult",
-    "diffuseMidReflectance",
-    "enableLinearLighting",
-    "EnableVerboseJsonLogging",
-    "DetailTexture",
-    "FullSweat",
-    "StartSweat",
-    "WetFadeTime",
-    "UseDynamicWetness",
-];
-
-/// Every `"Advanced Skin"` key [`pack_skin`] reads (profile or section root).
-#[cfg(feature = "test-hooks")]
-const SKIN_KEYS: &[&str] = &[
-    "EnableSkin",
-    "ExtraSkinWetness",
-    "WetParams",
-    "SkinMainRoughness",
-    "SkinSecondRoughness",
-    "SkinSpecularTexMultiplier",
-    "SecondarySpecularStrength",
-    "F0",
-    "BaseColorMultiplier",
-    "SkinDetailTiling",
-    "BodyTilingMultiplier",
-    "SkinDetailStrength",
-    "EnableSkinDetail",
-    "Translucency",
-    "sssWidth",
-    "SSSAmount",
-    "UseSSS",
-    "FuzzStrength",
-    "FuzzRoughness",
-    "FuzzF0",
-    "ExtraEdgeRoughness",
-    "PhysicalMainRoughnessMultiplier",
-    "PhysicalSecondRoughnessMultiplier",
-    "PhysicalSpecularStrength",
-    "WetResponse",
-];
-
 /// The struct field a section key lands in (C5 renames).
 fn renamed<'a>(renames: &[(&str, &'a str)], key: &'a str) -> &'a str {
     renames.iter().find(|r| r.0 == key).map_or(key, |r| r.1)
-}
-
-/// What one program's settings write missed (03 report 6.3): reflected fields nothing wrote, and settings keys
-/// that matched no field.
-#[cfg(feature = "test-hooks")]
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Coverage {
-    pub unset: BTreeSet<String>,
-    pub unmatched: BTreeSet<String>,
-}
-
-#[cfg(feature = "test-hooks")]
-impl Coverage {
-    /// A one-line summary; `None` when there is nothing to report.
-    pub fn line(&self) -> Option<String> {
-        (!self.unset.is_empty() || !self.unmatched.is_empty()).then(|| {
-            format!(
-                "CS settings: {} fields unset, {} keys unmatched",
-                self.unset.len(),
-                self.unmatched.len()
-            )
-        })
-    }
-}
-
-/// `fields` (one program's [`reflected_fields`]) against `written` (its [`feature_data`]) and the settings. Checked
-/// fields: the 7 sections' structs, `skinData`, b7 and b8, minus `pad*`. Checked keys: the 7 sections', minus
-/// [`NO_FIELD_KEYS`], strings and objects; a section whose struct this build lacks is skipped. Test-only: the
-/// `cs_versions` tests use it to detect drift between CS builds (Note GJ).
-#[cfg(feature = "test-hooks")]
-pub fn coverage(
-    s: &CsSettings,
-    fields: &BTreeSet<String>,
-    written: &[(String, Vec<f64>)],
-) -> Coverage {
-    let under = |f: &str, p: &str| f.strip_prefix(p).is_some_and(|r| r.starts_with('.'));
-    let has = |p: &str| fields.iter().any(|f| under(f.as_str(), p));
-    let in_scope = |f: &str| {
-        SECTIONS
-            .iter()
-            .map(|sec| sec.1)
-            .chain(["skinData", "skinPerGeometryProfile"])
-            .any(|p| under(f, p))
-            || matches!(f, "skinPerGeometry" | "skinMaterialFlags" | "emissiveMult")
-    };
-    let is_pad = |f: &str| f.rsplit('.').next().is_some_and(|l| l.starts_with("pad"));
-    let wrote: BTreeSet<&str> = written.iter().map(|(n, _)| n.as_str()).collect();
-    let unset = fields
-        .iter()
-        .filter(|f| in_scope(f.as_str()) && !is_pad(f.as_str()) && !wrote.contains(&f.as_str()))
-        .cloned()
-        .collect();
-    let counts = |k: &str, v: &Value| {
-        matches!(v, Value::Number(_) | Value::Bool(_) | Value::Array(_))
-            && !NO_FIELD_KEYS.contains(&k)
-    };
-    let mut unmatched = BTreeSet::new();
-    for (section, prefix, renames) in SECTIONS {
-        let Some(Value::Object(m)) = s.merged.get(*section) else {
-            continue;
-        };
-        if !has(prefix) {
-            continue;
-        }
-        for (key, v) in m {
-            if counts(key.as_str(), v)
-                && !fields.contains(&format!("{prefix}.{}", renamed(renames, key)))
-            {
-                unmatched.insert(format!("{section}.{key}"));
-            }
-        }
-    }
-    if let (Some(Value::Object(skin)), true) = (s.merged.get("Advanced Skin"), has("skinData")) {
-        let profile = match skin.get("DefaultProfile") {
-            Some(Value::Object(d)) => Some(d),
-            _ => None,
-        };
-        for (key, v) in skin.iter().chain(profile.into_iter().flatten()) {
-            if counts(key.as_str(), v) && !SKIN_KEYS.contains(&key.as_str()) {
-                unmatched.insert(format!("Advanced Skin.{key}"));
-            }
-        }
-    }
-    Coverage { unset, unmatched }
 }
 
 /// Linear Lighting's `diffuseCurve` (C4, no settings key): the inverse of CS's DiffuseToWorking curve at mid

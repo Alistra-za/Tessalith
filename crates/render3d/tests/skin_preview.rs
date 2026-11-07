@@ -183,14 +183,7 @@ fn installed_cs_wetness_compiles_is_neutral_when_dry_and_shows_when_wet() {
     let mods = root.join("mods");
     let cs = mods.join("CommunityShaders_AIO-2026-10-03T06-46Z");
     let arch = mods.join("Arch Resources");
-    let origins = vec![
-        ("CS".to_string(), cs.clone(), 0),
-        ("overwrite".to_string(), root.join("overwrite"), i32::MAX),
-    ];
-    let settings = render3d::cs_settings::read_settings(&render3d::locate::settings_paths(
-        Some(&origins),
-        &cs.join("Shaders"),
-    ));
+    let settings = render3d::cs_settings::defaults().clone();
     let resolve = |norm: &str| std::fs::read(arch.join(norm.replace('/', "\\"))).ok();
     let nif = std::fs::read(arch.join(r"meshes\arch\head\Arch_head.nif")).unwrap();
     let out = std::env::temp_dir().join("sdc-skin-preview");
