@@ -760,6 +760,8 @@ mod tests {
     /// Note HG2: a shader choice that makes a colourless set shared changes no member, only the flag, and still plans
     /// in full. A request's shader choice is part of its signature, so this edits the kept request as a patch would
     /// see it after a shader change.
+    // Defensive: this builds a state no user path reaches (a real shader change is GLOBAL_CHANGE) and pins the flag
+    // clause in `same`.
     #[test]
     fn a_shader_edit_that_makes_a_shared_set_needs_a_full_plan() {
         let fx = fast_fixture();

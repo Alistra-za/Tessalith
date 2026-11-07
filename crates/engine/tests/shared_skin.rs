@@ -215,5 +215,7 @@ fn a_hand_add_of_a_colour_map_unmarks_the_set() {
     }];
     let (p, ev) = plan_with(&d, Target::Cs, &[(X, Shader::AdvancedSkin)], edits);
     assert!(job(&p, "colour.png").set_key.ends_with(X));
+    // Pinned as it is now: unmarked, the set is not skin by its maps, so the joined `x_wet` is not typed `skin_wet`.
+    assert_eq!(sub(&p, "x_wet.png"), Subtype::GenericData);
     assert!(not_shared(&resolved(&ev).1), "{:?}", resolved(&ev));
 }
