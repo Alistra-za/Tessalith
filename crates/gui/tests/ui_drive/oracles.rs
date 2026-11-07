@@ -181,6 +181,11 @@ fn pills_match_counts(m: &AppModel) -> Result<Option<String>, String> {
         1 if f.attention => ("Not ready", c.attention),
         1 if f.ready => ("Ready", c.ready),
         1 if f.no_json => ("No JSON", c.no_json),
+        1 => {
+            return Ok(Some(
+                "not checked: the only filter part on has no pill count".into(),
+            ))
+        }
         _ => return Ok(Some("not checked: more than one filter part is on".into())),
     };
     if shown == want {

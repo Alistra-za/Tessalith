@@ -60,9 +60,28 @@ journey!(
         r#"{"op":"click","at":{"starts":"Not ready"}}"#,
         r#"{"op":"expect","fact":"/sets/armor~1gold/visible","equals":false}"#,
         r#"{"op":"expect","fact":"/selection","equals":"set:armor/gold"}"#,
+        r#"{"op":"check","name":"selected_set_kept_while_hidden"}"#,
         r#"{"op":"click","at":{"label":"Clear filter"}}"#,
-        r#"{"op":"expect","fact":"/sets/armor~1gold/visible","equals":true}"#,
-        r#"{"op":"check","name":"selected_set_kept_while_hidden"}"#
+        r#"{"op":"expect","fact":"/sets/armor~1gold/visible","equals":true}"#
+    ]
+);
+
+journey!(
+    g8_show_only_the_ready_sets,
+    "demo",
+    [
+        r#"{"op":"click","at":{"starts":"Ready"}}"#,
+        r#"{"op":"check","name":"sets_ready_shows_exactly_clean_sets"}"#
+    ]
+);
+
+journey!(
+    g9_filter_parts_combine_with_and,
+    "demo",
+    [
+        r#"{"op":"click","at":{"starts":"Not ready"}}"#,
+        r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"check","name":"sets_filter_shows_the_and_of_its_parts"}"#
     ]
 );
 

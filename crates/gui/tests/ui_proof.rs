@@ -1,4 +1,4 @@
-//! The UI driver's own tests, on tiny UIs. The journeys that drive the real app come later.
+//! The UI driver's own tests, on tiny UIs. The journeys that drive the real app live in `ui_proof/<feature>.rs`.
 
 mod app_harness;
 #[path = "ui_drive/checks.rs"]
@@ -45,8 +45,13 @@ pub fn run_journey(fixture: &str, lines: &[&str]) {
     let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
     let script = parse_script(&lines.join("\n")).unwrap();
     for (i, (line, step)) in script.iter().enumerate() {
-        if let Err(e) = fixtures::app_step(&mut h, &run, step) {
-            panic!("step {} `{line}`: {e}", i + 1);
+        match fixtures::app_step(&mut h, &run, step) {
+            Err(e) => panic!("step {} `{line}`: {e}", i + 1),
+            // A journey's check must decide: a note is a check that proved nothing.
+            Ok(Some(note)) if matches!(step, Step::Check { .. }) => {
+                panic!("step {} `{line}`: check did not decide: {note}", i + 1)
+            }
+            Ok(_) => {}
         }
     }
 }
