@@ -37,13 +37,15 @@
 //! passing gives `reached_at: null`. A check that only notes ("not checked") does not reach the goal.
 //!
 //! Output in --out: `00` is the settled start, `NN` follows step NN. Per frame `NN.tree.txt` (the AccessKit tree, with
-//! focused/disabled/hovered/clipped/offscreen marks), `NN.state.json` and `NN.png`. `steps.jsonl` is the script;
+//! focused/disabled/hovered/clipped/offscreen marks), `NN.state.json`, `NN.checks.json` (the mechanical checks of
+//! checks.rs plus a `filter` finding for a check step's note) and `NN.png`; run.json `findings` counts them per check. `steps.jsonl` is the script;
 //! `run.json` holds {fixture, size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms,
 //! error, note}], dialogs, shell: [{step, request}], goal}. `ms_fixture` is the fixture build, app start and first settle. Screenshots are comparable with the doc shots only when the adapter is the
 //! one in shots.toml; the driver says so when it is not.
 
 #[path = "../app_harness/mod.rs"]
 mod app_harness;
+mod checks;
 mod fixtures;
 mod frame;
 #[allow(dead_code)] // fields only the doc shots read
@@ -143,8 +145,39 @@ fn parse_args(args: &[String]) -> Result<Parsed, String> {
     }))
 }
 
-fn write_frame(h: &mut H, out: &Path, n: usize) -> Result<(), String> {
-    let text = frame::tree_text(&frame::snapshot(h));
+/// Findings per check over the whole run, for run.json.
+type Counts = std::collections::BTreeMap<&'static str, usize>;
+
+/// A check step's note as a finding of this frame.
+fn oracle_finding(step: &Step, note: &str) -> Option<checks::Finding> {
+    let Step::Check { name } = step else {
+        return None;
+    };
+    Some(checks::Finding {
+        check: "filter",
+        rule: format!("oracle {name}"),
+        subject: checks::Subject::default(),
+        other: None,
+        detail: note.to_string(),
+    })
+}
+
+fn write_frame(
+    h: &mut H,
+    out: &Path,
+    n: usize,
+    extra: Option<checks::Finding>,
+    counts: &mut Counts,
+) -> Result<(), String> {
+    let snap = frame::snapshot(h);
+    let mut found = checks::run_checks(&snap);
+    found.extend(extra);
+    for f in &found {
+        *counts.entry(f.check).or_default() += 1;
+    }
+    let json = serde_json::to_string_pretty(&found).unwrap();
+    std::fs::write(out.join(format!("{n:02}.checks.json")), json).map_err(|e| e.to_string())?;
+    let text = frame::tree_text(&snap);
     std::fs::write(out.join(format!("{n:02}.tree.txt")), text).map_err(|e| e.to_string())?;
     let state = serde_json::to_string_pretty(&state::state_json(&h.state().model)).unwrap();
     std::fs::write(out.join(format!("{n:02}.state.json")), state).map_err(|e| e.to_string())?;
@@ -218,7 +251,8 @@ fn run(a: Args) -> Result<i32, String> {
         println!("screenshots not comparable: adapter {adapter}");
     }
     let (mut rows, mut shell, mut code) = (vec![], vec![], 0);
-    let mut start_error = write_frame(&mut h, &a.out, 0).err();
+    let mut counts = Counts::new();
+    let mut start_error = write_frame(&mut h, &a.out, 0, None, &mut counts).err();
     if start_error.is_some() {
         code = 2;
     }
@@ -244,7 +278,11 @@ fn run(a: Args) -> Result<i32, String> {
         for r in log.into_iter().flatten() {
             shell.push(json!({"step": n, "request": format!("{r:?}")}));
         }
-        let written = write_frame(&mut h, &a.out, n);
+        let extra = match &res {
+            Ok(Some(note)) => oracle_finding(step, note),
+            _ => None,
+        };
+        let written = write_frame(&mut h, &a.out, n, extra, &mut counts);
         see_goal(&h, n);
         let (mut ok, mut error, note) = match res {
             Ok(note) => (true, None, note),
@@ -286,6 +324,7 @@ fn run(a: Args) -> Result<i32, String> {
         "steps": rows,
         "dialogs": *run.picker.asked.lock().unwrap(),
         "shell": shell,
+        "findings": counts,
         "goal": goal.as_ref().map(|(line, _)| json!({"line": line, "reached_at": reached})),
         "error": start_error.take(),
     });

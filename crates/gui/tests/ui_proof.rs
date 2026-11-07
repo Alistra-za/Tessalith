@@ -1,6 +1,8 @@
 //! The UI driver's own tests, on tiny UIs. The journeys that drive the real app come later.
 
 mod app_harness;
+#[path = "ui_drive/checks.rs"]
+mod checks;
 #[path = "ui_drive/fixtures.rs"]
 mod fixtures;
 #[path = "ui_drive/frame.rs"]
@@ -16,6 +18,7 @@ mod state;
 mod steps;
 mod support;
 
+use checks::{run_checks, Finding};
 use eframe::egui::{self, vec2, Key, Modifiers};
 use egui_kittest::Harness;
 use frame::{snapshot, tree_text};
@@ -511,4 +514,270 @@ fn an_unknown_fixture_lists_the_known_ones() {
     let d = tempfile::tempdir().unwrap();
     let e = fixtures::start("nope", d.path(), false).err().unwrap();
     assert!(e.contains("nope") && e.contains("demo"), "{e}");
+}
+
+// ---- mechanical frame checks (checks.rs) ----
+
+type Shared = std::rc::Rc<std::cell::Cell<egui::Rect>>;
+
+/// Findings of every check on one frame of a tiny UI in a `w`x`h` window.
+fn found(w: f32, h: f32, ui: impl FnMut(&mut egui::Ui) + 'static) -> Vec<Finding> {
+    let mut h = Harness::builder().with_size(vec2(w, h)).build_ui(ui);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    run_checks(&snapshot(&h))
+}
+
+fn of<'a>(f: &'a [Finding], check: &str) -> Vec<&'a Finding> {
+    f.iter().filter(|x| x.check == check).collect()
+}
+
+fn rect4(r: egui::Rect) -> [f32; 4] {
+    [r.min.x, r.min.y, r.width(), r.height()]
+}
+
+/// A 32x32 clickable tile named `name`, with `paint` drawing its text.
+fn tile(
+    ui: &mut egui::Ui,
+    name: &str,
+    paint: impl FnOnce(&egui::Painter, egui::Rect),
+) -> egui::Rect {
+    let (r, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    paint(ui.painter(), r);
+    r
+}
+
+fn centred(letter: &'static str) -> impl FnOnce(&egui::Painter, egui::Rect) {
+    move |p, r| {
+        p.text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+#[test]
+fn names_flags_an_unnamed_button() {
+    let empty = Shared::new(std::cell::Cell::new(egui::Rect::NOTHING));
+    let e2 = empty.clone();
+    let f = found(400.0, 200.0, move |ui| {
+        egui::Panel::left("side").resizable(true).show(ui, |ui| {
+            ui.label("side");
+        });
+        ui.horizontal(|ui| {
+            e2.set(ui.add(egui::Button::new("")).rect);
+            let _ = ui.button("Save");
+        });
+    });
+    let n = of(&f, "names");
+    assert_eq!(
+        n.len(),
+        1,
+        "{:?}",
+        n.iter().map(|x| &x.detail).collect::<Vec<_>>()
+    );
+    assert_eq!(n[0].subject.rect, rect4(empty.get()));
+    assert!(n[0].rule.starts_with("egui-ui-rules 8.2"));
+}
+
+#[test]
+fn clipped_text_flags_a_cut_label_but_not_a_truncated_one() {
+    let f = found(400.0, 200.0, |ui| {
+        ui.scope(|ui| {
+            ui.set_clip_rect(egui::Rect::from_min_size(
+                egui::pos2(10.0, 10.0),
+                vec2(40.0, 40.0),
+            ));
+            ui.put(
+                egui::Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(200.0, 20.0)),
+                egui::Label::new("cut label sticking out"),
+            );
+        });
+        ui.allocate_ui(vec2(60.0, 20.0), |ui| {
+            ui.add(egui::Label::new("truncated label that is long").truncate());
+        });
+        ui.scope(|ui| {
+            ui.set_clip_rect(egui::Rect::from_min_size(
+                egui::pos2(10.0, 100.0),
+                vec2(300.0, 6.0),
+            ));
+            ui.put(
+                egui::Rect::from_min_size(egui::pos2(10.0, 100.0), vec2(200.0, 20.0)),
+                egui::Label::new("cut at the bottom"),
+            );
+        });
+    });
+    let c = of(&f, "clipped_text");
+    assert_eq!(
+        c.len(),
+        1,
+        "{:?}",
+        c.iter().map(|x| &x.subject.label).collect::<Vec<_>>()
+    );
+    assert_eq!(c[0].subject.label, "cut label sticking out");
+    assert!(c[0].detail.contains("hover"), "{}", c[0].detail);
+    let s = of(&f, "summary");
+    assert!(
+        s.len() == 1 && s[0].detail.contains("clipped_text"),
+        "the bottom cut is counted in the summary: {:?}",
+        s.iter().map(|x| &x.detail).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn off_window_flags_a_button_cut_by_the_edge() {
+    let f = found(300.0, 200.0, |ui| {
+        let at = |x| egui::Rect::from_min_size(egui::pos2(x, 20.0), vec2(60.0, 24.0));
+        ui.put(at(280.0), egui::Button::new("Far"));
+        ui.put(at(10.0), egui::Button::new("Near"));
+    });
+    let o = of(&f, "off_window");
+    assert_eq!(
+        o.len(),
+        1,
+        "{:?}",
+        o.iter().map(|x| &x.subject.label).collect::<Vec<_>>()
+    );
+    assert_eq!(o[0].subject.label, "Far");
+}
+
+#[test]
+fn overlap_flags_two_buttons_on_top_of_each_other() {
+    let f = found(300.0, 200.0, |ui| {
+        let at = |x, y| egui::Rect::from_min_size(egui::pos2(x, y), vec2(50.0, 30.0));
+        ui.put(at(10.0, 10.0), egui::Button::new("A"));
+        ui.put(at(40.0, 20.0), egui::Button::new("B"));
+        ui.put(at(10.0, 100.0), egui::Button::new("C"));
+        ui.put(at(70.0, 100.0), egui::Button::new("D"));
+    });
+    let o = of(&f, "overlap");
+    assert_eq!(
+        o.len(),
+        1,
+        "{:?}",
+        o.iter().map(|x| &x.detail).collect::<Vec<_>>()
+    );
+    let pair = [&o[0].subject.label, &o[0].other.as_ref().unwrap().label];
+    assert!(
+        pair.contains(&&"A".to_string()) && pair.contains(&&"B".to_string()),
+        "{pair:?}"
+    );
+}
+
+#[test]
+fn alignment_flags_a_tile_whose_letter_moved_and_a_tile_with_none() {
+    let f = found(400.0, 200.0, |ui| {
+        ui.horizontal(|ui| {
+            tile(ui, "tile 1", centred("A"));
+            tile(ui, "tile 2", centred("B"));
+            tile(ui, "tile 3", |p, r| {
+                p.text(
+                    r.left_bottom(),
+                    egui::Align2::LEFT_BOTTOM,
+                    "C",
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                );
+            });
+            tile(ui, "tile 4", |_, _| {});
+            tile(ui, "tile 5", centred("E"));
+        });
+    });
+    let a = of(&f, "alignment");
+    let who: Vec<_> = a
+        .iter()
+        .map(|x| (x.subject.label.as_str(), x.detail.as_str()))
+        .collect();
+    assert_eq!(a.len(), 2, "{who:?}");
+    let moved = a
+        .iter()
+        .find(|x| x.subject.label == "tile 3")
+        .expect("moved tile");
+    assert!(moved.detail.contains("offset"), "{}", moved.detail);
+    let none = a
+        .iter()
+        .find(|x| x.subject.label == "tile 4")
+        .expect("empty tile");
+    assert!(none.detail.contains("no painted text"), "{}", none.detail);
+
+    // left-aligned names of different widths are one placement
+    let f = found(400.0, 200.0, |ui| {
+        ui.horizontal(|ui| {
+            for name in ["a", "abc", "abcdef"] {
+                tile(ui, name, move |p, r| {
+                    p.text(
+                        r.left_center() + vec2(4.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        name,
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    );
+                });
+            }
+        });
+    });
+    assert!(of(&f, "alignment").is_empty(), "{:?}", of(&f, "alignment"));
+}
+
+#[test]
+fn lonely_wrap_flags_one_tile_alone_on_its_row() {
+    fn wrapped(n: usize) -> Vec<Finding> {
+        found(500.0, 300.0, move |ui| {
+            let w = 4.0 * 32.0 + 3.0 * ui.spacing().item_spacing.x + 1.0;
+            ui.allocate_ui(vec2(w, 200.0), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for i in 0..n {
+                        tile(ui, &format!("tile {i}"), centred("T"));
+                    }
+                });
+            });
+        })
+    }
+    let l = wrapped(5);
+    assert_eq!(
+        of(&l, "lonely_wrap").len(),
+        1,
+        "{:?}",
+        of(&l, "lonely_wrap")
+    );
+    assert_eq!(of(&l, "lonely_wrap")[0].subject.label, "tile 4");
+    assert!(of(&wrapped(4), "lonely_wrap").is_empty());
+    assert!(of(&wrapped(8), "lonely_wrap").is_empty());
+}
+
+#[test]
+fn painted_only_matches_whole_words_and_skips_glyphs() {
+    let f = found(400.0, 200.0, |ui| {
+        ui.horizontal(|ui| {
+            for (name, painted) in [
+                ("Normal thumbnail", "N"),
+                ("Textures view", "Textures"),
+                ("Smaller tiles", "\u{2212}"),
+            ] {
+                let (r, resp) = ui.allocate_exact_size(vec2(90.0, 30.0), egui::Sense::click());
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
+                });
+                ui.painter().text(
+                    r.center(),
+                    egui::Align2::CENTER_CENTER,
+                    painted,
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                );
+            }
+        });
+    });
+    let p = of(&f, "painted_only");
+    assert_eq!(
+        p.len(),
+        1,
+        "{:?}",
+        p.iter().map(|x| &x.subject.label).collect::<Vec<_>>()
+    );
+    assert_eq!(p[0].subject.label, "N");
 }
