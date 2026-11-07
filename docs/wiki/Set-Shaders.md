@@ -80,9 +80,9 @@ A mostly white `_p` is normal for the coat path and a warning on the 0.5 paths. 
 Other things the checks look at:
 - **Green direction.** A normal map that curls like OpenGL when it is read as DirectX gets the Info hint `CHK-GREEN-GUESS`, which suggests *Treat as OpenGL (flip green)* and never flips by itself. The test is weak on straight ridges, so look at the map. A blue channel that points the wrong way raises `CHK-Z-SIGN`.
 
-## Generated height maps
+## Generated files
 
-The GUI can integrate a set's normal map into a height map (**Generate from normal map…**). The result is an ordinary source file next to the normal:
+A file named `<base>_<role>_generated.png` is read as an ordinary source. Tessalith no longer makes these files (3.0 removed Generate from normal map); keep or add them by hand, or make them in another tool.
 
 | File | Used as |
 |---|---|
@@ -91,13 +91,12 @@ The GUI can integrate a set's normal map into a height map (**Generate from norm
 | `<base>_ao_generated.png` | The AO packed into the `_rmaos` blue channel (PBR sets, `cs` target only) |
 | `<base>_curves_generated.png` | The set's `_curves` (read only by Also export) |
 
-- 16-bit grey PNG. `_generated` after a generated role (`_p`, `_height`, `_ao`, `_curves`) is stripped when grouping, so the file joins its set by its base name.
+- `_generated` after a generated role (`_p`, `_height`, `_ao`, `_curves`) is stripped when grouping, so the file joins its set by its base name.
 - **Two ranges:** 0.5 is "no shift" (Parallax, PBR, complex material, landscape); 1.0 is "no shift" for PBR multilayer with inner-layer parallax, where white is the top and nothing is raised.
 - **A real map always wins.** A real `_p`, `_height` or other height source for the same slot makes the generated file skipped with `GEN-REPLACED` (Info), never `IN-DUPLICATE` or `PACK-CONFLICT`. An earlier export of the generated `_p` sitting in the input folder is not a rival.
 - A `_p` wins the shader auto-pick, so a default set becomes Parallax and PGPatcher patches its meshes; on a TruePBR set the `parallax` key turns on by itself.
-- `GEN-STALE` (Info, GUI only) marks a generated file whose normal, neutral or shader changed since; it shows on the slot row's hover and as a Problems warning with **Regenerate…** ([Generate from normal map](GUI-Generate-From-Normal.md)).
-- **Generated AO** holds raw visibility (1 = open), with no strength baked in. A real `_ao` wins over it, and so does a pre-packed `_rmaos`/`_rfaos` image whose blue channel already holds AO (or one beside a loose roughness, metallic, specular or `_orm`). A pre-packed image whose blue is flat white gets the generated AO in B, with R, G and A kept from the image. It is written at the size of the set's other `_rmaos` sources, so the packed `_rmaos` has one size, and `GEN-AO` (Info) replaces `PACK-DEFAULTED` for blue. A baked AO is better: a generated one misses the broad cavity shading a bake gives. If the set's normal has an RNM bent layer, the bent layer is weighted by this AO too, so the normal map changes.
-- **Generated curvature** is the Laplacian of the same height, smoothed by a Gaussian of 2 texels at the solve size (up to 1024 px), stored 0.5-centred with peaks bright. It is written at the set's albedo size, because Also export's soft light reads both, and only for sets Also export derives (PBR, PBR landscape and PBR grass on `cs`, with an albedo and no DDS member). A real `_curves` or `_curvature` wins over it (`_cavity` is another map). A plain export does not use it.
+- **`_ao_generated`** is read as raw visibility (1 = open). A real `_ao` wins over it, and so does a pre-packed `_rmaos`/`_rfaos` image whose blue channel already holds AO (or one beside a loose roughness, metallic, specular or `_orm`). A pre-packed image whose blue is flat white gets the generated AO in B, with R, G and A kept from the image. `GEN-AO` (Info) replaces `PACK-DEFAULTED` for blue. If the set's normal has an RNM bent layer, the bent layer is weighted by this AO too, so the normal map changes.
+- **`_curves_generated`** is read only by Also export's soft light, for the sets it derives (PBR, PBR landscape and PBR grass on `cs`, with an albedo and no DDS member), as a 0.5-centred map with peaks bright. A real `_curves` or `_curvature` wins over it (`_cavity` is another map). A plain export does not use it.
 
 ## Complex grass
 

@@ -26,7 +26,6 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 - Cutout alpha: coverage-preserving mips, on by default. Normal mips are renormalised, and their variance is baked into TruePBR roughness.
 - Loose maps are packed into `_rmaos` / `_rfaos` / complex `_m`, with suffix-based channel remapping (ORM to RMAOS is instant). The complex-material `_m` gate is checked.
 - RNM normal-layer blending (`_bump`, `_detailnorm`, `_bent`, with optional masks `_bumpmask`, `_detailnormmask`, `_bentmask`). See [RNM normal layers](docs/wiki/Texture-Packing.md#rnm-normal-layers).
-- [Generate from normal map](docs/wiki/GUI-Generate-From-Normal.md#generate-from-normal-map): height, AO and curvature maps from a set's normal.
 - Complex grass (1:2 image, halves mipped apart) and [cubemaps](docs/wiki/Cubemaps.md).
 
 **Skyrim and mod aware**

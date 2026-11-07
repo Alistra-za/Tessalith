@@ -23,8 +23,7 @@ A PBR set with a map still undecided (or blocked by a code you have not acknowle
 
 **Also export recipe** in the [Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer) (it starts closed; Review's **Recipe settings are in Advanced** opens it) has one box per `[export.legacy]` value: diffuse brightness, AO strength (objects and landscape), curves opacity, metal darkening, specular scale, specular boost at full metal, landscape spec factor and dielectric env.
 
-`_curves`, `_curvature` and `_cavity` maps join their PBR set and are read only by Also export ([Set-Shaders](Set-Shaders.md#also-export-as-vanilla-and-cm)). [Generate from normal map](GUI-Generate-From-Normal.md#curvature) can make a curvature map.
-
+`_curves`, `_curvature` and `_cavity` maps join their PBR set and are read only by Also export ([Set-Shaders](Set-Shaders.md#also-export-as-vanilla-and-cm)).
 ## Files this export did not write
 
 Files Tessalith did not write are never overwritten, and Tessalith never deletes either. A file in one of the folders that this export did not write (an earlier export's CM diffuse after Keep metal brightness was turned off, the outputs of a set now skipped) stays, and the export notes list it as "not written by this export". Delete such files yourself: a stale CM file overrides the Vanilla file of the same name. The notes are written after the PGPatcher, CS PBR and complex-material JSON, so those files are not listed. To start from scratch, delete the three folders together.

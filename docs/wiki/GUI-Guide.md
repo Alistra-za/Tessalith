@@ -37,7 +37,6 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Advanced drawer](GUI-Advanced-Drawer.md): batch, preview and interface settings.
 - [Helpers, RNM layers and cubemaps](GUI-Helpers-RNM-and-Cubemaps.md): the Helpers group and panel, RNM layers, the cube controls.
 - [The 2D preview](GUI-Preview.md): source beside encode, readouts.
-- [Generate from normal map](GUI-Generate-From-Normal.md): height, AO and curvature from a normal.
 - [The set editor](GUI-Set-Editor.md): slot rows, packed channel sources, the shader.
 - [The 3D preview](GUI-Set-Preview-3D.md): a set on a mesh with Community Shaders.
 - [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md): TruePBR settings, the JSON file and the JSON editor.

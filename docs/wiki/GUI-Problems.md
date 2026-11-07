@@ -54,7 +54,6 @@ A row you must act on never just reports; its fix is its button:
 | Row | Button |
 |---|---|
 | *No file matches …* (a set line that names no file, the card's red **?** chip) | **Remove from set** or **Delete set** ([Set cards](GUI-Sets-Column.md#set-cards)). |
-| A stale generated map (`GEN-STALE`) | **Regenerate…**, which opens the generate dialog with that map ticked and writes nothing until you press Generate there. |
 | A short normal (`CHAN-NORMAL-LENGTH`) | **Rebuild Z**, which sets the file's `channels.reconstruct_z`; greyed with "Rebuild Z is on for this file: export again to rewrite it" once it is set. |
 | A folder that could not be read | A Project row with **Open folder**. |
 | The Vanilla/CM derive results ("NIF suggests …") | No button: hover the row for the values. |

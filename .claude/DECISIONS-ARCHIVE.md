@@ -29,6 +29,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
   - **Exempt textures.** `mips.levels = "none"` skips `pot_dims` (`resize::pot_exempt`): the texture keeps its size and gets `DIM-NPOT`, now a **Warning**, raised only there. `resize` still shrinks an exempt texture. A cube's source is never resized (`target_dims` returns it unchanged); its default face is `pot_dims((cell, cell))`, at most 4096, so a cell within 5 % of the next power of two now rounds up (1000×500 equirect, cell 250 → face 256). An explicit `cubemap.face_size` is unchanged.
 
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+  - **What is gated.** The counters and getters `filtered_builds`, `problems_builds`, `problem_lookups`, `export_files_builds`, `view_builds`, `set_cards_drawn`, `helper_rows_drawn`, `cache_builds`, `gen_lookups`, `header_reads_on_this_thread`, `plan_calls`, `uv_reads_on_this_thread`, `visible_builds`, `row_builds`, `project_builds` and `dds_thumb_requests`; the plan-hold hooks (`hold_plan_results`, `take_held`, `handle_held`, `end_export_with`); the Meshes pill-read gate (`project_gate`, `project_alive`, `project_started`, `hold_rows_read`); the Set 3D encoder and viewport stand-ins (`hold_workers`, `inject`, `inject_as`, `inject_stale`, `has_alt`, `token_of`, `alt_token_of`, `set_plugin_reader`, `attach_test_thread`, `fake_render_thread`, `render_sent_for_test`, `loaded_for_test`); and small getters (`votes_pending`, `generation`, `plan_marks`, `gen_dims_len`, `clear_gen_dims`, `gen_preview_opts`). A build without the feature does none of the counting.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -191,6 +194,30 @@ ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 
 ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE
 
 ## Digest
 
@@ -383,6 +410,54 @@ ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 - The cube settings section is table-driven (`CUBE_FIELDS`, 18 `cubemap.*` rows), drawn only when every selected item is a Cubemap (no bulk cube rows). Drags are bounded to the engine's range; an existing out-of-range value shows unclamped and is written only on change. Unticking or Auto / None removes the key. The layout combo never offers "Six face files". [DT7, DT8, DT9, DT10, DT11, DT13]
 
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- Generate from normal map writes height (`_p` or the `_m` alpha), AO and curvature files beside the normal; a generated map is recognised by its `_generated` name marker only, and a real map for the slot wins over it (`GEN-REPLACED`, an intentional skip). [CO1, CO2, CO5, CO9]
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- The height solve is an FFT Poisson solve on de-tilted slopes (mean slope removed, mirror or wrap tiling detected); z is always rebuilt from R and G; a non-finite texel reads flat; a non-power-of-two normal is refused. [CO11, CO13, CO14, CO15, CO17, CO20, CO24]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- Generate sizes are 256/512/1024/2048 within the cap and the normal's longer side; detection runs at fixed sizes so the preview and the full run agree. [CO23, CO26, CO35]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
+- AO from a normal is a GTAO-style march over the solved height; a generated AO feeds the packed `_rmaos` B (`GEN-AO`), also on a pre-packed `_rmaos` whose B holds no content. [CO78, CO89, CO103, CO104]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- The engine has no writer for generated files: the GUI checks every target with `dds::may_replace` before writing any, then writes atomically, rolling back only what it did on a failure. [CO28, CO49, CO66]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- Generate provenance lives in `[generated]` of `sdc-project.toml`, outside undo; Generate is not an undo step; a stale generated file is flagged. [CO39, CO40, CO53, CO69]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
+- Height ranges use `R = p99.5(|h|)` of the zero-mean solve-size height and Strength 0.1–1.0 (default 1.0). Half's clamp `[8/255, 247/255]` sits inside the complex-material gate `(4/255, 251/255)`. [CO21, CO22]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- Generate has one `Opts::size`, each map capped: height 1024, up to 2048 where a recipe needs the set's size (`_m` alpha always; `_p` on cs PBR and PBR-landscape sets, defaulting to the albedo size with a cost warning above 512); AO 2048; curvature at albedo size up to 2048. The solve runs at `min(size, 1024)`, a larger height resampled up (periodic bilinear when wrapped, no seam). A map its recipe fixes is written at that size; a locked non-power-of-two size is `SIZE_LOCKED`. [CO25, CO31, CO34, CO67, CO82, CO95, CO112, CO118]
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- Green for the solve is DirectX unless the fit margin `max(e_dx, e_gl) / min(e_dx, e_gl)` is at least 1.25, when the lower error wins; below that the dialog says "undetermined". A tiling field whose shorter side is 16 px or less is not judged (wrap, ambiguous). [CO27, CO30]
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- Generate returns `InvalidOpts`, never a panic, for relief outside [0, 1], size 0, a zero-sized normal, Strength outside 0.1–1.0, AO radius outside 0–0.25, slices or steps outside 1–64, Depth outside 0.25–4 and Intensity outside 0.5–3. [CO29, CO84]
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- AO's march reads the same de-tilted slopes as the solve, uses an angle bias of tan 4°, and samples wrap on a wrapped map and clamp on a mirrored one. [CO79, CO80, CO81]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- A generated height is offered for the Default, Parallax, Pbr and PbrLandscape shaders, and for ComplexMaterial only on vanilla without a file-backed, non-generated `_m`; it is refused for vanilla multilayer, Glow, Envmap, Hair, Eye, Skin, vanilla landscape, AdvancedSkin, PbrGrass and ComplexGrass. [CO43]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- Generated AO is offered only on cs with Pbr, PbrLandscape or PbrGrass; a kept `_ao_generated` stays PBR evidence (`suggest::is_pbr_set`). A pre-packed `_rmaos` counts as an AO source only when its B has content (`pack::b_has_content`: range ≥ 2/255 or mean ≤ 250/255). A loose roughness, glossiness, metallic, specular, fuzz or `_orm` image beside a pre-packed one means the image is never filled, except a specular beside a flat alpha (HC1). [CO92, CO94, CO105, CO106, CO108]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- Curvature (`_curves`) is read only by Also export; it is not offered elsewhere or for a set with no albedo, and reaches a plain run as `PACK-UNUSED-INPUT`. A generated AO changes the base `_n` job's `rnm.ao.file` identity. [CO116, CO115, CO90]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- A cancel is read between stages and writes nothing before the first write; once writing has started the job runs to its end and the files it wrote are recorded. [CO36, CO50]
+
+ARCHIVED (superseded by Note GV1, 2026-11-07)
+- "Generate from normal map…" sits below Assign… in the slot row's format column (below the format combo on a filled Height or RMAOS row), absent for packed items, reason on hover when disabled. Its dialog: 160 pt tiles, wheel zoom 1-16x at the pointer, drag pans, double-click fits, one shared crop, zoom resets on reopen. [DP1, DP2, DP3]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -392,3 +467,29 @@ ARCHIVED (superseded by Note GT, 2026-11-06)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
 - **FT6 A non-UTF-8 shaders root does not fail every `gui.toml` save (T39).** `GuiSettings::save` drops `render3d.shaders` when its root is not Unicode, like the other paths. Test `settings::a_non_unicode_shaders_root_does_not_stop_the_settings_saving`.
+
+## Note FN — User-facing audit leads: generate sizes, fill boxes, read-only reasons, report, feature clash (main team, 2026-11-04)
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- **FN1 Generate from normal follows the automatic power of two (lead 32).** The export writes a normal with mips at `resize::pot_dims` (FM29), so Generate solves there too.
+  - Engine: `from_normal::generate` resamples a non-power-of-two normal to `pot_dims` before the FFT (`to_pot`: `resize::enlarge` on the axes that grow, then `mips::area_resample` down, the order `resize_work` uses). `GenerateError::NotPowerOfTwo` is gone. A 1000² normal is solved at 1024² (a 2.4 % upsample), so the height lines up texel for texel with the written normal. A normal kept at its own size by `mips.levels = "none"` is still solved at its power of two; the generated map is a mip-mapped input like any other.
+  - GUI: `AppModel::gen_normal_size` (the normal's `pot_dims`) feeds the offered sizes, the dialog's paths and Generate. `locked_to` locks AO beside other `_rmaos` sources, and curvature, to the sources' `pot_dims`, and refuses with "written W×H, another aspect ratio" when that step changes the aspect (1000×600 is written 1024×512), because a pack or derive cannot join different aspects (FM30). The NPOT reasons in the entry and in curvature are gone.
+  - Tests: engine `generate_writes_the_requested_size_and_solves_npot_at_its_power_of_two`; GUI `an_npot_normal_is_offered_at_its_power_of_two_size`, `a_locked_size_takes_the_power_of_two_the_maps_are_written_at`, `a_disabled_generate_button_shows_the_reason`, plus the size and reason tests adjusted in `generate_from_normal.rs`.
+
+## Note FV — backlog batch B5: Also derive, RNM AO, PSD (main team, 2026-11-04)
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- **FV5 An NPOT normal solved at its power of two is unchanged (R1; no fix).** The torus test came out green: 1000² against 1024² differ by a mean 0.0001 in height, and the resampled normal's mean slope is 1.0238 times the 1024² one's, against the 1.024 the per-pixel slope convention predicts, so `to_pot` keeps resampling the normal. The slope comparison is the pin, because the height is range-normalised and would hide a uniform slope bias (`from_normal::an_npot_torus_solves_like_its_power_of_two_twin`).
+
+## Note FY — backlog batch B8: gui refactors and dead code (main team, 2026-11-04)
+
+ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
+- **FY5 One auto-flag entry point (L57).** `checks`, `from_normal` (two sites) pass `auto_flags::hint` to `resolved_for`, as the PGPatcher export and Parameters panel do; `auto_flags` and `resolved` (no scan evidence) exist only under `test-hooks`. A PBR grass set's checks and generate-from-normal now read the grass-only auto keys as its export does (test `auto_flags::a_pbr_grass_sets_checks_read_the_keys_its_export_writes`); the visible result of those readers (`height_neutral`) is the same, because a grass shader is `Half` either way.
+
+ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
+- **FY6 The two warning-text parsers carry `shortcut:` notes (L76).** `from_normal::replaced_by` (GEN-REPLACED) and `Cx::errors` in the cube section (CFG-INVALID); the upgrade is structured warning data, which needs an engine event change.
+
+## Note HC — 2.1 bug batch (main team, 2026-11-05)
+
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- **HC1 A specular fills the flat alpha of a pre-packed `_rmaos`/`_rfaos` image (owner, 2026-11-05).** Before, the image won under `packing.prefer = prepacked` and the specular read "not used", even with a hand-set `rmaos.a` fill. Now, when the set's only other loose map is a specular (a generated AO the image's empty B takes may join it) and the image's alpha is flat, the image joins the recipe as CO104 does: A from the specular, the other channels from the image. "Flat" is the alpha verdict `plan_fills` reads (`AlphaFacts::empty`), so any constant counts, not only 255. An alpha with content, or another loose map, keeps the M9 result. A pre-packed DDS is never joined (images only, as CO103). No `encode_version` arm moves: the recipe and its bytes for given sources are unchanged, and the new source list re-encodes that set by itself. Tests `generated_files::a_specular_fills_the_flat_alpha_of_a_prepacked_rmaos` and its neighbours.

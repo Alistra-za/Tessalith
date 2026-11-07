@@ -171,10 +171,9 @@ These come from the GUI's artist checks, plus `CHK-LOW-DETAIL`, which convert me
 
 ### Generated maps
 
-These concern the `*_generated.png` files the GUI's **Generate from normal map…** writes.
+These concern `*_generated.png` files, which Tessalith reads as ordinary sources ([Generated files](Set-Shaders.md#generated-files)).
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `GEN-REPLACED` | info | A generated file was skipped on purpose because a real map for the same slot is in the set. | Nothing; the real map wins. Delete the generated file if you no longer want it. |
-| `GEN-STALE` | info | GUI only: the generated file's normal, height neutral or shader changed since it was made. | **Regenerate…**, or ignore. |
-| `GEN-AO` | info | A packed `_rmaos` takes its blue channel from a generated AO (replaces `PACK-DEFAULTED`). | Nothing; a baked AO is better if you have one. |
+| `GEN-REPLACED` | info | A generated file was skipped on purpose because a real map for the same slot is in the set. | Nothing; the real map wins. Remove the generated file from the folder if you no longer want it. |
+| `GEN-AO` | info | A packed `_rmaos` takes its blue channel from an `_ao_generated` file (replaces `PACK-DEFAULTED`). | Nothing; a baked AO is better if you have one. |

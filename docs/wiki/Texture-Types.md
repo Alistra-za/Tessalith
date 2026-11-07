@@ -162,7 +162,7 @@ Which encoder each format uses is in [Format and encoder](Project-Config.md#form
 ## Packing, helpers and shaders
 
 - How raw maps pack, helper textures and RNM normal layers: [Texture packing](Texture-Packing.md).
-- Set shaders, height maps, generated maps, complex grass and the extra exports: [Shaders and height maps](Set-Shaders.md).
+- Set shaders, height maps, `_generated` files, complex grass and the extra exports: [Shaders and height maps](Set-Shaders.md).
 
 ## Alpha policies
 
