@@ -41,12 +41,17 @@ fn shader_of(m: &NifModel, name: &str) -> u32 {
         .block
 }
 
+/// The source-block count the scenarios below give `compact`: only the first 4 blocks of `scenes::idle_clip` (Root,
+/// BSXFlags, shape S, its BSLSP) count as the source file. Its clip, manager and text keys (13 more blocks, 17 in all)
+/// count as appended, and compaction keeps them because the file still refers to them.
+const SRC: u32 = 4;
+
 fn add_ctrl(b: &[u8], keys: KeyData) -> Op {
     let m = read_model(b).unwrap();
     Op::AddController {
         at: anchor_role(&m, Some(shader_of(&m, "S")), Role::Shader).unwrap(),
         class: LSCF.into(),
-        var: Some(11),
+        var: Some(21),
         keys,
         flags: 0x48,
         freq: 1.0,
@@ -55,39 +60,31 @@ fn add_ctrl(b: &[u8], keys: KeyData) -> Op {
     }
 }
 
-fn ctrl_at(b: &[u8]) -> Anchor {
+fn ctrl_anchor(b: &[u8], var: u32) -> Anchor {
     let m = read_model(b).unwrap();
     let role = Role::Ctrl {
         owner: Owner::Shader,
         class: LSCF.into(),
-        var: Some(11),
+        var: Some(var),
         nth: 0,
     };
     anchor_role(&m, Some(shader_of(&m, "S")), role).unwrap()
 }
 
-fn add_seq(b: &[u8], keys: KeyData) -> Op {
-    let m = read_model(b).unwrap();
-    Op::AddSequence {
-        at: anchor_role(&m, None, Role::Root).unwrap(),
-        name: "Clip".into(),
-        cycle: 0,
-        freq: 1.0,
-        start: 0.0,
-        stop: 1.0,
-        tracks: vec![ClipTrack {
-            at: ctrl_at(b),
-            keys,
-        }],
-    }
+fn ctrl_at(b: &[u8]) -> Anchor {
+    ctrl_anchor(b, 21)
 }
 
-fn remove_seq(b: &[u8]) -> Op {
+/// Replaces the keys the clip (block 13) plays on the managed var-11 controller.
+fn set_clip_keys(b: &[u8], keys: KeyData) -> Op {
     let m = read_model(b).unwrap();
-    Op::RemoveSequence {
-        at: anchor_role(&m, None, Role::Root).unwrap(),
-        name: "Clip".into(),
-        nth: 0,
+    let at = ctrl_anchor(b, 11);
+    Op::SetKeys {
+        base: keys_of(b, &m, at.block, Some(13)).unwrap(),
+        at,
+        clip: Some(13),
+        clip_name: Some("Clip".into()),
+        keys,
     }
 }
 
@@ -110,11 +107,11 @@ fn run(src: &[u8], steps: &[Step]) -> Vec<u8> {
     cur
 }
 
-/// The owner's scenario on `animated(None, 0)`: Root (0), an unlinked BSXFlags (1, a source orphan), shape S (2),
-/// its BSLSP (3). Add + remove a controller; add one, clip it, remove the clip and the controller; add one and
-/// clip it again.
+/// The scenario on `idle_clip("Clip")` (17 blocks; the first `SRC` are the source: Root, BSXFlags, shape S, its
+/// BSLSP). Add + remove a controller; add one, edit the clip's keys, remove the controller; add one and edit the
+/// clip's keys again.
 fn owner_scenario() -> (Vec<u8>, Vec<u8>) {
-    let src = scenes::animated(None, 0);
+    let src = scenes::idle_clip("Clip");
     let k1 = lin(&[(0.0, 1.0), (1.0, 2.0)]);
     let k2 = lin(&[(0.0, 3.0), (1.0, 4.0)]);
     let k3 = lin(&[(0.0, 5.0), (0.5, 6.0), (1.0, 7.0)]);
@@ -124,11 +121,10 @@ fn owner_scenario() -> (Vec<u8>, Vec<u8>) {
             &|b| add_ctrl(b, k1.clone()),
             &|b| Op::RemoveController { at: ctrl_at(b) },
             &|b| add_ctrl(b, k1.clone()),
-            &|b| add_seq(b, k2.clone()),
-            &remove_seq,
+            &|b| set_clip_keys(b, k2.clone()),
             &|b| Op::RemoveController { at: ctrl_at(b) },
             &|b| add_ctrl(b, k2.clone()),
-            &|b| add_seq(b, k3.clone()),
+            &|b| set_clip_keys(b, k3.clone()),
         ],
     );
     (src, out)
@@ -194,32 +190,38 @@ fn summary(b: &[u8]) -> Vec<String> {
 #[test]
 fn owner_scenario_keeps_only_live_appended_blocks() {
     let (src, out) = owner_scenario();
-    assert_eq!(nblocks(&src), 4);
+    assert_eq!(nblocks(&src), 17);
     assert_eq!(
         nblocks(&out),
-        30,
-        "the uncompacted export (C-P36: the emptied manager, MTTC and palette stay until cleanup)"
+        26,
+        "the uncompacted export: three added controllers of three blocks each"
     );
-    let c = compact(&out, 4).unwrap();
-    // source 4 + BSXFlags, controller, manager, MTTC, palette (C-P36: the second add made them anew), data, keyed interp, blend, text keys, sequence
-    assert_eq!(nblocks(&c), 14);
+    let c = compact(&out, SRC).unwrap();
+    // the 17 source blocks (4 source + the clip's 13) and the last added controller, its interpolator and data
+    assert_eq!(nblocks(&c), 20);
     let h = Header::parse(&c).unwrap();
-    let kinds: Vec<String> = (4..14)
+    let kinds: Vec<String> = (4..20)
         .map(|i| String::from_utf8_lossy(h.kind(i)).into_owned())
         .collect();
     assert_eq!(
         kinds,
         [
-            "BSXFlags",
             LSCF,
+            LSCF,
+            "NiBlendFloatInterpolator",
+            "NiBlendFloatInterpolator",
+            "NiFloatInterpolator",
+            "NiFloatInterpolator",
+            "NiFloatData",
+            "NiFloatData",
+            "NiTextKeyExtraData",
+            "NiControllerSequence",
             "NiControllerManager",
             "NiMultiTargetTransformController",
             "NiDefaultAVObjectPalette",
             "NiFloatData",
             "NiFloatInterpolator",
-            "NiBlendFloatInterpolator",
-            "NiTextKeyExtraData",
-            "NiControllerSequence",
+            LSCF,
         ]
     );
     // no unused type stays in the list
@@ -290,8 +292,8 @@ fn hostile_input_never_panics_and_refuses() {
         assert!(compact(&out[..n], 4).is_err(), "truncated at {n}");
     }
     // a garbled controlled-block count in the live sequence
-    assert_eq!(h.kind(29), b"NiControllerSequence");
-    let seq = h.offsets[29];
+    assert_eq!(h.kind(13), b"NiControllerSequence");
+    let seq = h.offsets[13];
     let mut g = out.clone();
     g[seq + 4..seq + 8].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(compact(&g, 4).is_err());
@@ -299,26 +301,27 @@ fn hostile_input_never_panics_and_refuses() {
     let mut g = out.clone();
     g[seq + 12..seq + 16].copy_from_slice(&1000i32.to_le_bytes());
     assert!(compact(&g, 4).is_err());
-    // a live ref-free block that does not read: the live clip's NiFloatData (25) and NiTextKeyExtraData (28)
-    for (block, kind) in [(25, &b"NiFloatData"[..]), (28, b"NiTextKeyExtraData")] {
+    // a live ref-free block that does not read: the live clip's NiFloatData (10) and NiTextKeyExtraData (12)
+    for (block, kind) in [(10, &b"NiFloatData"[..]), (12, b"NiTextKeyExtraData")] {
         assert_eq!(h.kind(block), kind);
-        let at = h.offsets[block] + if block == 28 { 4 } else { 0 };
+        let at = h.offsets[block] + if block == 12 { 4 } else { 0 };
         let mut g = out.clone();
         g[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(compact(&g, 4).is_err(), "garbled block {block}");
     }
     // a source count past the file
-    assert!(compact(&out, 31).is_err());
+    assert!(compact(&out, 27).is_err());
     // a footer root is a ref: an appended block it names stays, renumbered
     let mut g = out.clone();
     let at = h.footer_at + 4;
-    g[at..at + 4].copy_from_slice(&5i32.to_le_bytes()); // the first, orphaned controller's NiFloatInterpolator
+    assert_eq!(h.kind(18), b"NiFloatInterpolator");
+    g[at..at + 4].copy_from_slice(&18i32.to_le_bytes()); // the first, orphaned controller's interpolator
     let c = compact(&g, 4).unwrap();
     let hc = Header::parse(&c).unwrap();
-    let root = hc.roots(&c).unwrap()[0];
-    assert_eq!(root, 5); // after its data (4), which it names
+    let root = hc.roots(&c).unwrap()[0] as usize;
+    assert_eq!(root, 18); // after the 13 appended blocks the source root names (4..16) and its data (17)
     assert_eq!(
-        (hc.kind(4), hc.kind(5)),
+        (hc.kind(root - 1), hc.kind(root)),
         (&b"NiFloatData"[..], &b"NiFloatInterpolator"[..])
     );
     // every single-byte garble of the appended blocks: no panic, either result

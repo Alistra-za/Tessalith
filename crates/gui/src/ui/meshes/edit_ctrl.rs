@@ -6,18 +6,14 @@ use super::edit_fields::{
     fit_width, float_named, from_picker, row_label, selected, set_name, take_focus, warnings, Act,
     OUT_OF_RANGE,
 };
-use crate::model::meshes::edit_doc::SourceId;
 use crate::model::meshes::nif_edit::{NifEdit, Playing};
 use crate::model::meshes::MeshesModel;
 use crate::model::viewport3d::Clock;
-use crate::ui::status::{AMBER, RED};
+use crate::ui::status::AMBER;
 use eframe::egui;
 use nif::ctrl::{Sequence, TimeCtrl};
 use nif::edit::validate::{ctrl_title, var_label, Target, ENV_SCALE_PBR};
-use nif::edit::{
-    anchor_role, anchor_shape, convert_check, merge_key, Anchor, ClipTrack, Op, Outcome, Owner,
-    Role, CONVERT_HOVER, CONVERT_NAME,
-};
+use nif::edit::{anchor_role, anchor_shape, merge_key, Anchor, Op, Owner, Role};
 use nif::fields::{Field, Value};
 use nif::keys::{Key, KeyData, KeyGroup};
 use nif::material::SLSF2_TRUE_PBR;
@@ -31,18 +27,6 @@ const TEST_REF: &str = "BSNiAlphaPropertyTestRefController";
 const FLOAT_VARS: [u32; 10] = [0, 8, 9, 10, 11, 12, 20, 21, 22, 23];
 const COLOR_VARS: [u32; 2] = [0, 1];
 const CYCLES: [&str; 3] = ["Loop", "Reverse", "Clamp"];
-const PICK_CLIP: &str = "Pick a clip in Preview to rename or remove it.";
-const NO_NAME: &str = "Type a name for the clip.";
-const NO_TRACK: &str = "Tick at least one controller.";
-const BAD_RANGE: &str = "Stop must be after start.";
-/// C-P35 I2: TBC, XYZ and CONST keys are never authored, so New clip starts such a controller flat.
-const FLAT_ONLY: &str = "Its keys are not linear or quadratic: the clip starts flat.";
-const NOT_ROOT_CLIP: &str =
-    "This clip is not on the root's manager: it cannot be renamed or removed here.";
-/// Remove and Rename find a clip by its name (C2-D1), so a null Name cannot be addressed.
-const NAMELESS_CLIP: &str = "This clip has no name: it cannot be renamed or removed here.";
-/// C2's root refusal (`nif::edit` keeps it private), shown before the click.
-const NO_ROOT: &str = "The root is not a node: a clip needs a node root.";
 
 /// The shape's shader flags, 0 without a lit shader: the variable labels and the PBR guard (B-P39) read them.
 fn shape_slsf2(e: &NifEdit, shape: &ShapeModel) -> u32 {
@@ -70,10 +54,7 @@ pub(super) fn controllers_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, a
         return;
     };
     // Owner decision 3 (Note CZ15): Preview stays at the top; it decides what the 3D view plays.
-    if !e.model.sequences.is_empty() {
-        preview(ui, e, act);
-        ui.separator();
-    }
+    clips_section(ui, e, act);
     let clock = m.v3.clock;
     let shader = shape
         .shader
@@ -85,7 +66,6 @@ pub(super) fn controllers_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, a
         .map(|a| (Owner::Alpha, "Alpha property", &a.prop));
     let chains: Vec<_> = [shader, alpha].into_iter().flatten().collect();
     if chains.is_empty() {
-        // No early return: the Clips section (Rename, Remove the picked clip) still follows (T4 review Minor 2).
         ui.label("This shape has no shader or alpha property.");
     }
     for (owner, title, prop) in &chains {
@@ -93,69 +73,32 @@ pub(super) fn controllers_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, a
         chain(ui, e, act, shape, *owner, prop, clock);
         ui.separator();
     }
-    clips_section(ui, e, act, shape, &chains);
 }
 
-/// Meshes UI T4 (Note CZ15): every clip control but Preview in one section at the end of the tab, closed by default:
-/// Rename and Remove of the picked clip, Convert to clips per property, New clip. It opens itself on the frame a
-/// clip refusal appears, so the red line is seen.
-fn clips_section(
-    ui: &mut egui::Ui,
-    e: &NifEdit,
-    act: &mut Act,
-    shape: &ShapeModel,
-    chains: &[(Owner, &str, &PropModel)],
-) {
+/// The Clips section (Note GR1): only the Preview picker, open by default; the title names the clip it shows.
+fn clips_section(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
     let n = e.model.sequences.len();
-    let title = match (n, e.playing) {
-        (0, _) => "Clips (0)".to_string(),
-        (n, Playing::Free) => format!("Clips ({n} · showing free chains)"),
-        (n, Playing::Clip(b)) => {
-            let shown = e
-                .model
-                .sequences
-                .iter()
-                .find(|s| s.block == b)
-                .map_or(format!("Clip {b}"), clip_name);
-            format!("Clips ({n} · showing {shown})")
-        }
+    if n == 0 {
+        return;
+    }
+    let title = match e.playing {
+        Playing::Free => format!("Clips ({n} · showing free chains)"),
+        Playing::Clip(b) => format!("Clips ({n} · showing {})", playing_name(e, b)),
     };
-    let refusals = [
-        egui::Id::new("meshes-edit-clip").with("refused"),
-        egui::Id::new("meshes-edit-new-clip").with("refused"),
-    ]
-    .into_iter()
-    .chain(
-        chains
-            .iter()
-            .map(|(_, _, p)| egui::Id::new(("meshes-edit-convert", p.block)).with("refused")),
-    );
-    // Only a refusal of this file state counts (T4 review Minor 1): every row's inputs start with `bytes_tag`, and a
-    // stale entry is cleared only by its row's `refused_line`, so it could otherwise open the section on nothing.
-    let now = format!("{}|", bytes_tag(e));
-    let refused = refusals.into_iter().any(|id| {
-        ui.data(|d| d.get_temp::<(String, String)>(id))
-            .is_some_and(|(inputs, _)| inputs.starts_with(&now))
-    });
-    // Final review Minor 1: per session, so the last session's state never decides this one's first frame.
-    let seen = egui::Id::new(("meshes-edit-clips-refused", e.session));
-    let before = ui.data(|d| d.get_temp::<bool>(seen)).unwrap_or(false);
-    ui.data_mut(|d| d.insert_temp(seen, refused));
     egui::CollapsingHeader::new(title)
         .id_salt(("meshes-edit-clips", e.session))
-        .default_open(false)
-        .open((refused && !before).then_some(true))
-        .show(ui, |ui| {
-            if n > 0 {
-                clip_actions(ui, e, act);
-            }
-            for (owner, title, prop) in chains.iter().filter(|(_, _, p)| !p.ctrls.is_empty()) {
-                ui.weak(format!("Convert to clips: {}", title.to_lowercase()));
-                convert_row(ui, e, act, shape, *owner, prop);
-            }
-            ui.strong("New clip");
-            new_clip(ui, e, act, shape);
-        });
+        .default_open(true)
+        .show(ui, |ui| preview(ui, e, act));
+    ui.separator();
+}
+
+/// The name of the clip at block `b`, "Clip {b}" when it has none or is gone.
+fn playing_name(e: &NifEdit, b: u32) -> String {
+    e.model
+        .sequences
+        .iter()
+        .find(|s| s.block == b)
+        .map_or(format!("Clip {b}"), clip_name)
 }
 
 /// A clip's name, or "Clip {block}" for a null name.
@@ -178,12 +121,7 @@ fn preview(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
         let mut pick = e.playing;
         let shown = match e.playing {
             Playing::Free => "Free chains".to_string(),
-            Playing::Clip(b) => e
-                .model
-                .sequences
-                .iter()
-                .find(|s| s.block == b)
-                .map_or(format!("Clip {b}"), clip_name),
+            Playing::Clip(b) => playing_name(e, b),
         };
         let r = egui::ComboBox::from_id_salt("meshes-edit-preview")
             .width(fit_width(ui, 200.0))
@@ -208,508 +146,6 @@ fn preview(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             act.playing = Some(pick);
         }
     });
-}
-
-/// C5-D3: Some(why) when `ops` would not apply to the current bytes. Parses the file: call it on a click only.
-fn refusal(e: &NifEdit, ops: &[Op]) -> Option<String> {
-    match nif::edit::apply(&e.patched, ops) {
-        Err(err) => Some(err.to_string()),
-        Ok(a) => a.outcomes.into_iter().find_map(|o| match o {
-            Outcome::Applied | Outcome::ReAnchored { .. } => None,
-            Outcome::Conflict(s) | Outcome::Refused(s) => Some(s),
-        }),
-    }
-}
-
-/// C5-D3: pushes `ops` (one undo step) when they apply; otherwise keeps why under `id` for [`refused_line`],
-/// tagged with the row's `inputs`.
-fn try_push(
-    ui: &egui::Ui,
-    e: &NifEdit,
-    act: &mut Act,
-    id: egui::Id,
-    inputs: String,
-    ops: Result<Vec<Op>, String>,
-) -> bool {
-    match ops.and_then(|ops| refusal(e, &ops).map_or(Ok(ops), Err)) {
-        Ok(ops) => {
-            act.push = Some((ops, None));
-            ui.data_mut(|d| d.remove::<(String, String)>(id));
-            true
-        }
-        Err(why) => {
-            ui.data_mut(|d| d.insert_temp(id, (inputs, why)));
-            false
-        }
-    }
-}
-
-/// The red refusal under a row, while its `inputs` (and the file's bytes) are still those of the refused click.
-fn refused_line(ui: &mut egui::Ui, id: egui::Id, inputs: &str) {
-    let Some((i, why)) = ui.data(|d| d.get_temp::<(String, String)>(id)) else {
-        return;
-    };
-    if i == inputs {
-        ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
-    } else {
-        ui.data_mut(|d| d.remove::<(String, String)>(id));
-    }
-}
-
-/// The current state's identity: a refusal shown for one file state is cleared by any edit, undo or reload.
-fn bytes_tag(e: &NifEdit) -> String {
-    e.rev.to_string() // Note CU2: never the `Arc` address, which a later state can reuse
-}
-
-/// Rename and Remove for the clip the Preview shows, with its cycle and range (C5-D1, F14).
-fn clip_actions(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
-    let seq = match e.playing {
-        Playing::Clip(b) => e.model.sequences.iter().find(|s| s.block == b),
-        Playing::Free => None,
-    };
-    let name = seq.map(clip_name).unwrap_or_default();
-    let id = egui::Id::new("meshes-edit-clip");
-    let err = id.with("refused");
-    let inputs = format!("{}|{:?}", bytes_tag(e), seq.map(|s| s.block));
-    // C5-D8: path_field's pattern; the buffer lives only while the field has focus.
-    let mut commit = None;
-    ui.horizontal(|ui| {
-        row_label(ui, "Clip name");
-        let mut buf = ui
-            .data(|d| d.get_temp::<String>(id))
-            .unwrap_or_else(|| name.clone());
-        let r = ui.add_enabled(
-            seq.is_some(),
-            egui::TextEdit::singleline(&mut buf)
-                .id(id.with("field"))
-                .desired_width(fit_width(ui, 200.0)),
-        );
-        set_name(
-            &r,
-            egui::WidgetType::TextEdit,
-            "Clip name",
-            None,
-            Some(buf.clone()),
-        );
-        if r.changed() {
-            // C5-D3: a refusal is about the name it was given; a new one clears it
-            ui.data_mut(|d| d.remove::<(String, String)>(err));
-        }
-        if r.lost_focus() {
-            ui.data_mut(|d| d.remove::<String>(id));
-            if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                commit = Some(buf);
-            }
-        } else if r.has_focus() {
-            ui.data_mut(|d| d.insert_temp(id, buf));
-        } else {
-            ui.data_mut(|d| d.remove::<String>(id));
-        }
-        r.on_disabled_hover_text(PICK_CLIP);
-    });
-    let mut remove = false;
-    egui::Sides::new().shrink_left().truncate().show(
-        ui,
-        |_| {},
-        |ui| {
-            let r = ui.add_enabled(seq.is_some(), egui::Button::new("Remove clip"));
-            let label = match seq {
-                Some(_) => format!("Remove clip {name}"),
-                None => "Remove clip".into(),
-            };
-            set_name(&r, egui::WidgetType::Button, &label, None, None);
-            // rule 5.2: Enter never removes; a mouse click or an AccessKit click still does
-            let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            remove = r.clicked() && !enter;
-            r.on_disabled_hover_text(PICK_CLIP);
-        },
-    );
-    if let Some(s) = seq {
-        let root = anchor_role(&e.model, None, Role::Root).ok_or(NO_ROOT.to_string());
-        // C5-D2: the manager's list order, read on the click only
-        let key = || match s.name {
-            None => Err(NAMELESS_CLIP.to_string()),
-            Some(_) => {
-                nif::edit::clip_key(&e.patched, &e.model, s.block).ok_or(NOT_ROOT_CLIP.to_string())
-            }
-        };
-        match commit {
-            Some(new) if new.is_empty() => {
-                try_push(ui, e, act, err, inputs.clone(), Err(NO_NAME.into()));
-            }
-            Some(new) if new != name => {
-                let ops = root.clone().and_then(|at| {
-                    let (name, nth) = key()?;
-                    Ok(vec![Op::RenameSequence {
-                        at,
-                        name,
-                        nth,
-                        new_name: new,
-                    }])
-                });
-                try_push(ui, e, act, err, inputs.clone(), ops);
-            }
-            _ => {}
-        }
-        if remove {
-            let ops = root.and_then(|at| {
-                let (name, nth) = key()?;
-                Ok(vec![Op::RemoveSequence { at, name, nth }])
-            });
-            try_push(ui, e, act, err, inputs.clone(), ops);
-        }
-        clip_timing(ui, e, act, s);
-    }
-    refused_line(ui, err, &inputs);
-    ui.separator();
-}
-
-/// The clip's cycle, frequency, start and stop (Note GD8): each change is one SetSequenceTiming carrying all four, a
-/// drag one undo step. A bad value is pushed as typed; its Warn says the clip keeps the timing it had.
-fn clip_timing(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, s: &Sequence) {
-    let cur = (s.cycle, s.frequency, s.start, s.stop);
-    let mut next = cur;
-    let mut drag_end = false;
-    ui.horizontal(|ui| {
-        row_label(ui, "Cycle");
-        let shown = cycle_name(s.cycle);
-        let r = egui::ComboBox::from_id_salt("meshes-edit-clip-cycle")
-            .width(120.0)
-            .selected_text(&shown)
-            .show_ui(ui, |ui| {
-                for (i, n) in CYCLES.iter().enumerate() {
-                    ui.selectable_value(&mut next.0, i as u32, *n);
-                }
-            })
-            .response;
-        set_name(
-            &r,
-            egui::WidgetType::ComboBox,
-            "Clip cycle",
-            None,
-            Some(shown),
-        );
-    });
-    let merging = next.0 == cur.0;
-    for (label, k) in [("Frequency", 1), ("Start", 2), ("Stop", 3)] {
-        ui.horizontal(|ui| {
-            row_label(ui, label);
-            let v = [cur.1, cur.2, cur.3][k - 1];
-            let mut x = v;
-            let speed = (v.abs() as f64 * 0.01).max(0.01);
-            let r = ui.add(egui::DragValue::new(&mut x).speed(speed));
-            let name = format!("Clip {}", label.to_lowercase());
-            set_name(&r, egui::WidgetType::DragValue, &name, Some(x as f64), None);
-            if r.changed() && x.to_bits() != v.to_bits() {
-                match k {
-                    1 => next.1 = x,
-                    2 => next.2 = x,
-                    _ => next.3 = x,
-                }
-            }
-            drag_end |= r.drag_stopped() || r.lost_focus();
-        });
-    }
-    if let Some(root) = e.model.root {
-        warnings(ui, e, &Target::Block { block: root }, act);
-    }
-    if drag_end {
-        act.flush = true;
-    }
-    let same = |a: f32, b: f32| a.to_bits() == b.to_bits();
-    if next.0 == cur.0 && same(next.1, cur.1) && same(next.2, cur.2) && same(next.3, cur.3) {
-        return;
-    }
-    // the manager's list order, read on a change only (C5-D2)
-    let (Some(at), Some((name, nth))) = (
-        anchor_role(&e.model, None, Role::Root),
-        nif::edit::clip_key(&e.patched, &e.model, s.block),
-    ) else {
-        return;
-    };
-    let op = Op::SetSequenceTiming {
-        at,
-        name,
-        nth,
-        cycle: next.0,
-        freq: next.1,
-        start: next.2,
-        stop: next.3,
-    };
-    let key = merging.then(|| merge_key(&op));
-    act.push = Some((vec![op], key));
-}
-
-/// Convert to clips for one property chain (C5-D4): a name field and the button.
-fn convert_row(
-    ui: &mut egui::Ui,
-    e: &NifEdit,
-    act: &mut Act,
-    shape: &ShapeModel,
-    owner: Owner,
-    prop: &PropModel,
-) {
-    let (role, what) = match owner {
-        Owner::Shader => (Role::Shader, "shader"),
-        Owner::Alpha => (Role::Alpha, "alpha"),
-    };
-    let check = convert_check(&e.model, prop.block, shape.name.as_deref());
-    let id = egui::Id::new(("meshes-edit-convert", prop.block));
-    let mut name: String = ui
-        .data(|d| d.get_temp(id))
-        .unwrap_or_else(|| CONVERT_NAME.to_string());
-    let mut clicked = false;
-    egui::Sides::new().shrink_left().truncate().show(
-        ui,
-        |ui| {
-            let r = ui.add_enabled(
-                check.is_ok(),
-                egui::TextEdit::singleline(&mut name)
-                    .desired_width(ui.available_width().min(200.0)),
-            );
-            set_name(
-                &r,
-                egui::WidgetType::TextEdit,
-                &format!("Convert {what} clip name"),
-                None,
-                Some(name.clone()),
-            );
-            match &check {
-                Ok(_) => r.on_hover_text(CONVERT_HOVER),
-                Err(why) => r.on_disabled_hover_text(why),
-            };
-        },
-        |ui| {
-            let r = ui.add_enabled(check.is_ok(), egui::Button::new("Convert to clips"));
-            set_name(
-                &r,
-                egui::WidgetType::Button,
-                &format!("Convert {what} controllers to clips"),
-                None,
-                None,
-            );
-            clicked = r.clicked();
-            match &check {
-                Ok(_) => r.on_hover_text(CONVERT_HOVER),
-                Err(why) => r.on_disabled_hover_text(why),
-            };
-        },
-    );
-    let err = id.with("refused");
-    let inputs = format!("{}|{name}", bytes_tag(e));
-    if clicked {
-        let ops = anchor_role(&e.model, Some(shape.block), role)
-            .map(|at| {
-                vec![Op::ConvertChainToClips {
-                    at,
-                    name: name.clone(),
-                }]
-            })
-            .ok_or_else(|| "This property cannot be found again in the file.".to_string());
-        try_push(ui, e, act, err, inputs.clone(), ops);
-    }
-    ui.data_mut(|d| d.insert_temp(id, name));
-    refused_line(ui, err, &inputs);
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct NewClip {
-    name: String,
-    cycle: u32,
-    start: f32,
-    stop: f32,
-    picked: Vec<u32>,
-    /// (source, shape) the ticks belong to: another source (mod, path or bytes) or shape clears them (C-P35 M6).
-    scope: Option<(SourceId, u32)>,
-}
-
-/// C5-D6: no name, Clamp (the census's most common cycle), 0 to 1 s, nothing ticked.
-impl Default for NewClip {
-    fn default() -> Self {
-        NewClip {
-            name: String::new(),
-            cycle: 2,
-            start: 0.0,
-            stop: 1.0,
-            picked: vec![],
-            scope: None,
-        }
-    }
-}
-
-/// The New clip form (C5-D5..D7). State in temp data under `Id::new("meshes-edit-new-clip")`.
-fn new_clip(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, shape: &ShapeModel) {
-    let id = egui::Id::new("meshes-edit-new-clip");
-    let mut nc: NewClip = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-    let scope = Some((e.doc.source.clone(), shape.block));
-    if nc.scope != scope {
-        nc.picked.clear();
-        nc.scope = scope;
-    }
-    let root = anchor_role(&e.model, None, Role::Root).filter(|_| e.model.root_net.is_some());
-    let no_root = root.is_none().then_some(NO_ROOT);
-    let slsf2 = shape_slsf2(e, shape);
-    ui.horizontal(|ui| {
-        row_label(ui, "Name");
-        let r = ui.add_enabled(
-            no_root.is_none(),
-            egui::TextEdit::singleline(&mut nc.name).desired_width(fit_width(ui, 200.0)),
-        );
-        set_name(
-            &r,
-            egui::WidgetType::TextEdit,
-            "New clip name",
-            None,
-            Some(nc.name.clone()),
-        );
-        if let Some(why) = no_root {
-            r.on_disabled_hover_text(why);
-        }
-    });
-    ui.horizontal(|ui| {
-        row_label(ui, "Cycle");
-        let shown = cycle_name(nc.cycle);
-        let r = egui::ComboBox::from_id_salt(id.with("cycle"))
-            .width(120.0)
-            .selected_text(&shown)
-            .show_ui(ui, |ui| {
-                for (i, n) in CYCLES.iter().enumerate() {
-                    ui.selectable_value(&mut nc.cycle, i as u32, *n);
-                }
-            })
-            .response;
-        set_name(
-            &r,
-            egui::WidgetType::ComboBox,
-            "New clip cycle",
-            None,
-            Some(shown),
-        );
-    });
-    for (label, name, v) in [
-        ("Start", "New clip start", &mut nc.start),
-        ("Stop", "New clip stop", &mut nc.stop),
-    ] {
-        ui.horizontal(|ui| {
-            row_label(ui, label);
-            let r = ui.add(egui::DragValue::new(v).speed(0.01).suffix(" s"));
-            set_name(&r, egui::WidgetType::DragValue, name, Some(*v as f64), None);
-        });
-    }
-    // C5-D7: the selected shape's shader and alpha chains, editable classes only
-    let props = [
-        shape
-            .shader
-            .and_then(|b| e.model.lighting.get(&b))
-            .map(|l| (Owner::Shader, &l.prop)),
-        shape
-            .alpha
-            .and_then(|b| e.model.alphas.get(&b))
-            .map(|a| (Owner::Alpha, &a.prop)),
-    ];
-    let mut tracks = vec![];
-    for (owner, prop) in props.into_iter().flatten() {
-        let shared = (owner == Owner::Alpha && prop.users.len() > 1).then(|| {
-            format!(
-                "This alpha is shared by {} shapes: split it before editing.",
-                prop.users.len()
-            )
-        });
-        for i in 0..prop.ctrls.len() {
-            let Some((c, at)) = ctrl_anchor(e, shape, owner, prop, i).filter(|(c, _)| editable(c))
-            else {
-                continue;
-            };
-            let title = ctrl_title(c, slsf2);
-            let flat_only =
-                matches!(e.keys.get(&(c.block, None)), Some(Ok(k)) if has_keys(k) && !authored(k));
-            ui.horizontal(|ui| {
-                let mut on = nc.picked.contains(&c.block);
-                let r = ui.add_enabled(shared.is_none(), egui::Checkbox::new(&mut on, &title));
-                let (name, enabled, sel) =
-                    (format!("Add {title} to the new clip"), r.enabled(), on);
-                r.widget_info(move || {
-                    egui::WidgetInfo::selected(
-                        egui::WidgetType::Checkbox,
-                        enabled,
-                        sel,
-                        name.clone(),
-                    )
-                });
-                if r.changed() {
-                    nc.picked.retain(|&b| b != c.block);
-                    if on {
-                        nc.picked.push(c.block);
-                    }
-                }
-                if let Some(why) = &shared {
-                    r.on_disabled_hover_text(why);
-                } else if flat_only {
-                    r.on_hover_text(FLAT_ONLY);
-                }
-                ui.weak(short_class(&c.class));
-            });
-            if shared.is_none() && nc.picked.contains(&c.block) {
-                tracks.push((prop, c, at));
-            }
-        }
-    }
-    let why = no_root
-        .or(nc.name.is_empty().then_some(NO_NAME))
-        .or(tracks.is_empty().then_some(NO_TRACK))
-        .or(
-            (nc.stop.partial_cmp(&nc.start) != Some(std::cmp::Ordering::Greater))
-                .then_some(BAD_RANGE),
-        );
-    let r = ui.add_enabled(why.is_none(), egui::Button::new("Add clip"));
-    set_name(&r, egui::WidgetType::Button, "Add clip", None, None);
-    let clicked = r.clicked();
-    if let Some(why) = why {
-        r.on_disabled_hover_text(why);
-    }
-    let err = id.with("refused");
-    let inputs = format!("{}|{nc:?}", bytes_tag(e));
-    if let (true, Some(at)) = (clicked, root) {
-        let tracks = tracks
-            .into_iter()
-            .map(|(prop, c, at)| {
-                // C5-D5: the controller's own keys; a managed, keyless or TBC/XYZ/CONST one (C-P35 I2) starts flat
-                // over the clip's range
-                let keys = match e.keys.get(&(c.block, None)) {
-                    Some(Ok(k)) if has_keys(k) && authored(k) => k.clone(),
-                    _ => flat_keys(e, prop, &c.class, c.var, [nc.start, nc.stop]),
-                };
-                ClipTrack { at, keys }
-            })
-            .collect();
-        let ops = vec![Op::AddSequence {
-            at,
-            name: nc.name.clone(),
-            cycle: nc.cycle,
-            freq: 1.0,
-            start: nc.start,
-            stop: nc.stop,
-            tracks,
-        }];
-        if try_push(ui, e, act, err, inputs.clone(), Ok(ops)) {
-            nc = NewClip::default();
-        }
-    }
-    ui.data_mut(|d| d.insert_temp(id, nc));
-    refused_line(ui, err, &inputs);
-}
-
-/// LINEAR or QUADRATIC: the key types New clip copies (D11).
-fn authored(k: &KeyData) -> bool {
-    matches!(curve::key_type(k), Some(1 | 2))
-}
-
-fn has_keys(k: &KeyData) -> bool {
-    match k {
-        KeyData::Float(g) => !g.keys.is_empty(),
-        KeyData::Pos(g) => !g.keys.is_empty(),
-        KeyData::Bool(g) => !g.keys.is_empty(),
-    }
 }
 
 fn chain(
@@ -752,7 +188,6 @@ fn chain(
             }
         }
     });
-    // Convert to clips moved to the Clips section (Note CZ15).
     add_row(ui, e, act, shape, owner, prop);
 }
 

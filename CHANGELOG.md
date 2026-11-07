@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0 (Unreleased)
+
+- NIF Edit no longer edits clips (add, remove, rename, timing, Convert to clips). Existing clips still play, and the keys of a clip-driven controller stay editable. A saved edit drops its clip edits when it opens.
+
 ## 2.1.0 (Unreleased)
 
 - The 3D preview uses Community Shaders d2026.10.11.0 built into Tessalith, with its default settings, and works with no Community Shaders installed. It no longer looks for your Community Shaders folder, so **Shader folder…**, the "Community Shaders not found" line and the "moved/updated" prompt are gone, and your own CS settings, enabled features and Game Gamma no longer change the preview. An old `shaders` key in `gui.toml` is ignored. See docs/wiki/GUI-Set-Preview-3D.md.

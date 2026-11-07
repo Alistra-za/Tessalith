@@ -28,7 +28,7 @@ This wiki covers version 2.0.0. Tessalith is licensed GPL-3.0-or-later. Its conv
 | [GUI guide](GUI-Guide.md) | Every panel in the GUI: the converter, set editor, bulk editing, 3D preview, PGPatcher JSON editor, settings. |
 | [Texture types](Texture-Types.md) | Sub-types, file suffixes, naming, formats, packing and set shaders. |
 | [Mod scanning](Mod-Scanning.md) | Scanning meshes and plugins from an MO2 instance or a folder, and what the scan feeds back. |
-| [NIF editing](GUI-NIF-Edit.md) | Editing a mesh's shader, alpha, controllers and clips in the Meshes view, and exporting the edited NIF. |
+| [NIF editing](GUI-NIF-Edit.md) | Editing a mesh's shader, alpha and controllers in the Meshes view, and exporting the edited NIF. |
 | [Validation and output](Validation-and-Output.md) | What gets checked after encoding, the output layout, the manifest, re-run behaviour. |
 | [Troubleshooting](Troubleshooting.md) | Every diagnostic code, common errors, and the in-game checklist. |
 | [FAQ](FAQ.md) | Short answers to common questions. |

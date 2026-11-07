@@ -59,6 +59,7 @@ CREATE TABLE plugin (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE N
 CREATE TABLE rec (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, sig TEXT NOT NULL, edid TEXT,
                      owner_ok INTEGER NOT NULL DEFAULT 0, txst_flags INTEGER, decal INTEGER, mato_flags INTEGER);
 CREATE TABLE rec_winner (formid INTEGER PRIMARY KEY, plugin_id INTEGER NOT NULL, n_overrides INTEGER NOT NULL);
+-- txst_slot.slot: the raw TXST index (TX00 = 0 .. TX07 = 7), not a lighting slot. TX02 is the env mask, TX03 the glow; convert with plugin_store::TX_TO_NIF.
 CREATE TABLE txst_slot (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, slot INTEGER NOT NULL,
                      path_id INTEGER NOT NULL);
 CREATE TABLE model_ref (formid INTEGER, local INTEGER NOT NULL, plugin_id INTEGER NOT NULL, slot INTEGER NOT NULL,

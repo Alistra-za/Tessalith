@@ -44,7 +44,7 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 
 **NIF editing (in the 3D view)**
 - Edit NIF fields and shader flags.
-- Animation clock, key editor, controllers and named clips, with an in-game preview.
+- Animation clock, key editor, controllers and clip playback, with an in-game preview.
 
 **Command line**
 - Batch conversion, inspect and validate with `sdc`. See the [CLI reference](docs/wiki/CLI-Reference.md).

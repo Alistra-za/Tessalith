@@ -296,21 +296,111 @@ pub fn heel_tri(zs: [f32; 3], node_z: f32) -> Vec<u8> {
 }
 
 pub fn managed_clip() -> Vec<u8> {
-    managed_clip_with(false)
+    managed_clip_with(false, "B")
 }
 
 /// `managed_clip` plus an unnamed BSTriShape (12) with no shader and no alpha.
 pub fn managed_clip_and_bare_shape() -> Vec<u8> {
-    managed_clip_with(true)
+    managed_clip_with(true, "B")
 }
 
-fn managed_clip_with(bare: bool) -> Vec<u8> {
+/// `managed_clip` with the second sequence (block 3) named "SpecialIdle".
+pub fn managed_clip_special_idle() -> Vec<u8> {
+    managed_clip_with(false, "SpecialIdle")
+}
+
+/// NiNode "Root" (0; extra [1]; controller 14; children [2]) ; BSXFlags 1 (1) ; BSTriShape "S" (2) -> BSLSP (3) ->
+/// manager-controlled LSCF var 11 (4, flags 0x68, NiBlendFloatInterpolator 6) -> LSCF var 20 (5, blend 7) ;
+/// NiFloatInterpolator 0.0 (8, 9) over NiFloatData LINEAR (0, 0) (1, 1) (10, 11) ; NiTextKeyExtraData (12) ;
+/// NiControllerSequence `name` (13; one CB per controller, bound by ref; Loop, 1, 0..1) ; NiControllerManager (14)
+/// listing it, with NiMultiTargetTransformController (15, targets [2]) and NiDefaultAVObjectPalette (16, "S" -> 2).
+pub fn idle_clip(name: &str) -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = |n: &mut Nif, x: &str| n.string(x);
+    let (root, bsx, sh) = (s(&mut n, "Root"), s(&mut n, "BSX"), s(&mut n, "S"));
+    let (seq_name, prop) = (s(&mut n, name), s(&mut n, "BSLightingShaderProperty"));
+    let ct = s(&mut n, "BSLightingShaderPropertyFloatController");
+    let (id11, id20) = (s(&mut n, "11"), s(&mut n, "20"));
+    let (start, end) = (s(&mut n, "start"), s(&mut n, "end"));
+    let w = W::default().i32(root).u32(1).i32(1).i32(14);
+    n.block("NiNode", avobj(w).u32(1).i32(2).u32(0).0);
+    n.block("BSXFlags", W::default().i32(bsx).u32(1).0);
+    n.block("BSTriShape", bstri_named(sh, 3, -1));
+    n.block("BSLightingShaderProperty", lsp_body(0, &[], 4, &[]));
+    for (next, blend, var) in [(5, 6, 11), (-1, 7, 20)] {
+        n.block(
+            "BSLightingShaderPropertyFloatController",
+            ctrl_body(next, 0x68, 3, W::default().i32(blend).u32(var)),
+        );
+    }
+    for _ in 0..2 {
+        n.block(
+            "NiBlendFloatInterpolator",
+            W::default().u8(1).u8(0).f(0.0).f(0.0).0,
+        );
+    }
+    for d in [10, 11] {
+        n.block("NiFloatInterpolator", W::default().f(0.0).i32(d).0);
+    }
+    for _ in 0..2 {
+        n.block("NiFloatData", float_data(1));
+    }
+    n.block(
+        "NiTextKeyExtraData",
+        W::default()
+            .i32(-1)
+            .u32(2)
+            .f(0.0)
+            .i32(start)
+            .f(1.0)
+            .i32(end)
+            .0,
+    );
+    let mut w = W::default().i32(seq_name).u32(2).u32(0);
+    for (interp, ctrl, cid) in [(8, 4, id11), (9, 5, id20)] {
+        w = w
+            .i32(interp)
+            .i32(ctrl)
+            .u8(0)
+            .i32(sh)
+            .i32(prop)
+            .i32(ct)
+            .i32(cid)
+            .i32(-1);
+    }
+    n.block(
+        "NiControllerSequence",
+        w.f(1.0) // weight
+            .i32(12) // text keys
+            .u32(0) // cycle
+            .fs(&[1.0, 0.0, 1.0]) // freq, start, stop
+            .i32(14) // manager
+            .i32(root) // accum root name
+            .u16(0)
+            .0,
+    );
+    n.block(
+        "NiControllerManager",
+        ctrl_body(15, 0x48, 0, W::default().u8(0).u32(1).i32(13).i32(16)),
+    );
+    n.block(
+        "NiMultiTargetTransformController",
+        ctrl_body(-1, 0x48, 0, W::default().u16(1).i32(2)),
+    );
+    n.block(
+        "NiDefaultAVObjectPalette",
+        W::default().i32(0).u32(1).sized("S").i32(2).0,
+    );
+    n.bytes()
+}
+
+fn managed_clip_with(bare: bool, b_name: &str) -> Vec<u8> {
     let mut n = Nif::new(100);
     let s = |n: &mut Nif, x: &str| n.string(x);
     let (root, a, bb, shape) = (
         s(&mut n, "Root"),
         s(&mut n, "A"),
-        s(&mut n, "B"),
+        s(&mut n, b_name),
         s(&mut n, "shape"),
     );
     let prop = s(&mut n, "BSLightingShaderProperty");

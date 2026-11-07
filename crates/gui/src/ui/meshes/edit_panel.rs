@@ -144,11 +144,7 @@ fn top(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
                     .show(ui, |ui| {
                         for (i, d) in e.doc.ops.iter().enumerate() {
                             let failed = d.status == OpStatus::Conflict;
-                            let mut label = e.op_label_at(i);
-                            // Note GD8: the row says that its Revert takes the clip's timing too
-                            if !e.timing_dependents(i).is_empty() {
-                                label.push_str(" (Revert also removes its clip timing)");
-                            }
+                            let label = e.op_label_at(i);
                             op_row(ui, e, i, &label, failed, act);
                         }
                     });
