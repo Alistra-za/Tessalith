@@ -1,0 +1,32 @@
+#!/bin/sh
+# Mechanical checks that have failed reviews or CI before. Enable with: git config core.hooksPath .githooks
+fail=0
+
+# Formats the working tree, not the index: a stray unstaged edit can fail this, which is worth seeing anyway.
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.rs$'; then
+    if ! cargo fmt --all --check >/dev/null 2>&1; then
+        echo "pre-commit: cargo fmt --all --check failed; run cargo fmt --all" >&2
+        fail=1
+    fi
+fi
+
+# PowerShell double quotes turn `a and `e into BEL and ESC (.claude/mistakes/general.md, 2026-11-03).
+bad=$(git diff --cached -U0 --no-color --diff-filter=ACMR -- . \
+    ':(exclude)crates/encoders-sys/vendor' ':(glob,exclude)crates/*/tests/fixtures/**' ':(glob,exclude)crates/*/tests/data/**' \
+    | LC_ALL=C grep '^+' | LC_ALL=C grep -v '^+++' | LC_ALL=C tr -d '\t\r' | LC_ALL=C grep -c '[[:cntrl:]]')
+if [ "$bad" -gt 0 ]; then
+    echo "pre-commit: $bad added line(s) hold control bytes; check with git diff --cached | grep -nP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'" >&2
+    fail=1
+fi
+
+for f in .claude/DECISIONS.md .claude/DECISIONS-ARCHIVE.md; do
+    if git diff --cached --name-only | grep -qxF "$f"; then
+        dup=$(git show ":$f" | LC_ALL=C grep -oE '^## Note [A-Z]+' | sort | uniq -d)
+        if [ -n "$dup" ]; then
+            echo "pre-commit: duplicate headings in $f: $dup" >&2
+            fail=1
+        fi
+    fi
+done
+
+exit $fail

@@ -1,7 +1,7 @@
 """Duplicate finder for the user-facing docs (docs/DOCUMENTATION.md §2: one home per fact).
 
   py -3.13 -I tools/doc-dupes.py [--root .] [--out <tsv>] [--allow tools/doc-dupes-allow.txt] [--files <glob>...]
-      Prints counts, the top file pairs and every failing cluster; exits 1 when a cluster fails.
+      Prints counts, the top file pairs and every failing cluster; exits 1 when a cluster fails, 2 when it read no sentences.
   py -3.13 -I tools/doc-dupes.py --lost <git-ref> --from <file>...
       Lists what <file> held at <ref> that the current tree no longer has (sentences, then lines); exits 0.
   py -3.13 -I tools/doc-dupes.py --self-test
@@ -200,6 +200,10 @@ def read_texts(root, paths):
 def report(root, paths, allow_path, out_tsv):
     texts = read_texts(root, paths)
     recs = records(texts)
+    if not recs:
+        print(f"no sentences read under {pathlib.Path(root).resolve()}: run from the repo root or pass --root",
+              file=sys.stderr)
+        return 2
     pairs = find_pairs(recs)
     cl = clusters(recs, pairs, load_allow(allow_path))
     linked = sum(1 for a, b in pairs if is_reference(recs[a], recs[b]) or is_reference(recs[b], recs[a]))
@@ -211,7 +215,8 @@ def report(root, paths, allow_path, out_tsv):
     byfile = collections.Counter(tuple(sorted((recs[a].file, recs[b].file))) for a, b in pairs)
     for (fa, fb), v in byfile.most_common(25):
         print(f"{v:4} {fa} <-> {fb}")
-    text_of = {(r.file, r.line): r.text for r in recs}
+    # From the pairs, not all records: a line can hold several sentences and only the paired one explains the cluster.
+    text_of = {(r.file, r.line): r.text for pair in pairs for r in (recs[pair[0]], recs[pair[1]])}
     for members, copies, _ in failing:
         print(f"\ncluster of {len(members)} ({len(copies)} copies):")
         for n in members:
@@ -360,6 +365,8 @@ def self_test():
     ll = [t for _, t in lost_lines(old, cur)]
     check("--lost line mode: table row and TOML line listed, moved code line not",
           "| fill alpha |" in ll and 'mip_filter = "kaiser"' in ll and "levels = 9" not in ll)
+
+    check("no sentences is an error, not a pass", report(".", [], "no-allow-file", None) == 2)
     print(f"self-test: {passed} passed")
     return 0
 
