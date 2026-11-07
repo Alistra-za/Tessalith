@@ -615,6 +615,228 @@ fn the_badge_scan_reads_a_document_with_clip_ops() {
     );
 }
 
+/// Final review I4: a typo in any of the five names would make a whole document fail to open.
+#[test]
+fn every_removed_clip_op_name_is_dropped() {
+    for name in [
+        "AddSequence",
+        "RemoveSequence",
+        "RenameSequence",
+        "SetSequenceTiming",
+        "ConvertChainToClips",
+    ] {
+        let t =
+            format!("{DOC_HEAD}[[ops]]\nstatus = \"Applied\"\n\n[ops.op.{name}]\nname = \"x\"\n");
+        let d = EditDoc::from_text(&t).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!((d.ops.len(), d.dropped_clip_ops), (0, 1), "{name}");
+    }
+}
+
+/// Final review I4: pending follows the hash of the ops that are left, not a constant.
+#[test]
+fn pending_follows_the_hash_of_the_ops_left_after_the_drop() {
+    let mixed = |hash: &str| {
+        let export = format!("[export]\nsha256 = \"ee\"\nops_hash = \"{hash}\"\n\n");
+        [DOC_HEAD, &export, OP_SET_FIELD, OP_ADD_SEQUENCE].concat()
+    };
+    let real = EditDoc::from_text(&mixed("0")).unwrap().ops_hash();
+    let d = EditDoc::from_text(&mixed(&real)).unwrap();
+    assert_eq!(d.dropped_clip_ops, 1);
+    assert!(!d.pending(), "the hash of the kept ops matches");
+    assert!(EditDoc::from_text(&mixed("0123")).unwrap().pending());
+    // a clip-only document exported before the drop: its exported hash was of ops that are gone
+    let mut gone = EditDoc::from_text(&clip_only_text()).unwrap();
+    assert!(gone.pending());
+    gone.export.ops_hash = Some(EditDoc::new(gone.source.clone()).ops_hash());
+    assert!(
+        !gone.pending(),
+        "an empty op list with its own hash is not pending"
+    );
+}
+
+/// Final review Minor 5: a bad field reports its line, with or without clip ops in the document.
+#[test]
+fn a_bad_field_in_a_document_reports_its_line() {
+    let bad = OP_SET_FIELD.replace("Conflict", "Bogus");
+    let e = EditDoc::from_text(&[DOC_HEAD, &bad].concat()).unwrap_err();
+    assert!(e.contains("line") && e.contains("Bogus"), "{e}");
+    let e = EditDoc::from_text(&[DOC_HEAD, OP_ADD_SEQUENCE, &bad].concat()).unwrap_err();
+    assert!(
+        e.contains("line") && e.contains("Bogus"),
+        "with clip ops: {e}"
+    );
+}
+
+/// Final review I1: a clip key edit whose `AddSequence` (or Convert) was dropped names a clip that is no longer
+/// there. It is never applied and never panics: the row is red (Conflict or Refused), the bytes are the source's, and
+/// Revert clears it.
+#[test]
+fn a_clip_key_edit_that_depended_on_a_dropped_clip_op_does_not_apply() {
+    let bytes = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
+    let open = |edit_mod: Option<&Path>| {
+        NifEdit::open(
+            bytes.clone(),
+            copy("A", 1, false),
+            "meshes/x.nif",
+            edit_mod,
+            None,
+        )
+        .unwrap()
+    };
+    let probe = open(None);
+    let (shape, _) = lit_shape(&probe);
+    let role = Role::Ctrl {
+        owner: nif::edit::Owner::Shader,
+        class: "BSLightingShaderPropertyFloatController".into(),
+        var: Some(20),
+        nth: 0,
+    };
+    let at = nif::edit::anchor_role(&probe.model, Some(shape), role).unwrap();
+    let key = |time: f32, value: f32| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    let group = |v: f32| {
+        KeyData::Float(KeyGroup {
+            key_type: Some(1),
+            keys: vec![key(0.0, 0.0), key(1.0, v)],
+        })
+    };
+    // a block past the end of the file (the appended sequence), and one inside it that is no sequence
+    let blocks = nif::header::Header::parse(&bytes).unwrap().offsets().len() as u32;
+    for clip in [blocks + 3, 1] {
+        let mut d = EditDoc::new(probe.doc.source.clone());
+        d.ops.push(DocOp {
+            op: Op::SetKeys {
+                at: at.clone(),
+                clip: Some(clip),
+                clip_name: Some("SpecialIdle".into()),
+                keys: group(2.0),
+                base: group(1.0),
+            },
+            status: OpStatus::Applied,
+        });
+        let text = d
+            .to_text()
+            .replacen("[[ops]]", &format!("{OP_ADD_SEQUENCE}[[ops]]"), 1);
+        let dir = tempfile::tempdir().unwrap();
+        let p = doc_path(dir.path(), "meshes/x.nif").unwrap();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, text).unwrap();
+        let mut e = open(Some(dir.path()));
+        assert_eq!(e.open_lines.len(), 1, "{:?}", e.open_lines);
+        assert_eq!(e.doc.ops.len(), 1);
+        assert!(
+            matches!(
+                e.outcomes[0],
+                nif::edit::Outcome::Conflict(_) | nif::edit::Outcome::Refused(_)
+            ),
+            "clip {clip}: {:?}",
+            e.outcomes
+        );
+        assert_eq!(*e.patched, *e.source, "clip {clip}: nothing was applied");
+        assert!(e.export_block().is_some(), "the red row blocks the export");
+        e.revert(0);
+        assert!(
+            e.outcomes.is_empty() && !e.doc.has_conflicts(),
+            "Revert clears it"
+        );
+    }
+}
+
+/// Final review I3: an export-folder change reaches Messages with the drop line when the new folder's document opens
+/// in place of an untouched session. A touched session keeps its own document (nothing is loaded into it), and the
+/// folder's document, clip ops and all, is kept aside whole at the next save.
+#[test]
+fn a_folder_change_says_what_it_dropped_and_keeps_the_other_document_whole() {
+    let doc_in = |out: &Path| {
+        let p = nif_doc(out);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, clip_only_text()).unwrap();
+        p
+    };
+    // untouched: the same NIF reopens from the new folder
+    let (d, mut m) = export_session();
+    m.open_edit();
+    let out = d.path().join("mods").join("MyOut");
+    doc_in(&out);
+    m.messages.clear();
+    m.set_nif_export_root(Some(out));
+    assert_eq!(m.messages, vec![CLIP_ONLY_LINE.to_string()]);
+    assert_eq!(m.edit.as_ref().unwrap().doc.ops.len(), 0);
+    // touched: its edit moves; the destination's document is not loaded, so nothing is dropped
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let out = d.path().join("mods").join("MyOut");
+    let p = doc_in(&out);
+    m.messages.clear();
+    m.set_nif_export_root(Some(out));
+    assert!(
+        m.messages.iter().all(|l| !l.contains("dropped")),
+        "{:?}",
+        m.messages
+    );
+    gloss(&mut m, 13.5);
+    let aside: Vec<_> = std::fs::read_dir(p.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|f| f.path())
+        .filter(|f| *f != p)
+        .collect();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    let kept = std::fs::read_to_string(&aside[0]).unwrap();
+    assert!(kept.contains("AddSequence") && kept.contains("RenameSequence"));
+}
+
+/// Spec decision 4: a document of only clip ops, exported before the drop, opens pending; Review lists it, nothing
+/// says "No edits to export.", and its export writes the unedited NIF over the old export.
+#[test]
+fn the_next_export_of_a_clip_only_document_writes_the_nif_without_them() {
+    let (d, mut m) = export_session();
+    let out = d.path().join("mods").join(EDIT_MOD);
+    let old = b"exported with clip edits";
+    let target = exported(&d);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, old).unwrap();
+    let text = [
+        DOC_HEAD,
+        &format!(
+            "[export]\nsha256 = \"{}\"\nops_hash = \"0123\"\n\n",
+            sha256_hex(old)
+        ),
+        OP_ADD_SEQUENCE,
+        OP_RENAME_SEQUENCE,
+    ]
+    .concat();
+    let p = nif_doc(&out);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, text).unwrap();
+    m.open_edit();
+    assert_eq!(m.error, None);
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(e.doc.ops.len(), 0);
+    assert!(e.pending());
+    assert_eq!(
+        e.blocked, None,
+        "the footer is Ready, not No edits to export"
+    );
+    let rows = m.nif_review_rows();
+    assert_eq!(rows.len(), 1, "Review lists it: {rows:?}");
+    assert_eq!(rows[0].blocked, None, "and Export is not off for it");
+    assert_eq!(export(&mut m), Ok(1));
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        *e.source,
+        "the unedited NIF"
+    );
+    assert!(!e.doc.pending());
+}
+
 #[test]
 fn bad_documents_are_refused() {
     let dir = std::env::temp_dir().join(format!("sdc-nifedit-bad-{}", std::process::id()));
@@ -6437,17 +6659,18 @@ fn with_clip(bytes: &[u8]) -> (Vec<u8>, u32) {
             })
             .into(),
     });
-    with_clip_at(bytes, true, 0.0, Some(keys), [1.0, 0.0, 1.0])
+    with_clip_at(bytes, true, 0.0, Some(keys), [1.0, 0.0, 1.0], 0)
 }
 
 /// [`with_clip`] with the CB bound by ref or (ref -1) by strings only, the CB interpolator's value, its keys (None:
-/// data -1, the empty group) and the sequence's (frequency, start, stop).
+/// data -1, the empty group), the sequence's (frequency, start, stop) and its cycle type (0 Loop, 1 Reverse).
 fn with_clip_at(
     bytes: &[u8],
     by_ref: bool,
     value: f32,
     keys: Option<KeyData>,
     timing: [f32; 3],
+    cycle: u32,
 ) -> (Vec<u8>, u32) {
     let m = nif::model::read_model(bytes).unwrap();
     let (shape, lsp) = m
@@ -6525,7 +6748,7 @@ fn with_clip_at(
         .i32(-1)
         .f(1.0)
         .i32(tk as i32)
-        .u32(0)
+        .u32(cycle)
         .fs(&timing)
         .i32(-1)
         .i32(-1)
@@ -6641,7 +6864,7 @@ const IDLE_LAST: [f32; 3] = [0.1, 0.2, 0.3];
 /// The skinned fixture with, first in the lit shape's chain, a manager-controlled LSCC "Emissive colour" (var 1, flags
 /// 0x68, a NiBlendPoint3Interpolator) driven by a NiControllerSequence `name` (one CB bound by ref, NiPosData LINEAR
 /// `IDLE_FIRST` at 0 and `IDLE_LAST` at 1; Loop, frequency 1, 0 to 1) that a NiControllerManager on the root lists.
-fn with_idle_clip(name: &str) -> Vec<u8> {
+fn with_idle_clip(name: impl AsRef<[u8]>) -> Vec<u8> {
     let bytes = fixture("TestNifFile_Skinned_SE.nif");
     let m = nif::model::read_model(&bytes).unwrap();
     let (shape, lsp) = m
@@ -6713,7 +6936,7 @@ fn with_idle_clip(name: &str) -> Vec<u8> {
         )
         .unwrap();
     let (name, prop, ctype, cid) = (
-        s(&mut doc, name.as_bytes()),
+        s(&mut doc, name.as_ref()),
         s(&mut doc, b"BSLightingShaderProperty"),
         s(&mut doc, b"BSLightingShaderPropertyColorController"),
         s(&mut doc, b"1"),
@@ -6855,7 +7078,7 @@ fn losing_the_selected_clip_returns_to_the_free_chains() {
 #[test]
 fn add_key_on_a_string_bound_empty_clip_starts_at_its_interpolator_value() {
     let plain = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
-    let (nif, seq) = with_clip_at(&plain, false, 5.0, None, [1.0, 0.0, 1.0]);
+    let (nif, seq) = with_clip_at(&plain, false, 5.0, None, [1.0, 0.0, 1.0], 0);
     let mut m = direct(nif);
     m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
     let e = m.edit.as_ref().unwrap();
@@ -6971,7 +7194,7 @@ fn picking_a_clip_sets_the_clock_range_to_its_timing() {
         key_type: Some(1),
         keys: vec![key(0.0, 0.0), key(3.0, 3.0)],
     });
-    let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [1.0, 0.0, 3.0]);
+    let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [1.0, 0.0, 3.0], 0);
     let (_d, mut m, _cmds) = session_on(&nif);
     assert_eq!(m.v3.clock.unwrap().range, (0.0, 1.0), "Free");
     m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
@@ -6980,6 +7203,64 @@ fn picking_a_clip_sets_the_clock_range_to_its_timing() {
     m.edit_with(|e| e.set_playing(Playing::Free));
     m.tick_anim(0.0);
     assert_eq!(m.v3.clock.unwrap().range, (0.0, 1.0), "Free again");
+}
+
+/// Kept by Note GR1 (it was `clip_timing_moves_the_time_slider`): the Time slider spans a picked clip's
+/// `(stop - start) / |frequency|`, and a Reverse clip counts both legs.
+#[test]
+fn a_clips_cycle_and_frequency_set_the_time_slider_span() {
+    let plain = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
+    let key = |time: f32, value: f32| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    for (cycle, span) in [(0, 0.75), (1, 1.5)] {
+        let keys = KeyData::Float(KeyGroup {
+            key_type: Some(1),
+            keys: vec![key(0.0, 0.0), key(3.0, 3.0)],
+        });
+        let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [4.0, 0.0, 3.0], cycle);
+        let (_d, mut m, _cmds) = session_on(&nif);
+        m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
+        assert_eq!(
+            m.edit.as_ref().unwrap().anim_range(),
+            Some((0.0, span)),
+            "cycle {cycle}"
+        );
+        m.tick_anim(0.0);
+        assert_eq!(m.v3.clock.unwrap().range, (0.0, span), "cycle {cycle}");
+    }
+}
+
+/// Kept by Note CU1 and GR1 (it was `preview_never_switches_clips_after_a_revert`, `preview_tells_non_ascii_clip_names_apart`):
+/// the picked clip stays picked only while a sequence at its block keeps its name; a source reload that puts another
+/// name there returns the Preview to Free chains. Names are Windows-1252 bytes, so "Café" and "Cafè" differ.
+#[test]
+fn a_picked_clip_stays_picked_only_while_its_block_keeps_its_name() {
+    for (a, b) in [
+        (&b"Glow"[..], &b"Dim"[..]),
+        (&b"Caf\xe9"[..], &b"Caf\xe8"[..]),
+    ] {
+        let (_d, mut m, _cmds) = session_on(&with_idle_clip(a));
+        let seq = m.edit.as_ref().unwrap().model.sequences[0].block;
+        m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
+        m.edit_with(|e| e.reload_source(with_idle_clip(a)).unwrap());
+        assert_eq!(
+            m.edit.as_ref().unwrap().playing,
+            Playing::Clip(seq),
+            "same name"
+        );
+        m.edit_with(|e| e.reload_source(with_idle_clip(b)).unwrap());
+        let e = m.edit.as_ref().unwrap();
+        assert_eq!(
+            e.model.sequences[0].block, seq,
+            "the other name is on the same block"
+        );
+        assert_eq!(e.playing, Playing::Free, "{a:?} then {b:?}");
+    }
 }
 
 // ---- v2 B8: In game (simulated) through pgpsim ----
@@ -8444,8 +8725,8 @@ fn reveal(h: &mut Harness<'static, MeshesModel>, label: &str) {
     }
 }
 
-/// Note CU2: every change of the edited bytes gives a new revision, so a refusal line never comes back on a later
-/// state (the `Arc` address could be reused).
+/// Note CU2: every change of the edited bytes gives a new revision. `rev` keys the pending cache (Note GD23) and the
+/// stale-block checks (Note GP8), so a state that reused an earlier `rev` would show that state's answers.
 #[test]
 fn every_apply_gives_a_new_revision() {
     let mut m = clip_scene();

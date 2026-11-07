@@ -62,7 +62,7 @@ pub struct EditDoc {
     #[serde(default)]
     pub export: ExportRec,
     pub ops: Vec<DocOp>,
-    /// Clip ops rom_text removed from the loaded text (Note GR2); the next save writes the document without them.
+    /// Clip ops `from_text` removed from the loaded text (Note GR2); the next save writes the document without them.
     #[serde(skip)]
     pub dropped_clip_ops: usize,
 }
@@ -91,7 +91,17 @@ impl EditDoc {
             ops.retain(|o| !is_clip_op(o));
             dropped = before - ops.len();
         }
-        let mut d: EditDoc = v.try_into().map_err(|e| e.to_string())?;
+        // Re-parse text, not the table, so a bad field reports its line.
+        // shortcut: after a drop the line numbers are the filtered text's (the quoted line still shows the fault); keep
+        // the spans by blanking the clip tables in the original text if a user reports a wrong line.
+        let filtered;
+        let text = if dropped == 0 {
+            t
+        } else {
+            filtered = toml::to_string(&v).map_err(|e| e.to_string())?;
+            &filtered
+        };
+        let mut d: EditDoc = toml::from_str(text).map_err(|e| e.to_string())?;
         d.dropped_clip_ops = dropped;
         if d.version > 1 {
             return Err(format!(

@@ -44,6 +44,8 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 **Source changed.** If the source NIF changes on disk (a mod update), the edits are re-applied by name and role, not by position. The panel says "Source changed: N applied, M conflicts". A conflicting edit has **Take source** (drop your edit) and **Keep mine** (keep it on top of the new source).
 
+**Older edits.** An edit saved before NIF Edit stopped editing clips (New clip, Remove clip, rename, timing, Convert to clips) drops those clip edits when it opens, and Messages says "<path>: N clip edit(s) dropped: NIF Edit no longer edits clips." The next export writes the NIF without them. A key edit on a clip that one of them made turns red; **Revert** clears it.
+
 ## Export
 
 The bottom of the edit panel stays under the tabs however long a tab is. Its first line is a status: a green dot and **Ready**, a grey dot and "No edits to export." while nothing is edited, a grey dot and "Skipped until an export folder is chosen" once there are edits and no folder (Review lists the same), or a red dot and **Blocked:** with the reason: an edit cannot be applied, conflicts are open, or an edit introduced an error. When a pending row is red, **Show** opens the pending list. When a file Tessalith did not write is already at the export path, **Diff…** opens a list of the blocks that differ between that file and what the export writes, read at the click; **Close** shuts it. Then "Writes meshes\…\x.nif to <export folder>\meshes\…\x.nif" (hover for the full path) and "The source file is never changed. Change the folder with Export to ▾ in the header."

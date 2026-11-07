@@ -41,8 +41,9 @@ fn shader_of(m: &NifModel, name: &str) -> u32 {
         .block
 }
 
-/// The first blocks of `scenes::idle_clip` are what the scenarios below treat as the source file; its controllers,
-/// clip, manager and text keys count as blocks the export appended.
+/// The source-block count the scenarios below give `compact`: only the first 4 blocks of `scenes::idle_clip` (Root,
+/// BSXFlags, shape S, its BSLSP) count as the source file. Its clip, manager and text keys (13 more blocks, 17 in all)
+/// count as appended, and compaction keeps them because the file still refers to them.
 const SRC: u32 = 4;
 
 fn add_ctrl(b: &[u8], keys: KeyData) -> Op {
