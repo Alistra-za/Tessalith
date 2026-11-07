@@ -13,8 +13,9 @@ Wrapper around the headless UI driver (crates/gui/tests/ui_drive, Note HM). Usag
   -Replay runDir [-Upto n] -Out dir
                              fixture, size and theme from runDir\run.json, the first n steps of runDir\steps.jsonl (all if no -Upto).
   -Collect dir               every *.checks.json under dir, deduplicated on (check, subject role, subject label, run size), into
-                             dir\mechanical.json and dir\mechanical.md (Check | Rule | Where | Size | Seen | First frame).
-  -SelfTest                  -Collect on two generated runs holding the same finding plus one other: expects 2 rows.
+                             dir\mechanical.json and dir\mechanical.md (Check | Rule | Detail | Where | Size | Seen | First frame); the rule is part of the dedupe key.
+  -SelfTest                  -Collect on generated runs: one finding seen twice at one size, one other, the same finding at a
+                             second size, and a `filter` finding from two oracles at a third size: expects 5 rows.
 #>
 [CmdletBinding()]
 param(
@@ -94,10 +95,10 @@ function Invoke-Collect([string]$Dir) {
         $frame = $f.Name -replace '\.checks\.json$', ''
         $first = '{0} {1}' -f [IO.Path]::GetRelativePath($Dir, $f.DirectoryName), $frame
         foreach ($x in @(Get-Content -Raw -LiteralPath $f.FullName | ConvertFrom-Json)) {
-            $key = '{0}|{1}|{2}|{3}' -f $x.check, $x.subject.role, $x.subject.label, $size
+            $key = '{0}|{1}|{2}|{3}|{4}' -f $x.check, $x.rule, $x.subject.role, $x.subject.label, $size
             if (-not $rows.Contains($key)) {
                 $rows[$key] = [pscustomobject]@{
-                    check = $x.check; rule = $x.rule
+                    check = $x.check; rule = $x.rule; detail = $x.detail
                     where = ('{0} "{1}"' -f $x.subject.role, $x.subject.label).Trim()
                     size = $size; seen = 0; first_frame = $first
                 }
@@ -108,9 +109,9 @@ function Invoke-Collect([string]$Dir) {
     $all = @($rows.Values)
     ConvertTo-Json -InputObject $all -Depth 4 | Set-Content -LiteralPath (Join-Path $Dir 'mechanical.json') -Encoding utf8
     $cell = { param($s) ([string]$s) -replace '\|', '\|' -replace '[\r\n]+', ' ' }
-    $md = @('| Check | Rule | Where | Size | Seen | First frame |', '|---|---|---|---|---|---|')
+    $md = @('| Check | Rule | Detail | Where | Size | Seen | First frame |', '|---|---|---|---|---|---|---|')
     foreach ($r in $all) {
-        $md += '| {0} | {1} | {2} | {3} | {4} | {5} |' -f (& $cell $r.check), (& $cell $r.rule), (& $cell $r.where), $r.size, $r.seen, (& $cell $r.first_frame)
+        $md += '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f (& $cell $r.check), (& $cell $r.rule), (& $cell $r.detail), (& $cell $r.where), $r.size, $r.seen, (& $cell $r.first_frame)
     }
     $md | Set-Content -LiteralPath (Join-Path $Dir 'mechanical.md') -Encoding utf8
     Write-Host "collected $($all.Count) rows from $($files.Count) frames into $Dir\mechanical.md"
@@ -122,7 +123,9 @@ function Invoke-SelfTest {
     try {
         $names = '{"check":"names","rule":"every control has a name","subject":{"role":"Button","label":"","rect":[0,0,10,10]},"other":null,"detail":"d"}'
         $overlap = '{"check":"overlap","rule":"no overlap","subject":{"role":"Label","label":"A","rect":[0,0,10,10]},"other":{"role":"Label","label":"B","rect":[5,5,10,10]},"detail":"d"}'
-        foreach ($case in @(@('run1', @($names)), @('run2', @($names, $overlap)), @('run3', @($names), '[1055.0,770.0]'))) {
+        $f1 = '{"check":"filter","rule":"sets_search_shows_exactly_name_matches","subject":{"role":"","label":"","rect":[0,0,0,0]},"other":null,"detail":"hides everything"}'
+        $f2 = '{"check":"filter","rule":"sets_pills_match_their_counts","subject":{"role":"","label":"","rect":[0,0,0,0]},"other":null,"detail":"changes nothing"}'
+        foreach ($case in @(@('run1', @($names)), @('run2', @($names, $overlap)), @('run3', @($names), '[1055.0,770.0]'), @('run4', @($f1, $f2), '[1200.0,700.0]'))) {
             $d = Join-Path $tmp $case[0]
             New-Item -ItemType Directory -Force $d | Out-Null
             $sz = if ($case.Count -gt 2) { $case[2] } else { '[1400.0,790.0]' }
@@ -131,7 +134,8 @@ function Invoke-SelfTest {
         }
         $n = Invoke-Collect $tmp
         $seen = @((Get-Content -Raw (Join-Path $tmp 'mechanical.json') | ConvertFrom-Json | Where-Object { $_.check -eq 'names' -and $_.size -eq '1400x790' }).seen)
-        if ($n -eq 3 -and $seen -eq 2) { Write-Host 'PASS: 3 rows'; return 0 }
+        $md = Get-Content -Raw (Join-Path $tmp 'mechanical.md')
+        if ($n -eq 5 -and $seen -eq 2 -and $md.Contains('hides everything') -and $md.Contains('changes nothing')) { Write-Host 'PASS: 5 rows'; return 0 }
         Write-Host "FAIL: $n rows, names seen $seen"; return 1
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
