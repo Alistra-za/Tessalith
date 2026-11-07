@@ -472,7 +472,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             .map(|d| match d {
                 Decision::Subtype { .. } => "sub-type".into(),
                 Decision::AlphaMeaning => alpha.clone().unwrap_or_else(|| "alpha".into()),
-                Decision::CubeLayout => "cube layout".into(),
+                Decision::CubeLayout => "not six faces, a cross or a strip".into(),
                 // Note FB8: the sentence names the action; the code is on the hover.
                 Decision::Acknowledge(c) => code_text::code_line(*c).into(),
             })
@@ -504,7 +504,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         });
     }
     for a in pbr_export::export_asks(m) {
-        // A project-wide ask (a photo crop) belongs to no set.
+        // A project-wide ask belongs to no set.
         let at = if a.set_id.is_empty() {
             At::Project
         } else {

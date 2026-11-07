@@ -243,11 +243,7 @@
         "hcross",
         "vcross",
         "hstrip",
-        "vstrip",
-        "equirect",
-        "mirror_ball",
-        "angular",
-        "photo"
+        "vstrip"
       ],
       "type": "string"
     },

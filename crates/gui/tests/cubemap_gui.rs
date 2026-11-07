@@ -285,7 +285,7 @@ fn out_of_range_yaw_shows_the_engine_message() {
 
 const UNCLEAR: &str = "a/room_e.png";
 
-/// A square `_e.png` (could be a panorama, a mirror ball or a photo) next to a 2D diffuse, planned.
+/// A square `_e.png` (no cube source: not six faces, a cross or a strip) next to a 2D diffuse, planned.
 fn unclear_model(d: &std::path::Path) -> AppModel {
     let r = d.join("textures/a");
     std::fs::create_dir_all(&r).unwrap();
@@ -319,97 +319,71 @@ fn unclear_cube_offers_a_layout_decision() {
     assert!(!flat.contains(&sdc_gui::model::items::Decision::CubeLayout));
 }
 
+const NOT_A_CUBE: &str = "six faces, a cross or a strip";
+
+/// Note GU2: a square image typed as a cube has no layout answer. The Undecided box, the Review row and the
+/// Problems row say what a cube source is; there is no layout combo and no `Set layout` menu.
 #[test]
-fn picking_a_layout_resolves_only_that_file() {
+fn a_square_cube_has_no_layout_combo() {
+    use sdc_gui::ui::review::undecided_row;
     let d = tempfile::tempdir().unwrap();
     let m = unclear_model(d.path());
+    let problems = sdc_gui::model::bottom::problems(&m);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.text.contains(NOT_A_CUBE) && p.text.starts_with("Undecided")),
+        "{problems:#?}"
+    );
     let mut h = Harness::builder()
         .with_size(eframe::egui::vec2(1400.0, 1600.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
+    assert!(
+        h.query_all_by_label_contains(NOT_A_CUBE).count() >= 1,
+        "the Undecided box says what a cube source is"
+    );
+    for gone in ["Cube layout", "Set layout ▾", "Pick a layout…"] {
+        assert_eq!(h.query_all_by_label(gone).count(), 0, "{gone}");
+    }
     assert_eq!(
         h.query_all_by_label_contains("could be several cube layouts")
             .count(),
-        1
+        0
     );
-    h.get_by_label("Cube layout").click();
+    // The Review row: the same sentence, and no menu.
+    let d = tempfile::tempdir().unwrap();
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(800.0, 300.0))
+        .build_ui_state(
+            |ui, m: &mut AppModel| {
+                undecided_row(ui, m, UNCLEAR, None);
+            },
+            unclear_model(d.path()),
+        );
     h.run();
-    // DT32: only the layouts an unclear image can be; a cross or strip would never fit it.
-    for name in [
-        "360° panorama",
-        "Mirror ball",
-        "Angular map",
-        "Single photo",
-    ] {
-        assert_eq!(h.query_all_by_label(name).count(), 1, "{name}");
-    }
-    for name in [
-        "Six face files",
-        "Auto",
-        "Horizontal cross",
-        "Vertical cross",
-        "Horizontal strip",
-        "Vertical strip",
-    ] {
-        assert_eq!(h.query_all_by_label(name).count(), 0, "{name}");
-    }
-    h.get_by_label("Mirror ball").click();
-    h.run();
-    settle(&mut h);
-    let p = h.state().project.as_ref().unwrap();
-    assert_eq!(
-        p.file_value(UNCLEAR, "cubemap.layout"),
-        Some(serde_json::json!("mirror_ball"))
-    );
-    assert_eq!(p.file_value("a/flat.png", "cubemap.layout"), None);
-    let it = h.state().item(UNCLEAR).unwrap();
+    assert_eq!(h.query_all_by_label_contains(NOT_A_CUBE).count(), 1);
+    assert_eq!(h.query_all_by_label("Set layout ▾").count(), 0);
+}
+
+/// Changing the sub-type is the one answer: it resolves only that file.
+#[test]
+fn changing_the_subtype_resolves_only_that_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = unclear_model(d.path());
+    m.decide(UNCLEAR, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let it = m.item(UNCLEAR).unwrap();
     assert!(
         !it.decisions
             .contains(&sdc_gui::model::items::Decision::CubeLayout),
         "{:?}",
         it.decisions
     );
-    assert_eq!(
-        it.status,
-        sdc_gui::model::items::ItemStatus::Ready,
-        "{:?}",
-        it.decisions
-    );
-}
-
-/// Note FC3 (supersedes DT35's hint): a row whose question is the layout answers it inline with `Set layout ▾`; a 2D
-/// row has no such control.
-#[test]
-fn a_layout_row_sets_the_layout_inline() {
-    use sdc_gui::ui::review::{apply, undecided_row, SET_LAYOUT};
-    for (key, want) in [(UNCLEAR, 1), ("a/flat.png", 0)] {
-        let d = tempfile::tempdir().unwrap();
-        let mut h = Harness::builder()
-            .with_size(eframe::egui::vec2(800.0, 300.0))
-            .build_ui_state(
-                move |ui, m: &mut AppModel| {
-                    if let Some(p) = undecided_row(ui, m, key, None) {
-                        apply(m, p);
-                    }
-                },
-                unclear_model(d.path()),
-            );
-        h.run();
-        assert_eq!(h.query_all_by_label(SET_LAYOUT).count(), want, "{key}");
-        if want == 0 {
-            continue;
-        }
-        h.get_by_label(SET_LAYOUT).click();
-        h.run();
-        h.get_by_label("Mirror ball").click();
-        h.run();
-        let p = h.state().project.as_ref().unwrap();
-        assert_eq!(
-            p.file_value(UNCLEAR, "cubemap.layout"),
-            Some(serde_json::json!("mirror_ball"))
-        );
-    }
+    assert_eq!(it.status, sdc_gui::model::items::ItemStatus::Ready);
+    let p = m.project.as_ref().unwrap();
+    assert_eq!(p.file_value("a/flat.png", "subtype"), None);
 }
 
 // ---- the cross preview (Task 5) ----

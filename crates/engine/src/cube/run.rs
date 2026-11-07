@@ -1,6 +1,6 @@
 //! A cube job's stages up to quantise (cubemap support v1, DECISIONS DS10, DS11): load, decode to linear light,
 //! cut the six faces, size them, colour filters, cone blur, then one mip chain built in direction space across faces.
-use super::{filter, import_dir, layout, sample, Cube, CubeJob};
+use super::{filter, layout, sample, Cube, CubeJob};
 use crate::api::CancelToken;
 use crate::config::{ColorContent, CubeLayout, Profile, ResizeMode};
 use crate::events::Stage;
@@ -71,25 +71,7 @@ pub(crate) fn prepare(
     stop()?;
     let src = (works[0].img.width, works[0].img.height);
     let n = layout::face_size(p, cj.layout, src);
-    let direct: Option<fn(&Rgba32F, u32) -> Cube> = match cj.layout {
-        CubeLayout::Equirect => Some(import_dir::equirect),
-        CubeLayout::MirrorBall => Some(import_dir::mirror_ball),
-        CubeLayout::Angular => Some(import_dir::angular),
-        CubeLayout::Photo => {
-            Some(|img, n| import_dir::equirect(&import_dir::photo_panorama(img), n))
-        }
-        _ => None,
-    };
-    let faces: [Rgba32F; 6] = if let Some(import) = direct {
-        // Any loaded size reads as a panorama (DS14, DS15), sampled straight at the face size, so the resize below
-        // is a no-op.
-        let Cube { faces, .. } = import(&works[0].img, n);
-        let mut k = 0;
-        faces.map(|f| {
-            k += 1;
-            layout::orient(f, k - 1, &p.cubemap)
-        })
-    } else if cj.layout == CubeLayout::Faces {
+    let faces: [Rgba32F; 6] = if cj.layout == CubeLayout::Faces {
         if works
             .iter()
             .any(|w| (w.img.width, w.img.height) != (src.0, src.0))

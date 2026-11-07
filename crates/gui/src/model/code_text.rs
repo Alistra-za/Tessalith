@@ -98,6 +98,10 @@ pub fn code_sentence(code: Code) -> &'static str {
     }
 }
 
+/// Note GU2: what a cube-typed image that is not six faces, a cross or a strip is told (the engine's reason, in short).
+pub const NOT_A_CUBE: &str =
+    "Not a cube source: it must be six faces, a cross or a strip. Change this file's sub-type.";
+
 /// [`code_sentence`], or a plain line for a code with none (a place that has no engine message to fall back on).
 pub fn code_line(code: Code) -> &'static str {
     match code_sentence(code) {

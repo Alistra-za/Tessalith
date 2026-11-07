@@ -22,8 +22,6 @@ const FIRST_GROUND: [u8; 3] = [40, 30, 20];
 /// What ticking "Highlight clamp" or "Blur" first writes (Note DT10): the engine's own examples.
 const FIRST_CLAMP: f64 = 4.0;
 const FIRST_BLUR: f64 = 0.35;
-/// The photo layout's blur when `cubemap.blur` is unset (engine DS16).
-const PHOTO_BLUR: &str = "0.6 (photo default)";
 const FACE_NAMES: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
 
 /// Every selected item is a cube; `key` alone when the selection is a set or empty.
@@ -325,17 +323,8 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
             });
-            let has_faces = matches!(
-                layout,
-                Some(
-                    CubeLayout::Faces
-                        | CubeLayout::Hcross
-                        | CubeLayout::Vcross
-                        | CubeLayout::Hstrip
-                        | CubeLayout::Vstrip
-                )
-            );
-            if has_faces {
+            // Any layout is six faces to turn or flip.
+            if layout.is_some() {
                 faces(ui, &cx, &views, &opts, &mut put);
             }
             grid(ui, &cx, "Colour grade", |ui| {
@@ -451,10 +440,9 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
                 let f = find(&views, "cubemap.blur");
-                // Blur the engine fills (a photo, a style, a preset) cannot be unticked: clearing the key changes
+                // Blur the engine fills (a style, a preset) cannot be unticked: clearing the key changes
                 // nothing, so the tick is disabled with the reason (Note DT13).
                 let inherited = c.blur.is_some() && !f.edited;
-                let photo_auto = inherited && layout == Some(CubeLayout::Photo);
                 let e = cx.row(ui, f, |ui| {
                     ui.horizontal(|ui| {
                         let (tick, r) = ui
@@ -463,11 +451,8 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                             })
                             .inner;
                         if inherited {
-                            let why = if photo_auto {
-                                "photo default; set 0 for no blur".to_string()
-                            } else {
-                                format!("{}; set 0 for no blur", provenance_text(&f.provenance))
-                            };
+                            let why =
+                                format!("{}; set 0 for no blur", provenance_text(&f.provenance));
                             r.clone().on_disabled_hover_text(why);
                         }
                         let Some(v) = c.blur else {
@@ -483,9 +468,6 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                             "",
                             "Cubemap blur value",
                         );
-                        if photo_auto {
-                            ui.weak(PHOTO_BLUR);
-                        }
                         // Unticked is Off: the key goes.
                         (tick.map(|_| None).or(p.map(|v| Some(json!(v)))), r2)
                     })

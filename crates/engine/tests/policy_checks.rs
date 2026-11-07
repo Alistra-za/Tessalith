@@ -2786,18 +2786,17 @@ fn cube_dds_is_decided_as_a_cubemap() {
     );
 }
 
+/// 3.0 removed the photo layout's blur default: only a style (or an explicit key) sets `cubemap.blur`.
 #[test]
-fn photo_defaults_to_heavy_blur() {
-    assert_eq!(
-        cube(&["cubemap.layout=photo"]).profile.cubemap.blur,
-        Some(0.6)
-    );
-    let j = cube(&["cubemap.layout=photo", "cubemap.blur=0.2"]);
-    assert_eq!(j.profile.cubemap.blur, Some(0.2));
+fn a_layout_sets_no_blur_default() {
     assert_eq!(cube(&[]).profile.cubemap.blur, None);
+    for l in ["hcross", "vcross", "hstrip", "vstrip"] {
+        let set = format!("cubemap.layout={l}");
+        assert_eq!(cube(&[set.as_str()]).profile.cubemap.blur, None, "{l}");
+    }
     assert_eq!(
-        cube(&["cubemap.layout=equirect"]).profile.cubemap.blur,
-        None
+        cube(&["cubemap.style=vanilla_metal"]).profile.cubemap.blur,
+        Some(0.6)
     );
 }
 

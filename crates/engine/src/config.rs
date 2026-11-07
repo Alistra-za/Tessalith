@@ -814,8 +814,8 @@ pub struct ValidationSpec {
 // Cubemap styles (DECISIONS DS4): each fills `face_size`, `format`, `blur` (and `vanilla_metal` `saturation`) where
 // no explicit layer set them.
 cfg_enum!(CubeStyle, "snake_case" { VanillaMetal, Room, Eye, Hd });
-// How a cubemap source is laid out; unset = from the aspect ratio. `equirect` is a 2:1 360-degree panorama.
-cfg_enum!(CubeLayout, "snake_case" { Faces, Hcross, Vcross, Hstrip, Vstrip, Equirect, MirrorBall, Angular, Photo });
+// How a cubemap source is laid out; unset = from the aspect ratio. 3.0 removed equirect, mirror_ball, angular, photo.
+cfg_enum!(CubeLayout, "snake_case" { Faces, Hcross, Vcross, Hstrip, Vstrip });
 cfg_enum!(#[derive(Default)] FaceFlip, "lowercase" { #[default] None, H, V });
 // The ground fill look: the horizon colour darkening towards the nadir.
 cfg_enum!(GroundMode, "lowercase" { Gradient });

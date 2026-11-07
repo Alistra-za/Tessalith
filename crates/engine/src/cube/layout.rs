@@ -7,7 +7,7 @@ use crate::image::Rgba32F;
 pub const HCROSS: [(u32, u32); 6] = [(2, 1), (0, 1), (1, 0), (1, 2), (1, 1), (3, 1)];
 const VCROSS: [(u32, u32); 6] = [(2, 1), (0, 1), (1, 0), (1, 2), (1, 1), (1, 3)];
 
-/// The layout an image's exact aspect ratio says it has; square and anything else `None`.
+/// The layout an image's exact aspect ratio says it has; square, 2:1 and anything else `None`.
 pub fn detect(w: u32, h: u32) -> Option<CubeLayout> {
     let (w, h) = (u64::from(w), u64::from(h));
     if h == 0 || w == 0 {
@@ -20,15 +20,13 @@ pub fn detect(w: u32, h: u32) -> Option<CubeLayout> {
         Some(CubeLayout::Hstrip)
     } else if h == 6 * w {
         Some(CubeLayout::Vstrip)
-    } else if w == 2 * h {
-        Some(CubeLayout::Equirect)
     } else {
         None
     }
 }
 
 /// Cell edge and each face's cell for a `w` x `h` image read as `layout`; `None` when the size is not that layout
-/// (or the layout is `Faces`, which is six files, not one image, or `Equirect`, which has no cells).
+/// (or the layout is `Faces`, which is six files, not one image).
 pub fn cells(layout: CubeLayout, w: u32, h: u32) -> Option<(u32, [(u32, u32); 6])> {
     if w == 0 || h == 0 || detect(w, h) != Some(layout) {
         return None;
@@ -38,11 +36,7 @@ pub fn cells(layout: CubeLayout, w: u32, h: u32) -> Option<(u32, [(u32, u32); 6]
         CubeLayout::Vcross => (w / 3, VCROSS),
         CubeLayout::Hstrip => (h, [0, 1, 2, 3, 4, 5].map(|k| (k, 0))),
         CubeLayout::Vstrip => (w, [0, 1, 2, 3, 4, 5].map(|k| (0, k))),
-        CubeLayout::Faces
-        | CubeLayout::Equirect
-        | CubeLayout::MirrorBall
-        | CubeLayout::Angular
-        | CubeLayout::Photo => return None,
+        CubeLayout::Faces => return None,
     })
 }
 
@@ -160,30 +154,16 @@ pub(crate) fn orient(face: Rgba32F, k: usize, spec: &CubemapSpec) -> Rgba32F {
     }
 }
 
-/// Whether a `w` x `h` image can be read as `layout`: any non-empty image as `Equirect` (the importer resamples; only
-/// auto-detection needs exact 2:1), the exact cells otherwise.
+/// Whether a `w` x `h` image can be read as `layout`: only the exact cell proportions, so a cross or strip with a
+/// border never fits.
 pub fn fits(layout: CubeLayout, w: u32, h: u32) -> bool {
-    match layout {
-        CubeLayout::Equirect | CubeLayout::MirrorBall | CubeLayout::Angular | CubeLayout::Photo => {
-            w > 0 && h > 0
-        }
-        _ => cells(layout, w, h).is_some(),
-    }
+    cells(layout, w, h).is_some()
 }
 
-/// The source's face-sized cell: a quarter of an equirect's width (its 90 degrees), half a mirror ball's or angular
-/// map's width, the cross or strip cell, else the shorter side. `src` is the source image size (one face's size for `Faces`).
+/// The source's face-sized cell: the cross or strip cell, else the shorter side. `src` is the source image size (one
+/// face's size for `Faces`).
 pub fn source_cell(layout: CubeLayout, src: (u32, u32)) -> u32 {
-    if layout == CubeLayout::Equirect {
-        src.0 / 4
-    } else if layout == CubeLayout::Photo {
-        // The fake panorama is twice the photo wide (DS16), so its quarter is half the photo.
-        src.0 / 2
-    } else if matches!(layout, CubeLayout::MirrorBall | CubeLayout::Angular) {
-        src.0 / 2
-    } else {
-        cells(layout, src.0, src.1).map_or(src.0.min(src.1), |c| c.0)
-    }
+    cells(layout, src.0, src.1).map_or(src.0.min(src.1), |c| c.0)
 }
 
 /// The face edge written: `cubemap.face_size`, else [`source_cell`] taken to a power of two by

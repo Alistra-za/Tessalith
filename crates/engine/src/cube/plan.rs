@@ -107,7 +107,7 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
         let verdict = match layout {
             None => JobStatus::Unresolved {
                 reasons: vec![format!(
-                    "cube layout unclear for {w}x{h}: set cubemap.layout for this file in sdc.toml (hcross, vcross, hstrip, vstrip, equirect, mirror_ball, angular, photo)"
+                    "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type."
                 )],
                 needs: vec![crate::policy::Need::CubeLayout],
             },

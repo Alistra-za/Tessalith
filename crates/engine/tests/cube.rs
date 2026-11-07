@@ -75,9 +75,9 @@ fn detect_exact_ratios_only() {
     assert_eq!(detect(768, 1024), Some(CubeLayout::Vcross));
     assert_eq!(detect(1536, 256), Some(CubeLayout::Hstrip));
     assert_eq!(detect(256, 1536), Some(CubeLayout::Vstrip));
-    assert_eq!(detect(2048, 1024), Some(CubeLayout::Equirect));
     for (w, h) in [
         (512, 512),
+        (2048, 1024),
         (1024, 2048),
         (4096, 2049),
         (1025, 768),
@@ -191,20 +191,17 @@ fn face_size_rule() {
         .profile("cs-quality", Target::Cs, Subtype::Cubemap)
         .unwrap();
     assert_eq!(layout::face_size(&p, CubeLayout::Hcross, (600, 450)), 128);
-    assert_eq!(layout::face_size(&p, CubeLayout::Equirect, (512, 256)), 128);
+    assert_eq!(layout::face_size(&p, CubeLayout::Hstrip, (768, 128)), 128);
     // Note FM29: the cell goes through `pot_dims`, so a 250 cell (within 5 % of 256) rounds up.
-    assert_eq!(
-        layout::face_size(&p, CubeLayout::Equirect, (1000, 500)),
-        256
-    );
-    assert_eq!(layout::face_size(&p, CubeLayout::Equirect, (960, 480)), 128);
+    assert_eq!(layout::face_size(&p, CubeLayout::Hstrip, (1500, 250)), 256);
+    assert_eq!(layout::face_size(&p, CubeLayout::Hstrip, (960, 160)), 128);
     // DS21 (final review M4): the auto size stops at 4096, the top of the documented range.
     assert_eq!(
         layout::face_size(&p, CubeLayout::Hstrip, (6 * 16384, 16384)),
         4096
     );
     assert_eq!(
-        layout::face_size(&p, CubeLayout::Photo, (16384, 9216)),
+        layout::face_size(&p, CubeLayout::Vcross, (3 * 16384, 4 * 16384)),
         4096
     );
     assert_eq!(layout::face_size(&p, CubeLayout::Faces, (4096, 4096)), 4096);
@@ -212,12 +209,11 @@ fn face_size_rule() {
     assert_eq!(layout::face_size(&p, CubeLayout::Hcross, (600, 450)), 64);
 }
 
-// ---- Task 13: equirect panoramas, yaw and mirror (DECISIONS DS14) ----
+// ---- Task 13: the 3D preview's panorama mapping, yaw and mirror (DECISIONS DS14) ----
 
 use engine::cube::latlong::{dir_to_uv, uv_to_dir};
-use engine::cube::sample::fetch;
-use engine::cube::world::{to_cube, UP};
-use engine::cube::{cube_dir, dir_to_face, filter, import_dir, Cube};
+use engine::cube::world::to_cube;
+use engine::cube::{cube_dir, dir_to_face, filter, Cube};
 
 fn near3(a: [f32; 3], b: [f32; 3]) -> bool {
     (0..3).all(|k| (a[k] - b[k]).abs() < 1e-4)
@@ -243,81 +239,10 @@ fn pano_mapping_matches_the_in_game_check() {
     }
 }
 
-/// A `w` x `h` equirect of `c`, one fetch per pixel centre.
-fn pano_of(c: &Cube, w: u32, h: u32) -> Rgba32F {
-    let mut img = Rgba32F::new(w, h, [0.0; 4]);
-    for y in 0..h {
-        for x in 0..w {
-            let d = uv_to_dir(
-                (x as f32 + 0.5) / w as f32,
-                (y as f32 + 0.5) / h as f32,
-                0.0,
-            );
-            *img.at_mut(x, y) = fetch(c, to_cube(d));
-        }
-    }
-    img
-}
-
-fn rgb_psnr(a: &Rgba32F, b: &Rgba32F) -> f64 {
-    let mse =
-        a.px.iter()
-            .zip(&b.px)
-            .flat_map(|(p, q)| (0..3).map(move |k| ((p[k] - q[k]) as f64).powi(2)))
-            .sum::<f64>()
-            / (3 * a.px.len()) as f64;
-    10.0 * (1.0 / mse).log10()
-}
-
-#[test]
-fn equirect_of_a_cube_round_trips() {
-    let arrow = Cube {
-        size: 64,
-        faces: arrow_faces(64),
-    };
-    let got = import_dir::equirect(&pano_of(&arrow, 512, 256), 64);
-    assert_eq!(got.size, 64);
-    let q: Vec<f64> = (0..6)
-        .map(|f| rgb_psnr(&got.faces[f], &arrow.faces[f]))
-        .collect();
-    // DS14: the arrow cube's saturated hard edges (face borders, bands) soften by about a texel through the two
-    // bilinear passes, which caps whole-face PSNR near 27-28 dB; away from those edges the round trip is exact.
-    assert!(q.iter().all(|&q| q > 26.0), "{q:.2?}");
-    let away = |v: u32| v > 2 && v < 61 && !(5..=10).contains(&v);
-    let inner = |img: &Rgba32F| {
-        let mut o = Rgba32F::new(1, 0, [0.0; 4]);
-        for y in (0..64).filter(|&y| away(y)) {
-            for x in (0..64).filter(|&x| away(x)) {
-                o.px.push(img.at(x, y));
-            }
-        }
-        o
-    };
-    for f in 0..6 {
-        let q = rgb_psnr(&inner(&got.faces[f]), &inner(&arrow.faces[f]));
-        assert!(q > 40.0, "face {f} away from edges: {q:.2} dB");
-    }
-}
-
 /// The centre texel of the face world direction `w` lands on.
 fn centre(c: &Cube, w: [f32; 3]) -> [f32; 4] {
     let n = c.size;
     c.faces[dir_to_face(to_cube(w)).0].at(n / 2, n / 2)
-}
-
-#[test]
-fn equirect_top_row_lands_on_up() {
-    let mut pano = Rgba32F::new(256, 128, [0.0, 0.0, 0.0, 1.0]);
-    for y in 0..32 {
-        for x in 0..256 {
-            *pano.at_mut(x, y) = [1.0; 4];
-        }
-    }
-    let c = import_dir::equirect(&pano, 32);
-    let up = c.faces[dir_to_face(UP).0].at(16, 16);
-    let down = c.faces[dir_to_face(UP.map(|v| -v)).0].at(16, 16);
-    assert!(up[0] > 0.99, "{up:?}");
-    assert!(down[0] < 0.01, "{down:?}");
 }
 
 const EAST: [f32; 3] = [1.0, 0.0, 0.0];
@@ -374,98 +299,35 @@ fn mirror_swaps_east_and_west() {
     assert_markers(&filter::mirror(&markers(32)), WEST, NORTH);
 }
 
-/// A smooth field of world direction: no hard edges, so any sub-texel offset in the importer shows.
-fn smooth(d: [f32; 3]) -> [f32; 4] {
-    [
-        0.5 + 0.5 * (6.0 * d[0]).sin(),
-        0.5 + 0.5 * (6.0 * d[1]).sin(),
-        0.5 + 0.5 * (6.0 * d[2]).sin(),
-        1.0,
-    ]
-}
-
 #[test]
-fn equirect_of_a_smooth_field_round_trips() {
-    let (w, h, n) = (512, 256, 64);
-    let mut pano = Rgba32F::new(w, h, [0.0; 4]);
-    for y in 0..h {
-        for x in 0..w {
-            let d = uv_to_dir(
-                (x as f32 + 0.5) / w as f32,
-                (y as f32 + 0.5) / h as f32,
-                0.0,
-            );
-            *pano.at_mut(x, y) = smooth(d);
-        }
-    }
-    let got = import_dir::equirect(&pano, n);
-    let q: Vec<f64> = (0..6)
-        .map(|f| {
-            let mut want = Rgba32F::new(n, n, [0.0; 4]);
-            for y in 0..n {
-                for x in 0..n {
-                    let d = engine::cube::world::to_world(cube_dir(f, x, y, n));
-                    *want.at_mut(x, y) = smooth(d);
-                }
-            }
-            rgb_psnr(&got.faces[f], &want)
-        })
-        .collect();
-    eprintln!("smooth round trip, per-face PSNR: {q:.2?}");
-    assert!(q.iter().all(|&q| q > 35.0), "{q:.2?}");
-}
-
-#[test]
-fn explicit_equirect_reads_any_size() {
-    // 64x33 is a small 4096x2049: unclear when guessed, read as a panorama when set.
-    assert_eq!(detect(64, 33), None);
-    assert!(layout::fits(CubeLayout::Equirect, 64, 33));
+fn a_strip_with_a_power_of_two_cell_is_not_resized() {
     let d = tempfile::tempdir().unwrap();
     png(
         d.path(),
-        "textures/cubemaps/pano.png",
-        64,
-        33,
-        [90, 120, 200],
-    );
-    let (p, ev) = plan_of(req(
-        d.path(),
-        &["file:**/pano.png.cubemap.layout=equirect"],
-        true,
-    ));
-    let (s, run_ev) = run(p);
-    assert_eq!(s.converted, 1, "{ev:#?} {run_ev:#?}");
-}
-
-#[test]
-fn default_panorama_is_not_resized() {
-    let d = tempfile::tempdir().unwrap();
-    png(
-        d.path(),
-        "textures/cubemaps/pano.png",
-        512,
-        256,
+        "textures/cubemaps/s.png",
+        768,
+        128,
         [90, 120, 200],
     );
     let (p, ev) = plan_of(req(d.path(), &[], true));
-    let j = job(&p, "pano.dds");
-    assert_eq!(j.cube.as_ref().unwrap().layout, CubeLayout::Equirect);
+    let j = job(&p, "s.dds");
+    assert_eq!(j.cube.as_ref().unwrap().layout, CubeLayout::Hstrip);
     assert!(
         !j.warnings.iter().any(|w| w.code == Code::DimResized),
         "{:?} {ev:#?}",
         j.warnings
     );
-    // A non-power-of-two width: the 250 cell is named, not min(w, h).
+    // A non-power-of-two cell: the 250 cell is named, not min(w, h).
     let d = tempfile::tempdir().unwrap();
     png(
         d.path(),
-        "textures/cubemaps/pano.png",
-        1000,
-        500,
+        "textures/cubemaps/s.png",
+        1500,
+        250,
         [90, 120, 200],
     );
     let p = plan(d.path(), &[]);
-    let w = job(&p, "pano.dds")
+    let w = job(&p, "s.dds")
         .warnings
         .iter()
         .find(|w| w.code == Code::DimResized)
@@ -475,9 +337,9 @@ fn default_panorama_is_not_resized() {
 }
 
 #[test]
-fn near_two_to_one_is_unclear() {
+fn near_two_to_one_is_not_a_cube_source() {
     assert_eq!(detect(4096, 2049), None);
-    assert_eq!(detect(4096, 2048), Some(CubeLayout::Equirect));
+    assert_eq!(detect(4096, 2048), None);
 }
 
 #[test]
@@ -851,14 +713,11 @@ fn single_file_layout_from_aspect_or_key() {
     assert_eq!(x.sources.len(), 1);
     match &job(&p, "y.dds").status {
         JobStatus::Unresolved { reasons, needs } => {
+            // Note GU2: a square image is told what a cube source is.
             assert!(
-                reasons.iter().any(|r| r.contains("cubemap.layout")),
+                reasons[0].contains("six faces, a cross or a strip"),
                 "{reasons:?}"
             );
-            // DS22 (final review M1): a square image's answers are listed too.
-            for l in ["hcross", "equirect", "mirror_ball", "angular", "photo"] {
-                assert!(reasons[0].contains(l), "{l}: {reasons:?}");
-            }
             assert_eq!(needs, &vec![Need::CubeLayout]);
         }
         s => panic!("{s:?}"),
@@ -874,6 +733,59 @@ fn single_file_layout_from_aspect_or_key() {
         .warnings
         .iter()
         .any(|w| w.message.contains("layout does not fit 512x512")));
+}
+
+/// Note GU2: the reason a cube-typed image that is no cube source gives, and the one answer left (change its sub-type).
+fn refused_reason(w: u32, h: u32) -> String {
+    let d = tempfile::tempdir().unwrap();
+    png(d.path(), "textures/cubemaps/x.png", w, h, [9, 9, 9]);
+    let p = plan(d.path(), &[]);
+    match &job(&p, "x.dds").status {
+        JobStatus::Unresolved { reasons, needs } => {
+            assert_eq!(needs, &vec![Need::CubeLayout]);
+            reasons.join("; ")
+        }
+        s => panic!("{w}x{h}: {s:?}"),
+    }
+}
+
+#[test]
+fn a_square_image_names_the_accepted_sources() {
+    let r = refused_reason(1024, 1024);
+    assert!(
+        r.contains("1024x1024 is not six faces, a cross or a strip"),
+        "{r}"
+    );
+    assert!(r.contains("sub-type") && !r.contains("equirect"), "{r}");
+}
+
+#[test]
+fn a_2_to_1_image_names_the_accepted_sources() {
+    let r = refused_reason(2048, 1024);
+    assert!(
+        r.contains("2048x1024 is not six faces, a cross or a strip"),
+        "{r}"
+    );
+}
+
+/// A pin of existing behaviour: an explicit layout the image does not fit stays a CUBE-FACES error. `fits` wants the
+/// exact cell proportions, so a cross or strip with a border can never pass and the message does not offer it.
+#[test]
+fn a_misfit_layout_still_reports_cube_faces() {
+    let d = tempfile::tempdir().unwrap();
+    png(d.path(), "textures/cubemaps/s.png", 1536, 256, [9, 9, 9]);
+    let p = plan(d.path(), &["file:**/s.png.cubemap.layout=hcross"]);
+    let j = job(&p, "s.dds");
+    assert_eq!(
+        j.status,
+        JobStatus::Error {
+            codes: vec![Code::CubeFaces]
+        }
+    );
+    assert!(j
+        .warnings
+        .iter()
+        .any(|w| w.message.contains("hcross layout does not fit 1536x256")));
 }
 
 #[test]
@@ -1314,154 +1226,29 @@ fn marker_reads_back_as_a_dynamic_marker() {
     }
 }
 
-// ---- Task 14: mirror ball and angular map (DECISIONS DS15) ----
-
-/// A square image whose red is x/w and green is y/h, so a sample says where in the image it came from.
-fn coord_image(n: u32) -> Rgba32F {
-    let mut img = Rgba32F::new(n, n, [0.0; 4]);
-    for y in 0..n {
-        for x in 0..n {
-            *img.at_mut(x, y) = [
-                (x as f32 + 0.5) / n as f32,
-                (y as f32 + 0.5) / n as f32,
-                0.0,
-                1.0,
-            ];
-        }
-    }
-    img
-}
-
-/// Where in the unit disc (u right, v up) the cube's colour toward world `d` was read from.
-fn disc_at(c: &Cube, d: [f32; 3]) -> (f32, f32) {
-    let p = fetch(c, to_cube(d));
-    assert!(p.iter().all(|v| v.is_finite()), "{d:?} -> {p:?}");
-    (2.0 * p[0] - 1.0, 1.0 - 2.0 * p[1])
-}
-
-fn close(got: (f32, f32), want: (f32, f32)) {
-    assert!(
-        (got.0 - want.0).abs() < 0.03 && (got.1 - want.1).abs() < 0.03,
-        "{got:?} vs {want:?}"
-    );
-}
-
-#[test]
-fn mirror_ball_centre_is_behind_the_camera() {
-    let c = import_dir::mirror_ball(&coord_image(256), 64);
-    close(disc_at(&c, SOUTH), (0.0, 0.0));
-    close(disc_at(&c, UPW), (0.0, 0.707));
-    close(disc_at(&c, DOWN), (0.0, -0.707));
-    close(disc_at(&c, EAST), (0.707, 0.0));
-    // North is the rim (clamped to 0.98): a direction just east of north reads from the ring on the east side. The
-    // exact back pole itself has no unique ring point, so it is only checked to be finite below.
-    close(disc_at(&c, [0.3, 0.954, 0.0]), (0.98, 0.0));
-    let c = import_dir::mirror_ball(&coord_image(256), 8);
-    assert!(c
-        .faces
-        .iter()
-        .all(|f| f.px.iter().all(|p| p[0].is_finite())));
-}
-
-#[test]
-fn angular_centre_is_forward() {
-    let c = import_dir::angular(&coord_image(256), 64);
-    close(disc_at(&c, NORTH), (0.0, 0.0));
-    close(disc_at(&c, EAST), (0.5, 0.0));
-    close(disc_at(&c, UPW), (0.0, 0.5));
-    close(disc_at(&c, WEST), (-0.5, 0.0));
-    // Just east of north: acos(0.954) / pi = 0.098 along +x.
-    close(disc_at(&c, [0.3, 0.954, 0.0]), (0.098, 0.0));
-}
+// ---- Note GU2: a cube source is six faces, a cross or a strip ----
 
 #[test]
 fn square_images_are_never_auto_detected() {
     assert_eq!(detect(512, 512), None);
-    assert!(layout::fits(CubeLayout::MirrorBall, 512, 512));
-    assert!(layout::fits(CubeLayout::Angular, 512, 512));
-    assert_eq!(cells(CubeLayout::MirrorBall, 512, 512), None);
+    for l in [
+        CubeLayout::Hcross,
+        CubeLayout::Vcross,
+        CubeLayout::Hstrip,
+        CubeLayout::Vstrip,
+        CubeLayout::Faces,
+    ] {
+        assert!(!layout::fits(l, 512, 512), "{l:?}");
+        assert_eq!(cells(l, 512, 512), None, "{l:?}");
+    }
     let p = PresetRegistry::builtin()
         .unwrap()
         .profile("cs-quality", Target::Cs, Subtype::Cubemap)
         .unwrap();
-    assert_eq!(
-        layout::face_size(&p, CubeLayout::MirrorBall, (512, 512)),
-        256
-    );
-    assert_eq!(layout::face_size(&p, CubeLayout::Angular, (700, 700)), 256);
-    assert_eq!(layout::source_cell(CubeLayout::Angular, (700, 700)), 350);
-}
-
-// ---- Task 15: single photo (DECISIONS DS16) ----
-
-#[test]
-fn photo_panorama_is_seamless_and_mirrored() {
-    let (w, h) = (64u32, 32u32);
-    let mut img = Rgba32F::new(w, h, [0.0; 4]);
-    for y in 0..h {
-        for x in 0..w {
-            *img.at_mut(x, y) = [x as f32 * 0.003, 0.2 + y as f32 * 0.002, 0.5, 1.0];
-        }
-    }
-    let p = import_dir::photo_panorama(&img);
-    let ww = 2 * w;
-    assert_eq!((p.width, p.height), (ww, ww / 2));
-    for y in 0..p.height {
-        let (a, b) = (p.at(0, y), p.at(ww - 1, y));
-        for k in 0..4 {
-            assert!((a[k] - b[k]).abs() < 1.0 / 255.0, "seam row {y}");
-        }
-        for k in 0..ww / 4 {
-            assert_eq!(p.at(ww / 4 - 1 - k, y), p.at(ww / 4 + k, y), "left {k}");
-            assert_eq!(
-                p.at(3 * ww / 4 + k, y),
-                p.at(3 * ww / 4 - 1 - k, y),
-                "right {k}"
-            );
-        }
-    }
-    // The front half is the photo, centred on the horizon row.
-    let top = (p.height - h) / 2;
-    assert_eq!(p.at(ww / 4 + 5, top + 7), img.at(5, 7));
-}
-
-#[test]
-fn photo_poles_are_the_row_means() {
-    let (w, h) = (64u32, 32u32);
-    let mut img = Rgba32F::new(w, h, [0.0; 4]);
-    for y in 0..h {
-        for x in 0..w {
-            *img.at_mut(x, y) = [(x * 7 % 13) as f32 / 13.0, y as f32 / h as f32, 0.1, 1.0];
-        }
-    }
-    let p = import_dir::photo_panorama(&img);
-    let mean = |row: u32| {
-        let mut m = [0.0f32; 4];
-        for x in 0..w {
-            for (k, mk) in m.iter_mut().enumerate() {
-                *mk += img.at(x, row)[k] / w as f32;
-            }
-        }
-        m
-    };
-    for (row, want) in [(0, mean(0)), (p.height - 1, mean(h - 1))] {
-        for x in [0, 17, p.width / 2, p.width - 1] {
-            let got = p.at(x, row);
-            for k in 0..4 {
-                assert!((got[k] - want[k]).abs() < 1e-5, "row {row} x {x}");
-            }
-        }
-    }
-}
-
-#[test]
-fn photo_fits_any_size_and_cell_matches_the_panorama() {
-    assert_eq!(detect(400, 301), None);
-    assert!(layout::fits(CubeLayout::Photo, 400, 300));
-    assert!(!layout::fits(CubeLayout::Photo, 0, 300));
-    assert_eq!(cells(CubeLayout::Photo, 400, 300), None);
-    // Panorama width 800, so a quarter of that.
-    assert_eq!(layout::source_cell(CubeLayout::Photo, (400, 300)), 200);
+    assert_eq!(layout::face_size(&p, CubeLayout::Faces, (512, 512)), 512);
+    // A cell the layout cannot read falls back to the shorter side.
+    assert_eq!(layout::source_cell(CubeLayout::Hstrip, (700, 700)), 700);
+    assert_eq!(layout::source_cell(CubeLayout::Hstrip, (3072, 512)), 512);
 }
 
 /// DT1: a square single image with no layout waits for a layout choice.

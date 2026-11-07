@@ -4149,19 +4149,20 @@ fn cube_vcross_rgba8() {
     }
 }
 
-/// Task 13 (DECISIONS DS14): a 2:1 HDR panorama, light sky over brown ground with a hot sun, as a `room` cube.
+/// Task 13 (DECISIONS DS14), rebuilt on six HDR faces in a strip (Note GU2): light sky on five faces, brown ground
+/// on -Z, and a hot sun in the middle of +X, as a `room` cube.
 #[test]
-fn cube_equirect_hdr() {
-    // The sun sits on the horizon at u 0.5, which is world east (+X).
+fn cube_hdr_faces() {
     let convert_sky = |sets: &[&str]| {
         let d = tempfile::tempdir().unwrap();
-        let img = image::Rgb32FImage::from_fn(256, 128, |x, y| {
-            if (124..132).contains(&x) && (60..68).contains(&y) {
+        let img = image::Rgb32FImage::from_fn(768, 128, |x, y| {
+            let (face, fx) = (x / 128, x % 128);
+            if face == 0 && (56..72).contains(&fx) && (56..72).contains(&y) {
                 image::Rgb([40.0, 38.0, 30.0])
-            } else if y < 64 {
-                image::Rgb([0.5, 0.7, 1.0])
-            } else {
+            } else if face == 5 {
                 image::Rgb([0.3, 0.15, 0.05])
+            } else {
+                image::Rgb([0.5, 0.7, 1.0])
             }
         });
         put(
@@ -4197,7 +4198,7 @@ fn cube_equirect_hdr() {
     ]);
     let (hot, face, at) = sun(&f);
     let (hot_unclamped, face_unclamped, _) = sun(&unclamped);
-    eprintln!("cube_equirect_hdr: sun on face {face} at {at:?}; red-saturated +X texels {hot} clamped, {hot_unclamped} unclamped");
+    eprintln!("cube_hdr_faces: sun on face {face} at {at:?}; red-saturated +X texels {hot} clamped, {hot_unclamped} unclamped");
     assert_eq!(
         (face, face_unclamped),
         (0, 0),
@@ -4224,59 +4225,6 @@ fn cube_equirect_hdr() {
         sky[2] > sky[0] && ground[0] > ground[2] && sky[2] > ground[2] + 60,
         "sky {sky:?} ground {ground:?}"
     );
-}
-
-/// Task 14 (DECISIONS DS15): a square mirror-ball or angular photo needs `cubemap.layout`; one cube, 7 mips at 64.
-#[test]
-fn cube_mirror_ball_and_angular() {
-    for layout in ["mirror_ball", "angular"] {
-        let d = tempfile::tempdir().unwrap();
-        let img =
-            image::RgbImage::from_fn(128, 128, |x, y| Rgb([(x * 2) as u8, (y * 2) as u8, 90]));
-        put(
-            d.path(),
-            "textures/cubemaps/ball.png",
-            DynamicImage::ImageRgb8(img),
-        );
-        let set = format!("file:**/ball.png.cubemap.layout={layout}");
-        let o = convert(d.path(), Target::Cs, &[set.as_str()], &[]);
-        assert_eq!(
-            (o.summary.converted, o.summary.exit_code()),
-            (1, 0),
-            "{layout}: {:?}",
-            warnings(&o)
-        );
-        let f = dds(d.path(), "textures/cubemaps/ball.dds");
-        assert!(f.is_cubemap, "{layout}");
-        assert_eq!((f.width, f.height, f.mip_count), (64, 64, 7), "{layout}");
-    }
-}
-
-/// Task 15 (DECISIONS DS16): a 400x300 photo with `cubemap.layout = photo` is one valid cube.
-#[test]
-fn cube_single_photo() {
-    let d = tempfile::tempdir().unwrap();
-    let img = image::RgbImage::from_fn(400, 300, |x, y| Rgb([(x / 2) as u8, (y / 2) as u8, 90]));
-    put(
-        d.path(),
-        "textures/cubemaps/view.png",
-        DynamicImage::ImageRgb8(img),
-    );
-    let o = convert(
-        d.path(),
-        Target::Cs,
-        &["file:**/view.png.cubemap.layout=photo"],
-        &[],
-    );
-    assert_eq!(
-        (o.summary.converted, o.summary.exit_code()),
-        (1, 0),
-        "{:?}",
-        warnings(&o)
-    );
-    let f = dds(d.path(), "textures/cubemaps/view.dds");
-    assert!(f.is_cubemap);
-    assert_eq!((f.width, f.height), (128, 128));
 }
 
 #[test]

@@ -470,32 +470,9 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
     out
 }
 
-/// What Review asks to acknowledge: the photo crops (project-wide), then the pitfalls of every PBR set.
+/// What Review asks to acknowledge: the pitfalls of every PBR set.
 pub fn export_asks(m: &AppModel) -> Vec<ExportIssue> {
-    photo_crops(m)
-        .into_iter()
-        .chain(set_asks(m).iter().cloned())
-        .collect()
-}
-
-/// Note FC12 (supersedes DS26's "no warning"): a single photo taller than wide keeps only its middle `w` rows when it
-/// becomes a cube (`import_dir::photo_panorama`); each such texture is an ask, from the size the plan read.
-fn photo_crops(m: &AppModel) -> Vec<ExportIssue> {
-    let session = m.session.as_ref();
-    m.items
-        .iter()
-        .filter_map(|i| {
-            let j = i.job.as_ref()?;
-            if j.cube.as_ref()?.layout != engine::config::CubeLayout::Photo {
-                return None;
-            }
-            let st = j.source?;
-            let (w, h) = session?.cache().dims(&j.input, st)?;
-            // The texture's path, not its file name: two same-named photos are two acknowledgements.
-            let name = &i.key;
-            (h > w).then(|| general(format!("Only the middle {w}×{w} of {name} is used")))
-        })
-        .collect()
+    set_asks(m).to_vec()
 }
 
 /// The PBR sets' pitfalls. Cached like `export_blocks`, plus `evidence_rev` (the known texture paths and the mesh
@@ -844,7 +821,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
     for i in export_blocks(m).iter().cloned() {
         place(i, true);
     }
-    // The photo crops are not the JSON's: the sets' pitfalls only.
+    // Only the sets' pitfalls are asked.
     for i in set_asks(m).iter().cloned() {
         place(i, false);
     }

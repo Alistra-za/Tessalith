@@ -1189,6 +1189,57 @@ fn removed_encoder_keys_and_codes_are_named() {
     );
 }
 
+/// Note GU2: the four single-image cube layouts 3.0 removed are refused by value wherever `cubemap.layout` sits
+/// (config defaults, a `[files]` entry, a rule, a user preset, `--set`); the kept layouts still load.
+#[test]
+fn a_removed_layout_is_refused_everywhere() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for layout in ["equirect", "mirror_ball", "angular", "photo"] {
+        let table = format!("cubemap = {{ layout = \"{layout}\" }}");
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.hdr\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"sky.hdr\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        for set in [
+            format!("cubemap.layout={layout}"),
+            format!("file:sky.hdr.cubemap.layout={layout}"),
+        ] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains("cubemap.layout") && e.contains("removed in 3.0"),
+                "{layout}: {e}"
+            );
+            assert!(e.contains("six faces, a cross or a strip"), "{layout}: {e}");
+        }
+    }
+    for layout in ["faces", "hcross", "vcross", "hstrip", "vstrip"] {
+        ConfigFile::parse(
+            &format!("[defaults]\ncubemap = {{ layout = \"{layout}\" }}\n"),
+            "sdc.toml",
+        )
+        .unwrap();
+        engine::overrides::parse_set(&format!("cubemap.layout={layout}")).unwrap();
+    }
+}
+
 #[test]
 fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {

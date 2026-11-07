@@ -1,15 +1,17 @@
 //! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
 //! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
-use super::settings_panel::{alpha_dropdown, subtype_label, unclear_layouts};
+use super::settings_panel::{alpha_dropdown, subtype_label};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::code_text::{ack_label, ack_label_for_texture, alpha_confirm_text, code_line};
+use crate::model::code_text::{
+    ack_label, ack_label_for_texture, alpha_confirm_text, code_line, NOT_A_CUBE,
+};
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
-use engine::config::{CubeLayout, Subtype, Target};
+use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
 
@@ -23,8 +25,6 @@ pub enum RowPick {
     Select(String),
     Decide(String, Subtype),
     Answer(String, Answer),
-    /// Note FC3 (DT35): the cube layout picked from the row's `Set layout ▾`.
-    Layout(String, CubeLayout),
 }
 
 pub fn apply(model: &mut AppModel, pick: RowPick) {
@@ -32,27 +32,7 @@ pub fn apply(model: &mut AppModel, pick: RowPick) {
         RowPick::Select(k) => model.select_item(&k),
         RowPick::Decide(k, st) => model.decide_undecided_row(&k, st),
         RowPick::Answer(k, a) => model.answer_undecided_row(&k, a),
-        RowPick::Layout(k, l) => model.set_field(&k, "cubemap.layout", serde_json::json!(l)),
     }
-}
-
-/// Note FC3 (supersedes DT35's hint): the cube layout question answered on the row, `Set layout ▾`, with the layouts
-/// the settings panel's picker offers for an unclear image.
-pub const SET_LAYOUT: &str = "Set layout ▾";
-
-fn layout_menu(ui: &mut egui::Ui, key: &str, why: &str) -> Option<RowPick> {
-    let mut pick = None;
-    ui.menu_button(SET_LAYOUT, |ui| {
-        for (l, label) in unclear_layouts() {
-            if ui.button(*label).clicked() {
-                pick = Some(RowPick::Layout(key.to_string(), *l));
-                ui.close();
-            }
-        }
-    })
-    .response
-    .on_disabled_hover_text(why);
-    pick
 }
 
 /// One undecided texture's row: the name link and the Problems row's fix buttons on one line (`Set type: X ✓ ▾`, the
@@ -87,7 +67,9 @@ pub fn undecided_row(
             Decision::Acknowledge(code) => {
                 Some((code_line(*code).to_string(), Some(code.as_str())))
             }
-            Decision::CubeLayout | Decision::Subtype { .. } => None,
+            // Note GU2: no menu, only what a cube source is; the type picker on the row is the way out.
+            Decision::CubeLayout => Some((NOT_A_CUBE.to_string(), None)),
+            Decision::Subtype { .. } => None,
         })
         .collect();
     if !sentences.is_empty() {
@@ -198,11 +180,7 @@ fn fix_buttons_on(
                         }
                     }
                 }
-                Decision::CubeLayout => {
-                    if let Some(p) = layout_menu(ui, key, why) {
-                        pick = Some(p);
-                    }
-                }
+                Decision::CubeLayout => {}
                 Decision::Acknowledge(code) => {
                     if ui
                         .button(if surface == "Review" {

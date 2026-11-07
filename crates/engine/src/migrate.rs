@@ -308,6 +308,30 @@ pub const REMOVED: &[Removed] = &[
         hint: "use resize = \"half\"",
         since: "2.0",
     },
+    Removed {
+        key: "cubemap.layout",
+        value: Some("equirect"),
+        hint: "convert it to six faces, a cross or a strip first",
+        since: "3.0",
+    },
+    Removed {
+        key: "cubemap.layout",
+        value: Some("mirror_ball"),
+        hint: "convert it to six faces, a cross or a strip first",
+        since: "3.0",
+    },
+    Removed {
+        key: "cubemap.layout",
+        value: Some("angular"),
+        hint: "convert it to six faces, a cross or a strip first",
+        since: "3.0",
+    },
+    Removed {
+        key: "cubemap.layout",
+        value: Some("photo"),
+        hint: "convert it to six faces, a cross or a strip first",
+        since: "3.0",
+    },
 ];
 
 fn key_hit(r: &Removed, segs: &[&str]) -> bool {

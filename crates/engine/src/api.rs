@@ -759,12 +759,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         let face = own.map_or(0, |src| {
             u64::from(crate::cube::layout::face_size(p, c.layout, src))
         });
-        // DS19: a single photo also holds its fake 2w x w float panorama (`import_dir::photo_panorama`).
-        let panorama = match (c.layout, own) {
-            (CubeLayout::Photo, Some((w, _))) => 2 * u64::from(w) * u64::from(w) * 16,
-            _ => 0,
-        };
-        others + 6 * face * face * 16 * 3 + panorama
+        others + 6 * face * face * 16 * 3
     });
     own.map_or(0, |d| bytes_at(&job.input, d))
         .max(dims.map_or(0, |(w, h)| input_bytes(w, h)))
@@ -3793,30 +3788,28 @@ mod tests {
         }
     }
 
-    /// Final review I1: a single-photo cube also holds its fake 2w x w float panorama (`import_dir::photo_panorama`).
+    /// Admission (DS8) counts three float cubes of the face size beside the source; rebuilt on a strip when the photo
+    /// layout (and its panorama term) went in 3.0.
     #[test]
-    fn a_photo_cube_is_admitted_for_its_panorama() {
+    fn a_strip_cube_is_admitted_for_three_float_cubes() {
         let d = tempfile::tempdir().unwrap();
-        let mut j = png_job(d.path(), "sky_e.png", (64, 36), Subtype::Cubemap);
+        let mut j = png_job(d.path(), "sky_e.png", (384, 64), Subtype::Cubemap);
         let base = job_bytes(&j);
-        let cube = |layout| crate::cube::CubeJob {
-            layout,
+        j.cube = Some(crate::cube::CubeJob {
+            layout: CubeLayout::Hstrip,
             sources: vec![crate::cube::CubeSource {
                 path: j.input.clone(),
                 stamp: None,
                 face: None,
             }],
-        };
-        let face = |layout| u64::from(crate::cube::layout::face_size(&j.profile, layout, (64, 36)));
-        let photo_face = face(CubeLayout::Photo);
-        j.cube = Some(cube(CubeLayout::Photo));
-        assert_eq!(
-            job_bytes(&j),
-            base + 6 * photo_face * photo_face * 16 * 3 + 2 * 64 * 64 * 16
-        );
-        let eq_face = face(CubeLayout::Equirect);
-        j.cube = Some(cube(CubeLayout::Equirect));
-        assert_eq!(job_bytes(&j), base + 6 * eq_face * eq_face * 16 * 3);
+        });
+        let face = u64::from(crate::cube::layout::face_size(
+            &j.profile,
+            CubeLayout::Hstrip,
+            (384, 64),
+        ));
+        assert_eq!(face, 64);
+        assert_eq!(job_bytes(&j), base + 6 * face * face * 16 * 3);
     }
 
     #[test]

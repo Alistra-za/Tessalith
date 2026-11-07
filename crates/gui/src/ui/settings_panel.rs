@@ -3,7 +3,7 @@
 use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
-use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, shown_for};
+use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, shown_for, NOT_A_CUBE};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
@@ -309,7 +309,11 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         // Cubemap (Note DT7). Auto is the unset layout, "none" the unset style / ground fill.
         "cubemap.layout" => std::iter::once(opt(json!("auto"), "Auto"))
             // Faces is detected from a six-file set, never chosen.
-            .chain(pickable_layouts().map(|(l, label)| opt(json!(l), label)))
+            .chain(
+                PICKABLE_LAYOUTS
+                    .iter()
+                    .map(|(l, label)| opt(json!(l), label)),
+            )
             .collect(),
         "cubemap.style" => vec![
             opt(json!("none"), "None"),
@@ -338,31 +342,13 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
     })
 }
 
-/// The cube layouts a picker offers, in display order. `Faces` (a six-file set) is not chosen but detected.
-pub const CUBE_LAYOUTS: [(CubeLayout, &str); 9] = [
+/// The layouts a user can pick, in display order. `Faces` (a six-file set) is not chosen but detected.
+const PICKABLE_LAYOUTS: [(CubeLayout, &str); 4] = [
     (CubeLayout::Hcross, "Horizontal cross"),
     (CubeLayout::Vcross, "Vertical cross"),
     (CubeLayout::Hstrip, "Horizontal strip"),
     (CubeLayout::Vstrip, "Vertical strip"),
-    (CubeLayout::Equirect, "360° panorama"),
-    (CubeLayout::MirrorBall, "Mirror ball"),
-    (CubeLayout::Angular, "Angular map"),
-    (CubeLayout::Photo, "Single photo"),
-    (CubeLayout::Faces, "Six face files"),
 ];
-
-/// The layouts a user can pick: all but `Faces`, which is detected from a six-file set.
-fn pickable_layouts() -> impl Iterator<Item = &'static (CubeLayout, &'static str)> {
-    CUBE_LAYOUTS.iter().filter(|(l, _)| *l != CubeLayout::Faces)
-}
-
-/// The layouts the unclear-layout decision offers (DT32): an image only asks when no cross or strip fits it.
-pub(crate) fn unclear_layouts() -> impl Iterator<Item = &'static (CubeLayout, &'static str)> {
-    use CubeLayout::*;
-    CUBE_LAYOUTS
-        .iter()
-        .filter(|(l, _)| matches!(l, Equirect | MirrorBall | Angular | Photo))
-}
 
 fn display_value(v: &Value) -> String {
     match v {
@@ -978,25 +964,9 @@ fn decision_box(
                             }
                         }
                     }
+                    // Note GU2: no layout answer is left; the sub-type picker above is the way out.
                     Decision::CubeLayout => {
-                        ui.label("This image could be several cube layouts: pick one");
-                        let r = egui::ComboBox::from_id_salt(("pick-cube-layout", cx.key))
-                            .selected_text("Pick a layout…")
-                            .show_ui(ui, |ui| {
-                                for (l, label) in unclear_layouts() {
-                                    if ui.selectable_label(false, *label).clicked() {
-                                        actions.push(Action::Set("cubemap.layout", json!(l)));
-                                    }
-                                }
-                            })
-                            .response;
-                        r.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::ComboBox,
-                                r.enabled(),
-                                "Cube layout",
-                            )
-                        });
+                        ui.label(NOT_A_CUBE);
                     }
                     Decision::Acknowledge(code) => {
                         // Note FB8: the sentence, with the code on its hover.

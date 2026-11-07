@@ -42,7 +42,7 @@ pub enum Decision {
         suggested: Option<Subtype>,
     },
     AlphaMeaning,
-    /// A single image that could be several cube layouts (`Need::CubeLayout`).
+    /// A single image that is not six faces, a cross or a strip (`Need::CubeLayout`); its only answer is a sub-type.
     CubeLayout,
     Acknowledge(Code),
 }

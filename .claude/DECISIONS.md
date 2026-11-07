@@ -15,13 +15,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC, HE
@@ -1203,3 +1203,4 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 ## Note GU — v3 cube sources and removed-key versions (owner, 2026-11-06)
 
 - **GU1 Each removed key names its version.** Every `REMOVED` row in `engine::migrate` carries `since`, the version that removed it, and the message reads `<dotted path>: removed in <since>; <hint>`. Rows from 2.0 say `2.0` and their messages are unchanged.
+- **GU2 A cube source is six faces, a cross or a strip.** A cube source is six faces, a cross or a strip (exact 4:3, 3:4, 6:1, 1:6 proportions), or a cube DDS; a square or 2:1 image typed as a cube is Unresolved with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type.", and the GUI shows that sentence with no layout combo and no **Set layout** menu. `cubemap.layout` = `equirect`, `mirror_ball`, `angular` or `photo` is refused in config, presets and `--set` with "removed in 3.0; convert it to six faces, a cross or a strip first".

@@ -1,7 +1,6 @@
 //! Cube-map maths shared by the 3D preview and the cubemap pipeline (moved from render3d, Note DS1).
 pub mod checks;
 pub mod filter;
-pub mod import_dir;
 pub mod latlong;
 pub mod layout;
 pub mod marker;
