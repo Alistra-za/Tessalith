@@ -18,8 +18,8 @@ use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::rnm::{rnm_active, rnm_rows};
 use crate::model::sets::{
-    card_title, is_json_set, shows_json_panel, slot_clash_text, slot_of, slot_row, views, SetView,
-    SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
+    card_title, is_json_set, shared_cells, shows_json_panel, slot_clash_text, slot_of, slot_row,
+    views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
 use crate::pgp::prefix::{
@@ -463,9 +463,12 @@ fn rows(
         .show(ui, |ui| {
             // The row takes the right-click; its labels are not selectable, so they do not take it.
             ui.style_mut().interaction.selectable_labels = false;
-            for cell in slot_row(v.shader.as_ref(), &v.slots) {
+            for cell in shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)) {
                 // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only.
-                if !v.skin && matches!(cell.kind, SlotKind::SkinWet | SlotKind::SkinDetail) {
+                if !v.skin
+                    && !v.shared
+                    && matches!(cell.kind, SlotKind::SkinWet | SlotKind::SkinDetail)
+                {
                     continue;
                 }
                 let size = cell.fill.item().and_then(|i| sizes.get(i));
@@ -684,9 +687,22 @@ fn row(
                     ui.add(egui::Label::new(egui::RichText::new(s).small().weak()).truncate());
                 }
             }
-            None => {
-                ui.weak("empty");
-            }
+            // Note HG: a slot the set's record names that no set in the project writes counts as supplied.
+            None => match slot.slot_number().and_then(|n| v.record_supplied.get(&n)) {
+                Some(path) => {
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("From record: {name}")).weak(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(path);
+                }
+                None => {
+                    ui.weak("empty");
+                }
+            },
         }
         // Note AO7: both kinds of a shared slot (slot 7: `_cnr` and `_f`) are a conflict, not a silent pick: the row
         // names and shows both, and either can be taken out of the set here.

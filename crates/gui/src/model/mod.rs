@@ -49,6 +49,7 @@ pub mod sets_filter;
 pub mod shell;
 pub mod skin;
 pub mod texture_view;
+pub mod txst_map;
 pub mod used_by;
 pub mod uv_coverage;
 pub mod view;
@@ -371,6 +372,8 @@ pub struct AppModel {
     pub user_presets: Option<PathBuf>,
     /// `(id, file)` of the user presets the last plan loaded (the preset inspector lists them).
     pub loaded_user_presets: Vec<(String, String)>,
+    /// The last plan's suffix aliases (`PlanView::suffix_aliases`).
+    pub suffix_aliases: std::collections::BTreeMap<String, String>,
     /// `(file, reason)` of the user preset files the last plan skipped (CFG-PRESET-SKIPPED; the inspector lists them).
     pub skipped_user_presets: Vec<(String, String)>,
     /// Note FC3 (Y4): the last plan's IN-UNREADABLE warnings, one Problems row each.
@@ -763,6 +766,7 @@ impl AppModel {
             user_config: None,
             user_presets: None,
             loaded_user_presets: vec![],
+            suffix_aliases: Default::default(),
             skipped_user_presets: vec![],
             unreadable: vec![],
             read_only_flags: vec![],
@@ -2678,6 +2682,7 @@ impl AppModel {
         self.rnm_keys = view.rnm_keys;
         self.batch_preset = view.preset_id;
         self.loaded_user_presets = view.user_presets;
+        self.suffix_aliases = view.suffix_aliases;
         self.skipped_user_presets = view.skipped_user_presets;
         self.unreadable = view.unreadable;
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
@@ -2957,6 +2962,12 @@ impl AppModel {
         (self.inputs_rev, self.check_state.plans_applied)
     }
 
+    /// Tests (Note HG): whether the last plan was made from the inputs the model would send now.
+    #[cfg(feature = "test-hooks")]
+    pub fn inputs_settled(&self) -> bool {
+        self.last_inputs.as_ref() == Some(&EngineInputs::of(self))
+    }
+
     /// Note FI15: every item's output game path (a skipped DDS included), from its `textures/` component on, with
     /// `/`, lowercased by the engine's output-key fold (equal to the ASCII fold for ASCII paths), sorted and
     /// deduplicated; paths with no `textures/` component are left out. The `u64` changes only when the list does,
@@ -3065,12 +3076,18 @@ impl AppModel {
             return None;
         }
         let mut changed = BTreeSet::new();
+        // Note HG: a record fill reads other sets' output paths (`job_key`), so in a mapped project a moved output is
+        // a change of its set (`splice_views` then builds every view).
+        let mapped = self
+            .sets_doc
+            .as_ref()
+            .is_some_and(|d| d.entries().iter().any(|e| e.txst.is_some()));
         // Both lists are sorted the same way (`PlanView::build`), so a pairwise compare finds any key change.
         for (a, b) in old_items.iter().zip(&self.items) {
             if a.key != b.key || a.set_key != b.set_key {
                 return None;
             }
-            if sets::view_reads(a) != sets::view_reads(b) {
+            if sets::view_reads(a) != sets::view_reads(b) || (mapped && a.job_key != b.job_key) {
                 changed.extend(b.set_key.clone());
             }
         }
@@ -4402,6 +4419,53 @@ mod tests {
         assert!(
             inputs.1.len() > candidates.len(),
             "named and explicit paths: {inputs:?}"
+        );
+        assert_eq!(inputs, sets::linear::engine_inputs(&m));
+    }
+
+    /// Note HG: the linear twin handles record paths as `engine_inputs` does: a mapped file and a mapped packed output.
+    #[test]
+    fn the_linear_twin_follows_records_too() {
+        use crate::sets_doc::TxstMap;
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let r = d.path().join("textures/landscape");
+        let rgb = |x: u32, y: u32| image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]);
+        image::RgbImage::from_fn(64, 64, rgb)
+            .save(r.join("q.png"))
+            .unwrap();
+        image::GrayImage::from_fn(64, 64, |x, _| image::Luma([x as u8]))
+            .save(r.join("q_roughness.png"))
+            .unwrap();
+        m.replan();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        m.set_shader("landscape/q", Some(engine::shader::Shader::AdvancedSkin));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let rec = |slots: &[(u8, &str)]| TxstMap {
+            slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+            ..TxstMap::default()
+        };
+        m.map_record(
+            "landscape/moss",
+            rec(&[(1, "textures/landscape/moss_new.dds")]),
+        )
+        .unwrap();
+        m.map_record("landscape/q", rec(&[(6, "textures/landscape/z_rfaos.dds")]))
+            .unwrap();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let inputs = sets::engine_inputs(&m);
+        assert_eq!(
+            inputs.1.get(&OutputKey::File("landscape/moss.png".into())),
+            Some(&PathBuf::from("landscape/moss_new.dds")),
+            "{inputs:?}"
+        );
+        assert_eq!(
+            inputs.1.get(&OutputKey::Packed {
+                set: "landscape/q".into(),
+                suffix: "rfaos".into()
+            }),
+            Some(&PathBuf::from("landscape/z_rfaos.dds")),
+            "{inputs:?}"
         );
         assert_eq!(inputs, sets::linear::engine_inputs(&m));
     }

@@ -40,6 +40,7 @@ fn fx(target: Target, members: &[(&str, Kind)]) -> Fx {
             key: "textures/a/x".into(),
             members: (0..members.len()).collect(),
             suffixes: Default::default(),
+            shared_skin: false,
         },
     };
     for (name, kind) in members {

@@ -952,6 +952,11 @@ pub enum MenuAction {
         set: String,
         n: u8,
     },
+    /// Note HG: turn the texture set record's fill of slot `n` back on (its `no_fill` key removed).
+    RestoreFill {
+        set: String,
+        n: u8,
+    },
     /// Note AN: turn slot `n`'s PGPatcher `lock_<slot>` key of `set` on or off (one undo step).
     PgpLock {
         set: String,
@@ -1279,11 +1284,38 @@ impl AppModel {
             vec![MenuEntry {
                 action: MenuAction::ClearBorrow { set: id.clone(), n },
                 label: "Clear".into(),
-                disabled: off,
+                disabled: off.clone(),
             }]
         } else {
             vec![]
         };
+        // Note HG: a record fill the user turned off comes back from here, after Clear (the only command on 9 and 10).
+        if let Some(host) = v.fill_off.get(&n) {
+            let at = menu
+                .iter()
+                .position(|e| {
+                    matches!(
+                        e.action,
+                        MenuAction::Slot {
+                            cmd: SlotCommand::Clear,
+                            ..
+                        }
+                    )
+                })
+                .map_or(menu.len(), |i| i + 1);
+            menu.insert(
+                at,
+                MenuEntry {
+                    action: MenuAction::RestoreFill { set: id.clone(), n },
+                    label: if host.is_empty() {
+                        "Use the record's slot".into()
+                    } else {
+                        format!("From {host}")
+                    },
+                    disabled: off.clone(),
+                },
+            );
+        }
         // The member that fills this slot has a source file to show.
         let own = v.slots.iter().find(|(k, _)| **k == kind);
         if let Some((_, super::sets::SlotFill::Own { item })) = own {
@@ -1436,6 +1468,7 @@ impl AppModel {
             }
             MenuAction::SlotLock { set, n, on } => return self.set_slot_lock(&set, n, on).err(),
             MenuAction::ClearBorrow { set, n } => return self.clear_slot_borrow(&set, n).err(),
+            MenuAction::RestoreFill { set, n } => return self.restore_fill(&set, n).err(),
             MenuAction::PgpLock { set, n, on } => return self.set_pgp_lock(&set, n, on).err(),
             MenuAction::RenameInputs => self.open_rename(super::rename::RenameMode::Inputs),
             MenuAction::RenameOutputs => self.open_rename(super::rename::RenameMode::Outputs),

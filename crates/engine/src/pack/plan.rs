@@ -689,6 +689,9 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     if ctx.target != Target::Cs {
         return false;
     }
+    if set.shared_skin {
+        return true;
+    }
     let roles: BTreeSet<RawMap> = RawMap::INPUTS
         .into_iter()
         .filter(|r| set.suffixes.contains(&r.id()))

@@ -138,6 +138,7 @@ fn fx() -> Fx {
             key: "textures/a/x".into(),
             members: (0..files.len()).collect(),
             suffixes: Default::default(),
+            shared_skin: false,
         },
         files,
         jobs,

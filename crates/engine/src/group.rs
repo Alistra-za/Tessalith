@@ -242,6 +242,8 @@ pub struct TextureSet {
     pub members: Vec<usize>,
     /// Recognised suffixes present in the set (lower-case; the colour member has none).
     pub suffixes: BTreeSet<String>,
+    /// Note HG: maps other skin sets use; no colour member. Set by `mark_shared_skin`.
+    pub shared_skin: bool,
 }
 
 /// A path compared case-insensitively: '/'-separated and lower-cased.
@@ -276,6 +278,7 @@ pub fn group_sets_with(
             key,
             members: vec![],
             suffixes: BTreeSet::new(),
+            shared_skin: false,
         });
         set.members.push(i);
         if let Some(s) = suffix {
@@ -497,6 +500,89 @@ pub fn join_skin_detail(
         }
     }
     sets.retain(|s| !s.members.is_empty());
+}
+
+fn stem_of(f: &InputFile) -> String {
+    f.rel
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Note HG2: the shared member rule, by member names only (never a set key or a plan's slots). `Some(tails)` when
+/// every member is `_n`, `_sk`, `_wet` or `_detail_n` and at least one is `_n` or `_sk`; `tails` are the `wet` and
+/// `detail_n` suffixes the set must list so those members type as their maps. A `*_wet` or `*_detail_n` whose whole
+/// stem is another member's base is that base's colour map, and a `*_detail_n` whose base (`x_detail`) is another
+/// member's base is that base's normal, so neither counts as a tail.
+pub fn shared_member_tails<S: AsRef<str>>(
+    stems: &[S],
+    aliases: &BTreeMap<String, String>,
+) -> Option<BTreeSet<&'static str>> {
+    let splits: Vec<SuffixSplit> = stems
+        .iter()
+        .map(|s| split_suffix_with(s.as_ref(), aliases))
+        .collect();
+    let mut tails = BTreeSet::new();
+    let mut maps = false;
+    for (i, (stem, s)) in stems.iter().map(AsRef::as_ref).zip(&splits).enumerate() {
+        // Unicode folding, as set keys are built (Note BF).
+        let base_of_another = |text: &str| {
+            let text = text.to_lowercase();
+            splits
+                .iter()
+                .enumerate()
+                .any(|(j, o)| j != i && o.base.to_lowercase() == text)
+        };
+        match s.suffix.as_deref() {
+            None if wet_tail_split(stem).is_some() && !base_of_another(stem) => {
+                tails.insert(SKIN_WET);
+            }
+            Some("n")
+                if detail_tail_split(stem).is_some()
+                    && !base_of_another(stem)
+                    && !base_of_another(&s.base) =>
+            {
+                tails.insert(SKIN_DETAIL);
+            }
+            Some("n" | "sk") => maps = true,
+            _ => return None,
+        }
+    }
+    maps.then_some(tails)
+}
+
+/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) that passes
+/// [`shared_member_tails`] has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs
+/// before the `_wet` and `_detail_n` joins, which see the flag, and again after set edits on the edited sets, which
+/// decides it. A shared set lists its tails, so those members type as their maps.
+pub fn mark_shared_skin(
+    sets: &mut [TextureSet],
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+    explicit: &BTreeMap<String, crate::shader::Shader>,
+) {
+    for s in sets.iter_mut() {
+        s.shared_skin = false;
+        if explicit.get(&s.key) != Some(&crate::shader::Shader::AdvancedSkin)
+            || s.members.is_empty()
+        {
+            continue;
+        }
+        let stems: Vec<String> = s.members.iter().map(|&i| stem_of(&files[i])).collect();
+        let by_name = shared_member_tails(&stems, aliases);
+        // A host a hand move emptied keeps the `_wet` and `_detail_n` it joined, which the set lists.
+        let joined_only = stems.iter().all(|stem| {
+            matches!(
+                member_split(stem, s, aliases).suffix.as_deref(),
+                Some(SKIN_WET | SKIN_DETAIL)
+            )
+        });
+        s.shared_skin = by_name.is_some() || joined_only;
+        if let Some(tails) = by_name {
+            s.suffixes.extend(tails.into_iter().map(String::from));
+        }
+    }
 }
 
 /// Groups of two or more inputs that map to one output path, compared case-insensitively, among the inputs

@@ -356,6 +356,12 @@ fn fix_button(
             &format!("Remove match{n} from the set's PGPatcher settings"),
             sets_off,
         ),
+        Fix::UseRecordPaths(_) => button(
+            ui,
+            "Use new paths",
+            "Write the record's current paths to this set's mapping; its outputs follow them",
+            sets_off,
+        ),
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
             ui,
@@ -720,6 +726,11 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::TagAsGrass(k) => model.tag_as_grass(&k),
         Fix::StraightAlpha(k) => model.set_field(&k, "alpha.exr_straight", json!(true)),
         Fix::RemoveMatch(id, n) => model.set_json_value(&id, &format!("match{n}"), None),
+        Fix::UseRecordPaths(id) => {
+            if let Err(why) = model.use_record_paths(&id) {
+                model.status_line = why;
+            }
+        }
         Fix::RemoveAliases(file, _) => {
             if let Err(why) = model.remove_preset_aliases(&file) {
                 model.status_line = why;

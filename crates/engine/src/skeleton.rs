@@ -2,7 +2,8 @@
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
 use crate::api::{
     check_file_overrides, drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members,
-    predict_suffixes, reencodes, set_is_pbr, waiting_images, Plan, Prepared, BV2_REASON,
+    pre_edit_shaders, predict_suffixes, reencodes, set_is_pbr, waiting_images, Plan, Prepared,
+    BV2_REASON,
 };
 use crate::config::Target;
 use crate::cube::plan::face_tag;
@@ -338,14 +339,18 @@ impl Skeleton {
             // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
             let mut joined = p.grouped.clone();
             drop_typed_roles(&mut joined, &p.files, &typed);
+            let explicit = pre_edit_shaders(&next.prepared.req, &joined);
             join_members(
                 &mut joined,
                 &p.files,
                 p.registry.alias_table(),
                 &new_ctx,
                 &p.hand,
+                &explicit,
             );
-            let same = |a: &TextureSet, b: &TextureSet| a.key == b.key && a.members == b.members;
+            let same = |a: &TextureSet, b: &TextureSet| {
+                a.key == b.key && a.members == b.members && a.shared_skin == b.shared_skin
+            };
             if joined.len() != p.joined.len()
                 || !joined.iter().zip(&p.joined).all(|(a, b)| same(a, b))
             {
@@ -751,6 +756,90 @@ mod tests {
             Some(NeedsFull(GLOBAL_CHANGE))
         );
         assert!(Skeleton::patch_sig(Some(&s), sig, &[]).is_ok());
+    }
+
+    /// Note HG2: a shader choice that makes a colourless set shared changes no member, only the flag, and still plans
+    /// in full. A request's shader choice is part of its signature, so this edits the kept request as a patch would
+    /// see it after a shader change.
+    // Defensive: this builds a state no user path reaches (a real shader change is GLOBAL_CHANGE) and pins the flag
+    // clause in `same`.
+    #[test]
+    fn a_shader_edit_that_makes_a_shared_set_needs_a_full_plan() {
+        let fx = fast_fixture();
+        for f in ["w_normal", "w_sk"] {
+            image::RgbImage::new(16, 16)
+                .save(fx.dir.path().join(format!("in/dir/{f}.png")))
+                .unwrap();
+        }
+        let s = skeleton(&fx.req);
+        let mut shaded = s.clone();
+        shaded
+            .prepared
+            .req
+            .set_shaders
+            .insert("dir/w".into(), crate::shader::Shader::AdvancedSkin);
+        assert_eq!(
+            shaded
+                .patch(&[(
+                    "dir/w_sk.png".into(),
+                    Some(table("alpha.policy = \"cutout\""))
+                )])
+                .err(),
+            Some(NeedsFull(MEMBERSHIP_CHANGE))
+        );
+        // Without the choice the same edit patches.
+        assert!(s
+            .patch(&[(
+                "dir/w_sk.png".into(),
+                Some(table("alpha.policy = \"cutout\""))
+            )])
+            .is_ok());
+    }
+
+    /// Note HG2: a file patch reruns the joins, so it resolves a renamed host's shader as `prepare` does, and it keeps
+    /// the flag `prepare` set after set edits. Without the first it asks for a full plan on every edit.
+    #[test]
+    fn a_file_patch_keeps_a_renamed_or_created_host_shared() {
+        use crate::sets::SetEdit;
+        let host = |edits: Vec<SetEdit>, key: &str| {
+            let mut fx = fast_fixture();
+            for f in ["w_normal", "w_sk", "w_wet"] {
+                image::RgbImage::new(16, 16)
+                    .save(fx.dir.path().join(format!("in/dir/{f}.png")))
+                    .unwrap();
+            }
+            fx.req
+                .set_shaders
+                .insert("dir/y".into(), crate::shader::Shader::AdvancedSkin);
+            fx.req.set_edits = edits;
+            let s = skeleton(&fx.req);
+            let (next, _) = s
+                .patch(&[(
+                    format!("dir/{key}.png"),
+                    Some(table("alpha.policy = \"cutout\"")),
+                )])
+                .unwrap_or_else(|e| panic!("{e:?}"));
+            let y = next
+                .prepared
+                .sets
+                .iter()
+                .find(|t| t.key.ends_with("/dir/y"))
+                .expect("set y");
+            assert!(y.shared_skin, "{y:?}");
+        };
+        let rename = SetEdit::Rename {
+            from: "dir/w".into(),
+            to: "dir/y".into(),
+        };
+        host(vec![rename], "w_sk");
+        let mut created = vec![SetEdit::Create {
+            set: "dir/y".into(),
+        }];
+        created.extend(["w_normal", "w_sk"].map(|f| SetEdit::Move {
+            file: format!("dir/{f}.png"),
+            to: "dir/y".into(),
+        }));
+        host(created, "w_sk");
     }
 
     #[test]

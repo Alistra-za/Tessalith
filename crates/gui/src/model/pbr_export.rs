@@ -6,6 +6,7 @@ use super::sets::{
     engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
     set_views, SetView, SlotFill, SlotKind,
 };
+use super::txst_map::record_entries;
 use super::AppModel;
 use crate::pgp::prefix::{
     check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
@@ -397,10 +398,12 @@ fn path_lower(p: &std::path::Path) -> String {
 /// sees the collision (Review focus 2). An owned output is also compared with the mirrored path of every output that
 /// has no explicit path: the engine does not re-check those (Task 10 review, Minor 8).
 pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
-    if m.target != Target::Cs {
+    let views = set_views(m);
+    // Note HG: record paths collide on every target; off cs only they are compared.
+    let record = record_entries(m, &views);
+    if m.target != Target::Cs && record.is_empty() {
         return vec![];
     }
-    let views = set_views(m);
     let name = |k: &OutputKey| match k {
         OutputKey::File(f) => f.clone(),
         OutputKey::Packed { set, suffix } => format!("{set} ({suffix})"),
@@ -412,7 +415,14 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
             .map(|v| v.key.clone())
             .unwrap_or_default()
     };
-    let candidates = output_candidates(m, &views);
+    // Note HG: a record path replaces any other path for its key.
+    let mut candidates = if m.target == Target::Cs {
+        output_candidates(m, &views)
+    } else {
+        vec![]
+    };
+    candidates.retain(|(_, k, _)| !record.iter().any(|(_, r, _)| r == k));
+    candidates.extend(record);
     let mut seen: BTreeMap<String, (String, OutputKey)> = BTreeMap::new();
     let mut out = vec![];
     for (owner, k, p) in &candidates {

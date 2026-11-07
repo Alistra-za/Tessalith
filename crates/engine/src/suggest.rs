@@ -67,7 +67,9 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
     // is the colour member, at High like `_d`. `hdr_sky` and `_i` stay Medium.
     match c.suffix {
         Some("n") if landscape => vec![s(LandscapeNormal, High, "_n under textures/landscape")],
-        Some("n") if pbr => vec![s(PbrNormal, High, "_n in a PBR set"), s(Normal, Low, "_n")],
+        Some("n") if pbr || c.advanced_skin => {
+            vec![s(PbrNormal, High, "_n in a PBR set"), s(Normal, Low, "_n")]
+        }
         Some("n") => vec![s(Normal, High, "_n, non-PBR set")],
         Some("msn") => vec![s(Msn, High, "_msn model-space normal")],
         Some("rmaos") => vec![s(Rmaos, High, "_rmaos")],

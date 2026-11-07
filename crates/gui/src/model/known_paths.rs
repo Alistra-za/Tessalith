@@ -2,6 +2,7 @@
 //! name and the PGPatcher JSON editor's match values). Read from the scan database on a worker after a scan and at
 //! start; empty without a scan.
 use super::sets::{set_views, SlotFill};
+use super::txst_map::{defining_plugin, formid_text};
 use super::AppModel;
 use crate::worker::{spawn_guarded, WorkerMsg};
 use modscan::store::Store;
@@ -18,6 +19,24 @@ pub struct KnownPaths {
     /// Diffuse path (with `.dds`) → the slots (0-based bits, 1..=7) a live mesh's texture set or a winning TXST fills
     /// beside it. A set's missing-map warning is dropped for such a map (Note HE4).
     pub supplies: BTreeMap<String, u16>,
+    /// Every winning texture set record (TXST) with a path, ordered by EDID (Note HG): the picker's list.
+    pub records: Vec<TxstRecord>,
+}
+
+/// A winning texture set record. Keyed by `plugin` + `formid` (Note HG): the plugin that defines it and its own FormID
+/// without the master digits, never the load-order one. `edid` is only a label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxstRecord {
+    /// The file that defines the record (its master when the winner overrides it).
+    pub plugin: String,
+    /// The plugin whose copy wins.
+    pub winner: String,
+    /// `0x814`: see [`super::txst_map::formid_text`].
+    pub formid: String,
+    pub edid: String,
+    /// 1-based lighting slot (the numbering of `borrow` and `lock`, converted from the raw `TX0n` index) → the
+    /// scan's path.
+    pub slots: BTreeMap<u8, String>,
 }
 
 /// Read the known paths from scan database `db`.
@@ -25,19 +44,25 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
     let store = Store::open_read_only(db).map_err(|e| e.to_string())?;
     let conn = store.conn();
     let mut textures: BTreeMap<String, u16> = BTreeMap::new();
-    for sql in [
+    for (sql, raw_tx) in [
         // Lighting slots of enabled, non-derived copies only (trace-debug #42): not an effect shape's greyscale.
-        format!(
-            "SELECT DISTINCT p.p, tu.slot FROM tex_use tu JOIN path p ON p.id = tu.tex_path_id \
-             JOIN texset ts ON ts.id = tu.texset_id WHERE tu.slot < 16 AND {}",
-            super::used_by::LIVE_LIGHTING_TEXSET
+        (
+            format!(
+                "SELECT DISTINCT p.p, tu.slot FROM tex_use tu JOIN path p ON p.id = tu.tex_path_id \
+                 JOIN texset ts ON ts.id = tu.texset_id WHERE tu.slot < 16 AND {}",
+                super::used_by::LIVE_LIGHTING_TEXSET
+            ),
+            false,
         ),
-        // Note HC6: the slots of each winning TXST whose master is loaded, as `txsts_matching` reads them.
-        "SELECT DISTINCT p.p, ts.slot FROM txst_slot ts JOIN path p ON p.id = ts.path_id \
-         JOIN rec_winner w ON w.formid = ts.formid AND w.plugin_id = ts.plugin_id \
-         JOIN rec r ON r.plugin_id = ts.plugin_id AND r.local = ts.local AND r.owner_ok = 1 \
-         WHERE ts.slot < 16"
-            .to_string(),
+        // Note HC6: the slots of each winning TXST whose master is loaded, as `txsts_matching` reads them. The
+        // scan stores the raw `TX0n` index (Note HG1).
+        (
+            "SELECT DISTINCT p.p, ts.slot FROM txst_slot ts JOIN path p ON p.id = ts.path_id \
+             JOIN rec_winner w ON w.formid = ts.formid AND w.plugin_id = ts.plugin_id \
+             JOIN rec r ON r.plugin_id = ts.plugin_id AND r.local = ts.local AND r.owner_ok = 1"
+                .to_string(),
+            true,
+        ),
     ] {
         let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = st
@@ -45,6 +70,14 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             .map_err(|e| e.to_string())?;
         for row in rows {
             let (p, slot) = row.map_err(|e| e.to_string())?;
+            let slot = if raw_tx {
+                match tx_to_slot(slot) {
+                    Some(s) => i64::from(s) - 1,
+                    None => continue,
+                }
+            } else {
+                slot
+            };
             if p.starts_with("textures/") {
                 *textures.entry(p).or_default() |= 1 << slot;
             }
@@ -53,21 +86,28 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
     // Only the missing-map warnings depend on these; a failing query must not blank the pickers (final review K1).
     let supplies = (|| -> Result<BTreeMap<String, u16>, String> {
     let mut supplies: BTreeMap<String, u16> = BTreeMap::new();
-    for sql in [
+    for (sql, raw_tx) in [
         // A mesh's texture set: bit N when its slot N is filled. Not a self-join of `tex_use` (no index on texset_id).
-        format!(
-            "SELECT d.p, (ts.t1 IS NOT NULL) * 2 + (ts.t2 IS NOT NULL) * 4 + (ts.t3 IS NOT NULL) * 8 \
-             + (ts.t4 IS NOT NULL) * 16 + (ts.t5 IS NOT NULL) * 32 + (ts.t6 IS NOT NULL) * 64 \
-             + (ts.t7 IS NOT NULL) * 128 FROM texset ts JOIN path d ON d.id = ts.t0 WHERE {}",
-            super::used_by::LIVE_LIGHTING_TEXSET
+        (
+            format!(
+                "SELECT d.p, (ts.t1 IS NOT NULL) * 2 + (ts.t2 IS NOT NULL) * 4 + (ts.t3 IS NOT NULL) * 8 \
+                 + (ts.t4 IS NOT NULL) * 16 + (ts.t5 IS NOT NULL) * 32 + (ts.t6 IS NOT NULL) * 64 \
+                 + (ts.t7 IS NOT NULL) * 128 FROM texset ts JOIN path d ON d.id = ts.t0 WHERE {}",
+                super::used_by::LIVE_LIGHTING_TEXSET
+            ),
+            false,
         ),
-        // A winning TXST (HC6's conditions on its diffuse row): the other slots of the same record.
-        "SELECT d.p, 1 << o.slot FROM txst_slot d0 JOIN path d ON d.id = d0.path_id \
-         JOIN rec_winner w ON w.formid = d0.formid AND w.plugin_id = d0.plugin_id \
-         JOIN rec r ON r.plugin_id = d0.plugin_id AND r.local = d0.local AND r.owner_ok = 1 \
-         JOIN txst_slot o ON o.plugin_id = d0.plugin_id AND o.local = d0.local \
-         WHERE d0.slot = 0 AND o.slot BETWEEN 1 AND 7"
-            .to_string(),
+        // A winning TXST (HC6's conditions on its diffuse row): the other slots of the same record, as the raw TX
+        // index (Note HG1), mapped below.
+        (
+            "SELECT d.p, o.slot FROM txst_slot d0 JOIN path d ON d.id = d0.path_id \
+             JOIN rec_winner w ON w.formid = d0.formid AND w.plugin_id = d0.plugin_id \
+             JOIN rec r ON r.plugin_id = d0.plugin_id AND r.local = d0.local AND r.owner_ok = 1 \
+             JOIN txst_slot o ON o.plugin_id = d0.plugin_id AND o.local = d0.local \
+             WHERE d0.slot = 0 AND o.slot BETWEEN 1 AND 7"
+                .to_string(),
+            true,
+        ),
     ] {
         let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = st
@@ -75,6 +115,11 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             .map_err(|e| e.to_string())?;
         for row in rows {
             let (p, bits) = row.map_err(|e| e.to_string())?;
+            let bits = if raw_tx {
+                tx_to_slot(bits).map_or(0, |s| 1 << (s - 1))
+            } else {
+                bits
+            };
             if p.starts_with("textures/") && bits != 0 {
                 *supplies.entry(p).or_default() |= bits as u16;
             }
@@ -101,11 +146,74 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             }
         }
     }
+    // Like `supplies`: the picker's list must not blank the other pickers when its query fails (final review K1).
+    let records = read_records(conn).unwrap_or_default();
     Ok(KnownPaths {
         textures,
         mesh_dirs: dirs.into_iter().collect(),
         supplies,
+        records,
     })
+}
+
+/// The winning TXSTs (HC6's conditions: `rec_winner`, `owner_ok = 1`) that name a path, by EDID. One query; the
+/// `txst_slot.slot` column is the raw `TX0n` index (Note HG1), converted by [`tx_to_slot`] here.
+fn read_records(conn: &rusqlite::Connection) -> Result<Vec<TxstRecord>, String> {
+    let mut st = conn
+        .prepare(
+            "SELECT r.plugin_id, r.local, r.edid, pl.name, pl.masters_json, p.p, ts.slot FROM rec r \
+             JOIN rec_winner w ON w.formid = r.formid AND w.plugin_id = r.plugin_id \
+             JOIN plugin pl ON pl.id = r.plugin_id \
+             JOIN txst_slot ts ON ts.plugin_id = r.plugin_id AND ts.local = r.local \
+             JOIN path p ON p.id = ts.path_id \
+             WHERE r.sig = 'TXST' AND r.owner_ok = 1 \
+             ORDER BY r.edid COLLATE NOCASE, r.plugin_id, r.local, ts.slot",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = st
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<TxstRecord> = vec![];
+    let mut last: Option<(i64, i64)> = None;
+    for row in rows {
+        let (plugin_id, local, edid, winner, masters, path, tx) = row.map_err(|e| e.to_string())?;
+        let Some(slot) = tx_to_slot(tx) else { continue };
+        if last != Some((plugin_id, local)) {
+            last = Some((plugin_id, local));
+            let local = local as u32;
+            let masters: Vec<String> = serde_json::from_str(&masters).unwrap_or_default();
+            out.push(TxstRecord {
+                plugin: defining_plugin(local, &winner, &masters),
+                winner,
+                formid: formid_text(local),
+                edid: edid.unwrap_or_default(),
+                slots: BTreeMap::new(),
+            });
+        }
+        if let Some(rec) = out.last_mut() {
+            rec.slots.insert(slot, path);
+        }
+    }
+    Ok(out)
+}
+
+// modscan's TX_TO_NIF, +1; private there, and held equal by the_slots_match_txst_textures.
+/// The 1-based lighting slot of raw TXST index `tx` (`TX0n`), `None` outside 0..=7.
+pub(crate) fn tx_to_slot(tx: i64) -> Option<u8> {
+    const TX_TO_SLOT: [u8; 8] = [1, 2, 6, 3, 4, 5, 7, 8];
+    usize::try_from(tx)
+        .ok()
+        .and_then(|i| TX_TO_SLOT.get(i).copied())
 }
 
 /// `p` without a `.dds` ending.

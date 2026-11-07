@@ -54,7 +54,7 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
-const RESERVED: [&str; 14] = [
+const RESERVED: [&str; 16] = [
     "id",
     "created",
     "renamed_from",
@@ -69,7 +69,20 @@ const RESERVED: [&str; 14] = [
     "skin",
     "cm",
     "xpmf",
+    "txst",
+    "no_fill",
 ];
+
+/// The texture set record a set is mapped to (`[sets.txst]`): the record's identity (plugin file name, form ID,
+/// editor ID) and its paths. `slots` keys are 1-based lighting slots, as `Subtype::txst_slot` gives; each value is the
+/// record's path as stored (`textures/...dds`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TxstMap {
+    pub plugin: String,
+    pub formid: String,
+    pub edid: String,
+    pub slots: BTreeMap<u8, String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SetEntry {
@@ -84,6 +97,10 @@ pub struct SetEntry {
     pub shader: Option<engine::shader::Shader>,
     /// F3a Task 8: locked slot numbers (`lock = ["slot2"]`), kept as they are by drops, slot commands and bulk edits.
     pub lock: BTreeSet<u8>,
+    /// The texture set record the set is mapped to (`[sets.txst]`); its paths name the set's outputs.
+    pub txst: Option<TxstMap>,
+    /// 1-based record slots the user chose to leave empty (`no_fill = ["slot2"]`).
+    pub no_fill: BTreeSet<u8>,
     /// F3b D2: the base name every output of the set takes (`output_name = "steel"`): `steel_n.dds`, `steel.dds`…
     /// in each output's own folder. Never on a CS PBR set, which renames through the PGPatcher `rename` key.
     pub output_name: Option<String>,
@@ -192,6 +209,26 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
                 .collect()
         })
         .unwrap_or_default();
+    let txst = t.get("txst").and_then(Item::as_table_like).map(|b| {
+        let text = |k: &str| {
+            b.get(k)
+                .and_then(Item::as_str)
+                .map(str::to_string)
+                .unwrap_or_default()
+        };
+        TxstMap {
+            plugin: text("plugin"),
+            formid: text("formid"),
+            edid: text("edid"),
+            slots: b
+                .iter()
+                .filter_map(|(k, v)| {
+                    let n: u8 = k.strip_prefix("slot")?.parse().ok()?;
+                    (1..=8).contains(&n).then_some((n, v.as_str()?.to_string()))
+                })
+                .collect(),
+        }
+    });
     Some(SetEntry {
         id,
         created: t.get("created").and_then(Item::as_bool).unwrap_or(false),
@@ -207,6 +244,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             .and_then(Item::as_str)
             .and_then(|s| serde_json::from_value(Json::String(s.to_string())).ok()),
         lock: strings(t.get("lock"))
+            .iter()
+            .filter_map(|s| s.strip_prefix("slot")?.parse().ok())
+            .collect(),
+        txst,
+        no_fill: strings(t.get("no_fill"))
             .iter()
             .filter_map(|s| s.strip_prefix("slot")?.parse().ok())
             .collect(),
@@ -1138,6 +1180,52 @@ impl SetsDoc {
         self.list_edit(id, "lock", &format!("slot{slot}"), on);
     }
 
+    /// Map set `id` to a texture set record (`Some`), or remove the mapping (`None`). An equal write is no edit.
+    pub fn set_txst(&mut self, id: &str, map: Option<&TxstMap>) {
+        if self.read_only() {
+            return;
+        }
+        let now = self
+            .parse_entries()
+            .into_iter()
+            .find(|e| same_id(&e.id, id))
+            .and_then(|e| e.txst);
+        if now.as_ref() == map {
+            return;
+        }
+        let t = self.table_mut(id);
+        match map {
+            None => {
+                t.remove("txst");
+                // A table holding only its id says nothing; an entry with no mapping is no entry.
+                if t.len() == 1 {
+                    let lower = fold_id(id);
+                    self.tables_mut().retain(|t| !is_id(t, &lower));
+                }
+            }
+            Some(m) => {
+                let mut b = Table::new();
+                for (k, v) in [
+                    ("plugin", &m.plugin),
+                    ("formid", &m.formid),
+                    ("edid", &m.edid),
+                ] {
+                    b.insert(k, toml_edit::value(v.as_str()));
+                }
+                for (n, p) in &m.slots {
+                    b.insert(&format!("slot{n}"), toml_edit::value(p.as_str()));
+                }
+                t.insert("txst", Item::Table(b));
+            }
+        }
+        self.f.touch();
+    }
+
+    /// Leave record slot `slot` (1-based) of set `id` empty when filling from its record (`on`), or fill it again.
+    pub fn set_no_fill(&mut self, id: &str, slot: u8, on: bool) {
+        self.list_edit(id, "no_fill", &format!("slot{slot}"), on);
+    }
+
     /// Set (or with `None` remove) set `id`'s explicit shader (M6 spec §7).
     pub fn set_shader(&mut self, id: &str, shader: Option<engine::shader::Shader>) {
         if self.read_only() {
@@ -1590,6 +1678,11 @@ mod tests {
                 Box::new(|s| s.set_borrow("a/x", 2, Some("b/y"))),
             ),
             ("set_lock", Box::new(|s| s.set_lock("a/x", 2, true))),
+            (
+                "set_txst",
+                Box::new(|s| s.set_txst("a/x", Some(&TxstMap::default()))),
+            ),
+            ("set_no_fill", Box::new(|s| s.set_no_fill("a/x", 2, true))),
             (
                 "set_shader",
                 Box::new(|s| s.set_shader("a/x", Some(engine::shader::Shader::Pbr))),

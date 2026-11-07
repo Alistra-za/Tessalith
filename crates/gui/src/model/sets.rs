@@ -2,13 +2,14 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
+use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
     is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
 };
 use crate::pgp::settings::Settings;
-use crate::sets_doc::{SetEntry, SetsDoc};
+use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
 use engine::codes::{Code, Warning};
 use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
@@ -326,6 +327,17 @@ pub struct SetView {
     pub pbr: bool,
     /// The diffuse resolves to `skin_albedo`: an Advanced skin set (no JSON, the skin card, AG90).
     pub skin: bool,
+    /// A shared skin set (Note HG): marked Advanced skin, holding no diffuse and no Rmaos, only the maps other skin
+    /// sets use. Derived in the GUI by [`is_shared`].
+    pub shared: bool,
+    /// Slots (record numbering, 1-based) an empty slot of the set's texture set record took from the set that writes
+    /// that path: slot → that set's id. Each is also a `SlotFill::Borrowed` in `slots` (Note HG).
+    pub filled: BTreeMap<u8, String>,
+    /// Slots the user turned a record fill off for (`no_fill`): slot → the id of the set that writes the path, empty
+    /// when no set does any more.
+    pub fill_off: BTreeMap<u8, String>,
+    /// Slots the record names that no set in the project writes: slot → the record path. They count as supplied.
+    pub record_supplied: BTreeMap<u8, String>,
     /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
     pub rfaos: bool,
     pub created: bool,
@@ -346,6 +358,8 @@ pub struct SetView {
     pub set_warnings: Vec<Warning>,
     /// F3a Task 8: the locked slot numbers (`SetEntry::lock`).
     pub locks: BTreeSet<u8>,
+    /// The texture set record the set is mapped to (`SetEntry::txst`), for the card line and the menu.
+    pub txst: Option<TxstMap>,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
 }
@@ -359,6 +373,10 @@ impl SetView {
             slots: BTreeMap::new(),
             pbr: false,
             skin: false,
+            shared: false,
+            filled: BTreeMap::new(),
+            fill_off: BTreeMap::new(),
+            record_supplied: BTreeMap::new(),
             rfaos: false,
             created: false,
             missing: vec![],
@@ -371,6 +389,7 @@ impl SetView {
             shader_choice: None,
             set_warnings: vec![],
             locks: BTreeSet::new(),
+            txst: None,
             recipes: vec![],
         }
     }
@@ -422,7 +441,9 @@ pub const BADGE_PBR_LANDSCAPE_NONE: &str = "PBR Landscape (no JSON yet)";
 /// The Sets column badge. A PBR Landscape set's says what it writes (Note BM, review I2): CS records when a block
 /// has an EDID, the PGPatcher entry when the set is a PGPatcher JSON set its statics rule keeps.
 pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
-    if v.skin {
+    if v.shared {
+        "shared skin maps (no JSON)"
+    } else if v.skin {
         "Advanced skin"
     } else if is_pbr_landscape(v) {
         match (m.cs_records_written(v), m.pgp_written(v)) {
@@ -443,7 +464,9 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
 
 /// Layout v2 A5: the short kind on the set card's pill (`badge_text` is its hover).
 pub fn kind_text(m: &AppModel, v: &SetView) -> &'static str {
-    if v.skin {
+    if v.shared {
+        "shared"
+    } else if v.skin {
         "skin"
     } else if is_pbr_landscape(v) {
         "PBR Landscape"
@@ -569,6 +592,71 @@ pub fn slot_row(pick: Option<&ShaderPick>, slots: &BTreeMap<SlotKind, SlotFill>)
     cells
 }
 
+/// Note HG4: a shared set shows only the maps other skin sets use; its diffuse and `_rfaos` cards are not drawn.
+pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
+    if !v.shared {
+        return cells;
+    }
+    cells
+        .into_iter()
+        .filter(|c| {
+            matches!(
+                c.kind,
+                SlotKind::Normal | SlotKind::SkinSk | SlotKind::SkinWet | SlotKind::SkinDetail
+            )
+        })
+        .collect()
+}
+
+/// A shared skin set: marked Advanced skin, with members, and every one of them a map a shared set may hold. That
+/// is the engine's rule (`group::mark_shared_skin`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
+/// unmarked after a hand edit (a `_p`, a diffuse, an `_rfaos`) is not shared here either. A lone `_rfaos` is not shared.
+fn is_shared(v: &SetView, aliases: &BTreeMap<String, String>) -> bool {
+    let allowed = |k: &SlotKind| {
+        matches!(
+            k,
+            SlotKind::Normal | SlotKind::SkinSk | SlotKind::SkinWet | SlotKind::SkinDetail
+        )
+    };
+    v.shader
+        .as_ref()
+        .is_some_and(|p| p.shader == Shader::AdvancedSkin)
+        && !v.members.is_empty()
+        && v.slots
+            .iter()
+            .all(|(k, f)| allowed(k) || !f.is_filled())
+        // Every member is one of those maps. One in a slot is decided by the slot; one in no slot (a kept DDS has no
+        // job, so no slot) by its name, as the engine reads it (`member_split`, so a joined `x_wet` counts).
+        && v.members.iter().all(|m| {
+            let slot = v
+                .slots
+                .iter()
+                .find(|(_, f)| f.item() == Some(m.as_str()))
+                .map(|(k, _)| k);
+            match slot {
+                Some(k) => allowed(k),
+                None => kept_member_is_shared_map(m, aliases),
+            }
+        })
+}
+
+/// A member with no slot reads as `_n`, `_sk`, `_wet` or `_detail_n` by its file name (the engine's member rule).
+fn kept_member_is_shared_map(key: &str, aliases: &BTreeMap<String, String>) -> bool {
+    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
+    let set = TextureSet {
+        key: String::new(),
+        members: vec![],
+        suffixes: [SKIN_WET, SKIN_DETAIL].map(String::from).into(),
+        shared_skin: false,
+    };
+    let stem = Path::new(key)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let suffix = member_split(&stem, &set, aliases).suffix;
+    matches!(suffix.as_deref(), Some("n" | "sk" | SKIN_WET | SKIN_DETAIL))
+}
+
 /// Note AO: why a card's slot is in conflict (both kinds of slot 3 or 7 filled), if it is.
 pub fn slot_clash_text(cell: &SlotCell) -> Option<String> {
     slot_conflict(&[cell.kind], cell.clash?)
@@ -592,7 +680,7 @@ const SLOT7_CLASH: &str =
 const SLOT3_CLASH: &str =
     "a set cannot hold both an emissive map (_g) and a skin _sk map: both use slot 3";
 
-fn entry_of<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a SetEntry> {
+pub(super) fn entry_of<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a SetEntry> {
     entries.iter().find(|e| same_id(&e.id, id))
 }
 
@@ -706,6 +794,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             entry_view(m, v, e, own);
         }
     }
+    fill_from_records(m, &mut views, &entries, &own_slots);
     // PBR, derived match, prefix.
     for v in &mut views {
         finish_view(m, v);
@@ -810,6 +899,7 @@ fn entry_view(
     v.settings = e.settings.clone();
     v.shader_choice = e.shader;
     v.locks = e.lock.clone();
+    v.txst = e.txst.clone();
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
@@ -857,6 +947,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
+    v.shared = is_shared(v, &m.suffix_aliases);
     // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
     v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
         Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
@@ -899,12 +990,14 @@ fn owns_of(v: &SetView, owners: &Ownership) -> Vec<SlotKind> {
 pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTreeSet<String>) {
     // shortcut: the lookups below are linear in the sets per scope set; a partial over many sets (a bulk edit)
     // builds every view instead. Index the sets by key if a big bulk edit's frame shows in a profile.
-    if scope.len() > 32 {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
+    // project with many mapped sets shows it in a profile.
+    if scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
         *views = build_views(m);
         return;
     }
     let root = m.sets_root();
-    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let scope_ids: Vec<String> = views
         .iter()
         .filter(|v| scope.contains(&v.key))
@@ -1021,7 +1114,7 @@ fn output_suffix(item: &TextureItem, slot: SlotKind) -> &'static str {
 }
 
 /// The recipe suffix of a packed item (`rmaos`, `rfaos`, `p`, `m`).
-fn recipe_suffix(i: &TextureItem) -> Option<String> {
+pub(super) fn recipe_suffix(i: &TextureItem) -> Option<String> {
     let pk = i.job.as_ref()?.pack.as_ref()?;
     Some(pk.kind.suffix().to_string())
 }
@@ -1057,17 +1150,30 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let mut paths = BTreeMap::new();
     let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
-    let named = output_name_paths(m, &views);
-    if m.target != Target::Cs {
+    let mut named = output_name_paths(m, &views);
+    let record = record_paths(m, &views);
+    if m.target != Target::Cs && record.is_empty() {
         paths.extend(named);
         return (edits, paths);
     }
-    let candidates = output_candidates(m, &views);
+    // Note HG (agent ruling, overrides the brief's insertion order): a record path beats every other path for its
+    // key *before* the duplicate checks, so a name a record replaced reserves nothing. The checks below then run on
+    // final paths, on every target, and a record path that loses one leaves its file on its default path.
+    let cs = m.target == Target::Cs;
+    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(k, _)| k.clone()).collect();
+    named.retain(|(k, _)| !rec_keys.contains(k));
+    let mut candidates = if cs {
+        output_candidates(m, &views)
+    } else {
+        vec![]
+    };
+    candidates.retain(|(_, k, _)| !rec_keys.contains(k));
     // Mirrored outputs: textures with no explicit path, now or in the plan on screen, write their job key. An owned
     // path on one is held back too (the engine would skip both as IN-DUPLICATE and the plan would not settle);
     // `path_collisions` reports it.
     let mut explicit: BTreeSet<&OutputKey> = candidates.iter().map(|(_, c, _)| c).collect();
     explicit.extend(named.iter().map(|(c, _)| c));
+    explicit.extend(rec_keys.iter());
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
     let owners = packed_owners(&views);
     let mirrored: BTreeSet<String> = m
@@ -1084,6 +1190,12 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
     for (_, key, rel) in named.chain(candidates) {
+        if !cs {
+            // Off cs an output name takes no checks, as before records existed; it only reserves its path.
+            seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase());
+            paths.insert(key, rel);
+            continue;
+        }
         if mirrored.contains(&rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
             continue;
         }
@@ -1092,6 +1204,13 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         // both as IN-DUPLICATE, the sets would stop being PBR sets, the paths would vanish, and the two-pass planning
         // would flip between two plans.)
         if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+            paths.insert(key, rel);
+        }
+    }
+    // Record paths last: they take the same checks on every target.
+    for (key, rel) in record {
+        let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+        if !mirrored.contains(&low) && seen.insert(low) {
             paths.insert(key, rel);
         }
     }
@@ -1104,6 +1223,12 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
 pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, PathBuf)> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut out = vec![];
+    // Once per pass: the identity the engine accepts for every file.
+    let defaults = entries
+        .iter()
+        .any(|e| e.output_name.is_some())
+        .then(|| DefaultOutputs::new(m))
+        .flatten();
     for e in entries.iter() {
         let Some(name) = e.output_name.as_deref() else {
             continue;
@@ -1122,7 +1247,12 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             if item.job.is_none() || item.job_key.is_empty() {
                 continue;
             }
-            let Some(rel) = renamed_output(&item.job_key, name, v.skin) else {
+            // Note HG: the default output of the file as it is now, never the last plan's `job_key`, which a record
+            // mapping or an earlier name may have moved.
+            let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
+                continue;
+            };
+            let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1142,6 +1272,72 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
     out
 }
 
+/// Note HG: the default output key (`/`, lower case, relative to the export root) of every file when no output path
+/// is sent for it, from what is true now and as the engine accepts it: one `apply_read_as` over all the project's
+/// files with the project's `[inputs]` (so a refused alias leaves its file as it is, as in the plan), then
+/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input`. No output
+/// name or record mapping can reach it. Built once per `output_name_paths` pass.
+pub struct DefaultOutputs<'a> {
+    out_root: &'a Path,
+    root: &'a Path,
+    files: HashMap<String, engine::discover::InputFile>,
+}
+
+impl<'a> DefaultOutputs<'a> {
+    /// `None` without a root.
+    pub fn new(m: &'a AppModel) -> Option<Self> {
+        use engine::discover::{apply_read_as, canonicalise_outputs, InputFile, InputKind};
+        let (root, out_root) = (m.root.as_deref()?, m.sets_root.as_deref()?);
+        let (keys, mut list): (Vec<&str>, Vec<InputFile>) = m
+            .items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Packed)
+            .map(|i| {
+                let rel = PathBuf::from(&i.key);
+                let f = InputFile {
+                    path: root.join(&rel),
+                    output: out_root.join(&rel).with_extension("dds"),
+                    game_path: String::new(),
+                    rel,
+                    kind: if i.kind == ItemKind::Dds {
+                        InputKind::Dds
+                    } else {
+                        InputKind::Image
+                    },
+                    real_rel: None,
+                };
+                (i.key.as_str(), f)
+            })
+            .unzip();
+        let aliases = m
+            .project
+            .as_ref()
+            .map(|p| p.read_as_all())
+            .unwrap_or_default();
+        apply_read_as(&mut list, root, out_root, &aliases);
+        canonicalise_outputs(&mut list, &m.suffix_aliases);
+        Some(DefaultOutputs {
+            out_root,
+            root,
+            files: keys.into_iter().map(String::from).zip(list).collect(),
+        })
+    }
+
+    /// `item`'s default output key; `None` for a packed output without a job or a known first source.
+    pub fn key(&self, item: &TextureItem) -> Option<String> {
+        let output = if item.kind == ItemKind::Packed {
+            let pk = item.job.as_ref()?.pack.as_ref()?;
+            let first = pk.sources.first()?.path.strip_prefix(self.root).ok()?;
+            let first = self
+                .files
+                .get(first.to_string_lossy().replace('\\', "/").as_str())?;
+            engine::pack::plan::virtual_input(first, pk.kind).output
+        } else {
+            self.files.get(&item.key)?.output.clone()
+        };
+        Some(engine::manifest::output_key(self.out_root, &output))
+    }
+}
 /// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
 /// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
 /// (`group::member_split`). `""` for the colour member.
@@ -1156,6 +1352,7 @@ pub fn member_tail(stem: &str, skin: bool) -> &str {
         } else {
             BTreeSet::new()
         },
+        shared_skin: false,
     };
     let base = member_split(stem, &set, &BTreeMap::new()).base;
     // The base is a prefix of `stem`, so the cut is on a char boundary.
@@ -1242,10 +1439,18 @@ pub fn borrowed_normal(m: &AppModel) -> BTreeMap<String, String> {
 /// Entry id → the saved shader choice (M6, `BatchRequest::set_shaders`).
 pub fn set_shaders(m: &AppModel) -> BTreeMap<String, Shader> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    entries
+    let mut out: BTreeMap<String, Shader> = entries
         .iter()
         .filter_map(|e| Some((e.id.clone(), e.shader?)))
-        .collect()
+        .collect();
+    // Note HG (R7): a set with no colour map, mapped to a record whose colour a skin set writes, is skin too. A
+    // `shader` the user chose is in `out` already and wins.
+    if entries.iter().any(|e| e.txst.is_some()) {
+        for id in record_shared_sets(m, &views(m)) {
+            out.entry(id).or_insert(Shader::AdvancedSkin);
+        }
+    }
+    out
 }
 
 /// Note BM: the ids of the sets with a `[sets.cs_txst]` block (sent as `BatchRequest::cs_txst_sets`).
@@ -1327,15 +1532,24 @@ pub(crate) mod linear {
         let (edits, _) = super::engine_inputs(m);
         let mut paths = BTreeMap::new();
         let views = views(m);
-        let named = output_name_paths(m, &views);
-        if m.target != Target::Cs {
+        let mut named = output_name_paths(m, &views);
+        let record = record_paths(m, &views);
+        let cs = m.target == Target::Cs;
+        if !cs && record.is_empty() {
             paths.extend(named);
             return (edits, paths);
         }
-        let candidates = output_candidates(m, &views);
+        named.retain(|(k, _)| !record.iter().any(|(r, _)| r == k));
+        let mut candidates = if cs {
+            output_candidates(m, &views)
+        } else {
+            vec![]
+        };
+        candidates.retain(|(_, k, _)| !record.iter().any(|(r, _)| r == k));
         let explicit = |k: &OutputKey| {
             candidates.iter().any(|(_, c, _)| c == k)
                 || named.iter().any(|(c, _)| c == k)
+                || record.iter().any(|(c, _)| c == k)
                 || m.last_inputs
                     .as_ref()
                     .is_some_and(|l| l.output_paths.contains_key(k))
@@ -1353,10 +1567,17 @@ pub(crate) mod linear {
         let mut seen = BTreeSet::new();
         let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
         for (_, key, rel) in named.chain(candidates) {
-            if mirrored.contains(&rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
-                continue;
+            let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+            if !cs {
+                seen.insert(low);
+                paths.insert(key, rel);
+            } else if !mirrored.contains(&low) && seen.insert(low) {
+                paths.insert(key, rel);
             }
-            if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+        }
+        for (key, rel) in record {
+            let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+            if !mirrored.contains(&low) && seen.insert(low) {
                 paths.insert(key, rel);
             }
         }
@@ -1433,7 +1654,7 @@ pub enum SlotCommand {
     Clear,
 }
 
-const READ_ONLY: &str = "sdc-project.toml is read-only";
+pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
 const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.
@@ -1640,12 +1861,43 @@ impl AppModel {
         if !v.borrows_slot(n) {
             return Err(format!("slot {n} of {} borrows nothing", v.id));
         }
+        // Note HG: a record fill is turned off; there is no borrow line to drop.
+        let fill = v.filled.contains_key(&n);
         let id = v.id;
         self.edit_docs(
             &format!("Clear slot {n} of {id}"),
             None,
             true,
-            move |_, s| s.set_borrow(&id, n, None),
+            move |_, s| {
+                if fill {
+                    s.set_no_fill(&id, n, true);
+                } else {
+                    s.set_borrow(&id, n, None);
+                }
+            },
+        );
+        Ok(())
+    }
+
+    /// Note HG: turn slot `n`'s record fill of set `set` back on (the `no_fill` key removed), re-planned. Refused on a
+    /// pinned slot, a read-only `sdc-project.toml`, and a slot whose fill is not off.
+    pub fn restore_fill(&mut self, set: &str, n: u8) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
+        if v.locks.contains(&n) {
+            return Err(SLOT_LOCKED.into());
+        }
+        if !v.fill_off.contains_key(&n) {
+            return Err(format!("slot {n} of {} is not turned off", v.id));
+        }
+        let id = v.id;
+        self.edit_docs(
+            &format!("Use slot {n} from the record"),
+            None,
+            true,
+            move |_, d| d.set_no_fill(&id, n, false),
         );
         Ok(())
     }
@@ -1842,7 +2094,8 @@ impl AppModel {
             ),
             // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
             DropChoice::Share
-                if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail)) && !target.skin =>
+                if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail))
+                    && !(target.skin || target.shared) =>
             {
                 Err(format!(
                     "{} is not an Advanced skin set; only those use a wet or detail map",
@@ -2510,6 +2763,17 @@ impl AppModel {
         // Note HC7: `slotN` alone leaves a borrow in the slot. The plan reads borrows (the bake), so this one re-plans.
         let borrower = self.view_of(set).filter(|v| v.borrows_slot(slot));
         if let (Some(v), SlotCommand::FromSet | SlotCommand::Clear) = (borrower, &cmd) {
+            // Note HG: a record fill is turned off, not written as a setting (`slotN = ""` is a PGPatcher command).
+            if v.filled.contains_key(&slot) {
+                let id = v.id;
+                self.edit_docs(
+                    &format!("Clear slot {slot} of {id}"),
+                    None,
+                    true,
+                    move |_, d| d.set_no_fill(&id, slot, true),
+                );
+                return Ok(());
+            }
             let id = v.id;
             self.edit_docs(
                 &format!("Clear slot {slot} of {id}"),

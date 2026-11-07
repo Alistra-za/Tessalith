@@ -1222,6 +1222,7 @@ pub(crate) fn join_members(
     aliases: &BTreeMap<String, String>,
     ctx: &ResolveCtx,
     hand: &[Option<crate::helper::HelperRole>],
+    explicit: &BTreeMap<String, Shader>,
 ) {
     // Note DY: a hand-set helper with no recognised suffix (`x_mask`) joins set `x` when it exists.
     crate::group::join_helpers(sets, files, aliases, |i| {
@@ -1229,9 +1230,10 @@ pub(crate) fn join_members(
     });
     // Final review I3 (DECISIONS Note R): `x_wet` joins set `x` as its skin `_wet` member only on cs and only
     // when `x` is Advanced skin. Before set edits, so they see the joined set like any automatic one.
-    // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here; move the explicit shaders up
-    // if such a project needs its `_wet` joined.
+    // shortcut: a set skin only by its chosen shader (Note DV7) is not seen here, unless it is shared (Note HG2, which
+    // `set_is_advanced_skin` reads); use `explicit` here too if such a project needs its `_wet` joined.
     if ctx.target == Target::Cs {
+        crate::group::mark_shared_skin(sets, files, aliases, explicit);
         let is_skin = |s: &TextureSet| {
             s.members
                 .first()
@@ -1569,7 +1571,15 @@ impl Engine {
         // The skeleton keeps the grouping before the joins, so a patch can rerun them (fast re-plan).
         let grouped = sets.clone();
         drop_typed_roles(&mut sets, &files, &typed);
-        join_members(&mut sets, &files, registry.alias_table(), &ctx, &hand);
+        let explicit = pre_edit_shaders(req, &sets);
+        join_members(
+            &mut sets,
+            &files,
+            registry.alias_table(),
+            &ctx,
+            &hand,
+            &explicit,
+        );
         let joined = sets.clone();
         let stale = crate::sets::apply_set_edits(
             &mut sets,
@@ -1581,6 +1591,11 @@ impl Engine {
         );
         // A touched set's suffixes were rebuilt from its members' names.
         drop_typed_roles(&mut sets, &files, &typed);
+        // Note HG2: decided on the edited sets, so a created or renamed set is shared by the same rule.
+        if target == Target::Cs {
+            let (explicit, _) = explicit_shaders(req, &sets);
+            crate::group::mark_shared_skin(&mut sets, &files, registry.alias_table(), &explicit);
+        }
         for s in &stale {
             rep.emit(
                 None,
@@ -2787,16 +2802,19 @@ impl Engine {
             let mut warnings = vec![];
             if let Some(p) = &pick {
                 warnings = crate::shader::pick_notes(p, target);
-                let maps = map_members(
-                    &ctx,
-                    set,
-                    files,
-                    &index,
-                    &skipped,
-                    registry.alias_table(),
-                    target,
-                );
-                warnings.extend(crate::shader::check_maps(p, target, &maps));
+                // Note HG2: a shared set holds only the maps other skin sets use, so no map is missing or extra.
+                if !set.shared_skin {
+                    let maps = map_members(
+                        &ctx,
+                        set,
+                        files,
+                        &index,
+                        &skipped,
+                        registry.alias_table(),
+                        target,
+                    );
+                    warnings.extend(crate::shader::check_maps(p, target, &maps));
+                }
             }
             rep.emit(
                 Some(&set.key),
@@ -3416,6 +3434,45 @@ pub(crate) fn explicit_shaders(
         }
     }
     (out, stale)
+}
+
+/// [`explicit_shaders`] for the sets before set edits (Note HG2): a shader stored under a Rename's new id also names
+/// the set it renames, unless that id is taken, which makes the Rename stale. `prepare` and a fast re-plan's rerun of
+/// the joins both ask this, so they agree.
+// shortcut: a Rename's target is checked against the pre-edit sets, not the sets as the earlier edits leave them, so
+// renames in an order that frees and then takes a name (`a` -> `c`, then `b` -> `a`) lend the shader to the wrong set
+// and leave its `_wet` typing undecided. Only a hand-edited project reaches this; walk the edits in order if the GUI
+// ever writes such a sequence.
+pub(crate) fn pre_edit_shaders(
+    req: &BatchRequest,
+    sets: &[TextureSet],
+) -> BTreeMap<String, Shader> {
+    let (mut out, _) = explicit_shaders(req, sets);
+    let root = &req.output_root;
+    for s in sets {
+        let mut after = s.key.clone();
+        for e in &req.set_edits {
+            if let crate::sets::SetEdit::Rename { from, to } = e {
+                let to = crate::sets::set_key(root, to);
+                if after == crate::sets::set_key(root, from) && !sets.iter().any(|t| t.key == to) {
+                    after = to;
+                }
+            }
+        }
+        if after != s.key {
+            let renamed = TextureSet {
+                key: after,
+                members: vec![],
+                suffixes: BTreeSet::new(),
+                shared_skin: false,
+            };
+            let (found, _) = explicit_shaders(req, std::slice::from_ref(&renamed));
+            if let Some(&shader) = found.get(&renamed.key) {
+                out.insert(s.key.clone(), shader);
+            }
+        }
+    }
+    out
 }
 
 /// The members the shader map check sees (spec §5): each non-raw member with its ordinary job (or as a kept DDS

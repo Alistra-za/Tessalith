@@ -193,7 +193,7 @@ fn build_plan(m: &AppModel) -> Plan {
             .members
             .iter()
             .any(|k| job(k).is_some_and(|j| skin_only(j.profile.subtype)));
-        if !v.skin && !has_skin_member {
+        if v.shared || (!v.skin && !has_skin_member) {
             continue;
         }
         let mut skip = |s| p.skips.push((v.id.clone(), v.key.clone(), s));

@@ -654,7 +654,7 @@ fn read_lists_the_slots_a_mesh_or_txst_fills_beside_a_diffuse() {
              INSERT INTO rec_winner(formid, plugin_id, n_overrides) VALUES (100, 2, 2), (200, 2, 1);
              INSERT INTO txst_slot(formid, local, plugin_id, slot, path_id) VALUES
                (100, 100, 1, 0, 9), (100, 100, 1, 1, 10),
-               (100, 100, 2, 0, 6), (100, 100, 2, 1, 7), (100, 100, 2, 3, 8),
+               (100, 100, 2, 0, 6), (100, 100, 2, 1, 7), (100, 100, 2, 4, 8),
                (200, 200, 2, 0, 11), (200, 200, 2, 1, 12);",
         )
         .unwrap();

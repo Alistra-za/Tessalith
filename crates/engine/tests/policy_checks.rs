@@ -69,6 +69,7 @@ fn run_info(
         key: "k".into(),
         members: vec![0],
         suffixes: sets.iter().map(|s| s.to_string()).collect(),
+        shared_skin: false,
     };
     let a = analyse(&img, info);
     resolve_file(
@@ -339,6 +340,7 @@ fn run_with(
         key: "k".into(),
         members: vec![0],
         suffixes: suffix.iter().map(|s| s.to_string()).collect(),
+        shared_skin: false,
     };
     let a = analyse(&opaque(), &RGBA8);
     resolve_file(
@@ -813,6 +815,7 @@ fn preset_alpha_policy_counts_as_explicit() {
         key: "k".into(),
         members: vec![0],
         suffixes: BTreeSet::new(),
+        shared_skin: false,
     };
     let a = analyse(&img, &RGBA8);
     let facts = FileFacts {
@@ -999,6 +1002,7 @@ fn resolve_in(ctx: &ResolveCtx, rel: &str, suffix: Option<&str>, img: &Rgba32F) 
         key: "k".into(),
         members: vec![0],
         suffixes: suffix.iter().map(|s| s.to_string()).collect(),
+        shared_skin: false,
     };
     let a = analyse(img, &RGBA8);
     resolve_file(
@@ -2679,6 +2683,7 @@ fn cube_src_named(
         key: "k".into(),
         members: vec![0],
         suffixes: BTreeSet::from(["e".to_string()]),
+        shared_skin: false,
     };
     let mut a = analyse(&Rgba32F::new(w, h, [0.5, 0.4, 0.3, 1.0]), &info);
     tweak(&mut a);
