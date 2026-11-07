@@ -326,6 +326,9 @@ pub struct SetView {
     pub pbr: bool,
     /// The diffuse resolves to `skin_albedo`: an Advanced skin set (no JSON, the skin card, AG90).
     pub skin: bool,
+    /// A shared skin set (Note HG): marked Advanced skin, holding no diffuse and no Rmaos, only the maps other skin
+    /// sets use. Derived in the GUI by [`is_shared`].
+    pub shared: bool,
     /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
     pub rfaos: bool,
     pub created: bool,
@@ -359,6 +362,7 @@ impl SetView {
             slots: BTreeMap::new(),
             pbr: false,
             skin: false,
+            shared: false,
             rfaos: false,
             created: false,
             missing: vec![],
@@ -422,7 +426,9 @@ pub const BADGE_PBR_LANDSCAPE_NONE: &str = "PBR Landscape (no JSON yet)";
 /// The Sets column badge. A PBR Landscape set's says what it writes (Note BM, review I2): CS records when a block
 /// has an EDID, the PGPatcher entry when the set is a PGPatcher JSON set its statics rule keeps.
 pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
-    if v.skin {
+    if v.shared {
+        "shared skin maps (no JSON)"
+    } else if v.skin {
         "Advanced skin"
     } else if is_pbr_landscape(v) {
         match (m.cs_records_written(v), m.pgp_written(v)) {
@@ -443,7 +449,9 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
 
 /// Layout v2 A5: the short kind on the set card's pill (`badge_text` is its hover).
 pub fn kind_text(m: &AppModel, v: &SetView) -> &'static str {
-    if v.skin {
+    if v.shared {
+        "shared"
+    } else if v.skin {
         "skin"
     } else if is_pbr_landscape(v) {
         "PBR Landscape"
@@ -567,6 +575,33 @@ pub fn slot_row(pick: Option<&ShaderPick>, slots: &BTreeMap<SlotKind, SlotFill>)
         }
     }
     cells
+}
+
+/// Note HG4: a shared set shows only the maps other skin sets use; its diffuse and `_rfaos` cards are not drawn.
+pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
+    if !v.shared {
+        return cells;
+    }
+    cells
+        .into_iter()
+        .filter(|c| {
+            matches!(
+                c.kind,
+                SlotKind::Normal | SlotKind::SkinSk | SlotKind::SkinWet | SlotKind::SkinDetail
+            )
+        })
+        .collect()
+}
+
+/// A shared skin set: marked Advanced skin, no diffuse and no Rmaos, with members. A lone `_rfaos` is not shared.
+fn is_shared(v: &SetView) -> bool {
+    v.shader
+        .as_ref()
+        .is_some_and(|p| p.shader == Shader::AdvancedSkin)
+        && !v.members.is_empty()
+        && ![SlotKind::Diffuse, SlotKind::Rmaos]
+            .iter()
+            .any(|k| v.slots.get(k).is_some_and(SlotFill::is_filled))
 }
 
 /// Note AO: why a card's slot is in conflict (both kinds of slot 3 or 7 filled), if it is.
@@ -857,6 +892,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     // AG90: everything that reads `pbr` is PGPatcher JSON (entries, blocks, pitfalls, prefixes, ownership, rename).
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
+    v.shared = is_shared(v);
     // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
     v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
         Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
@@ -1122,7 +1158,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             if item.job.is_none() || item.job_key.is_empty() {
                 continue;
             }
-            let Some(rel) = renamed_output(&item.job_key, name, v.skin) else {
+            let Some(rel) = renamed_output(&item.job_key, name, v.skin || v.shared) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1843,7 +1879,8 @@ impl AppModel {
             ),
             // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
             DropChoice::Share
-                if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail)) && !target.skin =>
+                if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail))
+                    && !(target.skin || target.shared) =>
             {
                 Err(format!(
                     "{} is not an Advanced skin set; only those use a wet or detail map",

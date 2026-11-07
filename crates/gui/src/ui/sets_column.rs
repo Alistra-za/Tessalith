@@ -8,8 +8,8 @@ use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, shader_options, slot_row, DropChoice, DropOutcome,
-    FillProposal, Missing, SetView, SlotFill, SlotKind,
+    badge_text, fill_proposals, kind_text, shader_options, shared_cells, slot_row, DropChoice,
+    DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
 use crate::model::AppModel;
 use eframe::egui;
@@ -109,7 +109,7 @@ const CARD_EST: f32 = 110.0;
 /// Note FM32: the rows `v`'s chips wrap into at column width `width` (`frame_x` is the card's side margins, `gap` the
 /// chip spacing). A count from the set's slot row, its missing entries and its extra members, not a layout.
 fn chip_rows(v: &SetView, width: f32, frame_x: f32, gap: f32) -> usize {
-    let chips = slot_row(v.shader.as_ref(), &v.slots).len()
+    let chips = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)).len()
         + v.missing.len()
         + v.members.len().saturating_sub(v.slots.len());
     let per_row = ((width - frame_x + gap) / (CHIP + gap)).floor().max(1.0) as usize;
@@ -1232,7 +1232,7 @@ fn pill(
                         ui.weak("Drop a texture here to start");
                     }
                     ui.horizontal_wrapped(|ui| {
-                        let row = slot_row(v.shader.as_ref(), &v.slots);
+                        let row = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
                         let mut chipped: HashSet<&str> = HashSet::new();
                         for cell in &row {
                             let k = cell.kind;

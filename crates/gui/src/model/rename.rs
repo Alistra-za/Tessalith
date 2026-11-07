@@ -291,7 +291,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
     // The members of Advanced skin sets: their `_wet` and `_detail_n` are tails (`member_tail`).
     let skin: HashSet<&str> = views
         .iter()
-        .filter(|v| v.skin)
+        .filter(|v| v.skin || v.shared)
         .flat_map(|v| v.members.iter().map(String::as_str))
         .collect();
     let project = m.project.as_ref();
@@ -459,7 +459,7 @@ fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<Rename
         r.problem = check_output_name(&new).err();
         let renamed: Vec<String> = outputs
             .iter()
-            .filter_map(|(_, jk)| renamed_output(jk, &new, v.skin))
+            .filter_map(|(_, jk)| renamed_output(jk, &new, v.skin || v.shared))
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .collect();
         r.output = match renamed.len() {
@@ -528,7 +528,7 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
             continue;
         };
         for (_, jk) in &outs[at] {
-            let Some(p) = renamed_output(jk, &r.new, views[at].skin) else {
+            let Some(p) = renamed_output(jk, &r.new, views[at].skin || views[at].shared) else {
                 continue;
             };
             let l = lower(&p.to_string_lossy());
