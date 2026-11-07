@@ -207,6 +207,31 @@ pub fn harness(m: AppModel) -> H {
     h
 }
 
+/// `harness` without wgpu: the same size, pixels per point, theme, OS and fonts, for runs that need no pixels from
+/// the GPU (the 2D preview and 3D views are then off). `h.render()` is not available on it.
+pub fn plain_harness(m: AppModel) -> H {
+    let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
+    let mut app = SdcApp::new(m);
+    app.meshes.procs = sdc_gui::model::meshes::no_procs;
+    let mut frame = eframe::Frame::_new_kittest();
+    let theme = if render.theme == "light" {
+        egui::Theme::Light
+    } else {
+        egui::Theme::Dark
+    };
+    let h = Harness::builder()
+        .with_size(egui::vec2(render.size[0] as f32, render.size[1] as f32))
+        .with_pixels_per_point(render.pixels_per_point)
+        .with_theme(theme)
+        .with_os(egui::os::OperatingSystem::Windows)
+        .build_ui_state(
+            move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
+            app,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
 /// Frames with real time between them, so workers (thumbnails, previews, plans) land.
 pub fn settle(h: &mut H, frames: usize) {
     for _ in 0..frames {

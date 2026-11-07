@@ -1,14 +1,31 @@
 //! The UI driver's own tests, on tiny UIs. The journeys that drive the real app come later.
+#![allow(dead_code)] // the shared manifest has fields only the doc shots read
 
+mod app_harness;
+#[path = "ui_drive/fixtures.rs"]
+mod fixtures;
 #[path = "ui_drive/frame.rs"]
 mod frame;
+#[path = "doc_shots/manifest.rs"]
+mod manifest;
 #[path = "ui_drive/steps.rs"]
 mod steps;
+mod support;
 
 use eframe::egui::{self, vec2, Key, Modifiers};
 use egui_kittest::Harness;
 use frame::{snapshot, tree_text};
 use steps::{find, parse_key, parse_script, ui_step, Step, Target};
+
+/// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
+fn app_data() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let d = tempfile::tempdir().unwrap();
+        app_harness::redirect_app_data(d.path());
+        d
+    });
+}
 
 #[derive(Default)]
 struct Tiny {
@@ -297,4 +314,78 @@ fn an_index_with_no_match_still_lists_labels() {
         e.contains("no node labelled \"Open\"") && e.contains("Open folder…"),
         "{e}"
     );
+}
+
+#[test]
+fn the_driver_picker_answers_in_order_then_cancels() {
+    use sdc_gui::model::picker::{PickerBackend, PickerSpec};
+    let p = fixtures::DriverPicker::default();
+    p.queue("a".into());
+    p.queue("b".into());
+    let spec = PickerSpec::folder();
+    assert_eq!(p.pick(&spec), Some("a".into()));
+    assert_eq!(p.pick(&spec), Some("b".into()));
+    assert_eq!(p.pick(&spec), None);
+    let asked = p.asked.lock().unwrap();
+    assert_eq!(asked.len(), 3);
+    assert!(asked[2].ends_with("cancel"), "{asked:?}");
+}
+
+#[test]
+fn pick_refuses_paths_outside_the_fixture() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, run) = fixtures::start("demo", d.path(), false).unwrap();
+    for bad in [r"..\x", r"C:\x", r"\x", r"a\..\..\x"] {
+        let step = Step::Pick { path: bad.into() };
+        let e = fixtures::app_step(&mut h, &run, &step).unwrap_err();
+        assert!(e.contains("inside the fixture folder"), "{bad}: {e}");
+    }
+    let step = Step::Pick {
+        path: "export2".into(),
+    };
+    fixtures::app_step(&mut h, &run, &step).unwrap();
+}
+
+#[test]
+fn explorer_requests_are_recorded_not_spawned() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _run) = fixtures::start("demo", d.path(), false).unwrap();
+    let file = d.path().join("textures/armor/steel.png");
+    h.state_mut().model.reveal(&file).unwrap();
+    app_harness::settle(&mut h, 2);
+    let log = h.state().shell_log.clone().unwrap();
+    assert_eq!(log, vec![sdc_gui::model::shell::ShellRequest::Reveal(file)]);
+}
+
+#[test]
+fn the_open_folder_entry_asks_the_fake_dialog() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, run) = fixtures::start("demo", d.path(), false).unwrap();
+    let root = h.state().model.root.clone();
+    assert!(root.is_some());
+    for line in [
+        r#"{"op":"click","at":{"label":"Open"}}"#,
+        r#"{"op":"click","at":{"label":"Open folder…"}}"#,
+    ] {
+        let s = parse_script(line).unwrap();
+        fixtures::app_step(&mut h, &run, &s[0].1).unwrap();
+    }
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.state().model.picker.busy() {
+        assert!(std::time::Instant::now() < end, "the picker never finished");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app_harness::settle(&mut h, 2);
+    assert_eq!(run.picker.asked.lock().unwrap().len(), 1);
+    assert_eq!(h.state().model.root, root, "the fake answered Cancel");
+}
+
+#[test]
+fn an_unknown_fixture_lists_the_known_ones() {
+    let d = tempfile::tempdir().unwrap();
+    let e = fixtures::start("nope", d.path(), false).err().unwrap();
+    assert!(e.contains("nope") && e.contains("demo"), "{e}");
 }
