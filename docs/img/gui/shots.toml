@@ -200,12 +200,6 @@ scenario = "rename_outputs"
 used_by = ["GUI-Bulk-and-Rename.md"]
 
 [[shot]]
-id = "generate-dialog"
-page = "GUI-Generate-From-Normal"
-scenario = "generate_dialog"
-used_by = ["GUI-Generate-From-Normal.md"]
-
-[[shot]]
 id = "marker-dialog"
 page = "GUI-Helpers-RNM-and-Cubemaps"
 scenario = "marker_dialog"
