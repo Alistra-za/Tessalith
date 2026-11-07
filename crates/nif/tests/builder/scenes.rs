@@ -313,7 +313,7 @@ pub fn managed_clip_special_idle() -> Vec<u8> {
 /// manager-controlled LSCF var 11 (4, flags 0x68, NiBlendFloatInterpolator 6) -> LSCF var 20 (5, blend 7) ;
 /// NiFloatInterpolator 0.0 (8, 9) over NiFloatData LINEAR (0, 0) (1, 1) (10, 11) ; NiTextKeyExtraData (12) ;
 /// NiControllerSequence `name` (13; one CB per controller, bound by ref; Loop, 1, 0..1) ; NiControllerManager (14)
-/// listing it.
+/// listing it, with NiMultiTargetTransformController (15, targets [2]) and NiDefaultAVObjectPalette (16, "S" -> 2).
 pub fn idle_clip(name: &str) -> Vec<u8> {
     let mut n = Nif::new(100);
     let s = |n: &mut Nif, x: &str| n.string(x);
@@ -381,7 +381,15 @@ pub fn idle_clip(name: &str) -> Vec<u8> {
     );
     n.block(
         "NiControllerManager",
-        ctrl_body(-1, 0x48, 0, W::default().u8(0).u32(1).i32(13).i32(-1)),
+        ctrl_body(15, 0x48, 0, W::default().u8(0).u32(1).i32(13).i32(16)),
+    );
+    n.block(
+        "NiMultiTargetTransformController",
+        ctrl_body(-1, 0x48, 0, W::default().u16(1).i32(2)),
+    );
+    n.block(
+        "NiDefaultAVObjectPalette",
+        W::default().i32(0).u32(1).sized("S").i32(2).0,
     );
     n.bytes()
 }

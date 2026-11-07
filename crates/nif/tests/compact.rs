@@ -106,7 +106,7 @@ fn run(src: &[u8], steps: &[Step]) -> Vec<u8> {
     cur
 }
 
-/// The scenario on `idle_clip("Clip")` (15 blocks; the first `SRC` are the source: Root, BSXFlags, shape S, its
+/// The scenario on `idle_clip("Clip")` (17 blocks; the first `SRC` are the source: Root, BSXFlags, shape S, its
 /// BSLSP). Add + remove a controller; add one, edit the clip's keys, remove the controller; add one and edit the
 /// clip's keys again.
 fn owner_scenario() -> (Vec<u8>, Vec<u8>) {
@@ -189,17 +189,17 @@ fn summary(b: &[u8]) -> Vec<String> {
 #[test]
 fn owner_scenario_keeps_only_live_appended_blocks() {
     let (src, out) = owner_scenario();
-    assert_eq!(nblocks(&src), 15);
+    assert_eq!(nblocks(&src), 17);
     assert_eq!(
         nblocks(&out),
-        24,
+        26,
         "the uncompacted export: three added controllers of three blocks each"
     );
     let c = compact(&out, SRC).unwrap();
-    // the 15 source blocks (4 source + the clip's 11) and the last added controller, its interpolator and data
-    assert_eq!(nblocks(&c), 18);
+    // the 17 source blocks (4 source + the clip's 13) and the last added controller, its interpolator and data
+    assert_eq!(nblocks(&c), 20);
     let h = Header::parse(&c).unwrap();
-    let kinds: Vec<String> = (4..18)
+    let kinds: Vec<String> = (4..20)
         .map(|i| String::from_utf8_lossy(h.kind(i)).into_owned())
         .collect();
     assert_eq!(
@@ -216,6 +216,8 @@ fn owner_scenario_keeps_only_live_appended_blocks() {
             "NiTextKeyExtraData",
             "NiControllerSequence",
             "NiControllerManager",
+            "NiMultiTargetTransformController",
+            "NiDefaultAVObjectPalette",
             "NiFloatData",
             "NiFloatInterpolator",
             LSCF,
@@ -307,16 +309,16 @@ fn hostile_input_never_panics_and_refuses() {
         assert!(compact(&g, 4).is_err(), "garbled block {block}");
     }
     // a source count past the file
-    assert!(compact(&out, 25).is_err());
+    assert!(compact(&out, 27).is_err());
     // a footer root is a ref: an appended block it names stays, renumbered
     let mut g = out.clone();
     let at = h.footer_at + 4;
-    assert_eq!(h.kind(16), b"NiFloatInterpolator");
-    g[at..at + 4].copy_from_slice(&16i32.to_le_bytes()); // the first, orphaned controller's interpolator
+    assert_eq!(h.kind(18), b"NiFloatInterpolator");
+    g[at..at + 4].copy_from_slice(&18i32.to_le_bytes()); // the first, orphaned controller's interpolator
     let c = compact(&g, 4).unwrap();
     let hc = Header::parse(&c).unwrap();
     let root = hc.roots(&c).unwrap()[0] as usize;
-    assert_eq!(root, 16); // after the 11 appended blocks the source root names (4..14) and its data (15)
+    assert_eq!(root, 18); // after the 13 appended blocks the source root names (4..16) and its data (17)
     assert_eq!(
         (hc.kind(root - 1), hc.kind(root)),
         (&b"NiFloatData"[..], &b"NiFloatInterpolator"[..])
