@@ -593,15 +593,29 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
         .collect()
 }
 
-/// A shared skin set: marked Advanced skin, no diffuse and no Rmaos, with members. A lone `_rfaos` is not shared.
+/// A shared skin set: marked Advanced skin, with members, and every one of them a map a shared set may hold. That
+/// is the engine's rule (`group::unmark_shared_after_edits`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
+/// unmarked after a hand edit (a `_p`, a diffuse, an `_rfaos`) is not shared here either. A lone `_rfaos` is not shared.
 fn is_shared(v: &SetView) -> bool {
+    let allowed = |k: &SlotKind| {
+        matches!(
+            k,
+            SlotKind::Normal | SlotKind::SkinSk | SlotKind::SkinWet | SlotKind::SkinDetail
+        )
+    };
     v.shader
         .as_ref()
         .is_some_and(|p| p.shader == Shader::AdvancedSkin)
         && !v.members.is_empty()
-        && ![SlotKind::Diffuse, SlotKind::Rmaos]
+        && v.slots
             .iter()
-            .any(|k| v.slots.get(k).is_some_and(SlotFill::is_filled))
+            .all(|(k, f)| allowed(k) || !f.is_filled())
+        // Every member sits in one of those slots: a member with no slot is some other kind of map.
+        && v.members.iter().all(|m| {
+            v.slots
+                .iter()
+                .any(|(k, f)| allowed(k) && f.item() == Some(m.as_str()))
+        })
 }
 
 /// Note AO: why a card's slot is in conflict (both kinds of slot 3 or 7 filled), if it is.

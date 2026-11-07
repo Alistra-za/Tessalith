@@ -2,7 +2,7 @@
 //! skin sets use. The GUI shows it as shared, with only those maps, and writes no `.csskin.json` for it.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use image::{ImageBuffer, Rgb};
 use sdc_gui::model::bottom::problems;
@@ -169,6 +169,21 @@ fn a_wet_member_of_a_shared_set_keeps_its_tail() {
         .unwrap_or_else(|| panic!("{:?}", p.rows));
     assert_eq!(r.new, "textures/s/x2_wet.png");
     assert_eq!(r.kind, Some(("_wet".to_string(), "_wet".to_string())));
+    // Apply: the saved input mapping and the re-planned output keep the tail.
+    let mut m = m;
+    m.dialog = Some(sdc_gui::model::Dialog::Rename(dlg));
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(
+        m.read_as_of("textures/s/x_wet.png").as_deref(),
+        Some("textures/s/x2_wet.png")
+    );
+    let out = m
+        .item("textures/s/x_wet.png")
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.to_string_lossy().replace('\\', "/"))
+        .expect("the wet job");
+    assert!(out.ends_with("x2_wet.dds"), "{out}");
 }
 
 #[test]
@@ -191,6 +206,93 @@ fn a_wet_can_be_dropped_on_a_shared_set() {
     assert!(matches!(out, DropOutcome::Joined), "{out:?}");
     idle(&mut m);
     assert!(view(&m, X).slots.contains_key(&SlotKind::SkinWet));
+}
+
+/// A shared set `x` (with its own `_wet`), a skin set `rock` and an ordinary set `plain`.
+fn with_neighbours(dir: &Path) -> AppModel {
+    project(
+        dir,
+        &[
+            "textures/s/x_normal.png",
+            "textures/s/x_sk.png",
+            "textures/s/x_wet.png",
+            "textures/s/rock.png",
+            "textures/s/rock_rfaos.png",
+            "textures/s/rock_wet.png",
+            "textures/s/plain.png",
+        ],
+    )
+}
+
+#[test]
+fn a_wet_is_still_refused_on_an_ordinary_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_neighbours(d.path());
+    assert!(!view(&m, "textures/s/plain").skin && !view(&m, "textures/s/plain").shared);
+    let out = m.drop_choice(
+        "textures/s/rock_wet.png",
+        "textures/s/plain",
+        DropChoice::Share,
+    );
+    assert!(matches!(out, DropOutcome::Refused(_)), "{out:?}");
+}
+
+#[test]
+fn a_wet_on_an_occupied_shared_slot_asks_to_replace() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_neighbours(d.path());
+    assert!(view(&m, X).shared);
+    let out = m.drop_choice("textures/s/rock_wet.png", X, DropChoice::Share);
+    assert!(matches!(out, DropOutcome::AskReplace { .. }), "{out:?}");
+}
+
+#[test]
+fn a_set_given_a_height_map_is_no_longer_shared_and_shows_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared(d.path());
+    colour(d.path(), "textures/s/rock_p.png");
+    m.replan();
+    idle(&mut m);
+    m.edit_docs("add", None, true, |_, s| {
+        s.add_member(X, "textures/s/rock_p.png")
+    });
+    idle(&mut m);
+    let v = view(&m, X);
+    assert!(
+        v.members.iter().any(|k| k.ends_with("rock_p.png")),
+        "{:?}",
+        v.members
+    );
+    assert!(!v.shared, "{:?}", v.slots);
+    assert!(kinds(&v).contains(&SlotKind::Height), "{:?}", kinds(&v));
+}
+
+#[test]
+fn the_statics_choice_is_off_on_a_shared_set() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared(d.path());
+    m.add_cs_block(X, Kind::Txst);
+    m.set_cs_statics(X, Statics::Always);
+    let key = view(&m, X).key;
+    m.select_set(&key);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    h.get_by_label("CS PBR records").click();
+    h.run();
+    for name in ["auto", "always", "never"] {
+        let n = h
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, name)
+            .next()
+            .unwrap_or_else(|| panic!("no {name} button"));
+        assert!(n.accesskit_node().is_disabled(), "{name}");
+    }
+    assert_eq!(
+        h.query_all_by_label_contains("PGPatcher entry written")
+            .count(),
+        0
+    );
+    h.get_by_label(sdc_gui::ui::cs_pbr::SHARED_NO_PGP);
 }
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {

@@ -476,6 +476,9 @@ fn meshes(ui: &mut egui::Ui, v: &SetView, st: Option<&StaticsStatus>) {
     }
 }
 
+/// Why the statics choice is off on a shared set (Note HG4).
+pub const SHARED_NO_PGP: &str = "A shared set has no diffuse, so it writes no PGPatcher entry.";
+
 fn statics(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut Vec<Act>) {
     ui.horizontal(|ui| {
         ui.label("PGPatcher entry for statics:");
@@ -484,11 +487,18 @@ fn statics(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut
             (Statics::Always, "always"),
             (Statics::Never, "never"),
         ] {
-            if ui.selectable_label(b.statics == s, name).clicked() && b.statics != s {
+            let r = ui.add_enabled(!v.shared, egui::Button::selectable(b.statics == s, name));
+            let r = r.on_disabled_hover_text(SHARED_NO_PGP);
+            if r.clicked() && b.statics != s {
                 acts.push(Act::Statics(s));
             }
         }
     });
+    // A shared set has no diffuse, so no PGPatcher entry: the status line would claim one.
+    if v.shared {
+        ui.weak(SHARED_NO_PGP);
+        return;
+    }
     let st = m.statics_status(v);
     if let Some(s) = &st {
         ui.label(statics_text(s));
