@@ -164,7 +164,6 @@ fn cpu_first() -> egui_wgpu::NativeAdapterSelectorMethod {
 /// The real `SdcApp` through `eframe::App::ui`, with the app's device setup on kittest's adapter and the manifest's
 /// render settings.
 pub fn harness(m: AppModel) -> H {
-    let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
     let mut setup = sdc_gui::render::wgpu_configuration().wgpu_setup;
     if let egui_wgpu::WgpuSetup::CreateNew(ref mut c) = setup {
         c.native_adapter_selector = Some(cpu_first());
@@ -185,7 +184,14 @@ pub fn harness(m: AppModel) -> H {
         name.push_str(" (no BC textures: the 2D preview cannot draw)");
     }
     let _ = ADAPTER.set(name);
-    let mut app = SdcApp::new(m).with_render_state(Some(&rs));
+    let app = SdcApp::new(m).with_render_state(Some(&rs));
+    build(app, Some(rs))
+}
+
+/// The shared builder: the manifest's size, pixels per point and theme, Windows, the app's fonts; the GPU renderer
+/// when there is a render state.
+fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
+    let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     let mut frame = eframe::Frame::_new_kittest();
     let theme = if render.theme == "light" {
@@ -193,16 +199,18 @@ pub fn harness(m: AppModel) -> H {
     } else {
         egui::Theme::Dark
     };
-    let h = Harness::builder()
+    let mut b = Harness::builder()
         .with_size(egui::vec2(render.size[0] as f32, render.size[1] as f32))
         .with_pixels_per_point(render.pixels_per_point)
         .with_theme(theme)
-        .with_os(egui::os::OperatingSystem::Windows)
-        .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))
-        .build_ui_state(
-            move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
-            app,
-        );
+        .with_os(egui::os::OperatingSystem::Windows);
+    if let Some(rs) = rs {
+        b = b.renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs));
+    }
+    let h = b.build_ui_state(
+        move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
+        app,
+    );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
@@ -210,26 +218,7 @@ pub fn harness(m: AppModel) -> H {
 /// `harness` without wgpu: the same size, pixels per point, theme, OS and fonts, for runs that need no pixels from
 /// the GPU (the 2D preview and 3D views are then off). `h.render()` is not available on it.
 pub fn plain_harness(m: AppModel) -> H {
-    let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
-    let mut app = SdcApp::new(m);
-    app.meshes.procs = sdc_gui::model::meshes::no_procs;
-    let mut frame = eframe::Frame::_new_kittest();
-    let theme = if render.theme == "light" {
-        egui::Theme::Light
-    } else {
-        egui::Theme::Dark
-    };
-    let h = Harness::builder()
-        .with_size(egui::vec2(render.size[0] as f32, render.size[1] as f32))
-        .with_pixels_per_point(render.pixels_per_point)
-        .with_theme(theme)
-        .with_os(egui::os::OperatingSystem::Windows)
-        .build_ui_state(
-            move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
-            app,
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h
+    build(SdcApp::new(m), None)
 }
 
 /// Frames with real time between them, so workers (thumbnails, previews, plans) land.
