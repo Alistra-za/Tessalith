@@ -8,6 +8,10 @@ mod frame;
 #[allow(dead_code)] // fields only the doc shots read
 #[path = "doc_shots/manifest.rs"]
 mod manifest;
+#[path = "ui_drive/oracles.rs"]
+mod oracles;
+#[path = "ui_drive/state.rs"]
+mod state;
 #[path = "ui_drive/steps.rs"]
 mod steps;
 mod support;
@@ -15,7 +19,31 @@ mod support;
 use eframe::egui::{self, vec2, Key, Modifiers};
 use egui_kittest::Harness;
 use frame::{snapshot, tree_text};
+use sdc_gui::model::sets;
 use steps::{find, parse_key, parse_script, ui_step, Step, Target};
+
+/// A test that replays a step script on a fixture; see `run_journey`.
+macro_rules! journey {
+    ($name:ident, $fixture:literal, [$($step:literal),* $(,)?]) => {
+        #[test]
+        fn $name() {
+            crate::run_journey($fixture, &[$($step),*]);
+        }
+    };
+}
+
+/// Replays `lines` on `fixture` without wgpu; panics "step N `<line>`: <error>" at the first failing step.
+pub fn run_journey(fixture: &str, lines: &[&str]) {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
+    let script = parse_script(&lines.join("\n")).unwrap();
+    for (i, (line, step)) in script.iter().enumerate() {
+        if let Err(e) = fixtures::app_step(&mut h, &run, step) {
+            panic!("step {} `{line}`: {e}", i + 1);
+        }
+    }
+}
 
 /// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
 fn app_data() {
@@ -383,6 +411,99 @@ fn the_open_folder_entry_asks_the_fake_dialog() {
     assert_eq!(asked.len(), 1, "{asked:?}");
     assert_eq!(asked[0], "folder: cancel");
     assert_eq!(h.state().model.root, root, "the fake answered Cancel");
+}
+
+#[test]
+fn the_state_names_selection_dirt_and_outputs() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, run) = fixtures::start("demo", d.path(), false).unwrap();
+    // an unknown check names the known ones
+    let unknown = parse_script(r#"{"op":"check","name":"nope"}"#).unwrap();
+    let e = fixtures::app_step(&mut h, &run, &unknown[0].1).unwrap_err();
+    assert!(e.contains("sets_pills_match_their_counts"), "{e}");
+    let key = sets::views(&h.state().model)
+        .iter()
+        .find(|v| v.id == "architecture/stone/stonewall")
+        .unwrap()
+        .key
+        .clone();
+    h.state_mut().model.select_set(&key);
+    app_harness::settle(&mut h, 2);
+    let m = &h.state().model;
+    let s = state::state_json(m);
+    let at = |p: &str| s.pointer(p).unwrap_or_else(|| panic!("no {p} in {s}"));
+    assert_eq!(at("/selection"), "set:architecture/stone/stonewall");
+    assert!(at("/dirty").is_boolean());
+    assert_eq!(at("/review_open"), false);
+    let out = at("/items/architecture~1stone~1stonewall.png/output");
+    assert!(out.as_str().unwrap().ends_with("stonewall.dds"), "{out}");
+    assert!(at("/sets/architecture~1stone~1cobble/slots")
+        .as_object()
+        .unwrap()
+        .values()
+        .any(|v| v.as_str().unwrap().starts_with("own:")));
+    assert_eq!(at("/counts/sets"), sets::views(m).len());
+}
+
+#[test]
+fn expect_reads_equals_contains_and_absent() {
+    use serde_json::json;
+    use state::eval_expect as ev;
+    let s = json!({"a": [1, 2], "s": "hello", "o": {"k": 1}});
+    assert!(ev(&s, "/a", None, Some(&json!(2)), false).is_ok());
+    let e = ev(&s, "/a", None, Some(&json!(3)), false).unwrap_err();
+    assert!(e.contains("found [1,2]"), "{e}");
+    assert!(ev(&s, "/s", None, Some(&json!("ell")), false).is_ok());
+    assert!(ev(&s, "/o", None, Some(&json!("k")), false).is_ok());
+    assert!(ev(&s, "/nope", None, None, true).is_ok());
+    assert!(ev(&s, "/a", None, None, true).is_err());
+    assert!(ev(&s, "/s", Some(&json!("hello")), None, false).is_ok());
+    let e = ev(&s, "/s", Some(&json!("hello")), None, true).unwrap_err();
+    assert!(e.contains("exactly one"), "{e}");
+}
+
+#[test]
+fn filter_matches_names_wrong_rows_and_flags_hide_all_and_no_change() {
+    use oracles::filter_matches as fm;
+    let all: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+    let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(fm(&v(&["a"]), &all, |n| n == "a"), Ok(None));
+    let e = fm(&v(&["a", "b"]), &all, |n| n == "a").unwrap_err();
+    assert!(e.contains('b') && !e.contains("\"a\""), "{e}");
+    assert_eq!(
+        fm(&v(&[]), &all, |_| false),
+        Ok(Some("hides everything".into()))
+    );
+    assert_eq!(fm(&all, &all, |_| true), Ok(Some("changes nothing".into())));
+}
+
+journey!(
+    clicking_a_set_card_opens_the_set,
+    "demo",
+    [
+        r#"{"op":"click","at":{"label":"architecture/stone/stonewall"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"set:architecture/stone/stonewall"}"#
+    ]
+);
+
+journey!(
+    the_not_ready_pill_shows_what_it_counts,
+    "demo",
+    [
+        r#"{"op":"click","at":{"starts":"Not ready","role":"Button"}}"#,
+        r#"{"op":"check","name":"sets_pills_match_their_counts"}"#,
+        r#"{"op":"expect","fact":"/sets_filter/attention","equals":true}"#
+    ]
+);
+
+#[test]
+#[should_panic(expected = "expect /review_open")]
+fn a_false_expect_fails_the_journey() {
+    run_journey(
+        "demo",
+        &[r#"{"op":"expect","fact":"/review_open","equals":true}"#],
+    );
 }
 
 #[test]

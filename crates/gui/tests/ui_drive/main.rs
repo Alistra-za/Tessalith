@@ -4,8 +4,8 @@
 //!
 //! Usage:
 //!   cargo test --offline -p sdc-gui --test ui_drive -- --fixture <name> --script <steps.jsonl> --out <dir>
-//!       [--size <W>x<H>] [--theme dark|light]
-//!   cargo test --offline -p sdc-gui --test ui_drive -- --list      fixture names
+//!       [--size <W>x<H>] [--theme dark|light] [--goal '<one expect or check line>']
+//!   cargo test --offline -p sdc-gui --test ui_drive -- --list      fixture names, then `check <name>` lines
 //!   Any other arguments (cargo test's own, e.g. --skip render_): prints one line and exits 0.
 //! Exit 0: every step ran. 1: a step failed (its frame and run.json are still written). 2: bad arguments or fixture,
 //! or a frame could not be written (run.json is still written, with that step marked failed).
@@ -19,11 +19,27 @@
 //!   {"op":"resize","w":1100,"h":700}   {"op":"settle","frames":4}
 //!   {"op":"pick","path":"textures"}    queue the answer of the next file dialog (a path inside the fixture folder;
 //!                                      no answer queued = Cancel)
+//!   {"op":"expect","fact":"/selection","equals":"set:architecture/stone/stonewall"}   also "contains": v, "absent": true
+//!   {"op":"check","name":"sets_pills_match_their_counts"}   a named Rust check (oracles.rs; `--list` names them)
+//! `fact` is a JSON Pointer (RFC 6901) into the frame's state.json; a `/` inside a set id or item key is written `~1`
+//! (`/items/architecture~1stone~1stonewall.png/status`). Exactly one of equals, contains, absent. `contains` on an
+//! array means an element equals it, on a string a substring, on an object a key.
+//!
+//! state.json, per frame: dialog (variant name or null), review_open, selection ("none" | "item:<key>" | "set:<id>"),
+//! selected_sets [id], expanded, dirty, counts {items, visible_items, sets, visible_sets, problems}, sets_filter
+//! {search, attention, ready, no_json, shader}, textures_filter {search, needs_decision, warnings, failed,
+//! not_in_set, subtype, format, set}, sets {<id>: {key, shader, visible, selected, members, slots: {<SlotKind>:
+//! "empty" | "own:<item key>" | "borrowed:<set id>"}}}, items {<key>: {name, set, status, visible, output}} (output
+//! relative to the export folder), problems [{level, at, text}].
+//!
+//! `--goal '<line>'` is one expect or check line read on every frame (00 included) without failing the run: the first
+//! frame where it passes prints `GOAL REACHED at step n` and sets run.json `goal: {line, reached_at: n}`; never
+//! passing gives `reached_at: null`. A check that only notes ("not checked") does not reach the goal.
 //!
 //! Output in --out: `00` is the settled start, `NN` follows step NN. Per frame `NN.tree.txt` (the AccessKit tree, with
-//! focused/disabled/hovered/clipped/offscreen marks) and `NN.png`. `steps.jsonl` is the script; `run.json` holds
-//! {fixture, size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms, error, note}],
-//! dialogs, shell: [{step, request}]}. `ms_fixture` is the fixture build, app start and first settle. Screenshots are comparable with the doc shots only when the adapter is the
+//! focused/disabled/hovered/clipped/offscreen marks), `NN.state.json` and `NN.png`. `steps.jsonl` is the script;
+//! `run.json` holds {fixture, size, theme, adapter, comparable, ms_fixture, ms_total, steps: [{n, line, ok, ms,
+//! error, note}], dialogs, shell: [{step, request}], goal}. `ms_fixture` is the fixture build, app start and first settle. Screenshots are comparable with the doc shots only when the adapter is the
 //! one in shots.toml; the driver says so when it is not.
 
 #[path = "../app_harness/mod.rs"]
@@ -33,6 +49,8 @@ mod frame;
 #[allow(dead_code)] // fields only the doc shots read
 #[path = "../doc_shots/manifest.rs"]
 mod manifest;
+mod oracles;
+mod state;
 mod steps;
 #[path = "../support/mod.rs"]
 mod support;
@@ -41,6 +59,7 @@ use app_harness::{adapter_name, redirect_app_data, settle, H};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use steps::Step;
 
 struct Args {
     fixture: String,
@@ -48,6 +67,7 @@ struct Args {
     out: PathBuf,
     size: Option<(f32, f32)>,
     light: Option<bool>,
+    goal: Option<String>,
 }
 
 enum Parsed {
@@ -70,12 +90,13 @@ fn parse_size(s: &str) -> Result<(f32, f32), String> {
 }
 
 fn parse_args(args: &[String]) -> Result<Parsed, String> {
-    const OURS: [&str; 6] = [
+    const OURS: [&str; 7] = [
         "--fixture",
         "--script",
         "--out",
         "--size",
         "--theme",
+        "--goal",
         "--list",
     ];
     if !args.iter().any(|a| OURS.contains(&a.as_str())) {
@@ -84,7 +105,8 @@ fn parse_args(args: &[String]) -> Result<Parsed, String> {
     if args.iter().any(|a| a == "--list") {
         return Ok(Parsed::List);
     }
-    let (mut fixture, mut script, mut out, mut size, mut light) = (None, None, None, None, None);
+    let (mut fixture, mut script, mut out, mut size, mut light, mut goal) =
+        (None, None, None, None, None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || {
@@ -97,6 +119,7 @@ fn parse_args(args: &[String]) -> Result<Parsed, String> {
             "--script" => script = Some(PathBuf::from(value()?)),
             "--out" => out = Some(PathBuf::from(value()?)),
             "--size" => size = Some(parse_size(&value()?)?),
+            "--goal" => goal = Some(value()?),
             "--theme" => {
                 light = Some(match value()?.as_str() {
                     "light" => true,
@@ -116,12 +139,15 @@ fn parse_args(args: &[String]) -> Result<Parsed, String> {
         out: need(out, "--out")?,
         size,
         light,
+        goal,
     }))
 }
 
 fn write_frame(h: &mut H, out: &Path, n: usize) -> Result<(), String> {
     let text = frame::tree_text(&frame::snapshot(h));
     std::fs::write(out.join(format!("{n:02}.tree.txt")), text).map_err(|e| e.to_string())?;
+    let state = serde_json::to_string_pretty(&state::state_json(&h.state().model)).unwrap();
+    std::fs::write(out.join(format!("{n:02}.state.json")), state).map_err(|e| e.to_string())?;
     h.render()?
         .save(out.join(format!("{n:02}.png")))
         .map_err(|e| e.to_string())
@@ -148,6 +174,16 @@ fn run(a: Args) -> Result<i32, String> {
         .map_err(|e| format!("cannot read {}: {e}", a.script.display()))?;
     let script = steps::parse_script(&text)?;
     fixtures::lookup(&a.fixture)?;
+    let goal = match &a.goal {
+        None => None,
+        Some(line) => match steps::parse_script(line)?.as_slice() {
+            [(_, s @ (Step::Expect { .. } | Step::Check { .. }))] => {
+                Some((line.clone(), s.clone()))
+            }
+            _ => return Err("--goal must be exactly one expect or check line".into()),
+        },
+    };
+    let mut reached: Option<usize> = None;
     std::fs::create_dir_all(&a.out).map_err(|e| e.to_string())?;
     clear_out(&a.out);
     let copy = a.out.join("steps.jsonl");
@@ -186,6 +222,16 @@ fn run(a: Args) -> Result<i32, String> {
     if start_error.is_some() {
         code = 2;
     }
+    // the goal is read on every frame, 00 included, and never fails the run
+    let mut see_goal = |h: &H, n: usize| {
+        if let (Some((_, g)), None) = (&goal, reached) {
+            if fixtures::evaluate(h, g) == Ok(None) {
+                reached = Some(n);
+                println!("GOAL REACHED at step {n}");
+            }
+        }
+    };
+    see_goal(&h, 0);
     for (i, (line, step)) in script.iter().enumerate() {
         if code != 0 {
             break;
@@ -199,6 +245,7 @@ fn run(a: Args) -> Result<i32, String> {
             shell.push(json!({"step": n, "request": format!("{r:?}")}));
         }
         let written = write_frame(&mut h, &a.out, n);
+        see_goal(&h, n);
         let (mut ok, mut error, note) = match res {
             Ok(note) => (true, None, note),
             Err(e) => (false, Some(e), None),
@@ -239,6 +286,7 @@ fn run(a: Args) -> Result<i32, String> {
         "steps": rows,
         "dialogs": *run.picker.asked.lock().unwrap(),
         "shell": shell,
+        "goal": goal.as_ref().map(|(line, _)| json!({"line": line, "reached_at": reached})),
         "error": start_error.take(),
     });
     std::fs::write(
@@ -259,6 +307,9 @@ fn main() {
         Ok(Parsed::List) => {
             for (n, _) in fixtures::FIXTURES {
                 println!("{n}");
+            }
+            for (n, _) in oracles::ORACLES {
+                println!("check {n}");
             }
             0
         }

@@ -1,6 +1,8 @@
 //! The projects the UI driver runs on, the fake file dialog and the app-level steps (`pick`).
 
 use crate::app_harness::{self, harness, plain_harness, settle, H};
+use crate::oracles::ORACLES;
+use crate::state::{eval_expect, state_json};
 use crate::steps::{ui_step, Step};
 use crate::support;
 use sdc_gui::model::picker::{PickerBackend, PickerKind, PickerSpec};
@@ -103,6 +105,37 @@ pub fn start(fixture: &str, dir: &Path, wgpu: bool) -> Result<(H, Run), String> 
     ))
 }
 
+/// An `Expect` or `Check` step against the model as it is now; `Some(note)` is a check that could not decide.
+pub fn evaluate(h: &H, step: &Step) -> Result<Option<String>, String> {
+    let m = &h.state().model;
+    match step {
+        Step::Expect {
+            fact,
+            equals,
+            contains,
+            absent,
+        } => eval_expect(
+            &state_json(m),
+            fact,
+            equals.as_ref(),
+            contains.as_ref(),
+            *absent,
+        )
+        .map(|()| None),
+        Step::Check { name } => match ORACLES.iter().find(|(n, _)| n == name) {
+            Some((_, f)) => f(m),
+            None => {
+                let known: Vec<&str> = ORACLES.iter().map(|(n, _)| *n).collect();
+                Err(format!(
+                    "unknown check \"{name}\"; known: {}",
+                    known.join(", ")
+                ))
+            }
+        },
+        _ => Err("not an expect or check step".into()),
+    }
+}
+
 /// Run one step. `Some(note)` is text the caller reports beside the step.
 pub fn app_step(h: &mut H, run: &Run, step: &Step) -> Result<Option<String>, String> {
     match step {
@@ -119,6 +152,7 @@ pub fn app_step(h: &mut H, run: &Run, step: &Step) -> Result<Option<String>, Str
             run.picker.queue(run.dir.join(p));
         }
         Step::Settle { frames } => settle(h, *frames),
+        Step::Expect { .. } | Step::Check { .. } => return evaluate(h, step),
         other => {
             ui_step(h, other)?;
             settle(h, 2);
