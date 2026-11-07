@@ -1,4 +1,4 @@
-//! The cubemap section of a cube's settings (cubemap GUI step, Note DT7-DT12): one row per `cubemap.*` key, in five
+//! The cubemap section of a cube's settings (cubemap GUI step, Note DT7-DT12): one row per `cubemap.*` key, in four
 //! groups. Drawing only: the edits come back as (item key, dotted field, value) and the panel applies them through
 //! `AppModel::set_field` / `clear_field`, so sdc.toml stays the only place a setting is written.
 use super::columns::RED;

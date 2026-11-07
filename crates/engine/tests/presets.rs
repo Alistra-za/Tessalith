@@ -1282,6 +1282,7 @@ fn ground_fill_and_horizon_are_refused() {
     }
     ConfigFile::parse("[defaults]\ncubemap = { yaw = 90.0 }\n", "sdc.toml").unwrap();
 }
+
 #[test]
 fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {

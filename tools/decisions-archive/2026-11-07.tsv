@@ -1,0 +1,16 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- Memory admission:	Digest	93	back	GU	A photo cube adds nothing: the layout is gone (GU2)	partial	2026-11-07		goes: a photo cube adds 2 × w × w × 16 (DS19); stays: the rest of the admission rule
+Digest¶- The world-to-cube basis	Digest	255	back	GU	refused in config, presets and `--set` (GU2, GU3)	partial	2026-11-07		goes: equirect panoramas, mirror-ball and angular importers, single-photo approximation, ground fill and horizon (DS14 equirect part, DS15, DS16, DS17, DS26); stays: the world basis (DS13), yaw and mirror (DS14)
+Digest¶- The unclear single-image decision offers	Digest	260	back	GU	no layout combo and no **Set layout** menu (GU2)	archive-item	2026-11-07		whole: the Undecided box offers no layouts (DT14, DT32)
+Digest¶- A cube DDS loads as its six faces	Digest	265	back	GU	a photo cube adds nothing: the layout is gone (GU2)	partial	2026-11-07		goes: a photo cube adds its fake panorama to admission (DS19); stays: the cube DDS rule (DN7a)
+Digest¶- The unclear-layout reason lists	Digest	266	back	GU	not a cube source: {w}x{h} is not six faces, a cross or a strip (GU2)	archive-item	2026-11-07		whole: the reason lists no layouts and ground_fill is refused (DS22, DS25)
+Digest¶- The cube section lists the 18	Digest	267	back	GU	refused in config, presets and `--set` (GU3)	partial	2026-11-07		goes: 18 rows (16 now: ground_fill and horizon are out); stays: the rest (DT7-DT10)
+Digest¶- OPEN: panorama import's	Digest	271	back	GU	the panorama importer is gone (GU2)	partial	2026-11-07		goes: panorama import's fixed 3x3 taps alias; stays: static cubes use a Gaussian cone, not GGX (DS)
+Digest¶- The cube settings section is table-driven	Digest	570	back	GU	refused in config, presets and `--set` (GU3)	partial	2026-11-07		goes: 18 rows (16 now); stays: the rest (DT7-DT11, DT13)
+FM¶- **GUI.** `pbr_export::export_asks` starts with the photo crops	FM	777	back	GU	a photo cube adds nothing: the layout is gone (GU2)	partial	2026-11-07		goes: export_asks starts with the photo crops; stays: the Files-row table and the file list
+FM¶- **Warnings are Problems rows.**	FM	792	back	GU	a photo cube adds nothing: the layout is gone (GU2)	partial	2026-11-07		goes: the portrait photo crop as a pitfall (FC12); stays: the rest of the rule
+FM¶- **Exempt textures.**	FM	827	back	GU	a square or 2:1 image typed as a cube is Unresolved (GU2)	partial	2026-11-07		goes: the 1000×500 equirect example; stays: the pot_dims rule
+Index¶- Cubemaps:	Index	18	back	GU		partial	2026-11-07		goes: the line without GU (GU1 to GU4 govern it)
+Index¶- Presets and config:	Index	19	back	GU		partial	2026-11-07		goes: the line without GU (GU1 to GU4 govern it)
+Index¶- GUI Settings panel:	Index	24	back	GU		partial	2026-11-07		goes: the line without GU (GU1 to GU4 govern it)
+Index¶- GUI Dialogs and Export:	Index	27	back	GU		partial	2026-11-07		goes: the line without GU (GU1 to GU4 govern it)

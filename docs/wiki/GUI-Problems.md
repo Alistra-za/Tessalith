@@ -57,7 +57,6 @@ A row you must act on never just reports; its fix is its button:
 | A short normal (`CHAN-NORMAL-LENGTH`) | **Rebuild Z**, which sets the file's `channels.reconstruct_z`; greyed with "Rebuild Z is on for this file: export again to rewrite it" once it is set. |
 | A folder that could not be read | A Project row with **Open folder**. |
 | The Vanilla/CM derive results ("NIF suggests …") | No button: hover the row for the values. |
-| An unclear cubemap layout | **Set layout ▾**. |
 | A PGPatcher feature clash | **Turn off {feature}** for each of the two features; neither is the default. <!-- D:FN5 --> |
 | A PGPatcher path error | **Fix path**, which selects the set and puts the keyboard in that field (a `rename` or match path). A slot path error has **Go to set** instead, because slot paths are edited in the JSON editor. |
 | A NIF problem from the Meshes view | **Open the {tab} tab**, with the edit panel's own tab name (*Shader*, *Alpha*, *Controllers*, *Extra data*). |

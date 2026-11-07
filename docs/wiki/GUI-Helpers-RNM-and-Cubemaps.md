@@ -73,28 +73,26 @@ A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown)
 
 **In the Textures column.** The six faces are one item ([Textures column](GUI-Textures-Column.md)). The size estimate counts all six faces and their mips. A six-file set's settings are written to all six face entries in `sdc.toml`, so the faces keep matching.
 
-**Settings panel.** The section is drawn only when every selected texture is a cube. It has five groups:
+**Settings panel.** The section is drawn only when every selected texture is a cube. It has four groups:
 
 | Group | Controls |
 |---|---|
 | **Source** | Layout, face size, and for a face, cross or strip source the per-face rotation and flip, plus *Turn -Z upright* on a vertical cross. |
 | **Orientation** | Yaw, *Mirror east and west*. |
 | **Colour grade** | The colour filters ([settings](Cubemaps.md#settings)). |
-| **Ground** | *Ground fill* and *Horizon*. |
 | **Look** | Style and blur. |
 
 - The layout box never offers six face files. A six-file set shows "Six face files" as read-only text.
-- **Horizon** is disabled, with "needs a ground fill", until a ground fill is set.
-- A blur the engine fills in (a photo's 0.6, or the blur of a style or preset) cannot be unticked, so set 0 for no blur.
+- A blur the engine fills in (the blur of a style or preset) cannot be unticked, so set 0 for no blur.
 - A value in `sdc.toml` outside the engine's range is shown as it is, with the engine's message in red under the row. Tessalith never changes it; fix it in the box or in the file.
 - Colours are raw 0 to 255 codes, not gamma-converted. A drag or colour pick writes once, when you let go.
 
-**Unclear layout.** A single image Tessalith cannot place (a square one with no `cubemap.layout`, say) shows "This image could be several cube layouts: pick one" in the settings panel's *Undecided* box, once the sub-type is confirmed. Pick a layout there: 360° panorama, mirror ball, angular map or single photo (a cross or strip would already have been recognised). It is written for that file only. In the Review tab its row has a **Set layout ▾** menu with the same layouts.
+**Not a cube source.** A square or 2:1 image typed as a cube shows the reason from [Cubemap sources](Cubemap-Sources.md#ways-to-make-one) in the settings panel's *Undecided* box and in its Review row. Change the sub-type to answer it.
 
 **Cube preview.** The encoded side draws all six faces of the mip on show as one cross (4 by 3 faces), sized like a 2D preview, so a big cube previews at a lower mip. *Face labels* (on by default) names each face. *Heatmap* and *Tile 3×3* are off for a cube ("Not for cubes"), and there is no texel readout.
 
 - A six-file set has six source buttons, +X to -Z, over the source side. Each shows the processed face (after turns, flips, sizing and mips), the same picture as its cell in the cross.
-- A single-image cube's source side shows the input file itself (panorama, ball, cross, strip or photo).
+- A single-image cube's source side shows the input file itself (cross or strip).
 - A set that cannot be built shows the engine's reason in the encoded pane, for example "faces differ in size" (the code is not shown).
 
 **Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog for a 1×1 dynamic-cubemap marker. It works with or without a project open.

@@ -1,6 +1,6 @@
 # Cubemaps
 
-A cubemap is six square pictures, one for each direction around a point. Skyrim uses them for reflections: the `_e` texture on Environment Map and Eye shaders (NIF slot 4), plus room reflections in caves and temples. Tessalith takes six faces, a cross, a strip, a 360° panorama, a mirror ball, an angular map or a single photo, and writes a correct cube DDS with a full mip chain.
+A cubemap is six square pictures, one for each direction around a point. Skyrim uses them for reflections: the `_e` texture on Environment Map and Eye shaders (NIF slot 4), plus room reflections in caves and temples. Tessalith takes six faces, a cross or a strip, and writes a correct cube DDS with a full mip chain.
 
 ## Which face is which
 
@@ -76,13 +76,12 @@ All are optional and set per file or in `sdc.toml`, under `[defaults]`, `[subtyp
 | `cubemap.style` | Starting point for size, format and blur (below) |
 | `cubemap.layout` | Source layout, when the shape doesn't settle it |
 | `cubemap.face_size` | Face size in pixels |
-| `cubemap.yaw`, `cubemap.mirror` | Turn the cube about the up axis (degrees, -360 to 360); swap east and west |
+| `cubemap.yaw`, `cubemap.mirror` | Turn the cube about the up axis (degrees, -360 to 360, clockwise seen from above, so 90 moves east to south); swap east and west |
 | `cubemap.face_rotate`, `cubemap.face_flip` | Turn or flip single faces: six entries in face order (0, 90, 180, 270; `h`, `v`) |
 | `cubemap.vcross_negz_rotate` | Turn the vertical cross's bottom cell ([values](Project-Config-Fields.md#cubemap)) |
 | `cubemap.blur` | 0 (sharp) to 1 (very soft) |
 | `cubemap.exposure`, `brightness`, `contrast`, `midtones`, `saturation`, `tint` | Colour adjustments |
 | `cubemap.highlight_clamp` | Soft-compresses bright highlights so a chosen level becomes full white |
-| `cubemap.ground_fill`, `cubemap.horizon` | Replace everything below the horizon with a colour or a gradient |
 
 ### Styles
 
@@ -95,27 +94,13 @@ All are optional and set per file or in `sdc.toml`, under `[defaults]`, `[subtyp
 
 Every value a style sets can be overridden by its own key. `vanilla_metal` also lowers saturation to 0.8.
 
-### Ground fill and horizon
-
-A panorama or photo often shows the photographer's feet or a patchy floor. `cubemap.ground_fill` covers everything below the horizon line:
-- `"gradient"` takes the average colour at the horizon and darkens it towards straight down, to half at the bottom;
-- `[r, g, b]` is a flat colour. The three numbers (0 to 255) are code values on the game's 1.6 curve, like `cubemap.tint`, not sRGB.
-
-`cubemap.horizon` sets where the line sits, from -45 to 45 degrees (0 is level; positive is above it). It blends over about two degrees around the line. If `ground_fill` is not set, nothing is filled and `horizon` does nothing. A bad value is an error naming the two accepted forms.
-
-```toml
-[files."textures/cubemaps/studio_e.png"]
-cubemap.ground_fill = [30, 28, 26]
-cubemap.horizon = -10
-```
-
 ### Order of work
 
-Tessalith applies the settings in this order: import, face rotate and flip, yaw, mirror, exposure, highlight clamp and colour, ground fill, blur, mips.
+Tessalith applies the settings in this order: import, face rotate and flip, yaw, mirror, exposure, highlight clamp and colour, blur, mips.
 
 ### Blur
 
-`cubemap.blur` blurs the cube evenly across the faces, so no seams show. It is a cone blur. The default is no blur, unless a style sets one or the layout is `photo` (0.6).
+`cubemap.blur` blurs the cube evenly across the faces, so no seams show. It is a cone blur. The default is no blur, unless a style sets one.
 
 ### HDR sources
 

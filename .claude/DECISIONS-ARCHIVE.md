@@ -20,6 +20,15 @@ ARCHIVED (wording before the edit; superseded in part by Note HA, 2026-11-04)
 ARCHIVED (wording before the edit; superseded in part by Note HB3, 2026-11-05)
   - **The behaviours stay; only the message goes.** Alpha 251..=254 still counts as opaque (Note L); a `data` alpha that is constant is still written as `data`; mip 0 of a short normal is still renormalised under `mips.normal_base`; `skin_wet_form` still picks BC4 height or BC7 normal (`skin_wet_notice` is gone); a loose map still wins its slot over an `_orm` channel (`Recipe.notes` and the `prefer` helper are gone); a bent layer with no AO source still uses a uniform weight; the env `_m` is still written only for a scanned Environment Map mesh.
 
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+  - **GUI.** `pbr_export::export_asks` starts with the photo crops. The Files-row table in `model/bottom.rs` lists `DERIVE-NIF-SUGGEST` alone. Files touched under the NIF team's shared GUI paths: `crates/gui/src/model/{bottom,code_text,items,mod,pbr_export}.rs` and `crates/gui/src/ui/review.rs`; `ui/mod.rs` and `worker.rs` are untouched.
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+  - **Warnings are Problems rows.** `export_asks` (the PGPatcher set pitfalls, the portrait photo crop, the CS PBR pitfalls) feed Problems as ordinary Warning rows (`carried`) and nothing else: no Warnings column in Review, no tick, no Acknowledge all, no `{n} warnings in Problems` link, no block. A pitfall alone does not open Review, so the header Export runs when nothing else needs an answer. A set with no match (V4) is one of these rows too. A NIF edit that cannot be written is listed in the Review footer under `NIF edits skipped (n)`, one amber `{path}: {reason}` row each, and never blocks.
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+  - **Exempt textures.** `mips.levels = "none"` skips `pot_dims` (`resize::pot_exempt`): the texture keeps its size and gets `DIM-NPOT`, now a **Warning**, raised only there. `resize` still shrinks an exempt texture. A cube's source is never resized (`target_dims` returns it unchanged); its default face is `pot_dims((cell, cell))`, at most 4096, so a cell within 5 % of the next power of two now rounds up (1000×500 equirect, cell 250 → face 256). An explicit `cubemap.face_size` is unchanged.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -164,6 +173,18 @@ ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
 
 ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, HB
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC, HE
 
 ## Digest
 
@@ -331,6 +352,30 @@ ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
 
 ARCHIVED (wording before the edit; superseded in part by Note GT, 2026-11-06)
 - Deferred frames run the user's `DeferredCompositeCS.hlsl` (`CSHADER`) into RT0; blended shapes draw forward on top; debug views skip it; a failed build keeps forward with "Deferred preview unavailable: <error>". A late composite failure rebuilds forward programs synchronously; async deferred-off keeps the target while any draw holds DEFERRED; no DEFERRED draw means a forward frame. [CJ6, CJ7]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- Memory admission: a plan-pass cache hit admits at 0 bytes, a cold file costs one stat; a job over the budget runs alone when nothing else is in flight; RNM layers add at the resized base size and a bake's layers at the `_n`'s resized size (sums); a photo cube adds `2 × w × w × 16`; a helper's decode bytes count beside its target's. [AV4, BB2, BB3, BB5, DS19, DY10e]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- The world-to-cube basis comes from the in-game test; equirect panoramas take yaw and mirror; mirror-ball and angular-map importers; single-photo approximation (a portrait photo is cropped, the photo faces east); ground fill and horizon. [DS13, DS14, DS15, DS16, DS17, DS26]
+
+ARCHIVED (superseded by Note GU, 2026-11-07)
+- The unclear single-image decision offers 360° panorama, Mirror ball, Angular map and Single photo. [DT14, DT32]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- A cube DDS loads as its six faces, an h-strip: `analysis.dds_cube` wins over a face tag in the name and over `cubemap.layout`, and an explicit layout other than hstrip is `CFG-INVALID`. Admission sees the real 6w × h strip, and a photo cube adds its fake panorama. [DN7a, DS19]
+
+ARCHIVED (superseded by Note GU, 2026-11-07)
+- The unclear-layout reason lists every one-file layout (hcross, vcross, hstrip, vstrip, equirect, mirror_ball, angular, photo; `faces` is left out). `ground_fill` is `"gradient"` or `[r, g, b]` with whole numbers 0..=255, and a fractional or out-of-range element is refused naming those forms. [DS22, DS25]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- The cube section lists the 18 `cubemap.*` rows from `fields::CUBE_FIELDS`, shows only when every selected item is a cube, and shows out-of-range values rather than fixing them (each drag value is bounded to the engine's range). Ticking Highlight clamp writes 4.0 and Blur 0.35. [DT7, DT8, DT9, DT10]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- OPEN: panorama import's fixed 3x3 taps alias when the face is far smaller than the source; static cubes use a Gaussian cone, not GGX. [DS]
+
+ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
+- The cube settings section is table-driven (`CUBE_FIELDS`, 18 `cubemap.*` rows), drawn only when every selected item is a Cubemap (no bulk cube rows). Drags are bounded to the engine's range; an existing out-of-range value shows unclamped and is written only on change. Unticking or Auto / None removes the key. The layout combo never offers "Six face files". [DT7, DT8, DT9, DT10, DT11, DT13]
 
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
