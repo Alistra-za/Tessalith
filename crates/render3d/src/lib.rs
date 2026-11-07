@@ -1,5 +1,6 @@
 pub mod background;
 pub mod builtin;
+mod bundled;
 pub mod cache;
 pub mod cbuffer;
 pub mod compile;
@@ -41,6 +42,7 @@ use compile::{cached, program_key, CompiledPair, ProgramKey, SrvKind};
 use cs_settings::CsSettings;
 use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
+pub use includes::ShaderSource;
 use locate::Fingerprint;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
 use nif::material::{MaterialState, SkinPreview};
@@ -48,6 +50,12 @@ use permutation::{defines, Defines, Stage};
 pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
 use source::{ExpandedSource, SourceSet};
+
+/// Every path in the embedded CS tree, for the test that it holds only the include closure.
+#[cfg(feature = "test-hooks")]
+pub fn bundled_names() -> Vec<&'static str> {
+    bundled::names().collect()
+}
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -565,7 +573,7 @@ impl Renderer {
             glint_noise: None,
             glint_noise_logged: false,
             gpu,
-            sources: SourceSet::new(shaders.root.clone()),
+            sources: SourceSet::new(ShaderSource::Folder(shaders.root.clone())),
             shaders,
             cache_dir,
             // = preview_defines(&CsSettings::default(), true): the P0 Linear Lighting default.
@@ -800,7 +808,7 @@ impl Renderer {
 
     /// Replaces the shaders (a moved or updated CS): the expansion memo and the device programs are dropped (`compiled` is content-addressed and stays valid). The loaded model still uses the old programs until the next [`Renderer::load`].
     pub fn set_shaders(&mut self, shaders: Fingerprint) {
-        self.sources = SourceSet::new(shaders.root.clone());
+        self.sources = SourceSet::new(ShaderSource::Folder(shaders.root.clone()));
         self.shaders = shaders;
         self.programs.clear();
         self.composite = None;

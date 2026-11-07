@@ -20,7 +20,7 @@ fn tree(root: &Path, a: &str) {
 }
 
 fn src(root: &Path) -> Arc<render3d::source::ExpandedSource> {
-    SourceSet::new(root.to_path_buf())
+    SourceSet::new(render3d::ShaderSource::Folder(root.to_path_buf()))
         .get(Path::new("Lighting.hlsl"))
         .unwrap()
 }
@@ -85,7 +85,7 @@ fn define_order_does_not_matter_but_values_entry_and_target_do() {
 fn the_expansion_is_memoised_until_the_set_is_replaced() {
     let d = tempfile::tempdir().unwrap();
     tree(d.path(), "1.0");
-    let set = SourceSet::new(d.path().to_path_buf());
+    let set = SourceSet::new(render3d::ShaderSource::Folder(d.path().to_path_buf()));
     let first = set.get(Path::new("Lighting.hlsl")).unwrap();
     fs::write(
         d.path().join("Common/A.hlsli"),
@@ -94,7 +94,7 @@ fn the_expansion_is_memoised_until_the_set_is_replaced() {
     .unwrap();
     let again = set.get(Path::new("Lighting.hlsl")).unwrap();
     assert!(Arc::ptr_eq(&first, &again), "memo hit: no second expansion");
-    let fresh = SourceSet::new(d.path().to_path_buf())
+    let fresh = SourceSet::new(render3d::ShaderSource::Folder(d.path().to_path_buf()))
         .get(Path::new("Lighting.hlsl"))
         .unwrap();
     assert_ne!(fresh.sha256, first.sha256, "a new set sees the edit");
@@ -103,7 +103,8 @@ fn the_expansion_is_memoised_until_the_set_is_replaced() {
 #[test]
 fn a_missing_entry_file_is_an_error() {
     let d = tempfile::tempdir().unwrap();
-    let e = SourceSet::new(d.path().to_path_buf()).get(Path::new("Nope.hlsl"));
+    let e = SourceSet::new(render3d::ShaderSource::Folder(d.path().to_path_buf()))
+        .get(Path::new("Nope.hlsl"));
     assert!(e.is_err());
 }
 

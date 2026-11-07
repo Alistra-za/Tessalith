@@ -235,7 +235,7 @@ fn installed_composite_reflects() {
         gpu.adapter,
         Composite::typed_uav_load(&gpu)
     );
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(shaders.into()));
     let cache = tempfile::tempdir().unwrap();
     let t = std::time::Instant::now();
     let c = Composite::new(
@@ -280,7 +280,7 @@ fn installed_dc_composite_reflects() {
     };
     use render3d::compile::SrvKind;
     let gpu = render3d::device::Gpu::new().unwrap();
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(shaders.into()));
     let cache = tempfile::tempdir().unwrap();
     let defines = [
         "CSHADER",
@@ -539,7 +539,7 @@ fn composite_without_env_input_fails_closed() {
     use render3d::device::{Gpu, Target};
     let gpu = Gpu::new_warp().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(standin_root());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(standin_root()));
     let c = Composite::new(&gpu, &src, &["CSHADER".into(), DC.into()], cache.path()).unwrap();
     assert!(c.needs_env());
     let t = Target::new_deferred(&gpu, 16, 16).unwrap();
@@ -625,7 +625,7 @@ fn forward_dc_draw_samples_env_texture_t31() {
 fn composite_with_an_unknown_sampler_fails_closed() {
     let gpu = render3d::device::Gpu::new_warp().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(standin_root());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(standin_root()));
     let defines = ["CSHADER", DC, "STANDIN_COMPOSITE_SAMPLER2"].map(String::from);
     let e = Composite::new(&gpu, &src, &defines, cache.path())
         .err()
@@ -723,7 +723,9 @@ fn gpu_prefilter_writes_each_level_at_its_roughness() {
         shaders_with_prefilter(MARK_PREFILTER),
         tempfile::tempdir().unwrap(),
     );
-    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(
+        shaders.path().to_path_buf(),
+    ));
     let mut p = Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path()).unwrap();
     let img = &render3d::hdri::studio().image;
     let e = EnvMaps::new_gpu(&gpu, &mut p, img, 16, 0.0).unwrap();
@@ -764,7 +766,9 @@ fn prefilter_with_an_unknown_interface_fails_closed() {
         shaders_with_prefilter(&two_srvs),
         tempfile::tempdir().unwrap(),
     );
-    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(
+        shaders.path().to_path_buf(),
+    ));
     let e = render3d::composite::Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path())
         .err()
         .expect("two SRVs");
@@ -805,7 +809,7 @@ fn installed_prefilter_matches_the_cpu_chain() {
     use render3d::composite::{EnvMaps, Prefilter};
     let gpu = render3d::device::Gpu::new().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(shaders.into()));
     let defines = ["CSHADER", "ENABLE_LL"].map(String::from);
     let mut p = Prefilter::new(&gpu, &src, &defines, cache.path()).unwrap();
     let img = &render3d::hdri::studio().image;

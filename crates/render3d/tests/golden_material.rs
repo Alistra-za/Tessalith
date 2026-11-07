@@ -309,7 +309,8 @@ fn same(kind: VarKind, a: &[f32], b: &[f32]) -> bool {
 /// The capture's used material fields (PS b1 PerMaterial, the PS b2 material fields, VS b1 TexcoordOffset), each
 /// with its reflected layout var and cbuffer size, keyed by fixture cbuffer stem.
 fn material_fields(env: &Env, r: &Replay) -> Result<Vec<(&'static str, CbVar, u32)>, String> {
-    let src = SourceSet::new(env.shaders.clone()).get(Path::new("Lighting.hlsl"))?;
+    let src = SourceSet::new(render3d::ShaderSource::Folder(env.shaders.clone()))
+        .get(Path::new("Lighting.hlsl"))?;
     let ps_list = &r.defines[0];
     let ps_d: Vec<String> = std::iter::once("PSHADER".to_string())
         .chain(ps_list.iter().cloned())

@@ -40,9 +40,9 @@ fn the_pool_compiles_off_thread_at_below_normal_priority() {
 #[test]
 fn a_failing_job_is_delivered_as_an_error() {
     let cache = tempfile::tempdir().unwrap();
-    let set = render3d::source::SourceSet::new(
+    let set = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures").into(),
-    );
+    ));
     // `tiny.hlsl` is a pixel shader (`SV_Position` in, `SV_Target` out): as vs_5_0 it does not compile.
     let src = set.get(std::path::Path::new("tiny.hlsl")).unwrap();
     let job = render3d::CompileJob {

@@ -14,7 +14,7 @@ fn compile(
     _hash: &str,
 ) -> Result<Compiled, String> {
     let rel = file.strip_prefix(root).unwrap_or(file);
-    let src = SourceSet::new(root.to_path_buf()).get(rel)?;
+    let src = SourceSet::new(render3d::ShaderSource::Folder(root.to_path_buf())).get(rel)?;
     render3d::compile::compile(&src, d, target, cache)
 }
 
@@ -525,7 +525,7 @@ fn composite_reflects_uavs_and_threads() {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/standin"
     ));
-    let src = SourceSet::new(root)
+    let src = SourceSet::new(render3d::ShaderSource::Folder(root))
         .get(Path::new("DeferredCompositeCS.hlsl"))
         .unwrap();
     let cache = tempfile::tempdir().unwrap();
