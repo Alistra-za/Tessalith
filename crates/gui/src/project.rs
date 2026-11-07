@@ -622,6 +622,19 @@ impl ProjectDoc {
             .map(str::to_string)
     }
 
+    /// Every `[inputs]` alias, by the key as written: the table the engine validates all at once.
+    pub fn read_as_all(&self) -> BTreeMap<String, engine::presets::ReadAs> {
+        let Some(t) = self.f.doc.get("inputs").and_then(Item::as_table_like) else {
+            return BTreeMap::new();
+        };
+        t.iter()
+            .filter_map(|(k, v)| {
+                let path = v.get("as")?.as_str()?.to_string();
+                Some((k.to_string(), engine::presets::ReadAs { path }))
+            })
+            .collect()
+    }
+
     /// F3b: set file `key`'s alias to `alias`, or with `None` remove its entry (an empty `[inputs]` goes too).
     pub fn set_read_as(&mut self, key: &str, alias: Option<&str>) {
         if self.read_only() {

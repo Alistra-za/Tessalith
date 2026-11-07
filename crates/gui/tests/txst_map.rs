@@ -769,6 +769,52 @@ fn unmapping_after_an_input_rename_uses_the_new_folder() {
     );
 }
 
+/// The engine refuses an alias onto another file's name (IN-ALIAS-INVALID); the file keeps its identity, so does its
+/// named output.
+#[test]
+fn a_refused_alias_leaves_a_named_output_in_its_folder() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[inputs.\"textures/a/x.png\"]\nas = \"textures/c/x.png\"\n",
+    )
+    .unwrap();
+    let toml = skin_set("textures/a/x", "output_name = \"steel\"\n");
+    let m = project_toml(d.path(), &["textures/a/x.png", "textures/c/x.png"], &toml);
+    let o = out(&m, "textures/a/x.png");
+    assert!(o.ends_with("/textures/a/steel.dds"), "{o}");
+}
+
+/// A created set's id does not follow an input alias; its named output still does.
+#[test]
+fn unmapping_a_created_set_after_a_rename_uses_the_new_folder() {
+    use sdc_gui::model::rename::{RenameDialog, RenameMode};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), &["textures/a/x.png"], "");
+    let id = m.drop_new_set("textures/a/x.png").unwrap();
+    idle(&mut m);
+    m.set_output_name(&id, Some("steel")).unwrap();
+    idle(&mut m);
+    m.map_record(&id, record(&[(1, "textures/b/body.dds")]))
+        .unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    let mut dlg = RenameDialog {
+        mode: RenameMode::Inputs,
+        keys: vec!["textures/a/x.png".into()],
+        ..RenameDialog::default()
+    };
+    dlg.typed
+        .insert("textures/a/x.png".into(), "textures/c/x.png".into());
+    m.dialog = Some(sdc_gui::model::Dialog::Rename(dlg));
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    m.unmap_record(&id).unwrap();
+    idle(&mut m);
+    let o = out(&m, "textures/a/x.png");
+    assert!(o.ends_with("/textures/c/steel.dds"), "{o}");
+}
 /// A project opened with a mapping and an output name, then unmapped.
 #[test]
 fn a_reopened_mapped_and_named_set_unmaps_to_its_named_path() {
@@ -789,6 +835,7 @@ fn a_reopened_mapped_and_named_set_unmaps_to_its_named_path() {
 fn the_default_output_matches_the_plan_when_nothing_moves_it() {
     let d = tempfile::tempdir().unwrap();
     let m = mapped_free(d.path());
+    let defaults = sdc_gui::model::sets::DefaultOutputs::new(&m).unwrap();
     let mut n = 0;
     for it in m
         .items
@@ -796,7 +843,7 @@ fn the_default_output_matches_the_plan_when_nothing_moves_it() {
         .filter(|i| i.job.is_some() && !i.job_key.is_empty())
     {
         assert_eq!(
-            sdc_gui::model::sets::default_output_key(&m, it).as_deref(),
+            defaults.key(it).as_deref(),
             Some(it.job_key.as_str()),
             "{}",
             it.key

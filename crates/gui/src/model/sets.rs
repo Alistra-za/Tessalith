@@ -1205,6 +1205,12 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
 pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, PathBuf)> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut out = vec![];
+    // Once per pass: the identity the engine accepts for every file.
+    let defaults = entries
+        .iter()
+        .any(|e| e.output_name.is_some())
+        .then(|| DefaultOutputs::new(m))
+        .flatten();
     for e in entries.iter() {
         let Some(name) = e.output_name.as_deref() else {
             continue;
@@ -1225,7 +1231,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             }
             // Note HG: the default output of the file as it is now, never the last plan's `job_key`, which a record
             // mapping or an earlier name may have moved.
-            let Some(from) = default_output_key(m, item) else {
+            let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
                 continue;
             };
             let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
@@ -1248,41 +1254,72 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
     out
 }
 
-/// Note HG: the output key (`/`, lower case, relative to the export root) `item` gets when no output path is sent
-/// for it, from what is true now: its key, its `[inputs]` alias and the suffix aliases, by the engine's own steps
-/// (`apply_read_as`, `canonicalise_outputs`); a packed output is named after its first source by
-/// `pack::plan::virtual_input`. No output name or record mapping can reach it. `None` without a root or a pack job.
-pub fn default_output_key(m: &AppModel, item: &TextureItem) -> Option<String> {
-    use engine::discover::{apply_read_as, canonicalise_outputs, InputFile, InputKind};
-    let (root, out_root) = (m.root.as_deref()?, m.sets_root.as_deref()?);
-    let input = |key: &str| {
-        let rel = PathBuf::from(key);
-        let mut f = InputFile {
-            path: root.join(&rel),
-            output: out_root.join(&rel).with_extension("dds"),
-            game_path: String::new(),
-            rel,
-            kind: InputKind::Image,
-            real_rel: None,
-        };
-        if let Some(path) = m.read_as_of(key) {
-            let alias = BTreeMap::from([(key.to_string(), engine::presets::ReadAs { path })]);
-            apply_read_as(std::slice::from_mut(&mut f), root, out_root, &alias);
-        }
-        canonicalise_outputs(std::slice::from_mut(&mut f), &m.suffix_aliases);
-        f
-    };
-    let output = if item.kind == ItemKind::Packed {
-        let pk = item.job.as_ref()?.pack.as_ref()?;
-        let first = pk.sources.first()?.path.strip_prefix(root).ok()?;
-        let first = input(&first.to_string_lossy().replace('\\', "/"));
-        engine::pack::plan::virtual_input(&first, pk.kind).output
-    } else {
-        input(&item.key).output
-    };
-    Some(engine::manifest::output_key(out_root, &output))
+/// Note HG: the default output key (`/`, lower case, relative to the export root) of every file when no output path
+/// is sent for it, from what is true now and as the engine accepts it: one `apply_read_as` over all the project's
+/// files with the project's `[inputs]` (so a refused alias leaves its file as it is, as in the plan), then
+/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input`. No output
+/// name or record mapping can reach it. Built once per `output_name_paths` pass.
+pub struct DefaultOutputs<'a> {
+    out_root: &'a Path,
+    root: &'a Path,
+    files: HashMap<String, engine::discover::InputFile>,
 }
 
+impl<'a> DefaultOutputs<'a> {
+    /// `None` without a root.
+    pub fn new(m: &'a AppModel) -> Option<Self> {
+        use engine::discover::{apply_read_as, canonicalise_outputs, InputFile, InputKind};
+        let (root, out_root) = (m.root.as_deref()?, m.sets_root.as_deref()?);
+        let (keys, mut list): (Vec<&str>, Vec<InputFile>) = m
+            .items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Packed)
+            .map(|i| {
+                let rel = PathBuf::from(&i.key);
+                let f = InputFile {
+                    path: root.join(&rel),
+                    output: out_root.join(&rel).with_extension("dds"),
+                    game_path: String::new(),
+                    rel,
+                    kind: if i.kind == ItemKind::Dds {
+                        InputKind::Dds
+                    } else {
+                        InputKind::Image
+                    },
+                    real_rel: None,
+                };
+                (i.key.as_str(), f)
+            })
+            .unzip();
+        let aliases = m
+            .project
+            .as_ref()
+            .map(|p| p.read_as_all())
+            .unwrap_or_default();
+        apply_read_as(&mut list, root, out_root, &aliases);
+        canonicalise_outputs(&mut list, &m.suffix_aliases);
+        Some(DefaultOutputs {
+            out_root,
+            root,
+            files: keys.into_iter().map(String::from).zip(list).collect(),
+        })
+    }
+
+    /// `item`'s default output key; `None` for a packed output without a job or a known first source.
+    pub fn key(&self, item: &TextureItem) -> Option<String> {
+        let output = if item.kind == ItemKind::Packed {
+            let pk = item.job.as_ref()?.pack.as_ref()?;
+            let first = pk.sources.first()?.path.strip_prefix(self.root).ok()?;
+            let first = self
+                .files
+                .get(first.to_string_lossy().replace('\\', "/").as_str())?;
+            engine::pack::plan::virtual_input(first, pk.kind).output
+        } else {
+            self.files.get(&item.key)?.output.clone()
+        };
+        Some(engine::manifest::output_key(self.out_root, &output))
+    }
+}
 /// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
 /// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
 /// (`group::member_split`). `""` for the colour member.
