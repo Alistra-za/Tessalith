@@ -6,12 +6,14 @@ use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
+use crate::model::known_paths::TxstRecord;
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
     badge_text, fill_proposals, kind_text, shader_options, shared_cells, slot_row, DropChoice,
     DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
 use crate::model::AppModel;
+use crate::sets_doc::TxstMap;
 use eframe::egui;
 use engine::codes::Warning;
 use engine::shader::{Shader, ShaderOrigin};
@@ -56,6 +58,15 @@ pub enum Pending {
         id: String,
         query: String,
         sel: usize,
+    },
+    /// Note HG: Map to texture set record…, the set, the typed query, the hits of `seen` (the query and the scan they
+    /// were filtered for) as indexes into `known.records`, and the chosen record. Nothing is written until Map.
+    MapRecord {
+        id: String,
+        query: String,
+        hits: Vec<usize>,
+        seen: Option<(String, usize)>,
+        sel: Option<TxstRecord>,
     },
 }
 
@@ -155,6 +166,10 @@ enum Act {
     NewSet(String),
     Reorder(String, usize),
     OpenMoveTo(String),
+    /// Note HG: open the texture set record picker on a set.
+    MapRecord(String),
+    /// Note HG: remove a set's record mapping.
+    UnmapRecord(String),
     OpenRename(String),
     Delete(String, usize),
     /// Item 18: open Fill from names on a set.
@@ -882,6 +897,27 @@ pub fn draw(
                     sel: 0,
                 })
             }
+            Act::MapRecord(id) => {
+                // A mapped set opens on its current record, when the scan still has it.
+                let sel = crate::model::sets::views(model)
+                    .iter()
+                    .find(|v| v.id == id)
+                    .and_then(|v| v.txst.as_ref())
+                    .and_then(|t| model.record_of(t))
+                    .cloned();
+                st.pending = Some(Pending::MapRecord {
+                    id,
+                    query: String::new(),
+                    hits: vec![],
+                    seen: None,
+                    sel,
+                });
+            }
+            Act::UnmapRecord(id) => {
+                if let Err(why) = model.unmap_record(&id) {
+                    st.pending = Some(Pending::Refused(why));
+                }
+            }
             Act::OpenRename(id) => {
                 st.pending = Some(Pending::Rename {
                     text: id.clone(),
@@ -1224,6 +1260,9 @@ fn pill(
                             warn_button(ui, v, &rows, acts);
                             check_badge(ui, v, &checks, acts);
                         });
+                    }
+                    if let Some(map) = &v.txst {
+                        record_line(ui, map);
                     }
                     if !v.key.is_empty() {
                         shader_combo(ui, model, v, editing, acts);
@@ -1621,6 +1660,32 @@ fn menu(
         acts.push(Act::FillNames(v.id.clone()));
         ui.close();
     }
+    // Note HG: one reason at a time; the scan comes first, as the PBR refusal can't be fixed by scanning.
+    let why_not = if model.known.records.is_empty() {
+        Some("Scan your mods first")
+    } else if v.pbr && model.target == engine::config::Target::Cs {
+        Some("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs")
+    } else {
+        None
+    };
+    let label = if v.txst.is_some() {
+        "Change record…"
+    } else {
+        "Map to texture set record…"
+    };
+    let map = ui.add_enabled(why_not.is_none(), egui::Button::new(label));
+    let map = match why_not {
+        Some(why) if editing.on => map.on_disabled_hover_text(why),
+        _ => tip(map),
+    };
+    if map.clicked() {
+        acts.push(Act::MapRecord(v.id.clone()));
+        ui.close();
+    }
+    if v.txst.is_some() && tip(ui.button("Remove record mapping")).clicked() {
+        acts.push(Act::UnmapRecord(v.id.clone()));
+        ui.close();
+    }
 }
 
 /// What a button in the drop modal asked for; applied after the modal is drawn (the modal only reads the model).
@@ -1644,6 +1709,10 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     }
     if matches!(st.pending, Some(Pending::MoveTo { .. })) {
         move_to_modal(ctx, model, st);
+        return;
+    }
+    if matches!(st.pending, Some(Pending::MapRecord { .. })) {
+        map_record_modal(ctx, model, st);
         return;
     }
     let Some(p) = st.pending.clone() else { return };
@@ -1676,7 +1745,10 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             let footer = vec![("OK".to_string(), Role::Default, ModalAnswer::Close)];
             ("Can't do that".to_string(), Some(why.clone()), footer)
         }
-        Pending::Rename { .. } | Pending::FillNames { .. } | Pending::MoveTo { .. } => return,
+        Pending::Rename { .. }
+        | Pending::FillNames { .. }
+        | Pending::MoveTo { .. }
+        | Pending::MapRecord { .. } => return,
     };
     let buttons: Vec<(&str, _, bool)> = footer.iter().map(|b| (b.0.as_str(), b.1, true)).collect();
     let mut answer = None;
@@ -1927,6 +1999,185 @@ fn move_to_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) 
         st.pending = None;
         apply_reorder(model, &id, to);
     }
+}
+
+/// One picker row: EDID, FormID, plugin (and the winner when it differs) and the colour path, each cut to its column
+/// with the whole text on hover (the label's own tooltip) and in the row's AccessKit name.
+fn record_row(ui: &mut egui::Ui, r: &TxstRecord, selected: bool) -> egui::Response {
+    let h = ui.spacing().interact_size.y;
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+    let name = format!("{} ({}, {})", r.edid, r.formid, r.plugin);
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name)
+    });
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    if selected {
+        ui.painter()
+            .rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+    } else if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    let plugin = if r.winner.eq_ignore_ascii_case(&r.plugin) {
+        r.plugin.clone()
+    } else {
+        format!("{} (won by {})", r.plugin, r.winner)
+    };
+    let colour = r.slots.get(&1).map_or("", String::as_str);
+    // (text, start, end) as fractions of the row; the last gap keeps a cell off its neighbour.
+    let cells = [
+        (r.edid.as_str(), 0.0, 0.27),
+        (r.formid.as_str(), 0.27, 0.37),
+        (plugin.as_str(), 0.37, 0.65),
+        (colour, 0.65, 1.0),
+    ];
+    for (text, a, b) in cells {
+        let cell = egui::Rect::from_min_max(
+            egui::pos2(rect.min.x + a * rect.width() + 4.0, rect.min.y),
+            egui::pos2(rect.min.x + b * rect.width() - 4.0, rect.max.y),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(cell)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.add(egui::Label::new(text).truncate().selectable(false));
+            },
+        );
+    }
+    resp
+}
+
+/// Map to texture set record… (Note HG): type to filter, click a row, read what each file would write, then Map. It
+/// writes nothing before Map, and Enter does not map (there is no Default button). Esc or Cancel closes; a click
+/// outside does not (it holds the typed text). The list is virtual: the scan holds thousands of records.
+fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
+    let Some(Pending::MapRecord {
+        id,
+        query,
+        hits,
+        seen,
+        sel,
+    }) = &mut st.pending
+    else {
+        return;
+    };
+    use super::dialogs::Role;
+    let known = model.known.clone();
+    let stamp = std::sync::Arc::as_ptr(&known) as usize;
+    let title = format!("Map {id} to a texture set record");
+    let buttons = [
+        ("Cancel", Role::Plain, true),
+        ("Map", Role::Plain, sel.is_some()),
+    ];
+    let hovers = [None, Some("Pick a record first")];
+    let (keys, clicked) = super::dialogs::dialog_hover(
+        ctx,
+        "set-map-record",
+        false,
+        640.0,
+        &title,
+        &buttons,
+        &hovers,
+        |ui| {
+            let field = ui.add(
+                egui::TextEdit::singleline(query)
+                    .hint_text("EDID, plugin, FormID or path")
+                    .desired_width(f32::INFINITY),
+            );
+            field.widget_info(|| egui::WidgetInfo {
+                label: Some("Search texture set records".into()),
+                ..egui::WidgetInfo::text_edit(
+                    true,
+                    query.as_str(),
+                    query.as_str(),
+                    "EDID, plugin, FormID or path",
+                )
+            });
+            if !field.has_focus() && !field.lost_focus() && seen.is_none() {
+                field.request_focus();
+            }
+            // Only a changed query (or a scan that landed) filters again.
+            if !seen
+                .as_ref()
+                .is_some_and(|(q, s)| q == query && *s == stamp)
+            {
+                *hits = crate::model::txst_map::record_hits(&known.records, query);
+                *seen = Some((query.clone(), stamp));
+            }
+            ui.weak(format!("{} of {} records", hits.len(), known.records.len()));
+            let row_h = ui.spacing().interact_size.y;
+            egui::ScrollArea::vertical()
+                .max_height(row_h * 9.0)
+                .auto_shrink([false, true])
+                .show_rows(ui, row_h, hits.len(), |ui, range| {
+                    for n in range {
+                        let Some(r) = hits.get(n).and_then(|&i| known.records.get(i)) else {
+                            continue;
+                        };
+                        if record_row(ui, r, sel.as_ref() == Some(r)).clicked() {
+                            *sel = Some(r.clone());
+                        }
+                    }
+                });
+            if let Some(r) = sel.as_ref() {
+                ui.separator();
+                let head = format!("{} ({}, {})", r.edid, r.formid, r.plugin);
+                ui.add(egui::Label::new(egui::RichText::new(head).strong()).truncate());
+                egui::ScrollArea::vertical()
+                    .id_salt("map-record-preview")
+                    .max_height(row_h * 5.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for (file, path) in model.record_preview(id, r) {
+                            match path {
+                                Some(p) => {
+                                    ui.add(egui::Label::new(format!("{file} → {p}")).truncate())
+                                }
+                                None => ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("{file}: keeps its own path"))
+                                            .weak(),
+                                    )
+                                    .truncate(),
+                                ),
+                            };
+                        }
+                    });
+            }
+        },
+    );
+    if keys.cancel || clicked == Some(0) {
+        st.pending = None;
+    } else if clicked == Some(1) {
+        if let Some(Pending::MapRecord {
+            id, sel: Some(r), ..
+        }) = st.pending.take()
+        {
+            if let Err(why) = model.map_record(&id, r.to_map()) {
+                st.pending = Some(Pending::Refused(why));
+            }
+        }
+    }
+}
+
+/// The card's record line (Note HG); its hover lists the stored slots.
+fn record_line(ui: &mut egui::Ui, map: &TxstMap) {
+    let text = format!("Record: {} ({}, {})", map.edid, map.formid, map.plugin);
+    let r = ui.add(
+        egui::Label::new(egui::RichText::new(&text).small().weak())
+            .truncate()
+            .show_tooltip_when_elided(false),
+    );
+    r.on_hover_ui(|ui| {
+        ui.label(&text);
+        for (n, p) in &map.slots {
+            ui.label(format!("slot{n}: {p}"));
+        }
+    });
 }
 
 #[cfg(test)]

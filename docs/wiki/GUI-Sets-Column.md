@@ -62,6 +62,7 @@ The pills and the shader are remembered in `gui.toml` with the window layout. Th
   - The **Rename** submenu has **Rename…** (the set's name), **Rename outputs…** (F2; the files the set writes) and **Rename inputs…** (read the source files under other names); see [Renaming](GUI-Bulk-and-Rename.md#renaming).
   - **Delete set** asks nothing. It is one undo step, and a toast "Deleted set name (N members)" has an **Undo** button, which works while nothing else was done since (otherwise use Undo in the header). The textures stay. Only a set you created can be deleted: an automatic set would regroup from the file names at once. A set whose files are all gone still shows, as missing, so you can delete its entry.
 - **Fill from names…** in a set's menu finds the textures in the set's folder that are named like its diffuse (or the set) plus a suffix the engine knows (`_n`, `_p`, `_g`, `_rmaos`, `_cnr`, `_s`, …, and exporter tails such as `_normal`) and are not in the set yet. A dialog lists each file with the slot it would fill, all ticked. A filled slot says "replaces <file>"; a pinned slot says "locked" and cannot be ticked. **Fill** (or **Enter**) moves the ticked files in as one undo step. **Esc** or **Cancel** closes it; a click outside does nothing.
+- **Map to texture set record…** writes the set's files where a plugin's record points ([below](#texture-set-records)).
 
 ![A set card's right-click menu.](../img/gui/GUI-Sets-Column/set-card-menu.png)
 
@@ -75,6 +76,29 @@ The pills and the shader are remembered in `gui.toml` with the window layout. Th
 - Picking the set's own place closes the dialog and changes nothing. A set a filter hides shows "(hidden by filter)".
 
 The moved set scrolls into view and keeps the selection.
+
+## Texture set records
+
+**Map to texture set record…** in a set's menu ties the set to a texture set record (`TXST`) of your plugins, so its files are written where the plugin points. It is greyed with "Scan your mods first" until a [scan](Mod-Scanning.md) has run, and for a PGPatcher PBR set on Community Shaders ("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs"). A mapped set's menu has **Change record…** and **Remove record mapping**, which puts the outputs back on their default names. <!-- D:HG8 -->
+
+- **The picker** lists the scan's winning records by EDID, with FormID, plugin and colour path; when an override wins, the winning plugin follows the defining one. Words you type must all appear in the EDID, plugin, FormID or colour path. A picked row lists each of the set's files with the path it will write, or "keeps its own path". **Map** stores the mapping. **Cancel** or Esc closes with nothing changed; Enter does not map, and a click outside does nothing. <!-- D:HG8 -->
+- **The record is keyed by plugin and FormID**, not EDID, which a plugin may repeat. The FormID is the plugin's own without its first two digits (`0x05000814` is `0x814`), and the plugin is the one that defines the record, so an override in another plugin finds the same record. <!-- D:HG8 -->
+- **Where it is stored.** `[sets.txst]` in `sdc-project.toml` holds the key, the EDID and a copy of the record's paths, so a new scan never moves an output by itself.
+- **The card** shows `Record: Arch_skinbody_elf (0x814, Arch_Resources.esp)`; its hover lists `slotN: path`.
+
+A file in a slot the record names is written at the record's path, ahead of **Rename outputs**. A file with no slot in the record (`_wet`, `_detail_n`, a slot the record leaves empty) keeps its path, and no type or format changes. A record path that is not a `textures/….dds` path inside the project's textures folder is never written. Two sets writing one record path give the duplicate-output row, so each needs its own record. A file already at a record's path that Tessalith did not write is kept and reported as `OUT-UNKNOWN-EXISTING` until you delete it or choose overwrite ([how](Validation-and-Output.md#re-runs-and-if-changed)). <!-- D:HG5,HG6 -->
+
+An empty slot of a mapped set reads one of three ways:
+
+| Row | Meaning |
+|---|---|
+| Amber, borrowed | The record's path is written by another set in the project. Nothing is added to `sdc-project.toml`, and one `_n` is written. A skin set that takes its normal this way also takes that set's `_wet` and `_detail_n`. <!-- D:HG7 --> |
+| Grey **From record: body_s.dds** | No set writes the path. The slot counts as supplied: no missing-map warning, and the file is not checked. |
+| **empty** | The record names nothing for the slot. |
+
+A file the set has, an explicit borrow and a pin win over a fill. A record's colour map is never borrowed. **Clear** on a filled slot turns the fill off, and its missing-map warning returns; **From {set}** in the slot's menu turns it back on. <!-- D:HG7 -->
+
+After a scan, a mapped set whose stored paths differ from the record's winning copy gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from a non-empty scan gets an Info row, and the mapping stays; an empty scan says nothing. <!-- D:HG8 --> `sdc convert` does not read `sdc-project.toml`, so it ignores mappings.
 
 ## Slot menus
 

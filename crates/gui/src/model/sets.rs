@@ -9,7 +9,7 @@ use crate::pgp::prefix::{
     is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
 };
 use crate::pgp::settings::Settings;
-use crate::sets_doc::{SetEntry, SetsDoc};
+use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
 use engine::codes::{Code, Warning};
 use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
@@ -357,6 +357,8 @@ pub struct SetView {
     pub set_warnings: Vec<Warning>,
     /// F3a Task 8: the locked slot numbers (`SetEntry::lock`).
     pub locks: BTreeSet<u8>,
+    /// The texture set record the set is mapped to (`SetEntry::txst`), for the card line and the menu.
+    pub txst: Option<TxstMap>,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
 }
@@ -386,6 +388,7 @@ impl SetView {
             shader_choice: None,
             set_warnings: vec![],
             locks: BTreeSet::new(),
+            txst: None,
             recipes: vec![],
         }
     }
@@ -895,6 +898,7 @@ fn entry_view(
     v.settings = e.settings.clone();
     v.shader_choice = e.shader;
     v.locks = e.lock.clone();
+    v.txst = e.txst.clone();
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }

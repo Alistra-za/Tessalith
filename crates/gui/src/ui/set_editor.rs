@@ -687,9 +687,22 @@ fn row(
                     ui.add(egui::Label::new(egui::RichText::new(s).small().weak()).truncate());
                 }
             }
-            None => {
-                ui.weak("empty");
-            }
+            // Note HG: a slot the set's record names that no set in the project writes counts as supplied.
+            None => match slot.slot_number().and_then(|n| v.record_supplied.get(&n)) {
+                Some(path) => {
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("From record: {name}")).weak(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(path);
+                }
+                None => {
+                    ui.weak("empty");
+                }
+            },
         }
         // Note AO7: both kinds of a shared slot (slot 7: `_cnr` and `_f`) are a conflict, not a silent pick: the row
         // names and shows both, and either can be taken out of the set here.

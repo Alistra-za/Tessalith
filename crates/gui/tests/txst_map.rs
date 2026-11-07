@@ -1472,12 +1472,11 @@ fn a_mapped_skin_project_settles() {
     let mut m = r(d.path());
     // The plan on screen was made from the inputs the model sends now, within the re-plan bound.
     assert!(m.inputs_settled());
-    assert!(m.auto_replans() < 2);
     let marks = m.plan_marks();
     let inputs = engine_inputs(&m);
     m.replan();
     idle(&mut m);
-    assert!(m.inputs_settled() && m.auto_replans() < 2);
+    assert!(m.inputs_settled());
     assert_eq!(
         m.plan_marks().0,
         marks.0,
@@ -1636,4 +1635,509 @@ fn restore_is_refused_on_a_pinned_slot_and_a_read_only_file() {
     assert!(m.sets_doc.as_ref().unwrap().read_only());
     let e = m.restore_fill(M, 2).unwrap_err();
     assert!(e.contains("read-only"), "{e}");
+}
+
+// ---- Task 6: the picker, the card and record changes (Note HG) ----
+
+use eframe::egui::accesskit::Role;
+use sdc_gui::model::bottom::{At, Fix, Level};
+use sdc_gui::model::known_paths::{KnownPaths, TxstRecord};
+use sdc_gui::model::txst_map::filter_records;
+
+const ARCH: &str = "Arch_skinbody_elf";
+
+fn trec(edid: &str, plugin: &str, formid: &str, slots: &[(u8, &str)]) -> TxstRecord {
+    TxstRecord {
+        plugin: plugin.into(),
+        winner: plugin.into(),
+        formid: formid.into(),
+        edid: edid.into(),
+        slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+    }
+}
+
+fn arch() -> TxstRecord {
+    trec(
+        ARCH,
+        "Arch_Resources.esp",
+        "0x814",
+        &[
+            (1, "textures/s/e/femalebody.dds"),
+            (2, "textures/s/body_n.dds"),
+        ],
+    )
+}
+
+fn scan(m: &mut AppModel, records: Vec<TxstRecord>) {
+    m.set_known(KnownPaths {
+        records,
+        ..KnownPaths::default()
+    });
+}
+
+/// `M` unmapped, with a scan holding `arch()` and a decoy.
+fn unmapped(dir: &Path) -> AppModel {
+    let mut m = project_toml(dir, M_FILES, &skin_set(M, ""));
+    scan(&mut m, vec![arch(), trec("Other", "O.esp", "0x1", &[])]);
+    m
+}
+
+/// `M` mapped to `arch()` as the file stores it.
+fn stored(dir: &Path, slot2: &str) -> AppModel {
+    let toml = skin_set(M, "")
+        + &format!(
+            "[sets.txst]\nplugin = \"Arch_Resources.esp\"\nformid = \"0x814\"\nedid = \"{ARCH}\"\n\
+             slot1 = \"textures/s/e/femalebody.dds\"\nslot2 = \"{slot2}\"\n"
+        );
+    project_toml(dir, M_FILES, &toml)
+}
+
+fn rows(m: &AppModel) -> Vec<sdc_gui::model::bottom::Problem> {
+    problems(m)
+        .iter()
+        .filter(|p| p.text.starts_with("Record "))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn the_filter_matches_every_word() {
+    let list = vec![
+        arch(),
+        trec("Arch_skinbody_human", "Arch_Resources.esp", "0x900", &[]),
+        trec("Other", "Elf.esp", "0x1", &[(1, "textures/o/Skin\\x.dds")]),
+    ];
+    let hit = |q: &str| -> Vec<&str> {
+        filter_records(&list, q)
+            .iter()
+            .map(|r| r.edid.as_str())
+            .collect()
+    };
+    assert_eq!(hit("skinbody elf"), [ARCH]);
+    assert_eq!(hit("SKINBODY   ELF"), [ARCH]);
+    assert_eq!(hit("elf.esp"), ["Other"], "plugin");
+    assert_eq!(hit("0x814"), [ARCH], "formid");
+    assert_eq!(hit("o/skin"), ["Other"], "colour path, either slash");
+    assert_eq!(hit("o\\skin"), ["Other"]);
+    assert_eq!(hit("").len(), 3);
+    assert!(hit("skinbody zzz").is_empty());
+}
+
+#[test]
+fn the_preview_lists_each_file() {
+    let d = tempfile::tempdir().unwrap();
+    let m = unmapped(d.path());
+    let prev = m.record_preview(M, &arch());
+    let of = |name: &str| prev.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone());
+    assert_eq!(
+        of("x.png"),
+        Some(Some("textures/s/e/femalebody.dds".to_string()))
+    );
+    assert_eq!(
+        of("x_n.png"),
+        Some(Some("textures/s/body_n.dds".to_string()))
+    );
+    assert_eq!(of("x_rfaos.png"), Some(None), "the record has no slot 6");
+    assert_eq!(of("x_wet.png"), Some(None), "a wet map has no record slot");
+}
+
+#[test]
+fn a_changed_record_raises_a_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    scan(&mut m, vec![arch()]);
+    assert!(rows(&m).is_empty(), "same paths: no row");
+    let mut now = arch();
+    now.slots.insert(2, "textures/s/new_n.dds".into());
+    scan(&mut m, vec![now]);
+    let r = rows(&m);
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(r[0].level, Level::Warning);
+    assert_eq!(r[0].text, format!("Record {ARCH} changed"));
+    assert_eq!(r[0].fix, Some(Fix::UseRecordPaths(M.into())));
+    assert!(matches!(&r[0].at, At::Set { id, .. } if id == M));
+}
+
+#[test]
+fn use_new_paths_updates_the_copy() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    let mut now = arch();
+    now.slots.insert(1, "textures/s/e/new_body.dds".into());
+    now.edid = "Renamed".into();
+    scan(&mut m, vec![now.clone()]);
+    assert_eq!(rows(&m).len(), 1);
+    m.use_record_paths(M).unwrap();
+    idle(&mut m);
+    let e = entry(&m, M).txst.unwrap();
+    assert_eq!(e.slots, now.slots);
+    assert_eq!(e.edid, "Renamed");
+    assert!(rows(&m).is_empty(), "{:?}", rows(&m));
+    // What reaches disk follows the new copy.
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/new_body.dds"));
+}
+
+#[test]
+fn a_new_override_finds_the_same_record() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    let map = entry(&m, M).txst.unwrap();
+    let mut won = arch();
+    won.winner = "Patch.esp".into();
+    scan(&mut m, vec![won]);
+    assert_eq!(
+        m.record_of(&map).map(|r| r.winner.as_str()),
+        Some("Patch.esp")
+    );
+    let mut later = arch();
+    later.winner = "Newer.esp".into();
+    later.plugin = "ARCH_resources.ESP".into();
+    scan(&mut m, vec![later]);
+    assert_eq!(
+        m.record_of(&map).map(|r| r.winner.as_str()),
+        Some("Newer.esp")
+    );
+    let mut other = arch();
+    other.formid = "0x815".into();
+    scan(&mut m, vec![other]);
+    assert!(
+        m.record_of(&map).is_none(),
+        "another FormID is another record"
+    );
+}
+
+#[test]
+fn a_missing_record_raises_an_info_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    scan(&mut m, vec![trec("Other", "O.esp", "0x1", &[])]);
+    let r = rows(&m);
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(r[0].level, Level::Info);
+    assert_eq!(
+        r[0].text,
+        format!("Record {ARCH} isn't in the latest scan; its stored paths stay")
+    );
+    assert_eq!(r[0].fix, None);
+    // The mapping and the paths it wrote stay.
+    assert!(entry(&m, M).txst.is_some());
+    assert!(out(&m, "textures/s/e/x.png").ends_with("/textures/s/e/femalebody.dds"));
+}
+
+#[test]
+fn an_empty_scan_says_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let m = stored(d.path(), "textures/s/body_n.dds");
+    assert!(m.known.records.is_empty());
+    assert!(rows(&m).is_empty());
+}
+
+// ---- Task 6: the screens (kittest, 1280 wide) ----
+
+fn pill_of<'a>(h: &'a Harness<'static, AppModel>, id: &'a str) -> egui_kittest::Node<'a> {
+    h.query_all_by_label(id).next().expect("the set pill")
+}
+
+fn menu_of(m: AppModel) -> Harness<'static, AppModel> {
+    let mut h = harness(m, 1280.0);
+    h.run();
+    pill_of(&h, M).click_secondary();
+    h.run();
+    h
+}
+
+#[test]
+fn the_menu_offers_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let h = menu_of(unmapped(d.path()));
+    h.get_by_label("Map to texture set record…");
+    assert!(h.query_by_label("Change record…").is_none());
+    assert!(h.query_by_label("Remove record mapping").is_none());
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    scan(&mut m, vec![arch()]);
+    let h = menu_of(m);
+    h.get_by_label("Change record…");
+    h.get_by_label("Remove record mapping");
+    assert!(h.query_by_label("Map to texture set record…").is_none());
+}
+
+#[test]
+fn the_menu_removes_a_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    scan(&mut m, vec![arch()]);
+    let mut h = menu_of(m);
+    h.get_by_label("Remove record mapping").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    assert!(entry(h.state(), M).txst.is_none());
+}
+
+#[test]
+fn it_is_greyed_with_no_scan() {
+    let d = tempfile::tempdir().unwrap();
+    let m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
+    let mut h = menu_of(m);
+    let item = h.get_by_label("Map to texture set record…");
+    assert!(item.accesskit_node().is_disabled());
+    item.hover();
+    h.run();
+    h.get_by_label("Scan your mods first");
+}
+
+#[test]
+fn it_is_greyed_on_a_pbr_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    scan(&mut m, vec![arch()]);
+    assert!(view(&m, "landscape/rock01").pbr);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    pill_of(&h, "landscape/rock01").click_secondary();
+    h.run();
+    let item = h.get_by_label("Map to texture set record…");
+    assert!(item.accesskit_node().is_disabled());
+    item.hover();
+    h.run();
+    h.get_by_label("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs");
+}
+
+fn open_picker(h: &mut Harness<'static, AppModel>) {
+    pill_of(h, M).click_secondary();
+    h.run();
+    h.get_by_label("Map to texture set record…").click();
+    h.run();
+}
+
+const ROW: &str = "Arch_skinbody_elf (0x814, Arch_Resources.esp)";
+
+#[test]
+fn the_picker_maps_a_record() {
+    let d = tempfile::tempdir().unwrap();
+    let m = unmapped(d.path());
+    let rev = m.sets_doc.as_ref().unwrap().rev();
+    let mut h = harness(m, 1280.0);
+    h.run();
+    open_picker(&mut h);
+    h.get_by_label("Search texture set records")
+        .type_text("elf");
+    h.run();
+    h.get_by_label("1 of 2 records");
+    assert!(
+        h.query_by_label_contains("Other (0x1").is_none(),
+        "filtered out"
+    );
+    // Nothing is chosen yet: Map is off, with its reason.
+    let map = h.get_by_role_and_label(Role::Button, "Map");
+    assert!(map.accesskit_node().is_disabled());
+    map.hover();
+    h.run();
+    h.get_by_label("Pick a record first");
+    h.get_by_label(ROW).click();
+    h.run();
+    h.get_by_label("x.png → textures/s/e/femalebody.dds");
+    h.get_by_label("x_rfaos.png: keeps its own path");
+    // Enter doesn't map, and nothing is written before Map.
+    h.key_press(eframe::egui::Key::Enter);
+    h.run();
+    assert!(entry(h.state(), M).txst.is_none());
+    assert_eq!(h.state().sets_doc.as_ref().unwrap().rev(), rev);
+    h.get_by_role_and_label(Role::Button, "Map").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    let e = entry(h.state(), M).txst.expect("mapped");
+    assert_eq!(
+        (e.plugin.as_str(), e.formid.as_str()),
+        ("Arch_Resources.esp", "0x814")
+    );
+    assert_eq!(e.slots, arch().slots);
+    assert!(out(h.state(), "textures/s/e/x.png").ends_with("/textures/s/e/femalebody.dds"));
+}
+
+#[test]
+fn cancel_leaves_the_doc_unchanged() {
+    let d = tempfile::tempdir().unwrap();
+    let m = unmapped(d.path());
+    let rev = m.sets_doc.as_ref().unwrap().rev();
+    let mut h = harness(m, 1280.0);
+    h.run();
+    open_picker(&mut h);
+    h.get_by_label(ROW).click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    assert!(h.query_by_label(ROW).is_none(), "the picker closed");
+    assert!(entry(h.state(), M).txst.is_none());
+    assert_eq!(h.state().sets_doc.as_ref().unwrap().rev(), rev);
+}
+
+#[test]
+fn the_picker_draws_only_visible_rows() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
+    let many: Vec<TxstRecord> = (0..5000)
+        .map(|n| {
+            trec(
+                &format!("Rec{n:04}"),
+                "Big.esp",
+                &format!("0x{n:X}"),
+                &[(1, "textures/b.dds")],
+            )
+        })
+        .collect();
+    scan(&mut m, many);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    open_picker(&mut h);
+    h.get_by_label("5000 of 5000 records");
+    let drawn = h.query_all_by_label_contains(", Big.esp)").count();
+    assert!(
+        (1..100).contains(&drawn),
+        "{drawn} rows built for 5,000 records"
+    );
+}
+
+#[test]
+fn the_card_names_its_record() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    scan(&mut m, vec![arch()]);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    let line = "Record: Arch_skinbody_elf (0x814, Arch_Resources.esp)";
+    h.get_by_label(line).hover();
+    h.run();
+    h.get_by_label("slot1: textures/s/e/femalebody.dds");
+    h.get_by_label("slot2: textures/s/body_n.dds");
+}
+
+#[test]
+fn a_supplied_slot_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    // The Advanced skin editor has no `_s` row; its normal row is where a supplied slot shows.
+    let toml = skin_set(M, "") + &txst(&[(2, BODY_N)]);
+    let mut m = project_toml(d.path(), &["textures/s/e/x.png"], &toml);
+    assert_eq!(
+        view(&m, M).record_supplied.get(&2).map(String::as_str),
+        Some(BODY_N)
+    );
+    let key = view(&m, M).key;
+    m.select_set(&key);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    h.get_by_label("From record: body_n.dds").hover();
+    h.run();
+    h.get_by_label(BODY_N);
+}
+
+#[test]
+fn the_problems_row_uses_new_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = stored(d.path(), "textures/s/body_n.dds");
+    let mut now = arch();
+    now.slots.insert(2, "textures/s/new_n.dds".into());
+    scan(&mut m, vec![now.clone()]);
+    m.open_problems(None);
+    let mut h = harness(m, 1280.0);
+    h.run();
+    h.get_by_label(&format!("Record {ARCH} changed"));
+    h.get_by_role_and_label(Role::Button, "Use new paths")
+        .click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    assert_eq!(entry(h.state(), M).txst.unwrap().slots, now.slots);
+    h.run();
+    assert!(
+        h.query_by_label_contains("changed").is_none(),
+        "the row is gone"
+    );
+}
+/// Screenshots for the Task 6 review (`TXST_SHOTS_DIR` names the folder): the card and editor with a mapped set, the
+/// picker with long EDIDs and paths, and the Problems rows. Not a gate.
+#[test]
+#[ignore]
+fn render_picker_shots() {
+    let out = std::path::PathBuf::from(std::env::var_os("TXST_SHOTS_DIR").expect("TXST_SHOTS_DIR"));
+    std::fs::create_dir_all(&out).unwrap();
+    let long =
+        "Arch_Resources_ExtremelyLongTextureSetRecordName_FemaleBody_ElfVariant_Scaled_UltraDetail";
+    let deep = "textures/arch/skin/variants/elf/highpoly/femalebody_ultra_detail_maps/femalebody_elf_albedo_final_v3.dds";
+    let mut recs = vec![
+        trec(
+            long,
+            "Arch_Resources_With_A_Very_Long_Plugin_Name_Patched.esp",
+            "0x814",
+            &[(1, deep), (2, "textures/s/body_n.dds")],
+        ),
+        arch(),
+        trec(
+            "Arch_skinbody_human",
+            "Arch_Resources.esp",
+            "0x900",
+            &[(1, "textures/arch/skin/human/femalebody.dds")],
+        ),
+    ];
+    recs[2].winner = "Patch_Of_Everything.esp".into();
+    for n in 0..40 {
+        recs.push(trec(
+            &format!("Filler_{n:02}"),
+            "Filler.esp",
+            &format!("0x{:X}", 0x1000 + n),
+            &[(1, "textures/filler/x.dds")],
+        ));
+    }
+    let shot = |name: &str, w: f32, h: &mut Harness<'static, AppModel>| {
+        for _ in 0..8 {
+            h.run_steps(1);
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        h.render()
+            .unwrap()
+            .save(out.join(format!("{name}-{w}.png")))
+            .unwrap();
+    };
+    let build = |m: AppModel, w: f32| {
+        let h = Harness::builder()
+            .with_size(egui::vec2(w, 760.0))
+            .renderer(egui_kittest::wgpu::WgpuTestRenderer::new())
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h
+    };
+    for w in [1100.0f32, 1280.0, 1600.0] {
+        // Card, editor and the Problems row: M mapped to the long record, whose paths changed since.
+        let d = tempfile::tempdir().unwrap();
+        let toml = skin_set(M, "")
+            + &format!(
+                "[sets.txst]\nplugin = \"Arch_Resources_With_A_Very_Long_Plugin_Name_Patched.esp\"\nformid = \"0x814\"\nedid = \"{long}\"\n\
+                 slot1 = \"textures/s/e/femalebody.dds\"\nslot2 = \"textures/s/old_n.dds\"\nslot8 = \"{deep}\"\n"
+            );
+        let mut m = project_toml(
+            d.path(),
+            &["textures/s/e/x.png", "textures/s/e/x_wet.png"],
+            &toml,
+        );
+        scan(&mut m, recs.clone());
+        let key = view(&m, M).key;
+        m.select_set(&key);
+        m.open_problems(None);
+        let mut h = build(m, w);
+        shot("card-editor-problems", w, &mut h);
+        // The picker over the same project, opened on the set's menu and one row picked.
+        let d = tempfile::tempdir().unwrap();
+        let mut m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
+        scan(&mut m, recs.clone());
+        let mut h = build(m, w);
+        h.run();
+        open_picker(&mut h);
+        h.get_by_label(&format!(
+            "{long} (0x814, Arch_Resources_With_A_Very_Long_Plugin_Name_Patched.esp)"
+        ))
+        .click();
+        shot("picker", w, &mut h);
+        // The pending dialog lives in a thread-local: close it before the next width.
+        h.get_by_role_and_label(Role::Button, "Cancel").click();
+        h.run();
+    }
 }

@@ -2,6 +2,7 @@
 //! name and the PGPatcher JSON editor's match values). Read from the scan database on a worker after a scan and at
 //! start; empty without a scan.
 use super::sets::{set_views, SlotFill};
+use super::txst_map::{defining_plugin, formid_text};
 use super::AppModel;
 use crate::worker::{spawn_guarded, WorkerMsg};
 use modscan::store::Store;
@@ -18,6 +19,24 @@ pub struct KnownPaths {
     /// Diffuse path (with `.dds`) → the slots (0-based bits, 1..=7) a live mesh's texture set or a winning TXST fills
     /// beside it. A set's missing-map warning is dropped for such a map (Note HE4).
     pub supplies: BTreeMap<String, u16>,
+    /// Every winning texture set record (TXST) with a path, ordered by EDID (Note HG): the picker's list.
+    pub records: Vec<TxstRecord>,
+}
+
+/// A winning texture set record. Keyed by `plugin` + `formid` (Note HG): the plugin that defines it and its own FormID
+/// without the master digits, never the load-order one. `edid` is only a label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxstRecord {
+    /// The file that defines the record (its master when the winner overrides it).
+    pub plugin: String,
+    /// The plugin whose copy wins.
+    pub winner: String,
+    /// `0x814`: see [`super::txst_map::formid_text`].
+    pub formid: String,
+    pub edid: String,
+    /// 1-based lighting slot (the numbering of `borrow` and `lock`, converted from the raw `TX0n` index) → the
+    /// scan's path.
+    pub slots: BTreeMap<u8, String>,
 }
 
 /// Read the known paths from scan database `db`.
@@ -127,11 +146,65 @@ pub fn read(db: &Path) -> Result<KnownPaths, String> {
             }
         }
     }
+    // Like `supplies`: the picker's list must not blank the other pickers when its query fails (final review K1).
+    let records = read_records(conn).unwrap_or_default();
     Ok(KnownPaths {
         textures,
         mesh_dirs: dirs.into_iter().collect(),
         supplies,
+        records,
     })
+}
+
+/// The winning TXSTs (HC6's conditions: `rec_winner`, `owner_ok = 1`) that name a path, by EDID. One query; the
+/// `txst_slot.slot` column is the raw `TX0n` index (Note HG1), converted by [`tx_to_slot`] here.
+fn read_records(conn: &rusqlite::Connection) -> Result<Vec<TxstRecord>, String> {
+    let mut st = conn
+        .prepare(
+            "SELECT r.plugin_id, r.local, r.edid, pl.name, pl.masters_json, p.p, ts.slot FROM rec r \
+             JOIN rec_winner w ON w.formid = r.formid AND w.plugin_id = r.plugin_id \
+             JOIN plugin pl ON pl.id = r.plugin_id \
+             JOIN txst_slot ts ON ts.plugin_id = r.plugin_id AND ts.local = r.local \
+             JOIN path p ON p.id = ts.path_id \
+             WHERE r.sig = 'TXST' AND r.owner_ok = 1 \
+             ORDER BY r.edid COLLATE NOCASE, r.plugin_id, r.local, ts.slot",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = st
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<TxstRecord> = vec![];
+    let mut last: Option<(i64, i64)> = None;
+    for row in rows {
+        let (plugin_id, local, edid, winner, masters, path, tx) = row.map_err(|e| e.to_string())?;
+        let Some(slot) = tx_to_slot(tx) else { continue };
+        if last != Some((plugin_id, local)) {
+            last = Some((plugin_id, local));
+            let local = local as u32;
+            let masters: Vec<String> = serde_json::from_str(&masters).unwrap_or_default();
+            out.push(TxstRecord {
+                plugin: defining_plugin(local, &winner, &masters),
+                winner,
+                formid: formid_text(local),
+                edid: edid.unwrap_or_default(),
+                slots: BTreeMap::new(),
+            });
+        }
+        if let Some(rec) = out.last_mut() {
+            rec.slots.insert(slot, path);
+        }
+    }
+    Ok(out)
 }
 
 // modscan's TX_TO_NIF, +1; private there, and held equal by the_slots_match_txst_textures.

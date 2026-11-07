@@ -4,6 +4,7 @@ use super::meshes::{NifLevel, NifTab};
 use super::{checks, code_text, counts_toward_badge, pbr_export, sets, AppModel, ItemStatus};
 use crate::pgp::settings::Feature;
 use engine::codes::Code;
+use engine::config::Target;
 use nif::fields::Field;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -193,6 +194,8 @@ pub enum Fix {
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
     RemoveAliases(PathBuf, String),
+    /// Note HG: copy the winning record's current paths into the set's (by id) mapping.
+    UseRecordPaths(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,6 +570,21 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
+    for v in views.iter().filter(|v| !(v.pbr && m.target == Target::Cs)) {
+        let Some(map) = &v.txst else { continue };
+        if m.record_of(map).is_some_and(|r| r.slots != map.slots) {
+            out.push(Problem {
+                fix: Some(Fix::UseRecordPaths(v.id.clone())),
+                ..row(
+                    Level::Warning,
+                    set_at(&v.key, &v.id),
+                    format!("Record {} changed", map.edid),
+                    None,
+                )
+            });
+        }
+    }
     // Note GI (X4): an XPMF pbr profile's exact EDID with no PBRMaterialObjects JSON from this project.
     for (key, id, edid) in super::xpmf_json::skipped_edids(m) {
         out.push(Problem {
@@ -821,6 +839,24 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     )
                 });
             }
+        }
+    }
+    // Note HG: a mapped set whose record is in no winning copy of a non-empty scan; the mapping and paths stay. An
+    // empty scan says nothing (a scan that has not run is not a record that went away).
+    if !m.known.records.is_empty() {
+        for v in views.iter().filter(|v| !(v.pbr && m.target == Target::Cs)) {
+            let Some(map) = v.txst.as_ref().filter(|t| m.record_of(t).is_none()) else {
+                continue;
+            };
+            out.push(row(
+                Level::Info,
+                set_at(&v.key, &v.id),
+                format!(
+                    "Record {} isn't in the latest scan; its stored paths stay",
+                    map.edid
+                ),
+                None,
+            ));
         }
     }
     out.extend(nif_rows(NifLevel::Info, Level::Info));

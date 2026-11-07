@@ -2,6 +2,7 @@
 //! record's 1-based lighting slots (`Subtype::txst_slot`, `TxstMap::slots` keys), never `SlotKind` indexes.
 
 use super::items::{ItemKind, ItemStatus, TextureItem};
+use super::known_paths::TxstRecord;
 use super::sets::{
     entry_of, map_slot, recipe_suffix, SetView, SlotFill, SlotKind, LAST_GAME_SLOT, READ_ONLY,
 };
@@ -352,7 +353,123 @@ pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String>
         .collect()
 }
 
+/// The FormID a mapping stores and the picker shows: the plugin's own `local` without its master digits, `0x`, upper
+/// case, no leading zeros (`05000814` is `0x814`). Owner, 2026-11-06. Never from the load-order FormID: a light
+/// plugin's `FE4CD814` would keep `4CD`, which moves with the load order.
+pub fn formid_text(local: u32) -> String {
+    format!("0x{:X}", local & 0x00FF_FFFF)
+}
+
+/// The plugin that defines the record whose own copy has `local` in plugin `own`: its master at the index the first
+/// two digits hold, or `own` when the index is at or past `masters.len()` (`clamp_local`).
+pub fn defining_plugin(local: u32, own: &str, masters: &[String]) -> String {
+    masters
+        .get((local >> 24) as usize)
+        .map_or_else(|| own.to_string(), Clone::clone)
+}
+
+/// The records of `list` that contain every word of `query` (case-insensitive, `\` read as `/`) in their EDID, plugin,
+/// winning plugin, FormID or colour path.
+pub fn filter_records<'a>(list: &'a [TxstRecord], query: &str) -> Vec<&'a TxstRecord> {
+    record_hits(list, query)
+        .into_iter()
+        .map(|i| &list[i])
+        .collect()
+}
+
+/// [`filter_records`] as indexes into `list`, for a picker that keeps its hits between frames.
+pub fn record_hits(list: &[TxstRecord], query: &str) -> Vec<usize> {
+    let q = query.trim().replace('\\', "/").to_lowercase();
+    let words: Vec<&str> = q.split_whitespace().collect();
+    (0..list.len())
+        .filter(|&i| {
+            let r = &list[i];
+            let hay = format!(
+                "{}\n{}\n{}\n{}\n{}",
+                r.edid,
+                r.plugin,
+                r.winner,
+                r.formid,
+                r.slots.get(&1).map_or("", String::as_str)
+            )
+            .to_lowercase();
+            words.iter().all(|w| hay.contains(w))
+        })
+        .collect()
+}
+
+impl TxstRecord {
+    /// What a mapping stores for this record.
+    pub fn to_map(&self) -> TxstMap {
+        TxstMap {
+            plugin: self.plugin.clone(),
+            formid: self.formid.clone(),
+            edid: self.edid.clone(),
+            slots: self.slots.clone(),
+        }
+    }
+}
+
 impl AppModel {
+    /// The winning record `map` names, by plugin + FormID (ASCII-folded), not by EDID or by the winning plugin.
+    pub fn record_of(&self, map: &TxstMap) -> Option<&TxstRecord> {
+        self.known.records.iter().find(|r| {
+            r.plugin.eq_ignore_ascii_case(&map.plugin) && r.formid.eq_ignore_ascii_case(&map.formid)
+        })
+    }
+
+    /// What mapping set `set` to `r` would do, for the picker: each file the set writes (its name) and the record path
+    /// it would write (`None`: the record names no slot for it, or the path can't be written from this project, so
+    /// the file keeps its own). Raw packing sources and helpers write nothing and are left out.
+    pub fn record_preview(&self, set: &str, r: &TxstRecord) -> Vec<(String, Option<String>)> {
+        let Some(v) = self.view_of(set) else {
+            return vec![];
+        };
+        let off = v.pbr && self.target == Target::Cs;
+        v.members
+            .iter()
+            .filter_map(|k| self.item(k))
+            .filter(|i| {
+                !matches!(i.status, ItemStatus::PackedInto(_)) && i.kind != ItemKind::Helper
+            })
+            .map(|i| {
+                let path = record_slot(i)
+                    .and_then(|s| r.slots.get(&s))
+                    .filter(|p| {
+                        !off && self
+                            .root
+                            .as_deref()
+                            .and_then(|root| record_rel(root, &i.key, p))
+                            .is_some()
+                    })
+                    .cloned();
+                (i.name.clone(), path)
+            })
+            .collect()
+    }
+
+    /// "Use new paths": copy the winning record's current paths and EDID into set `set`'s mapping.
+    pub fn use_record_paths(&mut self, set: &str) -> Result<(), String> {
+        let Some(id) = self.view_of(set).map(|v| v.id) else {
+            return Err(format!("no set {set}"));
+        };
+        let stored = self
+            .sets_doc
+            .as_ref()
+            .and_then(|d| {
+                d.entries()
+                    .iter()
+                    .find(|e| same_id(&e.id, &id))
+                    .and_then(|e| e.txst.clone())
+            })
+            .ok_or_else(|| format!("{id} is not mapped to a texture set record"))?;
+        let map = self
+            .record_of(&stored)
+            .ok_or_else(|| format!("{} isn't in the latest scan", stored.edid))?
+            .to_map();
+        self.map_record(&id, map)
+    }
+
     /// Map set `set` to a texture set record. A re-plan follows; inside `batch_edit` it joins the batch.
     pub fn map_record(&mut self, set: &str, map: TxstMap) -> Result<(), String> {
         if !self.sets_editable() {

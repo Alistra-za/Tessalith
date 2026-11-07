@@ -24,6 +24,10 @@ A set whose diffuse is an **Advanced skin** (`skin_albedo`) gets an **Advanced s
 - **Where skin sets write.** A skin set's files go to their normal paths (mirroring the source folders), not under `textures\pbr\<prefix>\`, and **Rename** names its outputs with an output name, as for any set without JSON.
 - Number boxes limit to the Community Shaders range for their setting (for example 0–1, 0–10 for the specular texture multiplier, 0.1–100 for the detail tiling) and keep 4 decimals. Each edit is one undo step, and a drag on one value is one step. Bulk edit does not touch these.
 
+### Shared-map sets
+
+A skin set with no colour map, holding only `_n`, `_sk`, `_wet` and `_detail_n`, shows only those cards; other skin sets borrow its maps. Mapped to a texture set record whose colour path a skin set in the project writes, it is an Advanced skin set itself, and a shader you chose on it wins. Skin variants then share one `_n` and `_sk` and keep their own diffuse and `_rfaos` each. [Mapping, slot states and existing files](GUI-Sets-Column.md#texture-set-records).
+
 ## PBR Landscape
 
 Under the Community Shaders target, a PBR set (an `_rmaos`, a PBR albedo or the raw PBR maps) under `textures\landscape\`, with a `landscape` folder in its path, or with a Community Shaders texture-set block gets the **PBR Landscape** shader automatically; you can also pick it in the Shader list. It converts exactly like a PBR set; only the cards and the set's pill change. Its maps are the albedo (a landscape diffuse or plain diffuse also fills it), `_n`, and optionally `_rmaos` and `_p`. Any PBR set under `textures\landscape\` counts, trees, grass and mountains included; pick PBR in the Shader list for one that is not terrain.

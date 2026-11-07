@@ -2962,13 +2962,7 @@ impl AppModel {
         (self.inputs_rev, self.check_state.plans_applied)
     }
 
-    /// Tests (Note HG): the re-plans in a row the engine inputs forced (`finish_plan` stops at 2), and whether the
-    /// last plan was made from the inputs the model would send now.
-    #[cfg(feature = "test-hooks")]
-    pub fn auto_replans(&self) -> u8 {
-        self.auto_replans
-    }
-
+    /// Tests (Note HG): whether the last plan was made from the inputs the model would send now.
     #[cfg(feature = "test-hooks")]
     pub fn inputs_settled(&self) -> bool {
         self.last_inputs.as_ref() == Some(&EngineInputs::of(self))

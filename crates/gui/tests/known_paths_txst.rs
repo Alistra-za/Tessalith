@@ -199,3 +199,210 @@ fn a_meshes_slots_are_unchanged() {
     assert_eq!(k.textures["textures/m/five.dds"], 1 << 5);
     assert_ne!(k.supplies["textures/m/d.dds"] & (1 << 5), 0);
 }
+
+// ---- Task 6: the winning records the picker lists (Note HG) ----
+
+use sdc_gui::model::txst_map::formid_text;
+
+fn plugin(c: &rusqlite::Connection, id: i64, name: &str, masters: &[&str]) {
+    c.execute(
+        "INSERT INTO plugin (id, name, path, size, mtime, lo_index, light, flags, masters_json)
+         VALUES (?1, ?2, ?2, 1, 1, ?1, 0, 0, ?3)",
+        rusqlite::params![id, name, serde_json::to_string(masters).unwrap()],
+    )
+    .unwrap();
+}
+
+/// A TXST copy in plugin `pid`: `formid` is the load-order one, `local` the plugin's own. `wins` adds its
+/// `rec_winner` row; `owner_ok` is the scan's flag.
+fn copy(
+    c: &rusqlite::Connection,
+    (pid, local, formid): (i64, u32, u32),
+    edid: &str,
+    (wins, owner_ok): (bool, bool),
+    rows: &[(i64, &str)],
+) {
+    c.execute(
+        "INSERT INTO rec (formid, local, plugin_id, sig, edid, owner_ok) VALUES (?1, ?2, ?3, 'TXST', ?4, ?5)",
+        rusqlite::params![formid, local, pid, edid, owner_ok],
+    )
+    .unwrap();
+    if wins {
+        c.execute(
+            "INSERT INTO rec_winner (formid, plugin_id, n_overrides) VALUES (?1, ?2, 0)",
+            rusqlite::params![formid, pid],
+        )
+        .unwrap();
+    }
+    for (tx, p) in rows {
+        let path = path_id(c, p);
+        c.execute(
+            "INSERT INTO txst_slot (formid, local, plugin_id, slot, path_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![formid, local, pid, tx, path],
+        )
+        .unwrap();
+    }
+}
+
+/// `db` plus the records of the owner's layout: a light plugin with five masters, an override, a losing copy, two
+/// masters sharing one number, and a winner the scan flagged `owner_ok = 0`.
+fn records_db(dir: &std::path::Path) -> std::path::PathBuf {
+    let p = db(dir);
+    let s = Store::open(&p).unwrap();
+    let c = s.conn();
+    let five = [
+        "Skyrim.esm",
+        "Update.esm",
+        "Dawnguard.esm",
+        "HearthFires.esm",
+        "Dragonborn.esm",
+    ];
+    plugin(c, 2, "Arch.esp", &five);
+    plugin(c, 3, "Patch.esp", &["Skyrim.esm"]);
+    plugin(c, 4, "Old.esp", &["Skyrim.esm"]);
+    plugin(c, 5, "Two.esp", &["A.esm", "B.esm"]);
+    plugin(c, 6, "Off.esp", &[]);
+    copy(
+        c,
+        (2, 0x0500_0814, 0xFE4C_D814),
+        "Arch_skinbody_elf",
+        (true, true),
+        &[
+            (0, "textures/arch/skin/elf/femalebody.dds"),
+            (1, "textures/arch/skin/body_n.dds"),
+            (2, "textures/arch/skin/body_rmaos.dds"),
+            (3, "textures/arch/skin/body_sk.dds"),
+            (7, "textures/arch/skin/elf/body_s.dds"),
+        ],
+    );
+    copy(
+        c,
+        (3, 0x0001_2EB7, 0x0001_2EB7),
+        "Won",
+        (true, true),
+        &[(0, "textures/won.dds")],
+    );
+    copy(
+        c,
+        (4, 0x0001_2EB7, 0x0001_2EB7),
+        "Lost",
+        (false, true),
+        &[(0, "textures/lost.dds")],
+    );
+    copy(
+        c,
+        (5, 0x0000_0801, 0x2000_0801),
+        "ZeroMaster",
+        (true, true),
+        &[(0, "textures/z0.dds")],
+    );
+    copy(
+        c,
+        (5, 0x0100_0801, 0x2100_0801),
+        "OneMaster",
+        (true, true),
+        &[(0, "textures/z1.dds")],
+    );
+    copy(
+        c,
+        (6, 0x0000_0800, 0x2200_0800),
+        "Flagged",
+        (true, false),
+        &[(0, "textures/f.dds")],
+    );
+    p
+}
+
+fn rec<'a>(k: &'a KnownPaths, edid: &str) -> &'a sdc_gui::model::known_paths::TxstRecord {
+    k.records
+        .iter()
+        .find(|r| r.edid == edid)
+        .unwrap_or_else(|| panic!("no record {edid}: {:?}", k.records))
+}
+
+fn records() -> (tempfile::TempDir, KnownPaths) {
+    let d = tempfile::tempdir().unwrap();
+    let k = known_paths::read(&records_db(d.path())).unwrap();
+    (d, k)
+}
+
+#[test]
+fn formid_text_drops_the_first_two_digits() {
+    assert_eq!(formid_text(0x0500_0814), "0x814");
+    assert_eq!(formid_text(0x0001_2EB7), "0x12EB7");
+    assert_eq!(formid_text(0x0500_0FE6), "0xFE6");
+}
+
+#[test]
+fn a_light_plugin_uses_its_own_copy() {
+    let (_d, k) = records();
+    let r = rec(&k, "Arch_skinbody_elf");
+    assert_eq!(
+        (r.formid.as_str(), r.plugin.as_str()),
+        ("0x814", "Arch.esp")
+    );
+    assert_eq!(r.winner, "Arch.esp");
+}
+
+#[test]
+fn an_override_is_keyed_by_its_master() {
+    let (_d, k) = records();
+    let r = rec(&k, "Won");
+    assert_eq!(
+        (r.formid.as_str(), r.plugin.as_str()),
+        ("0x12EB7", "Skyrim.esm")
+    );
+    assert_eq!(r.winner, "Patch.esp");
+}
+
+#[test]
+fn two_masters_with_one_number_stay_apart() {
+    let (_d, k) = records();
+    let (a, b) = (rec(&k, "ZeroMaster"), rec(&k, "OneMaster"));
+    assert_eq!((a.formid.as_str(), b.formid.as_str()), ("0x801", "0x801"));
+    assert_eq!((a.plugin.as_str(), b.plugin.as_str()), ("A.esm", "B.esm"));
+}
+
+#[test]
+fn only_winners_are_listed() {
+    let (_d, k) = records();
+    let names: Vec<&str> = k.records.iter().map(|r| r.edid.as_str()).collect();
+    assert!(!names.contains(&"Lost"), "{names:?}");
+    assert!(!names.contains(&"Flagged"), "{names:?}");
+    assert!(names.contains(&"Won"));
+}
+
+#[test]
+fn records_keep_their_slots() {
+    let (_d, k) = records();
+    let r = rec(&k, "Arch_skinbody_elf");
+    assert_eq!(r.slots[&6], "textures/arch/skin/body_rmaos.dds");
+    assert_eq!(r.slots[&3], "textures/arch/skin/body_sk.dds");
+    assert_eq!(r.slots[&8], "textures/arch/skin/elf/body_s.dds");
+    assert_eq!(r.slots.keys().copied().collect::<Vec<_>>(), [1, 2, 3, 6, 8]);
+}
+
+/// Pin of the ordering: by EDID, not by plugin or FormID.
+#[test]
+fn records_are_ordered_by_edid() {
+    let (_d, k) = records();
+    let names: Vec<&str> = k.records.iter().map(|r| r.edid.as_str()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_by_key(|n| n.to_lowercase());
+    assert_eq!(names, sorted);
+}
+
+#[test]
+fn a_failing_record_query_keeps_the_pickers() {
+    let d = tempfile::tempdir().unwrap();
+    let p = db(d.path());
+    // The record query joins `plugin`; without it only that query fails.
+    Store::open(&p)
+        .unwrap()
+        .conn()
+        .execute_batch("DROP TABLE plugin")
+        .unwrap();
+    let k = known_paths::read(&p).unwrap();
+    assert!(k.records.is_empty());
+    assert_eq!(k.textures["textures/a/x.dds"], 1 << 0);
+}
