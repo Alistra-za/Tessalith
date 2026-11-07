@@ -245,3 +245,56 @@ fn the_tree_folds_unnamed_containers_and_long_lists() {
         "{text}"
     );
 }
+
+#[test]
+fn a_label_is_scrolled_into_view() {
+    let mut h = tiny(|ui, _| {
+        egui::ScrollArea::vertical()
+            .max_height(100.0)
+            .show(ui, |ui| {
+                for i in 0..50 {
+                    ui.label(format!("Row {i}"));
+                }
+            });
+    });
+    step(
+        &mut h,
+        r#"{"op":"scroll","at":{"label":"Row 45"},"dir":"into_view"}"#,
+    )
+    .unwrap();
+    let s = snapshot(&h);
+    let n = find(&s, &label("Row 45")).unwrap();
+    // inside the 100 px scroll area (8..108) and, when the join is trusted, inside its clip
+    assert!(n.rect.min.y >= 8.0 && n.rect.max.y <= 108.5, "{n:?}");
+    assert!(
+        n.clip.is_none_or(|c| c.contains(frame::visible_centre(n))),
+        "{n:?}"
+    );
+}
+
+#[test]
+fn a_click_carries_its_modifiers() {
+    let mut h = tiny(|ui, s| {
+        if ui.button("M").clicked() {
+            s.dropped = ui.input(|i| i.modifiers.command);
+        }
+    });
+    step(&mut h, r#"{"op":"click","at":{"label":"M"},"mods":"Ctrl"}"#).unwrap();
+    assert!(h.state().dropped);
+}
+
+#[test]
+fn an_index_with_no_match_still_lists_labels() {
+    let h = tiny(|ui, _| {
+        let _ = ui.button("Open folder…");
+    });
+    let t = Target {
+        index: Some(0),
+        ..label("Open")
+    };
+    let e = find(&snapshot(&h), &t).unwrap_err();
+    assert!(
+        e.contains("no node labelled \"Open\"") && e.contains("Open folder…"),
+        "{e}"
+    );
+}

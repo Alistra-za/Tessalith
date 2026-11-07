@@ -55,9 +55,19 @@ const INTERACTIVE_ROLES: [&str; 10] = [
 /// What the walk keeps of an egui WidgetRect (the type itself is not public).
 struct Joined {
     id: egui::Id,
+    rect: Rect,
     clip: Rect,
     layer: String,
     interactive: bool,
+}
+
+/// A node's name and value. egui names a Label by its text in `value`, not in `label`; `with_kit` in steps.rs
+/// matches kittest nodes with this too.
+pub fn names(a: &egui_kittest::kittest::AccessKitNode<'_>) -> (String, Option<String>) {
+    match (a.label(), a.value()) {
+        (None, Some(v)) if format!("{:?}", a.role()) == "Label" => (v, None),
+        (l, v) => (l.unwrap_or_default(), v),
+    }
 }
 
 fn flatten(s: &Shape, clip: Rect, out: &mut Vec<Text>) {
@@ -86,6 +96,7 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
                         w.id.accesskit_id(),
                         Joined {
                             id: w.id,
+                            rect: w.rect,
                             clip: w.interact_rect,
                             layer: format!("{l:?}"),
                             interactive: w.sense.interactive(),
@@ -111,10 +122,11 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
             return; // the glyph run under a Label; its text is already the Label's value
         }
         let joined = h.get(&a.locate().0);
-        // egui names a Label by its text in `value`, not in `label`.
-        let (label, value) = match (a.label(), a.value()) {
-            (None, Some(v)) if role == "Label" => (v, None),
-            (l, v) => (l.unwrap_or_default(), v),
+        let (label, value) = names(&a);
+        let r = if a.bounding_box().is_some() {
+            rect_of(n)
+        } else {
+            Rect::NOTHING
         };
         let idx = out.len();
         out.push(Node {
@@ -127,12 +139,11 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
             label,
             value,
             placeholder: a.placeholder().map(str::to_owned),
-            rect: if a.bounding_box().is_some() {
-                rect_of(n)
-            } else {
-                Rect::NOTHING
-            },
-            clip: joined.map(|w| w.clip),
+            rect: r,
+            // egui registers a Label in a ScrollArea at its unscrolled place; a clip for another place is not this node's
+            clip: joined
+                .filter(|w| (w.rect.min - r.min).abs().max_elem() < 1.0)
+                .map(|w| w.clip),
             layer: joined.map(|w| w.layer.clone()),
             focused: a.is_focused(),
             disabled: a.is_disabled(),

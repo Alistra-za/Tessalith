@@ -2,7 +2,7 @@
 //! The step format of the headless UI driver and the code that runs a UI step on any `Harness`.
 //! Steps are JSON lines; `Pick`, `Expect` and `Check` need the app and are run elsewhere.
 
-use crate::frame::{snapshot, visible_centre, Node, Snapshot};
+use crate::frame::{names, snapshot, visible_centre, Node, Snapshot};
 use eframe::egui::{self, Modifiers, PointerButton, Pos2, Rect};
 use egui_kittest::kittest::NodeT;
 use egui_kittest::Harness;
@@ -234,7 +234,7 @@ pub fn find<'a>(s: &'a Snapshot, t: &Target) -> Result<&'a Node, String> {
         .filter(|n| t.role.as_ref().is_none_or(|r| n.role == *r))
         .collect();
     hits.sort_by(|a, b| reading_order(a, b));
-    if let Some(i) = t.index {
+    if let Some(i) = t.index.filter(|_| !hits.is_empty()) {
         return hits
             .get(i)
             .copied()
@@ -292,7 +292,7 @@ fn with_kit<S, R>(
         let a = k.accesskit_node();
         a.bounding_box().is_some()
             && format!("{:?}", a.role()) == n.role
-            && a.label().unwrap_or_default() == n.label
+            && names(&a).0 == n.label
             && k.rect() == n.rect
     });
     k.map(|k| f(&k))
@@ -344,10 +344,12 @@ fn click_at<S>(
     h.event(egui::Event::PointerMoved(p));
     h.run_steps(1);
     h.event(egui::Event::ModifiersChanged(mods));
+    h.run_steps(1);
     for _ in 0..pairs {
         h.event(press(p, button, true, mods));
         h.event(press(p, button, false, mods));
     }
+    h.run_steps(1);
     h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
 }
 
@@ -430,21 +432,23 @@ pub fn ui_step<S>(h: &mut Harness<'static, S>, step: &Step) -> Result<(), String
             h.run_steps(3);
         }
         Step::Scroll { at, dir, times } => {
-            let s = snapshot(h);
-            let n = find(&s, at)?.clone();
-            with_kit(h, &n, |k| match dir {
-                ScrollDir::IntoView => k.scroll_to_me(),
-                _ => {
-                    for _ in 0..*times {
-                        match dir {
-                            ScrollDir::Up => k.scroll_up(),
-                            ScrollDir::Down => k.scroll_down(),
-                            ScrollDir::Left => k.scroll_left(),
-                            _ => k.scroll_right(),
-                        }
-                    }
-                }
-            })?;
+            // one action per frame: a scroll moves the node, so it is found again each time
+            for _ in 0..if *dir == ScrollDir::IntoView {
+                1
+            } else {
+                *times
+            } {
+                let s = snapshot(h);
+                let n = find(&s, at)?.clone();
+                with_kit(h, &n, |k| match dir {
+                    ScrollDir::IntoView => k.scroll_to_me(),
+                    ScrollDir::Up => k.scroll_up(),
+                    ScrollDir::Down => k.scroll_down(),
+                    ScrollDir::Left => k.scroll_left(),
+                    ScrollDir::Right => k.scroll_right(),
+                })?;
+                h.run_steps(1);
+            }
         }
         Step::Resize { w, h: height } => {
             h.set_size(egui::vec2(*w, *height));
