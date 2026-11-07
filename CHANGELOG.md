@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0 (Unreleased)
+
+- NIF Edit no longer edits clips (add, remove, rename, timing, Convert to clips). Existing clips still play, and the keys of a clip-driven controller stay editable. A saved edit drops its clip edits when it opens.
+
 ## 2.1.0 (Unreleased)
 
 - Community Shaders Advanced skin material files: every export writes `<diffuse>.csskin.json` for each Advanced skin set, with the values set on the skin card, the paths of the set's `_rfaos`, `_wet` and `_detail_n` (a borrowed slot points at the host set's file) and the diffuse's size and hash. There is no button and no opt-out; the card's **Export JSON** placeholder is gone. An edited file is kept, a stale one is left in place and listed in the export notes. A set with no diffuse or a borrowed diffuse writes no file, and a value outside the Community Shaders range blocks the export. See docs/wiki/GUI-Set-Materials.md#advanced-skin-card.

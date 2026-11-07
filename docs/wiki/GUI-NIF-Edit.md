@@ -1,6 +1,6 @@
 # Editing a NIF
 
-How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers and clips are on [NIF animation](GUI-NIF-Animation.md).
+How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers are on [NIF animation](GUI-NIF-Animation.md); existing clips play there.
 
 ## Before you start
 
@@ -23,7 +23,7 @@ How to edit a mesh's shader, alpha, controllers and extra data in the Meshes vie
 ## Shared blocks
 
 The panel says when a block has more than one user.
-- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. On the Controllers tab you click **Split alpha** first. If a clip also drives that alpha, it cannot be split yet.
+- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. On the Controllers tab you click **Split alpha** first. Split alpha also works on an alpha a clip drives: both alphas keep following the clip.
 - A shared texture set: "Shared by N shapes: editing makes a copy for this shape."
 - A shared shader: "Shared by N shapes: shader edits change all of them." A texture path edit on a shared shader is refused, because it would change the other shapes.
 - A shared interpolator: a value edit is a conflict ("This interpolator is shared by N controllers"), and the value row is greyed. A key edit copies the interpolator and its keys first, so the other controller's curve does not change.
@@ -38,7 +38,7 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 ## Pending edits, undo and source changes
 
-**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. Reverting a new or converted clip also removes the later timing edits of that clip, and its row says so: "(Revert also removes its clip timing)". A row in red did not apply, with the reason. The list is closed until a row turns red, which opens it; click its title to open or close it.
+**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. A row in red did not apply, with the reason. The list is closed until a row turns red, which opens it; click its title to open or close it.
 
 **Undo.** While an edit is open in the Meshes view, the header **Undo** and **Redo**, the command palette and **Ctrl+Z** / **Ctrl+Y** act on the NIF edit. With no edit open they act on the Textures history. The header buttons say which: **Undo** for the Textures history, **Undo NIF edit: Set shader type** (the step's name) for the NIF one, and the hover names the history. The panel has no Undo or Redo of its own; each pending edit keeps its **Revert**. A slider drag is one step.
 
@@ -60,7 +60,7 @@ Changing the export folder while you have edits open keeps them in memory, unsav
 
 ### After an export
 
-After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller or clip), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
+After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
 
 ### A file Tessalith did not write
 

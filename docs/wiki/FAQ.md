@@ -16,7 +16,7 @@ There is a prebuilt zip, but no installer: unzip it anywhere and run `tessalith.
 
 ### Can I edit a mesh (NIF)?
 
-Yes, in the GUI's Meshes view: shader fields and flags, alpha, extra data, controllers and animation clips. Review exports an edited copy, with your textures; the source file never changes. See [NIF editing](GUI-NIF-Edit.md).
+Yes, in the GUI's Meshes view: shader fields and flags, alpha, extra data, and controllers. Review exports an edited copy, with your textures; the source file never changes. See [NIF editing](GUI-NIF-Edit.md).
 
 ### Which target should I pick?
 
