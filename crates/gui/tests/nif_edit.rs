@@ -285,97 +285,6 @@ fn add_controller_times_round_trip_as_bits() {
     assert!(matches!(old.ops[0].op, Op::AddController { freq, .. } if freq == 1.5));
 }
 
-/// v2 C2: the three clip ops survive the edit document; AddSequence's times keep their bits (a NaN stop too).
-#[test]
-fn clip_ops_survive_the_edit_document() {
-    use nif::edit::{ClipTrack, Owner};
-    let root = Anchor {
-        block: 0,
-        kind: "NiNode".into(),
-        shape: None,
-        role: Role::Root,
-    };
-    let track = |var: u32, block: u32| ClipTrack {
-        at: Anchor {
-            block,
-            kind: "BSLightingShaderPropertyFloatController".into(),
-            shape: Some("S".into()),
-            role: Role::Ctrl {
-                owner: Owner::Shader,
-                class: "BSLightingShaderPropertyFloatController".into(),
-                var: Some(var),
-                nth: 0,
-            },
-        },
-        keys: KeyData::Float(KeyGroup {
-            key_type: Some(1),
-            keys: vec![Key {
-                time: 0.0,
-                value: 0.5,
-                forward: None,
-                backward: None,
-                tbc: None,
-            }],
-        }),
-    };
-    let ops = [
-        Op::AddSequence {
-            at: root.clone(),
-            name: "Open".into(),
-            cycle: 2,
-            freq: 1.0,
-            start: -0.0,
-            stop: f32::from_bits(0xFFC0_0001),
-            tracks: vec![track(11, 4), track(20, 5)],
-        },
-        Op::RemoveSequence {
-            at: root.clone(),
-            name: "Idle".into(),
-            nth: 1,
-        },
-        Op::SetSequenceTiming {
-            at: root.clone(),
-            name: "Idle".into(),
-            nth: 0,
-            cycle: 1,
-            freq: 2.5,
-            start: -0.0,
-            stop: 3.0,
-        },
-        Op::RenameSequence {
-            at: root,
-            name: "Open".into(),
-            nth: 0,
-            new_name: "Close".into(),
-        },
-    ];
-    let mut d = doc();
-    d.ops = ops
-        .iter()
-        .map(|op| DocOp {
-            op: op.clone(),
-            status: OpStatus::Applied,
-        })
-        .collect();
-    let back = EditDoc::from_text(&d.to_text()).unwrap();
-    let Op::AddSequence { start, stop, .. } = &back.ops[0].op else {
-        panic!("{:?}", back.ops)
-    };
-    assert_eq!(
-        [start.to_bits(), stop.to_bits()],
-        [0x8000_0000, 0xFFC0_0001]
-    );
-    // NaN != NaN: compare the rest with the stop made equal
-    let mut back = back;
-    if let Op::AddSequence { stop, .. } = &mut back.ops[0].op {
-        *stop = 1.0;
-    }
-    if let Op::AddSequence { stop, .. } = &mut d.ops[0].op {
-        *stop = 1.0;
-    }
-    assert_eq!(back, d);
-}
-
 #[test]
 fn every_op_variant_round_trips() {
     use nif::edit::Owner;
@@ -501,10 +410,6 @@ fn every_op_variant_round_trips() {
             stop: 2.0,
         },
         Op::RemoveController { at: ctrl.clone() },
-        Op::ConvertChainToClips {
-            at: shader.clone(),
-            name: "Caf\u{e9}".into(),
-        },
     ];
     for v in [
         E::Bsx(7),
@@ -534,6 +439,180 @@ fn every_op_variant_round_trips() {
         .collect();
     assert_eq!(EditDoc::from_text(&d.to_text()).unwrap(), d);
     assert_eq!(EditDoc::from_text(&doc().to_text()).unwrap(), doc());
+}
+
+// Documents written before clip editing was removed (Note GR2): the variants as the serializer wrote them.
+const DOC_HEAD: &str = "version = 1\n\n[source]\norigin = \"A\"\ndata_path = \"meshes/x.nif\"\nsize = 3\nsha256 = \"ab\"\n\n";
+const OP_SET_FIELD: &str = r#"[[ops]]
+status = "Conflict"
+
+[ops.op.SetField]
+field = "ShaderType"
+
+[ops.op.SetField.at]
+block = 3
+kind = "BSLightingShaderProperty"
+shape = "Shape"
+role = "Shader"
+
+[ops.op.SetField.value]
+U32 = 1
+
+[ops.op.SetField.base]
+U32 = 0
+
+"#;
+const OP_ADD_SEQUENCE: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.AddSequence]
+name = "Open"
+cycle = 2
+freq = 1065353216
+start = 2147483648
+stop = 4290772993
+tracks = []
+
+[ops.op.AddSequence.at]
+block = 0
+kind = "NiNode"
+role = "Root"
+
+"#;
+const OP_RENAME_SEQUENCE: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.RenameSequence]
+name = "Open"
+nth = 0
+new_name = "Close"
+
+[ops.op.RenameSequence.at]
+block = 0
+kind = "NiNode"
+role = "Root"
+
+"#;
+const OP_SET_KEYS_CLIP: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.SetKeys]
+clip = 2
+clip_name = "Open"
+
+[ops.op.SetKeys.at]
+block = 9
+kind = "BSLightingShaderPropertyFloatController"
+shape = "S"
+
+[ops.op.SetKeys.at.role.Ctrl]
+owner = "Shader"
+class = "BSLightingShaderPropertyFloatController"
+var = 2
+nth = 1
+
+[ops.op.SetKeys.keys.Float]
+key_type = 1
+
+[[ops.op.SetKeys.keys.Float.keys]]
+time = 1056964608
+value = 1065353216
+
+[ops.op.SetKeys.base.Float]
+key_type = 1
+keys = []
+
+"#;
+const EXPORTED: &str = "[export]\nsha256 = \"ee\"\nops_hash = \"0123\"\n\n";
+const CLIP_ONLY_LINE: &str =
+    "meshes/x.nif: 2 clip edit(s) dropped: NIF Edit no longer edits clips.";
+
+fn clip_only_text() -> String {
+    [DOC_HEAD, EXPORTED, OP_ADD_SEQUENCE, OP_RENAME_SEQUENCE].concat()
+}
+
+fn open_with(edit_mod: &Path, autosave: Option<&Path>) -> NifEdit {
+    NifEdit::open(
+        fixture("TestNifFile_Skinned_SE.nif"),
+        copy("A", 1, false),
+        "meshes/x.nif",
+        Some(edit_mod),
+        autosave,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_document_of_only_clip_ops_opens_empty_and_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, clip_only_text()).unwrap();
+    let e = open_with(d.path(), None);
+    assert_eq!(e.doc.ops.len(), 0);
+    assert!(
+        e.doc.pending(),
+        "the export has the clip edits, this does not"
+    );
+    assert_eq!(e.open_lines, vec![CLIP_ONLY_LINE.to_string()]);
+}
+
+#[test]
+fn a_mixed_document_keeps_its_other_ops_in_order() {
+    let t = [
+        DOC_HEAD,
+        OP_SET_FIELD,
+        OP_ADD_SEQUENCE,
+        OP_SET_KEYS_CLIP,
+        OP_RENAME_SEQUENCE,
+    ]
+    .concat();
+    let doc = EditDoc::from_text(&t).unwrap();
+    assert_eq!(doc.dropped_clip_ops, 2);
+    assert_eq!(doc.ops.len(), 2);
+    assert!(matches!(doc.ops[0].op, Op::SetField { .. }));
+    assert_eq!(doc.ops[0].status, OpStatus::Conflict);
+    assert!(matches!(
+        &doc.ops[1].op,
+        Op::SetKeys { clip: Some(2), clip_name: Some(n), .. } if n == "Open"
+    ));
+    assert_eq!(doc.ops[1].status, OpStatus::Applied);
+    assert_eq!(
+        EditDoc::from_text(&doc.to_text()).unwrap().dropped_clip_ops,
+        0
+    );
+}
+
+#[test]
+fn an_autosave_with_clip_ops_recovers() {
+    let d = tempfile::tempdir().unwrap();
+    let auto = d.path().join("auto.toml");
+    std::fs::write(&auto, clip_only_text()).unwrap();
+    let e = open_with(&d.path().join("mod"), Some(&auto));
+    assert!(e.open_lines.iter().all(|l| !l.contains("does not load")));
+    assert_eq!(
+        e.open_lines,
+        vec![
+            format!(
+                "Recovered the edits of meshes/x.nif autosaved in {}.",
+                auto.display()
+            ),
+            CLIP_ONLY_LINE.to_string(),
+        ]
+    );
+    assert_eq!(e.doc.ops.len(), 0);
+}
+
+#[test]
+fn the_badge_scan_reads_a_document_with_clip_ops() {
+    let d = tempfile::tempdir().unwrap();
+    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, clip_only_text()).unwrap();
+    assert_eq!(
+        pending_docs(d.path()),
+        vec![("meshes/x.nif".to_string(), DocBadge::Pending)]
+    );
 }
 
 #[test]

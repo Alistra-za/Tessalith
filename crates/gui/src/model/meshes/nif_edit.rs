@@ -663,7 +663,14 @@ impl NifEdit {
         let had_doc = saved.is_some();
         let (saved, owns_autosave, open_lines, recovered) =
             recover_autosave(saved, &doc_path, &edit_mod, autosave, data_path);
+        let mut open_lines = open_lines;
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
+        if doc.dropped_clip_ops > 0 {
+            open_lines.push(format!(
+                "{data_path}: {} clip edit(s) dropped: NIF Edit no longer edits clips.",
+                doc.dropped_clip_ops
+            ));
+        }
         let changed = doc.source.sha256 != id.sha256;
         if changed {
             doc.source = id; // saved with the next change; the statuses carry the conflicts
