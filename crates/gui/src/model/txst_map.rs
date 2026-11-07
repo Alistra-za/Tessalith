@@ -14,9 +14,23 @@ use std::path::{Path, PathBuf};
 /// path is `record`, by `engine::discover::game_path`'s rule: the first `textures` folder below the root, else the
 /// last one in the root's own path. `None` when `record` is not a `textures/...dds` path that stays inside the export
 /// folder, or lies outside the root's own `textures` folder.
+///
+/// The record's spelling is normalised (agent ruling, Note HG): lower-case, `/`, empty and `.` components dropped,
+/// so `textures/s/./a.dds` and `textures/s//a.dds` name the same output as `textures/s/a.dds`; `..` is refused.
+// shortcut: containment is by path components only, so a junction the user made inside the export folder is followed
+// as it is for every other output; upgrade when the engine's write boundary resolves real paths.
 pub fn record_rel(root: &Path, item_key: &str, record: &str) -> Option<PathBuf> {
-    let rec = record.replace('\\', "/").to_ascii_lowercase();
-    if !rec.starts_with("textures/")
+    let record = record.replace('\\', "/");
+    if record.starts_with('/') {
+        return None;
+    }
+    let parts: Vec<String> = record
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != ".")
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let rec = parts.join("/");
+    if parts.first().map(String::as_str) != Some("textures")
         || !rec.ends_with(".dds")
         || check_rel_path(&rec, "record path").is_err()
     {
@@ -25,25 +39,29 @@ pub fn record_rel(root: &Path, item_key: &str, record: &str) -> Option<PathBuf> 
     let key = item_key.replace('\\', "/");
     let dirs: Vec<&str> = key.split('/').collect();
     let dirs = &dirs[..dirs.len() - 1];
-    if let Some(i) = dirs.iter().position(|c| c.eq_ignore_ascii_case("textures")) {
+    let rel = if let Some(i) = dirs.iter().position(|c| c.eq_ignore_ascii_case("textures")) {
         let before = dirs[..i].join("/");
-        return Some(PathBuf::from(if before.is_empty() {
+        if before.is_empty() {
             rec
         } else {
             format!("{before}/{rec}")
-        }));
-    }
-    let comps: Vec<String> = root
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
-        .collect();
-    match comps.iter().rposition(|c| c == "textures") {
-        Some(i) => {
-            let prefix = format!("{}/", comps[i..].join("/"));
-            rec.strip_prefix(&prefix).map(PathBuf::from)
         }
-        None => Some(PathBuf::from(rec)),
-    }
+    } else {
+        let comps: Vec<String> = root
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+            .collect();
+        match comps.iter().rposition(|c| c == "textures") {
+            Some(i) => {
+                let prefix = format!("{}/", comps[i..].join("/"));
+                rec.strip_prefix(&prefix)?.to_string()
+            }
+            None => rec,
+        }
+    };
+    // The result is checked too: stripping a prefix must never leave a rooted or empty path.
+    (!rel.starts_with('/') && check_rel_path(&rel, "record path").is_ok())
+        .then(|| PathBuf::from(rel))
 }
 
 /// The record slot (1-based) a file fills: none for a raw packing source or a helper, as `slot_of` is; unlike
@@ -154,7 +172,20 @@ mod tests {
             Some("b/y.dds")
         );
         assert_eq!(rel(at, "x.png", "textures/z/y.dds"), None);
+        // Spelling is normalised, not refused.
+        for same in [
+            "textures/b/./y.dds",
+            "textures//b//y.dds",
+            "Textures\\B\\.\\y.dds",
+        ] {
+            assert_eq!(rel("C:/p", "x.png", same).as_deref(), Some(r), "{same}");
+        }
+        assert_eq!(
+            rel("C:/d/textures", "x.png", "textures//y.dds").as_deref(),
+            Some("y.dds")
+        );
         for bad in [
+            "/textures/y.dds",
             "meshes/y.dds",
             "textures/y.png",
             "textures/../y.dds",

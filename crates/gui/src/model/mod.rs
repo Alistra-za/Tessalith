@@ -674,6 +674,9 @@ pub struct AppModel {
     close_ready: bool,
     /// The engine inputs the latest plan was requested with (DECISIONS P1: two-pass planning).
     last_inputs: Option<EngineInputs>,
+    /// Note HG: item key → the output key (`TextureItem::job_key`) its file had in the last plan that gave it no
+    /// explicit path: its default, unaffected by an `output_name` or a record mapping. Plain files only.
+    pub(crate) plain_keys: std::collections::HashMap<String, String>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
     /// Task 9 (Z11): plans of an undo, redo, open or reload do not clean up encodings; the next settled plan ends it.
@@ -922,6 +925,7 @@ impl AppModel {
             auto_note: None,
             missing_preset_id: None,
             last_inputs: None,
+            plain_keys: Default::default(),
             auto_replans: 0,
             follow_off: false,
             type_pending: None,
@@ -2668,8 +2672,10 @@ impl AppModel {
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
+        let target_moved = self.target != view.target;
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
+        self.note_plain_keys(target_moved);
         self.refresh_game_paths();
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
@@ -2734,6 +2740,32 @@ impl AppModel {
         // Note HE2: before the votes, so an export queued behind this plan starts on the plan after the clear.
         self.clear_deleted_lines();
         self.refresh_mesh_votes(true);
+    }
+
+    /// Note HG: remember each plain file's default output key from a plan that gave it no explicit path, so what an
+    /// `output_name` derives its folder from never carries a record mapping that was removed. An entry survives
+    /// plans that did give the file a path, and goes with a target change or a vanished file.
+    fn note_plain_keys(&mut self, target_moved: bool) {
+        let old = if target_moved {
+            Default::default()
+        } else {
+            std::mem::take(&mut self.plain_keys)
+        };
+        let last = self.last_inputs.as_ref().map(|l| &l.output_paths);
+        let mut now = std::collections::HashMap::new();
+        for it in &self.items {
+            if it.kind == ItemKind::Packed || it.job.is_none() || it.job_key.is_empty() {
+                continue;
+            }
+            let explicit = last
+                .is_some_and(|l| l.contains_key(&engine::sets::OutputKey::File(it.key.clone())));
+            if !explicit {
+                now.insert(it.key.clone(), it.job_key.clone());
+            } else if let Some(v) = old.get(&it.key) {
+                now.insert(it.key.clone(), v.clone());
+            }
+        }
+        self.plain_keys = now;
     }
 
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.
@@ -4407,6 +4439,53 @@ mod tests {
         assert!(
             inputs.1.len() > candidates.len(),
             "named and explicit paths: {inputs:?}"
+        );
+        assert_eq!(inputs, sets::linear::engine_inputs(&m));
+    }
+
+    /// Note HG: the linear twin handles record paths as `engine_inputs` does: a mapped file and a mapped packed output.
+    #[test]
+    fn the_linear_twin_follows_records_too() {
+        use crate::sets_doc::TxstMap;
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let r = d.path().join("textures/landscape");
+        let rgb = |x: u32, y: u32| image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]);
+        image::RgbImage::from_fn(64, 64, rgb)
+            .save(r.join("q.png"))
+            .unwrap();
+        image::GrayImage::from_fn(64, 64, |x, _| image::Luma([x as u8]))
+            .save(r.join("q_roughness.png"))
+            .unwrap();
+        m.replan();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        m.set_shader("landscape/q", Some(engine::shader::Shader::AdvancedSkin));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let rec = |slots: &[(u8, &str)]| TxstMap {
+            slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+            ..TxstMap::default()
+        };
+        m.map_record(
+            "landscape/moss",
+            rec(&[(1, "textures/landscape/moss_new.dds")]),
+        )
+        .unwrap();
+        m.map_record("landscape/q", rec(&[(6, "textures/landscape/z_rfaos.dds")]))
+            .unwrap();
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let inputs = sets::engine_inputs(&m);
+        assert_eq!(
+            inputs.1.get(&OutputKey::File("landscape/moss.png".into())),
+            Some(&PathBuf::from("landscape/moss_new.dds")),
+            "{inputs:?}"
+        );
+        assert_eq!(
+            inputs.1.get(&OutputKey::Packed {
+                set: "landscape/q".into(),
+                suffix: "rfaos".into()
+            }),
+            Some(&PathBuf::from("landscape/z_rfaos.dds")),
+            "{inputs:?}"
         );
         assert_eq!(inputs, sets::linear::engine_inputs(&m));
     }

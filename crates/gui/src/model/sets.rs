@@ -1132,21 +1132,30 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let mut paths = BTreeMap::new();
     let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
-    let named = output_name_paths(m, &views);
-    // Note HG: a mapped set's record paths beat its output name.
+    let mut named = output_name_paths(m, &views);
     let record = record_paths(m, &views);
-    if m.target != Target::Cs {
+    if m.target != Target::Cs && record.is_empty() {
         paths.extend(named);
-        paths.extend(record);
         return (edits, paths);
     }
-    let candidates = output_candidates(m, &views);
+    // Note HG (agent ruling, overrides the brief's insertion order): a record path beats every other path for its
+    // key *before* the duplicate checks, so a name a record replaced reserves nothing. The checks below then run on
+    // final paths, on every target, and a record path that loses one leaves its file on its default path.
+    let cs = m.target == Target::Cs;
+    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(k, _)| k.clone()).collect();
+    named.retain(|(k, _)| !rec_keys.contains(k));
+    let mut candidates = if cs {
+        output_candidates(m, &views)
+    } else {
+        vec![]
+    };
+    candidates.retain(|(_, k, _)| !rec_keys.contains(k));
     // Mirrored outputs: textures with no explicit path, now or in the plan on screen, write their job key. An owned
     // path on one is held back too (the engine would skip both as IN-DUPLICATE and the plan would not settle);
     // `path_collisions` reports it.
     let mut explicit: BTreeSet<&OutputKey> = candidates.iter().map(|(_, c, _)| c).collect();
     explicit.extend(named.iter().map(|(c, _)| c));
-    explicit.extend(record.iter().map(|(c, _)| c));
+    explicit.extend(rec_keys.iter());
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
     let owners = packed_owners(&views);
     let mirrored: BTreeSet<String> = m
@@ -1163,6 +1172,12 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
     for (_, key, rel) in named.chain(candidates) {
+        if !cs {
+            // Off cs an output name takes no checks, as before records existed; it only reserves its path.
+            seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase());
+            paths.insert(key, rel);
+            continue;
+        }
         if mirrored.contains(&rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
             continue;
         }
@@ -1174,7 +1189,7 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             paths.insert(key, rel);
         }
     }
-    // The same checks, then the record path replaces any other value for its key.
+    // Record paths last: they take the same checks on every target.
     for (key, rel) in record {
         let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
         if !mirrored.contains(&low) && seen.insert(low) {
@@ -1208,7 +1223,9 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             if item.job.is_none() || item.job_key.is_empty() {
                 continue;
             }
-            let Some(rel) = renamed_output(&item.job_key, name, v.skin || v.shared) else {
+            // Note HG: the default output, not the last plan's, which a record mapping may have moved.
+            let from = m.plain_keys.get(&item.key).unwrap_or(&item.job_key);
+            let Some(rel) = renamed_output(from, name, v.skin || v.shared) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1414,14 +1431,20 @@ pub(crate) mod linear {
         let (edits, _) = super::engine_inputs(m);
         let mut paths = BTreeMap::new();
         let views = views(m);
-        let named = output_name_paths(m, &views);
+        let mut named = output_name_paths(m, &views);
         let record = record_paths(m, &views);
-        if m.target != Target::Cs {
+        let cs = m.target == Target::Cs;
+        if !cs && record.is_empty() {
             paths.extend(named);
-            paths.extend(record);
             return (edits, paths);
         }
-        let candidates = output_candidates(m, &views);
+        named.retain(|(k, _)| !record.iter().any(|(r, _)| r == k));
+        let mut candidates = if cs {
+            output_candidates(m, &views)
+        } else {
+            vec![]
+        };
+        candidates.retain(|(_, k, _)| !record.iter().any(|(r, _)| r == k));
         let explicit = |k: &OutputKey| {
             candidates.iter().any(|(_, c, _)| c == k)
                 || named.iter().any(|(c, _)| c == k)
@@ -1443,10 +1466,11 @@ pub(crate) mod linear {
         let mut seen = BTreeSet::new();
         let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
         for (_, key, rel) in named.chain(candidates) {
-            if mirrored.contains(&rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
-                continue;
-            }
-            if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+            let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+            if !cs {
+                seen.insert(low);
+                paths.insert(key, rel);
+            } else if !mirrored.contains(&low) && seen.insert(low) {
                 paths.insert(key, rel);
             }
         }

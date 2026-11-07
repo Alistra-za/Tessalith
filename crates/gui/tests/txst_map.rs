@@ -390,7 +390,7 @@ fn the_editor_of_a_shared_set_has_rows_for_its_maps_only() {
 // ---- Task 4: a mapped set writes to its record's paths ----
 
 use engine::sets::OutputKey;
-use sdc_gui::model::pbr_export::path_collisions;
+use sdc_gui::model::pbr_export::{export_blocks, path_collisions};
 use sdc_gui::model::sets::engine_inputs;
 use sdc_gui::sets_doc::TxstMap;
 
@@ -557,6 +557,12 @@ fn two_sets_on_one_record_path_are_a_collision() {
     let m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
     let rows = path_collisions(&m);
     assert!(rows.iter().any(|r| r.text.contains("same.dds")), "{rows:?}");
+    assert!(
+        export_blocks(&m)
+            .iter()
+            .any(|r| r.text.contains("same.dds")),
+        "export is blocked"
+    );
     let n = engine_inputs(&m)
         .1
         .values()
@@ -565,6 +571,132 @@ fn two_sets_on_one_record_path_are_a_collision() {
     assert_eq!(n, 1, "the engine sees one of them");
 }
 
+#[test]
+fn a_replaced_output_name_reserves_no_path() {
+    let d = tempfile::tempdir().unwrap();
+    let rec = |p: &str| {
+        format!("[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"{p}\"\n")
+    };
+    let toml = format!(
+        "{}{}{}{}",
+        skin_set("textures/s/a", "output_name = \"steel\"\n"),
+        rec("textures/s/body.dds"),
+        skin_set("textures/s/b", ""),
+        rec("textures/s/steel.dds")
+    );
+    let m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
+    assert!(out(&m, "textures/s/a.png").ends_with("/textures/s/body.dds"));
+    assert!(out(&m, "textures/s/b.png").ends_with("/textures/s/steel.dds"));
+    assert!(path_collisions(&m).is_empty(), "{:?}", path_collisions(&m));
+}
+
+#[test]
+fn a_spelling_variant_of_a_record_path_collides() {
+    let d = tempfile::tempdir().unwrap();
+    let rec = |p: &str| {
+        format!("[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"{p}\"\n")
+    };
+    let toml = format!(
+        "{}{}{}{}",
+        skin_set("textures/s/a", ""),
+        rec("textures/s/same.dds"),
+        skin_set("textures/s/b", ""),
+        rec("textures/s/./same.dds")
+    );
+    let m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
+    assert!(!path_collisions(&m).is_empty());
+    let toml = toml.replace("textures/s/./same.dds", "textures/s//same.dds");
+    let d = tempfile::tempdir().unwrap();
+    let m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
+    assert!(!path_collisions(&m).is_empty());
+}
+
+#[test]
+fn a_vanilla_collision_is_reported_and_stable() {
+    let d = tempfile::tempdir().unwrap();
+    let rec = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"textures/s/same.dds\"\n";
+    let toml =
+        format!("[[sets]]\nid = \"textures/s/a\"\n{rec}[[sets]]\nid = \"textures/s/b\"\n{rec}");
+    let mut m = project_toml(d.path(), &["textures/s/a.png", "textures/s/b.png"], &toml);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert!(!path_collisions(&m).is_empty());
+    assert!(export_blocks(&m)
+        .iter()
+        .any(|r| r.text.contains("same.dds")));
+    let before = engine_inputs(&m);
+    m.replan();
+    idle(&mut m);
+    assert_eq!(engine_inputs(&m), before, "planning is stable");
+    for k in ["textures/s/a.png", "textures/s/b.png"] {
+        assert!(
+            m.item(k).is_some_and(|i| i.job.is_some()),
+            "{k} keeps its job"
+        );
+    }
+    assert_eq!(
+        before
+            .1
+            .values()
+            .filter(|p| p.ends_with("same.dds"))
+            .count(),
+        1
+    );
+}
+
+/// An `output_name` takes its folder from the file's default output, not from where a removed mapping put it.
+#[test]
+fn unmapping_restores_the_named_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let id = "textures/a/x";
+    let rec = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot1 = \"textures/b/body.dds\"\n";
+    let toml = skin_set(id, "output_name = \"steel\"\n") + rec;
+    let mut m = project_toml(d.path(), &["textures/a/x.png"], &toml);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    m.unmap_record(id).unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/a/steel.dds"));
+    // Through undo, too.
+    m.undo();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/b/body.dds"));
+    m.unmap_record(id).unwrap();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/a/steel.dds"));
+    m.map_record(id, record(&[(1, "textures/b/body.dds")]))
+        .unwrap();
+    idle(&mut m);
+    m.undo();
+    idle(&mut m);
+    assert!(out(&m, "textures/a/x.png").ends_with("/textures/a/steel.dds"));
+}
+
+/// A set of raw packing maps with no diffuse builds `_rmaos`; slot 6 of its record moves it.
+#[test]
+fn a_packed_rmaos_follows_slot_six() {
+    let d = tempfile::tempdir().unwrap();
+    let toml = "[[sets]]\nid = \"textures/s/q\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"Q\"\n\
+        slot6 = \"textures/s/z_rmaos.dds\"\n";
+    let m = project_toml(
+        d.path(),
+        &["textures/s/q_roughness.png", "textures/s/q_ao.png"],
+        toml,
+    );
+    let packed = m
+        .items
+        .iter()
+        .find(|i| i.kind == sdc_gui::model::items::ItemKind::Packed)
+        .expect("a packed output");
+    let o = packed
+        .job
+        .as_ref()
+        .unwrap()
+        .output
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(o.ends_with("/textures/s/z_rmaos.dds"), "{o}");
+    assert!(!view(&m, "textures/s/q").pbr);
+}
 #[test]
 fn a_pbr_set_ignores_its_mapping() {
     let d = tempfile::tempdir().unwrap();
