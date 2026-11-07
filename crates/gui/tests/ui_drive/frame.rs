@@ -206,6 +206,9 @@ fn flags(n: &Node) -> String {
     s
 }
 
+/// Printed children per level; the Sets column alone holds more than 50 nodes.
+const MAX_CHILDREN: usize = 400;
+
 /// One line per named node, indented by printed depth; unnamed containers fold into their parent.
 pub fn tree_text(s: &Snapshot) -> String {
     let mut kids: Vec<Vec<usize>> = vec![vec![]; s.nodes.len()];
@@ -259,11 +262,16 @@ pub fn tree_text(s: &Snapshot) -> String {
         );
         let mut ch = vec![];
         printed(i, s, kids, unnamed, &mut ch);
-        for &c in ch.iter().take(50) {
+        for &c in ch.iter().take(MAX_CHILDREN) {
             emit(c, depth + 1, s, kids, unnamed, out);
         }
-        if ch.len() > 50 {
-            let _ = writeln!(out, "{}… {} more", "  ".repeat(depth + 1), ch.len() - 50);
+        if ch.len() > MAX_CHILDREN {
+            let _ = writeln!(
+                out,
+                "{}… {} more",
+                "  ".repeat(depth + 1),
+                ch.len() - MAX_CHILDREN
+            );
         }
     }
     let mut out = String::new();
@@ -274,11 +282,11 @@ pub fn tree_text(s: &Snapshot) -> String {
     if unnamed(&s.nodes[0]) {
         let mut top = vec![];
         printed(0, s, &kids, &unnamed, &mut top);
-        for &c in top.iter().take(50) {
+        for &c in top.iter().take(MAX_CHILDREN) {
             emit(c, 0, s, &kids, &unnamed, &mut out);
         }
-        if top.len() > 50 {
-            let _ = writeln!(out, "… {} more", top.len() - 50);
+        if top.len() > MAX_CHILDREN {
+            let _ = writeln!(out, "… {} more", top.len() - MAX_CHILDREN);
         }
     } else {
         emit(0, 0, s, &kids, &unnamed, &mut out);

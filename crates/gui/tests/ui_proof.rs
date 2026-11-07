@@ -282,7 +282,7 @@ fn the_tree_marks_focus_disabled_and_hover() {
 fn the_tree_folds_unnamed_containers_and_long_lists() {
     let h = tiny(|ui, _| {
         ui.vertical(|ui| {
-            for i in 0..80 {
+            for i in 0..500 {
                 ui.label(format!("row {i}"));
             }
         });
@@ -290,10 +290,10 @@ fn the_tree_folds_unnamed_containers_and_long_lists() {
     let text = tree_text(&snapshot(&h));
     assert_eq!(
         text.lines().filter(|l| l.contains("\"row ")).count(),
-        50,
+        400,
         "{text}"
     );
-    assert!(text.lines().any(|l| l.trim() == "… 30 more"), "{text}");
+    assert!(text.lines().any(|l| l.trim() == "… 100 more"), "{text}");
     assert!(
         !text
             .lines()
@@ -788,6 +788,20 @@ fn painted_only_matches_whole_words_and_skips_glyphs() {
         p.iter().map(|x| &x.subject.label).collect::<Vec<_>>()
     );
     assert_eq!(p[0].subject.label, "N");
+}
+
+#[test]
+fn tree_text_prints_sixty_siblings_without_a_more_line() {
+    let h = tiny(|ui, _| {
+        for i in 0..60 {
+            ui.label(format!("row{i:02}"));
+        }
+    });
+    let t = tree_text(&snapshot(&h));
+    for i in 0..60 {
+        assert!(t.contains(&format!("row{i:02}")), "row{i:02} missing");
+    }
+    assert!(!t.contains(" more"), "{t}");
 }
 
 /// run.json `size` is where the run started and `final_size` where it ended. Needs the ui_drive exe (built by
