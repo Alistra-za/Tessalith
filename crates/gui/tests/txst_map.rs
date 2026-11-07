@@ -1628,6 +1628,65 @@ fn a_created_host_with_a_hand_added_wet_is_shared() {
     );
 }
 
+/// R7 reads the members' names: `a_wet` sorts first and takes the plan's Diffuse slot, but `z` is a real colour map.
+#[test]
+fn a_hand_added_wet_cannot_hide_a_colour_map() {
+    let d = tempfile::tempdir().unwrap();
+    let m = created_host(
+        d.path(),
+        &[
+            "textures/s/a_wet.png",
+            "textures/s/z.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &["textures/s/a_wet.png", "textures/s/z.png"],
+    );
+    assert_eq!(view(&m, H).members.len(), 2);
+    assert!(view(&m, M).skin);
+    assert_eq!(sdc_gui::model::sets::set_shaders(&m).get(H), None);
+    assert!(!view(&m, H).shared);
+}
+
+/// Names don't change between plans, so R7 settles even where the plan's Diffuse slot would move: `z_n` is typed
+/// `diffuse` by hand, and `a_wet` holds that slot only until the set is skin.
+#[test]
+fn r7_settles_when_a_map_is_typed_as_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[files.\"textures/s/z_n.png\"]\nsubtype = \"diffuse\"\n",
+    )
+    .unwrap();
+    let mut m = created_host(
+        d.path(),
+        &[
+            "textures/s/a_wet.png",
+            "textures/s/z_n.png",
+            "textures/s/e/x.png",
+            "textures/s/e/x_rfaos.png",
+        ],
+        &["textures/s/a_wet.png", "textures/s/z_n.png"],
+    );
+    assert_eq!(
+        sub_of(&m, "textures/s/z_n.png"),
+        Some(engine::config::Subtype::Diffuse),
+        "the [files] entry is read"
+    );
+    assert!(m.inputs_settled());
+    let marks = m.plan_marks();
+    let inputs = engine_inputs(&m);
+    m.replan();
+    idle(&mut m);
+    assert!(m.inputs_settled());
+    assert_eq!(
+        m.plan_marks().0,
+        marks.0,
+        "no inputs changed on a fresh plan"
+    );
+    assert_eq!(engine_inputs(&m), inputs);
+}
+
 #[test]
 fn a_renamed_host_stays_shared() {
     use engine::config::Subtype;

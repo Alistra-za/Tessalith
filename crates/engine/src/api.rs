@@ -3439,6 +3439,10 @@ pub(crate) fn explicit_shaders(
 /// [`explicit_shaders`] for the sets before set edits (Note HG2): a shader stored under a Rename's new id also names
 /// the set it renames, unless that id is taken, which makes the Rename stale. `prepare` and a fast re-plan's rerun of
 /// the joins both ask this, so they agree.
+// shortcut: a Rename's target is checked against the pre-edit sets, not the sets as the earlier edits leave them, so
+// renames in an order that frees and then takes a name (`a` -> `c`, then `b` -> `a`) lend the shader to the wrong set
+// and leave its `_wet` typing undecided. Only a hand-edited project reaches this; walk the edits in order if the GUI
+// ever writes such a sequence.
 pub(crate) fn pre_edit_shaders(
     req: &BatchRequest,
     sets: &[TextureSet],

@@ -510,29 +510,52 @@ fn stem_of(f: &InputFile) -> String {
         .into_owned()
 }
 
-/// Note HG2: the tail of `stem` when a hand move put it in set `key` as a `_wet` or `_detail_n` map, which
-/// [`member_split`] reads only in a set already listing that suffix. A file that names its own set (`road_wet` in set
-/// `road_wet`, `x_detail_n` in set `x_detail`) is that set's colour member or normal, not this.
-pub fn hand_added_tail(
-    stem: &str,
-    key: &str,
+/// Note HG2: the shared member rule, by member names only (never a set key or a plan's slots). `Some(tails)` when
+/// every member is `_n`, `_sk`, `_wet` or `_detail_n` and at least one is `_n` or `_sk`; `tails` are the `wet` and
+/// `detail_n` suffixes the set must list so those members type as their maps. A `*_wet` or `*_detail_n` whose whole
+/// stem is another member's base is that base's colour map, and a `*_detail_n` whose base (`x_detail`) is another
+/// member's base is that base's normal, so neither counts as a tail.
+pub fn shared_member_tails<S: AsRef<str>>(
+    stems: &[S],
     aliases: &BTreeMap<String, String>,
-) -> Option<&'static str> {
-    let s = split_suffix_with(stem, aliases);
-    if s.base.to_lowercase() == key_base(key).to_lowercase() {
-        return None;
+) -> Option<BTreeSet<&'static str>> {
+    let splits: Vec<SuffixSplit> = stems
+        .iter()
+        .map(|s| split_suffix_with(s.as_ref(), aliases))
+        .collect();
+    let mut tails = BTreeSet::new();
+    let mut maps = false;
+    for (i, (stem, s)) in stems.iter().map(AsRef::as_ref).zip(&splits).enumerate() {
+        // Unicode folding, as set keys are built (Note BF).
+        let base_of_another = |text: &str| {
+            let text = text.to_lowercase();
+            splits
+                .iter()
+                .enumerate()
+                .any(|(j, o)| j != i && o.base.to_lowercase() == text)
+        };
+        match s.suffix.as_deref() {
+            None if wet_tail_split(stem).is_some() && !base_of_another(stem) => {
+                tails.insert(SKIN_WET);
+            }
+            Some("n")
+                if detail_tail_split(stem).is_some()
+                    && !base_of_another(stem)
+                    && !base_of_another(&s.base) =>
+            {
+                tails.insert(SKIN_DETAIL);
+            }
+            Some("n" | "sk") => maps = true,
+            _ => return None,
+        }
     }
-    match s.suffix.as_deref() {
-        None => wet_tail_split(stem).map(|_| SKIN_WET),
-        Some("n") => detail_tail_split(stem).map(|_| SKIN_DETAIL),
-        _ => None,
-    }
+    maps.then_some(tails)
 }
 
-/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) whose members are all `_n`, `_sk`,
-/// `_wet` or `_detail_n` has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs
+/// Note HG2: a set the user explicitly made Advanced skin (`explicit`, by set key) that passes
+/// [`shared_member_tails`] has no colour member of its own: it is shared, and other skin sets use its maps. Run on cs
 /// before the `_wet` and `_detail_n` joins, which see the flag, and again after set edits on the edited sets, which
-/// decides it. A shared set lists a hand-added tail, so its member types as that map.
+/// decides it. A shared set lists its tails, so those members type as their maps.
 pub fn mark_shared_skin(
     sets: &mut [TextureSet],
     files: &[InputFile],
@@ -547,19 +570,16 @@ pub fn mark_shared_skin(
             continue;
         }
         let stems: Vec<String> = s.members.iter().map(|&i| stem_of(&files[i])).collect();
-        let tails: Vec<&str> = stems
-            .iter()
-            .filter_map(|stem| hand_added_tail(stem, &s.key, aliases))
-            .collect();
-        let shared = stems.iter().all(|stem| {
-            hand_added_tail(stem, &s.key, aliases).is_some()
-                || matches!(
-                    member_split(stem, s, aliases).suffix.as_deref(),
-                    Some("n" | "sk" | SKIN_WET | SKIN_DETAIL)
-                )
+        let by_name = shared_member_tails(&stems, aliases);
+        // A host a hand move emptied keeps the `_wet` and `_detail_n` it joined, which the set lists.
+        let joined_only = stems.iter().all(|stem| {
+            matches!(
+                member_split(stem, s, aliases).suffix.as_deref(),
+                Some(SKIN_WET | SKIN_DETAIL)
+            )
         });
-        if shared {
-            s.shared_skin = true;
+        s.shared_skin = by_name.is_some() || joined_only;
+        if let Some(tails) = by_name {
             s.suffixes.extend(tails.into_iter().map(String::from));
         }
     }

@@ -284,7 +284,45 @@ fn a_stale_rename_does_not_lend_its_shader() {
     assert!(!same_set(&p, "x_normal.png", "x_wet.png"));
 }
 
-/// Pin: a file named `_wet` that names its set is that set's colour member, whatever shader the set has.
+/// The member rule reads names, not the set's current name, so an ordinary set's members keep their meaning through a
+/// rename: `road_wet` is the colour, alone or as the base of `road_wet_n`, and `x_detail_n` is no detail map.
+#[test]
+fn renaming_a_colour_set_keeps_its_colour() {
+    let plan = |files: &[&str], from: &str, to: &str| {
+        let d = tempfile::tempdir().unwrap();
+        for f in files {
+            put(d.path(), &format!("textures/s/{f}.png"));
+        }
+        let (from, to) = (format!("textures/s/{from}"), format!("textures/s/{to}"));
+        let edits = vec![SetEdit::Rename {
+            from,
+            to: to.clone(),
+        }];
+        let (p, _) = plan_with(&d, Target::Cs, &[(&to, Shader::AdvancedSkin)], edits);
+        p
+    };
+    let lone = plan(&["road_wet"], "road_wet", "road");
+    let with_n = plan(&["road_wet", "road_wet_n"], "road_wet", "road");
+    let detail = plan(&["x_detail_n"], "x_detail", "y");
+    // With a sibling of its base `x_detail_n` is that base's normal, in a set of any name.
+    let sibling = plan(&["x_detail_n", "x_detail_sk"], "x_detail", "y");
+    assert_eq!(
+        [
+            sub(&lone, "road_wet.png"),
+            sub(&with_n, "road_wet.png"),
+            sub(&detail, "x_detail_n.png"),
+            sub(&sibling, "x_detail_n.png"),
+        ],
+        [
+            Subtype::SkinAlbedo,
+            Subtype::SkinAlbedo,
+            Subtype::Normal,
+            Subtype::PbrNormal,
+        ]
+    );
+}
+
+/// Pin: a lone `_wet` file is its set's colour member, whatever shader the set has: the set has no `_n` or `_sk`.
 #[test]
 fn a_set_named_after_its_wet_file_keeps_its_colour() {
     let d = tempfile::tempdir().unwrap();

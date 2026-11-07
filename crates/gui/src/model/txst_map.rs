@@ -332,9 +332,10 @@ fn wet_with_the_normal<'a>(
     }
 }
 
-/// R7: the ids of the sets mapped to a record, with no `shader` of their own and no colour map, whose record's colour
-/// path a skin set in the project writes. `set_shaders` marks them Advanced skin. `v.skin` is the last plan's, so
-/// this settles through the `EngineInputs` compare.
+/// R7: the ids of the sets mapped to a record, with no `shader` of their own and members that pass the engine's
+/// shared member rule ([`engine::group::shared_member_tails`]), whose record's colour path another set, a skin one,
+/// writes. `set_shaders` marks them Advanced skin. The rule reads member names only, so it is the same in every plan;
+/// `w.skin` is the last plan's, so this settles through the `EngineInputs` compare.
 pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String> {
     let Some(doc) = m.sets_doc.as_ref() else {
         return vec![];
@@ -349,14 +350,20 @@ pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String>
         .filter_map(|e| {
             let path = e.txst.as_ref()?.slots.get(&1)?;
             let v = views.iter().find(|v| same_id(&v.id, &e.id))?;
-            // Until the set is skin the plan lists a hand-added `x_wet` as its diffuse, and writes it at the record's
-            // slot 1: it is no colour map, and the writer to find is another set's.
-            if v.slots
-                .get(&SlotKind::Diffuse)
-                .is_some_and(|f| !f.item().is_some_and(|k| is_hand_added_wet(m, v, k)))
-            {
-                return None;
-            }
+            // The engine's members are its input files, read by their `[inputs]` alias.
+            let stems: Vec<String> = v
+                .members
+                .iter()
+                .filter(|k| m.item(k).is_some_and(|i| i.kind != ItemKind::Packed))
+                .map(|k| {
+                    let rel = m.read_as_of(k).unwrap_or_else(|| k.clone());
+                    let stem = Path::new(&rel).file_stem().unwrap_or_default();
+                    stem.to_string_lossy().into_owned()
+                })
+                .collect();
+            engine::group::shared_member_tails(&stems, &m.suffix_aliases)?;
+            // Until the set is skin the plan may write a hand-added `x_wet` at the record's slot 1, so the writer to
+            // find is another set's.
             let others = views
                 .iter()
                 .filter(|w| !same_id(&w.id, &v.id))
@@ -367,12 +374,6 @@ pub(super) fn record_shared_sets(m: &AppModel, views: &[SetView]) -> Vec<String>
             w.skin.then(|| e.id.clone())
         })
         .collect()
-}
-
-fn is_hand_added_wet(m: &AppModel, v: &SetView, key: &str) -> bool {
-    let stem = Path::new(key).file_stem().unwrap_or_default();
-    engine::group::hand_added_tail(&stem.to_string_lossy(), &v.key, &m.suffix_aliases)
-        == Some(engine::group::SKIN_WET)
 }
 
 /// Whether two stored FormIDs are one: compared as hex numbers, `0x` optional, in any case. One that doesn't parse
