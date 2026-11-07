@@ -610,12 +610,36 @@ fn is_shared(v: &SetView) -> bool {
         && v.slots
             .iter()
             .all(|(k, f)| allowed(k) || !f.is_filled())
-        // Every member sits in one of those slots: a member with no slot is some other kind of map.
+        // Every member is one of those maps. One in a slot is decided by the slot; one in no slot (a kept DDS has no
+        // job, so no slot) by its name, as the engine reads it (`member_split`, so a joined `x_wet` counts).
         && v.members.iter().all(|m| {
-            v.slots
+            let slot = v
+                .slots
                 .iter()
-                .any(|(k, f)| allowed(k) && f.item() == Some(m.as_str()))
+                .find(|(_, f)| f.item() == Some(m.as_str()))
+                .map(|(k, _)| k);
+            match slot {
+                Some(k) => allowed(k),
+                None => kept_member_is_shared_map(m),
+            }
         })
+}
+
+/// A member with no slot reads as `_n`, `_sk`, `_wet` or `_detail_n` by its file name (the engine's member rule).
+fn kept_member_is_shared_map(key: &str) -> bool {
+    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
+    let set = TextureSet {
+        key: String::new(),
+        members: vec![],
+        suffixes: [SKIN_WET, SKIN_DETAIL].map(String::from).into(),
+        shared_skin: false,
+    };
+    let stem = Path::new(key)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let suffix = member_split(&stem, &set, &BTreeMap::new()).suffix;
+    matches!(suffix.as_deref(), Some("n" | "sk" | SKIN_WET | SKIN_DETAIL))
 }
 
 /// Note AO: why a card's slot is in conflict (both kinds of slot 3 or 7 filled), if it is.

@@ -269,9 +269,39 @@ fn a_set_given_a_height_map_is_no_longer_shared_and_shows_it() {
 
 #[test]
 fn the_statics_choice_is_off_on_a_shared_set() {
-    use sdc_gui::model::cs_pbr::{Kind, Statics};
     let d = tempfile::tempdir().unwrap();
-    let mut m = shared(d.path());
+    statics_are_off(shared(d.path()));
+}
+
+/// A kept `x_wet.dds` (not re-encoded, so no job and no slot) leaves the set shared.
+#[test]
+fn a_kept_dds_member_leaves_a_set_shared() {
+    let d = tempfile::tempdir().unwrap();
+    support::bc1_dds(&d.path().join("textures/s/x_wet.dds"));
+    let m = project(
+        d.path(),
+        &["textures/s/x_normal.png", "textures/s/x_sk.png"],
+    );
+    let v = view(&m, X);
+    let wet = v
+        .members
+        .iter()
+        .find(|k| k.ends_with("x_wet.dds"))
+        .unwrap_or_else(|| panic!("{:?}", v.members));
+    assert!(m.item(wet).is_some_and(|i| i.job.is_none()), "no job");
+    assert!(v.shared, "{:?}", v.slots);
+    assert_eq!(kind_text(&m, &v), "shared");
+    let diffuse = shared_cells(&v, slot_row(v.shader.as_ref(), &v.slots))
+        .iter()
+        .filter(|c| matches!(c.kind, SlotKind::Diffuse | SlotKind::Rmaos))
+        .count();
+    assert_eq!(diffuse, 0);
+    assert!(skin_json_plan(&m).1.iter().all(|(id, ..)| id != X));
+    statics_are_off(m);
+}
+
+fn statics_are_off(mut m: AppModel) {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
     m.add_cs_block(X, Kind::Txst);
     m.set_cs_statics(X, Statics::Always);
     let key = view(&m, X).key;
