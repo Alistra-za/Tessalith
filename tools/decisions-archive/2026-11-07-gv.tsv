@@ -5,14 +5,14 @@ Digest¶- Generate sizes are 256	Digest	226	back	GV1	The GUI makes no height, AO
 Digest¶- AO from a normal is a GTAO	Digest	227	back	GV2	The engine has no solver	partial	2026-11-07		goes: the GTAO march (CO78); stays: a `_ao_generated` file feeds the packed `_rmaos` B (GEN-AO), also on a pre-packed `_rmaos` (CO89, CO103, CO104)
 Digest¶- The engine has no writer for generated files	Digest	228	back	GV1	The GUI makes no height, AO or curvature map	archive-item	2026-11-07		whole: nothing writes generated files any more (CO28, CO49, CO66)
 Digest¶- Generate provenance lives in	Digest	229	back	GV1	A `[generated]` table in `sdc-project.toml` loads without a message	archive-item	2026-11-07		whole: provenance, undo and the stale flag are gone (CO39, CO40, CO53, CO69)
-Digest¶- Height ranges use	Digest	239	back	GV2	The engine has no solver	partial	2026-11-07		goes: the p99.5 range and Strength (CO21); stays: Half's clamp inside the complex-material gate (CO22)
+Digest¶- Height ranges use	Digest	239	back	GV2	The engine has no solver	partial	2026-11-07		goes: the p99.5 range and Strength (CO21); the Half's clamp line (CO22) has its own archive row
 Digest¶- Generate has one	Digest	240	back	GV1	The GUI makes no height, AO or curvature map	archive-item	2026-11-07		whole: the sizes and the solve size are gone (CO25, CO31, CO34, CO67, CO82, CO95, CO112, CO118)
 Digest¶- Green for the solve is DirectX	Digest	241	back	GV2	The engine has no solver	archive-item	2026-11-07		whole: the green fit is gone (CO27, CO30)
 Digest¶- Generate returns	Digest	242	back	GV2	The engine has no solver	archive-item	2026-11-07		whole: InvalidOpts went with the solver (CO29, CO84)
 Digest¶- AO's march reads	Digest	243	back	GV2	The engine has no solver	archive-item	2026-11-07		whole: the march is gone (CO79, CO80, CO81)
 Digest¶- A generated height is offered	Digest	244	back	GV1	The GUI makes no height, AO or curvature map	archive-item	2026-11-07		whole: nothing offers a generated height (CO43)
 Digest¶- Generated AO is offered only	Digest	245	back	GV1	The GUI makes no height, AO or curvature map	partial	2026-11-07		goes: the offer rule for a generated AO (CO92); stays: `_ao_generated` as PBR evidence, the pre-packed `_rmaos` B rule, the specular exception (CO94, CO105, CO106, CO108, HC1)
-Digest¶- Curvature (	Digest	246	back	GV1	The GUI makes no height, AO or curvature map	partial	2026-11-07		wording only: a generated AO becomes an `_ao_generated` AO file; the rest stays (CO116, CO115, CO90)
+Digest¶- Curvature (	Digest	246	back	GV1	The GUI makes no height, AO or curvature map	partial	2026-11-07		goes: "not offered elsewhere or for a set with no albedo" (the dialog's offer rule, CO116); stays: Also export reads curvature, a plain run gets PACK-UNUSED-INPUT, an `_ao_generated` file changes the `_n` job's identity (CO115, CO90)
 Digest¶- A cancel is read between stages	Digest	247	back	GV1	The GUI makes no height, AO or curvature map	archive-item	2026-11-07		whole: there is no generate job to cancel (CO36, CO50)
 Digest¶- "Generate from normal map…" sits below	Digest	443	back	GV1	The GUI makes no height, AO or curvature map	archive-item	2026-11-07		whole: the slot-row entry and its dialog are gone (DP1, DP2, DP3)
 FN1	FN		back	GV2	The engine has no solver	archive-item	2026-11-07		whole: the solver and the dialog sizes it fed are gone
@@ -29,3 +29,8 @@ Index¶- CLI:	Index		back	GV		partial	2026-11-07		goes: the line without GV (`--
 Index¶- GUI Files and Inspector:	Index		back	GV		partial	2026-11-07		goes: the line without GV (GV1 govern it)
 Index¶- GUI Dialogs and Export:	Index		back	GV		partial	2026-11-07		goes: the line without GV (GV1 govern it)
 FM¶- **What is gated.**	FM		back	GV	The GUI makes no height, AO or curvature map	partial	2026-11-07		goes: gen_lookups, gen_dims_len, clear_gen_dims and gen_preview_opts; stays: the rest of the gated list
+Digest¶- Half's clamp	Digest		back	GV2	The engine has no solver	archive-item	2026-11-07		whole: HALF_LO and HALF_HI went with the solver and no live code applies the clamp (CO22)
+Digest¶- Plain slot and match labels	Digest		back	GV1	The GUI makes no height, AO or curvature map	partial	2026-11-07		goes: the reason on the greyed AO box, the Generate dialog checkbox (FB13); stays: plain slot and match labels, the one-line Textures heading
+Digest¶- Provenance and JSON hashes	Digest		back	GV1	The GUI makes no height, AO or curvature map	partial	2026-11-07		goes: generated-file provenance (FC11); stays: JSON hashes recorded at write time
+Index¶- GUI Settings panel	Index		back	GV		partial	2026-11-07		goes: the line without GV (GV1 removes GEN-STALE from the settings panel message list)
+Index¶- Process and docs	Index		back	GV		partial	2026-11-07		goes: the line without GV (GV3 governs the docs)

@@ -219,6 +219,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE
 
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU
+
+ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -457,6 +463,15 @@ ARCHIVED (superseded by Note GV1, 2026-11-07)
 
 ARCHIVED (superseded by Note GV1, 2026-11-07)
 - "Generate from normal map…" sits below Assign… in the slot row's format column (below the format combo on a filled Height or RMAOS row), absent for packed items, reason on hover when disabled. Its dialog: 160 pt tiles, wheel zoom 1-16x at the pointer, drag pans, double-click fits, one shared crop, zoom resets on reopen. [DP1, DP2, DP3]
+
+ARCHIVED (superseded by Note GV2, 2026-11-07)
+- Half's clamp `[8/255, 247/255]` sits inside the complex-material gate `(4/255, 251/255)`. [CO22]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- Provenance and JSON hashes are recorded at write time. [FC11]
+
+ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
+- Plain slot and match labels; a one-line Textures heading; a reason on the greyed AO box. [FB13]
 
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 

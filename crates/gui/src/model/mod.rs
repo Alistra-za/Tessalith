@@ -1537,7 +1537,7 @@ impl AppModel {
     }
 
     /// A v2 worker job is in flight (owner answer 8): the app's one poll line keeps frames coming and `wait_idle`
-    /// waits for it. Not part of `busy()`, which greys the Advanced fields. Tracks A and B add their jobs here.
+    /// waits for it. Not part of `busy()`, which greys the Advanced fields. The jobs left are the overlay and the UV coverage reads.
     pub fn v2_jobs_pending(&self) -> bool {
         self.overlay_pending()
             || self.uv.read_pending()

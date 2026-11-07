@@ -1355,6 +1355,38 @@ fn gen_stale_in_allow_is_refused() {
     assert!(e.contains("removed in 3.0"), "{e}");
 }
 
+/// Final review (Important 4): the removed-key walk matches `allow` at every depth, so GEN-STALE is refused under
+/// `[files]`, in a `[[rules]]` entry and in a preset file too. The `Ok` lines are pins (they pass on any code): the
+/// codes that stayed are still accepted.
+#[test]
+fn gen_stale_in_allow_is_refused_at_every_depth() {
+    for text in [
+        "[files.\"a.png\"]\nallow = [\"GEN-STALE\"]\n",
+        "[[rules]]\nallow = [\"GEN-STALE\"]\n",
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains("removed in 3.0"), "{text}: {e}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let f = write(
+        d.path(),
+        "stale.toml",
+        "schema_version = 1\nid = \"w\"\nversion = \"1\"\nbase = \"cs-quality\"\nallow = [\"GEN-STALE\"]\n",
+    );
+    let e = PresetRegistry::builtin()
+        .unwrap()
+        .add_file(&f)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("removed in 3.0"), "{e}");
+    for kept in ["GEN-AO", "GEN-REPLACED"] {
+        assert!(Code::parse_allow(kept).is_ok(), "{kept}");
+    }
+    // `allow` lives under `[files]` (a top-level one is an unknown field either way).
+    let r = ConfigFile::parse("[files.\"a.png\"]\nallow = [\"GEN-AO\"]\n", "sdc.toml");
+    assert!(r.is_ok(), "{:?}", r.err());
+}
+
 /// Trace-debug #15: a quoted dotted key under `[files."x"]` used to pass the field check and then read as null (the
 /// value silently dropped). It is refused with the way to write it; the unquoted form still works.
 #[test]

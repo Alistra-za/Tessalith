@@ -16,7 +16,7 @@
 //! and PBR-GRASS-DETECT (a PBR grass albedo CS would read as complex grass) (PBR grass design 2026-10-14 §4.4).
 //! and the four `CHK-*` codes of the GUI's artist checks, and CHK-LOW-DETAIL of check 3 at convert time (v2 artist checks, DECISIONS Note CL).
 //! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
-//! and the two `GEN-*` codes of generated maps: GEN-REPLACED and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
+//! and the two `GEN-*` codes of generated maps: GEN-REPLACED and GEN-AO (`_generated` files, DECISIONS Notes CO and GV).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
 //! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM)
 //! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
@@ -171,9 +171,9 @@ codes! {
     DeriveNifSuggest = "DERIVE-NIF-SUGGEST" => Info,
     // Track A Also export (Note CN): the Vanilla or CM phase stopped with an engine error; its exit code is kept.
     AlsoPhaseFailed = "ALSO-PHASE-FAILED" => Error,
-    // v2 Generate from normal map (Note CO): a generated member skipped because a real map fills its slot.
+    // A `_generated` file (Note CO, GV) skipped because a real map fills its slot.
     GenReplaced = "GEN-REPLACED" => Info,
-    // v2 Generate from normal map (Note CO): a packed _rmaos whose B channel is an AO generated from the normal map.
+    // A packed _rmaos whose B channel is an `_ao_generated` file (Note CO, GV).
     GenAo = "GEN-AO" => Info,
     // Cubemap (DECISIONS Note DS): a cube's faces are missing, not square or not the same size.
     CubeFaces = "CUBE-FACES" => Error,

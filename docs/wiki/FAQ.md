@@ -37,6 +37,7 @@ No, not by default ([why, and what to do](Troubleshooting.md#dds-files-in-the-fo
 ### Does it change my source files?
 
 No. Tessalith writes only the output folder, `sdc.toml`, `sdc-project.toml` (GUI), the manifest under `<output>\_sdc\`, the scan database with its `scan.lock`, the 3D preview's shader cache under `%LOCALAPPDATA%\sdc\shader-cache`, and its own settings (plus `gui.toml.bad`, a copy of a settings file it could not read). Renaming in the GUI writes aliases; files on disk are never renamed.
+
 ### Why BC7 for almost everything?
 
 BC7 keeps the most quality at the same size as BC3. BC4 is used for single-channel maps, BC5 for two-channel data, BC6H for HDR under `cs`. BC1 is used only by the compact presets, for opaque colour.

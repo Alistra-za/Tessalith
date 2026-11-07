@@ -21,7 +21,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV
 
 ## Digest
 
@@ -232,9 +232,8 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. A file's hand-set `helper.role` (`ao`, `orm`, `rmaos`) says which it is and any other role (`none` included) takes it out; the file name decides only a file with no hand-set role. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16, FV3]
 - RNM decode clamps z to at least 0: a no-op at strength ≤ 1; above 1 it deviates from rnm.py, which does not clamp. [Y5]
 - A generated map rivals a real map only until the real one appears: step 3b (after `apply_output_paths`, before duplicate detection) drops the loser from `set.members` with no job, skipped `GEN-REPLACED` (Info) "generated <name> replaced by <real name>". The generated member's own earlier export (`dds::same_file`, also its packed outputs: the member's output folder joined with the rival's name) is no rival, so an in-place run keeps it. A replaced member never reaches the pre-packed conflict, so no `PACK-CONFLICT`. [CO6, CO7, CO8, CO10, CO102]
-- Half's clamp `[8/255, 247/255]` sits inside the complex-material gate `(4/255, 251/255)`. [CO22]
 - A kept `_ao_generated` stays PBR evidence (`suggest::is_pbr_set`). A pre-packed `_rmaos` counts as an AO source only when its B has content (`pack::b_has_content`: range ≥ 2/255 or mean ≤ 250/255). A loose roughness, glossiness, metallic, specular, fuzz or `_orm` image beside a pre-packed one means the image is never filled, except a specular beside a flat alpha (HC1). [CO92, CO94, CO105, CO106, CO108]
-- Curvature (`_curves`) is read only by Also export; it is not offered elsewhere or for a set with no albedo, and reaches a plain run as `PACK-UNUSED-INPUT`. An `_ao_generated` file changes the base `_n` job's `rnm.ao.file` identity. [CO116, CO115, CO90]
+- Curvature (`_curves`, `_curvature`, `_curves_generated`) is read only by Also export, and reaches a plain run as `PACK-UNUSED-INPUT`. An `_ao_generated` file changes the base `_n` job's `rnm.ao.file` identity. [CO116, CO115, CO90]
 
 ### Cubemaps
 
@@ -311,7 +310,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - A copied Vanilla output (Also export) is the PBR twin's record with `output` = the Vanilla key, its own `output_stamp`, and `copied_from` = the twin's `output_stamp` (skipped when `None`). It is current when `sources` and `source_sha256` equal the twin's, `copied_from` equals the twin file's stamp now and `output_stamp` matches the file. An existing file under `if-changed` goes through `may_replace` with the Vanilla record's stamp as "ours"; `Kept` is `OUT-UNKNOWN-EXISTING`. [CN33]
 - A derived job's identity is in the manifest; its analysis is not cached. [CN12, CN22]
 - `packing` joins every `Profile`. [M10]
-- Provenance and JSON hashes are recorded at write time. [FC11]
+- JSON hashes are recorded at write time. [FC11]
 - The manifest-compatibility shims are gone. [FM12]
 - Uncompressed output layouts and DDS re-encode: `reencode` is a plan-time selector; mip 0 is decoded, the rest regenerated. [S5, S6]
 
@@ -435,7 +434,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Status colours are fixed; Copy works on rows. [CA20, CA21]
 - The Problems list owns every fix button; `fix_off()` is the one definition of "fix buttons off". [CA11, CA12]
 - One type picker for Set type and the texture panel's Sub-type; a Problems row accepts its suggestion in one click, Enter or Space. [FB9]
-- Plain slot and match labels; a one-line Textures heading; a reason on the greyed AO box. [FB13]
+- Plain slot and match labels; a one-line Textures heading. [FB13]
 - The set editor is one scrolling column. [FB2]
 - Window and layout live in `gui.toml` (not eframe persistence), debounced, in native points so another egui zoom restores the same window; a clamped window never overwrites its saved size. [AG3, AG17, AG19, AG105, CE21, FM31]
 - A column's content never runs wider than its panel (egui moves the divider to the content's edge and leaves an unpainted strip). [AG124]
@@ -1194,3 +1193,4 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 - **GV1 The GUI makes no height, AO or curvature map.** The Generate dialog, its set-card, slot-row and Problems entries, the "generated" marker and hover, the stale-map row and Delete generated file are gone; a `_generated` file is an ordinary source row, and GEN-REPLACED, GEN-AO and Also export's read of `_curves_generated` are unchanged. A `[generated]` table in `sdc-project.toml` loads without a message and is saved as it was, and a `generated` key in `_sdc/generated.json` is ignored on load and dropped by the next write to that file; every hash field there stays. Undo no longer protects the `[generated]` table text, since it is no longer Tessalith's record.
 - **GV2 The engine has no solver.** `engine::from_normal` (height, AO and curvature from a normal) and the `GEN-STALE` code are gone. An `allow` list that names `GEN-STALE` is refused with "removed in 3.0"; `_generated` files are still read as ordinary sources, and the Also export still reads `_curves_generated`.
 - **GV3 The docs say what a `_generated` file still is.** `docs/wiki/GUI-Generate-From-Normal.md` and every link to it are gone; `Set-Shaders.md#generated-files` is the one home: a `_generated` file is an ordinary source that a real map beats (`GEN-REPLACED`), `_ao_generated` feeds `_rmaos` B (`GEN-AO`) and `_curves_generated` is read by Also export. Rulings wholly about the solver, the dialog or `GEN-STALE` moved to the archive; mixed ones were edited to this rule (archive table `2026-11-07-gv.tsv`).
+- **GV4 The 3.0 generate removal reverses the 2.0 debloat review's "kept on purpose: AO/curvature" (item not in the repo), owner 2026-11-06.** GV1-GV3 supersede the frozen 1.x CO rulings where they describe the solver, the dialog, its offers, provenance or the stale flag, FC3's GEN-STALE row, FB13's AO box and DP1-DP3; `tools/decisions-archive/2026-11-07-gv.tsv` lists each cut. CO1-CO10, CO75, CO89, CO90, CO92, CO94, CO102-CO106, CO108, CO115 and CO116 stay, as edited in the digest.

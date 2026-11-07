@@ -191,10 +191,6 @@ fn a_generated_file_is_a_plain_row() {
     let mut h = harness(m);
     h.run();
     let row = slot_rect(&h, "Height _p");
-    assert!(
-        h.query_all_by_label("generated").next().is_none(),
-        "the marker"
-    );
     assert!(h
         .query_all_by_label_contains("Generated from")
         .next()
@@ -221,6 +217,72 @@ fn a_generated_file_is_a_plain_row() {
         "the File cell's hover"
     );
     assert!(h.query_all_by_label_contains("stale").next().is_none());
+}
+
+/// Final review (Important 5), a pin of the kept GEN-REPLACED rule seen from the GUI: with a real `rock01_p.png` beside
+/// `rock01_p_generated.png` the real map fills Height, the generated item carries GEN-REPLACED, and that stays out of
+/// Problems, the menus and every hover.
+#[test]
+fn a_generated_file_beside_a_real_height_is_replaced_quietly() {
+    use engine::codes::Code;
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    for name in ["rock01_p_generated.png", "rock01_p.png"] {
+        ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 1000) as u16]))
+            .save(d.path().join("textures/landscape").join(name))
+            .unwrap();
+    }
+    m.replan();
+    idle(&mut m);
+    m.decide(KEY, Answer::Subtype(Subtype::Height));
+    m.decide("landscape/rock01_p.png", Answer::Subtype(Subtype::Height));
+    idle(&mut m);
+    let generated = m.item(KEY).expect("the generated file is a source");
+    assert!(
+        generated
+            .warnings
+            .iter()
+            .any(|w| w.code == Code::GenReplaced),
+        "{:?}",
+        generated.warnings
+    );
+    assert!(
+        !problems(&m)
+            .iter()
+            .any(|p| p.code == Some(Code::GenReplaced) || p.also.contains(&Code::GenReplaced)),
+        "a GEN-REPLACED Problems row"
+    );
+    no_slot_entry(&m);
+    select_rock(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let row = slot_rect(&h, "Height _p");
+    let file = h
+        .query_all_by_label("rock01_p.png")
+        .map(|n| n.rect())
+        .filter(|r| r.min.x > row.max.x)
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the Height row shows rock01_p.png");
+    h.hover_at(file.center());
+    h.run();
+    // Positive control: the File cell's hover drew, so "no replaced by" means something.
+    assert!(
+        h.query_all_by_label_contains("rock01_p.png\n")
+            .next()
+            .is_some(),
+        "the File cell's hover did not draw"
+    );
+    for s in ["replaced by", "stale", "Generated from"] {
+        assert!(h.query_all_by_label_contains(s).next().is_none(), "{s:?}");
+    }
+    card_menu(&mut h, ROCK_SET);
+    for l in ENTRIES {
+        assert!(
+            h.query_all_by_label(l).next().is_none(),
+            "the card menu offers {l:?}"
+        );
+    }
 }
 
 /// Pin (passes on the old code too): an old `[generated]` table loads with no message and a later save leaves its
@@ -262,6 +324,9 @@ fn old_sidecar(d: &Path) -> SetsDoc {
         r#"{"generated":{"a_p_generated.png":{"from":"a_n.png"}},
             "pgp_json_sha256":{"a.json":"keep"},
             "cs_pbr_sha256":{"b.json":"keep too"},
+            "copy_sha256":{"d.json":"copy"},
+            "xpmf_sha256":{"e.json":"xpmf"},
+            "cs_skin_sha256":{"f.json":"skin"},
             "last_json_sha256":"last"}"#,
     )
     .unwrap();
@@ -278,6 +343,9 @@ fn an_old_generated_key_keeps_the_hashes() {
     let side = sidecar(d.path());
     assert_eq!(side["pgp_json_sha256"]["a.json"], "keep");
     assert_eq!(side["cs_pbr_sha256"]["b.json"], "keep too");
+    assert_eq!(side["copy_sha256"]["d.json"], "copy");
+    assert_eq!(side["xpmf_sha256"]["e.json"], "xpmf");
+    assert_eq!(side["cs_skin_sha256"]["f.json"], "skin");
     assert_eq!(side["last_json_sha256"], "last");
     assert_eq!(side["cm_json_sha256"]["c.json"], "new");
     assert_eq!(doc.pgp_json_shas()["a.json"], "keep");
