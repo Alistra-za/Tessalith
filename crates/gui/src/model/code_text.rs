@@ -98,9 +98,18 @@ pub fn code_sentence(code: Code) -> &'static str {
     }
 }
 
-/// Note GU2: what a cube-typed image that is not six faces, a cross or a strip is told (the engine's reason, in short).
-pub const NOT_A_CUBE: &str =
-    "Not a cube source: it must be six faces, a cross or a strip. Change this file's sub-type.";
+/// Note GU2: the engine's reason a cube-typed image is no cube source (so the two cannot drift), else a plain line.
+pub fn not_a_cube(job: Option<&engine::policy::ResolvedJob>) -> String {
+    match job.map(|j| &j.status) {
+        Some(engine::policy::JobStatus::Unresolved { reasons, .. }) if !reasons.is_empty() => {
+            reasons.join("; ")
+        }
+        _ => format!(
+            "not a cube source: it must be {}",
+            engine::cube::plan::CUBE_SOURCES
+        ),
+    }
+}
 
 /// [`code_sentence`], or a plain line for a code with none (a place that has no engine message to fall back on).
 pub fn code_line(code: Code) -> &'static str {

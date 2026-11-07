@@ -340,9 +340,15 @@ fn a_square_cube_has_no_layout_combo() {
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
+    // The settings panel's box shows the engine's own reason (with the size); the Problems row's shorter text has no
+    // size, so this label can only come from the box of the selected square cube.
+    let reason = "64x64 is not six faces, a cross or a strip. Change this file's sub-type.";
+    let box_text: Vec<_> = h.query_all_by_label_contains(reason).collect();
+    assert_eq!(box_text.len(), 1, "the texture panel's Undecided box");
     assert!(
-        h.query_all_by_label_contains(NOT_A_CUBE).count() >= 1,
-        "the Undecided box says what a cube source is"
+        box_text[0].rect().min.x > 500.0,
+        "the box is in the right-hand panel: {:?}",
+        box_text[0].rect()
     );
     for gone in ["Cube layout", "Set layout ▾", "Pick a layout…"] {
         assert_eq!(h.query_all_by_label(gone).count(), 0, "{gone}");

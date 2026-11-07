@@ -4,7 +4,7 @@ use super::settings_panel::{alpha_dropdown, subtype_label};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
 use crate::model::code_text::{
-    ack_label, ack_label_for_texture, alpha_confirm_text, code_line, NOT_A_CUBE,
+    ack_label, ack_label_for_texture, alpha_confirm_text, code_line, not_a_cube,
 };
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
@@ -68,7 +68,7 @@ pub fn undecided_row(
                 Some((code_line(*code).to_string(), Some(code.as_str())))
             }
             // Note GU2: no menu, only what a cube source is; the type picker on the row is the way out.
-            Decision::CubeLayout => Some((NOT_A_CUBE.to_string(), None)),
+            Decision::CubeLayout => Some((not_a_cube(item.job.as_ref()), None)),
             Decision::Subtype { .. } => None,
         })
         .collect();

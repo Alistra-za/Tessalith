@@ -3,7 +3,7 @@
 use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
-use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, shown_for, NOT_A_CUBE};
+use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, not_a_cube, shown_for};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
@@ -966,7 +966,7 @@ fn decision_box(
                     }
                     // Note GU2: no layout answer is left; the sub-type picker above is the way out.
                     Decision::CubeLayout => {
-                        ui.label(NOT_A_CUBE);
+                        ui.label(not_a_cube(Some(cx.job)));
                     }
                     Decision::Acknowledge(code) => {
                         // Note FB8: the sentence, with the code on its hover.

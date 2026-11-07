@@ -3788,8 +3788,8 @@ mod tests {
         }
     }
 
-    /// Admission (DS8) counts three float cubes of the face size beside the source; rebuilt on a strip when the photo
-    /// layout (and its panorama term) went in 3.0.
+    /// A pin (passes on the old code too): admission (DS8) counts three float cubes of the face size beside the
+    /// source; rebuilt on a strip when the photo layout (and its panorama term) went in 3.0.
     #[test]
     fn a_strip_cube_is_admitted_for_three_float_cubes() {
         let d = tempfile::tempdir().unwrap();

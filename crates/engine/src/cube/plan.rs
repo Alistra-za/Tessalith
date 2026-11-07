@@ -9,6 +9,9 @@ use crate::policy::{cube_layout_of, JobStatus, ResolvedJob};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+/// What a cube source is, as the refusal message and the GUI name it (Note GU2).
+pub const CUBE_SOURCES: &str = "six faces, a cross or a strip";
+
 /// A trailing face tag (`_posx` .. `_negz`, `_px` .. `_nz`, ASCII case-insensitive): the stem without it and the
 /// face index (+X -X +Y -Y +Z -Z).
 pub fn face_tag(stem: &str) -> Option<(&str, usize)> {
@@ -107,7 +110,7 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
         let verdict = match layout {
             None => JobStatus::Unresolved {
                 reasons: vec![format!(
-                    "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type."
+                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's sub-type."
                 )],
                 needs: vec![crate::policy::Need::CubeLayout],
             },
@@ -115,7 +118,10 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
                 let msg = if l == CubeLayout::Faces {
                     "cubemap.layout faces is six separate files, not one image".to_string()
                 } else {
-                    format!("{} layout does not fit {w}x{h}", format!("{l:?}").to_lowercase())
+                    format!(
+                        "{} layout does not fit {w}x{h}",
+                        format!("{l:?}").to_lowercase()
+                    )
                 };
                 j.warnings.push(Warning::new(Code::CubeFaces, msg));
                 JobStatus::Error {

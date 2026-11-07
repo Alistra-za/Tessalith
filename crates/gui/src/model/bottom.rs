@@ -472,7 +472,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             .map(|d| match d {
                 Decision::Subtype { .. } => "sub-type".into(),
                 Decision::AlphaMeaning => alpha.clone().unwrap_or_else(|| "alpha".into()),
-                Decision::CubeLayout => "not six faces, a cross or a strip".into(),
+                Decision::CubeLayout => {
+                    format!("not {}", engine::cube::plan::CUBE_SOURCES)
+                }
                 // Note FB8: the sentence names the action; the code is on the hover.
                 Decision::Acknowledge(c) => code_text::code_line(*c).into(),
             })
