@@ -2,7 +2,7 @@
 
 The 3D view of a set on a mesh, rendered with Direct3D 11 and the Community Shaders shader files built into Tessalith. The Meshes view's 3D panel works the same way. For anyone checking a material in something close to the game before exporting.
 
-The preview uses Community Shaders d2026.10.11.0 with default settings, whatever CS you run. Your own CS settings or a newer CS can look different in game. <!-- D:GT4 -->
+The preview uses Community Shaders 1.9.0 (AIO build 2026-10-03) with default settings, whatever CS you run. Your own CS settings or a newer CS can look different in game. <!-- D:GT4 -->
 
 ## Set preview (3D)
 

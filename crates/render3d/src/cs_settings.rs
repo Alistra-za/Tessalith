@@ -41,7 +41,7 @@ pub const PREVIEW_FEATURES: &[(&str, &str)] = &[
     ("DynamicCubemaps", "DYNAMIC_CUBEMAPS"),
 ];
 
-/// The `Shaders/Features/*.ini` stems of the pinned CS (`d2026.10.11.0`): every feature counts as loaded in the
+/// The `Shaders/Features/*.ini` stems of the pinned CS (1.9.0 (AIO build 2026-10-03)): every feature counts as loaded in the
 /// bundled defaults. The test `feature_names_equal_the_pinned_features_folder` compares it with the folder.
 pub const FEATURE_NAMES: &[&str] = &[
     "CloudShadows",
