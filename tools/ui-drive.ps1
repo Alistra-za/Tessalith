@@ -40,6 +40,8 @@ $exe = Join-Path $repo '.claude\scratch\ui_drive.exe'
 
 function Invoke-Build {
     if (-not $env:CARGO_TARGET_DIR) { throw 'set CARGO_TARGET_DIR (and CARGO_BUILD_JOBS=4, CARGO_INCREMENTAL=0) before -Build' }
+    if (-not $env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS = '4' }
+    if (-not $env:CARGO_INCREMENTAL) { $env:CARGO_INCREMENTAL = '0' }
     Push-Location $repo
     try {
         $lines = & cargo test --offline -p sdc-gui --test ui_drive --no-run --message-format=json
@@ -120,15 +122,16 @@ function Invoke-SelfTest {
     try {
         $names = '{"check":"names","rule":"every control has a name","subject":{"role":"Button","label":"","rect":[0,0,10,10]},"other":null,"detail":"d"}'
         $overlap = '{"check":"overlap","rule":"no overlap","subject":{"role":"Label","label":"A","rect":[0,0,10,10]},"other":{"role":"Label","label":"B","rect":[5,5,10,10]},"detail":"d"}'
-        foreach ($case in @(@('run1', @($names)), @('run2', @($names, $overlap)))) {
+        foreach ($case in @(@('run1', @($names)), @('run2', @($names, $overlap)), @('run3', @($names), '[1055.0,770.0]'))) {
             $d = Join-Path $tmp $case[0]
             New-Item -ItemType Directory -Force $d | Out-Null
-            '{"size":[1400.0,790.0]}' | Set-Content -LiteralPath (Join-Path $d 'run.json')
+            $sz = if ($case.Count -gt 2) { $case[2] } else { '[1400.0,790.0]' }
+            "{`"size`":$sz}" | Set-Content -LiteralPath (Join-Path $d 'run.json')
             '[' + ($case[1] -join ',') + ']' | Set-Content -LiteralPath (Join-Path $d '00.checks.json')
         }
         $n = Invoke-Collect $tmp
-        $seen = (Get-Content -Raw (Join-Path $tmp 'mechanical.json') | ConvertFrom-Json | Where-Object check -eq 'names').seen
-        if ($n -eq 2 -and $seen -eq 2) { Write-Host 'PASS: 2 rows'; return 0 }
+        $seen = @((Get-Content -Raw (Join-Path $tmp 'mechanical.json') | ConvertFrom-Json | Where-Object { $_.check -eq 'names' -and $_.size -eq '1400x790' }).seen)
+        if ($n -eq 3 -and $seen -eq 2) { Write-Host 'PASS: 3 rows'; return 0 }
         Write-Host "FAIL: $n rows, names seen $seen"; return 1
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }

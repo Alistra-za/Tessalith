@@ -56,6 +56,19 @@ Ops, one example each:
 {"op":"check","name":"sets_pills_match_their_counts"}
 Each run writes NN.png (the screen after step NN; 00 is the start) and NN.tree.txt (role, label, position, with focused/disabled/hovered/clipped/offscreen marks) into the output folder, plus NN.state.json (the app's model, not the screen), NN.checks.json and run.json.`
 
+// The explorer sees the UI ops and the two screen files only: no expect/check, no state.json, no example from a real fixture.
+const EXPLORER_CARD = `The app takes one JSON object per line (steps). A target names exactly one of "label" (exact), "starts" (prefix) or "placeholder", plus optional "role" and "index" (0 = first in reading order; needed when several nodes match). Use the labels in NN.tree.txt.
+Ops, one example each:
+{"op":"click","at":{"label":"Save"},"mods":"Ctrl+Shift"}   (also double_click, right_click, hover; mods is optional)
+{"op":"type","text":"abc","at":{"placeholder":"Name"}}   (at clicks the field first)
+{"op":"key","key":"Ctrl+K"}   (Enter, Escape, Ctrl+Shift+Z ...)
+{"op":"drag","from":{"label":"First"},"to":{"label":"Second"}}
+{"op":"scroll","at":{"label":"List"},"dir":"down","times":3}   (dir: up, down, left, right, into_view)
+{"op":"resize","w":1100,"h":700}
+{"op":"settle","frames":4}
+{"op":"pick","path":"folder"}   (answers the next file dialog with a folder; none queued = Cancel)
+Each run writes NN.png (the screen after step NN; 00 is the start) and NN.tree.txt (role, label, position, with focused/disabled/hovered/clipped/offscreen marks) into the output folder.`
+
 const GOALS = {
   type: 'object',
   properties: {
@@ -164,20 +177,22 @@ Return the commit, and per goal: id, sentence, fixture, check, shortest_steps (t
   { label: 'fixtures', phase: 'Fixtures', schema: FIXTURES })
 if (!fx || !fx.goals || !fx.goals.length) throw new Error('fixtures agent returned no goals')
 const usable = fx.goals.filter(g => !g.blocked)
-const dropped = fx.goals.slice(MAX)
+const dropped = usable.slice(MAX)
 for (const g of fx.goals.filter(g => g.blocked)) log(`goal ${g.id} blocked: ${g.blocked}`)
-if (fx.goals.length > MAX) log(`explore: ${dropped.length} goal(s) not explored (max_goals ${MAX}): ${dropped.map(g => g.id).join(', ')}`)
-const picked = usable.slice(0, MAX)
-const failures = fx.goals.filter(g => !g.path_ok)
+if (dropped.length) log(`explore: ${dropped.length} goal(s) not explored (max_goals ${MAX}): ${dropped.map(g => g.id).join(', ')}`)
+const failures = fx.goals.filter(g => !g.path_ok && !g.blocked)
+for (const g of failures) log(`goal ${g.id}: shortest path failed, an intent failure; not explored`)
+const picked = usable.slice(0, MAX).filter(g => g.path_ok)
+log(`run mode: ${3 + picked.length} agents (fixtures 1, explorers ${picked.length}, visual 1, verify 1)`)
 
 phase('Explore')
 const explored = (await pipeline(picked, (g) => {
   const dir = `${OUT}\\explore\\${g.id}`
-  const cap = Math.min(3 * g.shortest_steps, 25)
+  const cap = Math.min(Math.max(3 * (g.shortest_steps || 0), 3), 25)
   return agent(
     `You are a new user of a desktop app. You have not seen its code, documentation or wiki and must not look: do not open, list or search any file except the ones named here. Your goal: "${g.sentence}". You use the app only through \`pwsh -NoProfile -File ${WRAP} -Fixture ${g.fixture} -Size ${EXPLORE_SIZE} -GoalFile ${dir}\\goal.json -Steps ${dir}\\steps.jsonl -Out ${dir}\`. Write your steps to \`${dir}\\steps.jsonl\` and run the command; each run replays every step from a fresh start and writes NN.png (the screen after step NN; 00 is the start) and NN.tree.txt (what is on that screen: role, label, position). Read only those two kinds of file and the command's output. Add one step at a time. When the output says GOAL REACHED, stop; stop also after ${cap} steps. For each step, record what you saw and why you chose it. A dead end is a step you later undid or abandoned; a wrong click is one that did not move you toward the goal; a hover you needed is one whose text told you what to do.
 
-${DRIVER}
+${EXPLORER_CARD}
 Use the PowerShell tool. Return the schema: goal, reached, steps_used, log [{n, step, saw, why}], dead_ends [{n, what}], wrong_clicks [{n, label, why}], hovers_needed [{n, label, text}], dir ("${dir}").`,
     { label: `explore ${g.id}`, phase: 'Explore', schema: EXPLORER })
 })).filter(Boolean)
@@ -202,5 +217,4 @@ Return report (the path), kept, dropped, intent_failures.`,
   { label: 'verify', phase: 'Verify', schema: VERIFY })
 if (!verify) throw new Error('verifier returned nothing')
 
-log(`run mode: ${2 + explored.length + 1} agents (fixtures 1, explorers ${explored.length}, visual 1, verify 1)`)
 return { mode: 'run', report: verify.report, kept: verify.kept, dropped: verify.dropped, goals: fx.goals.map(g => g.id) }
