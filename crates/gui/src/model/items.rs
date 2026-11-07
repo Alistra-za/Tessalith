@@ -484,3 +484,15 @@ impl PlanView {
         }
     }
 }
+
+impl super::AppModel {
+    /// The texture's message list (the settings panel's): its warnings and its check results.
+    pub fn item_messages(&self, key: &str) -> Vec<Warning> {
+        let mut ws = self
+            .item(key)
+            .map(|i| i.warnings.clone())
+            .unwrap_or_default();
+        ws.extend(self.check_warnings(key).iter().cloned());
+        ws
+    }
+}

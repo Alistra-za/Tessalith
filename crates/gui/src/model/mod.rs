@@ -14,7 +14,6 @@ pub mod cube_cross;
 pub mod encoding_follow;
 pub mod export;
 pub mod fields;
-pub mod from_normal;
 pub mod heatmap;
 pub mod helpers;
 pub mod history;
@@ -184,10 +183,6 @@ pub enum Dialog {
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
     Rename(rename::RenameDialog),
-    /// v2 Track B: "Generate from normal map…" for this set id; its state is `AppModel::gen` (floats are not `Eq`).
-    GenerateFromNormal(String),
-    /// Note CO: "Delete generated file…", asked once per file; texts and refusals read when it opened.
-    ConfirmDeleteGenerated(Box<from_normal::DeleteGenerated>),
     /// Export to ▾: Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
     MakeMarker,
     Error(String),
@@ -582,16 +577,6 @@ pub struct AppModel {
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
     /// (AG128).
     pub stats: std::cell::RefCell<shell::StatCache>,
-    /// Header sizes read for the Generate offers, by (path, size, mtime) (Note CO, spec-M5).
-    pub(crate) gen_dims: std::cell::RefCell<from_normal::GenDims>,
-    /// Generated-file facts for the slot rows: the normals' hashes by (path, stamp) and `GenInfo` by item (Task 7).
-    pub(crate) gen_info: std::cell::RefCell<from_normal::GenInfoCache>,
-    /// The Generate path's alias map by plan, and its lookup counters (Task 10, Task 6 review M6).
-    pub(crate) gen_look: std::cell::RefCell<from_normal::GenLookups>,
-    /// The Generate dialog's state while it is open, or while a cancelled Generate that started writing lands.
-    pub gen: Option<from_normal::GenDialog>,
-    /// The first file the last Generate wrote: selected by the plan that lists it.
-    pub gen_select: Option<String>,
     /// Note FC8: clicks and keys that waited one frame for a focused text field to commit (`ui::after_commit`); run
     /// first thing next frame, by `ui::actions::keys`.
     pub after_commit: Vec<AfterCommit>,
@@ -600,10 +585,6 @@ pub struct AppModel {
     weighting_follow: Vec<(String, String, String)>,
     /// Note FI3: a re-encode step's history merge key; the FC1 recording its settled plan makes joins that step.
     reencode_follow: Option<String>,
-    /// The last Generate job id, so a new dialog's ids never repeat a closed one's.
-    pub(crate) gen_ids: u64,
-    /// Generate dialogs opened so far; the preview zoom is reset when this changes.
-    pub(crate) gen_opens: u64,
     /// A Save report write is on a worker (AG130); the app keeps frames coming until it lands.
     pub report_saving: bool,
     /// "Show in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
@@ -905,16 +886,9 @@ impl AppModel {
             nav: Default::default(),
             shell: Vec::new(),
             stats: Default::default(),
-            gen_dims: Default::default(),
-            gen_info: Default::default(),
-            gen_look: Default::default(),
-            gen: None,
-            gen_select: None,
             after_commit: Vec::new(),
             weighting_follow: Vec::new(),
             reencode_follow: None,
-            gen_ids: 0,
-            gen_opens: 0,
             report_saving: false,
             show_in_meshes: None,
             nif_tab_request: None,
@@ -966,13 +940,9 @@ impl AppModel {
         self.pending_json_answer = None;
         self.nif_export_queued = false;
         self.nif_export_due = false;
-        // A Generate of the previous folder: cancelled; one that writes still lands, and records nothing here (I1).
-        self.gen_cancel();
-        self.gen_select = None;
         self.weighting_follow.clear();
         self.reencode_follow = None;
         self.after_commit.clear();
-        self.drop_provenance_note();
         // Every dialog that can be open here belongs to the previous folder (`OpenUnsaved` and `ExportRunning`
         // were answered to get here).
         self.dialog = None;
@@ -1573,7 +1543,6 @@ impl AppModel {
             || self.uv.read_pending()
             || self.uv.all_running()
             || self.uv.probe_pending()
-            || self.gen_pending()
     }
 
     /// Drain worker messages. True when anything changed (the UI repaints).
@@ -1811,11 +1780,6 @@ impl AppModel {
             WorkerMsg::ScanHasRows { stamp, rows } => self.uv_rows_landed(stamp, rows),
             WorkerMsg::Dims(dims) => self.dims_landed(dims),
             WorkerMsg::RnmPreview { id, image } => self.rnm_preview_landed(id, image),
-            WorkerMsg::Generated {
-                id,
-                preview,
-                result,
-            } => self.gen_landed(id, preview, result),
             _ => {}
         }
     }
@@ -1937,17 +1901,6 @@ impl AppModel {
             )),
             _ => Ok(()),
         }
-    }
-
-    /// I1: a close or open asked while a Generate writes: done when it has landed and recorded its files, so a file
-    /// Tessalith wrote is never left unrecorded or recorded into another project.
-    fn defer_until_generated(&mut self, action: AfterExport) {
-        self.status_line = match action {
-            AfterExport::Close => "Closing when Generate has finished",
-            AfterExport::Open(_) => "Opening the folder when Generate has finished",
-        }
-        .into();
-        self.after_export = Some(action);
     }
 
     /// Tests: end the export with a made-up result (`WorkerMsg` is private), as the worker's `ExportDone` would.
@@ -2554,8 +2507,7 @@ impl AppModel {
         }
     }
 
-    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes, generated-file
-    /// provenance; P14): saves `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next
+    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes; P14): saves `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next
     /// Save. True when it deferred.
     pub(crate) fn save_record(&mut self, was_dirty: bool) -> bool {
         if was_dirty {
@@ -2709,10 +2661,6 @@ impl AppModel {
         };
         if gone {
             self.selection = Selection::None;
-        }
-        // Generate's first file, by the plan Generate started (it lists the file); never a later one.
-        if let Some(k) = self.gen_select.take().filter(|k| self.item(k).is_some()) {
-            self.select_item(&k);
         }
         if let Some(k) = self.expanded.clone() {
             if self.item(&k).is_none() {
@@ -4145,8 +4093,6 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
-        // The deferred provenance is written now (M2).
-        self.drop_provenance_note();
         if wrote {
             self.refresh_banner(); // the save removed the saved documents' recovery files
             self.messages.notify(messages::Severity::Info, "Saved");
@@ -4199,9 +4145,6 @@ impl AppModel {
     pub fn request_open(&mut self, root: PathBuf) -> bool {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
-            false
-        } else if self.gen_writing() {
-            self.defer_until_generated(AfterExport::Open(root));
             false
         } else if self.prompts_unsaved() {
             self.dialog = Some(Dialog::OpenUnsaved(root));
@@ -4265,9 +4208,6 @@ impl AppModel {
     pub fn request_close(&mut self) -> bool {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Close));
-            false
-        } else if self.gen_writing() {
-            self.defer_until_generated(AfterExport::Close);
             false
         } else if self.prompts_unsaved() {
             self.dialog = Some(Dialog::CloseUnsaved);

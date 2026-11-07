@@ -11,7 +11,6 @@ pub mod cs_pbr;
 pub mod cube_section;
 pub mod dialogs;
 pub mod drawer;
-pub mod from_normal;
 pub mod group;
 pub mod header;
 pub mod helper_panel;

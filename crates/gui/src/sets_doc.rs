@@ -127,7 +127,7 @@ pub struct SetsDoc {
     f: TomlFile,
     entries_cache: RefCell<Option<(u64, Arc<Vec<SetEntry>>)>>,
     /// Note FC11: `<project root>/_sdc/generated.json` as last read or written: the records kept outside the undo
-    /// history (`[generated]` and the JSON hash tables), under the same keys as in this document. Written when a
+    /// history (the JSON hash tables), under the same keys as in this document. Written when a
     /// record is made, so it holds even when the document is never saved; a table it holds wins over the document's.
     side: serde_json::Map<String, Json>,
 }
@@ -313,10 +313,6 @@ impl SetsDoc {
                 self.set_shas(k, &m);
             }
         }
-        if self.side.contains_key(GENERATED) {
-            let g = self.generated();
-            self.put_doc_generated(&g);
-        }
         // Fix round 1 (controller ruling): applied quietly. The records are not the user's edits, so the document stays
         // clean (Discard leaves it clean too); the readable copy reaches `sdc-project.toml` with the next real Save.
         // Note FC14: only a document that was clean before; `TomlFile::open`/`reload` always leave it so today.
@@ -334,6 +330,8 @@ impl SetsDoc {
             return Ok(());
         }
         self.side.insert(key.to_string(), v);
+        // The key an earlier version kept here (Note GV1): read as nothing, dropped by the next write.
+        self.side.remove(GENERATED);
         // The getters read the sidecar first: a cache keyed on `rev` must see the change, even in a read-only document.
         self.f.rev = next_rev();
         let b = serde_json::to_vec_pretty(&self.side).map_err(std::io::Error::other)?;
@@ -390,8 +388,6 @@ impl SetsDoc {
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
-        let generated = self.f.doc.get(GENERATED).cloned();
-        let was_generated = self.doc_generated();
         let old = self.text();
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
@@ -414,14 +410,6 @@ impl SetsDoc {
         if self.export_folder() != folder {
             let v = folder.map(|p| Value::from(p.to_string_lossy().as_ref()));
             self.set_project("export_folder", v);
-        }
-        // Note CO (P15): `[generated]` records generated files on disk, which undo does not change either.
-        if self.doc_generated() != was_generated {
-            match generated {
-                Some(t) => self.f.doc.insert(GENERATED, t),
-                None => self.f.doc.remove(GENERATED),
-            };
-            self.f.touch();
         }
         if self.text() == old {
             self.f.doc = doc;
@@ -484,90 +472,6 @@ impl SetsDoc {
             "export_folder",
             Some(Value::from(path.to_string_lossy().as_ref())),
         );
-    }
-
-    /// Note CO: the top-level `[generated]` table, item key → provenance record (`model::from_normal::Provenance`).
-    /// Note FC11: the sidecar's copy when it has one.
-    pub fn generated(&self) -> BTreeMap<String, Json> {
-        match self.side.get(GENERATED) {
-            Some(Json::Object(o)) => o.clone().into_iter().collect(),
-            _ => self.doc_generated(),
-        }
-    }
-
-    /// `[generated]` as this document holds it.
-    fn doc_generated(&self) -> BTreeMap<String, Json> {
-        self.f
-            .doc
-            .get(GENERATED)
-            .and_then(Item::as_table_like)
-            .map(|t| {
-                t.iter()
-                    .filter_map(|(k, i)| Some((k.to_string(), item_json(i)?)))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Record (`Some`) or remove (`None`) the provenance of item `key`, matched by Unicode lowercase (Note BF). Not
-    /// through `set_project`: `[generated]` is a table of its own (P15). Err: the sidecar was not written (Note FC14).
-    pub fn set_generated(&mut self, key: &str, v: Option<&Json>) -> std::io::Result<()> {
-        let fold = key.to_lowercase();
-        // Note FC11: the sidecar first, as the document would hold it (no `null` members), so a reopen compares equal.
-        let mut all = self.generated();
-        all.retain(|k, _| k.to_lowercase() != fold);
-        if let Some(x) = v
-            .and_then(json_to_toml_deep)
-            .and_then(|t| item_json(&Item::Value(t)))
-        {
-            all.insert(key.to_string(), x);
-        }
-        let side = self.put_side(GENERATED, Json::Object(all.into_iter().collect()));
-        let now = self.doc_generated();
-        let same: Vec<&String> = now.keys().filter(|k| k.to_lowercase() == fold).collect();
-        let unchanged = match v {
-            None => same.is_empty(),
-            Some(v) => same.len() == 1 && same[0] == key && now.get(key) == Some(v),
-        };
-        if self.read_only() || unchanged {
-            return side;
-        }
-        let value = v.and_then(json_to_toml_deep);
-        let Some(t) = sub_table(self.f.doc.as_table_mut(), GENERATED, || {
-            Item::Table(Table::new())
-        }) else {
-            return side;
-        };
-        for k in same {
-            t.remove(k);
-        }
-        if let Some(value) = value {
-            t.insert(key, Item::Value(value));
-        }
-        if t.is_empty() {
-            self.f.doc.remove(GENERATED);
-        }
-        self.f.touch();
-        side
-    }
-
-    /// Note FC11: make the document's `[generated]` equal `all` (reconcile on open); no edit when it already is.
-    fn put_doc_generated(&mut self, all: &BTreeMap<String, Json>) {
-        if self.read_only() || self.doc_generated() == *all {
-            return;
-        }
-        let mut t = Table::new();
-        for (k, v) in all {
-            if let Some(v) = json_to_toml_deep(v) {
-                t.insert(k, Item::Value(v));
-            }
-        }
-        if t.is_empty() {
-            self.f.doc.remove(GENERATED);
-        } else {
-            self.f.doc.insert(GENERATED, Item::Table(t));
-        }
-        self.f.touch();
     }
 
     /// TA10: `[project] also_location`, where this project's Also export writes its three folders.

@@ -57,7 +57,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("copy_settings", copy_settings),
     ("rename_inputs", rename_inputs),
     ("rename_outputs", rename_outputs),
-    ("generate_dialog", generate_dialog),
     ("marker_dialog", marker_dialog),
     ("set_editor", set_editor),
     ("assign_menu", assign_menu),
@@ -772,13 +771,6 @@ fn rename_outputs(dir: &Path) -> Frame {
         dir,
         |m| select_set(m, "architecture/stone/stonewall"),
         |m| m.open_rename(RenameMode::Outputs),
-    )
-}
-fn generate_dialog(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        |m| m.open_gen("architecture/stone/stonewall", None),
     )
 }
 fn marker_dialog(dir: &Path) -> Frame {

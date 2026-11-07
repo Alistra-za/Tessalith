@@ -20,11 +20,11 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1204,3 +1204,7 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 - **GU2 A cube source is six faces, a cross or a strip.** A cube source is six faces, a cross or a strip (exact 4:3, 3:4, 6:1, 1:6 proportions), or a cube DDS; a square or 2:1 image typed as a cube is Unresolved with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type.", and the GUI shows that sentence with the cube section's Layout combo disabled (the sentence on hover), no **Set layout** menu, and **Set type…** on its Problems and Review row. `cubemap.layout` = `equirect`, `mirror_ball`, `angular` or `photo` is refused in config, presets and `--set` with "removed in 3.0; convert it to six faces, a cross or a strip first".
 - **GU3 Ground fill and horizon are gone.** A cube's lower half is the source's own pixels: the engine and the GUI no longer fill below a horizon. `cubemap.ground_fill` and `cubemap.horizon` are refused in config, presets and `--set` with "removed in 3.0", and a project that has neither key loads as before.
 - **GU4 The 3.0 cube removals reverse the 2.0 debloat review's "kept on purpose: cubemap knobs" (item 14; not in the repo), owner 2026-11-07.** GU2 and GU3 supersede that pick: the panorama importer is gone, and the archive table lists each digest line and sub-bullet it cut. DS13, DT13 (the layout box never offers six face files) and FC12's digest line stay.
+
+## Note GV — v3 generate from normal removed (owner, 2026-11-06)
+
+- **GV1 The GUI makes no height, AO or curvature map.** The Generate dialog, its set-card, slot-row and Problems entries, the "generated" marker and hover, the stale-map row and Delete generated file are gone; a `_generated` file is an ordinary source row, and GEN-REPLACED, GEN-AO and Also export's read of `_curves_generated` are unchanged. A `[generated]` table in `sdc-project.toml` loads without a message and is saved as it was, and a `generated` key in `_sdc/generated.json` is ignored on load and dropped by the next write to that file; every hash field there stays.

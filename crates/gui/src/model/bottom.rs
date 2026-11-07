@@ -158,8 +158,6 @@ pub enum At {
 pub enum Fix {
     /// Note DU3: remove the set entry that matches no file.
     RemoveMissing(sets::Missing),
-    /// GEN-STALE (CO70): open the Generate dialog for this generated item's map; its own Generate writes.
-    Regenerate(String),
     /// CHAN-NORMAL-LENGTH (Note DP): set `channels.reconstruct_z` on this item.
     RebuildZ(String),
     /// IN-UNREADABLE (Y4): open the folder that holds the skipped entry.
@@ -537,18 +535,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             out.push(Problem {
                 fix,
                 ..row(Level::Warning, at, w.message.clone(), Some(w.code))
-            });
-        }
-        // Note FC3 (CO70): a stale generated map is a Warning row with Regenerate; GEN-REPLACED stays on hover.
-        if let Some(reason) = m.generated_info(&i.key).and_then(|g| g.stale) {
-            out.push(Problem {
-                fix: Some(Fix::Regenerate(i.key.clone())),
-                ..row(
-                    Level::Warning,
-                    At::Texture(i.key.clone()),
-                    reason,
-                    Some(Code::GenStale),
-                )
             });
         }
     }

@@ -887,7 +887,7 @@ fn enter_right_after_typing_in_find_applies_the_rename() {
 
 /// Note FC5 (supersedes CZ4's "other Destructive buttons unchanged"): Enter or Space on a focused Destructive button
 /// in any `dialogs::dialog` does nothing; a click still does. One row per dialog with a Destructive button (the
-/// `Role::Destructive` uses in `ui/`): Reload, Changed on disk, Reset all, Delete generated file, Export running,
+/// `Role::Destructive` uses in `ui/`): Reload, Changed on disk, Reset all, Export running,
 /// Close / Open unsaved, the sets column's Replace and the presets Discard. A NIF file Tessalith did not write has no
 /// dialog: it is answered on its Review row (Note GD2), and Enter there writes nothing
 /// (`nif_edit::a_foreign_file_opens_no_guard_dialog`).
@@ -938,23 +938,6 @@ fn focused_destructive_buttons_ignore_enter_and_space() {
         let mut h = harness(m);
         press_on(&mut h, "Reset", key);
         assert_eq!(h.state().history.undo.len(), steps, "ResetAll {key:?}");
-        // Delete generated file: the file stays.
-        let mut m = opened(d.path());
-        let f = d.path().join("gen.png");
-        std::fs::write(&f, b"x").unwrap();
-        m.dialog = Some(Dialog::ConfirmDeleteGenerated(Box::new(
-            sdc_gui::model::from_normal::DeleteGenerated {
-                key: "gen.png".into(),
-                name: "gen.png".into(),
-                path: f.clone(),
-                body: "Delete gen.png?".into(),
-                refused: None,
-                seen: None,
-            },
-        )));
-        let mut h = harness(m);
-        press_on(&mut h, "Delete gen.png", key);
-        assert!(f.exists(), "DeleteGenerated {key:?}: file kept");
         // Export running: the export keeps going.
         let d = tempfile::tempdir().unwrap();
         let mut m = opened(d.path());

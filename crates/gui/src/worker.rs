@@ -115,13 +115,6 @@ pub enum WorkerMsg {
         id: u64,
         image: Result<Arc<crate::model::rnm_preview::RnmThumb>, String>,
     },
-    /// A Generate-from-normal job `id` ended (`AppModel::gen_frame` previews, `gen_generate` writes); a stale id is
-    /// dropped on landing.
-    Generated {
-        id: u64,
-        preview: bool,
-        result: Result<Arc<crate::model::from_normal::GenResult>, String>,
-    },
     /// Source sizes read from file headers (`AppModel::kick_dims`).
     Dims(Vec<(crate::model::out_size::DimKey, Option<(u32, u32)>)>),
     Encoded {

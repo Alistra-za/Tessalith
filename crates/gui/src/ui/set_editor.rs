@@ -12,7 +12,6 @@ use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
     PARALLAX_HOVER,
 };
-use crate::model::from_normal::GenMap;
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
@@ -43,9 +42,6 @@ pub const PGP_LOCK_UNWRITTEN: &str = "lock stored, not written (no PGPatcher ent
 /// plus the centre panel's 16 px of margin and a little slack.
 pub const ROWS_MIN: f32 = 540.0;
 
-/// The Height and RMAOS rows' Generate button (R1): its text; its accessible name is the entry's full label.
-pub const GEN_BUTTON: &str = "Generate…";
-pub const REGEN_BUTTON: &str = "Regenerate…";
 const THUMB: f32 = 56.0;
 /// The format and recipe combos (A5).
 const COMBO_W: f32 = 96.0;
@@ -561,15 +557,6 @@ fn row(
         SlotFill::Empty => (None, None),
     };
     let item = item_key.as_deref().and_then(|k| model.item(k));
-    // Note CO (owner answers 2 and 7): a generated file says where it came from; stale turns only this row's dot amber.
-    // P20: a packed output (the `_rmaos` row) shows the generated source it reads (a generated AO).
-    let gen = item_key.as_deref().and_then(|k| model.generated_info(k));
-    // P20: a packed output (the `_rmaos` row) names the generated AO it reads on its hover and dot, with no marker
-    // (review M1: the packed output itself is not generated).
-    let fed = match &gen {
-        None => item_key.as_deref().and_then(|k| model.generated_feed(k)),
-        Some(_) => None,
-    };
 
     // Slot: the title, dim when empty.
     let text = if locked {
@@ -671,16 +658,10 @@ fn row(
             Some(i) => {
                 let size =
                     size.map(|e| format!("{}×{} · {}", e.width, e.height, human(e.file_bytes())));
-                let mut hover = match &size {
+                let hover = match &size {
                     Some(s) => format!("{}\n{s}", i.name),
                     None => i.name.clone(),
                 };
-                if let Some(g) = &gen {
-                    hover.push_str(&format!("\nGenerated from {}", g.from));
-                }
-                if let Some(g) = &fed {
-                    hover.push_str(&format!("\nAO generated from {}", g.from));
-                }
                 ui.add(egui::Label::new(egui::RichText::new(&i.name).small()).truncate())
                     .on_hover_text(hover);
                 if let Some(s) = size {
@@ -726,41 +707,6 @@ fn row(
                     acts.push(Act::Slot(a));
                 }
             }
-            // R1/R2: Generate sits under Assign… (empty) or the format combo (filled); never on a packed item.
-            let gen_btn = |ui: &mut egui::Ui, acts: &mut Vec<Act>| {
-                let pre = match slot {
-                    SlotKind::Height => GenMap::Height,
-                    SlotKind::Rmaos => GenMap::Ao,
-                    _ => return,
-                };
-                if item.is_some_and(|i| i.kind == ItemKind::Packed) {
-                    return;
-                }
-                let e = model.gen_entry(&v.id, Some(pre));
-                let text = if e.label == REGEN_BUTTON {
-                    REGEN_BUTTON
-                } else {
-                    GEN_BUTTON
-                };
-                let r = ui.add_enabled(e.disabled.is_none(), egui::Button::new(text).small());
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        e.disabled.is_none(),
-                        &e.label,
-                    )
-                });
-                let r = match &e.disabled {
-                    Some(why) => r.on_disabled_hover_text(format!("{}\n{why}", e.label)),
-                    None => r.on_hover_text(&e.label),
-                };
-                if r.clicked() {
-                    acts.push(Act::Slot(e.action));
-                }
-            };
-            if own_job.is_none() {
-                gen_btn(ui, acts);
-            }
             let Some((i, job)) = own_job else { return };
             let (cur_f, cur_t) = (job.profile.format, job.profile.color.tag);
             // Format and Opaque write `sdc.toml`: a read-only one would drop the edit silently.
@@ -783,7 +729,6 @@ fn row(
             if choice != (cur_f, cur_t) {
                 acts.push(Act::Format(i.key.clone(), choice.0, choice.1));
             }
-            gen_btn(ui, acts);
             if i.kind == ItemKind::Packed {
                 packed_controls(ui, model, i, toml_read_only.as_deref(), acts);
             }
@@ -796,14 +741,6 @@ fn row(
     // full label as its accessible name and leads its hover with it.
     let flags_w = ui
         .vertical(|ui| {
-            if let Some(g) = &gen {
-                let name = format!("Generated from {}", g.from);
-                let r = ui.add(egui::Label::new(
-                    egui::RichText::new("generated").small().weak(),
-                ));
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
-                r.on_hover_text(name);
-            }
             if let (Some(n), Some(_)) = (
                 match slot {
                     _ if !shows_json_panel(v, model.target) => None,
@@ -873,14 +810,9 @@ fn row(
             } else if !rnm_layers.is_empty() {
                 lines.push(format!("RNM, {} layers", rnm_layers.len()));
             }
-            let stale = gen.as_ref().or(fed.as_ref()).and_then(|g| g.stale.as_ref());
-            if let Some(r) = stale {
-                lines.push(format!("stale: {r}"));
-            }
             if let Some(i) = item {
                 let s = match i.status {
                     ItemStatus::Failed(_) | ItemStatus::Error(_) => Status::Blocks,
-                    _ if stale.is_some() => Status::Warning,
                     _ if tile_ready(i) => Status::Ready,
                     _ => Status::Warning,
                 };
@@ -1238,23 +1170,7 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                         source_picker(ui, model, key, role, Some((&src, &file)), acts)
                     })
                     .inner;
-                // Note CO (P20): a generated source (the `_m` alpha's height) says where it came from and if stale.
-                match model.generated_info(&src) {
-                    Some(g) => {
-                        r.on_hover_text(format!("{file}\nGenerated from {}", g.from));
-                        if let Some(s) = g.stale {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(format!("stale: {s}")).small().weak(),
-                                )
-                                .truncate(),
-                            );
-                        }
-                    }
-                    None => {
-                        r.on_hover_text(file);
-                    }
-                }
+                r.on_hover_text(file);
             }
             FillRow::Value {
                 role,
