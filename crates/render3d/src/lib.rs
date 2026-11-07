@@ -615,9 +615,9 @@ impl Renderer {
         &self.gpu
     }
 
-    /// The whole CS feature define list for the next load or rebuilt draw (default [`DEFAULT_FEATURES`]): tests
-    /// and P0 callers. A later [`Renderer::set_settings`] / [`Renderer::set_features_on`] replaces only the
-    /// settings defines in it and keeps the rest (the stand-in STANDIN_* hooks) in order.
+    /// The whole CS feature define list for the next load or rebuilt draw (default: the pinned defaults' defines):
+    /// tests and P0 callers. A later `set_settings` / [`Renderer::set_features_on`] replaces only the settings
+    /// defines in it and keeps the rest (the stand-in STANDIN_* hooks) in order.
     pub fn set_features(&mut self, features: Vec<String>) {
         self.features = features;
     }
@@ -642,7 +642,7 @@ impl Renderer {
     }
 
     /// The "Community Shaders features" toggle (C8): off drops every settings define (LL included) and the sRGB
-    /// encode; applied like [`Renderer::set_settings`].
+    /// encode; applied through `apply_settings_defines`.
     pub fn set_features_on(&mut self, on: bool) {
         self.features_on = on;
         self.apply_settings_defines();
