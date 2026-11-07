@@ -13,7 +13,8 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 
 A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim`. It works on `nif/*` branches; the owner merges `nif/main` into `main`. Change those crates only when the task says so. Record what you changed in a DECISIONS note and in a line for the NIF team's handoff file (see CLAUDE.local.md).
 
-## Gates (all must pass before a commit is called done)
+## Gates
+During a plan: `cargo fmt --all --check`, both clippy lines workspace-wide, and tests of the changed crates only. Once at plan end and before a merge into `main`, run the full list (owner, 2026-10-29):
 ```
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -21,6 +22,7 @@ cargo clippy --workspace -- -D warnings
 cargo test --workspace -- --skip render_ --test-threads=4
 cargo test --workspace -- render_ --test-threads=1
 ```
+- **`.githooks/pre-commit`** checks fmt, control bytes and duplicate note headings. Turn it on in a clone with `git config core.hooksPath .githooks`.
 - **GPU tests (`render_*`) run alone.** They can hang for 30+ minutes when the GPU is busy.
 - **`cargo test -p engine --test golden`** is a quick pre-check; the workspace run already includes it.
 - **`cargo test -p engine --test encode_versions`** pins encoder inputs and built-in profile hashes; a change it accepts rewrites `crates/engine/tests/encode_versions/*.json`. Commit that diff with the change.
@@ -72,6 +74,7 @@ Build folders fill the drive fast: one worktree's `target/` reaches 50–170 GB.
 
 ## Where things are
 - `.claude/DECISIONS.md`: every live ruling: the index, the digest of 1.x rulings in force, and the 2.x notes. Read the index and the digest section for your area before changing behaviour. `.claude/DECISIONS-1.x.md`: the frozen 1.x record behind each digest cite (rulings under its `# Archived` heading are not in force). `.claude/DECISIONS-ARCHIVE.md`: superseded 2.x rulings, for history only.
+- `CODING_STANDARDS.md`: judgement rules a reviewer enforces; name it in every review dispatch.
 - `docs/DOCUMENTATION.md`: the documentation policy (what goes where, repetition limits, screenshots).
 - `docs/wiki/`: user-facing behaviour; the GUI pages are `docs/wiki/GUI-*.md` (`docs/gui.md` is a link to them). Update them when the UI changes, following `docs/DOCUMENTATION.md`. `docs/wiki` is the source of the GitHub wiki: after editing it, run `tools\publish-wiki.ps1` (`-Out <dir>` previews the converted pages).
 - `docs/research/`: the measurements behind encoder, mip-filter and coverage choices.
@@ -79,6 +82,7 @@ Build folders fill the drive fast: one worktree's `target/` reaches 50–170 GB.
 - `.claude/workflows/quality-audit.js`: a whole-repo quality pass (dead code, efficiency, duplication, architecture, test gaps, shortcut debt) with skeptical checks, a delete list and refactor briefs. It uses the same section table as trace-debug.
 - `.claude/workflows/in-game-capture.js`: launch the game through MO2, take RenderDoc captures of test meshes without a keyboard, restore settings, and turn the captures into numbers.
 - `.claude/workflows/golden-capture.js` (NIF team): Phase D golden captures with a CS settings profile (A, B, A_DC). Usage and plan format are in its header comment. File work lives in `golden-capture-lib.mjs`; run `node .claude/workflows/golden-capture.test.mjs` for the offline test (no game launch).
+- `tools/scan-query.py`: read-only queries against a scan database: any SQL, `--tables`, `--txst <plugin>`. Run it with `py -3.13 -I`.
 - `tools/package-release.ps1`: builds the release zip and SHA256SUMS.
 - `tools/doc-shots.ps1`: re-renders the documentation screenshots and writes a difference overlay for each changed one (run before a push).
 - `tools/doc-dupes.py`: finds facts repeated across the user-facing docs (one home per fact); `--lost` lists what an edit dropped.
