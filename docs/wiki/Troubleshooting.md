@@ -136,7 +136,7 @@ A hard abort can leave temporary files in the output folders ([atomic writes](Va
 | `unknown preset '<id>'` | A preset id that is not loaded. |
 | `preset inheritance cycle at '<id>'` | Presets whose `base` chain loops. |
 | `<file>: config schema_version N is newer than this sdc supports (1)` | A config written by a newer version. A preset gives `preset schema_version N is newer …`. |
-| `<file>: <key>: removed in 2.0; <fix>` | A key or value that Tessalith 2.0 no longer reads (for example `subtype = "rfaos"`: use `skin_rfaos`). The text names the key and what to write; `--set` gives the same text. The file is read-only in the GUI until fixed. <!-- D:FM10 --> |
+| `<file>: <key>: removed in <version>; <fix>` | A key or value that Tessalith does not read (for example `subtype = "rfaos"`, removed in 2.0: use `skin_rfaos`). The text names the key, the version that removed it and what to write; `--set` gives the same text. The file is read-only in the GUI until fixed. <!-- D:FM10 --> |
 | `[files] is only valid in a project sdc.toml, not in <path>` | `[files]` or `[inputs]` in the user config. |
 | `schema all needs --out <dir>` | |
 | `source changed since planning; re-run` | A source file changed between planning and encoding. Run again. |

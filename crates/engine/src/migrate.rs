@@ -1,5 +1,5 @@
 //! Version checks and the removed-key table for presets and configs (Note FM). A file is refused when its schema is
-//! newer than this sdc, and when it names a key or value that 2.0 removed: the error says where and what to write
+//! newer than this sdc, and when it names a key or value that a past version removed: the error says where and what to write
 //! instead. Nothing is upgraded in place; there are no step tables. Every removal adds a row to [`REMOVED`].
 use crate::presets::SCHEMA_VERSION as PRESET_SCHEMA;
 use toml::Value;
@@ -17,12 +17,12 @@ pub enum MigrateError {
         found: u32,
         current: u32,
     },
-    /// `<dotted path>: removed in 2.0; <hint>`.
+    /// `<dotted path>: removed in <since>; <hint>`.
     #[error("{0}")]
     Removed(String),
 }
 
-/// One key or value that 2.0 no longer reads. `key` is dot-separated segments compared with the last segments of
+/// One key or value that a removed version no longer reads. `key` is dot-separated segments compared with the last segments of
 /// each key's path, so `encoder.backend` matches under `[defaults]`, `[subtypes.X]`, `[files."k"]` and `[[rules]]`
 /// tables alike (array indices are not segments; a file key that contains dots is one segment). A table key matches
 /// too (`subtypes.rfaos`). `value: None` matches any value; `Some(v)` matches a string equal to `v` or an array
@@ -33,6 +33,13 @@ pub struct Removed {
     pub key: &'static str,
     pub value: Option<&'static str>,
     pub hint: &'static str,
+    /// The version that removed it, as shown in the message (`"2.0"`).
+    pub since: &'static str,
+}
+
+/// `<dotted path>: removed in <since>; <hint>`.
+pub fn removed_line(path: &str, r: &Removed) -> String {
+    format!("{path}: removed in {}; {}", r.since, r.hint)
 }
 
 pub const REMOVED: &[Removed] = &[
@@ -40,222 +47,266 @@ pub const REMOVED: &[Removed] = &[
         key: "subtypes.rfaos",
         value: None,
         hint: "the sub-type is skin_rfaos",
+        since: "2.0",
     },
     Removed {
         key: "subtype",
         value: Some("rfaos"),
         hint: "use skin_rfaos",
+        since: "2.0",
     },
     Removed {
         key: "subtypes",
         value: Some("rfaos"),
         hint: "use skin_rfaos",
+        since: "2.0",
     },
     Removed {
         key: "encoder.backend",
         value: Some("nvtt"),
         hint: "NVTT was removed in 2.0; delete the key",
+        since: "2.0",
     },
     // After the `nvtt` row: the first match names the value.
     Removed {
         key: "encoder.backend",
         value: None,
         hint: "the texture format picks the encoder; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "encoder.rgbcx_level",
         value: None,
         hint: "the BC1/BC3 level is fixed at 18; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ENC-NVTT-MISSING"),
         hint: "ENC-NVTT-MISSING was removed in 2.0 with NVTT; delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ENC-NVTT-VERSION"),
         hint: "ENC-NVTT-VERSION was removed in 2.0 with NVTT; delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ENC-NVTT-FAILED"),
         hint: "ENC-NVTT-FAILED was removed in 2.0 with NVTT; delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("IN-FLOAT-LDR"),
         hint: "IN-FLOAT-LDR was removed in 2.0 (a float source is linear light; nothing reports it); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("LOSS-BITDEPTH"),
         hint: "LOSS-BITDEPTH was removed in 2.0 (a 16-bit or float source is written with 8-bit endpoints and nothing reports it); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHAN-CONSTANT-ALPHA-DATA"),
         hint: "CHAN-CONSTANT-ALPHA-DATA was removed in 2.0 (nothing reports a constant `data` alpha); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHAN-NORMAL-SHORT"),
         hint: "CHAN-NORMAL-SHORT was removed in 2.0 (nothing reports a short normal; mip 0 is renormalised as before); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALPHA-254"),
         hint: "ALPHA-254 was removed in 2.0 (nothing reports opaque alpha that decodes as 254); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALPHA-NEAR-OPAQUE"),
         hint: "ALPHA-NEAR-OPAQUE was removed in 2.0 (alpha 251 to 254 is still treated as opaque, silently); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALPHA-PBR-NORMAL-DROPPED"),
         hint: "ALPHA-PBR-NORMAL-DROPPED was removed in 2.0 (a `pbr_normal` still drops its vanilla specular alpha, silently); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("IN-ICC-IGNORED"),
         hint: "IN-ICC-IGNORED was removed in 2.0 (an embedded ICC profile is still ignored, silently); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("SKIN-WET-FORM"),
         hint: "SKIN-WET-FORM was removed in 2.0; since 2.1 a skin_wet is always a BC7 normal + mask and a grey one is not written (SKIN-WET-GREY); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("PACK-ORM-OVERRIDDEN"),
         hint: "PACK-ORM-OVERRIDDEN was removed in 2.0 (a loose map still wins over an `_orm` channel, silently); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("RNM-AO-MISSING"),
         hint: "RNM-AO-MISSING was removed in 2.0 (a `bent` layer with no AO source still uses a uniform weight, silently); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("SET-COMPANION-OUTSIDE"),
         hint: "SET-COMPANION-OUTSIDE was removed in 2.0 (a companion on disk outside the batch is no longer reported); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("DERIVE-NO-SCAN"),
         hint: "DERIVE-NO-SCAN was removed in 2.0 (nothing reports a missing scan); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("DERIVE-NO-ENVMAP"),
         hint: "DERIVE-NO-ENVMAP was removed in 2.0 (nothing reports a missing Environment Map mesh); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHAN-AO-INVERTED"),
         hint: "CHAN-AO-INVERTED was removed in 2.0 (nothing guesses at an inverted AO map); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHAN-GLOSS-AS-ROUGH"),
         hint: "CHAN-GLOSS-AS-ROUGH was removed in 2.0 (nothing guesses at gloss stored as roughness); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("OUT-SIDECAR-KEPT"),
         hint: "OUT-SIDECAR-KEPT was removed in 2.0 (Tessalith no longer writes or removes .dds.json files); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("DDS-HEADER-PATCHED"),
         hint: "DDS-HEADER-PATCHED was removed in 2.0 (patch-header is gone); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("DDS-HEADER-UNPATCHABLE"),
         hint: "DDS-HEADER-UNPATCHABLE was removed in 2.0 (patch-header is gone); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "validation.min_mip_psnr_db",
         value: None,
         hint: "the value is fixed at 30 dB; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "validation.coverage_tolerance_pts",
         value: None,
         hint: "the value is fixed at 2 points; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "validation.complex_m_warn_alpha",
         value: None,
         hint: "the value is fixed at 247; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "validation.bc6h_min_peak_ratio",
         value: None,
         hint: "the value is fixed at 0.8; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "validation.pgpatcher_non_white_share",
         value: None,
         hint: "the value is fixed at 0.5; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "^defaults.packing.fill",
         value: None,
         hint: "fills are set per set; delete the [defaults] packing.fill line by hand, then set each fill on its packed output's card",
+        since: "2.0",
     },
     Removed {
         key: "bc1_model",
         value: None,
         hint: "BC1 always encodes for NVIDIA + AMD in 2.0; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "encoder.bc1_transparent_black",
         value: None,
         hint: "delete the line; use encoder.bc1_alpha for 1-bit alpha",
+        since: "2.0",
     },
     Removed {
         key: "^export.zip",
         value: None,
         hint: "an Also export no longer writes zips or a SHA256SUMS file; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALSO-ZIP-FAILED"),
         hint: "ALSO-ZIP-FAILED was removed in 2.0 (an Also export writes no zip); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALSO-REPORT-FAILED"),
         hint: "ALSO-REPORT-FAILED was removed in 2.0 (an Also export writes no conversion report); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("ALSO-OWNED-UNREADABLE"),
         hint: "ALSO-OWNED-UNREADABLE was removed in 2.0 (an Also export keeps no also.json record); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHK-RANGE"),
         hint: "CHK-RANGE was removed in 2.0 (the Value range check is gone); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "allow",
         value: Some("CHK-PLASTIC"),
         hint: "CHK-PLASTIC was removed in 2.0 (the Plastic look check is gone); delete it from the list",
+        since: "2.0",
     },
     Removed {
         key: "resize",
         value: Some("pot-down"),
         hint: "the power of two is automatic; delete the key",
+        since: "2.0",
     },
     Removed {
         key: "drop_top_mip",
         value: None,
         hint: "use resize = \"half\"",
+        since: "2.0",
     },
 ];
 
@@ -317,10 +368,7 @@ fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String, out: &mut
                 if hits.is_empty() {
                     walk(child, segs, shown, out);
                 }
-                out.extend(
-                    hits.iter()
-                        .map(|r| format!("{shown}: removed in 2.0; {}", r.hint)),
-                );
+                out.extend(hits.iter().map(|r| removed_line(shown, r)));
                 segs.pop();
                 shown.truncate(keep);
             }
@@ -349,7 +397,7 @@ fn listed(hits: Vec<String>) -> Option<String> {
     (!m.is_empty()).then_some(m)
 }
 
-/// Every removed key or value in a config or preset table, one per line (`<dotted path>: removed in 2.0; <hint>`),
+/// Every removed key or value in a config or preset table, one per line (`<dotted path>: removed in <since>; <hint>`),
 /// in key order; past [`LISTED`] the last line is `and N more`.
 pub fn removed_in(v: &Value) -> Option<String> {
     let mut out = vec![];
@@ -369,11 +417,7 @@ pub fn removed_set(field: &str, value: &str) -> Option<String> {
         .map(|e| e.trim().trim_matches(['"', '\'']))
         .collect();
     let hits = rows_hit(&segs, items.len() > 1, |w| items.contains(&w));
-    listed(
-        hits.iter()
-            .map(|r| format!("{field}: removed in 2.0; {}", r.hint))
-            .collect(),
-    )
+    listed(hits.iter().map(|r| removed_line(field, r)).collect())
 }
 
 fn toml_version(v: &Value, key: &'static str, absent: Option<u32>) -> Result<u32, MigrateError> {
@@ -600,5 +644,28 @@ mod tests {
         assert!(m.contains("fixed at 0.8"), "{m}");
         assert_eq!(removed_set("packing.fill.ao", "10"), None);
         assert_eq!(removed_set("validation.mips", "smallest"), None);
+    }
+
+    #[test]
+    fn a_2_0_row_still_says_2_0() {
+        let m = removed_set("subtypes.rfaos", "x").unwrap();
+        assert_eq!(
+            m,
+            "subtypes.rfaos: removed in 2.0; the sub-type is skin_rfaos"
+        );
+    }
+
+    #[test]
+    fn a_3_0_row_says_3_0() {
+        let r = Removed {
+            key: "a.b",
+            value: None,
+            hint: "delete the key",
+            since: "3.0",
+        };
+        assert_eq!(
+            removed_line("a.b", &r),
+            "a.b: removed in 3.0; delete the key"
+        );
     }
 }
