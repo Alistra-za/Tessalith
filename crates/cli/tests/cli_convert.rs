@@ -649,15 +649,16 @@ fn an_unknown_suffix_exits_1_and_names_the_fix() {
     let log = text(&o.stderr);
     assert!(
         log.lines()
-            .any(|l| l.contains("rock_bump.png") && l.contains("--set")),
+            .any(|l| l.contains("rock_bump.png") && l.contains("--set file:<path>.subtype=")),
         "{log}"
     );
     assert!(!fx.dds("textures/a/rock_bump.dds").exists());
+    // R1: the hint's form, with the file's path as written in the docs, works as typed.
     let o = fx.convert(&[
         "--accept-suggestions",
         "high",
         "--set",
-        "file:**/rock_bump.png.subtype=diffuse",
+        "file:textures/a/rock_bump.png.subtype=diffuse",
     ]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert!(fx.dds("textures/a/rock_bump.dds").exists());

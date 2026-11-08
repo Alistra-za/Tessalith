@@ -115,12 +115,26 @@ fn rock_bump_has_one_problems_row_and_no_card() {
     assert_eq!(rock_rows(&m), 1, "{:#?}", problems(&m));
     assert!(!has_card(&m, "rock_bump"));
     assert!(has_card(&m, "barrel"));
-    // The status line counts the cards.
+    // The status line and the Sets pills count the cards.
     assert!(
         m.status_line.contains("3 textures, 1 set"),
         "{}",
         m.status_line
     );
+    let c = m.set_counts();
+    assert_eq!(c.ready + c.attention, 1, "{c:?}");
+    // Minor 13: the row asks for a sub-type; the CLI's `--set` advice stays on the command line.
+    for p in problems(&m)
+        .iter()
+        .filter(|p| p.at == At::Texture(ROCK.into()))
+    {
+        assert!(!p.text.contains("--set"), "{}", p.text);
+        assert!(
+            !p.detail.as_deref().unwrap_or("").contains("--set"),
+            "{:?}",
+            p.detail
+        );
+    }
     m.export_clicked();
     assert!(m.review.is_some(), "Review opens on the undecided rock");
     let listed: Vec<_> = m.undecided_keys();
@@ -138,10 +152,34 @@ fn rock_bump_has_one_problems_row_and_no_card() {
     );
 }
 
+/// Every file under `dir`, recursively.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Final review Minor 3: no DDS, no JSON entry (PGPatcher, CS PBR, complex material), no `_sdc/generated.json` hash and
+/// nothing from Also export names the waiting file.
 #[test]
 fn a_waiting_file_does_not_export() {
     let d = tempfile::tempdir().unwrap();
     let mut m = folder(d.path());
+    for t in [
+        engine::presets::AlsoTarget::Vanilla,
+        engine::presets::AlsoTarget::Cm,
+    ] {
+        m.set_also_tick(t, true);
+        idle(&mut m);
+    }
+    assert!(m.also_on(), "the ticks took: {}", m.status_line);
     m.export_clicked();
     assert!(
         m.review_button_text().contains("(skip 1 undecided)"),
@@ -151,8 +189,23 @@ fn a_waiting_file_does_not_export() {
     m.export_from_review();
     idle(&mut m);
     assert!(m.export.summary.is_some(), "the export ran");
-    assert!(d.path().join("export/clutter/barrel.dds").exists());
-    assert!(!d.path().join("export/clutter/rock_bump.dds").exists());
+    // With a tick on, the export goes to the PBR folder (TA10) and the Vanilla folder gets its copy.
+    for dir in m.also_folders().iter().take(2) {
+        assert!(
+            files_under(dir).iter().any(|p| p.ends_with("barrel.dds")),
+            "{dir:?}: {:?}",
+            files_under(d.path())
+        );
+    }
+    let source = d.path().join("textures/clutter/rock_bump.png");
+    for p in files_under(d.path()).into_iter().filter(|p| *p != source) {
+        let name = p.file_name().unwrap().to_string_lossy().to_lowercase();
+        assert!(!name.contains("rock_bump"), "{p:?}");
+        if name.ends_with(".json") || name.ends_with(".toml") {
+            let text = std::fs::read_to_string(&p).unwrap_or_default();
+            assert!(!text.contains("rock_bump"), "{p:?}: {text}");
+        }
+    }
 }
 
 #[test]
@@ -211,6 +264,14 @@ fn assigning_a_type_brings_the_card() {
     assert!(!has_card(m, "rock_bump"), "Undo takes the card away");
     assert!(sets_column_labels(&h, "rock_bump").is_empty());
     assert_eq!(m.selection, Selection::None);
+    // Minor 13: Redo brings it back.
+    h.state_mut().redo();
+    idle(h.state_mut());
+    h.run();
+    let m = h.state();
+    assert!(!m.item(ROCK).unwrap().waiting);
+    assert!(has_card(m, "rock_bump"), "Redo brings the card back");
+    assert!(!sets_column_labels(&h, "rock_bump").is_empty());
 }
 
 /// Controller ruling: a set the user created keeps its card, and its only member still waits.
@@ -248,6 +309,122 @@ fn a_set_with_a_chosen_shader_keeps_its_card() {
         "a set shader assigns no type (GY2)"
     );
     assert_eq!(texture_rows(&m), 1);
+    // Minor 14: back to Auto leaves an entry that holds only its id, which is no choice: the card goes, and no
+    // "missing" card takes its place.
+    m.set_shader("clutter/rock_bump", None);
+    idle(&mut m);
+    assert!(
+        !views(&m).iter().any(|v| v.id.ends_with("rock_bump")),
+        "{:?}",
+        views(&m).iter().map(|v| &v.id).collect::<Vec<_>>()
+    );
+    assert_eq!(rock_rows(&m), 1, "{:#?}", problems(&m));
+}
+
+/// Minor 14: the saved order list is no choice either. A `[project] order` naming the rock's set keeps no card.
+#[test]
+fn an_order_entry_keeps_no_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = folder(d.path());
+    let ids: Vec<String> = ["clutter/rock_bump", "clutter/barrel"]
+        .map(String::from)
+        .to_vec();
+    m.sets_doc
+        .as_mut()
+        .expect("the sets document")
+        .set_order(&ids);
+    m.replan();
+    idle(&mut m);
+    assert!(!has_card(&m, "rock_bump"));
+    assert!(has_card(&m, "barrel"));
+}
+
+/// Minor 2 (ruled correct): an Error wins over waiting. The file is in error, not waiting, so its set keeps its card
+/// and it writes nothing.
+#[test]
+fn an_error_keeps_the_card_and_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures")).unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"clutter/rock_bump.png\"]\nformat = \"bc6h_uf16\"\n",
+    )
+    .unwrap();
+    let mut m = folder(d.path());
+    let rock = m.item(ROCK).expect("the rock");
+    assert!(
+        matches!(rock.status, ItemStatus::Error(_)),
+        "{:?}",
+        rock.status
+    );
+    assert!(!rock.waiting);
+    assert!(has_card(&m, "rock_bump"));
+    m.export_clicked();
+    m.export_from_review();
+    idle(&mut m);
+    assert!(!d.path().join("export/clutter/rock_bump.dds").exists());
+}
+
+/// Note GY6: the app asks the scan about the waiting file (its colour mesh key), and a mesh that uses it in slot 0
+/// makes it a diffuse with a card, recorded as the GUI records any High pick.
+#[test]
+fn a_mesh_that_uses_the_file_settles_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = folder(d.path());
+    let key = m
+        .mesh_vote_keys()
+        .into_iter()
+        .find(|k| k.ends_with("clutter/rock_bump"))
+        .expect("the rock's mesh key is read");
+    let shape = engine::shader::MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    m.mesh_alpha = [(key, vec![shape])].into();
+    m.replan();
+    idle(&mut m);
+    let rock = m.item(ROCK).unwrap();
+    assert!(!rock.waiting);
+    assert_eq!(
+        rock.job.as_ref().map(|j| j.profile.subtype),
+        Some(Subtype::Diffuse)
+    );
+    assert!(has_card(&m, "rock_bump"));
+    let doc = m.project.as_ref().expect("the project");
+    assert!(doc.file_value(ROCK, "subtype").is_some());
+}
+
+/// Important 4 (a): Problems builds set rows from the views, so a waiting file under a `pbr` folder, whose set the
+/// engine checks as a PBR set, has its own row only.
+#[test]
+fn a_waiting_pbr_file_has_no_set_rows() {
+    let d = tempfile::tempdir().unwrap();
+    let c = d.path().join("textures/pbr");
+    std::fs::create_dir_all(&c).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(c.join("rock_bump.png"))
+        .unwrap();
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let key = "pbr/rock_bump.png";
+    assert!(m.item(key).expect("the rock").waiting);
+    let set = m
+        .sets
+        .iter()
+        .find(|s| s.key.ends_with("pbr/rock_bump"))
+        .expect("the plan's set");
+    eprintln!("set-level warnings: {:?}", set.warnings);
+    let all = problems(&m);
+    let rows: Vec<_> = all
+        .iter()
+        .filter(|p| match &p.at {
+            At::Texture(k) => k == key,
+            At::Set { key, .. } => key.ends_with("rock_bump"),
+            _ => false,
+        })
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:#?}");
+    assert!(!has_card(&m, "rock_bump"));
 }
 
 /// `sets::view_reads` carries `waiting`: an explicit `generic_data` changes neither the slot nor the sub-type, only

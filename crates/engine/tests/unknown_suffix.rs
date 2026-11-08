@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 const REASON: &str =
-    "unknown suffix: assign a type with --set <file>:...subtype=<type> or a [files] entry";
+    "unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry";
 
 /// A 32 px colour gradient at `<dir>/in/<rel>`.
 fn put(dir: &Path, rel: &str) {
@@ -338,6 +338,80 @@ fn adding_the_normal_settles_the_base() {
     let after = same_both_ways(false);
     assert_ready(job(&after, "rock_bump.png"), Subtype::Diffuse);
     assert_ready(job(&after, "rock_bump_n.png"), Subtype::Normal);
+    // The stale case: a skeleton kept before the normal appeared. The skeleton never reads the disk, so a partial on it
+    // cannot see the new file and is not compared; the full plan the GUI sends after every partial wins (FL5).
+    std::fs::remove_file(d.path().join("in/textures/x/rock_bump_n.png")).unwrap();
+    let stale = session
+        .plan_and_keep(base.clone(), &rep(), &cancel)
+        .unwrap();
+    assert!(job(&stale, "rock_bump.png").waits_for_type());
+    flat(d.path(), "textures/x/rock_bump_n.png");
+    let next = session
+        .engine()
+        .plan_cached(edited.clone(), &rep(), &cancel, session.cache())
+        .unwrap();
+    assert!(!job(&next, "rock_bump.png").waits_for_type());
+    assert_ready(job(&next, "rock_bump_n.png"), Subtype::Normal);
+}
+
+/// Note GY6: a scanned mesh that uses the lone file in slot 0 says it is the colour member, as a path does
+/// (`BatchRequest::mesh_alpha` holds every slot-0 shape, whatever its alpha).
+#[test]
+fn a_mesh_diffuse_does_not_wait() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/x/rock_bump.png");
+    let shape = engine::shader::MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    let mut req = request(d.path(), Target::Cs);
+    req.mesh_alpha = [("textures/x/rock_bump".to_string(), vec![shape])].into();
+    let p = plan_req(req);
+    let j = job(&p, "rock_bump.png");
+    assert_does_not_wait(j);
+    assert_ready(j, Subtype::Diffuse);
+    // Evidence for another file does not count.
+    let mut req = request(d.path(), Target::Cs);
+    req.mesh_alpha = [("textures/x/rock".to_string(), vec![shape])].into();
+    assert_waits(job(&plan_req(req), "rock_bump.png"));
+}
+
+/// Final review Minor 2 (ruled correct): an Error-severity warning wins over waiting. The file is in error, not
+/// waiting, so the GUI keeps its card, and it writes nothing.
+#[test]
+fn an_error_wins_over_waiting() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/x/rock_bump.png");
+    let mut req = request(d.path(), Target::Cs);
+    req.overrides =
+        vec![engine::overrides::parse_set("file:**/rock_bump.png.format=bc6h_uf16").unwrap()];
+    let p = plan_req(req);
+    let j = job(&p, "rock_bump.png");
+    assert!(
+        matches!(&j.status, JobStatus::Error { codes } if codes.contains(&Code::CfgInvalid)),
+        "{:?}",
+        j.status
+    );
+    assert!(!j.waits_for_type());
+    run(p);
+    assert!(!d.path().join("out/textures/x/rock_bump.dds").exists());
+}
+
+/// Final review Minor 12: names are folded before matching, so a mixed-case vocabulary term is still recognised.
+#[test]
+fn a_mixed_case_term_does_not_wait() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/x/Rock_Albedo.png");
+    let p = plan(d.path());
+    let j = job(&p, "Rock_Albedo.png");
+    assert_does_not_wait(j);
+    assert_ready(j, Subtype::Diffuse);
+    assert!(
+        j.suggestions[0].reason.contains("exporter suffix _albedo"),
+        "{:?}",
+        j.suggestions
+    );
 }
 
 /// Rule item 2's alias half: a preset alias is a recognised suffix, so a lone `rock_diff` with `diff` aliased to `d`
@@ -346,7 +420,11 @@ fn adding_the_normal_settles_the_base() {
 fn a_lone_aliased_suffix_does_not_wait() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/x/rock_diff.png");
-    assert_waits(job(&plan(d.path()), "rock_diff.png"));
+    // Minor 12: the upper-case spelling is folded before the alias matches.
+    put(d.path(), "textures/y/ROCK_DIFF.png");
+    let p = plan(d.path());
+    assert_waits(job(&p, "rock_diff.png"));
+    assert_waits(job(&p, "ROCK_DIFF.png"));
     let preset = d.path().join("alias.toml");
     std::fs::write(
         &preset,
@@ -356,9 +434,11 @@ fn a_lone_aliased_suffix_does_not_wait() {
     let mut req = request(d.path(), Target::Cs);
     req.preset_files = vec![preset];
     let p = plan_req(req);
-    let j = job(&p, "rock_diff.png");
-    assert_does_not_wait(j);
-    assert_ready(j, Subtype::Diffuse);
+    for name in ["rock_diff.png", "ROCK_DIFF.png"] {
+        let j = job(&p, name);
+        assert_does_not_wait(j);
+        assert_ready(j, Subtype::Diffuse);
+    }
 }
 
 /// A 16 px BC7 DDS at `<dir>/in/<rel>`.

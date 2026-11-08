@@ -32,8 +32,9 @@ pub struct SuggestContext<'a> {
     pub is_float: bool,
     /// The set holds or builds an `_rfaos` (`pack::plan::set_is_advanced_skin`): Advanced skin sub-types apply.
     pub advanced_skin: bool,
-    /// The file is its set's only member, counted after joins and set edits (Note GY1).
-    pub alone_in_set: bool,
+    /// The file is its set's only member, counted after joins and set edits (Note GY1), and no scanned mesh uses it as
+    /// a diffuse (Note GY6).
+    pub may_wait: bool,
 }
 
 pub(crate) fn has_component(path: &str, name: &str) -> bool {
@@ -58,15 +59,13 @@ pub fn landscape_path(game_path: &str) -> bool {
     game_path.starts_with("textures/landscape/") || has_component(game_path, "landscape")
 }
 
-/// Note GY1: a stem with no recognised suffix (§6.1, alias or vocabulary) that has an underscore, alone in its set.
-/// [`suggest`] gives it nothing unless a path arm says what it is; `iron` and `iron_ore` beside `iron_ore_n` are colour.
-pub fn unknown_suffix(suffix: Option<&str>, game_path: &str, alone_in_set: bool) -> bool {
+/// Note GY1: a stem with no recognised suffix (§6.1, alias or vocabulary) that has an underscore, alone in its set
+/// (`may_wait`, `SuggestContext::may_wait`). [`suggest`] gives it nothing unless a path arm says what it is; `iron` and
+/// `iron_ore` beside `iron_ore_n` are colour.
+pub fn unknown_suffix(suffix: Option<&str>, game_path: &str, may_wait: bool) -> bool {
     let name = game_path.rsplit('/').next().unwrap_or(game_path);
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
-    alone_in_set
-        && suffix.is_none()
-        && stem.contains('_')
-        && crate::group::split_vocab(stem).is_none()
+    may_wait && suffix.is_none() && stem.contains('_') && crate::group::split_vocab(stem).is_none()
 }
 
 pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
@@ -157,7 +156,7 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
         }
         Some("d") | None if ui_or_sky => vec![s(UiSky, High, "colour under interface/ or sky/")],
         // Note GY1: after the path arms, so the path still says what the file is.
-        None if unknown_suffix(c.suffix, c.game_path, c.alone_in_set) => vec![],
+        None if unknown_suffix(c.suffix, c.game_path, c.may_wait) => vec![],
         Some("d") | None if c.advanced_skin => {
             vec![s(
                 SkinAlbedo,
@@ -261,7 +260,7 @@ mod tests {
             alpha,
             is_float: false,
             advanced_skin: false,
-            alone_in_set: false,
+            may_wait: false,
         }
     }
 

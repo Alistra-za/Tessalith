@@ -47,7 +47,8 @@ pub struct ResolveCtx<'a> {
     /// M6 (DECISIONS Note S): set key → the set's shader pick. Empty during pass 1 (`NO_SHADERS`).
     pub shaders: &'a BTreeMap<String, crate::shader::ShaderPick>,
     /// M6 Track E (DECISIONS Note U5): `shader::colour_mesh_key` → the alpha property of each scanned shape that uses
-    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence.
+    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence. A key there also means a
+    /// scanned mesh uses that file in slot 0 (Note GY6).
     pub mesh_alpha: &'a BTreeMap<String, Vec<crate::shader::MeshAlpha>>,
 }
 
@@ -375,9 +376,18 @@ pub fn helper_requested(ctx: &ResolveCtx, input: &InputFile) -> crate::helper::H
 }
 
 pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
+    decide_subtype_with(ctx, f, false)
+}
+
+/// [`decide_subtype`] for a file the plugin scanner may name as a GRAS model's diffuse (`resolve_file_with`).
+fn decide_subtype_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> SubtypeDecision {
     // An invalid chain is reported by `layered_profile`; here it only contributes no rules.
     let chain = preset_chain(ctx, f).unwrap_or_default();
-    let alone_in_set = f.set.members.len() == 1;
+    // Note GY6: a scanned mesh that uses the file in slot 0, or a GRAS model, says it is a diffuse, as a path does.
+    let mesh_diffuse = gras_diffuse
+        || crate::shader::colour_mesh_key(&f.input.game_path, &f.input.output, None)
+            .is_some_and(|k| ctx.mesh_alpha.contains_key(&k));
+    let may_wait = f.set.members.len() == 1 && !mesh_diffuse;
     let mut suggestions = suggest(&SuggestContext {
         target: ctx.target,
         suffix: f.suffix,
@@ -386,7 +396,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
         alpha: f.analysis.alpha,
         is_float: f.info.is_float,
         advanced_skin: set_is_advanced_skin(ctx, f.set, f.input),
-        alone_in_set,
+        may_wait,
     });
     if let Some((alias, canonical, preset)) = alias_parts(ctx, f) {
         for s in &mut suggestions {
@@ -542,7 +552,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::Suggestion,
             decided: false,
             suggestions,
-            waits: crate::suggest::unknown_suffix(f.suffix, &f.input.game_path, alone_in_set),
+            waits: crate::suggest::unknown_suffix(f.suffix, &f.input.game_path, may_wait),
         },
     }
 }
@@ -1293,7 +1303,7 @@ pub struct ResolvedJob {
 
 /// Note GY1: the reason of a file that waits for a type (`suggest::unknown_suffix`).
 pub const UNKNOWN_SUFFIX: &str =
-    "unknown suffix: assign a type with --set <file>:...subtype=<type> or a [files] entry";
+    "unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry";
 
 impl ResolvedJob {
     /// Note GY1: an unknown suffix, alone in its set, with no type assigned: unresolved, no suggestion, no set card.
@@ -2284,7 +2294,7 @@ pub fn resolve_file(ctx: &ResolveCtx, f: &FileFacts) -> ResolvedJob {
 /// design §5, ruling R11): when nothing explicit chose its sub-type and its analysis passes the detection tests, its
 /// top suggestion becomes a high-confidence `complex_grass`, on either target (Note AZ reverses ruling R1).
 pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> ResolvedJob {
-    let mut d = decide_subtype(ctx, f);
+    let mut d = decide_subtype_with(ctx, f, gras_diffuse);
     // Note DY (rulings 12, 13): a hand-set helper role on an image wins over its name and a requested sub-type;
     // `none` makes it an ordinary file.
     let role = (f.input.kind == crate::discover::InputKind::Image)

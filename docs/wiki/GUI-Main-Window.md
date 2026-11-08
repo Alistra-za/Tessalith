@@ -103,7 +103,7 @@ Each column collapses to a thin strip with the **◀** on its heading; **▶** e
 
 One word for each idea, everywhere in the window. The code, where there is one, is on hover.
 
-- **Undecided.** A texture that waits for your answer (its sub-type, including a lone file with an unknown suffix, what its alpha means, its cube layout, or an acknowledgement). The Textures column counts them (*n undecided*), the pill is *Undecided*, a Problems row reads *Undecided: …* (or *Alpha: … — confirm* for the alpha question alone), and its fix is a button or the **Alpha type** dropdown. Export skips them.
+- **Undecided.** A texture that waits for your answer (its sub-type, including a lone file with an unknown suffix, what its alpha means, or an acknowledgement). The Textures column counts them (*n undecided*), the pill is *Undecided*, a Problems row reads *Undecided: …* (or *Alpha: … — confirm* for the alpha question alone), and its fix is a button or the **Alpha type** dropdown. Export skips them.
 - **Not ready.** A set with a problem in the set or in one of its textures; the opposite of *Ready* on the Sets column's pill.
 - **Blocker.** A problem that stops the export (a red dot). Fix it or remove the texture.
 - **Warning.** A problem that does not stop the export (an amber dot).

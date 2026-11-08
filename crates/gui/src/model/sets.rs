@@ -829,16 +829,17 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         .unwrap_or_default();
     let order = m.sets_doc.as_ref().map(|d| d.order()).unwrap_or_default();
 
-    let mut views: Vec<SetView> = m
+    let (shown, hidden): (Vec<&SetItem>, Vec<&SetItem>) = m
         .sets
         .iter()
-        .filter(|s| !card_hidden(m, &entries, &root, s))
-        .map(|s| base_view(m, &root, s))
-        .collect();
+        .partition(|s| !card_hidden(m, &entries, &root, s));
+    let hidden: Vec<String> = hidden.iter().map(|s| set_id(&root, &s.key)).collect();
+    let mut views: Vec<SetView> = shown.iter().map(|s| base_view(m, &root, s)).collect();
     // Created sets that have no members yet, and entries whose files have all gone (spec §7.1: shown as missing,
-    // never silently dropped).
+    // never silently dropped). Note GY5: an entry that says nothing about a hidden set is neither.
     for e in &entries {
-        if !views.iter().any(|v| same_id(&v.id, &e.id)) {
+        if !views.iter().any(|v| same_id(&v.id, &e.id)) && !hidden.iter().any(|h| same_id(h, &e.id))
+        {
             views.push(SetView::new(String::new(), e.id.clone(), vec![]));
         }
     }
@@ -873,10 +874,15 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
 }
 
 /// Note GY5: a set whose only member waits for a type has no card, unless the user created it or set something on it
-/// (it has a sets-doc entry).
+/// (its sets-doc entry holds more than its id: a shader back to Auto or the last lock removed leaves only the id).
 fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> bool {
     matches!(s.members.as_slice(), [k] if m.item(k).is_some_and(|i| i.waiting))
-        && entry_of(entries, &set_id(root, &s.key)).is_none()
+        && entry_of(entries, &set_id(root, &s.key)).is_none_or(|e| {
+            *e == SetEntry {
+                id: e.id.clone(),
+                ..Default::default()
+            }
+        })
 }
 
 /// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).

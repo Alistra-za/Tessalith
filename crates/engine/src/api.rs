@@ -1269,7 +1269,8 @@ pub(crate) fn set_is_pbr(target: Target, set: &TextureSet, files: &[InputFile]) 
         alpha: AlphaContent::None,
         is_float: false,
         advanced_skin: false,
-        alone_in_set: set.members.len() == 1,
+        // Only `is_pbr_set` reads this context, and it never asks whether a file waits.
+        may_wait: false,
     }))
 }
 
@@ -3538,7 +3539,7 @@ fn map_members(
                 is_float: false,
                 advanced_skin: false,
                 // Note GY4: a kept DDS is never planned, so it never waits; its name still fills a slot.
-                alone_in_set: false,
+                may_wait: false,
             })
             .first()
             .map(|s| s.subtype);

@@ -540,7 +540,7 @@ fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha: Option<Mip0
         ),
         advanced_skin: false,
         // A DDS on its own has no set: its name alone answers.
-        alone_in_set: false,
+        may_wait: false,
     };
     suggest(&ctx)
         .first()
