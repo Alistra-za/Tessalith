@@ -347,3 +347,21 @@ ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
 
 ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-07)
 - Sets filter: "Search sets" (folds like set ids, tests id or label), pills Not ready / Ready / No JSON with counts (keyed sets only) and Filter ▾ with Any and the shaders, AND-ed; no "No sets match" before the first plan. [CD11, CD12, CD17, HN7]
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- A set card uses a one-row heading only when the name gets at least 80 px. [FI13]
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- **HN7 Filter names, shader counts and the drop hint (F4, F5, F6).** The search box is named "Search sets"; the shader menu "Sets shader filter", and "Sets shader filter: <shader>" while one is chosen, its visible text unchanged. The popup lists "<shader> <n>" with the keyed sets that pass the filter as it would be after that click (HP4); a zero entry is weak but clickable, so every Mode shader stays listed (extends CD11, A9 kept). "Drop here to start a new set" is `weak_text_color()` and the selection accent while a drag is over it.
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- **HP3 The card combo keeps its own row under the title (SC1, SC9; owner answer 2).** It is right-aligned and sized to its value (`combo_w` returns the capped and the full width, measured in `TextStyle::Button` because the ComboBox lays out in Button), capped at half the card's inner width and cut with `…`; the full value is in the hover and the AccessKit value. The left part of that row is free card area and opens the set. The combo is named "Shader for <set id>". The titles keep their row. **Amends CD7** ("the shader combo at full width").
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- **HP4 Every count in the column is what its click would show (SC5; owner answer 3).** A pill's count and a shader-menu entry's count are the keyed sets that pass the filter as it would be after that click (the search, the other pills, the shader), through one predicate. A zero pill is weak (greyed) only while it is off and stays clickable; a selected zero pill paints as a normal selected pill, because weak text on the selected fill risks 4.5:1 (HP8). A selected pill counts the sets shown with it on (the list itself), not what turning it off would show: a selected facet whose number jumps to the wider total reads as wrong (controller, 2026-11-08; owner to confirm). **Amends CD12** ("Not ready plus Ready count every keyed set") **and HN7** ("keyed sets per shader").
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- **HP6 The set editor's room comes from Textures first (SC2).** When the editor needs its floor (`set_editor::ROWS_MIN`), the shortfall comes from Textures down to its minimum, then from Sets. `TEXTURES_W` 380 and `SETS_W` 260 replace the literals in `ui/mod.rs`. Opening a set at 1055 no longer narrows the Sets column. **Amends FB2** (the split) **and HN4** ("FB2's narrowing is unchanged").
+
+ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
+- **HN3 The trailing row holds what no chip shows, and names each member (M1).** It holds a helper that fills nothing (dimmed by the disabled alpha, hover "not used: …"), a helper whose target has no chip on the card, a `_m` env mask and a clashing second member of a kind. A helper reads "<file>, <fills text>" (the HP2 wording), any other member "<file>, <role>", also in its hover. Each tile also paints a short tag bottom-left (HP9): its slot letter when the slot is taken, "unused" for an unused helper, the first fill ("M G") for a helper whose fills land on no chip, otherwise the member's tail ("_m", or "—" when empty); a tag wider than the tile is cut with `…`. This replaces "Members in no chip follow as plain thumbnails" with a row that says why each member is there.

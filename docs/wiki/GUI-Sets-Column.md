@@ -20,7 +20,7 @@ A card's first row has:
 
 Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.
 
-The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` at half the card; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
+The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` only when the card is too narrow, and always 48 px short of the card's left edge; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
 
 | Chip | Meaning |
 |---|---|
@@ -34,7 +34,7 @@ Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`
 
 What fits no chip follows in a trailing row of plain thumbnails. Each one has a short tag bottom-left and names its role on hover, so you can tell why it is there. The tag is the slot letter when its slot is taken, `unused` for a helper that fills nothing, the first fill ("M G") for a helper whose target has no chip, and the file's tail (`_m`) for any other member. A tag wider than the tile is cut with `…`; hover has the whole text.
 
-- a helper that fills nothing, dimmed, with "not used: …" on hover;
+- a helper that fills nothing, dimmed, with "unused: …" on hover;
 - a helper whose target has no chip on the card;
 - a `_m` env mask, and a second member of a kind the card already shows.
 

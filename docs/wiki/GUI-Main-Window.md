@@ -91,7 +91,7 @@ The window title shows the folder, with a dot when there are unsaved edits. The 
 
 ## The three columns
 
-From left to right: Textures, Sets, then the centre. The **Advanced** drawer is at the right edge, except with a set selected in 2D, where Advanced is the last tab under the set editor's slot rows. The bottom panel runs under all of them. Opening a set gives the set editor its room from Textures first, then from Sets.
+From left to right: Textures, Sets, then the centre. The **Advanced** drawer is at the right edge, except with a set selected in 2D, where Advanced is the last tab under the set editor's slot rows. The bottom panel runs under all of them. Opening a set gives the set editor its room from Textures first, then from Sets. Textures gives up room in whole tile columns, so it never leaves a blank strip beside its tiles; Sets covers the difference.
 
 - **Textures**: one tile per file. See [Textures column](GUI-Textures-Column.md).
 - **Sets**: one card per material set. See [Sets column](GUI-Sets-Column.md).
