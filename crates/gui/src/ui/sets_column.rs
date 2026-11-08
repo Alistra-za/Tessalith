@@ -224,7 +224,7 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
     p.rect_filled(rect, 2.0, vis.extreme_bg_color);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
     if outline.is_none() {
-        paint_letter(ui, rect, letter, true);
+        paint_letter(ui, rect, letter, true, f32::INFINITY);
     } else {
         // The missing entry's "?" stays centred.
         ui.painter().text(
@@ -252,7 +252,8 @@ pub fn dim_letter_colour(vis: &egui::Visuals) -> egui::Color32 {
 
 /// Note HP: a tile's label in its bottom-left corner. `dim` (an empty chip, no thumbnail under it) is weak text with
 /// no backing; otherwise white on a dark backing so it reads over any thumbnail. Text wider than the chip is cut with `…`.
-fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool) {
+/// `max_w` cuts the text with `…` (trailing-row tags); chip letters pass `f32::INFINITY` and are never cut.
+fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool, max_w: f32) {
     let font = egui::TextStyle::Small.resolve(ui.style());
     let colour = if dim {
         dim_letter_colour(ui.visuals())
@@ -262,7 +263,7 @@ fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool) {
     let lay = |s: String| ui.painter().layout_no_wrap(s, font.clone(), colour);
     let mut g = lay(text.to_string());
     let mut shown = text.to_string();
-    while g.size().x > CHIP - 2.0 && shown.pop().is_some() {
+    while g.size().x > max_w && shown.pop().is_some() {
         g = lay(format!("{}…", shown.trim_end()));
     }
     let at = rect.left_bottom() + egui::vec2(1.0, -1.0 - g.size().y);
@@ -1962,7 +1963,7 @@ fn chip_row<'a>(
         };
         let own = fixed.len();
         fixed.push(r.rect);
-        paint_letter(ui, r.rect, &letter, false);
+        paint_letter(ui, r.rect, &letter, false, f32::INFINITY);
         if from.is_some() {
             ui.painter().rect_stroke(
                 r.rect,
@@ -2050,7 +2051,7 @@ fn chip_row<'a>(
         );
         // the tag is painted at the tile's opacity, so an unused helper's fades with it
         if let Some(r) = &r {
-            paint_letter(ui, r.rect, &tile_tag(model, v, mk, kind), false);
+            paint_letter(ui, r.rect, &tile_tag(model, v, mk, kind), false, CHIP - 2.0);
         }
         ui.set_opacity(was);
         if let Some(r) = r {

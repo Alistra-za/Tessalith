@@ -391,11 +391,21 @@ fn each_badge_sits_on_its_own_chip() {
                 (b.center() - c.right_top()).abs().max_elem() <= 0.5,
                 "{at}: {b:?} is centred on the top-right corner of {c:?}"
             );
+            let mut found = false;
             for (t, r) in texts(&h) {
                 if t == letter && c.contains_rect(r.shrink(0.5)) {
+                    found = true;
                     assert!(!r.intersects(b), "{at}: the letter {r:?} meets {b:?}");
                 }
             }
+            assert!(
+                found,
+                "{at}: the chip's letter {letter:?} is painted inside {c:?}; texts there: {:?}",
+                texts(&h)
+                    .into_iter()
+                    .filter(|(_, r)| c.intersects(*r))
+                    .collect::<Vec<_>>()
+            );
         }
     }
     // a second helper on one chip takes the top-left corner
@@ -1377,7 +1387,9 @@ fn a_click_on_a_cards_middle_opens_the_set() {
         let resize = resize_line(w, h_px);
         let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
         let (card, combo) = stonewall(&h);
-        tap(&mut h, egui::pos2(card.center().x, combo.center().y));
+        // a few px clear of the capped combo, still inside the old full-width one
+        let x = card.center().x.min(combo.left() - 6.0);
+        tap(&mut h, egui::pos2(x, combo.center().y));
         assert_stonewall_opens(&h, &format!("at {w}x{h_px}"));
     }
 }
