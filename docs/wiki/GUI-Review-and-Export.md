@@ -10,7 +10,7 @@ What **Export** does, the Review panel that opens when something needs a look fi
 2. When something needs an answer, [Review](#review) opens in the bottom panel instead of exporting.
 3. If a source file changed on disk since it was planned, the textures concerned show "changed on disk" and the Textures column offers **Reload**, which re-reads only the changed files. Export checks first and plans again by itself; the GUI also checks whenever its window regains focus.
 4. The bottom panel opens on its [Files tab](#the-files-tab).
-5. After a complete export, the PGPatcher JSON is written ([The JSON file](GUI-PGPatcher-JSON.md#the-json-file)). NIF edits are written after the textures ([NIF edits](#review)).
+5. After a complete export, the PGPatcher JSON is written ([Where the JSON goes](GUI-PGPatcher-JSON.md#where-the-json-goes)). NIF edits are written after the textures ([NIF edits](#review)).
 
 **The header button.** **Export** reads "Review n files" until the project is clean (a folder chosen, files to write, planning finished, nothing undecided), then "Export n files" in the accent colour. <!-- D:FB1 --> With no folder open it reads plain "Export". Hover it for "N files, M problems" and what Review still has open.
 
