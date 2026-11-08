@@ -655,12 +655,14 @@ pub fn mark_shared_skin(
 }
 
 /// Note GW1: two detail maps (`detail`, `detailnorm`, `detail_n`) in one detail host are one IN-DUPLICATE group, since
-/// they write different files for the one slot. The set's detail members, in file order; `Dds` inputs take no part.
+/// they write different files for the one slot. The set's detail members, in file order, among the inputs `include`
+/// accepts (the filter `duplicate_outputs_with` gets).
 pub fn duplicate_details(
     sets: &[TextureSet],
     files: &[InputFile],
     aliases: &BTreeMap<String, String>,
     is_host: impl Fn(&TextureSet) -> bool,
+    include: impl Fn(&InputFile) -> bool,
 ) -> Vec<Vec<usize>> {
     sets.iter()
         .filter(|s| is_host(s))
@@ -668,7 +670,7 @@ pub fn duplicate_details(
             s.members
                 .iter()
                 .copied()
-                .filter(|&i| files[i].kind != InputKind::Dds)
+                .filter(|&i| include(&files[i]))
                 .filter(|&i| {
                     member_split(&stem_of(&files[i]), s, aliases)
                         .suffix

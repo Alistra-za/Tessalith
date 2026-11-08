@@ -1608,8 +1608,8 @@ impl Engine {
         // A touched set's suffixes were rebuilt from its members' names.
         drop_typed_roles(&mut sets, &files, &typed);
         // Note HG2: decided on the edited sets, so a created or renamed set is shared by the same rule.
+        let (explicit, _) = explicit_shaders(req, &sets);
         if target == Target::Cs {
-            let (explicit, _) = explicit_shaders(req, &sets);
             crate::group::mark_shared_skin(&mut sets, &files, registry.alias_table(), &explicit);
         }
         for s in &stale {
@@ -1698,18 +1698,19 @@ impl Engine {
             );
         }
         let waits = waiting_images(&ctx, target, &sets, &files, &typed, &hand);
-        let mut dups = crate::group::duplicate_outputs_with(&files, |f| {
+        let counts = |f: &InputFile| {
             !losers.contains(&f.path)
                 && !waits.contains(&f.path)
                 && (f.kind != InputKind::Dds || reencodes(&ctx, f))
-        });
+        };
+        let mut dups = crate::group::duplicate_outputs_with(&files, counts);
         // Note GW1: two detail maps of one host write different files for one slot.
-        let (explicit, _) = explicit_shaders(req, &sets);
         dups.extend(crate::group::duplicate_details(
             &sets,
             &files,
             registry.alias_table(),
             detail_host(&ctx, &files, &explicit),
+            counts,
         ));
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {

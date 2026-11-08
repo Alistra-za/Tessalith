@@ -297,7 +297,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
     let project = m.project.as_ref();
     let mut out = vec![];
     for key in &d.keys {
-        let in_skin = tails_of.get(key.as_str()).copied().unwrap_or(Tails::Plain);
+        let tails = tails_of.get(key.as_str()).copied().unwrap_or(Tails::Plain);
         let Some(it) = m.item(key) else { continue };
         let current = project
             .and_then(|p| p.read_as(key))
@@ -314,7 +314,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
         let real_ext = split_ext(split_path(key).1).1.to_string();
         let (dir, name) = split_path(&current);
         let stem = split_ext(name).0;
-        let tail = member_tail(stem, in_skin);
+        let tail = member_tail(stem, tails);
         let base = &stem[..stem.len() - tail.len()];
         let new = match d.typed.get(key) {
             Some(t) => {
@@ -342,7 +342,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
             r.matched = true;
         }
         let new_stem = split_ext(split_path(&new).1).0.to_string();
-        r.kind = Some((role_of(stem, in_skin), role_of(&new_stem, in_skin)));
+        r.kind = Some((role_of(stem, tails), role_of(&new_stem, tails)));
         r.output = input_output(&new);
         r.problem = input_problem(&new, &real_ext);
         if r.problem.is_none() && r.kind.as_ref().is_some_and(|(a, b)| a != b) {

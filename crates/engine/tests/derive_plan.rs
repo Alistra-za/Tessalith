@@ -1644,3 +1644,28 @@ fn env_m_vote_is_read_at_the_colour_members_own_key_for_a_d_set() {
         "{outs:?}"
     );
 }
+
+/// Note GW1: outside a landscape set `_detail` is no detail map and no layer, so it waits for a decision and the PBR
+/// set is left out of Also with the reason named.
+#[test]
+fn an_undecided_detail_file_leaves_a_pbr_set_out_of_also() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
+    png(
+        &inputs.join("textures/pbr/arm/steel_detail.png"),
+        16,
+        16,
+        [128, 128, 255, 255],
+    );
+    let (cs, _) = plan(request(&inputs, &d.path().join("pbr"), Target::Cs));
+    let (sets, _, notes) = engine::also::derive_sets(&cs, &BTreeSet::new());
+    assert!(sets.is_empty(), "{sets:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.why == "not derived: 1 map undecided in the PBR export"),
+        "{:?}",
+        notes.iter().map(|n| &n.why).collect::<Vec<_>>()
+    );
+}

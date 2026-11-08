@@ -38,7 +38,7 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
     // set reads `steel` beside the rows that read `steel_rmaos R`.
     let any = || {
         stems().next().map(|s| {
-            let tail = super::sets::member_tail(s, true).len();
+            let tail = super::sets::member_tail(s, super::sets::Tails::Skin).len();
             &s[..s.len() - tail]
         })
     };

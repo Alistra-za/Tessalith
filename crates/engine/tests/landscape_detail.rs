@@ -201,8 +201,8 @@ fn pbr_set_noise_stays_undecided() {
     assert!(j.warnings.iter().any(|w| w.code == Code::SugLowConfidence));
 }
 
-/// Review Focus 4, Note GW1: `_detail_mask` and `_detail2` (still layer terms until RNM is removed) beside a
-/// `_detail` map: no panic, no Error, no new blocker, and the detail map stays DetailNormal.
+/// Review Focus 4, Note GW1: `_detail_mask` and `_detail2` beside a `_detail` map plan without a blocking warning on
+/// either of them, and the detail map stays DetailNormal. (RNM layer behaviour is covered by the `rnm_*` tests.)
 #[test]
 fn detail_mask_and_detail2_leave_the_detail_map_alone() {
     for (target, shader) in [
@@ -234,11 +234,6 @@ fn detail_mask_and_detail2_leave_the_detail_map_alone() {
                 j.warnings
             );
         }
-        assert!(p
-            .jobs
-            .iter()
-            .flat_map(|j| &j.warnings)
-            .all(|w| w.severity < Severity::Blocking));
     }
 }
 
