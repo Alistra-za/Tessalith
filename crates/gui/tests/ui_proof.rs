@@ -497,6 +497,25 @@ fn filter_matches_names_wrong_rows_and_flags_hide_all_and_no_change() {
     assert_eq!(fm(&all, &all, |_| true), Ok(Some("changes nothing".into())));
 }
 
+#[test]
+fn one_set_open_decides_on_the_selection() {
+    let run = |m: &sdc_gui::model::AppModel| {
+        let (_, f) = oracles::ORACLES
+            .iter()
+            .find(|(n, _)| *n == "one_set_open")
+            .expect("registered");
+        f(m)
+    };
+    let (_d, mut h) = replay("demo", &[]);
+    let e = run(&h.state().model).unwrap_err();
+    assert!(e.contains("not a set"), "{e}");
+    let key = sets::views(&h.state().model)[0].key.clone();
+    h.state_mut().model.select_set(&key);
+    assert_eq!(run(&h.state().model), Ok(None));
+    h.state_mut().model.selection = sdc_gui::model::Selection::Item("x.png".into());
+    assert!(run(&h.state().model).unwrap_err().contains("not a set"));
+}
+
 journey!(
     clicking_a_set_card_opens_the_set,
     "demo",

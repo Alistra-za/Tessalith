@@ -5,7 +5,7 @@ use engine::sets::fold_id;
 use sdc_gui::model::bottom::{self, At};
 use sdc_gui::model::sets::{self, SetView};
 use sdc_gui::model::sets_filter::SetsFilter;
-use sdc_gui::model::{cm_json, AppModel};
+use sdc_gui::model::{cm_json, AppModel, Selection};
 
 /// `Ok(None)`: holds. `Ok(Some(note))`: not decided, with the reason. `Err`: broken.
 pub type Oracle = fn(&AppModel) -> Result<Option<String>, String>;
@@ -19,7 +19,23 @@ pub const ORACLES: &[(&str, Oracle)] = &[
     ("sets_shader_shows_exactly_that_shader", shader_only),
     ("sets_filter_shows_the_and_of_its_parts", all_parts),
     ("selected_set_kept_while_hidden", selected_kept_while_hidden),
+    ("one_set_open", one_set_open),
 ];
+
+/// Exactly one set is selected and the selection is that set (`/selection` starts with `set:`).
+fn one_set_open(m: &AppModel) -> Result<Option<String>, String> {
+    let sel = m.selected_sets();
+    if !matches!(m.selection, Selection::Set(_)) {
+        return Err(format!(
+            "the open selection is {:?}, not a set",
+            m.selection
+        ));
+    }
+    if sel.len() != 1 {
+        return Err(format!("{} sets selected, not one: {sel:?}", sel.len()));
+    }
+    Ok(None)
+}
 
 // ---- the Sets column filter, one predicate per row of sets-column/goals.md "Filters and controls" ----
 

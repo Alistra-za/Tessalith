@@ -616,11 +616,17 @@ const CLEAR_TO_REORDER: &str = "Clear the filter to reorder sets, or use Move to
 
 /// R17: the search box, the pills with their counts and the shader popup, under the heading.
 fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
-    ui.add(
+    let search = ui.add(
         egui::TextEdit::singleline(&mut model.sets_filter.search)
             .hint_text("Search sets")
             .desired_width(f32::INFINITY),
     );
+    // A hint is only a placeholder, so the box gets an accessible name too (after `ui.add`, rule 8.3).
+    let text = model.sets_filter.search.as_str();
+    search.widget_info(|| egui::WidgetInfo {
+        label: Some("Search sets".into()),
+        ..egui::WidgetInfo::text_edit(true, text, text, "Search sets")
+    });
     let c = model.set_counts();
     ui.horizontal_wrapped(|ui| {
         let f = &mut model.sets_filter;
@@ -653,33 +659,45 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
                 *on = !*on;
             }
         }
-        let text = if f.shader.is_none() {
-            "Filter ▾"
-        } else {
-            "Filter (1) ▾"
+        let (text, name) = match f.shader {
+            None => ("Filter ▾", "Sets shader filter".to_string()),
+            Some(s) => ("Filter (1) ▾", format!("Sets shader filter: {}", s.label())),
         };
         // A9: a saved shader the Mode does not offer is listed too, so it is never invisible.
         let mut shaders = shader_options(model.target);
         if let Some(s) = f.shader.filter(|s| !shaders.contains(s)) {
             shaders.push(s);
         }
-        crate::ui::path_picker::menu(ui, text, |ui| {
-            if ui.selectable_label(f.shader.is_none(), "Any").clicked() {
-                f.shader = None;
+        let r = crate::ui::path_picker::menu(ui, text, |ui| {
+            if ui
+                .selectable_label(model.sets_filter.shader.is_none(), "Any")
+                .clicked()
+            {
+                model.sets_filter.shader = None;
                 ui.close();
             }
             for s in shaders {
+                // A9: a shader with no sets stays pickable, in the weak colour.
+                let n = model.sets_with_shader(s);
+                let label = format!("{} {n}", s.label());
+                let label = if n == 0 {
+                    egui::RichText::new(label).color(ui.visuals().weak_text_color())
+                } else {
+                    egui::RichText::new(label)
+                };
                 if ui
-                    .selectable_label(f.shader == Some(s), s.label())
+                    .selectable_label(model.sets_filter.shader == Some(s), label)
                     .clicked()
                 {
-                    f.shader = Some(s);
+                    model.sets_filter.shader = Some(s);
                     ui.close();
                 }
             }
         })
-        .response
-        .on_hover_text("Only sets with this shader");
+        .response;
+        // The Textures column has its own "Filter ▾", so this one is named apart.
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        r.on_hover_text("Only sets with this shader");
     });
 }
 

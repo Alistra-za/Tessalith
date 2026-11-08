@@ -40,14 +40,14 @@ fn sets_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
         .outer_rect
 }
 
-/// K15: the Sets column's own "Filter ▾" (the Textures column and the mips field also match "Filter").
+/// K15: the Sets column's shader filter, named "Sets shader filter" (+ ": <shader>" once one is chosen).
 fn sets_filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
     let r = sets_rect(h);
     let mut v: Vec<_> = h
-        .query_all_by_label_contains("Filter")
+        .query_all_by_label_contains("Sets shader filter")
         .filter(|n| r.contains_rect(n.rect()) && n.accesskit_node().role() == Role::Button)
         .collect();
-    assert_eq!(v.len(), 1, "one Filter button in the Sets column");
+    assert_eq!(v.len(), 1, "one shader filter button in the Sets column");
     v.remove(0)
 }
 
@@ -526,15 +526,14 @@ fn the_pills_show_their_counts_and_the_shader_popup_filters() {
     pill(&h, &format!("Not ready {}", c.attention));
     pill(&h, &format!("Ready {}", c.ready));
     pill(&h, &format!("No JSON {}", c.no_json));
-    // rock01's card also says "PBR Landscape": the popup adds one more.
-    let cards = h.query_all_by_label(Shader::PbrLandscape.label()).count();
     sets_filter_button(&h).click();
     h.run();
-    assert_eq!(
-        h.query_all_by_label(Shader::PbrLandscape.label()).count(),
-        cards + 1
-    );
-    h.get_by_label(Shader::Landscape.label()).click();
+    // Each entry carries its set count (Note HN).
+    let n = h.state().sets_with_shader(Shader::PbrLandscape);
+    h.get_by_label(&format!("{} {n}", Shader::PbrLandscape.label()));
+    let n = h.state().sets_with_shader(Shader::Landscape);
+    h.get_by_label(&format!("{} {n}", Shader::Landscape.label()))
+        .click();
     h.run();
     assert_eq!(h.state().sets_filter.shader, Some(Shader::Landscape));
     h.get_by_label(&format!("Ready {}", c.ready)).click();

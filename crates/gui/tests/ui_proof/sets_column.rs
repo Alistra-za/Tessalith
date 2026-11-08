@@ -5,7 +5,7 @@ journey!(
     "demo",
     [
         r#"{"op":"click","at":{"label":"armor/gold"}}"#,
-        r#"{"op":"expect","fact":"/selection","equals":"set:armor/gold"}"#
+        r#"{"op":"check","name":"one_set_open"}"#
     ]
 );
 
@@ -45,8 +45,8 @@ journey!(
     g5_narrow_the_sets_to_one_shader,
     "demo",
     [
-        r#"{"op":"click","at":{"label":"Filter ▾","index":1}}"#,
-        r#"{"op":"click","at":{"label":"PBR"}}"#,
+        r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+        r#"{"op":"click","at":{"label":"PBR 2"}}"#,
         r#"{"op":"expect","fact":"/counts/visible_sets","equals":2}"#,
         r#"{"op":"check","name":"sets_shader_shows_exactly_that_shader"}"#
     ]

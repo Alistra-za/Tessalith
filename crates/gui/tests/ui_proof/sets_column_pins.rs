@@ -317,3 +317,106 @@ fn a_click_on_the_chip_beside_its_badge_selects_the_chip_file() {
     h.run_steps(2);
     assert_eq!(h.state().model.selection, Selection::Item(key));
 }
+
+#[test]
+fn the_sets_filter_controls_have_their_own_names() {
+    let (_d, h) = crate::replay("demo", &[]);
+    one(&h, "Sets shader filter");
+    let boxes = h
+        .query_all_by_role_and_label(Role::TextInput, "Search sets")
+        .filter(|n| in_sets_column(&h, n.rect()))
+        .count();
+    assert_eq!(boxes, 1, "one Search sets box in the Sets column");
+    // the Textures column keeps its own button
+    let all = h.query_all_by_role_and_label(Role::Button, "Filter ▾");
+    assert_eq!(all.filter(|n| !in_sets_column(&h, n.rect())).count(), 1);
+    let (_d, h) = crate::replay(
+        "demo",
+        &[
+            r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+            r#"{"op":"click","at":{"label":"PBR 2"}}"#,
+        ],
+    );
+    let r = one(&h, "Sets shader filter: PBR");
+    assert!(
+        texts(&h)
+            .iter()
+            .any(|(t, tr)| t == "Filter (1) ▾" && r.contains_rect(tr.shrink(0.5))),
+        "the visible text stays Filter (1) ▾"
+    );
+}
+
+/// The colour a painted text was drawn with: its section colour, or `None` for the default text colour.
+fn text_colour(h: &crate::app_harness::H, text: &str) -> Option<egui::Color32> {
+    fn find(s: &egui::Shape, text: &str) -> Option<Option<egui::Color32>> {
+        match s {
+            egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text)),
+            egui::Shape::Text(t) if t.galley.job.text == text => {
+                let c = t.galley.job.sections[0].format.color;
+                Some((c != egui::Color32::PLACEHOLDER).then_some(c))
+            }
+            _ => None,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .find_map(|c| find(&c.shape, text))
+        .unwrap_or_else(|| panic!("no painted {text:?}"))
+}
+
+#[test]
+fn the_shader_popup_counts_sets_per_shader() {
+    let (_d, mut h) = crate::replay(
+        "demo",
+        &[r#"{"op":"click","at":{"label":"Sets shader filter"}}"#],
+    );
+    for l in [
+        "PBR 2",
+        "Default 4",
+        "Environment Map 2",
+        "Parallax 1",
+        "Glow 0",
+        "Any",
+    ] {
+        one(&h, l);
+    }
+    let weak = h.ctx.global_style().visuals.weak_text_color();
+    assert_eq!(text_colour(&h, "Glow 0"), Some(weak));
+    assert_ne!(text_colour(&h, "PBR 2"), Some(weak));
+    // zero entries stay clickable
+    let pos = one(&h, "Glow 0").center();
+    h.event(egui::Event::PointerMoved(pos));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.run_steps(2);
+    assert_eq!(
+        h.state().model.sets_filter.shader,
+        Some(engine::shader::Shader::Glow)
+    );
+}
+
+#[test]
+fn sets_with_shader_counts_keyed_sets_per_pick() {
+    use engine::shader::Shader as S;
+    let (_d, mut h) = crate::replay("demo", &[]);
+    for (s, n) in [
+        (S::Pbr, 2),
+        (S::Default, 4),
+        (S::Envmap, 2),
+        (S::Parallax, 1),
+        (S::Glow, 0),
+    ] {
+        let m = &mut h.state_mut().model;
+        assert_eq!(m.sets_with_shader(s), n, "{s:?}");
+        m.sets_filter.shader = Some(s);
+        assert_eq!(m.visible_sets().len(), n, "{s:?} shows what it counts");
+    }
+}
