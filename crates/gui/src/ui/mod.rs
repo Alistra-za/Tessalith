@@ -193,7 +193,14 @@ pub fn draw_with_scan(
                     .max(columns::SETS_MIN)
             }
         };
+        // Note HP12: Textures' shrunk width rounds up to whole tile columns, the extra room coming from Sets.
         let textures_max = ui.available_width() - sets_room - floor;
+        let textures_max = columns::round_up_to_tiles(
+            ui,
+            model.prefs.tile,
+            textures_max,
+            ui.available_width() - columns::SETS_MIN - floor,
+        );
         column_panel(
             ui,
             Column::Textures,

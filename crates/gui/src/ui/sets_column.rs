@@ -944,8 +944,11 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         }
         let (text, name) = match f.shader {
-            None => ("Filter ▾", "Sets shader filter".to_string()),
-            Some(s) => ("Filter (1) ▾", format!("Sets shader filter: {}", s.label())),
+            None => ("Filter ▾", "Filter, Sets shader filter".to_string()),
+            Some(s) => (
+                "Filter (1) ▾",
+                format!("Filter (1), Sets shader filter: {}", s.label()),
+            ),
         };
         // A9: a saved shader the Mode does not offer is listed too, so it is never invisible.
         let mut shaders = shader_options(model.target);
@@ -1702,7 +1705,7 @@ fn pill(
                                 .map(|w| (v.id.as_str(), w)),
                         )
                         .collect();
-                    // One row only when the name keeps NAME_MIN px beside the pill and badges (Note FI13).
+                    // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges (Note FI13).
                     let sp = ui.spacing().item_spacing.x;
                     let btn = 2.0 * ui.spacing().button_padding.x + sp;
                     let body = egui::TextStyle::Body.resolve(ui.style());
@@ -1717,7 +1720,9 @@ fn pill(
                         + 2.0 * stroke
                         + STATUS_DOT
                         + sp;
-                    let mut need = lead + NAME_MIN + pill + sp;
+                    // Note HP12: a whole title shorter than NAME_MIN needs only its own width.
+                    let name_min = NAME_MIN.min(text_width(ui, &v.id, &body));
+                    let mut need = lead + name_min + pill + sp;
                     if !rows.is_empty() {
                         need += small_width(ui, &warn_text(rows.len())) + btn;
                     }
@@ -2031,7 +2036,8 @@ fn chip_row<'a>(
             (Some(k), ..) => {
                 format!("{} (its slot is taken)", v.slot_text(k))
             }
-            (None, Some(h), _) => helper_target_text(h),
+            // the tag paints "unused", so the name and hover say it too (Note HP12)
+            (None, Some(h), _) => helper_target_text(h).replacen("not used", "unused", 1),
             (None, None, Some(j)) => subtype_name(j.profile.subtype),
             _ => "not converted".to_string(),
         };
@@ -2085,7 +2091,7 @@ fn shader_combo(
         };
         format!("{}{tag}", p.shader.label())
     });
-    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at half the card). The
+    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at the card's inner width less COMBO_FREE). The
     // row's free left part allocates nothing, so a click there reaches the card.
     let (w, natural) = combo_w(ui, &text);
     let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
@@ -2128,15 +2134,19 @@ fn shader_combo(
     .inner
 }
 
-/// The shader combo's width: its shown text, the arrow and the padding, capped at half the card's inner width;
-/// and the uncapped width, to tell a cut value.
+/// The free card area left of the shader combo, which still opens the set (Note HP12).
+const COMBO_FREE: f32 = 48.0;
+
+/// The shader combo's width: its shown text, the arrow and the padding, capped at the card's inner width less
+/// `COMBO_FREE`; and the uncapped width, to tell a cut value.
 fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
     let sp = ui.spacing();
     let natural = text_width(ui, shown, &egui::TextStyle::Button.resolve(ui.style()))
         + sp.icon_width
         + sp.icon_spacing
         + 2.0 * sp.button_padding.x;
-    let cap = ui.available_width() / 2.0 - sp.item_spacing.x / 2.0;
+    let floor = sp.icon_width + 2.0 * sp.button_padding.x;
+    let cap = (ui.available_width() - COMBO_FREE).max(floor);
     (natural.min(cap), natural)
 }
 

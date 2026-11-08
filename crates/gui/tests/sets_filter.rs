@@ -40,7 +40,7 @@ fn sets_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
         .outer_rect
 }
 
-/// K15: the Sets column's shader filter, named "Sets shader filter" (+ ": <shader>" once one is chosen).
+/// K15: the Sets column's shader filter, named "Filter, Sets shader filter" ("Filter (1), ..." with ": <shader>" once one is chosen).
 fn sets_filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
     let r = sets_rect(h);
     let mut v: Vec<_> = h

@@ -483,7 +483,7 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
 #[test]
 fn the_trailing_row_names_each_member() {
     let (_d, h) = crate::replay("helpers", &[SEARCH]);
-    one(&h, "crate_metallic.png, not used: no targets chosen");
+    one(&h, "crate_metallic.png, unused: no targets chosen");
     let (_d, h) = crate::replay("demo", &[]);
     let m = &h.state().model;
     for (key, file) in [
@@ -537,7 +537,7 @@ fn a_click_on_the_chip_beside_its_badge_selects_the_chip_file() {
 #[test]
 fn the_sets_filter_controls_have_their_own_names() {
     let (_d, h) = crate::replay("demo", &[]);
-    one(&h, "Sets shader filter");
+    one(&h, "Filter, Sets shader filter");
     let boxes = h
         .query_all_by_role_and_label(Role::TextInput, "Search sets")
         .filter(|n| in_sets_column(&h, n.rect()))
@@ -549,11 +549,11 @@ fn the_sets_filter_controls_have_their_own_names() {
     let (_d, h) = crate::replay(
         "demo",
         &[
-            r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+            r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
             r#"{"op":"click","at":{"label":"PBR 2"}}"#,
         ],
     );
-    let r = one(&h, "Sets shader filter: PBR");
+    let r = one(&h, "Filter (1), Sets shader filter: PBR");
     assert!(
         texts(&h)
             .iter()
@@ -585,7 +585,7 @@ fn text_colour(h: &crate::app_harness::H, text: &str) -> Option<egui::Color32> {
 fn the_shader_popup_counts_sets_per_shader() {
     let (_d, mut h) = crate::replay(
         "demo",
-        &[r#"{"op":"click","at":{"label":"Sets shader filter"}}"#],
+        &[r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#],
     );
     for l in [
         "PBR 2",
@@ -700,7 +700,8 @@ fn opening_a_set_takes_the_editors_room_from_textures_first() {
             "at {w}x{h_px}: sets {s0}->{s1}, textures {t0}->{t1}, search {q0}->{q1}, centre {c1}"
         );
         assert!(
-            s1 >= s0 - 1.0 && q1 >= q0 - 1.0,
+            // Note HP12: Sets gives up at most the part of a tile column that rounds Textures up (under 120 px)
+            s1 >= SETS_MIN - 0.5 && s1 >= s0 - 30.0 && q1 >= q0 - 30.0,
             "{at}: Sets keeps its room"
         );
         assert!(c1 >= ROWS_MIN - 1.0, "{at}: the editor keeps its rows");
@@ -1234,7 +1235,7 @@ fn card_combos(h: &crate::app_harness::H) -> Vec<(egui::Rect, egui::Rect, String
 }
 
 #[test]
-fn the_card_combo_is_named_and_stays_in_the_right_half() {
+fn the_card_combo_is_named_and_keeps_48_px_free_on_its_left() {
     for (w, h_px, narrow) in [(1400.0, 790.0, false), (1055.0, 770.0, true)] {
         let resize = resize_line(w, h_px);
         let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
@@ -1247,10 +1248,10 @@ fn the_card_combo_is_named_and_stays_in_the_right_half() {
         for (card, c, name, _) in &combos {
             assert!(!name.is_empty(), "{at}: a combo in {card:?} has no name");
             assert!(
-                c.min.x >= card.center().x - 0.5
+                c.min.x >= card.min.x + 48.0 - 0.5
                     && c.max.x <= card.max.x + 0.5
                     && c.max.x >= card.max.x - 8.0,
-                "{at}: {name} {c:?} sits in the right half of {card:?}, flush right"
+                "{at}: {name} {c:?} leaves 48 px free in {card:?}, flush right (Note HP12 amends HP3)"
             );
             let title = texts(&h)
                 .into_iter()
@@ -1335,7 +1336,7 @@ fn a_cut_combo_keeps_its_value_in_access_and_on_hover() {
             Some(VALUE),
             "{at}"
         );
-        assert!(combo.min.x >= card.center().x - 0.5, "{at}: right half");
+        assert!(combo.min.x >= card.min.x + 47.5, "{at}: 48 px free");
         assert!(
             painted(&h, VALUE).1 && shown_text(&h, VALUE).ends_with('…'),
             "{at}: the painted value is elided"
@@ -1520,7 +1521,7 @@ fn each_pill_shows_exactly_its_count() {
             "demo",
             &[
                 resize.as_str(),
-                r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+                r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
                 r#"{"op":"click","at":{"label":"PBR 2"}}"#,
             ],
         );
@@ -1544,7 +1545,7 @@ fn the_shader_popup_counts_follow_the_search() {
             &[
                 resize.as_str(),
                 r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
-                r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+                r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
             ],
         );
         for l in [
@@ -1903,4 +1904,102 @@ fn an_off_screen_card_scrolls_into_view_on_request() {
     let click = format!(r#"{{"op":"click","at":{{"label":"{LAST}"}}}}"#);
     let (_d, h) = crate::replay("helpers", &[lines[0], lines[1], click.as_str()]);
     assert!(inside(&h), "the driver's click reached the last card");
+}
+
+/// Proof fix (SH3): a title that fits whole keeps the one-row heading, so its status pill sits on the title row
+/// (Note HP12 amends FI13: 80 px, or the name's whole width when that is less).
+#[test]
+fn a_short_title_keeps_its_status_pill_on_the_title_row() {
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        let all = texts(&h);
+        let card = crate_card(&h).card;
+        let in_card = |t: &str| {
+            let hits: Vec<_> = all
+                .iter()
+                .filter(|(s, r)| s == t && card.contains_rect(*r))
+                .map(|(_, r)| *r)
+                .collect();
+            assert_eq!(hits.len(), 1, "{w}x{h_px}: one painted {t:?}, got {hits:?}");
+            hits[0]
+        };
+        let (title, pill) = (in_card("props/crate"), in_card("PBR → JSON"));
+        assert!(
+            title.min.y < pill.max.y && pill.min.y < title.max.y,
+            "{w}x{h_px}: the pill {pill:?} shares the title's row {title:?}"
+        );
+    }
+}
+
+/// Proof fix (SH4): when an open set takes Textures' room, Textures rounds up to whole tile columns, the extra room
+/// coming from Sets (never below SETS_MIN). At 1055 that is two tiles a row, not one beside a blank strip.
+#[test]
+fn a_shrunk_textures_column_holds_whole_tile_columns() {
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) =
+            crate::replay("demo", &[resize.as_str(), r#"{"op":"settle","frames":6}"#]);
+        let cols0 = h.state().model.nav.cols;
+        h.get_by_label("armor/gold").click();
+        crate::app_harness::settle(&mut h, 6);
+        let (s, t, _, c) = widths(&h);
+        let cols = h.state().model.nav.cols;
+        let at = format!(
+            "{w}x{h_px}: sets {s}, textures {t}, centre {c}, tiles a row {cols0} -> {cols}"
+        );
+        assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
+        if w < 1100.0 {
+            assert_eq!(cols, 2, "{at}");
+            let step = h.state().model.prefs.tile + 12.0 + 8.0;
+            let off = (t - TEXTURES_MIN) % step;
+            assert!(
+                off < 1.0 || step - off < 1.0,
+                "{at}: a whole number of tile columns"
+            );
+        } else {
+            assert_eq!(cols, cols0, "{at}: Textures unchanged");
+        }
+    }
+}
+
+/// Proof fix (SH6): the card's shader combo is capped at the row's inner width minus the 48 px of free card area
+/// that opens the set, so "Environment Map (auto)" shows whole on a default column (amends HP3's half).
+#[test]
+fn the_shader_combo_shows_a_long_value_whole_and_leaves_48_px_free() {
+    const SHOWN: &str = "Environment Map (auto)";
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay("demo", &[resize.as_str(), r#"{"op":"settle","frames":6}"#]);
+        let (rows, elided, _) = painted(&h, SHOWN);
+        assert!(rows == 1 && !elided, "{w}x{h_px}: {SHOWN:?} is cut");
+    }
+    let (_d, mut h) = crate::replay("demo", &OPEN_GOLD);
+    sets_width(&mut h, SETS_MIN);
+    let (card, _) = card_and_panel(&h);
+    let combo = h
+        .get_by_role_and_label(Role::ComboBox, "Shader for armor/gold")
+        .rect();
+    assert!(
+        combo.left() - card.left() >= 48.0 - 0.5,
+        "48 px of the row stay free: combo {combo:?} in card {card:?}"
+    );
+}
+
+/// Proof fix (SH-names, egui-ui-rules 8.2): the Sets shader filter's name holds its painted word, and the trailing
+/// row's helper tile says the word its tag paints.
+#[test]
+fn painted_words_are_in_the_names() {
+    let (_d, h) = crate::replay("demo", &[]);
+    one(&h, "Filter, Sets shader filter");
+    let (_d, h) = crate::replay(
+        "demo",
+        &[
+            r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
+            r#"{"op":"click","at":{"label":"PBR 2"}}"#,
+        ],
+    );
+    one(&h, "Filter (1), Sets shader filter: PBR");
+    let (_d, h) = crate::replay("helpers", &[SEARCH]);
+    one(&h, "crate_metallic.png, unused: no targets chosen");
 }

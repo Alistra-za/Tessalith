@@ -26,6 +26,21 @@ const PILL_CHROME: f32 = 2.0 * (6.0 + 1.0);
 /// The Textures column's narrowest width: its heading over one tile.
 pub const TEXTURES_MIN: f32 =
     TILE + 2.0 * (TILE_MARGIN + TILE_STROKE) + SCROLL_ALLOWANCE + PANEL_CHROME;
+/// Note HP12: the Textures width `max` (outer) rounded up to whole tile columns, never past `cap`. A width that holds
+/// less than one tile, or already a whole number of them, is returned as it is.
+pub fn round_up_to_tiles(ui: &egui::Ui, tile: f32, max: f32, cap: f32) -> f32 {
+    let step = tile.max(ColumnPrefs::TILE_RANGE.0)
+        + 2.0 * (TILE_MARGIN + TILE_STROKE)
+        + ui.spacing().item_spacing.x;
+    let fit = (max - PANEL_CHROME - SCROLL_ALLOWANCE + ui.spacing().item_spacing.x) / step;
+    if fit < 1.0 {
+        return max;
+    }
+    let cols = (fit - 1e-3).ceil();
+    (cols * step - ui.spacing().item_spacing.x + SCROLL_ALLOWANCE + PANEL_CHROME)
+        .clamp(max, cap.max(max))
+}
+
 /// Note HP: the space between a card's chips across and down (room for a badge on each chip's corner), and the
 /// inset of the chip rows from the card's margin.
 pub const DOCK_GAP_X: f32 = 16.0;

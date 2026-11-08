@@ -56,7 +56,7 @@ journey!(
     g5_narrow_the_sets_to_one_shader,
     "demo",
     [
-        r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+        r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
         r#"{"op":"click","at":{"label":"PBR 2"}}"#,
         r#"{"op":"expect","fact":"/counts/visible_sets","equals":2}"#,
         r#"{"op":"check","name":"sets_shader_shows_exactly_that_shader"}"#

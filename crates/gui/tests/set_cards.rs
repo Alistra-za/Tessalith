@@ -751,7 +751,7 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
         assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}'s node");
     }
     // Tab from the Sets filter walks the cards: it reaches an off-screen card's stand-in, which scrolls its card in.
-    h.query_all_by_role_and_label(Role::Button, "Sets shader filter")
+    h.query_all_by_role_and_label(Role::Button, "Filter, Sets shader filter")
         .find(|n| in_sets_column(&h, n.rect()))
         .expect("the Sets filter button")
         .focus();
