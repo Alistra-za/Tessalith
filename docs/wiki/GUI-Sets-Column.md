@@ -26,12 +26,23 @@ The **shader** combo under the first row takes the card's whole width. Under it 
 |---|---|
 | Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
 | Dim box with the letter | An empty slot. |
+| Small thumbnail in the chip's top-right corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits on a filled chip and on an output with no source file of its own, such as an RMAOS built from helpers only. Hover shows the file and its fills line (`eye_rough.png`, "fills to eye_rmaos R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
 | Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
 | Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
 
 Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`remove` path or a borrow) out of `sdc-project.toml` as one undo step. When none of the set's files is left it offers **Delete set** instead. Each such line is also a row in Problems with the same button. A member's own chip has **Remove from set** in its menu too; a borrowed chip uses the slot's **Clear**. While `sdc-project.toml` is read-only they are off, and their hover says why.
 
-Members in no slot follow as plain thumbnails. The open set's card is highlighted. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name, so the name is never shown as "…". The "Drop here to start a new set" hint wraps instead of being cut.
+What fits no chip follows in a trailing row of plain thumbnails. Each one names its role on hover, so you can tell why it is there:
+
+- a helper that fills nothing, dimmed, with "not used: …" on hover;
+- a helper whose target has no chip on the card;
+- a `_m` env mask, and a second member of a kind the card already shows.
+
+A helper with a badge is not repeated there, unless its badge folded into **+K** or found no free corner.
+
+The open set's card is highlighted. When the column's width changes with one set open (opening a set can narrow the column), the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name.
+
+A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
 
 The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", and Tab to it scrolls it into view. A context menu or shader list open on a card closes when the card scrolls away, and the scroll bar's thumb changes length as card heights are learned.
 
@@ -41,11 +52,11 @@ Under the heading:
 
 - a *Search sets* box. It matches the set's id or its label (folded like set ids), never its key;
 - the pills *Not ready n*, *Ready n* and *No JSON n*. *Not ready* is every set that is not ready, so Not ready and Ready together count every set. *No JSON* is a set that writes no JSON;
-- **Filter ▾**, which lists *Any* and the shaders. It reads **Filter (1) ▾** while one is chosen.
+- **Filter ▾**, which lists *Any* and the shaders, each with how many sets use it ("PBR 2"). A shader no set uses is greyed but still pickable, so the list stays the same whatever the project holds. It reads **Filter (1) ▾** while one is chosen.
 
 The filters combine. A filter only hides: the open set and a multi-selection stay selected, the editor and the bulk panel stay, and the heading says "2 selected (1 hidden by filter)".
 
-- **Go to set** from the Problems tab on a hidden set selects it and leaves the filter on. A line under the filter then says "{id} is hidden by the Sets filter", with a **Clear filter** button.
+- **Go to set** from the Problems tab on a hidden set selects it and leaves the filter on. A line under the filter then says "{id} is hidden by the Sets filter" and wraps if the column is narrow. **Clear filter** sits on the row below, so a long id never pushes it out of reach.
 - When nothing matches, the column says "No sets match the filter (n hidden)" and offers **Clear filter**.
 - Dragging and **Move up** / **Move down** are off while any Sets filter is on: the handle and the two entries are greyed out ("Clear the filter to reorder sets, or use Move to…"). **Move to…** stays on, because it names the target number, and it counts a hidden set it passes.
 - A set you create while a filter is on stays shown until the filter changes; the column says "1 new set shown".

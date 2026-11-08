@@ -151,6 +151,16 @@ impl AppModel {
         c
     }
 
+    /// How many keyed sets the shader filter shows when `s` is picked: its own predicate, so the count equals the
+    /// list. Uncached: only the open shader popup asks.
+    // shortcut: rebuilds the set views once per shader while the popup is open; cache by revision when set counts reach the thousands.
+    pub fn sets_with_shader(&self, s: Shader) -> usize {
+        sets::views(self)
+            .iter()
+            .filter(|v| !v.key.is_empty() && v.shader.as_ref().map(|p| p.shader) == Some(s))
+            .count()
+    }
+
     /// Any pill, the shader or search text is on.
     pub fn sets_filter_active(&self) -> bool {
         let f = &self.sets_filter;

@@ -15,6 +15,11 @@ path = "src/lib.rs"
 name = "tessalith"
 path = "src/main.rs"
 
+[[test]]
+name = "ui_drive"
+path = "tests/ui_drive/main.rs"
+harness = false
+
 [dependencies]
 engine.workspace = true
 encoders-sys.workspace = true

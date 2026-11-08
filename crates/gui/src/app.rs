@@ -52,6 +52,9 @@ pub struct SdcApp {
     layout_save: crate::layout::SaveDebounce,
     /// What the layout looked like last frame; `None` before the first.
     layout_probe: Option<crate::layout::Probe>,
+    /// Test seam (the UI driver, Note HM3): `Some` records Explorer requests instead of spawning explorer.exe.
+    #[cfg(feature = "test-hooks")]
+    pub shell_log: Option<Vec<crate::model::shell::ShellRequest>>,
 }
 
 impl SdcApp {
@@ -88,6 +91,8 @@ impl SdcApp {
             was_focused: true,
             layout_save: Default::default(),
             layout_probe: None,
+            #[cfg(feature = "test-hooks")]
+            shell_log: None,
         }
     }
 
@@ -433,6 +438,11 @@ impl eframe::App for SdcApp {
         crate::ui::messages::draw(&ctx, &mut self.model);
         // Explorer requests the drawer and the menus queued this frame (Task 5).
         for req in self.model.take_shell() {
+            #[cfg(feature = "test-hooks")]
+            if let Some(log) = self.shell_log.as_mut() {
+                log.push(req);
+                continue;
+            }
             crate::model::shell::spawn(&req);
         }
         if let Some(s) = self.meshes.take_settings() {

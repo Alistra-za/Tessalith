@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Publishes docs/wiki/*.md to the GitHub wiki (a separate repo, <repo>.wiki.git), rewriting links for the wiki:
 #   [x](Page.md#a)          -> [x](Page#a)            (wiki pages have no .md)
 #   [x](../research/y.md)   -> https://github.com/<owner>/<repo>/blob/<ref>/docs/research/y.md
@@ -32,6 +33,12 @@ $names = @($pages | ForEach-Object { $_.BaseName })
 $base = "https://github.com/$Repo/blob/$Ref"
 $slugCache = @{}
 
+# Pages are UTF-8 without a BOM. Read them as such on any PowerShell, and refuse bytes that are not UTF-8.
+function Read-Utf8([string]$path) { [IO.File]::ReadAllText($path, [Text.UTF8Encoding]::new($false, $true)) }
+
+# True when the text holds UTF-8 that was decoded as cp1252 ("…" -> "â€¦", "é" -> "Ã©", "²" -> "Â²").
+function Test-Mojibake([string]$text) { $text -match "â€|[ÂÃ][\u0080-¿‘-›€ŒœŠšŸŽžƒˆ˜]" }
+
 # GitHub's heading slugs: markdown removed (link targets, backticks, *), lower-cased, every character but Unicode
 # letters, marks, digits, _, - and space deleted, each space a hyphen (runs not collapsed); repeats get -1, -2.
 function Get-Slugs([string]$text) {
@@ -55,7 +62,7 @@ function Get-Slugs([string]$text) {
 
 function Get-PageSlugs([string]$file) {
     $full = [IO.Path]::GetFullPath($file)
-    if (-not $slugCache.ContainsKey($full)) { $slugCache[$full] = Get-Slugs (Get-Content $full -Raw) }
+    if (-not $slugCache.ContainsKey($full)) { $slugCache[$full] = Get-Slugs (Read-Utf8 $full) }
     $slugCache[$full]
 }
 
@@ -92,7 +99,10 @@ function Convert-Page([string]$text, [string]$self, [System.Collections.Generic.
 function Write-Pages([string]$dir) {
     $errors = [System.Collections.Generic.List[string]]::new()
     $out = @{}
-    foreach ($p in $pages) { $out[$p.Name] = Convert-Page (Get-Content $p.FullName -Raw) $p.FullName $errors }
+    foreach ($p in $pages) {
+        $out[$p.Name] = Convert-Page (Read-Utf8 $p.FullName) $p.FullName $errors
+        if (Test-Mojibake $out[$p.Name]) { $errors.Add("$($p.Name): text decoded with the wrong encoding (like 'â€¦' for '…'); fix the source page") }
+    }
     if ($errors.Count) { throw ($errors -join "`n") }
     foreach ($n in $out.Keys) { [IO.File]::WriteAllText((Join-Path $dir $n), $out[$n], [Text.UTF8Encoding]::new($false)) }
     "Converted $($pages.Count) pages into $dir"
@@ -113,15 +123,20 @@ if ($SelfTest) {
         if (-not $s.Contains($c[1])) { $fail++; "FAIL: $($c[0] -replace "`n", ' / ') -> $($s -join ', ') (want $($c[1]))" }
     }
     if ((Get-Slugs "$f`n## Not a heading`n$f").Count) { $fail++; 'FAIL: a heading inside a fence counted' }
+    # UTF-8 read as cp1252 (Windows PowerShell 5.1's Get-Content default) turns "…" into "â€¦".
+    $bad = -join ([char[]]@(0xE2, 0x20AC, 0xA6))
+    foreach ($c in @(@("MO2$bad, Preset", $true), @('MO2…, Preset → café — 2²', $false))) {
+        if ((Test-Mojibake $c[0]) -ne $c[1]) { $fail++; "FAIL: Test-Mojibake '$($c[0])' should be $($c[1])" }
+    }
     if ($fail) { throw "self-test: $fail failed" }
-    "self-test: $($cases.Count + 1) passed"
+    "self-test: $($cases.Count + 3) passed"
     return
 }
 
 if ($Check) {
     $file = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Check))
     $errors = [System.Collections.Generic.List[string]]::new()
-    [void](Convert-Page (Get-Content $file -Raw) $file $errors)
+    [void](Convert-Page (Read-Utf8 $file) $file $errors)
     if ($errors.Count) { throw ($errors -join "`n") }
     "Links in $Check resolve"
     return

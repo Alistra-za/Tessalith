@@ -1,5 +1,6 @@
 //! Documentation screenshots (docs/DOCUMENTATION.md §5). The unit tests run in CI; `render_doc_shots` is the GPU render.
 
+mod app_harness;
 #[path = "doc_shots/compare.rs"]
 mod compare;
 #[path = "doc_shots/manifest.rs"]
@@ -126,7 +127,7 @@ fn render_doc_shots() {
             .collect()
     });
     let tmp = tempfile::tempdir().unwrap();
-    redirect_app_data(tmp.path());
+    app_harness::redirect_app_data(tmp.path());
     let repo = manifest::repo_root();
     let m = manifest::load(&repo.join("docs/img/gui/shots.toml"));
 
@@ -194,7 +195,7 @@ fn render_doc_shots() {
         ));
     }
 
-    let adapter = scenarios::adapter_name();
+    let adapter = app_harness::adapter_name();
     let fonts = font_hashes();
     let mut warn = vec![];
     if !adapter.is_empty() && adapter != m.render.adapter {
@@ -270,16 +271,6 @@ fn font_hashes() -> std::collections::BTreeMap<String, String> {
                 .map(|b| (f.to_string(), hex::encode(Sha256::digest(&b))))
         })
         .collect()
-}
-
-/// Points `%APPDATA%` and `%LOCALAPPDATA%` at `tmp` and proves the scan store followed.
-fn redirect_app_data(tmp: &Path) {
-    let a = tmp.join("appdata");
-    std::fs::create_dir_all(&a).unwrap();
-    std::env::set_var("LOCALAPPDATA", &a);
-    std::env::set_var("APPDATA", &a);
-    let store = sdc_gui::model::meshes::default_store_path().unwrap();
-    assert!(store.starts_with(&a), "scan.db not redirected: {store:?}");
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {

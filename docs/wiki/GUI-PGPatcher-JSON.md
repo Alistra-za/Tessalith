@@ -1,110 +1,142 @@
 # PGPatcher settings and the JSON
 
-The TruePBR settings a PBR set has under `cs`, the PGPatcher JSON that Export writes from them, and the JSON editor that shows every entry at once. For anyone making a PBR mod that PGPatcher patches. What each key does in game is PGPatcher's documentation; this page covers how Tessalith edits and writes them.
+This page is for mod authors making a PBR mod that PGPatcher patches: how to set a PBR set's PGPatcher values in Tessalith and get a JSON out of it. What each key does in game is in [PGPatcher's Mod Authors page](https://github.com/hakasapl/PGPatcher/wiki/Mod-Authors); this page covers how Tessalith edits and writes them.
 
-## PGPatcher settings
+## Before you start
 
-A PBR set under `cs` has the settings PGPatcher reads in the set editor's **Material** tab, as framed groups in this order:
+- The set needs the **PBR** shader and the project needs `cs` mode. The JSON is written in `cs` mode only.
+- Open the set and go to the set editor's **Material** tab. Everything below lives there or in the [JSON editor](#the-json-editor), and both edit the same values: a change in one shows in the other at once, and undo is shared.
 
 ![The PGPatcher settings of a set.](../img/gui/GUI-PGPatcher-JSON/pgp-material.png)
 
-| Group | Settings |
+## What's on the Material tab
+
+| Group | What you set |
 |---|---|
-| Material | Specular level, Roughness scale and, while Parallax is on, Displacement scale. |
+| Material | Specular level, Roughness scale, and Displacement scale while Parallax is on. |
 | Features | Emissive, Parallax, Hair, Multilayer (coat), Glint, Fuzz. |
-| Coat | Under the **Multilayer (coat)** checkbox: coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. |
-| Subsurface | The **Off / Standard / Foliage** selector, then colour and opacity for Standard and Foliage. |
-| Emissive settings | Emissive scale, Emissive colour. |
-| Glint settings | The glint parameters. |
-| Fuzz settings | Fuzz colour and weight. |
-| NiAlphaProperty | The schema's `alphaprop_*` keys ([below](#nialphaproperty)). Starts closed. |
-| Matching | The exact texture paths the entry matches (PGPatcher's `match1` to `match8`). |
-| CS PBR records | Community Shaders' PBR texture set and material object blocks ([Set materials](GUI-Set-Materials.md#community-shaders-pbr-records)). |
-| Advanced TruePBR settings | Path contains, Mesh path contains, Rename; UV and cubemap (Smooth angle, Auto UV, UV scale, Cubemap path); vertex colours and depth; Texture locks. Starts closed. |
+| Coat | Coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. Shown while Multilayer is on. |
+| Subsurface | **Off / Standard / Foliage**, then colour and opacity. |
+| Emissive, Glint, Fuzz settings | Their own values. Shown while the feature is on. |
+| NiAlphaProperty | The `alphaprop_*` keys ([below](#nialphaproperty)). |
+| Matching | The texture paths the entry matches (`match1` to `match8`). |
+| CS PBR records | Community Shaders' records ([Set materials](GUI-Set-Materials.md#community-shaders-pbr-records)). |
+| Advanced TruePBR settings | Path contains, Mesh path contains, Rename, UV and cubemap, vertex colours and depth, texture locks. |
 
-A **PGPatcher JSON editor…** button beside the Material tab opens the [JSON editor](#the-json-editor).
+Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
 
-**Headers.** A header shows the group title and, right-aligned, its value: Subsurface Off / Standard / Foliage, Coat / Emissive / Glint / Fuzz "on" (or "off" while the card is kept, below), NiAlphaProperty "set" or "off", Matching "2 matches" or an amber "matches nothing", CS PBR records "N records".
+## Your textures turn features on
 
-- Coat, Emissive, Glint and Fuzz are listed only while their feature is on: ticking its box adds the group, open, and unticking removes it. If the feature is off but the JSON still holds its values, the group stays, reads "off", says "kept, not used" and shows the stored values, which you can edit or reset. They are not written to the JSON while the feature is off.
-- Parallax has no group of its own. With Parallax off and a value still stored, the **Displacement scale** row stays in Material with "kept, not used".
-- A feature's state shows once, in its own group's header; the Features group (the ticks) has no value.
-- A feature that is on but blocked (multilayer with hair) reads "on, blocked by hair" (amber) in its own header, stays closed and stays ticked in Features.
+You rarely tick features by hand. Tessalith reads the set's files:
 
-**Readable labels.** Skin and complex-material keys show plain names ("SSS width", "Fuzz F0"); hover one for its exact key.
+| File in the set | Turns on |
+|---|---|
+| `_cnr` | Multilayer and Coat normal |
+| `_f` | Fuzz |
+| `_p` | Parallax |
+| `_g` | Emissive |
+| `_s` | Subsurface: Foliage for Tree Anim meshes (or a trees/plants folder with no scan), Coat diffuse while Multilayer is on, Standard otherwise |
 
-**Features that cannot go together** are greyed, with the reason on hover: hair excludes multilayer, glint, fuzz, emissive, parallax and subsurface; multilayer excludes subsurface; multilayer, glint and fuzz exclude each other; fuzz and coat normal exclude each other, because they share one slot. A switch that is already on stays enabled so you can turn it off. A feature that is on without its texture blocks export.
+These read "(auto)", with the reason on hover, and go into the JSON. Untick one to store an explicit off, which wins over the file; ↺ removes your choice again. Remove the texture and its auto value goes with it.
 
-**Switches turn on by themselves from the set's textures:** a `_cnr` turns on Multilayer and Coat normal, an `_f` Fuzz, a `_p` Parallax, a `_g` Emissive, and an `_s` Subsurface (Foliage when the set's scanned meshes are Tree Anim, or its path is under a trees or plants folder and there is no scan; Coat diffuse while Multilayer is on). They read "(auto)", with the reason on hover, and are written to the JSON. Untick one to store an explicit off, which wins; reset removes it. Removing the texture removes the auto value. Nothing is saved to the project until you set it. A hair diffuse defaults to cutout + blend alpha.
+## Features that can't go together
 
-**Coat.** Multilayer is what makes the coat values take effect. Inner UV scale only shows where the diffuse alpha is below 1 and the set has an inner-layer texture.
+These are greyed out, with the reason on hover. A switch that's already on stays clickable so you can turn it off.
 
-**Subsurface** is one selector, the first row of its group. Standard writes `subsurface`, Foliage writes `subsurface_foliage` (the Tree Anim term in Community Shaders), Off writes neither; it never writes both. Foliage needs an `_s`, like Standard.
+- Hair excludes multilayer, glint, fuzz, emissive, parallax and subsurface.
+- Multilayer excludes subsurface.
+- Multilayer, glint and fuzz exclude each other. (Coat normal needs Multilayer, so it can't go with fuzz either.)
 
-- A project that stores both shows "Standard + Foliage (conflict)" and is not rewritten until you pick a mode.
-- Export asks first on a conflict, on Foliage for a set whose scanned meshes are not Tree Anim, and on Standard for a set whose scanned meshes are Tree Anim (these two need a scan).
+A feature that's on without its texture blocks export, so add the texture or turn the feature off.
 
-**Numbers.** Numbers cannot go below 0, and strengths, weights and opacities stay within 0–1. A typed value outside the range is clamped, and the box says "clamped to ≥ 0" or "clamped to 0–1". A value hand-edited in `sdc-project.toml` shows as it is, with the same note, and the JSON gets it clamped. The glint log density has no limit. Keys whose useful values span a wide range (displacement, emissive scale, specular levels) speed up as their value grows.
+## Values you turned off are kept
 
-**Colours.** Every colour input has a swatch that opens a colour square and a `#RRGGBB` box (the `#` is optional, case is ignored). The box commits on Enter or focus loss; invalid text gets a red outline and is not applied.
+Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group reads "off" and "kept, not used", and you can still edit or reset them. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
 
-- Beside a TruePBR swatch (the coat colour included) are three number boxes, one float per channel (3 decimals) from 0 to 10. <!-- D:AG133 --> A channel above 1.0 is real (fuzz colour 1.25 is common).
-- The swatch and the hex box show the colour clamped to 1.0, and write 0–1 values only when you change the colour through them, so opening the colour square and closing it leaves a stored 1.25 alone. The JSON gets the value as stored (0.08 stays 0.08).
-- A colour saved as 0–255 whole numbers reads as value/255 and is written unchanged until you edit it.
-- Switching **Fuzz** on starts from colour 0.08, 0.08, 0.08 and weight 1.
+## Numbers and colours
 
-**Reset** (↺) returns one field to its default. There is no whole-set reset; *Reset all settings for N selected…* clears the selected textures' own entries.
+- Numbers can't go below 0, and strengths, weights and opacities stay within 0–1. A value outside that is clamped, and the box tells you.
+- Colour swatches take a `#RRGGBB` (the `#` is optional). Beside each TruePBR colour are three boxes, one per channel, from 0 to 10. <!-- D:AG133 --> Values above 1.0 are real: a fuzz colour of 1.25 is common, and opening the swatch won't clamp a stored 1.25.
+- ↺ resets one field. There's no whole-set reset. The defaults themselves are fixed ([why](#quick-qa)).
 
-PGPatcher's own `default` block is fixed: you cannot edit defaults. Each entry writes `emissive`, `parallax` and `subsurface` only when on, and omits the three numbers when unset or equal to the fixed value.
+## Subsurface
 
-### Matching
+Pick one mode: Standard writes `subsurface`, Foliage writes `subsurface_foliage`, Off writes neither. Both modes need an `_s`. Export asks first if you pick Foliage for meshes that aren't Tree Anim, or Standard for meshes that are (that check needs a scan).
 
-**Matching** lists the exact texture paths the entry matches. The entry applies when any of them matches. The diffuse path is on by default.
+## Matching
 
-- **+** adds a row for slot 3 to 8. A slot that holds a texture starts from the set's path for it; any other slot starts empty and says "this row matches nothing until a path is entered" (an empty row is not written to the JSON). **×** removes a row.
-- A set that matches nothing is left out of the JSON, and Export asks first.
-- A renamed set has one match: it says "renamed: matches by diffuse (PGPatcher rename needs match_diffuse)", and its entry is written as `match_diffuse` + `rename`, with no `match1`–`match8`. **+**, **Match on this** and the JSON editor's Match entries are greyed out while it has its one match, with the reason on hover. Extra rows from before the rename stay, say "not written", and Export asks about them. Path contains is treated the same way: a renamed set takes none, and one already there is not written and is marked so.
+The entry applies when any of its paths matches. The set's diffuse path is on by default.
 
-**Rename** (Advanced TruePBR settings) takes a new file name only, no folders. The outputs keep the matched texture's folder under `textures\pbr\` and take the new name, and Tessalith writes it to the JSON next to the matched diffuse as `match_diffuse`, the key PGPatcher renames from. If matches point at different textures and Rename is empty, a warning says the output prefix depends on which one hits first: edit the match paths so they point at the same texture.
+- **+** adds a path for slot 3 to 8, and **×** removes one. A row with no path matches nothing and isn't written.
+- **IMPORTANT** A set that matches nothing is left out of the JSON. Export asks first, but check the Matching header for an amber "matches nothing" before you ship.
 
-### NiAlphaProperty
+## Rename
 
-The collapsible **NiAlphaProperty** group holds the schema's `alphaprop_*` keys, which set the alpha blending and alpha testing of the shape in the NIF. A key that is off is not written, and each key that is set has a **reset** button.
+**Rename** (Advanced TruePBR settings) takes a new file name, no folders. Your outputs keep the matched texture's folder under `textures\pbr\` and take the new name. Tessalith writes it as `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. So a renamed set has exactly one match: **+** and **Match on this** are greyed until you clear Rename, and older extra rows say "not written".
 
-- **Override flags** writes `alphaprop_flags`. The controls under it (Enable blending, Source and Destination blend mode, Enable testing, Test function) compose the number as NifSkope does, and "= 4844" shows it with an **edit raw** box (0–65535; anything else is outlined red and not written). Switching it on starts at 4844: testing on, Greater, Src Alpha / Inv Src Alpha, blending off.
-- **No sorter (no effect in Skyrim SE)** comes last. A RenderDoc capture showed the game draws a blended shape in its stored triangle order whether bit 13 is set or not, so it is kept only so a stored value round-trips; Tessalith never sets it.
+If your matches point at different textures and Rename is empty, you get a warning: the output name depends on which match hits first. Point them at the same texture.
+
+## NiAlphaProperty
+
+These keys set the shape's alpha blending and testing in the NIF. A key that's off isn't written.
+
+- **Override flags** writes `alphaprop_flags`. Build it with the checkboxes the way NifSkope does, or type the number. Turning it on starts at 4844: testing on, Greater, Src Alpha / Inv Src Alpha, blending off.
 - **Alpha test threshold** writes `alphaprop_thresh` (0–255, starts at 128).
-- **Create NiAlphaProperty if missing** gives shapes without one a new property. Without it, the flags and threshold change only shapes that already have one, and Export warns about that.
-- **Delete NiAlphaProperty** removes the property and wins over the other alpha keys of the entry: they are greyed, and Export warns if any is set.
-- A hand-edited `4844.0` reads as 4844. A negative, fractional or too large value shows an amber "stored … is not valid" note (the key counts as set, and the first edit replaces it).
+- **Create NiAlphaProperty if missing** adds one to shapes that have none. Without it, the flags and threshold only change shapes that already have one, and Export warns you.
+- **Delete NiAlphaProperty** removes it and wins over the other alpha keys.
+- **No sorter** does nothing in Skyrim SE: a RenderDoc capture showed the game draws blended shapes in their stored order either way. I keep the switch only so a stored value survives a round trip; Tessalith never sets it.
 
-The JSON editor lists the same keys.
+## Where the JSON goes
 
-## The JSON file
+After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name.
 
-After a complete export, Export writes `<export folder>\PBRNIFPatcher\<name>.json`, with `<name>` from the editor's **JSON name:** field (by default the folder name). It is written in `cs` mode only.
-
-- Only sets that exported fully are written, and the file name must be a single plain file name.
-- If the file already exists and is not the one Tessalith wrote last time, you are asked before it is overwritten; a byte-identical file is never prompted.
-- With a read-only `sdc-project.toml` the JSON is still written, but the next export asks before overwriting.
+- Only sets that exported fully go in. Advanced skin sets have no entry.
+- **IMPORTANT** Tessalith never overwrites a JSON it didn't write without asking you first. An identical file is left alone without a prompt.
 
 ## The JSON editor
 
-Open it with **PGPatcher JSON editor…** in the header's **Export to ▾** menu (**More ▾** with no project open), the **PGPatcher JSON editor…** button beside the Material tab, or the command palette. It shows the whole PGPatcher JSON as a tab of the centre column, with **Pop out**, **Dock** and **Close** as the preset creator has ([Presets](GUI-Presets.md#presets)): one entry per TruePBR set, then the delete sections. A popped-out editor is a window titled "PGPatcher JSON — Tessalith". Advanced skin sets have no entry.
+Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button beside the Material tab, or from the command palette. It shows the whole JSON as one tab, with one entry per PBR set and then your delete sections. **Pop out** gives it its own window.
 
 ![The JSON editor.](../img/gui/GUI-PGPatcher-JSON/json-editor.png)
 
-Its top field, **JSON name:**, is the JSON's file name (by default the folder name, shown as grey hint text; empty restores it), with the full path beside it. A change applies when you leave the field, as one undo step.
+- Each entry shows its set's keys with the same controls as the Material tab. **Show** jumps to the set.
+- **+ key** adds any schema key. Keys Tessalith doesn't know show in amber and are kept as you wrote them.
+- The **▾** [path picker](GUI-Set-Editor.md#path-pickers) on a match lists the scanned textures for that slot. Without a scan it lists only your project's paths.
+- **JSON text** shows the file exactly as it would be written now, with **Copy**.
 
-- Each PBR set's entry is a pill with its title, output prefix and **Show** (selects the set and brings its editor to the front), then its keys as small pills with the same controls as the Material tab's groups. A key whose feature is off reads "kept, not used". Each entry has a **Collapse** / **Expand** button.
-- **+ key** adds any schema key. Keys Tessalith does not know are shown in amber and kept as written; they can be removed.
-- A texture match pill picks how it matches: *Match: exact, slot N (diffuse)* (`matchN`) or *path contains*. A set's own diffuse path reads *derived from the set*. A lock key reads *Keep the original texture (PGPatcher won't replace it): diffuse* (`lock_diffuse`, shown on hover).
-- The **▾** [path picker](GUI-Set-Editor.md#path-pickers) on a match lists the scan's textures for that slot, or every known texture path. The *mesh path contains* pill (`nif_filter`) has a picker of folders that hold scanned meshes. Without a scan, the pickers list only the project's own paths.
-- **+ Add a delete section** adds an entry that belongs to no set and makes PGPatcher delete the shapes it matches, for example a vanilla glow shape the PBR base shape replaces. Sections are saved as `[[pgp_sections]]` in `sdc-project.toml` (keys `match1` to `match8`, `path_contains`, `nif_filter`) and written with `delete: true` after every set's entry. A section with no texture match is not written.
-- A delete section that hits one of your sets (by exact match on the set's texture, or `path_contains` in its diffuse path) strikes that set's pill through, outlines it amber and warns. The set editor shows the same warning, with a button to the editor.
-- The header reads "N errors, M warnings". Errors are what blocks Export (a red line under the entry they belong to); warnings are what Export asks about (an amber line). A problem that belongs to no entry (the JSON name, a set that matches nothing) is listed in a **General** box at the top.
-- **Next error** and **Prev** (F8 and Shift+F8) jump to the next or previous entry with an error, unfold it and scroll to it. They wrap at the end.
-- The search box keeps the entries whose set name or any path in them (match, slot, `path_contains`, `nif_filter`) contains the text, ignoring case; "showing K of N" says how many are left. The counts and Next error ignore the search: if the next error is hidden by it, Next error clears the search. An entry shown struck through because a delete section hits it carries no count: "0 warnings" can sit above it.
-- **JSON text** shows the file as it would be written now, with **Copy**. It is built again only when something it is made from changes.
+### Deleting vanilla shapes
 
-Edits in the editor and in the Material tab are the same edits; each shows the other's at once, and undo is shared.
+**+ Add a delete section** makes PGPatcher delete the shapes it matches, for example a vanilla glow shape your PBR base shape replaces. Delete sections belong to no set, are saved in `sdc-project.toml` and are written with `delete: true` after the set entries.
+
+If a delete section would hit one of your own sets, that set is struck through and outlined amber, and its set editor warns you too.
+
+### Errors and warnings
+
+The header reads "N errors, M warnings". Errors block Export; warnings are what Export will ask you about. **Next error** (F8) and **Prev** (Shift+F8) jump between them. The search box narrows the entries by set name or any path in them, but the counts always cover everything.
+
+## Quick Q/A
+
+**Why is my set missing from the JSON?** It matches nothing, it didn't export fully, it's an Advanced skin set, or the project isn't in `cs` mode.
+
+**Why does my coat value do nothing?** Multilayer is off. The value is kept ("kept, not used") and goes into the JSON when you turn Multilayer back on.
+
+**Can I change PGPatcher's defaults?** No. Every JSON Tessalith writes starts with the same `default` block:
+
+```json
+"default": {
+  "emissive": false,
+  "parallax": false,
+  "displacement_scale": 1.0,
+  "specular_level": 0.04,
+  "roughness_scale": 1.0,
+  "subsurface": false
+}
+```
+
+Most mod authors never touch the `default` block, so I fixed it. That buys three things:
+
+- `emissive`, `parallax` and `subsurface` become plain switches. An entry writes `true` when the feature is on and leaves the key out otherwise.
+- The common values are written once. A set that uses specular 0.04, roughness scale 1.0 or displacement scale 1.0 doesn't repeat them; an entry only lists what differs.
+- The file is a little smaller and much easier to read: each entry shows only what makes that set different.
+
+To use another value, set it on the set (**Material** tab) and that entry carries it.

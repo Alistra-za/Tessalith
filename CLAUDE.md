@@ -75,6 +75,7 @@ Build folders fill the drive fast: one worktree's `target/` reaches 50–170 GB.
 - `.claude/workflows/quality-audit.js`: a whole-repo quality pass (dead code, efficiency, duplication, architecture, test gaps, shortcut debt) with skeptical checks, a delete list and refactor briefs. It uses the same section table as trace-debug.
 - `.claude/workflows/in-game-capture.js`: launch the game through MO2, take RenderDoc captures of test meshes without a keyboard, restore settings, and turn the captures into numbers.
 - `.claude/workflows/golden-capture.js` (NIF team): Phase D golden captures with a CS settings profile (A, B, A_DC). Usage and plan format are in its header comment. File work lives in `golden-capture-lib.mjs`; run `node .claude/workflows/golden-capture.test.mjs` for the offline test (no game launch).
+- `.claude/workflows/ui-proof.js`: headless UI proof of one feature: owner-approved goals, blind explorers, frame checks and a verified, ranked report; usage in its header. It drives the app through `crates/gui/tests/ui_drive` (`tools\ui-drive.ps1`); journeys are tests in `crates/gui/tests/ui_proof.rs`.
 - `tools/scan-query.py`: read-only queries against a scan database: any SQL, `--tables`, `--txst <plugin>`. Run it with `py -3.13 -I`.
 - `tools/package-release.ps1`: builds the release zip and SHA256SUMS.
 - `tools/doc-shots.ps1`: re-renders the documentation screenshots and writes a difference overlay for each changed one (run before a push).

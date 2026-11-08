@@ -53,7 +53,8 @@ The docs grew too large, mostly from over-explaining and over-stating limits. Wr
 - **Don't explain what the name already says.** A generic term or a self-describing setting gets no sentence of its own. Explain only what a reader could get wrong.
 - **State a limit once, plainly, at its home.** Don't repeat a caveat, soften it with "note that…", or warn about cases nobody will hit.
 - **A methodology caveat is explained once, where it first comes up, then dropped.** Example: perceptual metrics (error weighting tuned for colour seen by the eye) don't fit linear data such as normals, masks and height. Say that and why once, at its first use on the page. Later rows and tables just omit or mark those cells. Repeating the caveat reads as surprise at our own method.
-- **Tools:** write new prose with the `writing-docs-without-ai-tells` skill; rewrite existing prose with the `humanizer` skill. Both keep the facts and cut AI-style padding.
+- **Voice and page shape (owner, 2026-11-07):** write and review user-facing pages (README, docs/wiki, release notes) with the `modder-voice` skill: who the page is for in the first line, task headings, each rule with its reason, a reason behind every deliberate "no", edge cases left to DECISIONS. Its reference shape is [PGPatcher's Mod Authors page](https://github.com/hakasapl/PGPatcher/wiki/Mod-Authors); [GUI-PGPatcher-JSON](wiki/GUI-PGPatcher-JSON.md) is a page written with it.
+- **Tools:** after drafting, run the `humanizer` skill on the prose. It keeps the facts and cuts AI-style padding.
 
 ## 4. Page size and structure
 - **Size budget:** a wiki page holds at most about 15 KB of text, around 2,500 words. Over that, split it. A page under about 2 KB merges into its parent.
