@@ -124,7 +124,9 @@ pub fn create_program(gpu: &Gpu, vs: Compiled, ps: Compiled) -> Result<Program, 
 /// CS's `SharedData::DepthTexture` register (SharedData.hlsli:538).
 pub const DEPTH_TEXTURE: u32 = 17;
 
-/// The PS reads the scene depth: `SharedData::DepthTexture` at t17 (PhysicalSky's TexVolLum shares the register).
+/// The PS reads the scene depth: `SharedData::DepthTexture` at t17 (SharedData.hlsli:538; reflected as that name or
+/// bare `DepthTexture`, hence `ends_with`). PhysicalSky's `TexVolLum` (PhysicalSky/Common.hlsli:516) is also t17 but
+/// holds volumetric luminance, so binding the depth copy over it would be wrong: the name must not match.
 pub fn reads_depth(r: &Reflection) -> bool {
     r.srvs
         .iter()

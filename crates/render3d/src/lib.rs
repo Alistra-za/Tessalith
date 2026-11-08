@@ -2494,6 +2494,10 @@ impl Renderer {
                     .and_then(|s| s.draw.as_ref())
                     .is_some_and(|d| d.reads_depth)
             });
+            // The main pass then tests against the final opaque depth, not the depth so far, and still shows what it
+            // showed before (Note GX3): the pre-pass writes depth in the same order with the same states, so the last
+            // depth writer of a pixel passes again at equal depth and overwrites every earlier fragment, and the
+            // shapes after it see the same depth as before. That holds for z-write-off and z-test-off shapes too.
             let in_prepass = |s: &ShapeDraw| {
                 prepass && !s.blend && s.pipe.z_write && (!s.deferred || target.deferred())
             };

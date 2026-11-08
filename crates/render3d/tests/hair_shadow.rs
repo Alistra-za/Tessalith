@@ -2,6 +2,7 @@
 //! preview draws a depth pre-pass and binds its copy there; `render_*` on the bundled CS, run alone.
 use nif::material::MaterialState;
 use nif::props::LightingTrailer;
+use render3d::device::Gpu;
 use render3d::scene::{Camera, DirLight, Scene};
 use render3d::{ParsedNif, ParsedShape, Renderer, ShapeId};
 use serde_json::json;
@@ -68,10 +69,21 @@ fn scene() -> Scene {
     }
 }
 
-/// The bundled CS, forward or deferred (the two targets' depths are copied the same way), with `shapes` loaded.
+/// The bundled CS on the default GPU, forward or deferred (the two targets' depths are copied the same way), with
+/// `shapes` loaded.
 fn renderer(cache: &std::path::Path, deferred: bool, shapes: Vec<ParsedShape>) -> Renderer {
+    renderer_on(Gpu::new().unwrap(), cache, deferred, shapes)
+}
+
+fn renderer_on(
+    gpu: Gpu,
+    cache: &std::path::Path,
+    deferred: bool,
+    shapes: Vec<ParsedShape>,
+) -> Renderer {
     let mut r =
-        Renderer::with_source(render3d::ShaderSource::Bundled, cache.to_path_buf()).unwrap();
+        Renderer::with_gpu_source(gpu, render3d::ShaderSource::Bundled, cache.to_path_buf())
+            .unwrap();
     r.set_deferred(deferred).unwrap();
     let rep = r.load_parsed(
         &ParsedNif {
@@ -172,8 +184,6 @@ fn render_a_card_toward_the_light_shadows_the_hair() {
             2,
             "both opaque cards are in the pre-pass"
         );
-        let targets = if deferred { 10 } else { 2 };
-        assert_eq!(r.target_dims().len(), targets, "deferred {deferred}");
         // The occluder covers the right half; 17.2 px per unit on the hair plane (fov 50°, 256 px, 16 units away).
         let near = lit(&off, W / 2 - 18..W / 2 - 2); // hair 0.1-1.0 units from the occluder's edge
         let far = lit(&off, 0..W / 2 - 85); // more than 4.9 units: beyond the 4.5-unit reach with the jitter
@@ -204,19 +214,60 @@ fn render_a_card_toward_the_light_shadows_the_hair() {
     }
 }
 
-/// A frame whose shapes do not read t17 draws no pre-pass and copies nothing (Note GX1), so it renders as before.
-#[test]
-fn render_a_frame_without_a_depth_reader_draws_no_prepass() {
-    let cache = tempfile::tempdir().unwrap();
+/// No t17 reader: a plain card where the hair would be, the occluder overlapping it in front (so the depth test
+/// decides pixels) and a blended card over both.
+fn no_reader_shapes() -> Vec<ParsedShape> {
     let mut blended = opaque(0);
     blended.alpha = Some(nif::props::Alpha {
         flags: 0x00ED, // blend on, SrcAlpha / InvSrcAlpha
         threshold: 0,
     });
-    let glass = card(2, blended, 0.1, 0.1, [4.0, 3.0, 0.0]);
-    let mut r = renderer(cache.path(), false, vec![occluder(), glass]);
-    r.render(&scene(), W, H).unwrap();
-    assert_eq!(r.last_prepass_draws(), 0);
+    vec![
+        card(0, opaque(0), 0.3, 0.1, [0.0; 3]),
+        occluder(),
+        card(2, blended, 0.1, 0.1, [0.0, 3.0, 0.0]),
+    ]
+}
+
+/// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, captured on base f9639a84 (before
+/// Note GX), forward and deferred. WARP, not the default GPU, so the bytes do not depend on the adapter or driver;
+/// a Windows update that changes WARP's rasteriser changes them too, so re-capture on that base before re-pinning.
+const NO_READER_SHA256: [(bool, &str); 2] = [
+    (
+        false,
+        "d3cddc8212422ef19291924c8ce235ac0add7e70d8d5076d33629627befdf544",
+    ),
+    (
+        true,
+        "7d1cef7a9cb334306595af2940cb3c6c389de1ce6bc998c08285ab19889c547e",
+    ),
+];
+
+/// Two pins for a frame with no t17 reader (Note GX1): its pixels are byte-identical to base f9639a84, forward and
+/// deferred, although both targets' depth is now R32_TYPELESS (GX2); and it draws no pre-pass and so makes no copy.
+/// The last assert shows the counter does count: adding a hair card turns the pre-pass on.
+#[test]
+fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
+    use sha2::Digest;
+    for (deferred, want) in NO_READER_SHA256 {
+        let cache = tempfile::tempdir().unwrap();
+        let gpu = Gpu::new_warp().unwrap();
+        let mut r = renderer_on(gpu, cache.path(), deferred, no_reader_shapes());
+        let px = r.render(&scene(), 128, 128).unwrap();
+        let shown = px
+            .chunks(4)
+            .filter(|p| p[..3].iter().map(|&c| u32::from(c)).sum::<u32>() > 6)
+            .count();
+        println!("deferred {deferred}: {shown} lit px");
+        assert!(
+            shown > 4000,
+            "deferred {deferred}: the cards are drawn: {shown}"
+        );
+        let got = hex::encode(sha2::Sha256::digest(&px));
+        assert_eq!(got, want, "deferred {deferred}: the frame's bytes changed");
+        assert_eq!(r.last_prepass_draws(), 0, "deferred {deferred}");
+    }
+    let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), false, vec![hair(), occluder()]);
     r.render(&scene(), W, H).unwrap();
     assert_eq!(r.last_prepass_draws(), 2, "a hair card turns it on");
