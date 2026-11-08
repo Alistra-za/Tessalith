@@ -37,6 +37,8 @@ macro_rules! journey {
 
 #[path = "ui_proof/sets_column.rs"]
 mod sets_column;
+#[path = "ui_proof/sets_column_hp.rs"]
+mod sets_column_hp;
 #[path = "ui_proof/sets_column_pins.rs"]
 mod sets_column_pins;
 
