@@ -104,6 +104,7 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
             continue;
         }
         let base = txst.base.as_deref().zip(defaults.as_ref());
+        // `DefaultOutputs::new` is `None` only without a root or export root; then no output is planned at all.
         if txst.is_base() && base.is_none() {
             continue;
         }

@@ -406,17 +406,25 @@ use sdc_gui::model::txst_map::TargetPick;
 
 const BOOTS_BASE: &str = "textures/fs6/fs6_boots_ir";
 
-/// A DAZ-shaped vanilla set `Runner Boots_01` (colour, `_n`, `_p`) and its set id.
+/// A DAZ-shaped vanilla set `Runner Boots_01` (`_pbr_d` read as the diffuse, `_n`, `_s`) and its set id.
 fn boots(dir: &Path) -> (AppModel, String) {
     let r = dir.join("textures/textures/boots");
     std::fs::create_dir_all(&r).unwrap();
-    png(&r, "Runner Boots_01.png", [90, 60, 40]);
+    png(&r, "Runner Boots_01_pbr_d.png", [90, 60, 40]);
     png(&r, "Runner Boots_01_n.png", [128, 128, 255]);
-    png(&r, "Runner Boots_01_p.png", [40, 40, 40]);
+    png(&r, "Runner Boots_01_s.png", [40, 40, 40]);
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     m.set_target(engine::config::Target::Vanilla);
+    // DAZ shape: the exporter's `_pbr_d` is read as the diffuse.
+    m.edit_docs("alias", None, true, |p, _| {
+        p.set_read_as(
+            "textures/boots/Runner Boots_01_pbr_d.png",
+            Some("textures/boots/Runner Boots_01.png"),
+        )
+    });
+    idle(&mut m);
     m.decide(
-        "textures/boots/Runner Boots_01.png",
+        "textures/boots/Runner Boots_01_pbr_d.png",
         Answer::Subtype(Subtype::Diffuse),
     );
     m.decide(
@@ -428,8 +436,8 @@ fn boots(dir: &Path) -> (AppModel, String) {
         Answer::Green(GreenConvention::Directx),
     );
     m.decide(
-        "textures/boots/Runner Boots_01_p.png",
-        Answer::Subtype(Subtype::Height),
+        "textures/boots/Runner Boots_01_s.png",
+        Answer::Subtype(Subtype::BacklightTint),
     );
     idle(&mut m);
     let id = sdc_gui::model::sets::views(&m)
@@ -509,11 +517,40 @@ fn a_slot_the_base_lacks_goes_to_base_plus_suffix() {
     m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
         .unwrap();
     idle(&mut m);
+    assert_no_blocks(&m);
     let got = exported(&mut m);
     assert!(
-        got.iter().any(|g| g == "textures/fs6/fs6_boots_ir_p.dds"),
+        got.iter().any(|g| g == "textures/fs6/fs6_boots_ir_s.dds"),
         "{got:?}"
     );
+}
+
+fn assert_no_blocks(m: &AppModel) {
+    let all = problems(m);
+    let rows: Vec<_> = all.iter().filter(|p| p.level == Level::Blocks).collect();
+    assert!(rows.is_empty(), "{rows:?}");
+}
+
+/// The `_s` (slot 8, record-only) member under a RECORD mapping: it is not a collision with itself either.
+#[test]
+fn a_slot_8_member_under_a_record_mapping_does_not_collide_with_itself() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    let rec = trec(
+        "Boots",
+        "Plug.esp",
+        "0x1",
+        &[
+            (1, "textures/fs6/x.dds"),
+            (2, "textures/fs6/x_n.dds"),
+            (8, "textures/fs6/x_s.dds"),
+        ],
+    );
+    m.map_target(&id, TargetPick::Record(rec)).unwrap();
+    idle(&mut m);
+    assert_no_blocks(&m);
+    let got = exported(&mut m);
+    assert!(got.iter().any(|g| g == "textures/fs6/x_s.dds"), "{got:?}");
 }
 
 #[test]
@@ -611,4 +648,29 @@ fn target_replaces_lists_the_files_the_target_already_ships() {
             "textures/fs6/fs6_boots_ir_n.dds"
         ]
     );
+}
+
+/// The views follow the document revision, not TxstMap fields: two bases with equal slots are two mappings.
+#[test]
+fn two_bases_with_equal_slots_are_not_one_cached_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    let base_of = |m: &AppModel| {
+        let all = sdc_gui::model::sets::views(m);
+        let v = all.iter().find(|v| v.id == id).unwrap();
+        v.txst.as_ref().and_then(|t| t.base.clone())
+    };
+    let slots = |b: &str| FileBase {
+        base: b.into(),
+        slots: [(1, format!("{b}.dds"))].into(),
+    };
+    m.map_target(&id, TargetPick::Files(slots("textures/a/one")))
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(base_of(&m).as_deref(), Some("textures/a/one"));
+    let mut other = slots("textures/a/two");
+    other.slots = slots("textures/a/one").slots;
+    m.map_target(&id, TargetPick::Files(other)).unwrap();
+    idle(&mut m);
+    assert_eq!(base_of(&m).as_deref(), Some("textures/a/two"));
 }

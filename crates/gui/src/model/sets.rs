@@ -2996,10 +2996,19 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
         .collect()
 }
 
+/// Whether `item` writes an output of its own: it has a job and is neither a raw packing source nor a helper. A
+/// record-only slot (`_s` backlight, env mask, cubemap) has no `slot_of` but writes a file like any other, so the
+/// output key must not depend on the slot.
+fn writes_own_output(item: &TextureItem) -> bool {
+    item.job.is_some()
+        && !matches!(item.status, ItemStatus::PackedInto(_))
+        && item.kind != ItemKind::Helper
+}
+
 /// The engine key of the output `item` writes: its file, or its set and recipe for a packed output. `None` for an
 /// item that writes no output of its own.
 pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKey> {
-    slot_of(item)?;
+    writes_own_output(item).then_some(())?;
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
@@ -3035,7 +3044,7 @@ pub(crate) fn item_output_key_in(
     owners: &HashMap<&str, &str>,
     item: &TextureItem,
 ) -> Option<OutputKey> {
-    slot_of(item)?;
+    writes_own_output(item).then_some(())?;
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
