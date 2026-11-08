@@ -307,11 +307,26 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 }
 
 /// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
-fn fit_title(id: &str, fits: impl Fn(&str) -> bool) -> String {
+/// Note HP (SC4): when the search lies inside one middle segment, `…/<that segment>/<rest>` is tried right after the id.
+fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
     use super::header::elide_middle;
     let len = id.chars().count();
     if fits(id) {
         return id.to_string();
+    }
+    let q = engine::sets::fold_id(query.trim());
+    if !q.is_empty() {
+        let segs: Vec<&str> = id.split('/').collect();
+        let middle = 1..segs.len().saturating_sub(1);
+        if let Some(i) = middle
+            .into_iter()
+            .find(|&i| engine::sets::fold_id(segs[i]).contains(&q))
+        {
+            let t = format!("…/{}", segs[i..].join("/"));
+            if fits(&t) {
+                return t;
+            }
+        }
     }
     for n in (1..len).rev() {
         let t = elide_middle(id, n);
@@ -1651,7 +1666,9 @@ fn pill(
                     let shown_for = |ui: &egui::Ui| {
                         let font = egui::TextStyle::Body.resolve(ui.style());
                         let room = ui.available_width();
-                        fit_title(&v.id, |t| text_width(ui, t, &font) <= room)
+                        fit_title(&v.id, &model.sets_filter.search, |t| {
+                            text_width(ui, t, &font) <= room
+                        })
                     };
                     let name = |ui: &mut egui::Ui| {
                         let shown = shown_for(ui);
@@ -2815,6 +2832,34 @@ fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
 mod tests {
     use super::*;
     use engine::codes::Code;
+
+    fn fit_at(id: &str, query: &str, n: usize) -> String {
+        fit_title(id, query, |t: &str| t.chars().count() <= n)
+    }
+
+    #[test]
+    fn fit_title_keeps_a_middle_match() {
+        assert_eq!(
+            fit_at("architecture/stone/banner", "STONE", 15),
+            "…/stone/banner"
+        );
+        assert_eq!(fit_at("a/bb/stone/leaf", "ston", 13), "…/stone/leaf");
+    }
+
+    #[test]
+    fn fit_title_without_a_middle_match_keeps_hn6() {
+        let id = "architecture/stone/banner";
+        let hn6 = fit_at(id, "", 15);
+        for q in ["", "banner", "arch", "stone/ban"] {
+            assert_eq!(fit_at(id, q, 15), hn6, "query {q:?}");
+        }
+    }
+
+    #[test]
+    fn fit_title_shows_the_whole_id_when_it_fits() {
+        let id = "architecture/stone/banner";
+        assert_eq!(fit_at(id, "stone", 40), id);
+    }
 
     #[test]
     fn dock_cells_fill_right_then_left_and_fold_the_rest() {

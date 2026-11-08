@@ -967,6 +967,62 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
     );
 }
 
+/// Note HP (SC4): a cut title keeps the middle segment the search matched, and still ends with its leaf.
+#[test]
+fn a_search_keeps_its_match_in_cut_titles() {
+    let ids = [
+        ("architecture/stone/banner", "banner"),
+        ("architecture/stone/cobble", "cobble"),
+        ("architecture/stone/stonewall", "stonewall"),
+    ];
+    for (w, h_px) in [(1400, 790), (1055, 770)] {
+        let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
+        let first = [
+            resize.as_str(),
+            r#"{"op":"type","text":"STONE","at":{"placeholder":"Search sets"}}"#,
+        ];
+        let (_d, mut h) = crate::replay_mid(
+            "demo",
+            |_| {},
+            &first,
+            |h| sets_width(h, 180.0),
+            &[r#"{"op":"settle","frames":6}"#],
+        );
+        let mut any_cut = false;
+        for (id, leaf) in ids {
+            let title = h
+                .query_all_by_label(id)
+                .map(|n| n.rect())
+                .find(|r| in_sets_column(&h, *r))
+                .unwrap_or_else(|| panic!("{id} at {w}x{h_px}: its title is on screen"));
+            let shown: Vec<_> = texts(&h)
+                .into_iter()
+                .filter(|(t, r)| title.expand(1.0).contains_rect(*r) && t.ends_with(leaf))
+                .collect();
+            assert_eq!(
+                shown.len(),
+                1,
+                "{id} at {w}x{h_px}: one title, got {shown:?}"
+            );
+            let t = &shown[0].0;
+            assert!(
+                t.to_ascii_lowercase().contains("stone"),
+                "{id} at {w}x{h_px}: the title {t:?} keeps the match"
+            );
+            any_cut |= t != id;
+            // names and hovers stay the full id
+            h.event(egui::Event::PointerMoved(title.center()));
+            h.run();
+            let full = texts(&h).into_iter().filter(|(x, _)| x == id).count();
+            assert!(full >= 1, "{id}: the full id is the title or its tooltip");
+            if t != id {
+                assert_eq!(full, 1, "{id}: the tooltip is exactly the full id");
+            }
+        }
+        assert!(any_cut, "{w}x{h_px}: at 180 px at least one title is cut");
+    }
+}
+
 /// Note HP: one wording for a fill everywhere: the badge, its hover, the helper panel's subtitle and its Stop button.
 #[test]
 fn one_fill_has_one_wording() {
