@@ -26,7 +26,7 @@ Click a row to open its panel.
 
 ### The helper panel
 
-The centre shows the helper's name, a link back to its set, and the same "fills to … / not used: …" line. Every control writes the helper file's own `[files]` entry in `sdc.toml` as one undo step, and the folder is planned again. With `sdc.toml` read-only, the controls are greyed out with the reason on hover.
+The centre shows the helper's name, a link back to its set, and the same "fills … / not used: …" line, each fill as the target and then the output file name, such as "RMAOS R  crate_rmaos". Every control writes the helper file's own `[files]` entry in `sdc.toml` as one undo step, and the folder is planned again. With `sdc.toml` read-only, the controls are greyed out with the reason on hover.
 
 ![The panel of a helper texture.](../img/gui/GUI-Helpers-and-Cubemaps/helper-panel.png)
 

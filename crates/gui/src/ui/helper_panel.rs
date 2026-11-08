@@ -1,9 +1,10 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
-use crate::model::helpers::target_label;
+use crate::model::helpers::{fill_text, target_file};
 use crate::model::sets::Tails;
 use crate::model::AppModel;
 use eframe::egui;
+use egui::text::LayoutJob;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
 
@@ -36,6 +37,63 @@ pub(super) fn named(r: &egui::Response, kind: egui::WidgetType, name: &str, valu
     });
 }
 
+/// Appends `text` in the body colour (`PLACEHOLDER`: the widget's own) or, when `weak`, the weak one.
+fn push(job: &mut LayoutJob, style: &egui::Style, text: &str, weak: bool) {
+    let color = if weak {
+        style.visuals.weak_text_color()
+    } else {
+        egui::Color32::PLACEHOLDER
+    };
+    let font_id = egui::TextStyle::Body.resolve(style);
+    job.append(text, 0.0, egui::TextFormat::simple(font_id, color));
+}
+
+fn push_target(
+    job: &mut LayoutJob,
+    h: &HelperReport,
+    t: FillTarget,
+    tails: Tails,
+    style: &egui::Style,
+) {
+    push(job, style, &fill_text(t), false);
+    push(job, style, "  ", false);
+    push(job, style, &target_file(h, t, tails), true);
+}
+
+/// Note HP: a fill as one line: what it writes in the body colour, two spaces, the file it lands in in the weak one.
+pub(crate) fn target_job(
+    h: &HelperReport,
+    t: FillTarget,
+    tails: Tails,
+    style: &egui::Style,
+) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    push_target(&mut job, h, t, tails, style);
+    job
+}
+
+/// Note HP: the panel's subtitle: "fills " and the targets joined by ", ", or the weak "not used: <reason>".
+pub(crate) fn fills_job(h: &HelperReport, tails: Tails, style: &egui::Style) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    if h.fills.is_empty() {
+        push(
+            &mut job,
+            style,
+            &crate::model::items::helper_target_text(h),
+            true,
+        );
+        return job;
+    }
+    push(&mut job, style, "fills ", false);
+    for (i, t) in h.fills.iter().enumerate() {
+        if i > 0 {
+            push(&mut job, style, ", ", false);
+        }
+        push_target(&mut job, h, *t, tails, style);
+    }
+    job
+}
+
 /// The read-only reason on a disabled control's hover.
 fn why(r: egui::Response, ro: &Option<String>) -> egui::Response {
     match ro {
@@ -44,17 +102,18 @@ fn why(r: egui::Response, ro: &Option<String>) -> egui::Response {
     }
 }
 
-/// A combo in an exact-width slot; `f` draws the options. Returns its response.
-fn combo(
+/// A combo in an exact-width (`w`) slot; `f` draws the options. Returns its response.
+pub(super) fn combo(
     ui: &mut egui::Ui,
     id: (&str, &str),
     shown: &str,
+    w: f32,
     f: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
     let h = ui.spacing().interact_size.y;
-    ui.allocate_ui(egui::vec2(COMBO_W, h), |ui| {
+    ui.allocate_ui(egui::vec2(w, h), |ui| {
         egui::ComboBox::from_id_salt(id)
-            .width(COMBO_W)
+            .width(w)
             .truncate()
             .selected_text(shown)
             .show_ui(ui, f)
@@ -76,7 +135,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     }
     ui.heading(&name);
     let tails = model.helper_tails(h);
-    ui.weak(crate::model::items::helper_target_text(h, tails));
+    ui.label(fills_job(h, tails, ui.style()));
     ui.add_space(4.0);
     ui.add_enabled_ui(ro.is_none(), |ui| {
         egui::Grid::new(("helper-panel", key))
@@ -88,7 +147,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
                 read_rows(ui, key, h, &ro, &mut edits);
             });
         for (t, reason) in &h.skipped_targets {
-            ui.weak(format!("Skipped {}: {reason}", target_label(h, *t, tails)));
+            ui.weak(format!("Skipped {}: {reason}", fill_text(*t)));
         }
     });
     for (k, shown) in output_items(ui.ctx(), model, key, h) {
@@ -185,7 +244,7 @@ pub(crate) fn role_combo(
 ) -> Option<HelperRole> {
     let mut picked = None;
     let shown = current.label();
-    let r = combo(ui, (key, "helper-role"), &shown, |ui| {
+    let r = combo(ui, (key, "helper-role"), &shown, COMBO_W, |ui| {
         // "Not a helper" first (`all()`'s order), so it is in view without scrolling the long list.
         for role in HelperRole::all() {
             let new = role != current || !hand_set;
@@ -226,7 +285,6 @@ fn fills_rows(
         *first = false;
     };
     for t in &now {
-        let label = target_label(h, *t, tails);
         let was_first = first;
         lead(ui, &mut first);
         ui.horizontal(|ui| {
@@ -237,10 +295,10 @@ fn fills_rows(
                     ui.set_min_size(egui::vec2(COMBO_W, row_h));
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(pad);
-                    ui.add(egui::Label::new(&label).truncate());
+                    ui.add(egui::Label::new(target_job(h, *t, tails, ui.style())).truncate());
                 },
             );
-            let hover = format!("Stop filling {label}");
+            let hover = format!("Stop filling {}", fill_text(*t));
             let r = ui.small_button("✕");
             named(&r, egui::WidgetType::Button, &hover, None);
             if why(r.on_hover_text(&hover), ro).clicked() {
@@ -269,10 +327,10 @@ fn fills_rows(
         if more.is_empty() {
             ui.allocate_space(egui::vec2(COMBO_W, row_h));
         } else {
-            let r = combo(ui, (key, "helper-add-fill"), "Add target", |ui| {
+            let r = combo(ui, (key, "helper-add-fill"), "Add target", COMBO_W, |ui| {
                 for o in &more {
                     if ui
-                        .selectable_label(false, target_label(h, *o, tails))
+                        .selectable_label(false, target_job(h, *o, tails, ui.style()))
                         .clicked()
                     {
                         let mut next = now.clone();
@@ -308,7 +366,7 @@ fn read_rows(
 ) {
     ui.label("Read from");
     let shown = READS.iter().find(|r| r.0 == h.read).map_or("", |r| r.1);
-    let r = combo(ui, (key, "helper-read"), shown, |ui| {
+    let r = combo(ui, (key, "helper-read"), shown, COMBO_W, |ui| {
         for (v, label) in READS {
             if ui.selectable_label(v == h.read, label).clicked() && v != h.read {
                 edits.push(Edit::Read(v));

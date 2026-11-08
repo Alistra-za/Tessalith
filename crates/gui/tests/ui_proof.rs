@@ -37,6 +37,8 @@ macro_rules! journey {
 
 #[path = "ui_proof/sets_column.rs"]
 mod sets_column;
+#[path = "ui_proof/sets_column_hp.rs"]
+mod sets_column_hp;
 #[path = "ui_proof/sets_column_pins.rs"]
 mod sets_column_pins;
 
@@ -48,21 +50,50 @@ pub fn run_journey(fixture: &str, lines: &[&str]) {
 /// Replays `lines` like `run_journey` and returns the harness (and its temp dir) for further checks. Keep the
 /// `TempDir` alive as long as the harness: dropping it deletes the project folder the app reads.
 pub fn replay(fixture: &str, lines: &[&str]) -> (tempfile::TempDir, app_harness::H) {
+    replay_with(fixture, |_| {}, lines)
+}
+
+/// `replay`, with `before` run once the fixture has opened and before the first line.
+pub fn replay_with(
+    fixture: &str,
+    before: impl FnOnce(&mut app_harness::H),
+    lines: &[&str],
+) -> (tempfile::TempDir, app_harness::H) {
+    replay_mid(fixture, before, lines, |_| {}, &[])
+}
+
+/// `replay_with`, then `mid` between `first` and `rest` (a change the first lines' clicks must not see).
+pub fn replay_mid(
+    fixture: &str,
+    before: impl FnOnce(&mut app_harness::H),
+    first: &[&str],
+    mid: impl FnOnce(&mut app_harness::H),
+    rest: &[&str],
+) -> (tempfile::TempDir, app_harness::H) {
     app_data();
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
+    before(&mut h);
+    play(&mut h, &run, first, 0);
+    mid(&mut h);
+    play(&mut h, &run, rest, first.len());
+    (d, h)
+}
+
+/// Runs `lines`, numbering steps from `done + 1` (the lines already played).
+fn play(h: &mut app_harness::H, run: &fixtures::Run, lines: &[&str], done: usize) {
     let script = parse_script(&lines.join("\n")).unwrap();
     for (i, (line, step)) in script.iter().enumerate() {
-        match fixtures::app_step(&mut h, &run, step) {
-            Err(e) => panic!("step {} `{line}`: {e}", i + 1),
+        let n = done + i + 1;
+        match fixtures::app_step(h, run, step) {
+            Err(e) => panic!("step {n} `{line}`: {e}"),
             // A journey's check must decide: a note is a check that proved nothing.
             Ok(Some(note)) if matches!(step, Step::Check { .. }) => {
-                panic!("step {} `{line}`: check did not decide: {note}", i + 1)
+                panic!("step {n} `{line}`: check did not decide: {note}")
             }
             Ok(_) => {}
         }
     }
-    (d, h)
 }
 
 /// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
@@ -679,6 +710,40 @@ fn off_window_flags_a_button_cut_by_the_edge() {
         o.iter().map(|x| &x.subject.label).collect::<Vec<_>>()
     );
     assert_eq!(o[0].subject.label, "Far");
+}
+
+/// Note HP: the dock's badge hit rects sit on a chip's corner by design; anything else that overlaps still counts.
+#[test]
+fn overlap_spares_a_badge_centred_on_a_chip_corner() {
+    let hit = |ui: &mut egui::Ui, at: egui::Rect, name: &str| {
+        let r = ui.interact(at, ui.id().with(name), egui::Sense::click());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    };
+    let chip = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), vec2(32.0, 32.0));
+    let overlaps = |badge: egui::Rect| {
+        let f = found(300.0, 200.0, move |ui| {
+            hit(ui, chip, "chip");
+            hit(ui, badge, "badge");
+        });
+        of(&f, "overlap").len()
+    };
+    // 18x20, centre 1 px left of the top-right corner (a clamped badge)
+    let corner = egui::Rect::from_center_size(chip.right_top() - vec2(1.0, 0.0), vec2(18.0, 20.0));
+    assert_eq!(overlaps(corner), 0, "a badge on the corner");
+    // 20x20 centred on the top edge's midpoint is a real overlap
+    let mid = egui::Rect::from_center_size(chip.center_top(), vec2(20.0, 20.0));
+    assert_eq!(overlaps(mid), 1, "a badge on the edge's middle");
+    // two buttons sharing an edge
+    let side = egui::Rect::from_min_size(chip.right_top(), vec2(32.0, 32.0));
+    assert_eq!(overlaps(side), 0, "touching edges");
+    // a big rect centred on the corner is not a badge (over 24 px)
+    let big_chip = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), vec2(60.0, 60.0));
+    let big = egui::Rect::from_center_size(big_chip.right_top(), vec2(60.0, 60.0));
+    let f = found(300.0, 200.0, move |ui| {
+        hit(ui, big_chip, "chip");
+        hit(ui, big, "big");
+    });
+    assert_eq!(of(&f, "overlap").len(), 1, "two 60x60 buttons on a corner");
 }
 
 #[test]

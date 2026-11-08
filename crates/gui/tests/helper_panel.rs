@@ -215,18 +215,18 @@ fn fills_add_and_remove_write_the_list() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(d.path(), &CNRSET, ""), "x_roughness.png");
     h.get_by_label("suggested");
-    pick(&mut h, "Add fill target", "x_cnr alpha");
+    pick(&mut h, "Add fill target", "CNR alpha  x_cnr");
     assert_eq!(
         value(&h, "x_roughness.png", "helper.fills"),
         Some(json!(["rmaos.r", "cnr.a"]))
     );
     assert_eq!(h.query_all_by_label("suggested").count(), 0, "hand-set");
-    click(&mut h, "Stop filling x_rmaos R");
+    click(&mut h, "Stop filling RMAOS R");
     assert_eq!(
         value(&h, "x_roughness.png", "helper.fills"),
         Some(json!(["cnr.a"]))
     );
-    click(&mut h, "Stop filling x_cnr alpha");
+    click(&mut h, "Stop filling CNR alpha");
     assert_eq!(
         value(&h, "x_roughness.png", "helper.fills"),
         Some(json!([]))
@@ -246,9 +246,9 @@ fn hand_targets_that_did_not_land_stay_listed() {
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
     let mut h = app(m, "x_opacity.png");
-    h.get_by_role_and_label(Role::Button, "Stop filling x alpha");
-    h.get_by_role_and_label(Role::Button, "Stop filling x_n alpha");
-    click(&mut h, "Stop filling x alpha");
+    h.get_by_role_and_label(Role::Button, "Stop filling D alpha");
+    h.get_by_role_and_label(Role::Button, "Stop filling N alpha");
+    click(&mut h, "Stop filling D alpha");
     assert_eq!(
         value(&h, "x_opacity.png", "helper.fills"),
         Some(json!(["n.a"]))
@@ -276,7 +276,7 @@ fn read_only_project_disables_controls() {
         (Role::ComboBox, "Add fill target"),
         (Role::ComboBox, "Read from"),
         (Role::CheckBox, "Invert"),
-        (Role::Button, "Stop filling x_rmaos R"),
+        (Role::Button, "Stop filling RMAOS R"),
     ] {
         let n = h.get_by_role_and_label(role, name);
         assert!(n.accesskit_node().is_disabled(), "{name} is enabled");
@@ -332,8 +332,8 @@ fn panel_controls_inside_panel_at_1100() {
         );
         seen.push(name);
     }
-    let stop_cnr = format!("Stop filling {base}_cnr alpha");
-    let stop_rmaos = format!("Stop filling {base}_rmaos R");
+    let stop_cnr = "Stop filling CNR alpha".to_string();
+    let stop_rmaos = "Stop filling RMAOS R".to_string();
     for want in [
         "Helper role",
         "Add fill target",
@@ -393,8 +393,8 @@ fn fills_rows_line_up() {
     );
     let text_x = role.min.x + h.ctx.global_style().spacing.button_padding.x;
     for (stop, label) in [
-        ("Stop filling x_rmaos R", "x_rmaos R"),
-        ("Stop filling x_cnr alpha", "x_cnr alpha"),
+        ("Stop filling RMAOS R", "RMAOS R  x_rmaos"),
+        ("Stop filling CNR alpha", "CNR alpha  x_cnr"),
     ] {
         near(irect(&h, Role::Button, stop).min.x, reset_role.min.x, stop);
         let t = h
@@ -417,7 +417,7 @@ fn the_hint_column_says_set_by_you_or_suggested_on_the_first_fills_line() {
             "x_roughness.png",
             egui::vec2(1280.0, 800.0),
         );
-        let stop = irect(&h, Role::Button, "Stop filling x_rmaos R");
+        let stop = irect(&h, Role::Button, "Stop filling RMAOS R");
         let add = irect(&h, Role::ComboBox, "Add fill target");
         let hint_rect = h
             .query_all_by_label(hint)
@@ -451,26 +451,26 @@ fn a_packed_target_is_named_by_its_output() {
     let rmaos = engine::helper::FillTarget::parse("rmaos.r").unwrap();
     let lost = engine::helper::FillTarget::parse("m.r").unwrap();
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, rmaos, tails),
-        "steel_rmaos R"
+        sdc_gui::model::helpers::target_file(&rep, rmaos, tails),
+        "steel_rmaos"
     );
     // Final review M4: a target that did not land is named by the outputs' base name, like the rows beside it.
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, lost, tails),
-        lost.label("steel"),
+        sdc_gui::model::helpers::target_file(&rep, lost, tails),
+        "steel_m",
         "no output of its own: another output's base name"
     );
     // Final review K2: the colour output has no suffix, and its stem is the base too.
     let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, colour, tails),
-        colour.label("steel")
+        sdc_gui::model::helpers::target_file(&rep, colour, tails),
+        "steel"
     );
     let h = app(m, "x_roughness.png");
-    h.get_by_role_and_label(Role::Button, "Stop filling steel_rmaos R");
+    h.get_by_role_and_label(Role::Button, "Stop filling RMAOS R");
     h.get_by_role_and_label(Role::Button, "Show steel_rmaos");
     assert!(
-        h.query_all_by_label_contains("fills to steel_rmaos R")
+        h.query_all_by_label_contains("fills RMAOS R  steel_rmaos")
             .count()
             >= 1
     );
@@ -608,7 +608,7 @@ fn ordinary_image_can_become_a_helper() {
     );
     assert!(row_name(&h, "x_mask.png")
         .unwrap()
-        .contains("fills to x alpha"));
+        .contains("fills D alpha"));
     // The selection stays on the file, now the helper panel.
     h.get_by_role_and_label(Role::ComboBox, "Read from");
     // One undo step, and the subtype key is not written by it (the type the opening recorded, Note FC1, stays).

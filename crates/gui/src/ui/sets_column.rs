@@ -1,19 +1,21 @@
 //! The editable Sets column (M3b spec §3.1): set pills in project order with badges, drag and drop
 //! of textures onto sets (and onto an empty area for a new set), drag-to-reorder by the ≡ handle, and a context
 //! menu. Drawing only: every change is a model call, made after drawing.
-use super::columns::{bulk_menu, member, status_text, AMBER, RED};
+use super::columns::{
+    bulk_menu, member, status_text, AMBER, DOCK_GAP_X, DOCK_GAP_Y, DOCK_INSET, RED,
+};
 use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
-use crate::model::helpers::{docked, Docked};
-use crate::model::items::helper_target_text;
+use crate::model::helpers::{docked, fill_text, Docked};
+use crate::model::items::{helper_tag_text, helper_target_files};
 use crate::model::known_paths::TxstRecord;
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, shader_options, shared_cells, slot_row, DropChoice,
-    DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
+    badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
 use crate::model::AppModel;
 use crate::sets_doc::TxstMap;
@@ -112,6 +114,8 @@ pub struct DropState {
     /// Note FM32: the widget with the keyboard focus when the last frame's list ended. A stand-in that holds the focus
     /// and was not the holder then took it this frame (Tab), as opposed to a focused card the wheel scrolled away.
     pub focus: Option<egui::Id>,
+    /// Note HP: the Sets filter last frame, to tell a change from the first frame (`None`).
+    pub filter: Option<crate::model::sets_filter::SetsFilter>,
 }
 
 /// Review I1: a reveal re-aims at most this many frames, so a key that names no visible card cannot loop.
@@ -120,15 +124,18 @@ const REVEAL_TRIES: u8 = 8;
 /// R4: the height of a card never laid out, until any card has been measured (then their mean).
 const CARD_EST: f32 = 110.0;
 
-/// Note FM32: the rows `v`'s chips wrap into at column width `width` (`frame_x` is the card's side margins, `gap` the
-/// chip spacing). A count from the set's slot row, its missing entries and its extra members, not a layout.
+/// Note FM32: the rows `v`'s chips wrap into at column width `width` (`frame_x` is the card's side margins and
+/// the chip rows' inset, Note HP). A count from the set's slot row, its
+/// missing entries and its extra members, not a layout; the chips sit `DOCK_GAP_X` apart.
 // shortcut: a helper docked on a chip still counts as an extra member here, so an unmeasured card may be estimated
 // a row too tall (drawing corrects it, FM32); subtract the docked helpers if a scroll jump shows.
-fn chip_rows(v: &SetView, width: f32, frame_x: f32, gap: f32) -> usize {
+fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
     let chips = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)).len()
         + v.missing.len()
         + v.members.len().saturating_sub(v.slots.len());
-    let per_row = ((width - frame_x + gap) / (CHIP + gap)).floor().max(1.0) as usize;
+    let per_row = ((width - frame_x + DOCK_GAP_X) / (CHIP + DOCK_GAP_X))
+        .floor()
+        .max(1.0) as usize;
     chips.div_ceil(per_row)
 }
 
@@ -136,13 +143,7 @@ fn chip_rows(v: &SetView, width: f32, frame_x: f32, gap: f32) -> usize {
 /// screen is no longer the height of the old width (the scroll bar length stays right without drawing it). A card not
 /// in `views` any more is forgotten. The estimate leaves out the name row, which wraps below the pill when narrow;
 /// drawing the card measures it exactly. Returns whether the width changed from a known one.
-fn reflow_heights(
-    st: &mut DropState,
-    views: &[SetView],
-    width: f32,
-    gap: egui::Vec2,
-    frame_x: f32,
-) -> bool {
+fn reflow_heights(st: &mut DropState, views: &[SetView], width: f32, frame_x: f32) -> bool {
     let old = std::mem::replace(&mut st.card_w, width);
     if old <= 0.0 || (old - width).abs() < 0.5 {
         return false;
@@ -152,8 +153,8 @@ fn reflow_heights(
         let Some(v) = by_id.get(id.as_str()) else {
             return false;
         };
-        let rows = |w: f32| chip_rows(v, w, frame_x, gap.x) as f32;
-        *h = (*h + (rows(width) - rows(old)) * (CHIP + gap.y)).max(0.0);
+        let rows = |w: f32| chip_rows(v, w, frame_x) as f32;
+        *h = (*h + (rows(width) - rows(old)) * (CHIP + DOCK_GAP_Y)).max(0.0);
         true
     });
     true
@@ -222,30 +223,86 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
     let p = ui.painter();
     p.rect_filled(rect, 2.0, vis.extreme_bg_color);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-    p.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        letter,
-        egui::TextStyle::Small.resolve(ui.style()),
-        vis.weak_text_color(),
-    );
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, letter));
+    if outline.is_none() {
+        paint_letter(ui, rect, letter, true, f32::INFINITY);
+    } else {
+        // The missing entry's "?" stays centred.
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            egui::TextStyle::Small.resolve(ui.style()),
+            dim_letter_colour(ui.visuals()),
+        );
+    }
+    // an empty chip's name is "<letter>, empty"; a missing entry's outlined "?" keeps its own
+    let name = if outline.is_none() {
+        format!("{letter}, empty")
+    } else {
+        letter.to_string()
+    };
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
     r
 }
 
-/// The letter in a filled chip's bottom-left corner, on a dark backing so it reads over any thumbnail.
-fn paint_letter(ui: &egui::Ui, rect: egui::Rect, letter: &str) {
+/// Note HP: the dimmed letter's colour on an empty chip (read at 4.5:1 on `extreme_bg_color` in both themes).
+pub fn dim_letter_colour(vis: &egui::Visuals) -> egui::Color32 {
+    vis.widgets.inactive.text_color()
+}
+
+/// Note HP: a tile's label in its bottom-left corner. `dim` (an empty chip, no thumbnail under it) is weak text with
+/// no backing; otherwise white on a dark backing so it reads over any thumbnail. Text wider than the chip is cut with `…`.
+/// `max_w` cuts the text with `…` (trailing-row tags); chip letters pass `f32::INFINITY` and are never cut.
+fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool, max_w: f32) {
     let font = egui::TextStyle::Small.resolve(ui.style());
-    let g = ui
-        .painter()
-        .layout_no_wrap(letter.to_string(), font, egui::Color32::WHITE);
+    let colour = if dim {
+        dim_letter_colour(ui.visuals())
+    } else {
+        egui::Color32::WHITE
+    };
+    let lay = |s: String| ui.painter().layout_no_wrap(s, font.clone(), colour);
+    let mut g = lay(text.to_string());
+    let mut shown = text.to_string();
+    while g.size().x > max_w && shown.pop().is_some() {
+        g = lay(format!("{}…", shown.trim_end()));
+    }
     let at = rect.left_bottom() + egui::vec2(1.0, -1.0 - g.size().y);
-    ui.painter().rect_filled(
-        egui::Rect::from_min_size(at, g.size()).expand(1.0),
-        2.0,
-        egui::Color32::from_black_alpha(170),
-    );
-    ui.painter().galley(at, g, egui::Color32::WHITE);
+    if !dim {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(at, g.size()).expand(1.0),
+            2.0,
+            egui::Color32::from_black_alpha(170),
+        );
+    }
+    ui.painter().galley(at, g, colour);
+}
+
+/// Note HP (Decision 7): the trailing-row tile's tag. A member whose slot is taken: its slot letter; an unused helper:
+/// "unused"; a helper whose fills land on no chip: its first fill; any other member: its `member_tail`, or "—".
+/// `kind` is the slot the member owns in the set, if any. The tail is read with `v.skin || v.shared`, as the input
+/// names are (`input_name.rs`).
+fn tile_tag(model: &AppModel, v: &SetView, key: &str, kind: Option<SlotKind>) -> String {
+    if let Some(k) = kind {
+        return chip_letter(v, k);
+    }
+    let Some(item) = model.item(key) else {
+        return String::new();
+    };
+    let stem = std::path::Path::new(&item.name)
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
+    let fills = item.helper.as_ref().map(|h| h.fills.as_slice());
+    tag_text(fills, member_tail(&stem, v.tails()))
+}
+
+/// `tile_tag` for a member with no slot: a helper's first fill, or "unused" with none; any other member's tail, or "—".
+fn tag_text(helper_fills: Option<&[engine::helper::FillTarget]>, tail: &str) -> String {
+    match (helper_fills, tail) {
+        (Some(f), _) => f.first().map_or("unused".to_string(), |t| fill_text(*t)),
+        (None, "") => "—".to_string(),
+        (None, t) => t.to_string(),
+    }
 }
 
 /// The pill's hover (R15): the long badge, then one line each for blocked, owns, missing entries and recipes.
@@ -306,11 +363,26 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 }
 
 /// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
-fn fit_title(id: &str, fits: impl Fn(&str) -> bool) -> String {
+/// Note HP (SC4): when the search lies inside one middle segment, `…/<that segment>/<rest>` is tried right after the id.
+fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
     use super::header::elide_middle;
     let len = id.chars().count();
     if fits(id) {
         return id.to_string();
+    }
+    let q = engine::sets::fold_id(query.trim());
+    if !q.is_empty() {
+        let segs: Vec<&str> = id.split('/').collect();
+        let middle = 1..segs.len().saturating_sub(1);
+        if let Some(i) = middle
+            .into_iter()
+            .find(|&i| engine::sets::fold_id(segs[i]).contains(&q))
+        {
+            let t = format!("…/{}", segs[i..].join("/"));
+            if fits(&t) {
+                return t;
+            }
+        }
     }
     for n in (1..len).rev() {
         let t = elide_middle(id, n);
@@ -392,8 +464,12 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, v: &SetView, s: Status) {
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .inner_margin(egui::Margin::symmetric(PILL_PAD_X as i8, 1))
         .show(ui, |ui| {
-            let kind =
-                egui::Label::new(egui::RichText::new(kind_text(model, v)).small()).truncate();
+            let kind = egui::Label::new(
+                egui::RichText::new(kind_text(model, v))
+                    .small()
+                    .color(ui.visuals().widgets.inactive.text_color()),
+            )
+            .truncate();
             // In the card row's right-to-left layout the first widget lands rightmost: the dot stays left.
             if ui.layout().prefer_right_to_left() {
                 ui.add(kind);
@@ -441,8 +517,9 @@ fn chip_locks(v: &SetView, kind: Option<SlotKind>) -> (bool, bool) {
     (locked, pgp)
 }
 
-/// The side of a helper badge on a chip's top corner (Note HN).
-const BADGE: f32 = 12.0;
+/// Note HP: a helper badge is drawn 16 px, centred on its chip's top corner; its hit rect is 20 px before `clamp_hits`.
+const BADGE: f32 = 16.0;
+const BADGE_HIT: f32 = 20.0;
 
 /// What one cell of a chip's dock holds: the i-th helper's badge, or `+K` for K helpers not drawn.
 #[derive(Debug, PartialEq, Eq)]
@@ -469,14 +546,87 @@ fn dock_cells(locked: bool, pgp: bool, n: usize) -> Vec<(usize, Cell)> {
     }
 }
 
-/// A dock cell's rectangle on a chip.
-fn cell_rect(chip: egui::Rect, pos: usize) -> egui::Rect {
-    let min = if pos == 0 {
-        chip.right_top() - egui::vec2(BADGE, 0.0)
+/// A dock cell on a chip: the drawn rect and the unclamped hit rect, both centred on the chip's top-right (position 0)
+/// or top-left (1) corner.
+fn badge_rects(chip: egui::Rect, pos: usize) -> (egui::Rect, egui::Rect) {
+    let c = if pos == 0 {
+        chip.right_top()
     } else {
         chip.left_top()
     };
-    egui::Rect::from_min_size(min, egui::Vec2::splat(BADGE))
+    let at = |side: f32| egui::Rect::from_center_size(c, egui::Vec2::splat(side));
+    (at(BADGE), at(BADGE_HIT))
+}
+
+/// Cuts `r` back along its thinner overlap with `o`: the edge on `o`'s side moves to `o`'s edge. No overlap, no change.
+fn cut_from(r: &mut egui::Rect, o: egui::Rect) {
+    let i = r.intersect(o);
+    if i.width() <= 0.0 || i.height() <= 0.0 {
+        return;
+    }
+    if i.width() <= i.height() {
+        if r.center().x < o.center().x {
+            r.max.x = o.min.x;
+        } else {
+            r.min.x = o.max.x;
+        }
+    } else if r.center().y < o.center().y {
+        r.max.y = o.min.y;
+    } else {
+        r.min.y = o.max.y;
+    }
+}
+
+/// Note HP: the badge hit rects (each with the index in `fixed` of its own chip) cut so none leaves `card` or meets a
+/// `fixed` rect other than its own chip (pass 1), then split at the midline of every badge-badge overlap (pass 2).
+/// Both passes cut along the thinner overlap, and the drawn 16 px rect always stays inside a hit.
+// shortcut: three badges meeting in one spot are split pairwise in list order, not at a common point; the dock draws
+// at most two per chip 16 px apart, so this does not arise now.
+fn clamp_hits(
+    hits: &[(egui::Rect, usize)],
+    fixed: &[egui::Rect],
+    card: egui::Rect,
+) -> Vec<egui::Rect> {
+    let mut out: Vec<egui::Rect> = hits
+        .iter()
+        .map(|&(h, own)| {
+            let mut r = h.intersect(card);
+            for (j, f) in fixed.iter().enumerate() {
+                if j != own {
+                    cut_from(&mut r, *f);
+                }
+            }
+            r
+        })
+        .collect();
+    for a in 0..out.len() {
+        for b in a + 1..out.len() {
+            let i = out[a].intersect(out[b]);
+            if i.width() <= 0.0 || i.height() <= 0.0 {
+                continue;
+            }
+            let (ra, rb) = (out[a], out[b]);
+            let mid = i.center();
+            if i.width() <= i.height() {
+                let (left, right) = if ra.center().x < rb.center().x {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                out[left].max.x = mid.x;
+                out[right].min.x = mid.x;
+            } else {
+                let (top, bottom) = if ra.center().y < rb.center().y {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                out[top].max.y = mid.y;
+                out[bottom].min.y = mid.y;
+            }
+        }
+    }
+    out
 }
 
 /// A member chip's menu, drag payload and clicks: click selects, double-click expands, a slot member has the slot
@@ -534,34 +684,102 @@ fn member_acts(
     }
 }
 
-/// Note HN: the helpers that fill one chip, drawn in its top cells. A badge is the helper's thumbnail with the member
-/// behaviours (click selects, double-click expands, drag, the member menu); `+K` is a hover-only count. A helper
-/// with a badge is added to `drawn`, so the trailing row skips it.
+/// One chip's dock, planned: its rect, the index of that rect among the card's fixed rects, the helpers that fill it
+/// and the cells to draw (a badge whose item is gone has no cell).
+struct DockPlan<'a> {
+    chip: egui::Rect,
+    own: usize,
+    entries: Vec<&'a Docked>,
+    cells: Vec<(usize, Cell)>,
+}
+
+/// Note HN: the cells of the helpers that fill the chip `chip` (index `own` among the fixed rects). A helper with a
+/// badge is added to `badged`, so the trailing row skips it.
+fn plan_dock<'a>(
+    model: &AppModel,
+    chip: egui::Rect,
+    own: usize,
+    entries: Vec<&'a Docked>,
+    locks: (bool, bool),
+    badged: &mut HashSet<&'a str>,
+) -> DockPlan<'a> {
+    let mut cells = dock_cells(locks.0, locks.1, entries.len());
+    cells.retain(|(_, c)| match c {
+        Cell::Badge(i) => model.item(&entries[*i].helper).is_some(),
+        Cell::More(_) => true,
+    });
+    for (_, c) in &cells {
+        if let Cell::Badge(i) = c {
+            badged.insert(entries[*i].helper.as_str());
+        }
+    }
+    DockPlan {
+        chip,
+        own,
+        entries,
+        cells,
+    }
+}
+
+/// Note HP: clamps every dock hit rect of one card at once (they must not meet each other, a chip, a tile or the
+/// combo, nor leave the card), then draws the docks. Returns after the chips, so badges sit on top.
 #[allow(clippy::too_many_arguments)]
-fn draw_dock<'a>(
+fn draw_docks(
     ui: &mut egui::Ui,
     model: &AppModel,
     thumbs: &mut ThumbCache,
     v: &SetView,
-    chip: egui::Rect,
-    entries: &[&'a Docked],
-    locks: (bool, bool),
+    plans: &[DockPlan],
+    fixed: &[egui::Rect],
+    card: egui::Rect,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
-    drawn: &mut HashSet<&'a str>,
 ) {
-    for (pos, cell) in dock_cells(locks.0, locks.1, entries.len()) {
-        let rect = cell_rect(chip, pos);
+    let hits: Vec<(egui::Rect, usize)> = plans
+        .iter()
+        .flat_map(|p| {
+            p.cells
+                .iter()
+                .map(move |(pos, _)| (badge_rects(p.chip, *pos).1, p.own))
+        })
+        .collect();
+    let mut clamped = clamp_hits(&hits, fixed, card).into_iter();
+    for p in plans {
+        let hits: Vec<egui::Rect> = clamped.by_ref().take(p.cells.len()).collect();
+        draw_dock(ui, model, thumbs, v, p, &hits, sel_items, acts, member_menu);
+    }
+}
+
+/// Note HN: the helpers that fill one chip, drawn on its top corners. A badge is the helper's thumbnail with the
+/// member behaviours (click selects, double-click expands, drag, the member menu); `+K` is a hover-only count.
+/// `hits` are the clamped hit rects of `plan.cells`, in order.
+#[allow(clippy::too_many_arguments)]
+fn draw_dock(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    thumbs: &mut ThumbCache,
+    v: &SetView,
+    plan: &DockPlan,
+    hits: &[egui::Rect],
+    sel_items: &HashSet<String>,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+) {
+    let entries = &plan.entries;
+    for ((pos, cell), &hit) in plan.cells.iter().zip(hits) {
+        let (rect, _) = badge_rects(plan.chip, *pos);
+        let pos = *pos;
         match cell {
             Cell::Badge(i) => {
-                let d = entries[i];
+                let d = entries[*i];
+                // `plan_dock` kept only cells whose item exists, so this is never None; it stays because the
+                // item is needed and the model is borrowed immutably for the whole frame.
                 let Some(item) = model.item(&d.helper) else {
                     continue;
                 };
                 let id = ui.id().with(("dock", &v.id, &d.helper, d.slot, d.channel));
-                let r = ui.interact(rect, id, egui::Sense::click_and_drag());
-                drawn.insert(d.helper.as_str());
+                let r = ui.interact(hit, id, egui::Sense::click_and_drag());
                 if ui.is_rect_visible(rect) {
                     match thumbs.get(ui.ctx(), item) {
                         Some(t) => egui::Image::new(&t)
@@ -576,30 +794,31 @@ fn draw_dock<'a>(
                         }
                     }
                     let stroke = if sel_items.contains(&d.helper) {
-                        ui.visuals().selection.stroke
+                        egui::Stroke::new(2.0, ui.visuals().selection.stroke.color)
                     } else {
                         egui::Stroke::new(1.0, ui.visuals().panel_fill)
                     };
                     ui.painter()
                         .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
                 }
-                let name = format!("{}, fills {} {}", item.name, v.slot_text(d.slot), d.channel);
+                let name = format!("{}, fills {}", item.name, fill_text(d.target));
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
                 member_acts(model, v, &d.helper, None, true, &r, acts, member_menu);
                 let target = item
                     .helper
                     .as_ref()
-                    .map(|h| helper_target_text(h, v.tails()));
+                    .map(|h| helper_target_files(h, v.tails()));
                 r.on_hover_text(match target {
                     Some(t) => format!("{}\n{t}", item.name),
                     None => item.name.clone(),
                 });
             }
             Cell::More(k) => {
+                let k = *k;
                 let hidden = &entries[entries.len() - k..];
-                let slot = v.slot_text(hidden[0].slot);
+                let slot = chip_letter(v, hidden[0].slot);
                 let id = ui.id().with(("dock-more", &v.id, hidden[0].slot, pos));
-                let r = ui.interact(rect, id, egui::Sense::hover());
+                let r = ui.interact(hit, id, egui::Sense::hover());
                 if ui.is_rect_visible(rect) {
                     let font = egui::TextStyle::Small.resolve(ui.style());
                     ui.painter()
@@ -607,7 +826,7 @@ fn draw_dock<'a>(
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        // "+10" is wider than the 12 px cell: from ten up the cell says "+" and the hover lists them
+                        // "+10" is wider than the 16 px cell: from ten up the cell says "+" and the hover lists them
                         if k < 10 {
                             format!("+{k}")
                         } else {
@@ -623,7 +842,7 @@ fn draw_dock<'a>(
                     .iter()
                     .map(|d| {
                         let file = model.item(&d.helper).map_or(d.helper.as_str(), |i| &i.name);
-                        format!("{file} → {} {}", v.slot_text(d.slot), d.channel)
+                        format!("{file}, fills {}", fill_text(d.target))
                     })
                     .collect();
                 r.on_hover_text(lines.join("\n"));
@@ -689,23 +908,32 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
     let c = model.set_counts();
     ui.horizontal_wrapped(|ui| {
         let f = &mut model.sets_filter;
-        for (on, text, hover) in [
+        for (on, text, n, hover) in [
             (
                 &mut f.attention,
                 format!("Not ready {}", c.attention),
+                c.attention,
                 "Only sets that are not ready: a problem in the set or one of its textures",
             ),
             (
                 &mut f.ready,
                 format!("Ready {}", c.ready),
+                c.ready,
                 "Only sets with no problem",
             ),
             (
                 &mut f.no_json,
                 format!("No JSON {}", c.no_json),
+                c.no_json,
                 "Only sets that write no JSON",
             ),
         ] {
+            // Note HP SC5: a pill that would show nothing is weak, and stays clickable.
+            let text = if n == 0 && !*on {
+                egui::RichText::new(text).color(ui.visuals().weak_text_color())
+            } else {
+                egui::RichText::new(text)
+            };
             if ui
                 .add(
                     egui::Button::selectable(*on, text)
@@ -719,8 +947,11 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         }
         let (text, name) = match f.shader {
-            None => ("Filter ▾", "Sets shader filter".to_string()),
-            Some(s) => ("Filter (1) ▾", format!("Sets shader filter: {}", s.label())),
+            None => ("Filter ▾", "Filter, Sets shader filter".to_string()),
+            Some(s) => (
+                "Filter (1) ▾",
+                format!("Filter (1), Sets shader filter: {}", s.label()),
+            ),
         };
         // A9: a saved shader the Mode does not offer is listed too, so it is never invisible.
         let mut shaders = shader_options(model.target);
@@ -735,9 +966,9 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
                 model.sets_filter.shader = None;
                 ui.close();
             }
-            for s in shaders {
+            let counts = model.sets_with_shaders(&shaders);
+            for (s, n) in shaders.into_iter().zip(counts) {
                 // A9: a shader with no sets stays pickable, in the weak colour.
-                let n = model.sets_with_shader(s);
                 let label = format!("{} {n}", s.label());
                 let label = if n == 0 {
                     egui::RichText::new(label).color(ui.visuals().weak_text_color())
@@ -800,6 +1031,7 @@ fn card_node(
     n.set_label(format!("Set {}, position {} of {total}", v.id, index + 1));
     n.set_selected(selected);
     n.add_action(egui::accesskit::Action::Focus);
+    n.add_action(egui::accesskit::Action::ScrollIntoView);
     n.set_bounds(egui::accesskit::Rect {
         x0: rect.min.x.into(),
         y0: rect.min.y.into(),
@@ -809,8 +1041,8 @@ fn card_node(
 }
 
 /// Note FM32 (R4): a card outside the clip rect allocates `size` and stands in with the card's widget id: a Tab stop
-/// and an AccessKit node named for the set. Returns its rect and whether it took the focus this frame (`held` is the
-/// holder last frame). K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep theirs.
+/// and an AccessKit node named for the set. Returns its rect and whether the card is wanted in view: it took the
+/// focus this frame (`held` is the holder last frame) or got an AccessKit ScrollIntoView request. K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep theirs.
 fn stand_in(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -824,12 +1056,15 @@ fn stand_in(
     let layer = ui.layer_id();
     let ctx = ui.ctx();
     // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
-    let gained = ctx.memory_mut(|m| {
+    let mut wanted = ctx.memory_mut(|m| {
         m.interested_in_focus(id, layer);
         m.focused() == Some(id) && held != Some(id)
     });
+    // egui consumes ScrollIntoView only in a registered widget; a stand-in has none, so read the request here.
+    wanted |=
+        ctx.input(|i| i.has_accesskit_action_request(id, egui::accesskit::Action::ScrollIntoView));
     ctx.accesskit_node_builder(id, |n| card_node(n, v, at, selected, rect));
-    (rect, gained)
+    (rect, wanted)
 }
 
 pub fn draw(
@@ -891,8 +1126,8 @@ pub fn draw(
     // Laid-out cards by full index, for the insertion line.
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
     let gap = ui.spacing().item_spacing;
-    let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x;
-    let reflowed = reflow_heights(st, &views, ui.available_width(), gap, frame_x);
+    let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x + 2.0 * DOCK_INSET;
+    let reflowed = reflow_heights(st, &views, ui.available_width(), frame_x);
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
     if reflowed && model.nav.reveal_set.is_none() {
         if let [k] = model.selected_sets().as_slice() {
@@ -906,6 +1141,27 @@ pub fn draw(
     };
     let card_h = |id: &str| st.card_h.get(id).copied().unwrap_or(est);
     // A set the palette picked scrolls into view (item 19); `reveal_at` is its place in `visible`.
+    // Note HP (SC3): a changed filter, search or shader starts the list at its top, unless the one open set still
+    // shows: that one is revealed. The first frame has no earlier filter, so it counts as no change.
+    // Compare first and clone only on a change: this runs every frame.
+    let changed = match &st.filter {
+        Some(f) if *f == model.sets_filter => false,
+        last => {
+            let was_known = last.is_some();
+            st.filter = Some(model.sets_filter.clone());
+            was_known
+        }
+    };
+    let mut to_top = false;
+    if changed {
+        match model.selected_sets().as_slice() {
+            [k] if visible.iter().any(|&i| views[i].key == *k) => {
+                model.nav.reveal_set = Some(k.clone());
+            }
+            _ => to_top = model.nav.reveal_set.is_none(),
+        }
+        st.reveal_tries = 0;
+    }
     let reveal = model.nav.reveal_set.take();
     let reveal_at = reveal.as_deref().and_then(|k| {
         visible
@@ -940,7 +1196,12 @@ pub fn draw(
             .sum();
         ((now - was).abs() > 0.5).then(|| (off + now - was).max(0.0))
     };
-    let target = jump.or_else(anchored);
+    let target = if to_top {
+        st.anchor = None;
+        Some(0.0)
+    } else {
+        jump.or_else(anchored)
+    };
     let mut resized = false;
     let mut reveal_drawn = false;
     // The first card in view (id, top in the content) and the off-screen card that took the focus, if any.
@@ -1000,7 +1261,7 @@ pub fn draw(
             } else {
                 // R4: a card outside the clip rect stands in for its last height. The focus it takes scrolls the real
                 // card into view (Note FM32).
-                let (rect, gained) = stand_in(
+                let (rect, wanted) = stand_in(
                     ui,
                     id,
                     probe.size(),
@@ -1009,7 +1270,7 @@ pub fn draw(
                     (index, views.len()),
                     selected,
                 );
-                if gained {
+                if wanted {
                     if v.key.is_empty() {
                         ui.scroll_to_rect_animation(
                             rect,
@@ -1385,6 +1646,7 @@ fn pill(
         .corner_radius(12.0)
         .stroke(stroke)
         .fill(fill);
+    let card_margin = card.total_margin();
     let builder = egui::UiBuilder::new()
         .id(look.id)
         .sense(egui::Sense::click());
@@ -1400,6 +1662,15 @@ fn pill(
                 card.show(ui, |ui| {
                     ui.style_mut().interaction.selectable_labels = false;
                     ui.set_width(ui.available_width());
+                    // Note HP: the card's left, right and top, for the badge hit rects to stay inside. The bottom is
+                    // not known until the card is laid out, and no badge reaches it, so it is left open.
+                    let card_rect = {
+                        let (r, m) = (ui.max_rect(), card_margin);
+                        egui::Rect::from_min_max(
+                            r.min - egui::vec2(m.left, m.top),
+                            egui::pos2(r.max.x + m.right, f32::MAX),
+                        )
+                    };
                     let rows: Vec<(&str, &Warning)> = v
                         .members
                         .iter()
@@ -1437,7 +1708,8 @@ fn pill(
                                 .map(|w| (v.id.as_str(), w)),
                         )
                         .collect();
-                    // One row only when the name keeps NAME_MIN px beside the pill and badges (Note FI13).
+                    // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
+                    // (Notes FI13, HP12).
                     let sp = ui.spacing().item_spacing.x;
                     let btn = 2.0 * ui.spacing().button_padding.x + sp;
                     let body = egui::TextStyle::Body.resolve(ui.style());
@@ -1452,7 +1724,9 @@ fn pill(
                         + 2.0 * stroke
                         + STATUS_DOT
                         + sp;
-                    let mut need = lead + NAME_MIN + pill + sp;
+                    // Note HP12: a whole title shorter than NAME_MIN needs only its own width.
+                    let name_min = NAME_MIN.min(text_width(ui, &v.id, &body));
+                    let mut need = lead + name_min + pill + sp;
                     if !rows.is_empty() {
                         need += small_width(ui, &warn_text(rows.len())) + btn;
                     }
@@ -1464,7 +1738,9 @@ fn pill(
                     let shown_for = |ui: &egui::Ui| {
                         let font = egui::TextStyle::Body.resolve(ui.style());
                         let room = ui.available_width();
-                        fit_title(&v.id, |t| text_width(ui, t, &font) <= room)
+                        fit_title(&v.id, &model.sets_filter.search, |t| {
+                            text_width(ui, t, &font) <= room
+                        })
                     };
                     let name = |ui: &mut egui::Ui| {
                         let shown = shown_for(ui);
@@ -1532,158 +1808,55 @@ fn pill(
                     if let Some(map) = &v.txst {
                         record_line(ui, v, map, model.record_ignored(v));
                     }
+                    // Note HP: the rects a badge's hit area must keep clear of: the combo, then every chip and tile.
+                    let mut fixed: Vec<egui::Rect> = vec![];
                     if !v.key.is_empty() {
-                        shader_combo(ui, model, v, editing, acts);
+                        fixed.push(shader_combo(ui, model, v, editing, acts));
                     }
                     if v.key.is_empty() && v.created && v.missing.is_empty() {
                         ui.weak("Drop a texture here to start");
                     }
                     // Note HN: helpers dock on the chips they fill.
                     let dock = docked(model, v);
-                    ui.horizontal_wrapped(|ui| {
-                        let row = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
-                        let mut chipped: HashSet<&str> = HashSet::new();
-                        let mut badged: HashSet<&str> = HashSet::new();
-                        for cell in &row {
-                            let k = cell.kind;
-                            let letter = chip_letter(v, k);
-                            let (mk, from) = match &cell.fill {
-                                SlotFill::Own { item } => (item, None),
-                                SlotFill::Borrowed { from, item } => (item, Some(from)),
-                                SlotFill::Empty => {
-                                    letter_box(ui, &letter, None)
-                                        .on_hover_text(format!("{} (empty)", v.slot_text(k)));
-                                    continue;
-                                }
-                            };
-                            chipped.insert(mk);
-                            let note = from.map(|f| format!("borrowed from {f}"));
-                            // K13: a borrowed item belongs to another set: no drag payload from here.
-                            let Some(r) = member_chip(
-                                ui,
-                                model,
-                                thumbs,
-                                v,
-                                mk,
-                                Some(k),
-                                from.is_none(),
-                                note.as_deref(),
-                                sel_items,
-                                acts,
-                                &mut member_menu,
-                            ) else {
-                                letter_box(ui, &letter, None);
-                                continue;
-                            };
-                            paint_letter(ui, r.rect, &letter);
-                            if from.is_some() {
-                                ui.painter().rect_stroke(
-                                    r.rect,
-                                    2.0,
-                                    egui::Stroke::new(2.0, AMBER),
-                                    egui::StrokeKind::Inside,
+                    let side = DOCK_INSET as i8;
+                    let top = (DOCK_GAP_Y - ui.spacing().item_spacing.y) as i8;
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin {
+                            left: side,
+                            right: side,
+                            top,
+                            bottom: 0,
+                        })
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(DOCK_GAP_X, DOCK_GAP_Y);
+                            ui.horizontal_wrapped(|ui| {
+                                let (plans, fixed) = chip_row(
+                                    ui,
+                                    model,
+                                    thumbs,
+                                    v,
+                                    &dock,
+                                    editing,
+                                    sel_items,
+                                    acts,
+                                    &mut member_menu,
+                                    std::mem::take(&mut fixed),
                                 );
-                            }
-                            let entries: Vec<&Docked> =
-                                dock.iter().filter(|d| d.slot == k).collect();
-                            let name = chip_name(model, &letter, mk, &entries);
-                            r.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                                // Badges last: they register after every chip and sit on top of it.
+                                draw_docks(
+                                    ui,
+                                    model,
+                                    thumbs,
+                                    v,
+                                    &plans,
+                                    &fixed,
+                                    card_rect,
+                                    sel_items,
+                                    acts,
+                                    &mut member_menu,
+                                );
                             });
-                            draw_dock(
-                                ui,
-                                model,
-                                thumbs,
-                                v,
-                                r.rect,
-                                &entries,
-                                chip_locks(v, Some(k)),
-                                sel_items,
-                                acts,
-                                &mut member_menu,
-                                &mut badged,
-                            );
-                        }
-                        // K12: an add/remove entry that matches no file.
-                        // Note DU1: its menu removes the entry (an entry with no files left: Delete set).
-                        for m in &v.missing {
-                            let r = letter_box(ui, "?", Some(RED)).interact(egui::Sense::click());
-                            let text = m.text();
-                            r.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    true,
-                                    format!("Missing: {text}"),
-                                )
-                            });
-                            let r = r.on_hover_text(format!("no file matches {text}"));
-                            member_menu |= r.secondary_clicked();
-                            let open = r.context_menu(|ui| {
-                                let (label, act) = match m {
-                                    Missing::NoFilesLeft => {
-                                        ("Delete set", Act::Delete(v.id.clone(), v.members.len()))
-                                    }
-                                    _ => (
-                                        "Remove from set",
-                                        Act::RemoveMissing(v.id.clone(), m.clone()),
-                                    ),
-                                };
-                                let b = ui.add_enabled(editing.on, egui::Button::new(label));
-                                if b.on_disabled_hover_text(editing.why).clicked() {
-                                    acts.push(act);
-                                    ui.close();
-                                }
-                            });
-                            member_menu |= open.is_some();
-                        }
-                        // Members in no chip (an env mask `_m`, a clashing second kind) follow as plain thumbnails.
-                        for mk in &v.members {
-                            if chipped.contains(mk.as_str()) || badged.contains(mk.as_str()) {
-                                continue;
-                            }
-                            // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
-                            let kind = v
-                                .slots
-                                .iter()
-                                .find(|(_, f)| matches!(f, SlotFill::Own { item } if item == mk))
-                                .map(|(k, _)| *k);
-                            let Some(item) = model.item(mk) else {
-                                continue;
-                            };
-                            // Named by its file and why it is here (REPORT M1); an unused helper is dimmed.
-                            let role = match (kind, &item.helper, &item.job) {
-                                (Some(k), ..) => format!("{} (its slot is taken)", v.slot_text(k)),
-                                (None, Some(h), _) => helper_target_text(h, v.tails()),
-                                (None, None, Some(j)) => subtype_name(j.profile.subtype),
-                                _ => "not converted".to_string(),
-                            };
-                            let dim = item.helper.as_ref().is_some_and(|h| h.fills.is_empty());
-                            let was = ui.opacity();
-                            if dim {
-                                ui.multiply_opacity(ui.visuals().disabled_alpha());
-                            }
-                            let r = member_chip(
-                                ui,
-                                model,
-                                thumbs,
-                                v,
-                                mk,
-                                kind,
-                                true,
-                                Some(&role),
-                                sel_items,
-                                acts,
-                                &mut member_menu,
-                            );
-                            ui.set_opacity(was);
-                            if let Some(r) = r {
-                                let name = format!("{}, {role}", item.name);
-                                r.widget_info(|| {
-                                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
-                                });
-                            }
-                        }
-                    });
+                        });
                 });
             },
         );
@@ -1749,6 +1922,161 @@ fn pill(
     }
 }
 
+/// Note HP: the chip row of a card: one chip per slot (an empty one is a letter box), the missing entries, then the
+/// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
+/// (`fixed` comes in holding the combo's).
+#[allow(clippy::too_many_arguments)]
+fn chip_row<'a>(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    thumbs: &mut ThumbCache,
+    v: &SetView,
+    dock: &'a [Docked],
+    editing: &Editing,
+    sel_items: &HashSet<String>,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+    mut fixed: Vec<egui::Rect>,
+) -> (Vec<DockPlan<'a>>, Vec<egui::Rect>) {
+    let row = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    let mut chipped: HashSet<&str> = HashSet::new();
+    let mut badged: HashSet<&str> = HashSet::new();
+    let mut plans: Vec<DockPlan> = vec![];
+    for cell in &row {
+        let k = cell.kind;
+        let letter = chip_letter(v, k);
+        let (mk, from) = match &cell.fill {
+            SlotFill::Own { item } => (item, None),
+            SlotFill::Borrowed { from, item } => (item, Some(from)),
+            SlotFill::Empty => {
+                let r = letter_box(ui, &letter, None)
+                    .on_hover_text(format!("{} (empty)", v.slot_text(k)));
+                fixed.push(r.rect);
+                continue;
+            }
+        };
+        chipped.insert(mk);
+        let note = from.map(|f| format!("borrowed from {f}"));
+        // K13: a borrowed item belongs to another set: no drag payload from here.
+        let Some(r) = member_chip(
+            ui,
+            model,
+            thumbs,
+            v,
+            mk,
+            Some(k),
+            from.is_none(),
+            note.as_deref(),
+            sel_items,
+            acts,
+            member_menu,
+        ) else {
+            fixed.push(letter_box(ui, &letter, None).rect);
+            continue;
+        };
+        let own = fixed.len();
+        fixed.push(r.rect);
+        paint_letter(ui, r.rect, &letter, false, f32::INFINITY);
+        if from.is_some() {
+            ui.painter().rect_stroke(
+                r.rect,
+                2.0,
+                egui::Stroke::new(2.0, AMBER),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let entries: Vec<&Docked> = dock.iter().filter(|d| d.slot == k).collect();
+        let name = chip_name(model, &letter, mk, &entries);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        plans.push(plan_dock(
+            model,
+            r.rect,
+            own,
+            entries,
+            chip_locks(v, Some(k)),
+            &mut badged,
+        ));
+    }
+    // K12: an add/remove entry that matches no file.
+    // Note DU1: its menu removes the entry (an entry with no files left: Delete set).
+    for m in &v.missing {
+        let r = letter_box(ui, "?", Some(RED)).interact(egui::Sense::click());
+        fixed.push(r.rect);
+        let text = m.text();
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Missing: {text}"))
+        });
+        let r = r.on_hover_text(format!("no file matches {text}"));
+        *member_menu |= r.secondary_clicked();
+        let open = r.context_menu(|ui| {
+            let (label, act) = match m {
+                Missing::NoFilesLeft => ("Delete set", Act::Delete(v.id.clone(), v.members.len())),
+                _ => (
+                    "Remove from set",
+                    Act::RemoveMissing(v.id.clone(), m.clone()),
+                ),
+            };
+            let b = ui.add_enabled(editing.on, egui::Button::new(label));
+            if b.on_disabled_hover_text(editing.why).clicked() {
+                acts.push(act);
+                ui.close();
+            }
+        });
+        *member_menu |= open.is_some();
+    }
+    // Members in no chip (an env mask `_m`, a clashing second kind) follow as plain thumbnails.
+    for mk in &v.members {
+        if chipped.contains(mk.as_str()) || badged.contains(mk.as_str()) {
+            continue;
+        }
+        // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
+        let owns = |f: &SlotFill| matches!(f, SlotFill::Own { item } if item == mk);
+        let kind = v.slots.iter().find(|(_, f)| owns(f)).map(|(k, _)| *k);
+        let Some(item) = model.item(mk) else {
+            continue;
+        };
+        // Named by its file and why it is here (REPORT M1); an unused helper is dimmed.
+        let role = match (kind, &item.helper, &item.job) {
+            (Some(k), ..) => {
+                format!("{} (its slot is taken)", v.slot_text(k))
+            }
+            // the tag paints "unused", so the name and hover say it too (Note HP12)
+            (None, Some(h), _) => helper_tag_text(h),
+            (None, None, Some(j)) => subtype_name(j.profile.subtype),
+            _ => "not converted".to_string(),
+        };
+        let dim = item.helper.as_ref().is_some_and(|h| h.fills.is_empty());
+        let was = ui.opacity();
+        if dim {
+            ui.multiply_opacity(ui.visuals().disabled_alpha());
+        }
+        let r = member_chip(
+            ui,
+            model,
+            thumbs,
+            v,
+            mk,
+            kind,
+            true,
+            Some(&role),
+            sel_items,
+            acts,
+            member_menu,
+        );
+        // the tag is painted at the tile's opacity, so an unused helper's fades with it
+        if let Some(r) = &r {
+            paint_letter(ui, r.rect, &tile_tag(model, v, mk, kind), false, CHIP - 2.0);
+        }
+        ui.set_opacity(was);
+        if let Some(r) = r {
+            fixed.push(r.rect);
+            let name = format!("{}, {role}", item.name);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        }
+    }
+    (plans, fixed)
+}
+
 /// The set's Shader dropdown (M6 spec §7): the engine's pick with its provenance, then "Auto" and the mode's
 /// shaders. Disabled when sets are not editable.
 fn shader_combo(
@@ -1757,7 +2085,7 @@ fn shader_combo(
     v: &SetView,
     editing: &Editing,
     acts: &mut Vec<Act>,
-) {
+) -> egui::Rect {
     let text = v.shader.as_ref().map_or(String::new(), |p| {
         let tag = match p.provenance {
             ShaderOrigin::Set => "",
@@ -1767,29 +2095,63 @@ fn shader_combo(
         };
         format!("{}{tag}", p.shader.label())
     });
-    // A5: its own row, the card's width (a ComboBox never wraps, so it is never wider than the row).
-    ui.add_enabled_ui(editing.on, |ui| {
-        egui::ComboBox::from_id_salt(("shader", &v.id))
-            .width(ui.available_width())
-            .truncate()
-            .selected_text(text)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(v.shader_choice.is_none(), "Auto")
-                    .clicked()
-                {
-                    acts.push(Act::Shader(v.id.clone(), None));
-                }
-                for s in shader_options(model.target) {
+    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at the card's inner width
+    // less COMBO_FREE). The row's free left part allocates nothing, so a click there reaches the card.
+    let (w, natural) = combo_w(ui, &text);
+    let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(
+        row,
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.add_enabled_ui(editing.on, |ui| {
+                let r = super::helper_panel::combo(ui, ("shader", &v.id), &text, w, |ui| {
                     if ui
-                        .selectable_label(v.shader_choice == Some(s), s.label())
+                        .selectable_label(v.shader_choice.is_none(), "Auto")
                         .clicked()
                     {
-                        acts.push(Act::Shader(v.id.clone(), Some(s)));
+                        acts.push(Act::Shader(v.id.clone(), None));
                     }
+                    for s in shader_options(model.target) {
+                        if ui
+                            .selectable_label(v.shader_choice == Some(s), s.label())
+                            .clicked()
+                        {
+                            acts.push(Act::Shader(v.id.clone(), Some(s)));
+                        }
+                    }
+                });
+                super::helper_panel::named(
+                    &r,
+                    egui::WidgetType::ComboBox,
+                    &format!("Shader for {}", v.id),
+                    Some(&text),
+                );
+                if natural > w {
+                    // a read-only card's combo is disabled: only the disabled hover reaches it
+                    r.clone().on_hover_text(&text).on_disabled_hover_text(&text);
                 }
-            });
-    });
+                r.rect
+            })
+            .inner
+        },
+    )
+    .inner
+}
+
+/// The free card area left of the shader combo, which still opens the set (Note HP12).
+const COMBO_FREE: f32 = 48.0;
+
+/// The shader combo's width: its shown text, the arrow and the padding, capped at the card's inner width less
+/// `COMBO_FREE`; and the uncapped width, to tell a cut value.
+fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
+    let sp = ui.spacing();
+    let natural = text_width(ui, shown, &egui::TextStyle::Button.resolve(ui.style()))
+        + sp.icon_width
+        + sp.icon_spacing
+        + 2.0 * sp.button_padding.x;
+    let floor = sp.icon_width + 2.0 * sp.button_padding.x;
+    let cap = (ui.available_width() - COMBO_FREE).max(floor);
+    (natural.min(cap), natural)
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.
@@ -2503,6 +2865,56 @@ mod tests {
     use super::*;
     use engine::codes::Code;
 
+    fn fit_at(id: &str, query: &str, n: usize) -> String {
+        fit_title(id, query, |t: &str| t.chars().count() <= n)
+    }
+
+    #[test]
+    fn fit_title_keeps_a_middle_match() {
+        assert_eq!(
+            fit_at("architecture/stone/banner", "STONE", 15),
+            "…/stone/banner"
+        );
+        assert_eq!(fit_at("a/bb/stone/leaf", "ston", 13), "…/stone/leaf");
+    }
+
+    #[test]
+    fn fit_title_without_a_middle_match_keeps_hn6() {
+        let id = "architecture/stone/banner";
+        let hn6 = fit_at(id, "", 15);
+        for q in ["", "banner", "arch", "stone/ban"] {
+            assert_eq!(fit_at(id, q, 15), hn6, "query {q:?}");
+        }
+    }
+
+    #[test]
+    fn fit_title_with_a_match_that_does_not_fit_falls_through_to_hn6() {
+        // "…/stone/banner" is 14 characters: at 12 the middle match is skipped
+        let id = "architecture/stone/banner";
+        assert_eq!(fit_at(id, "stone", 12), fit_at(id, "", 12));
+    }
+
+    #[test]
+    fn a_tile_tag_is_the_slot_letter_or_the_first_fill_or_the_tail_or_a_dash() {
+        use engine::helper::{AlphaTarget as A, FillTarget as F};
+        let mask = F::Packed {
+            suffix: "m",
+            channel: 1,
+        };
+        // a helper: its first fill, "unused" with none (the tail is not read)
+        assert_eq!(tag_text(Some(&[mask, F::Alpha(A::N)]), "_m"), "M G");
+        assert_eq!(tag_text(Some(&[]), "_m"), "unused");
+        // any other member: its tail, or an em dash
+        assert_eq!(tag_text(None, "_m"), "_m");
+        assert_eq!(tag_text(None, ""), "—");
+    }
+
+    #[test]
+    fn fit_title_shows_the_whole_id_when_it_fits() {
+        let id = "architecture/stone/banner";
+        assert_eq!(fit_at(id, "stone", 40), id);
+    }
+
     #[test]
     fn dock_cells_fill_right_then_left_and_fold_the_rest() {
         use Cell::*;
@@ -2515,6 +2927,85 @@ mod tests {
         assert_eq!(dock_cells(true, false, 3), [(1, More(3))]);
         assert_eq!(dock_cells(false, true, 2), [(0, More(2))]); // the PGPatcher 🔒 keeps the left cell
         assert_eq!(dock_cells(true, true, 2), Vec::<(usize, Cell)>::new());
+    }
+
+    fn shared_area(a: egui::Rect, b: egui::Rect) -> f32 {
+        let i = a.intersect(b);
+        i.width().max(0.0) * i.height().max(0.0)
+    }
+
+    #[test]
+    fn badge_rects_straddle_the_corner() {
+        let chip = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::Vec2::splat(CHIP));
+        let (drawn, hit) = badge_rects(chip, 0);
+        assert_eq!(drawn.center(), chip.right_top());
+        assert_eq!(drawn.size(), egui::Vec2::splat(16.0));
+        assert_eq!(hit.center(), chip.right_top());
+        assert_eq!(hit.size(), egui::Vec2::splat(20.0));
+        let (drawn, hit) = badge_rects(chip, 1);
+        assert_eq!(drawn.center(), chip.left_top());
+        assert_eq!(hit.center(), chip.left_top());
+    }
+
+    #[test]
+    fn clamp_hits_splits_and_stops_at_edges() {
+        let s = egui::Vec2::splat(CHIP);
+        let a = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), s);
+        let b = a.translate(egui::vec2(CHIP + DOCK_GAP_X, 0.0));
+        let c = a.translate(egui::vec2(0.0, CHIP + DOCK_GAP_Y));
+        // 9 px = stroke 1 + margin 6 + inset 2 at the left; the card's top has the row's top margin as well
+        let card = egui::Rect::from_min_max(
+            egui::pos2(a.left() - 9.0, a.top() - 12.0),
+            egui::pos2(b.right() + 9.0, c.bottom() + 9.0),
+        );
+        let fixed = [a, b, c];
+        let hit = |chip: usize, pos: usize| (badge_rects(fixed[chip], pos), chip);
+        // (hits as (rect, own chip), the drawn rects) for each case
+        let cases = [vec![hit(0, 0), hit(1, 1)], vec![hit(0, 1)], vec![hit(2, 0)]];
+        for case in cases {
+            let hits: Vec<_> = case.iter().map(|((_, h), i)| (*h, *i)).collect();
+            let out = clamp_hits(&hits, &fixed, card);
+            for (k, (r, ((drawn, _), own))) in out.iter().zip(&case).enumerate() {
+                assert!(
+                    r.contains_rect(*drawn),
+                    "case {case:?} #{k}: {r:?} holds {drawn:?}"
+                );
+                assert!(
+                    r.width() >= 18.0 - 0.01 && r.height() >= 18.0 - 0.01,
+                    "{r:?}"
+                );
+                assert!(card.contains_rect(*r), "{r:?} inside the card");
+                for (j, f) in fixed.iter().enumerate() {
+                    if j != *own {
+                        assert_eq!(shared_area(*r, *f), 0.0, "{r:?} meets chip {j}");
+                    }
+                }
+                for (j, o) in out.iter().enumerate() {
+                    if j != k {
+                        assert_eq!(shared_area(*r, *o), 0.0, "{r:?} meets badge {j} {o:?}");
+                    }
+                }
+            }
+        }
+        let two = clamp_hits(
+            &[(badge_rects(a, 0).1, 0), (badge_rects(b, 1).1, 1)],
+            &fixed,
+            card,
+        );
+        for r in &two {
+            assert_eq!((r.width(), r.height()), (18.0, 20.0), "{r:?}");
+        }
+        assert_eq!(two[0].right(), a.right() + 8.0);
+        assert_eq!(two[1].left(), a.right() + 8.0);
+        let edge = clamp_hits(&[(badge_rects(a, 1).1, 0)], &fixed, card);
+        assert_eq!((edge[0].left(), edge[0].width()), (card.left(), 19.0));
+        let below = clamp_hits(&[(badge_rects(c, 0).1, 2)], &fixed, card);
+        assert_eq!((below[0].top(), below[0].height()), (a.bottom(), 18.0));
+        // a card whose top is under the badge's: the hit stops at the card's top
+        let low = egui::Rect::from_min_max(egui::pos2(card.left(), a.top() - 4.0), card.max);
+        let top = clamp_hits(&[(badge_rects(a, 0).1, 0)], &fixed, low);
+        assert_eq!(top[0].top(), low.top(), "cut to the card's top");
+        assert_eq!(fixed[0], a, "chips are not moved");
     }
 
     fn warn(msg: &str) -> Warning {

@@ -9,7 +9,7 @@ use engine::helper::{FILLS_FIELD, INVERT_FIELD, READ_FIELD, ROLE_FIELD};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// The set's base name that fill targets are labelled with ("x" in "x_rmaos R").
+/// The set's base name that a fill target with no output is filed under.
 pub fn set_base(h: &HelperReport) -> String {
     Path::new(&h.set_key)
         .file_name()
@@ -18,9 +18,30 @@ pub fn set_base(h: &HelperReport) -> String {
         .into_owned()
 }
 
-/// A fill target's name as the user sees it: the stem of the planned output that ends in the target's suffix, minus
-/// the suffix (so it matches the `Show …` button), else the set's base name when the target did not land.
-pub fn target_label(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
+/// A fill as the user reads it, the same on the badge, the panel and the Textures row: the chip and channel it
+/// writes ("RMAOS R", "CNR alpha", "D alpha"). Note HP.
+pub fn fill_text(t: FillTarget) -> String {
+    use engine::helper::AlphaTarget as A;
+    match t {
+        FillTarget::Alpha(a) => {
+            let chip = match a {
+                A::Diffuse => "D",
+                A::N => "N",
+                A::F => "F",
+                A::S => "S",
+                A::Cnr => "CNR",
+            };
+            format!("{chip} alpha")
+        }
+        FillTarget::Packed { suffix, .. } => {
+            format!("{} {}", suffix.to_uppercase(), fill_channel(t))
+        }
+    }
+}
+
+/// The file a fill target lands in: the stem of the planned output that ends in the target's suffix (so it matches
+/// the `Show …` button), else the outputs' (or the set's) base name plus the suffix when the target did not land.
+pub fn target_file(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
     use engine::helper::AlphaTarget as A;
     let suffix = match t {
         FillTarget::Alpha(A::Diffuse) => None,
@@ -43,7 +64,11 @@ pub fn target_label(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
         })
     };
     let base = set_base(h);
-    t.label(named.or_else(any).unwrap_or(&base))
+    let base = named.or_else(any).unwrap_or(&base);
+    match suffix {
+        Some(s) => format!("{base}_{s}"),
+        None => base.to_string(),
+    }
 }
 
 /// Note HN: the slot chip a fill target lands on. A `_m` target has no chip (CD8).
@@ -82,6 +107,8 @@ pub struct Docked {
     pub helper: String,
     pub slot: SlotKind,
     pub channel: &'static str,
+    /// The fill itself, for its wording (`fill_text`).
+    pub target: FillTarget,
 }
 
 /// The helpers of the set's members, one entry per reported fill that lands on a chip.
@@ -95,6 +122,7 @@ pub fn docked(model: &AppModel, v: &SetView) -> Vec<Docked> {
                     helper: k.clone(),
                     slot: fill_slot(t)?,
                     channel: fill_channel(t),
+                    target: t,
                 })
             })
         })
@@ -158,5 +186,27 @@ impl AppModel {
             INVERT_FIELD,
             on.then_some(json!(true)),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine::helper::AlphaTarget as A;
+
+    #[test]
+    fn fill_text_names_the_chip_and_channel() {
+        let p = |suffix, channel| FillTarget::Packed { suffix, channel };
+        for (t, want) in [
+            (p("rmaos", 0), "RMAOS R"),
+            (p("rfaos", 3), "RFAOS A"),
+            (p("m", 1), "M G"),
+            (p("p", 0), "P R"),
+            (FillTarget::Alpha(A::Cnr), "CNR alpha"),
+            (FillTarget::Alpha(A::Diffuse), "D alpha"),
+            (FillTarget::Alpha(A::N), "N alpha"),
+        ] {
+            assert_eq!(fill_text(t), want, "{t:?}");
+        }
     }
 }

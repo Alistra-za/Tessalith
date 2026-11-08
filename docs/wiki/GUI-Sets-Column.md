@@ -20,29 +20,29 @@ A card's first row has:
 
 Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.
 
-The **shader** combo under the first row takes the card's whole width. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS: <!-- D:HE1 -->
+The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` only when the card is too narrow, and it leaves at least 48 points free on its left; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
 
 | Chip | Meaning |
 |---|---|
 | Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
-| Dim box with the letter | An empty slot. |
-| Small thumbnail in the chip's top-right corner | A **helper badge**: a [helper](GUI-Helpers-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits on a filled chip and on an output with no source file of its own, such as an RMAOS built from helpers only. Hover shows the file and its fills line (`eye_rough.png`, "fills to eye_rmaos R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
+| Dim box with a dimmed letter | An empty slot. |
+| Small thumbnail on the chip's corner | A **helper badge**: a [helper](GUI-Helpers-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits centred on the chip's top-right corner, half outside the chip. A filled chip carries one, and so does an output with no source file of its own, such as an RMAOS built from helpers only. A second helper on the same chip takes the top-left corner. Hover shows the file and its fills line (`eye_rough.png`, "fills RMAOS R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
 | Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
 | Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
 
 Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`remove` path or a borrow) out of `sdc-project.toml` as one undo step. When none of the set's files is left it offers **Delete set** instead. Each such line is also a row in Problems with the same button. A member's own chip has **Remove from set** in its menu too; a borrowed chip uses the slot's **Clear**. While `sdc-project.toml` is read-only they are off, and their hover says why.
 
-What fits no chip follows in a trailing row of plain thumbnails. Each one names its role on hover, so you can tell why it is there:
+What fits no chip follows in a trailing row of plain thumbnails. Each one has a short tag bottom-left and names its role on hover, so you can tell why it is there. The tag is the slot letter when its slot is taken, `unused` for a helper that fills nothing, the first fill ("M G") for a helper whose target has no chip, and the file's tail (`_m`) for any other member. A tag wider than the tile is cut with `…`; hover has the whole text.
 
-- a helper that fills nothing, dimmed, with "not used: …" on hover;
+- a helper that fills nothing, dimmed, with "unused: …" on hover;
 - a helper whose target has no chip on the card;
 - a `_m` env mask, and a second member of a kind the card already shows.
 
 A helper with a badge is not repeated there, unless its badge folded into **+K** or found no free corner.
 
-The open set's card is highlighted. When the column's width changes with one set open (opening a set can narrow the column), the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name.
+The open set's card is highlighted. When the column's width changes with one set open, the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name. A short name that fits whole in less than 80 points keeps one row.
 
-A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
+A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. While you search, a cut title keeps the folder that holds the match (`…/stone/cobble`), so you see why the card is listed. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
 
 The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", and Tab to it scrolls it into view. A context menu or shader list open on a card closes when the card scrolls away, and the scroll bar's thumb changes length as card heights are learned.
 
@@ -51,8 +51,10 @@ The column lays out only the cards on screen, so it stays smooth with hundreds o
 Under the heading:
 
 - a *Search sets* box. It matches the set's id or its label (folded like set ids), never its key;
-- the pills *Not ready n*, *Ready n* and *No JSON n*. *Not ready* is every set that is not ready, so Not ready and Ready together count every set. *No JSON* is a set that writes no JSON;
-- **Filter ▾**, which lists *Any* and the shaders, each with how many sets use it ("PBR 2"). A shader no set uses is greyed but still pickable, so the list stays the same whatever the project holds. It reads **Filter (1) ▾** while one is chosen.
+- the pills *Not ready n*, *Ready n* and *No JSON n*. *Not ready* is every set that is not ready, *No JSON* is a set that writes no JSON;
+- **Filter ▾**, which lists *Any* and the shaders, each with a count ("PBR 2"). It reads **Filter (1) ▾** while one is chosen.
+
+Every number is the sets shown with that pill or shader on: the sets that pass the search and the other filters, plus that one. A selected pill's number is the list you are looking at. A zero is greyed but still works, and a shader no set uses stays listed, so the list is the same whatever the project holds. A selected pill is painted as usual, zero or not.
 
 The filters combine. A filter only hides: the open set and a multi-selection stay selected, the editor and the bulk panel stay, and the heading says "2 selected (1 hidden by filter)".
 
@@ -60,6 +62,8 @@ The filters combine. A filter only hides: the open set and a multi-selection sta
 - When nothing matches, the column says "No sets match the filter (n hidden)" and offers **Clear filter**.
 - Dragging and **Move up** / **Move down** are off while any Sets filter is on: the handle and the two entries are greyed out ("Clear the filter to reorder sets, or use Move to…"). **Move to…** stays on, because it names the target number, and it counts a hidden set it passes.
 - A set you create while a filter is on stays shown until the filter changes; the column says "1 new set shown".
+
+When a filter changes, the list starts at its top, so the first match is the first card. A **Go to set** that is waiting still wins.
 
 The pills and the shader are remembered in `gui.toml` with the window layout. The search text is not.
 

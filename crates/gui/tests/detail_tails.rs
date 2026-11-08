@@ -131,7 +131,7 @@ fn a_lone_detail_named_colour_sets_helper_target_keeps_its_name() {
         .expect("a helper");
     let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, colour, m.helper_tails(&rep)),
-        colour.label("rock_detail")
+        sdc_gui::model::helpers::target_file(&rep, colour, m.helper_tails(&rep)),
+        "rock_detail"
     );
 }

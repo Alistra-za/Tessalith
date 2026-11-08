@@ -97,9 +97,13 @@ fn idle(m: &mut AppModel) {
 }
 
 #[test]
-fn a_card_shows_name_pill_and_a_full_width_shader() {
+fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()));
+    h.run();
+    // The default column is too narrow for half a card to hold "PBR Landscape (auto)": widen it, as a drag leaves it.
+    h.ctx
+        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 460.0_f32));
     h.run();
     let card = card_rect(&h);
     let kind = on_card(&h, "PBR Landscape");
@@ -121,9 +125,19 @@ fn a_card_shows_name_pill_and_a_full_width_shader() {
     );
     let w = combo.rect().width();
     assert!(
-        (card.width() - w).abs() <= 20.0,
-        "the shader ({w}) spans the card ({})",
+        w < card.width() / 2.0,
+        "the shader ({w}) is under half the card ({})",
         card.width()
+    );
+    assert!(
+        combo.rect().min.y >= kind.max.y - 0.5,
+        "the shader row is under the pill"
+    );
+    assert!(
+        (card.max.x - combo.rect().max.x).abs() <= 8.0,
+        "the shader's right edge {} is the card's inner right {}",
+        combo.rect().max.x,
+        card.max.x
     );
     let texts: Vec<_> = shapes(&h)
         .into_iter()
@@ -167,11 +181,13 @@ fn slot_chips_are_labelled_and_empty_ones_are_dim() {
                     .starts_with(&prefix)
             })
             .count();
-        let n = on_card(&h, l).len() + named;
+        // an empty chip is named "<letter>, empty" (Note HP)
+        let empty = format!("{l}, empty");
+        let n = on_card(&h, l).len() + on_card(&h, &empty).len() + named;
         assert_eq!(n, 1, "one {l:?} chip on rock01's card");
     }
     assert!(h.query_by_label_contains("Height _p (empty)").is_none());
-    on_card(&h, "P")[0].hover();
+    on_card(&h, "P, empty")[0].hover();
     h.run();
     h.run();
     h.get_by_label("Height _p (empty)");
@@ -735,13 +751,23 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
         assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}'s node");
     }
     // Tab from the Sets filter walks the cards: it reaches an off-screen card's stand-in, which scrolls its card in.
-    h.query_all_by_role_and_label(Role::Button, "Sets shader filter")
+    h.query_all_by_role_and_label(Role::Button, "Filter, Sets shader filter")
         .find(|n| in_sets_column(&h, n.rect()))
         .expect("the Sets filter button")
         .focus();
     h.step();
-    // The first card past the screen is the next stop after the last drawn one.
-    let next = off[0];
+    // The first card wholly past the panel is the next stop that is only a stand-in. (A card whose position label
+    // is cut off by the bottom edge is drawn, so its Tab stops are its own parts, not a stand-in.)
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+        .expect("the Sets panel")
+        .outer_rect;
+    let next = *off
+        .iter()
+        .find(|&&n| {
+            h.query_all_by_label(&node_name(n))
+                .all(|c| !c.rect().intersects(panel))
+        })
+        .expect("a card wholly past the panel");
     let mut presses = 0;
     while pos_rect(&h, next, 60).is_none() && presses < 600 {
         h.key_press(egui::Key::Tab);

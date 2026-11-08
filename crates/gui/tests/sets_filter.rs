@@ -40,7 +40,7 @@ fn sets_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
         .outer_rect
 }
 
-/// K15: the Sets column's shader filter, named "Sets shader filter" (+ ": <shader>" once one is chosen).
+/// K15: the Sets column's shader filter, named "Filter, Sets shader filter" ("Filter (1), ..." with ": <shader>" once one is chosen).
 fn sets_filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
     let r = sets_rect(h);
     let mut v: Vec<_> = h
@@ -512,10 +512,10 @@ fn the_column_says_when_nothing_matches_and_clear_brings_all_back() {
 fn the_pills_show_their_counts_and_the_shader_popup_filters() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    let c = m.set_counts();
     // A9: a saved shader the Mode does not offer is still listed.
     m.target = engine::config::Target::Vanilla;
     m.sets_filter.shader = Some(Shader::PbrLandscape);
+    let c = m.set_counts();
     let mut h = harness(m);
     h.run();
     let r = sets_rect(&h);
@@ -670,4 +670,42 @@ fn move_up_and_down_are_off_while_filtered() {
             "{b} is disabled"
         );
     }
+}
+
+#[test]
+fn every_count_is_what_its_click_shows() {
+    use sdc_gui::model::sets_filter::{with_part, Part};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let mut seen = vec![];
+    for (search, pill) in [("", false), ("rock", false), ("leaf", true), ("", true)] {
+        m.clear_sets_filter();
+        m.sets_filter.search = search.into();
+        m.sets_filter.no_json = pill;
+        let base = m.sets_filter.clone();
+        let c = m.set_counts();
+        seen.push(c);
+        for (n, p) in [
+            (c.attention, Part::Attention),
+            (c.ready, Part::Ready),
+            (c.no_json, Part::NoJson),
+        ] {
+            let was = m.sets_filter.clone();
+            m.sets_filter = with_part(&base, p);
+            assert_eq!(m.visible_sets().len(), n, "{p:?} with {base:?}");
+            m.sets_filter = was;
+        }
+        for s in [
+            Shader::Pbr,
+            Shader::Default,
+            Shader::Landscape,
+            Shader::Glow,
+        ] {
+            let n = m.sets_with_shader(s);
+            m.sets_filter = with_part(&base, Part::Shader(s));
+            assert_eq!(m.visible_sets().len(), n, "{s:?} with {base:?}");
+            m.sets_filter = base.clone();
+        }
+    }
+    assert_ne!(seen[0], seen[1], "the search changes the counts");
 }

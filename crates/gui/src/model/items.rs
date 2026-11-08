@@ -1,10 +1,12 @@
 //! What the columns show, built from a plan and its events (M3a spec §2.2–2.3).
+use super::helpers::{fill_text, target_file};
 use engine::api::Plan;
 use engine::codes::{Code, Severity, Warning};
 use engine::config::{AlphaPolicy, Subtype, Target};
 use engine::discover::{InputFile, InputKind};
 use engine::events::{EngineEvent, EventKind, RecipeReport};
 use engine::helper::report::HelperReport;
+use engine::helper::FillTarget;
 use engine::manifest::output_key;
 use engine::overrides::project_rel;
 use engine::pack::plan::virtual_stem;
@@ -171,20 +173,38 @@ pub fn alpha_asked(item: &TextureItem) -> Option<AlphaPolicy> {
     Some(proposed.map_or(job.profile.alpha.policy, |p| p.0))
 }
 
-/// Note DY16: where a helper went, from the engine's report: "fills to x_rmaos R, x alpha" or "not used: <reason>".
-pub fn helper_target_text(h: &HelperReport, tails: super::sets::Tails) -> String {
+/// Note DY16: where a helper went, from the engine's report: "fills RMAOS R, D alpha" or "not used: <reason>".
+pub fn helper_target_text(h: &HelperReport) -> String {
+    target_line(h, "not used", |_, t| fill_text(t))
+}
+
+/// Note HP12: `helper_target_text` for the trailing-row tile, which paints the tag "unused" and so names itself with
+/// that word.
+pub fn helper_tag_text(h: &HelperReport) -> String {
+    target_line(h, "unused", |_, t| fill_text(t))
+}
+
+/// Note HP: `helper_target_text` with the file after each fill ("fills RMAOS R  x_rmaos, D alpha  x").
+pub fn helper_target_files(h: &HelperReport, tails: super::sets::Tails) -> String {
+    target_line(h, "not used", |h, t| {
+        format!("{}  {}", fill_text(t), target_file(h, t, tails))
+    })
+}
+
+/// `word` is how a helper that fills nothing is called ("not used", or "unused" where a tag paints that).
+fn target_line(
+    h: &HelperReport,
+    word: &str,
+    one: impl Fn(&HelperReport, FillTarget) -> String,
+) -> String {
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
-            Some(r) => format!("not used: {r}"),
-            None => "not used".to_string(),
+            Some(r) => format!("{word}: {r}"),
+            None => word.to_string(),
         };
     }
-    let to: Vec<String> = h
-        .fills
-        .iter()
-        .map(|t| super::helpers::target_label(h, *t, tails))
-        .collect();
-    format!("fills to {}", to.join(", "))
+    let to: Vec<String> = h.fills.iter().map(|t| one(h, *t)).collect();
+    format!("fills {}", to.join(", "))
 }
 
 fn file_name(p: &Path) -> String {
