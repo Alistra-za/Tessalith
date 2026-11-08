@@ -9,7 +9,7 @@ use engine::helper::{FILLS_FIELD, INVERT_FIELD, READ_FIELD, ROLE_FIELD};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// The set's base name that fill targets are labelled with ("x" in "x_rmaos R").
+/// The set's base name that a fill target with no output is filed under.
 pub fn set_base(h: &HelperReport) -> String {
     Path::new(&h.set_key)
         .file_name()
@@ -18,9 +18,33 @@ pub fn set_base(h: &HelperReport) -> String {
         .into_owned()
 }
 
-/// A fill target's name as the user sees it: the stem of the planned output that ends in the target's suffix, minus
-/// the suffix (so it matches the `Show …` button), else the set's base name when the target did not land.
-pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
+/// A fill as the user reads it, the same on the badge, the panel and the Textures row: the chip and channel it
+/// writes ("RMAOS R", "CNR alpha", "D alpha", "N layer"). Note HP.
+pub fn fill_text(t: FillTarget) -> String {
+    use engine::config::RnmTarget as R;
+    use engine::helper::AlphaTarget as A;
+    match t {
+        FillTarget::Alpha(a) => {
+            let chip = match a {
+                A::Diffuse => "D",
+                A::N => "N",
+                A::F => "F",
+                A::S => "S",
+                A::Cnr => "CNR",
+            };
+            format!("{chip} alpha")
+        }
+        FillTarget::Packed { suffix, .. } => {
+            format!("{} {}", suffix.to_uppercase(), fill_channel(t))
+        }
+        FillTarget::Rnm(R::Cnr) => "CNR layer".into(),
+        FillTarget::Rnm(_) => "N layer".into(),
+    }
+}
+
+/// The file a fill target lands in: the stem of the planned output that ends in the target's suffix (so it matches
+/// the `Show …` button), else the outputs' (or the set's) base name plus the suffix when the target did not land.
+pub fn target_file(h: &HelperReport, t: FillTarget) -> String {
     use engine::helper::AlphaTarget as A;
     let suffix = match t {
         FillTarget::Alpha(A::Diffuse) => None,
@@ -45,7 +69,11 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
         })
     };
     let base = set_base(h);
-    t.label(named.or_else(any).unwrap_or(&base))
+    let base = named.or_else(any).unwrap_or(&base);
+    match suffix {
+        Some(s) => format!("{base}_{s}"),
+        None => base.to_string(),
+    }
 }
 
 /// The `helper.fills` entries of the report's fills: layer blends (`Rnm`) are reports only, never written.
@@ -58,7 +86,7 @@ pub fn written_fills(h: &HelperReport) -> Vec<FillTarget> {
 }
 
 /// Note HN: the slot chip a fill target lands on. A `_m` target has no chip (CD8). Both `Rnm` blends sit on the
-/// normal chip unless they aim at `_cnr` (the rule `target_label` uses).
+/// normal chip unless they aim at `_cnr` (the rule `target_file` uses).
 pub fn fill_slot(t: FillTarget) -> Option<SlotKind> {
     use engine::helper::AlphaTarget as A;
     match t {
@@ -165,5 +193,31 @@ impl AppModel {
             INVERT_FIELD,
             on.then_some(json!(true)),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine::config::RnmTarget as R;
+    use engine::helper::AlphaTarget as A;
+
+    #[test]
+    fn fill_text_names_the_chip_and_channel() {
+        let p = |suffix, channel| FillTarget::Packed { suffix, channel };
+        for (t, want) in [
+            (p("rmaos", 0), "RMAOS R"),
+            (p("rfaos", 3), "RFAOS A"),
+            (p("m", 1), "M G"),
+            (p("p", 0), "P R"),
+            (FillTarget::Alpha(A::Cnr), "CNR alpha"),
+            (FillTarget::Alpha(A::Diffuse), "D alpha"),
+            (FillTarget::Alpha(A::N), "N alpha"),
+            (FillTarget::Rnm(R::N), "N layer"),
+            (FillTarget::Rnm(R::Both), "N layer"),
+            (FillTarget::Rnm(R::Cnr), "CNR layer"),
+        ] {
+            assert_eq!(fill_text(t), want, "{t:?}");
+        }
     }
 }

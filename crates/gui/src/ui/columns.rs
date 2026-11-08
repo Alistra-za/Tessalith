@@ -586,10 +586,10 @@ fn helper_row(
                     let shown = if h.fills.is_empty() {
                         "not used".to_string()
                     } else {
-                        format!("→ {}", target.trim_start_matches("fills to "))
+                        format!("→ {}", target.trim_start_matches("fills "))
                     };
                     ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate())
-                        .on_hover_text(&target);
+                        .on_hover_text(crate::model::items::helper_target_files(&h));
                 },
             );
     });

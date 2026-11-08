@@ -83,18 +83,14 @@ fn an_opened_folder_shows_items_filters_and_the_undecided_count() {
     for label in ["leaf.png", "rock01_normal.png", "Undecided", "Not in a set"] {
         h.get_by_label_contains(label);
     }
-    // The packed output's tile, and the two raw maps' helper rows (Note DY16): each row's name and its "→" target.
+    // The packed output's tile alone: the two raw maps' helper rows say "fills RMAOS R" without the file (Note HP).
     // (Note HN: the Sets column's RMAOS chip is named for its file too, so the count leaves that column out.)
     let in_grid = h
         .query_all_by_label_contains("rock01_rmaos")
         .filter(|n| !in_sets_column(&h, n.rect()))
         .count();
-    assert_eq!(in_grid, 5);
-    assert_eq!(
-        h.query_all_by_label_contains("fills to rock01_rmaos")
-            .count(),
-        2
-    );
+    assert_eq!(in_grid, 1);
+    assert_eq!(h.query_all_by_label_contains("fills RMAOS R").count(), 2);
     h.get_by_label_contains(" undecided");
     // A set is named by its path under the export folder.
     h.get_by_label("landscape/rock01");
@@ -675,7 +671,7 @@ fn a_packed_item_lists_its_channels_and_a_raw_map_points_to_the_output() {
     // A raw map (a helper since Note DY16) says where it goes and offers the way to its output.
     h.state_mut().select_item("landscape/rock01_roughness.png");
     h.run();
-    h.get_by_label("fills to rock01_rmaos R");
+    h.get_by_label("fills RMAOS R  rock01_rmaos");
     press(&mut h, "Show rock01_rmaos");
     assert_eq!(h.state().selection, Selection::Item(packed));
 }

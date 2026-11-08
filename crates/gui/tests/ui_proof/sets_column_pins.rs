@@ -209,7 +209,7 @@ fn the_dock_puts_each_badge_in_its_chips_top_cells() {
         let (_, packed_name) = packed(&h);
         for (badge, chip, letter) in [
             (
-                "crate_opacity.png, fills Diffuse alpha".to_string(),
+                "crate_opacity.png, fills D alpha".to_string(),
                 "D, crate.png, filled by crate_opacity.png".to_string(),
                 "D",
             ),
@@ -219,7 +219,7 @@ fn the_dock_puts_each_badge_in_its_chips_top_cells() {
                 "RMAOS",
             ),
             (
-                "crate_roughness.png, fills Coat _cnr alpha".to_string(),
+                "crate_roughness.png, fills CNR alpha".to_string(),
                 "CNR, crate_cnr.png, filled by crate_roughness.png".to_string(),
                 "CNR",
             ),
@@ -258,27 +258,27 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
         "CNR, crate_cnr.png, filled by crate_roughness.png".to_string(),
         "D, crate.png, filled by crate_opacity.png".to_string(),
         "crate_roughness.png, fills RMAOS R".to_string(),
-        "crate_roughness.png, fills Coat _cnr alpha".to_string(),
-        "crate_opacity.png, fills Diffuse alpha".to_string(),
+        "crate_roughness.png, fills CNR alpha".to_string(),
+        "crate_opacity.png, fills D alpha".to_string(),
     ] {
         one(&h, &l);
     }
     // a badge's helper is not also in the trailing row: its only Button is the badge itself
     assert_eq!(
         named_from(&h, "crate_opacity.png, "),
-        ["crate_opacity.png, fills Diffuse alpha"]
+        ["crate_opacity.png, fills D alpha"]
     );
     let (_d, h) = crate::replay("demo", &[]);
     for l in [
         "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
-        "iron_bump.png, fills Normal _n layer",
-        "iron_detailnorm.png, fills Normal _n layer",
+        "iron_bump.png, fills N layer",
+        "iron_detailnorm.png, fills N layer",
     ] {
         one(&h, l);
     }
     assert_eq!(
         named_from(&h, "iron_bump.png, "),
-        ["iron_bump.png, fills Normal _n layer"]
+        ["iron_bump.png, fills N layer"]
     );
 }
 
@@ -309,7 +309,7 @@ fn right_click_on_a_badge_opens_the_member_menu() {
         "helpers",
         &[
             SEARCH,
-            r#"{"op":"right_click","at":{"label":"crate_opacity.png, fills Diffuse alpha"}}"#,
+            r#"{"op":"right_click","at":{"label":"crate_opacity.png, fills D alpha"}}"#,
         ],
     );
     assert!(h.query_by_label("Remove from set").is_some());
@@ -848,4 +848,70 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
         3,
         "every stone title was on screen once: {checked:?}"
     );
+}
+
+/// Note HP: one wording for a fill everywhere: the badge, its hover, the helper panel's subtitle and its Stop button.
+#[test]
+fn one_fill_has_one_wording() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        let at = format!("at {w}x{h_px}");
+        for l in [
+            "crate_opacity.png, fills D alpha",
+            "crate_roughness.png, fills RMAOS R",
+            "crate_roughness.png, fills CNR alpha",
+        ] {
+            one(&h, l);
+        }
+        let badge = one(&h, "crate_roughness.png, fills RMAOS R");
+        h.event(egui::Event::PointerMoved(badge.center()));
+        h.run();
+        let hover = "crate_roughness.png\nfills CNR alpha  crate_cnr, RMAOS R  crate_rmaos";
+        assert!(texts(&h).iter().any(|(t, _)| t == hover), "{at}: hover");
+        for (p, r) in [(true, 0), (false, 1)] {
+            let _ = r;
+            h.event(egui::Event::PointerButton {
+                pos: badge.center(),
+                button: egui::PointerButton::Primary,
+                pressed: p,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        crate::app_harness::settle(&mut h, 6);
+        let sub = "fills CNR alpha  crate_cnr, RMAOS R  crate_rmaos";
+        let weak = h.ctx.global_style().visuals.weak_text_color();
+        let job = painted_job(&h, sub);
+        let sec = job.sections.last().unwrap();
+        assert_eq!(
+            &job.text[sec.byte_range.start.0..sec.byte_range.end.0],
+            "crate_rmaos",
+            "{at}"
+        );
+        assert_eq!(sec.format.color, weak, "{at}: the file is weak");
+        h.get_by_role_and_label(Role::Button, "Stop filling RMAOS R");
+        for (t, _) in texts(&h) {
+            assert!(!t.contains("fills to"), "{at}: {t:?}");
+        }
+        for n in h.query_all(egui_kittest::kittest::by()) {
+            let l = n.accesskit_node().label().unwrap_or_default();
+            assert!(!l.contains("fills to"), "{at}: node {l:?}");
+        }
+    }
+}
+
+/// The painted text shape's layout job whose text is `text`.
+fn painted_job(h: &crate::app_harness::H, text: &str) -> std::sync::Arc<egui::text::LayoutJob> {
+    fn find(s: &egui::Shape, text: &str) -> Option<std::sync::Arc<egui::text::LayoutJob>> {
+        match s {
+            egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text)),
+            egui::Shape::Text(t) if t.galley.job.text == text => Some(t.galley.job.clone()),
+            _ => None,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .find_map(|c| find(&c.shape, text))
+        .unwrap_or_else(|| panic!("no painted {text:?}"))
 }

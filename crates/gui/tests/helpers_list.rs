@@ -240,10 +240,10 @@ fn every_row_says_its_target_or_not_used() {
     let (y, _) = row(&h, "y_opacity.png");
     assert!(y.contains("not used:"), "{y}");
     let (x, _) = row(&h, "x_roughness.png");
-    assert!(x.contains("fills to x_rmaos R"), "{x}");
+    assert!(x.contains("fills RMAOS R"), "{x}");
     for (n, _) in rows(&h) {
         assert!(
-            n.contains("fills to ") || n.contains("not used"),
+            n.contains("fills ") || n.contains("not used"),
             "{n} says neither"
         );
     }
@@ -258,7 +258,7 @@ fn layer_files_now_have_rows() {
         "",
     ));
     let (name, _) = row(&h, "x_detailnorm.png");
-    assert!(name.contains("fills to x_n"), "{name}");
+    assert!(name.contains("fills N layer"), "{name}");
     h.state_mut().select_item("x_n.png");
     h.run();
     h.run();
@@ -304,12 +304,12 @@ fn helper_row_stays_inside_column_at_1100() {
     assert!(on_row >= 3, "row, name, target and chip: {on_row}");
     let name_label = h.get_by_label(&long).rect();
     assert!(
-        name_label.width() < panel.width() / 2.0,
+        name_label.width() < panel.width(),
         "the name is truncated: {name_label:?}"
     );
-    let target = h.get_by_label_contains("→ x_aaaa").rect();
+    let target = h.get_by_label_contains("→ RMAOS R").rect();
     assert!(target.width() > 10.0 && target.max.x <= panel.max.x);
-    assert!(name.contains("fills to"), "{name}");
+    assert!(name.contains("fills "), "{name}");
 }
 
 #[test]

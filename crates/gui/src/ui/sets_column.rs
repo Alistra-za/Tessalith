@@ -7,7 +7,7 @@ use super::status::Status;
 use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, Docked};
-use crate::model::items::helper_target_text;
+use crate::model::items::{helper_target_files, helper_target_text};
 use crate::model::known_paths::TxstRecord;
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
@@ -583,10 +583,15 @@ fn draw_dock<'a>(
                     ui.painter()
                         .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
                 }
-                let name = format!("{}, fills {} {}", item.name, v.slot_text(d.slot), d.channel);
+                let name = format!(
+                    "{}, fills {} {}",
+                    item.name,
+                    chip_letter(v, d.slot),
+                    d.channel
+                );
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
                 member_acts(model, v, &d.helper, None, true, &r, acts, member_menu);
-                let target = item.helper.as_ref().map(|h| helper_target_text(h));
+                let target = item.helper.as_ref().map(|h| helper_target_files(h));
                 r.on_hover_text(match target {
                     Some(t) => format!("{}\n{t}", item.name),
                     None => item.name.clone(),
@@ -594,7 +599,7 @@ fn draw_dock<'a>(
             }
             Cell::More(k) => {
                 let hidden = &entries[entries.len() - k..];
-                let slot = v.slot_text(hidden[0].slot);
+                let slot = chip_letter(v, hidden[0].slot);
                 let id = ui.id().with(("dock-more", &v.id, hidden[0].slot, pos));
                 let r = ui.interact(rect, id, egui::Sense::hover());
                 if ui.is_rect_visible(rect) {
@@ -620,7 +625,7 @@ fn draw_dock<'a>(
                     .iter()
                     .map(|d| {
                         let file = model.item(&d.helper).map_or(d.helper.as_str(), |i| &i.name);
-                        format!("{file} → {} {}", v.slot_text(d.slot), d.channel)
+                        format!("{file}, fills {} {}", chip_letter(v, d.slot), d.channel)
                     })
                     .collect();
                 r.on_hover_text(lines.join("\n"));

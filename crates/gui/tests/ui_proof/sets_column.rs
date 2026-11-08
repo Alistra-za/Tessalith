@@ -99,7 +99,7 @@ journey!(
     "helpers",
     [
         r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
-        r#"{"op":"click","at":{"label":"crate_opacity.png, fills Diffuse alpha"}}"#,
+        r#"{"op":"click","at":{"label":"crate_opacity.png, fills D alpha"}}"#,
         r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_opacity.png"}"#
     ]
 );
@@ -119,7 +119,7 @@ journey!(
     "helpers",
     [
         r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
-        r#"{"op":"click","at":{"label":"crate_roughness.png, fills Coat _cnr alpha"}}"#,
+        r#"{"op":"click","at":{"label":"crate_roughness.png, fills CNR alpha"}}"#,
         r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#,
         r#"{"op":"click","at":{"label":"props/crate"}}"#,
         r#"{"op":"expect","fact":"/selection","equals":"set:props/crate"}"#,
