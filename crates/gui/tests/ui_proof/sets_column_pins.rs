@@ -1547,7 +1547,17 @@ fn labels_sit_bottom_left_on_every_tile() {
         // an empty chip's letter sits where the D chip's does, dimmed
         let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
         let at = format!("cobble at {w}x{h_px}");
-        let weak = h.ctx.global_style().visuals.weak_text_color();
+        let weak = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
+        // the letter reads on the chip's own fill in both themes
+        for v in [egui::Visuals::dark(), egui::Visuals::light()] {
+            let dim = sdc_gui::ui::sets_column::dim_letter_colour(&v);
+            let c = contrast(dim, v.extreme_bg_color);
+            assert!(
+                c >= 4.5,
+                "{at}: dim letter contrast {c} (dark {})",
+                v.dark_mode
+            );
+        }
         let card = one_node(&h, "Set architecture/stone/cobble, ");
         let mut d_off = None;
         let mut empties = vec![];

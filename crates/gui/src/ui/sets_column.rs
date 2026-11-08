@@ -239,12 +239,17 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
     r
 }
 
+/// Note HP: the dimmed letter's colour on an empty chip (read at 4.5:1 on `extreme_bg_color` in both themes).
+pub fn dim_letter_colour(vis: &egui::Visuals) -> egui::Color32 {
+    vis.widgets.inactive.text_color()
+}
+
 /// Note HP: a tile's label in its bottom-left corner. `dim` (an empty chip, no thumbnail under it) is weak text with
 /// no backing; otherwise white on a dark backing so it reads over any thumbnail. Text wider than the chip is cut with `…`.
 fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool) {
     let font = egui::TextStyle::Small.resolve(ui.style());
     let colour = if dim {
-        ui.visuals().weak_text_color()
+        dim_letter_colour(ui.visuals())
     } else {
         egui::Color32::WHITE
     };
