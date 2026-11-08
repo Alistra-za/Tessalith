@@ -390,6 +390,7 @@ impl SetsDoc {
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
+        let target = self.target_mod();
         let generated = self.f.doc.get(GENERATED).cloned();
         let was_generated = self.doc_generated();
         let old = self.text();
@@ -414,6 +415,10 @@ impl SetsDoc {
         if self.export_folder() != folder {
             let v = folder.map(|p| Value::from(p.to_string_lossy().as_ref()));
             self.set_project("export_folder", v);
+        }
+        // Note HL: nor is the target mod.
+        if self.target_mod() != target {
+            self.set_target_mod(target.as_deref());
         }
         // Note CO (P15): `[generated]` records generated files on disk, which undo does not change either.
         if self.doc_generated() != was_generated {
@@ -483,6 +488,17 @@ impl SetsDoc {
         self.set_project(
             "export_folder",
             Some(Value::from(path.to_string_lossy().as_ref())),
+        );
+    }
+
+    /// Note HL: `[project] target_mod`, the mod folder being worked on (an absolute path; GUI-only state).
+    pub fn target_mod(&self) -> Option<std::path::PathBuf> {
+        self.project_str("target_mod").map(std::path::PathBuf::from)
+    }
+    pub fn set_target_mod(&mut self, p: Option<&std::path::Path>) {
+        self.set_project(
+            "target_mod",
+            p.map(|p| Value::from(p.to_string_lossy().as_ref())),
         );
     }
 

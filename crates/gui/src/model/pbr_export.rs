@@ -279,6 +279,18 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
     let mut out = vec![];
+    // Note HL: an export folder picked after the target mod, or a hand-edited `target_mod`, still overlaps it.
+    let target = m.sets_doc.as_ref().and_then(|d| d.target_mod());
+    if let Some((t, e)) = target.zip(m.export_folder_chosen()) {
+        if super::target_mod::overlaps(&t, &e) {
+            out.push(ExportIssue {
+                set_id: String::new(),
+                set_key: String::new(),
+                text: super::target_mod::TARGET_IS_EXPORT.into(),
+                fix: None,
+            });
+        }
+    }
     for v in &set_views(m) {
         // A value CS would reject voids the whole `.csskin.json`; it is not a PGPatcher entry, so it comes first.
         if m.target == Target::Cs && v.skin {
