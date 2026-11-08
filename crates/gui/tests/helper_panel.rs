@@ -447,22 +447,23 @@ fn a_packed_target_is_named_by_its_output() {
     m.set_output_name(&set, Some("steel")).unwrap();
     idle(&mut m);
     let rep = m.item("x_roughness.png").unwrap().helper.clone().unwrap();
+    let tails = m.helper_tails(&rep);
     let rmaos = engine::helper::FillTarget::parse("rmaos.r").unwrap();
     let lost = engine::helper::FillTarget::parse("m.r").unwrap();
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, rmaos),
+        sdc_gui::model::helpers::target_label(&rep, rmaos, tails),
         "steel_rmaos R"
     );
     // Final review M4: a target that did not land is named by the outputs' base name, like the rows beside it.
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, lost),
+        sdc_gui::model::helpers::target_label(&rep, lost, tails),
         lost.label("steel"),
         "no output of its own: another output's base name"
     );
     // Final review K2: the colour output has no suffix, and its stem is the base too.
     let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, colour),
+        sdc_gui::model::helpers::target_label(&rep, colour, tails),
         colour.label("steel")
     );
     let h = app(m, "x_roughness.png");

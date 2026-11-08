@@ -380,11 +380,7 @@ impl SetView {
     pub fn tails(&self) -> Tails {
         if self.skin || self.shared {
             Tails::Skin
-        } else if self
-            .shader
-            .as_ref()
-            .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
-        {
+        } else if self.landscape_host() {
             Tails::Landscape
         } else if self.joined_detail() {
             Tails::Detail
@@ -393,7 +389,18 @@ impl SetView {
         }
     }
 
-    /// A member is `<another member>_detail` or `_detailnorm`: the engine joined it (`group_sets_with`).
+    /// The engine's detail host rule for landscape (`api::detail_host`): the pick or the saved choice is Landscape or
+    /// PBR Landscape, or the first member's path says landscape.
+    fn landscape_host(&self) -> bool {
+        let is = |s: Shader| matches!(s, Shader::Landscape | Shader::PbrLandscape);
+        self.shader.as_ref().is_some_and(|p| is(p.shader))
+            || self.shader_choice.is_some_and(is)
+            || self.members.first().is_some_and(|k| {
+                engine::suggest::landscape_path(&k.replace('\\', "/").to_lowercase())
+            })
+    }
+
+    /// A member is `<another member's base>_detail` or `_detailnorm`: the engine joined it (`group_sets_with`).
     fn joined_detail(&self) -> bool {
         let stems: Vec<String> = self
             .members
@@ -401,10 +408,14 @@ impl SetView {
             .filter_map(|k| Path::new(k).file_stem())
             .map(|s| s.to_string_lossy().to_lowercase())
             .collect();
+        let bases: Vec<String> = stems
+            .iter()
+            .map(|s| engine::group::split_suffix_with(s, &BTreeMap::new()).base)
+            .collect();
         stems.iter().any(|s| {
             engine::group::DETAIL_SPELLINGS.iter().any(|sp| {
                 s.strip_suffix(&format!("_{sp}"))
-                    .is_some_and(|b| stems.iter().any(|o| o == b))
+                    .is_some_and(|b| bases.iter().any(|o| o == b))
             })
         })
     }

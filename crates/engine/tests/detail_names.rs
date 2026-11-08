@@ -174,6 +174,94 @@ fn a_mesh_picked_landscape_keeps_its_detail() {
     );
 }
 
+/// Final review I1: a Landscape picked from a mesh makes the set a detail host after the pick, so two detail maps in
+/// it are IN-DUPLICATE (not both written), on every target.
+#[test]
+fn a_mesh_picked_landscape_with_two_details_is_in_duplicate() {
+    for target in [Target::Vanilla, Target::Cs] {
+        let d = tempfile::tempdir().unwrap();
+        files(
+            d.path(),
+            &[
+                "textures/a/x.png",
+                "textures/a/x_detail.png",
+                "textures/a/x_detailnorm.png",
+            ],
+        );
+        let mesh = BTreeMap::from([("textures/a/x".to_string(), vec![Shader::Landscape])]);
+        let p = plan_with(d.path(), target, &[], mesh, AcceptSuggestions::High);
+        assert_eq!(
+            dup_names(&p),
+            ["x_detail.png", "x_detailnorm.png"],
+            "{target:?}"
+        );
+        assert!(
+            p.jobs
+                .iter()
+                .all(|j| !j.input.to_string_lossy().contains("_detail")),
+            "{target:?}"
+        );
+    }
+}
+
+/// Final review I3: a set edit keeps the detail members of a landscape or skin set as detail maps.
+#[test]
+fn set_edits_keep_the_detail_members() {
+    let cases: [(Target, &[&str], &str, Subtype); 2] = [
+        (
+            Target::Cs,
+            &[
+                "textures/landscape/x.png",
+                "textures/landscape/x_detail.png",
+            ],
+            "x_detail.png",
+            Subtype::DetailNormal,
+        ),
+        (
+            Target::Cs,
+            &[
+                "textures/a/x_rfaos.png",
+                "textures/a/x.png",
+                "textures/a/x_detail_n.png",
+            ],
+            "x_detail_n.png",
+            Subtype::SkinDetail,
+        ),
+    ];
+    for (target, names, detail, want) in cases {
+        let dir = names[0].rsplit_once('/').unwrap().0;
+        let id = format!("{dir}/x");
+        let spelled = detail.trim_end_matches(".png").trim_start_matches("x");
+        for edit in [
+            engine::sets::SetEdit::Rename {
+                from: id.clone(),
+                to: format!("{dir}/x2"),
+            },
+            engine::sets::SetEdit::Move {
+                file: format!("{dir}/other.png"),
+                to: id.clone(),
+            },
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            files(d.path(), names);
+            put(d.path(), &format!("{dir}/other.png"));
+            let mut req =
+                BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), target);
+            req.recursive = true;
+            req.set_edits = vec![edit.clone()];
+            let rep = Reporter::new(Arc::new(VecSink::default()), "detail-names");
+            let p = Engine::new()
+                .unwrap()
+                .plan(req, &rep, &CancelToken::default())
+                .unwrap();
+            let j = job(&p, detail);
+            // A Rename moves the set id only; the file keeps its own spelling and output name.
+            assert_eq!(j.profile.subtype, want, "{edit:?}");
+            assert_eq!(out_name(j), format!("x{spelled}.dds"), "{edit:?}");
+        }
+    }
+}
+
 #[test]
 fn skin_detail_is_skin_detail() {
     let d = tempfile::tempdir().unwrap();
@@ -256,6 +344,53 @@ fn two_detail_files_are_in_duplicate() {
     );
     let p = plan(d.path(), Target::Cs, &[]);
     assert_eq!(dup_names(&p), ["x_detail.png", "x_detail_n.png"]);
+
+    // The other skin pair, and the landscape `detail` + `detail_n` pair.
+    let d = tempfile::tempdir().unwrap();
+    files(
+        d.path(),
+        &[
+            "textures/a/x_rfaos.png",
+            "textures/a/x.png",
+            "textures/a/x_detailnorm.png",
+            "textures/a/x_detail_n.png",
+        ],
+    );
+    let p = plan(d.path(), Target::Cs, &[]);
+    assert_eq!(dup_names(&p), ["x_detail_n.png", "x_detailnorm.png"]);
+
+    let d = tempfile::tempdir().unwrap();
+    files(
+        d.path(),
+        &[
+            "textures/landscape/x.png",
+            "textures/landscape/x_detail.png",
+            "textures/landscape/x_detail_n.png",
+        ],
+    );
+    let p = plan(d.path(), Target::Cs, &[]);
+    assert_eq!(dup_names(&p), ["x_detail.png", "x_detail_n.png"]);
+}
+
+/// Final review I2: two same-stem twins in one detail host are one IN-DUPLICATE group each, reported once per file.
+#[test]
+fn same_stem_detail_twins_are_reported_once() {
+    let d = tempfile::tempdir().unwrap();
+    files(
+        d.path(),
+        &[
+            "textures/landscape/x.png",
+            "textures/landscape/x_detail.png",
+            "textures/landscape/x_detail.tga",
+        ],
+    );
+    let p = plan(d.path(), Target::Cs, &[]);
+    let n = p
+        .skipped
+        .iter()
+        .filter(|s| s.code == Some(Code::InDuplicate))
+        .count();
+    assert_eq!(n, 2);
 }
 
 #[test]
@@ -309,6 +444,36 @@ fn a_plain_set_detail_is_undecided() {
     assert!(j.suggestions.is_empty(), "{:?}", j.suggestions);
 }
 
+/// Note GW3 (controller's call 1): the old layer names are plain files now. `rock_n` exports with no blend input, and
+/// nothing reports an `RNM-*` code for `rock_bump`.
+#[test]
+fn old_layer_names_are_just_files() {
+    let d = tempfile::tempdir().unwrap();
+    files(d.path(), &["rock.png", "rock_n.png", "rock_bump.png"]);
+    let p = plan(d.path(), Target::Cs, &[]);
+    for j in &p.jobs {
+        for w in &j.warnings {
+            assert!(!w.code.as_str().starts_with("RNM-"), "{:?}", w);
+        }
+    }
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "old-layer-names");
+    Engine::new()
+        .unwrap()
+        .run(p, &rep, &CancelToken::default())
+        .unwrap();
+    let events = serde_json::to_string(&sink.take()).unwrap();
+    assert!(!events.contains("RNM-"), "{events}");
+    let m = engine::manifest::Manifest::at(&d.path().join("out"))
+        .load()
+        .unwrap();
+    let n = m
+        .values()
+        .find(|e| e.output.ends_with("rock_n.dds"))
+        .unwrap();
+    assert!(n.sources.is_empty(), "{:?}", n.sources);
+}
+
 #[test]
 fn a_set_with_a_saved_subtype_is_unchanged() {
     let d = tempfile::tempdir().unwrap();
@@ -344,4 +509,26 @@ fn a_set_with_a_saved_subtype_is_unchanged() {
         job(&p, "x_detail.png").profile.subtype,
         Subtype::GenericData
     );
+
+    // The same through a `[files]` entry in `sdc.toml` (project provenance).
+    for (saved, want) in [
+        ("detail_normal", Subtype::DetailNormal),
+        ("generic_data", Subtype::GenericData),
+    ] {
+        std::fs::write(
+            d.path().join("in/sdc.toml"),
+            format!("[files.\"textures/landscape/x_detail.png\"]\nsubtype = \"{saved}\"\n"),
+        )
+        .unwrap();
+        let p = plan(d.path(), Target::Cs, &[]);
+        let j = job(&p, "x_detail.png");
+        assert_eq!(j.profile.subtype, want, "{saved}");
+        assert!(
+            !j.provenance
+                .get("subtype")
+                .is_some_and(|p| p.to_string().starts_with("shader:")),
+            "{saved}: {:?}",
+            j.provenance.get("subtype")
+        );
+    }
 }

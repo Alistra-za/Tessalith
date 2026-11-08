@@ -115,7 +115,7 @@ impl ExportModel {
             .map(|r| r.path.as_str())
     }
 
-    /// Drop the queued rows of `path` (a raw map packed into a recipe, a used layer file).
+    /// Drop the queued rows of `path` (a raw map packed into a recipe).
     fn drop_queued(&mut self, path: &str) {
         let before = self.rows.len();
         self.rows

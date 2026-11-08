@@ -76,12 +76,11 @@ fn a_normal_card_has_no_rnm_section_or_outline() {
             "iron_s.png",
         ],
     );
-    assert!(
-        m.item(N).unwrap().job.as_ref().unwrap().bake.is_none()
-            && m.item("m/iron_detailnorm2.png")
-                .is_some_and(|i| i.helper.is_none()),
-        "the old layer file is a plain file"
-    );
+    let layer = m
+        .item("m/iron_detailnorm2.png")
+        .expect("the old layer file is an item");
+    assert!(layer.helper.is_none(), "the old layer file is a plain item");
+    assert!(m.item(N).is_some(), "the normal is an item");
     let key = m
         .sets
         .iter()

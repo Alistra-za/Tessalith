@@ -1,6 +1,7 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
 use crate::model::helpers::target_label;
+use crate::model::sets::Tails;
 use crate::model::AppModel;
 use eframe::egui;
 use engine::helper::report::HelperReport;
@@ -74,7 +75,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
         }
     }
     ui.heading(&name);
-    ui.weak(crate::model::items::helper_target_text(h));
+    let tails = model.helper_tails(h);
+    ui.weak(crate::model::items::helper_target_text(h, tails));
     ui.add_space(4.0);
     ui.add_enabled_ui(ro.is_none(), |ui| {
         egui::Grid::new(("helper-panel", key))
@@ -82,11 +84,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
             .show(ui, |ui| {
                 role_row(ui, key, h, &ro, &mut edits);
                 let now = model.current_fills(key, h);
-                fills_rows(ui, key, h, now, &ro, &mut edits);
+                fills_rows(ui, key, h, tails, now, &ro, &mut edits);
                 read_rows(ui, key, h, &ro, &mut edits);
             });
         for (t, reason) in &h.skipped_targets {
-            ui.weak(format!("Skipped {}: {reason}", target_label(h, *t)));
+            ui.weak(format!("Skipped {}: {reason}", target_label(h, *t, tails)));
         }
     });
     for (k, shown) in output_items(ui.ctx(), model, key, h) {
@@ -206,6 +208,7 @@ fn fills_rows(
     ui: &mut egui::Ui,
     key: &str,
     h: &HelperReport,
+    tails: Tails,
     // Final review M1: the `sdc.toml` list when hand-set (DY18b), so ✕ on one target never drops one that did not land.
     now: Vec<FillTarget>,
     ro: &Option<String>,
@@ -223,7 +226,7 @@ fn fills_rows(
         *first = false;
     };
     for t in &now {
-        let label = target_label(h, *t);
+        let label = target_label(h, *t, tails);
         let was_first = first;
         lead(ui, &mut first);
         ui.horizontal(|ui| {
@@ -268,7 +271,10 @@ fn fills_rows(
         } else {
             let r = combo(ui, (key, "helper-add-fill"), "Add target", |ui| {
                 for o in &more {
-                    if ui.selectable_label(false, target_label(h, *o)).clicked() {
+                    if ui
+                        .selectable_label(false, target_label(h, *o, tails))
+                        .clicked()
+                    {
                         let mut next = now.clone();
                         next.push(*o);
                         edits.push(Edit::Fills(Some(next)));

@@ -170,7 +170,7 @@ pub fn alpha_asked(item: &TextureItem) -> Option<AlphaPolicy> {
 }
 
 /// Note DY16: where a helper went, from the engine's report: "fills to x_rmaos R, x alpha" or "not used: <reason>".
-pub fn helper_target_text(h: &HelperReport) -> String {
+pub fn helper_target_text(h: &HelperReport, tails: super::sets::Tails) -> String {
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
             Some(r) => format!("not used: {r}"),
@@ -180,7 +180,7 @@ pub fn helper_target_text(h: &HelperReport) -> String {
     let to: Vec<String> = h
         .fills
         .iter()
-        .map(|t| super::helpers::target_label(h, *t))
+        .map(|t| super::helpers::target_label(h, *t, tails))
         .collect();
     format!("fills to {}", to.join(", "))
 }

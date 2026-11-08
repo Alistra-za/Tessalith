@@ -572,22 +572,18 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         (0, 0),
         "{events:#?}"
     );
-    // Only the cs-only sub-types are refused: their forced fixtures are skipped with CFG-UNAVAILABLE. Uncoded skips
-    // are intentional.
+    // Only the cs-only sub-types are refused: their forced fixtures are skipped with CFG-UNAVAILABLE.
     let refused: BTreeSet<String> = events
         .iter()
-        .filter_map(|e| match &e.kind {
-            EventKind::FileSkipped { code: None, .. } => None,
+        .map(|e| match &e.kind {
             EventKind::FileSkipped { code: Some(c), .. } if c.as_str() == "CFG-UNAVAILABLE" => {
                 // A forced fixture by its sub-type id, any other file by its path under `in/`.
                 let p = e.path.clone().unwrap_or_default().replace('\\', "/");
                 let rel = p.rsplit_once("/in/").map_or(p.as_str(), |(_, r)| r);
-                Some(
-                    rel.strip_prefix("textures/h/")
-                        .map_or(rel.to_string(), |f| {
-                            f.split('.').next().unwrap().to_string()
-                        }),
-                )
+                rel.strip_prefix("textures/h/")
+                    .map_or(rel.to_string(), |f| {
+                        f.split('.').next().unwrap().to_string()
+                    })
             }
             _ => panic!("unexpected vanilla event: {e:#?}"),
         })

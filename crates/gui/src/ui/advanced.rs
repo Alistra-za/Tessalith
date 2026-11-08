@@ -788,6 +788,33 @@ mod tests {
         assert!(arrow_held(settled, Role::SpinButton, egui::Key::ArrowUp).is_empty());
     }
 
+    fn slider_box(ui: &mut egui::Ui, s: &mut St) {
+        let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
+            ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false))
+        });
+        s.take(done);
+    }
+
+    /// FY1: a click on a slider settles it, and commits once.
+    #[test]
+    fn a_click_on_a_slider_commits_once() {
+        use egui_kittest::kittest::Queryable as _;
+        let st = St {
+            cur: 0.0,
+            commits: vec![],
+        };
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(300.0, 100.0))
+            .build_ui_state(slider_box, st);
+        h.run();
+        h.get_by_role(Role::Slider).click();
+        h.run();
+        h.run();
+        let commits = &h.state().commits;
+        assert_eq!(commits.len(), 1, "{commits:?}");
+        assert!(commits[0] > 0.0, "{commits:?}");
+    }
+
     #[test]
     fn held_value_commits_a_typed_value_and_an_arrow_key_once() {
         assert_eq!(typed(held_box, Role::SpinButton, "25"), vec![25.0]);

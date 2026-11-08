@@ -1,5 +1,6 @@
 //! Note DY17: the helper panel's edits. Each writes one `helper.*` selector of the helper file's own `[files]` entry in
 //! `sdc.toml` as one undo step, then plans again; a read-only `sdc.toml` takes none (`AppModel::edit`).
+use super::sets::Tails;
 use super::AppModel;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
@@ -18,7 +19,7 @@ pub fn set_base(h: &HelperReport) -> String {
 
 /// A fill target's name as the user sees it: the stem of the planned output that ends in the target's suffix, minus
 /// the suffix (so it matches the `Show …` button), else the set's base name when the target did not land.
-pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
+pub fn target_label(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
     use engine::helper::AlphaTarget as A;
     let suffix = match t {
         FillTarget::Alpha(A::Diffuse) => None,
@@ -36,7 +37,7 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
     // set reads `steel` beside the rows that read `steel_rmaos R`.
     let any = || {
         stems().next().map(|s| {
-            let tail = super::sets::member_tail(s, super::sets::Tails::Skin).len();
+            let tail = super::sets::member_tail(s, tails).len();
             &s[..s.len() - tail]
         })
     };
@@ -45,6 +46,14 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
 }
 
 impl AppModel {
+    /// The tails of the set a helper report belongs to (`SetView::tails`), `Plain` when the set is not listed.
+    pub fn helper_tails(&self, h: &HelperReport) -> Tails {
+        super::sets::views(self)
+            .iter()
+            .find(|s| s.key == h.set_key)
+            .map_or(Tails::Plain, |s| s.tails())
+    }
+
     /// Note DY18b: a helper's current list. A hand-set list is its `sdc.toml` `helper.fills`, so a target that did not
     /// land is not lost; otherwise the engine's reported fills.
     pub fn current_fills(&self, key: &str, h: &HelperReport) -> Vec<FillTarget> {

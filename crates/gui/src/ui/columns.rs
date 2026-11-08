@@ -532,7 +532,7 @@ fn helper_row(
         return;
     };
     let key = item.key.clone();
-    let target = crate::model::items::helper_target_text(&h);
+    let target = crate::model::items::helper_target_text(&h, model.helper_tails(&h));
     let role = h.role.label();
     // Registered before the cells, so the truncated labels keep their hover (the topmost widget wins the click).
     let resp = ui.interact(

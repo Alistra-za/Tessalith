@@ -1597,7 +1597,21 @@ fn rnm_keys_are_refused() {
                 .unwrap_err()
                 .to_string(),
         ];
-        for set in [format!("{path}={val}"), format!("file:a.png.{path}={val}")] {
+        refused.push(
+            ConfigFile::parse(&format!("[subtypes.normal]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+        );
+        refused.push(
+            r.add_toml(&format!("{head}[subtypes.normal]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+        );
+        for set in [
+            format!("{path}={val}"),
+            format!("file:a.png.{path}={val}"),
+            format!("subtype:normal.{path}={val}"),
+        ] {
             refused.push(engine::overrides::parse_set(&set).unwrap_err());
         }
         for e in refused {
@@ -1606,6 +1620,20 @@ fn rnm_keys_are_refused() {
                 "{path}: {e}"
             );
         }
+    }
+}
+
+/// Note GW1: a suffix alias spelled like a detail map name is refused, since those names are fixed.
+#[test]
+fn a_detail_map_name_is_no_suffix_alias() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for alias in ["detail", "detailnorm"] {
+        let e = PresetRegistry::builtin()
+            .unwrap()
+            .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(alias) && e.contains("detail map name"), "{e}");
     }
 }
 

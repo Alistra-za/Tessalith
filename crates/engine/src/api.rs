@@ -1207,7 +1207,8 @@ pub(crate) fn join_members(
 
 /// Note GW1: a set takes the detail names `_detail`, `_detailnorm` and `_detail_n` as one map when it is an Advanced skin
 /// set (cs), or is landscape by its path (`suggest::landscape_path`) or by an explicit Landscape or PBR Landscape.
-/// shortcut: a Landscape picked later (from a mesh) is not seen, so such a set needs an explicit shader for `_detail_n`.
+/// shortcut: a Landscape picked later (from a mesh) is not seen here, so such a set needs an explicit shader for
+/// `_detail_n`; `plan_sets` repeats the IN-DUPLICATE rule after the pick.
 pub(crate) fn detail_host<'a>(
     ctx: &'a ResolveCtx<'a>,
     files: &'a [InputFile],
@@ -2038,6 +2039,31 @@ impl Engine {
             shaders: &picks,
             ..base_ctx
         };
+        // Note GW1: a Landscape picked now (from a mesh) makes its set a detail host too, so two detail maps in it
+        // are IN-DUPLICATE like any other host's. `prepare` could not see the pick; its groups are not repeated.
+        let late: Vec<usize> = crate::group::duplicate_details(
+            &sets,
+            files,
+            registry.alias_table(),
+            |s| {
+                picks
+                    .get(&s.key)
+                    .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+            },
+            |f| f.kind != InputKind::Dds || reencodes(&ctx, f),
+        )
+        .into_iter()
+        .flatten()
+        .filter(|i| !dup_idx.contains(i))
+        .collect();
+        skipped.extend(late.iter().map(|&i| SkippedFile {
+            path: files[i].path.clone(),
+            output: files[i].output.clone(),
+            set: set_of.get(&i).map(|k| k.to_string()),
+            code: Some(Code::InDuplicate),
+            reason: "two inputs map to one output; exclude one".into(),
+        }));
+        let late_paths: BTreeSet<&Path> = late.iter().map(|&i| files[i].path.as_path()).collect();
         // Note CO103: images whose B is empty, for a generated AO beside a pre-packed `_rmaos` (pack planning).
         let flat_b: BTreeSet<PathBuf> = pass1
             .iter()
@@ -2089,6 +2115,9 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
+            if late_paths.contains(f.path.as_path()) {
+                continue;
+            }
             // Note GI (R5), GW1: a PBR Landscape detail map or `_noise` is typed again (detail normal, noise).
             let landscape_retype = split_for((set, f))
                 .suffix

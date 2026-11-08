@@ -1,4 +1,3 @@
-//! Also holds Note GW3's old_layer_names_are_just_files (the old RNM layer names are plain files).
 //! XPMF Task 2 (Note GI, design X12, X13, X15): in a landscape set `_detail` is its own detail-normal output;
 //! `_noise` is the BC4 projected noise; a MATO-only PBR Landscape set needs no RMAOS.
 use engine::api::*;
@@ -220,36 +219,4 @@ fn mato_only_set_exports_clean() {
     // DDS_HEADER.dwMipMapCount (offset 28), DX10 dxgiFormat (offset 128); 32x32 has six levels.
     assert_eq!((u32_at(128), u32_at(28)), (80, 6));
     assert!(d.path().join("out").join("foo_detail.dds").exists());
-}
-
-/// Note GW3 (controller's call 1): the old layer names are plain files now. `rock_n` exports with no blend input, and
-/// nothing reports an `RNM-*` code for `rock_bump`.
-#[test]
-fn old_layer_names_are_just_files() {
-    let d = tempfile::tempdir().unwrap();
-    for n in ["rock.png", "rock_n.png", "rock_bump.png"] {
-        png(d.path(), n);
-    }
-    let p = rnm_support::plan_dir(d.path(), vec![]);
-    for j in &p.jobs {
-        for w in &j.warnings {
-            assert!(!w.code.as_str().starts_with("RNM-"), "{:?}", w);
-        }
-    }
-    let sink = Arc::new(VecSink::default());
-    let rep = Reporter::new(sink.clone(), "old-layer-names");
-    Engine::new()
-        .unwrap()
-        .run(p, &rep, &CancelToken::default())
-        .unwrap();
-    let events = serde_json::to_string(&sink.take()).unwrap();
-    assert!(!events.contains("RNM-"), "{events}");
-    let m = engine::manifest::Manifest::at(&d.path().join("out"))
-        .load()
-        .unwrap();
-    let n = m
-        .values()
-        .find(|e| e.output.ends_with("rock_n.dds"))
-        .unwrap();
-    assert!(n.sources.is_empty(), "{:?}", n.sources);
 }

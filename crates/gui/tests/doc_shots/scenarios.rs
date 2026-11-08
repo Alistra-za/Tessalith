@@ -82,7 +82,7 @@ pub fn adapter_name() -> String {
 }
 
 /// A made-up mod: an architecture wall (diffuse, `_n`, `_m`), a PBR cobble set, a 200x120 banner (not a power of
-/// two), vanilla armour sets with `_n`/`_p`/`_m`, `_bump` and `_detailnorm`, a PBR metal set with `_rmaos`, a body
+/// two), vanilla armour sets with `_n`/`_p`/`_m`, a PBR metal set with `_rmaos`, a body
 /// skin and a fern with cut-out alpha. Returns its `textures` folder.
 pub fn demo(dir: &Path) -> PathBuf {
     let t = dir.join("textures");
@@ -171,8 +171,6 @@ pub fn demo(dir: &Path) -> PathBuf {
     mono("armor/steel_p.png", 100);
     mono("armor/steel_m.png", 60);
     mono("armor/gold_m.png", 80);
-    mono("armor/iron_bump.png", 120);
-    normal("armor/iron_detailnorm.png");
     colour("pbr/metal.png", 150, 150, 160);
     normal("pbr/metal_n.png");
     rgb("pbr/metal_rmaos.png", 128, 128, &|x, y| {
