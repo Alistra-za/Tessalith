@@ -3,7 +3,7 @@
 //! (P0 borrowed `nif::props::Lighting`).
 use crate::cbuffer::CbWriter;
 use crate::permutation::{defines, runtime_bits, Material, Stage};
-use crate::scene::srgb_to_linear;
+use crate::scene::{srgb_to_linear, Mat3x4};
 use nif::material::MaterialState;
 use nif::props::{LightingParams, LightingTrailer};
 use std::collections::HashSet;
@@ -55,22 +55,23 @@ pub struct ProjectedLayer {
 }
 
 /// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not parallax (3), FaceGen (4, 5),
-/// MLP (11) or sparkle snow (14), whose `PROJECTED_UV` branches differ (Lighting.hlsl:1740-1748), and not SLSF2.24.
+/// MLP (11) or sparkle snow (14), whose `PROJECTED_UV` branches differ (Lighting.hlsl:1740-1748), and not a vanilla
+/// SLSF2.24 (MLP). A PBR SLSF2.24 is the coat (TwoLayer), and CS projects onto it (Note GZ1).
 /// Also not eye (16) or model-space normals (SLSF1.12): those permutations do not compile with `PROJECTED_UV` (EYE
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).
 pub fn projected_eligible(m: &MaterialState) -> bool {
-    // shortcut: PBR+MLP shapes are excluded without a capture; upgrade if a capture shows CS projects onto them
     !m.skinned
         && !matches!(m.shader_type, 3 | 4 | 5 | 11 | 14 | 16)
-        && !bit(m.slsf2, 24)
+        && (m.is_pbr() || !bit(m.slsf2, 24))
         && !bit(m.slsf1, 12)
 }
 
 /// The layer's constants as the capture shows them (mato-capture-results.md). `ProjectedUVParams.z` is the noise
 /// UV scale's inverse, 0 when the scale is not positive. PBR only: `MaterialObjectRGBScale`, `ParallaxOccData`
 /// (roughness, specular level) and, with glint, `SparkleParams` and `PBRFlags` |= ProjectedGlint (ORed into what
-/// `write_pbr` wrote). Fields a layout lacks are skipped (`CbWriter::set`).
-pub fn write_projected(w: &mut CbWriter, l: &ProjectedLayer, pbr: bool) {
+/// `write_pbr` wrote). Fields a layout lacks are skipped (`CbWriter::set`). `model`: the shape's NIF transform, for
+/// `TextureProj` row 2.
+pub fn write_projected(w: &mut CbWriter, l: &ProjectedLayer, pbr: bool, model: &Mat3x4) {
     let inv_noise = if l.noise_uv_scale > 0.0 {
         1.0 / l.noise_uv_scale
     } else {
@@ -86,11 +87,14 @@ pub fn write_projected(w: &mut CbWriter, l: &ProjectedLayer, pbr: bool) {
     );
     // Diffuse/normal tiling 0.2, detail tiling 0.8, projected normals on.
     w.set("ProjectedUVParams3", &[0.2, 0.8, 0.0, 1.0]);
-    // shortcut: the captured matrix without the ref translation, so row 2 is world up only for a shape whose NIF
-    // rotation is identity; upgrade to inverse(world rotation)·up per shape if rotated statics show the wrong faces.
+    // Rows 0-1: the captured matrix (they feed TexCoord0.zw, unused on the triplanar path). Row 2: the VS turns it
+    // into World3x3 · row, and the model's row 2 makes that s²·world up for any rotation (Note GZ2).
+    let up = &model[2];
     w.set(
         "TextureProj",
-        &[0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        &[
+            0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, up[0], up[1], up[2], 0.0,
+        ],
     );
     if !pbr {
         return;
@@ -363,13 +367,14 @@ pub fn write_skin_flags(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
 /// Writes the material fields into one cbuffer of any stage. The writer must be zero (fresh from
 /// `CbWriter::new` or after `CbWriter::zero`): fields a branch does not write must read 0, never a previous
 /// material's value. `bound` = registers bound to a real texture in this draw. `projected`: the renderer's MATO
-/// layer, written when it applies to `m` ([`projected_eligible`]; the program then has `PROJECTED_UV`).
+/// layer and the shape's model, written when the layer applies to `m` ([`projected_eligible`]; the program then has
+/// `PROJECTED_UV`).
 pub fn write_material(
     w: &mut CbWriter,
     m: &MaterialState,
     bound: &Bound,
     linear_lighting: bool,
-    projected: Option<&ProjectedLayer>,
+    projected: Option<(&ProjectedLayer, &Mat3x4)>,
 ) {
     let p = &m.params;
     let pbr = m.is_pbr();
@@ -434,8 +439,8 @@ pub fn write_material(
     w.set("Bones", &bones);
     w.set("PreviousBones", &bones);
     // Last: it replaces MaterialObjectRGBScale and ORs into PBRFlags.
-    if let Some(l) = projected.filter(|_| projected_eligible(m)) {
-        write_projected(w, l, pbr);
+    if let Some((l, model)) = projected.filter(|_| projected_eligible(m)) {
+        write_projected(w, l, pbr, model);
     }
 }
 

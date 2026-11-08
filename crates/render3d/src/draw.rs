@@ -222,7 +222,13 @@ impl ShapeDraw {
     ) {
         for cb in self.vs_cbs.iter_mut().chain(self.ps_cbs.iter_mut()) {
             cb.writer.zero();
-            write_material(&mut cb.writer, m, &self.bound, linear_lighting, projected);
+            write_material(
+                &mut cb.writer,
+                m,
+                &self.bound,
+                linear_lighting,
+                projected.map(|l| (l, &self.model)),
+            );
             write_static(&mut cb.writer, feature_values);
             write_skin_flags(&mut cb.writer, m, &self.bound);
             cb.dirty = true;

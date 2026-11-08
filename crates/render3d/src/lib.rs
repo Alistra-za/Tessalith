@@ -1286,7 +1286,13 @@ impl Renderer {
         let fields = program_fields(program);
         let fv = values_for(&self.settings, self.features_on, self.head_part, &fields, m);
         for cb in vs_cbs.iter_mut().chain(ps_cbs.iter_mut()) {
-            write_material(&mut cb.writer, m, &bound, ll, self.projected.as_ref());
+            write_material(
+                &mut cb.writer,
+                m,
+                &bound,
+                ll,
+                self.projected.as_ref().map(|l| (l, world)),
+            );
             scene::write_static(&mut cb.writer, &fv);
             write_skin_flags(&mut cb.writer, m, &bound);
         }
