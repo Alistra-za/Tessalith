@@ -26,7 +26,7 @@ The **shader** combo under the first row takes the card's whole width. Under it 
 |---|---|
 | Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
 | Dim box with the letter | An empty slot. |
-| Small thumbnail in the chip's top-right corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits on a filled and on an empty chip, which is the case for an RMAOS built from helpers only. Hover shows the file and its fills line (`eye_rough.png`, "fills to eye_rmaos R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
+| Small thumbnail in the chip's top-right corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits on a filled chip and on an output with no source file of its own, such as an RMAOS built from helpers only. Hover shows the file and its fills line (`eye_rough.png`, "fills to eye_rmaos R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
 | Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
 | Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
 
@@ -40,7 +40,9 @@ What fits no chip follows in a trailing row of plain thumbnails. Each one names 
 
 A helper with a badge is not repeated there, unless its badge folded into **+K** or found no free corner.
 
-The open set's card is highlighted. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name. A name still too long is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`); hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it. When you open a set and the column narrows, the card scrolls into view.
+The open set's card is highlighted. When the column's width changes with one set open (opening a set can narrow the column), the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name.
+
+A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
 
 The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", and Tab to it scrolls it into view. A context menu or shader list open on a card closes when the card scrolls away, and the scroll bar's thumb changes length as card heights are learned.
 
