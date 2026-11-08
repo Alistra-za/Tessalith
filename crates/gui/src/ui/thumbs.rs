@@ -68,6 +68,7 @@ impl ThumbCache {
         tex
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

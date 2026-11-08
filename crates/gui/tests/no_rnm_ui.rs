@@ -108,7 +108,6 @@ fn a_normal_card_has_no_rnm_section_or_outline() {
     h.run();
     let panel_drew = h.query_all_by_label_contains("Normal").count();
     let panel_rnm = h.query_all_by_label("RNM").count();
-    let panel_blends = h.query_all_by_label("Blends into").count();
 
     assert!(card_drew > 0, "the normal card drew");
     assert!(
@@ -119,7 +118,31 @@ fn a_normal_card_has_no_rnm_section_or_outline() {
     assert_eq!(card_hover_rnm, 0, "an RNM hover on the card");
     assert_eq!(card_accent, 0, "the normal card has an accent outline");
     assert_eq!(panel_rnm, 0, "an RNM section");
-    assert_eq!(panel_blends, 0, "a Blends into row");
+}
+
+/// The layer file's own helper panel: it drew (the Role row), and has no "Blends into" row or layer-target combo.
+#[test]
+fn a_layer_files_helper_panel_has_no_blends_into_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(
+        d.path(),
+        &["iron.png", "iron_n.png", "iron_detailnorm2.png"],
+    );
+    let layer = "m/iron_detailnorm2.png";
+    assert!(
+        m.item(layer).is_some_and(|i| i.helper.is_some()),
+        "the layer file is a helper item"
+    );
+    m.select_item(layer);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let drew = h.query_all_by_label("Role").count();
+    let blends = h.query_all_by_label("Blends into").count();
+    let combos = h.query_all_by_label("Layer target").count();
+    assert!(drew > 0, "the helper panel drew");
+    assert_eq!(blends, 0, "a Blends into row");
+    assert_eq!(combos, 0, "a layer-target combo");
 }
 
 const AMBER: Color32 = Color32::from_rgb(230, 160, 30);
