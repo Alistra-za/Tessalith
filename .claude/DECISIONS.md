@@ -10,7 +10,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 ## Index
 
 - Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY
-- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
+- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW
@@ -96,7 +96,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 ### Analysis and alpha
 
 - The alpha question is one dropdown on the resolved type. [FM35]
-- No-suffix files are the colour member, at High confidence, unless a lone file with an underscore and no recognised suffix waits for a type (GY1); the GUI accepts High suggestions and records them in the project. [U1, U3, FC1, GY1]
+- A file with no recognised suffix is the colour member, at High confidence; a lone one with an underscore waits for a type (GY1). The GUI accepts High suggestions and records them in the project. [U1, U3, FC1, GY1]
 - Mesh alpha evidence (NiAlphaProperty from the scan) decides a varying alpha's meaning through the `mesh:alpha` layer; the first plan asks until the scan evidence is read, then re-plans. [U5, U6, U7, U9]
 - "(auto)" in the Sub-type row means the decision came from evidence, with the reason on hover. [U4]
 - `_coat` is coat colour + strength (canonical `s`). [U2, S-shader-9]

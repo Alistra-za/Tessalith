@@ -24,11 +24,7 @@ Things you may run into in version 2.0.0, and what to do about them.
 skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-`sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters).
-
-### One file says "unknown suffix" and `sdc convert` exits 1
-
-A file like `rock_bump.png`, alone in its set, waits for a type instead of becoming a colour map, and `--accept-suggestions high` doesn't change that. The message names the fix, and the rule is in [Texture types](Texture-Types.md#texture-sets).
+`sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#texture-sets) says why.
 
 ### A colour map asks what its alpha means
 

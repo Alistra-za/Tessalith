@@ -24,11 +24,12 @@ textures\armor\iron\
   iron_n.png        set "iron", suffix _n
   iron_m.png        set "iron", suffix _m
   iron_trim.png     set "iron_trim", colour map (_trim is not a suffix)
+  iron_trim_n.png   set "iron_trim", suffix _n
 ```
 
-A file waits for a type instead of becoming a colour map when all of these hold: it has no sub-type in a `[files]` entry or a rule, its name has an underscore but no recognised suffix (aliases count), and it is alone in its set. `rock_bump.png` on its own waits: you can't tell if it's a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it. Files under `textures\cubemaps`, `landscape`, `sky` and `interface` never wait. A set's shader doesn't give the type. A kept `.dds` never waits.
+A file waits for a type instead of becoming a colour map when all of these hold: it has no sub-type in a `[files]` entry or a rule, its name has an underscore but no recognised suffix (aliases count), and it is alone in its set, counted after joins and set edits. `rock_bump.png` on its own waits: you can't tell if it's a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it. Files under `textures\cubemaps`, `landscape`, `sky` and `interface` never wait. A set's shader doesn't give the type. A kept `.dds` never waits.
 
-In the GUI a waiting file is Undecided and has no set card until you pick a type. On the command line it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1; `--allow SUG-LOW-CONFIDENCE` doesn't convert it. <!-- D:GY1 -->
+In the GUI a waiting file is Undecided, with a Problems row, a Review row and no set card until you pick a type (the card stays when you created the set or set something on it, such as a shader). On the command line it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1; `--allow SUG-LOW-CONFIDENCE` doesn't convert it. <!-- D:GY1 -->
 
 Some decisions depend on the whole set: whether it is a PBR set, its shader, which raw maps get packed together, and whether a normal map's detail is baked into roughness.
 
