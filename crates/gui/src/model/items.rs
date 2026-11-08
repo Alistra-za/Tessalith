@@ -72,6 +72,8 @@ pub struct TextureItem {
     pub stamp: Option<SourceStamp>,
     /// Note DY16: the engine's report for a `Helper` item.
     pub helper: Option<std::sync::Arc<HelperReport>>,
+    /// Note GY5: the job waits for a type (`ResolvedJob::waits_for_type`); alone in its set, it has no set card.
+    pub waiting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,6 +258,7 @@ impl PlanView {
                 warnings: job.warnings.clone(),
                 thumb: session.thumbnail(job),
                 analysis: session.cache().analysis(job).map(std::sync::Arc::new),
+                waiting: job.waits_for_type(),
                 job: Some(job.clone()),
                 status,
                 changed_on_disk: false,
@@ -284,6 +287,7 @@ impl PlanView {
                         changed_on_disk: false,
                         stamp: None,
                         helper: None,
+                        waiting: false,
                     });
                 }
             }
@@ -315,6 +319,7 @@ impl PlanView {
                     changed_on_disk: false,
                     stamp: None,
                     helper: Some(std::sync::Arc::new(h.clone())),
+                    waiting: false,
                 }
             })
             .collect();
@@ -345,6 +350,7 @@ impl PlanView {
                 changed_on_disk: false,
                 stamp: if dds { SourceStamp::of(&s.path) } else { None },
                 helper: None,
+                waiting: false,
             });
         }
         for f in &plan.failed {
@@ -364,6 +370,7 @@ impl PlanView {
                 changed_on_disk: false,
                 stamp: None,
                 helper: None,
+                waiting: false,
             });
         }
         // De-duplicate by key (a raw source can feed two recipes): keep the first.

@@ -153,6 +153,8 @@ fn a_set_that_builds_rfaos_is_advanced_skin() {
 fn outside_advanced_skin_sk_is_the_vanilla_guess_and_wet_is_a_base_name() {
     let d = tempfile::tempdir().unwrap();
     set_files(&d, false);
+    // Note GY1: a normal on `x_wet`, so the unjoined `x_wet` is not a lone unknown suffix.
+    put(d.path(), "x_wet_n.png", wet_normal(64));
     let p = plan(&d, Target::Cs, &[]);
     assert_eq!(
         top(&p, "x_sk.png"),
@@ -879,6 +881,8 @@ fn a_wet_member_joins_only_a_cs_advanced_skin_set() {
     put(d.path(), "x.png", colour(64));
     put(d.path(), "x_rfaos.png", colour(64));
     put(d.path(), "x_wet.png", colour(64));
+    // Note GY1: a normal on `x_wet`, so the unjoined `x_wet` is not a lone unknown suffix.
+    put(d.path(), "x_wet_n.png", wet_normal(64));
     let p = plan(&d, Target::Vanilla, &[]);
     assert_ne!(set_of(&p, "x_wet.png"), set_of(&p, "x.png"));
     assert_eq!(top(&p, "x_wet.png").0, Subtype::Diffuse);

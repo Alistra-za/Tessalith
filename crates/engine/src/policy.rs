@@ -47,7 +47,8 @@ pub struct ResolveCtx<'a> {
     /// M6 (DECISIONS Note S): set key → the set's shader pick. Empty during pass 1 (`NO_SHADERS`).
     pub shaders: &'a BTreeMap<String, crate::shader::ShaderPick>,
     /// M6 Track E (DECISIONS Note U5): `shader::colour_mesh_key` → the alpha property of each scanned shape that uses
-    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence.
+    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence. A key there also means a
+    /// scanned mesh uses that file in slot 0 (Note GY6).
     pub mesh_alpha: &'a BTreeMap<String, Vec<crate::shader::MeshAlpha>>,
 }
 
@@ -76,6 +77,8 @@ pub struct SubtypeDecision {
     /// `--accept-suggestions high`.
     pub decided: bool,
     pub suggestions: Vec<Suggestion>,
+    /// Note GY1: the name is an unknown suffix alone in its set and nothing decided it (`suggest::unknown_suffix`).
+    pub waits: bool,
 }
 
 /// A suffix alias in use for one file (spec §3.7, DECISIONS Note G).
@@ -373,8 +376,18 @@ pub fn helper_requested(ctx: &ResolveCtx, input: &InputFile) -> crate::helper::H
 }
 
 pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
+    decide_subtype_with(ctx, f, false)
+}
+
+/// [`decide_subtype`] for a file the plugin scanner may name as a GRAS model's diffuse (`resolve_file_with`).
+fn decide_subtype_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> SubtypeDecision {
     // An invalid chain is reported by `layered_profile`; here it only contributes no rules.
     let chain = preset_chain(ctx, f).unwrap_or_default();
+    // Note GY6: a scanned mesh that uses the file in slot 0, or a GRAS model, says it is a diffuse, as a path does.
+    let mesh_diffuse = gras_diffuse
+        || crate::shader::colour_mesh_key(&f.input.game_path, &f.input.output, None)
+            .is_some_and(|k| ctx.mesh_alpha.contains_key(&k));
+    let may_wait = f.set.members.len() == 1 && !mesh_diffuse;
     let mut suggestions = suggest(&SuggestContext {
         target: ctx.target,
         suffix: f.suffix,
@@ -383,6 +396,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
         alpha: f.analysis.alpha,
         is_float: f.info.is_float,
         advanced_skin: set_is_advanced_skin(ctx, f.set, f.input),
+        may_wait,
     });
     if let Some((alias, canonical, preset)) = alias_parts(ctx, f) {
         for s in &mut suggestions {
@@ -425,6 +439,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                 provenance,
                 decided: true,
                 suggestions,
+                waits: false,
             };
         }
     }
@@ -439,6 +454,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                     provenance,
                     decided: true,
                     suggestions,
+                    waits: false,
                 };
             }
         }
@@ -450,6 +466,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::AnalysisFact("cube-dds".into()),
             decided: true,
             suggestions,
+            waits: false,
         };
     }
     // Note DV1: an inferred plain diffuse (`diffuse`, or `pbr_albedo` in a PBR set) of a chosen Advanced Skin set.
@@ -463,6 +480,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::Shader(crate::shader::Shader::AdvancedSkin.id().into()),
             decided: true,
             suggestions,
+            waits: false,
         };
     }
     // S-shader-4: the set's shader re-types a member (eye `_n` → msn, landscape colour → landscape_diffuse).
@@ -492,6 +510,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                 provenance: Provenance::Shader(id.into()),
                 decided: true,
                 suggestions,
+                waits: false,
             };
         }
         if let Some((st, why)) = suggestions
@@ -504,6 +523,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                     provenance: Provenance::Shader(id.into()),
                     decided: true,
                     suggestions,
+                    waits: false,
                 };
             }
             suggestions.insert(
@@ -524,6 +544,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                 provenance: Provenance::Suggestion,
                 decided,
                 suggestions,
+                waits: false,
             }
         }
         None => SubtypeDecision {
@@ -531,6 +552,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::Suggestion,
             decided: false,
             suggestions,
+            waits: crate::suggest::unknown_suffix(f.suffix, &f.input.game_path, may_wait),
         },
     }
 }
@@ -1274,6 +1296,22 @@ pub struct ResolvedJob {
     /// before analysis and again at load (`helper::apply_fill`); `None` for every other job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<crate::helper::FillJob>,
+    /// Note GY1: `SubtypeDecision::waits` as `resolve_decided` saw it. Not serialised: the JSON stays as it was.
+    #[serde(skip)]
+    pub unknown_suffix: bool,
+}
+
+/// Note GY1: the reason of a file that waits for a type (`suggest::unknown_suffix`).
+pub const UNKNOWN_SUFFIX: &str =
+    "unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry";
+
+impl ResolvedJob {
+    /// Note GY1: an unknown suffix, alone in its set, with no type assigned: unresolved, no suggestion, no set card.
+    pub fn waits_for_type(&self) -> bool {
+        self.unknown_suffix
+            && self.suggestions.is_empty()
+            && matches!(self.status, JobStatus::Unresolved { .. })
+    }
 }
 
 /// A source file's size and modification time, to tell whether it changed between planning and conversion.
@@ -2243,6 +2281,7 @@ fn packing_input_job(
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     }
 }
 
@@ -2255,7 +2294,7 @@ pub fn resolve_file(ctx: &ResolveCtx, f: &FileFacts) -> ResolvedJob {
 /// design §5, ruling R11): when nothing explicit chose its sub-type and its analysis passes the detection tests, its
 /// top suggestion becomes a high-confidence `complex_grass`, on either target (Note AZ reverses ruling R1).
 pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> ResolvedJob {
-    let mut d = decide_subtype(ctx, f);
+    let mut d = decide_subtype_with(ctx, f, gras_diffuse);
     // Note DY (rulings 12, 13): a hand-set helper role on an image wins over its name and a requested sub-type;
     // `none` makes it an ordinary file.
     let role = (f.input.kind == crate::discover::InputKind::Image)
@@ -2331,8 +2370,12 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     let suffix_alias = alias_use(ctx, f);
     let mut reasons = vec![];
     let mut needs = vec![];
+    // Note GY1: `--allow SUG-LOW-CONFIDENCE` accepts a suggestion; with none there is nothing to accept.
+    let no_pick = !d.decided && d.suggestions.is_empty();
+    // A suggestion added after `decide_subtype` (the grass auto-tag) settles a waiting file.
+    let unknown_suffix = no_pick && d.waits;
     if !d.decided {
-        if !allowed(ctx, f, Code::SugLowConfidence) {
+        if no_pick || !allowed(ctx, f, Code::SugLowConfidence) {
             needs.push(Need::Subtype);
         }
         reasons.push(match d.suggestions.first() {
@@ -2342,6 +2385,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                 s.confidence,
                 s.reason
             ),
+            None if unknown_suffix => UNKNOWN_SUFFIX.into(),
             None => "no sub-type could be suggested; set one".into(),
         });
     }
@@ -2395,6 +2439,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                     shader: None,
                     cube: None,
                     fill: None,
+                    unknown_suffix,
                 };
             }
         };
@@ -2479,7 +2524,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     // triggers LOSS-ALPHA-DATA against the default `remove`), then blocking codes.
     let status = if !errors.is_empty() {
         JobStatus::Error { codes: errors }
-    } else if !reasons.is_empty() && !allowed(ctx, f, Code::SugLowConfidence) {
+    } else if !reasons.is_empty() && (no_pick || !allowed(ctx, f, Code::SugLowConfidence)) {
         JobStatus::Unresolved { reasons, needs }
     } else if !blocking.is_empty() {
         JobStatus::Blocked { codes: blocking }
@@ -2504,5 +2549,6 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix,
     }
 }

@@ -807,6 +807,8 @@ pub fn pick_for_set(
             alpha: crate::presets::AlphaContent::None,
             is_float: false,
             advanced_skin: false,
+            // Only `is_pbr_set` reads this context, and it never asks whether a file waits.
+            may_wait: false,
         }),
         gras: set.members.iter().any(|&m| {
             let f = &files[m];
@@ -1752,6 +1754,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
     }
 

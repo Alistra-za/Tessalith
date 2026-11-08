@@ -1269,6 +1269,8 @@ pub(crate) fn set_is_pbr(target: Target, set: &TextureSet, files: &[InputFile]) 
         alpha: AlphaContent::None,
         is_float: false,
         advanced_skin: false,
+        // Only `is_pbr_set` reads this context, and it never asks whether a file waits.
+        may_wait: false,
     }))
 }
 
@@ -3536,6 +3538,8 @@ fn map_members(
                 alpha: AlphaContent::None,
                 is_float: false,
                 advanced_skin: false,
+                // Note GY4: a kept DDS is never planned, so it never waits; its name still fills a slot.
+                may_wait: false,
             })
             .first()
             .map(|s| s.subtype);
@@ -3920,6 +3924,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
     }
 
@@ -4083,6 +4088,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         let texels = 48 * 40;
         // `mips.levels = "none"` keeps the 48x40 size (Note FM29).
@@ -4147,6 +4153,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         std::fs::write(&job.output, b"dds").unwrap();
         let enc = EncoderVersions::current();

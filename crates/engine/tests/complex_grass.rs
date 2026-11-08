@@ -438,6 +438,26 @@ fn all_four_conditions_tag_complex_grass() {
     assert_eq!(j.profile.subtype, Subtype::ComplexGrass);
 }
 
+/// Note GY6: a GRAS model's diffuse never waits for a type. A lone `g_01` that passes the tests is complex grass (the
+/// auto-tag needs no earlier suggestion); one that fails them is a diffuse, as before the unknown-suffix rule.
+#[test]
+fn a_lone_underscored_gras_diffuse_does_not_wait() {
+    for (img, want) in [
+        (grass(32), Subtype::ComplexGrass),
+        (Rgba32F::new(32, 32, [0.4, 0.3, 0.2, 1.0]), Subtype::Diffuse),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        put(&d, "g_01.png", &img);
+        let mut r = req(&d, Target::Cs, &[]);
+        r.gras_diffuses = ["textures/plants/g_01".to_string()].into();
+        let p = plan_req(r);
+        let j = job(&p, "g_01.png");
+        assert!(!j.waits_for_type(), "{want:?}");
+        assert_eq!(j.profile.subtype, want);
+        assert_eq!(j.suggestions[0].subtype, want);
+    }
+}
+
 /// §5 (Review Focus 3): each condition false alone leaves the existing classification.
 #[test]
 fn each_condition_false_alone_leaves_the_classification() {

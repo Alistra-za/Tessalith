@@ -74,6 +74,7 @@ fn fx(target: Target, members: &[(&str, Kind)]) -> Fx {
             derive: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         });
         out.facts.insert(
             f.path.clone(),

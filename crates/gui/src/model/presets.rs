@@ -109,6 +109,7 @@ pub fn suffixes_of(st: Subtype, target: Target) -> Vec<&'static str> {
                                     alpha,
                                     is_float: false,
                                     advanced_skin: skin,
+                                    may_wait: false,
                                 })
                                 .iter()
                                 .any(|x| x.subtype == st)

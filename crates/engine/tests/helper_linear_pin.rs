@@ -46,6 +46,7 @@ fn job(f: &InputFile, subtype: Subtype, status: JobStatus, n: u64) -> ResolvedJo
         derive: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     }
 }
 

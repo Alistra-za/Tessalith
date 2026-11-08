@@ -149,6 +149,9 @@ fn detail_mask_and_detail2_leave_the_detail_map_alone() {
             "foo_detail_mask.png",
             "foo_detail2.png",
             "foo_detailmask.png",
+            // Note GY1: normals that use the two checked names as their base, so neither is a lone unknown suffix.
+            "foo_detail_mask_n.png",
+            "foo_detail2_n.png",
         ] {
             png(d.path(), n);
         }

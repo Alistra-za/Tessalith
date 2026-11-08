@@ -2633,7 +2633,8 @@ impl AppModel {
         // Keep the selection when its item or set still exists; else nothing.
         let gone = match &self.selection {
             Selection::Item(k) => self.item(k).is_none(),
-            Selection::Set(k) => !self.sets.iter().any(|s| &s.key == k),
+            // Note GY5: a set that lost its card is gone too.
+            Selection::Set(k) => !sets::has_card(self, k),
             Selection::None => false,
         };
         if gone {
@@ -2644,9 +2645,7 @@ impl AppModel {
                 self.expanded = None;
                 self.preview_close();
                 if selected_expanded {
-                    if let Some(set) =
-                        expanded_set.filter(|s| self.sets.iter().any(|x| &x.key == s))
-                    {
+                    if let Some(set) = expanded_set.filter(|s| sets::has_card(self, s)) {
                         self.selection = Selection::Set(set);
                     }
                 }
@@ -3317,7 +3316,7 @@ impl AppModel {
 
     /// "1 texture, 1 set" / "3 textures, 2 sets" (Note FI14).
     fn counts_line(&self) -> String {
-        let (t, s) = (self.items.len(), self.sets.len());
+        let (t, s) = (self.items.len(), sets::carded_sets(self));
         format!(
             "{t} texture{}, {s} set{}",
             review::plural(t),

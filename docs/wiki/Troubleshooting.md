@@ -24,7 +24,7 @@ Things you may run into in version 2.0.0, and what to do about them.
 skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-`sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters).
+`sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#texture-sets) says why.
 
 ### A colour map asks what its alpha means
 
@@ -55,7 +55,7 @@ The overlay and the check read your Meshes scan, so scan your MO2 instance in th
 
 ### A normal map came out as a diffuse
 
-Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
+Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm` (alone in its set it waits for a type instead, [see why](Texture-Types.md#texture-sets)). Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
 
 ### A texture is written at a different size
 

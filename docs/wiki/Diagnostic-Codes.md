@@ -102,7 +102,7 @@ Every warning has a code and a severity:
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
 | `SET-BAKE-RATIO` | warning | No longer raised: every size pair bakes. An `allow` list naming it still loads. | Nothing. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that does not exist. | Fix or remove it. |
-| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it, or `--accept-suggestions high` for High ones. |
+| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it, or `--accept-suggestions high` for High ones. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#texture-sets). `--allow SUG-LOW-CONFIDENCE` converts nothing that has no suggestion. |
 | `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the sub-type. |
 
 ### Validation

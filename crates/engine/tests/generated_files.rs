@@ -109,6 +109,9 @@ fn other_generated_names_plan_as_on_main() {
         "wall_n.png",
         "wall_n_generated.png",
         "wall_d_generated.png",
+        // Note GY1: a normal that uses each as its base, so neither is a lone unknown suffix.
+        "wall_n_generated_n.png",
+        "wall_d_generated_n.png",
     ] {
         put(d.path(), n, 16, |x, y| (x * 8 + y) as u8);
     }
