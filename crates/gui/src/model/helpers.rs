@@ -1,5 +1,6 @@
 //! Note DY17: the helper panel's edits. Each writes one `helper.*` selector of the helper file's own `[files]` entry in
 //! `sdc.toml` as one undo step, then plans again; a read-only `sdc.toml` takes none (`AppModel::edit`).
+use super::sets::{SetView, SlotKind};
 use super::AppModel;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
@@ -52,6 +53,61 @@ pub fn written_fills(h: &HelperReport) -> Vec<FillTarget> {
         .iter()
         .copied()
         .filter(|t| !matches!(t, FillTarget::Rnm(_)))
+        .collect()
+}
+
+/// Note HN: the slot chip a fill target lands on. A `_m` target has no chip (CD8). Both `Rnm` blends sit on the
+/// normal chip unless they aim at `_cnr` (the rule `target_label` uses).
+pub fn fill_slot(t: FillTarget) -> Option<SlotKind> {
+    use engine::helper::AlphaTarget as A;
+    match t {
+        FillTarget::Alpha(A::Diffuse) => Some(SlotKind::Diffuse),
+        FillTarget::Alpha(A::N) => Some(SlotKind::Normal),
+        FillTarget::Alpha(A::F) => Some(SlotKind::Fuzz),
+        FillTarget::Alpha(A::S) => Some(SlotKind::Subsurface),
+        FillTarget::Alpha(A::Cnr) => Some(SlotKind::Coat),
+        FillTarget::Packed { suffix, .. } => match suffix {
+            "rmaos" | "rfaos" => Some(SlotKind::Rmaos),
+            "p" => Some(SlotKind::Height),
+            _ => None,
+        },
+        FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some(SlotKind::Coat),
+        FillTarget::Rnm(_) => Some(SlotKind::Normal),
+    }
+}
+
+/// The channel a fill target writes: `alpha`, `R`/`G`/`B`/`A`, or `layer` for a blended normal layer.
+pub fn fill_channel(t: FillTarget) -> &'static str {
+    match t {
+        FillTarget::Alpha(_) => "alpha",
+        FillTarget::Packed { channel, .. } => ["R", "G", "B", "A"][usize::from(channel.min(3))],
+        FillTarget::Rnm(_) => "layer",
+    }
+}
+
+/// One helper filling one channel of one slot chip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Docked {
+    /// The helper's item key.
+    pub helper: String,
+    pub slot: SlotKind,
+    pub channel: &'static str,
+}
+
+/// The helpers of the set's members, one entry per reported fill that lands on a chip, in member then `fills` order.
+pub fn docked(model: &AppModel, v: &SetView) -> Vec<Docked> {
+    v.members
+        .iter()
+        .filter_map(|k| Some((k, model.item(k)?.helper.as_ref()?)))
+        .flat_map(|(k, h)| {
+            h.fills.iter().filter_map(move |&t| {
+                Some(Docked {
+                    helper: k.clone(),
+                    slot: fill_slot(t)?,
+                    channel: fill_channel(t),
+                })
+            })
+        })
         .collect()
 }
 

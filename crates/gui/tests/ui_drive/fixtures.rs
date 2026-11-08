@@ -5,6 +5,9 @@ use crate::oracles::ORACLES;
 use crate::state::{eval_expect, state_json};
 use crate::steps::{ui_step, Step};
 use crate::support;
+use engine::policy::AcceptSuggestions;
+use engine::shader::Shader;
+use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::picker::{PickerBackend, PickerKind, PickerSpec};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
@@ -15,7 +18,7 @@ use std::time::Duration;
 
 pub type Fixture = fn(&Path) -> AppModel;
 
-pub const FIXTURES: &[(&str, Fixture)] = &[("demo", demo_opened)];
+pub const FIXTURES: &[(&str, Fixture)] = &[("demo", demo_opened), ("helpers", helpers_opened)];
 
 /// Answers file dialogs from a queue; an empty queue is Cancel. `asked` records every dialog and its answer.
 #[derive(Default)]
@@ -55,25 +58,79 @@ pub struct Run {
 /// The demo project opened as the doc shots open it (cobble on PBR), with the export folder inside `dir`.
 fn demo_opened(dir: &Path) -> AppModel {
     let root = app_harness::demo(dir);
+    open_project(
+        dir,
+        root,
+        None,
+        &[("architecture/stone/cobble", Shader::Pbr)],
+    )
+}
+
+/// Opens `root` with the export folder inside `dir`, `accept` set before the open when given, then each shader set.
+fn open_project(
+    dir: &Path,
+    root: PathBuf,
+    accept: Option<AcceptSuggestions>,
+    shaders: &[(&str, Shader)],
+) -> AppModel {
     let export = dir.join("export");
     let settings = GuiSettings {
         export_folder: Some(export.clone()),
         ..GuiSettings::default()
     };
     let mut m = AppModel::new(settings, None, support::session());
+    if let Some(a) = accept {
+        m.accept = a;
+    }
     m.open_folder(root);
     assert!(
         m.wait_idle(Duration::from_secs(60)),
         "planning did not finish"
     );
-    m.set_shader(
-        "architecture/stone/cobble",
-        Some(engine::shader::Shader::Pbr),
-    );
+    for (set, shader) in shaders {
+        m.set_shader(set, Some(*shader));
+    }
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.set_export_folder(export);
     assert!(m.wait_idle(Duration::from_secs(60)));
     m
+}
+
+/// The demo plus a `props/crate` set whose helpers dock on the cards (Note HN, Decision 1). A second fixture because
+/// changing `demo` would move every count the goals and journeys pin. Suggestions are accepted (High) so the raw maps
+/// become helpers, as in `helper_panel.rs`.
+fn helpers_opened(dir: &Path) -> AppModel {
+    let root = app_harness::demo(dir);
+    let props = root.join("props");
+    std::fs::create_dir_all(&props).unwrap();
+    let save = |name: &str, f: &dyn Fn(u32, u32) -> [u8; 3]| {
+        ImageBuffer::from_fn(128, 128, |x, y| Rgb(f(x, y)))
+            .save(props.join(name))
+            .unwrap();
+    };
+    save("crate.png", &|x, y| [x as u8, y as u8, 90]);
+    save("crate_cnr.png", &|_, _| [128, 128, 255]);
+    for n in ["roughness", "opacity", "metallic"] {
+        ImageBuffer::from_fn(128, 128, |x, _| Luma([x as u8]))
+            .save(props.join(format!("crate_{n}.png")))
+            .unwrap();
+    }
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[files.\"props/crate_roughness.png\"]\nhelper.fills = [\"rmaos.r\", \"cnr.a\"]\n\n\
+         [files.\"props/crate_opacity.png\"]\nhelper.role = \"opacity\"\n\n\
+         [files.\"props/crate_metallic.png\"]\nhelper.fills = []\n",
+    )
+    .unwrap();
+    open_project(
+        dir,
+        root,
+        Some(AcceptSuggestions::High),
+        &[
+            ("architecture/stone/cobble", Shader::Pbr),
+            ("props/crate", Shader::Pbr),
+        ],
+    )
 }
 
 /// The fixture called `name`, or an error listing the known ones.

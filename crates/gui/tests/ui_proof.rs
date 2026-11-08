@@ -37,9 +37,16 @@ macro_rules! journey {
 
 #[path = "ui_proof/sets_column.rs"]
 mod sets_column;
+#[path = "ui_proof/sets_column_pins.rs"]
+mod sets_column_pins;
 
 /// Replays `lines` on `fixture` without wgpu; panics "step N `<line>`: <error>" at the first failing step.
 pub fn run_journey(fixture: &str, lines: &[&str]) {
+    replay(fixture, lines);
+}
+
+/// Replays `lines` like `run_journey` and returns the harness (and its temp dir) for further checks.
+pub fn replay(fixture: &str, lines: &[&str]) -> (tempfile::TempDir, app_harness::H) {
     app_data();
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
@@ -54,6 +61,7 @@ pub fn run_journey(fixture: &str, lines: &[&str]) {
             Ok(_) => {}
         }
     }
+    (d, h)
 }
 
 /// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
