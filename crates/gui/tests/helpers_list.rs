@@ -302,10 +302,23 @@ fn helper_row_stays_inside_column_at_1100() {
         }
     }
     assert!(on_row >= 3, "row, name, target and chip: {on_row}");
+    // The name is cut to fit: the painted galley is elided and narrower than its full text needs.
     let name_label = h.get_by_label(&long).rect();
+    let galley = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|c| painted_galley(&c.shape, &long))
+        .expect("the painted name");
+    let font = egui::TextStyle::Body.resolve(&h.ctx.global_style());
+    let full = h.ctx.fonts_mut(|f| {
+        f.layout_no_wrap(long.clone(), font, egui::Color32::WHITE)
+            .size()
+            .x
+    });
     assert!(
-        name_label.width() < panel.width(),
-        "the name is truncated: {name_label:?}"
+        galley.elided && name_label.width() < full,
+        "the name is truncated: {name_label:?} of {full}"
     );
     let target = h.get_by_label_contains("→ RMAOS R").rect();
     assert!(target.width() > 10.0 && target.max.x <= panel.max.x);
@@ -784,4 +797,12 @@ fn hide_helpers_persists() {
         &mut sdc_gui::model::view::ViewState::default(),
     );
     assert!(m.filter.hide_helpers);
+}
+
+fn painted_galley(s: &egui::Shape, text: &str) -> Option<std::sync::Arc<egui::Galley>> {
+    match s {
+        egui::Shape::Vec(v) => v.iter().find_map(|s| painted_galley(s, text)),
+        egui::Shape::Text(t) if t.galley.job.text == text => Some(t.galley.clone()),
+        _ => None,
+    }
 }

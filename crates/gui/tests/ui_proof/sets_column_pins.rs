@@ -869,8 +869,7 @@ fn one_fill_has_one_wording() {
         h.run();
         let hover = "crate_roughness.png\nfills CNR alpha  crate_cnr, RMAOS R  crate_rmaos";
         assert!(texts(&h).iter().any(|(t, _)| t == hover), "{at}: hover");
-        for (p, r) in [(true, 0), (false, 1)] {
-            let _ = r;
+        for p in [true, false] {
             h.event(egui::Event::PointerButton {
                 pos: badge.center(),
                 button: egui::PointerButton::Primary,
