@@ -600,42 +600,27 @@ pub(super) fn editor(
             ) as u8;
             threshold(ui, busy, key, cur, mixed)
         }
-        "alpha.parallax" => {
-            let mut b = f.value.as_bool().unwrap_or(false);
-            let r = ui
-                .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
-                .on_hover_text(PARALLAX_HOVER);
-            (r.changed().then(|| json!(b)), r)
-        }
         WEIGHTING => weighting_combo(ui, egui::Id::new((key, f.field)), target, job, f, mixed),
-        "encoder.bc1_alpha" | "encoder.perceptual" => {
-            let hover = if f.field == "encoder.bc1_alpha" {
-                BC1_ALPHA_HOVER
-            } else {
-                PERCEPTUAL_HOVER
+        "alpha.parallax" | "encoder.bc1_alpha" | "encoder.perceptual" | "alpha.exact_opaque"
+        | "alpha.exr_straight" => {
+            let hover = match f.field {
+                "alpha.parallax" => Some(PARALLAX_HOVER),
+                "encoder.bc1_alpha" => Some(BC1_ALPHA_HOVER),
+                "encoder.perceptual" => Some(PERCEPTUAL_HOVER),
+                "alpha.exr_straight" => Some(
+                    "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour",
+                ),
+                _ => None,
             };
             let mut b = f.value.as_bool().unwrap_or(false);
-            let r = ui
-                .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
-                .on_hover_text(hover);
-            // The box has no text of its own, so it takes the row's label as its AccessKit name (FM42, rule 8.2).
+            let mut r = ui.add(egui::Checkbox::new(&mut b, "").indeterminate(mixed));
+            if let Some(h) = hover {
+                r = r.on_hover_text(h);
+            }
+            // The box has no text of its own, so it takes the row's label as its AccessKit name (FM42, Note HP M1).
             r.widget_info(|| {
                 egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), b, f.label)
             });
-            (r.changed().then(|| json!(b)), r)
-        }
-        "alpha.exact_opaque" => {
-            let mut b = f.value.as_bool().unwrap_or(false);
-            let r = ui.add(egui::Checkbox::new(&mut b, "").indeterminate(mixed));
-            (r.changed().then(|| json!(b)), r)
-        }
-        "alpha.exr_straight" => {
-            let mut b = f.value.as_bool().unwrap_or(false);
-            let r = ui
-                .add(egui::Checkbox::new(&mut b, "").indeterminate(mixed))
-                .on_hover_text(
-                    "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour",
-                );
             (r.changed().then(|| json!(b)), r)
         }
         field => {

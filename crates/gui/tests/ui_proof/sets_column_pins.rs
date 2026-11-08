@@ -1610,3 +1610,30 @@ fn labels_sit_bottom_left_on_every_tile() {
         }
     }
 }
+
+/// Note HP (M1): the texture settings checkboxes are named by their row, none has an empty name.
+#[test]
+fn the_texture_settings_checkboxes_have_their_row_names() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"click","at":{"label":"RMAOS","index":0}}"#,
+                r#"{"op":"settle","frames":3}"#,
+            ],
+        );
+        let at = format!("at {w}x{h_px}");
+        let named = h
+            .query_all_by_role_and_label(Role::CheckBox, "Exact opaque alpha")
+            .count();
+        assert_eq!(named, 1, "{at}: one CheckBox named Exact opaque alpha");
+        let empty: Vec<_> = h
+            .query_all_by_role(Role::CheckBox)
+            .filter(|n| n.accesskit_node().label().unwrap_or_default().is_empty())
+            .map(|n| n.rect())
+            .collect();
+        assert!(empty.is_empty(), "{at}: unnamed CheckBoxes at {empty:?}");
+    }
+}
