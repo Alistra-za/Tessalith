@@ -16,7 +16,7 @@ In 2D the editor is one column that scrolls as a whole, like a texture's setting
 
 Nothing sits beside the slot rows. A row wider than the centre is cut at the window edge. The window-edge drawer is not drawn while the tabs are shown ([Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer) says when each is).
 
-What the Material tab holds depends on the set: the [PGPatcher settings](GUI-PGPatcher-JSON.md#pgpatcher-settings) on a TruePBR set, or one of the cards on [Set materials](GUI-Set-Materials.md) (Advanced skin, PBR Landscape, CS PBR records, PBR grass).
+What the Material tab holds depends on the set: the [PGPatcher settings](GUI-PGPatcher-JSON.md#whats-on-the-material-tab) on a TruePBR set, or one of the cards on [Set materials](GUI-Set-Materials.md) (Advanced skin, PBR Landscape, CS PBR records, PBR grass).
 
 ## Slot rows
 
@@ -36,7 +36,7 @@ A row has these columns:
 | Thumbnail | Click selects, double-click expands. The PGPatcher lock padlock and its hover are on it. |
 | *File* | The name cut to fit (the full name and size on hover), and under it the dimensions and file size. |
 | *Format* | The format dropdown (format and tag together, one undo step). An empty slot shows **Assign…** here, which opens the slot menu, headed by the slot's name ("Emissive / Skin (slot 3)"). A packed output's recipe and fills sit under the dropdown. |
-| *Flags* | Small toggles, each with a hover: **Match on this** (Diffuse, Normal: PGPatcher applies the entry to meshes with this exact texture in this slot; see [Matching](GUI-PGPatcher-JSON.md#pgpatcher-settings)) and **Opaque** (Diffuse: strips alpha, so the diffuse is fully opaque). |
+| *Flags* | Small toggles, each with a hover: **Match on this** (Diffuse, Normal: PGPatcher applies the entry to meshes with this exact texture in this slot; see [Matching](GUI-PGPatcher-JSON.md#matching)) and **Opaque** (Diffuse: strips alpha, so the diffuse is fully opaque). |
 | *Status* | A dot: green ready, amber a warning or decision, red blocks. Its hover gives the reason, such as "borrowed from X", "not used by the shader" or "RNM, 2 layers". |
 
 ![The menu Assign… opens on an empty slot.](../img/gui/GUI-Set-Editor/assign-menu.png)

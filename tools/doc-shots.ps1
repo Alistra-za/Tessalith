@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Refreshes the documentation screenshots (docs/DOCUMENTATION.md §5) before a push:
 #   1. Render: runs crates/gui/tests/doc_shots.rs render_doc_shots into a new temp folder (-Out), one PNG per
 #      [[shot]] of docs/img/gui/shots.toml (or only the ids in -Only).
@@ -53,7 +54,7 @@ try {
     cargo test --offline -p sdc-gui --test doc_shots render_doc_shots -- --ignored --exact --test-threads=1 *> $log
 } finally { Pop-Location }
 "Out: $Out"
-if (Test-Path (Join-Path $Out 'summary.md')) { Get-Content (Join-Path $Out 'summary.md') }
+if (Test-Path (Join-Path $Out 'summary.md')) { Get-Content (Join-Path $Out 'summary.md') -Encoding utf8 }
 $ok = Select-String -Path $log -Pattern 'test result: ok' -Quiet
 if (-not $ok -or -not (Test-Path (Join-Path $Out 'summary.tsv'))) { "render failed, see $log"; exit 2 }
 $rows = Read-Summary $Out

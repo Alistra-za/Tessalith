@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Builds (unless -NoBuild) and packages the release zip: dist/Tessalith-<version>-win-x64.zip + SHA256SUMS.txt.
 # Run from anywhere. The zip holds the two exes and the named files only, nothing else.
 #   tools\package-release.ps1                      build, stage, zip
@@ -16,7 +17,7 @@ Set-Location $root
 if (-not $AllowDirty -and (git status --porcelain)) {
     throw 'git tree is dirty; commit or pass -AllowDirty'
 }
-$m = [regex]::Match((Get-Content Cargo.toml -Raw), '(?ms)\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
+$m = [regex]::Match((Get-Content Cargo.toml -Raw -Encoding utf8),'(?ms)\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
 if (-not $m.Success) { throw 'no workspace version in Cargo.toml' }
 $version = $m.Groups[1].Value
 if ($Suffix) { $version = "$version-$Suffix" }
