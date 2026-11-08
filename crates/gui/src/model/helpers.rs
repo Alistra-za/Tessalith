@@ -27,8 +27,6 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
         FillTarget::Alpha(A::S) => Some("s"),
         FillTarget::Alpha(A::Cnr) => Some("cnr"),
         FillTarget::Packed { suffix, .. } => Some(suffix),
-        FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some("cnr"),
-        FillTarget::Rnm(_) => Some("n"),
     };
     let stems = || h.outputs.iter().filter_map(|o| o.file_stem()?.to_str());
     let named = suffix
@@ -46,15 +44,6 @@ pub fn target_label(h: &HelperReport, t: FillTarget) -> String {
     t.label(named.or_else(any).unwrap_or(&base))
 }
 
-/// The `helper.fills` entries of the report's fills: layer blends (`Rnm`) are reports only, never written.
-pub fn written_fills(h: &HelperReport) -> Vec<FillTarget> {
-    h.fills
-        .iter()
-        .copied()
-        .filter(|t| !matches!(t, FillTarget::Rnm(_)))
-        .collect()
-}
-
 impl AppModel {
     /// Note DY18b: a helper's current list. A hand-set list is its `sdc.toml` `helper.fills`, so a target that did not
     /// land is not lost; otherwise the engine's reported fills.
@@ -66,7 +55,7 @@ impl AppModel {
             .and_then(|v| engine::helper::fills_value(&v));
         match hand {
             Some(v) if h.fills_hand_set => v,
-            _ => written_fills(h),
+            _ => h.fills.clone(),
         }
     }
 

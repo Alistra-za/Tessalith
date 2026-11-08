@@ -1104,7 +1104,7 @@ fn inspect_json_reports_every_skipped_preset_under_one_batch_id() {
 }
 
 #[test]
-fn inspect_lists_a_base_normals_rnm_layers() {
+fn inspect_prints_no_rnm_lines_for_old_layer_files() {
     let d = tempfile::tempdir().unwrap();
     for n in [
         "iron_n.png",
@@ -1118,12 +1118,8 @@ fn inspect_lists_a_base_normals_rnm_layers() {
     let o = sdc().arg("inspect").arg(d.path()).output().unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     let out = text(&o.stdout);
-    assert!(
-        out.contains(
-            "rnm detail2 iron_detailnorm2.png strength 0.3, mask iron_detailnormmask2.png"
-        ),
-        "{out}"
-    );
+    assert!(out.contains("iron_n.png"), "{out}");
+    assert!(!out.contains("rnm "), "{out}");
 }
 
 /// Audit left-out: a folder is a usage error naming it, not "Access is denied".

@@ -238,8 +238,9 @@ fn pbr_fixture() -> Vec<(&'static str, DynamicImage)> {
     ]
 }
 
-/// rnm_bake.rs: an RNM base `_n` with one detail layer, plus the `_rmaos` its bake reads.
-fn rnm_fixture(dir: &Path) {
+/// A base `_n` and the `_rmaos` its bake reads, under `textures/rnm/` (the folder keeps its name: renaming it would
+/// move every identity key).
+fn normal_fixture(dir: &Path) {
     let p = |n: &str| format!("textures/rnm/{n}");
     put(
         dir,
@@ -260,17 +261,6 @@ fn rnm_fixture(dir: &Path) {
         &p("iron_rmaos.png"),
         DynamicImage::ImageRgba8(ImageBuffer::from_fn(32, 32, |_, _| {
             Rgba([128, 0, 255, 255])
-        })),
-    );
-    put(
-        dir,
-        &p("iron_detailnorm.png"),
-        DynamicImage::ImageRgb8(ImageBuffer::from_fn(32, 32, |x, y| {
-            Rgb([
-                (128.0 + 100.0 * (x as f32 * 1.7).sin()) as u8,
-                (128.0 + 100.0 * (y as f32 * 1.3).cos()) as u8,
-                200,
-            ])
         })),
     );
 }
@@ -551,9 +541,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     for (rel, img) in pbr_fixture() {
         put(d.path(), rel, img);
     }
-    rnm_fixture(d.path());
-    // Note GW1: `_detailnorm` is no layer by name any more; the hand role keeps `iron_n` blended as it was.
-    sets.push("file:**/rnm/iron_detailnorm.png.helper.role=detailnorm".to_string());
+    normal_fixture(d.path());
     let guarded = || {
         Subtype::ALL
             .into_iter()
@@ -585,7 +573,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         "{events:#?}"
     );
     // Only the cs-only sub-types are refused: their forced fixtures are skipped with CFG-UNAVAILABLE. Uncoded skips
-    // are intentional (vanilla skips the RNM detail layer as a normal layer).
+    // are intentional.
     let refused: BTreeSet<String> = events
         .iter()
         .filter_map(|e| match &e.kind {

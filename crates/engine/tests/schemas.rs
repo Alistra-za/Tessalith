@@ -87,7 +87,7 @@ fn config_schema_version_minimum_is_one() {
 }
 
 /// Audit REPORT #17 (Note BC): every settable field (`FIELD_PATHS`, which `[files]` entries accept) is in the
-/// config schema's `[files]` entry, including `reencode` and `rnm.target`; `subtype` is not a `[files]` field.
+/// config schema's `[files]` entry, including `reencode`; `subtype` is not a `[files]` field.
 #[test]
 fn the_files_entry_schema_accepts_every_field_path() {
     let v: serde_json::Value = serde_json::from_str(&schema_json(SchemaKind::Config)).unwrap();

@@ -84,8 +84,6 @@ pub enum VocabRole {
     PackingInput(RawMap),
     /// `_coat`: the PBR coat colour, the `_s` member (`pbr_subsurface`; DECISIONS Note S-shader-9).
     CoatColour,
-    /// An RNM normal layer or its mask (M6 Track F2); never written on its own.
-    NormalLayer(crate::rnm::LayerTerm),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,7 +101,6 @@ impl Vocab {
             VocabRole::Normal(_) => Some("n".into()),
             VocabRole::Emissive => Some("g".into()),
             VocabRole::CoatColour => Some("s".into()),
-            VocabRole::NormalLayer(t) => Some(t.canonical()),
             VocabRole::PackingInput(r) => Some(r.id()),
         }
     }
@@ -115,7 +112,7 @@ const fn term(term: &'static str, role: VocabRole) -> Vocab {
 
 /// Spec §4.4 exporter vocabulary, longest term first so `_base_color` wins over `_color`. None of these is a
 /// §6.1 suffix, and none ends in `_<§6.1 suffix>`, so a stem has at most one reading.
-/// `_norm` is rnm.py's alias of `_n` (M6 Track F2).
+/// `_norm` is an alias of `_n`.
 pub static VOCABULARY: [Vocab; 37] = {
     use GreenConvention::*;
     use RawMap::*;
@@ -164,12 +161,8 @@ pub static VOCABULARY: [Vocab; 37] = {
 /// The vocabulary term a stem ends in (case-insensitive) and the base before it. A stem that is only a term
 /// (`_normal`) is left alone, as with §6.1 suffixes.
 pub fn split_vocab(stem: &str) -> Option<(String, &'static Vocab)> {
-    // Note CO: the generated marker comes off before the layer terms too (08e-8).
+    // Note CO: the generated marker comes off first.
     let stem = split_generated(stem).0;
-    // M6 Track F2: layer terms (longest first) before the exporter vocabulary, so `_detail_mask` is one term.
-    if let Some(hit) = crate::rnm::split_layer(stem) {
-        return Some(hit);
-    }
     let lower = stem.to_ascii_lowercase();
     VOCABULARY.iter().find_map(|v| {
         let tail = format!("_{}", v.term);

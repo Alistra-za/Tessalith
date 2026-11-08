@@ -200,16 +200,6 @@ impl ExportModel {
                 self.note_output(&ev, &output);
                 self.finished_at(now);
             }
-            EventKind::FileSkipped {
-                kind: SkipKind::NormalLayer,
-                code: None,
-                ..
-            } => {
-                // A used layer file has no row; one a code explains stays visible.
-                if let Some(p) = ev.path.as_deref() {
-                    self.drop_queued(p);
-                }
-            }
             EventKind::FileSkipped { kind, reason, .. } => {
                 let state = match kind {
                     SkipKind::UpToDate => RowState::UpToDate,

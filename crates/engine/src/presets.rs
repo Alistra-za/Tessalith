@@ -359,11 +359,6 @@ pub(crate) fn file_entry(
         if field == crate::overrides::REENCODE_FIELD && !value.is_boolean() {
             return Err(bad("reencode takes true or false".into()));
         }
-        if field == crate::overrides::RNM_TARGET_FIELD
-            && crate::overrides::rnm_target_value(&value).is_none()
-        {
-            return Err(bad("rnm.target takes n, cnr or both".into()));
-        }
         if let Some(e) = crate::helper::value_error(&field, &value) {
             return Err(bad(e));
         }
@@ -670,7 +665,7 @@ impl PresetRegistry {
         Ok(id)
     }
 
-    /// Spec §3.7: an alias is `[a-z0-9]+`, is neither a §6.1 suffix, an exporter vocabulary term (§4.4) nor an RNM layer term,
+    /// Spec §3.7: an alias is `[a-z0-9]+`, is neither a §6.1 suffix nor an exporter vocabulary term (§4.4),
     /// maps to a §6.1 suffix and is unique across loaded presets.
     fn check_aliases(&self, p: &PresetFile) -> Result<(), PresetError> {
         let bad = |m: String| PresetError::Alias(format!("CFG-INVALID: preset '{}': {m}", p.id));
@@ -707,12 +702,6 @@ impl PresetRegistry {
             if crate::group::DETAIL_SPELLINGS.contains(&alias.as_str()) {
                 return Err(bad(format!(
                     "suffix alias '{alias}' is a detail map name (DECISIONS Note GW)"
-                )));
-            }
-            // Audit 08e-11: layer terms are file-name terms too (`rnm::split_layer`).
-            if crate::rnm::LAYER_VOCABULARY.iter().any(|v| v.term == alias) {
-                return Err(bad(format!(
-                    "suffix alias '{alias}' is an RNM layer term (DECISIONS Note W)"
                 )));
             }
             if !SUFFIXES.contains(&canonical.as_str()) {

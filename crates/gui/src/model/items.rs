@@ -201,10 +201,6 @@ impl PlanView {
             plan.helpers.iter().map(|h| h.path.as_path()).collect();
         let mut helper_warnings: BTreeMap<&Path, Vec<Warning>> = BTreeMap::new();
         for job in &plan.jobs {
-            // A normal's old layer file has no item; the engine still plans it until it drops layers.
-            if matches!(job.status, JobStatus::NormalLayer { .. }) {
-                continue;
-            }
             if matches!(job.status, JobStatus::PackingInput { .. })
                 && helper_paths.contains(job.input.as_path())
             {
@@ -230,7 +226,6 @@ impl PlanView {
                 JobStatus::PackingInput { role } => {
                     ItemStatus::Skipped(format!("raw {} map, not packed", role.id()))
                 }
-                JobStatus::NormalLayer { .. } => unreachable!("layer jobs are skipped above"),
             };
             let name = if packed {
                 job.output

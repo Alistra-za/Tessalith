@@ -1534,3 +1534,148 @@ fn defaults_tables_refuse_keys_that_would_do_nothing() {
     );
     assert!(check(json!({ "resize": "half" }), json!({})).is_ok());
 }
+
+/// Every key RNM read: the 20 `RnmSpec` fields as dotted paths, each with a TOML literal, then `rnm.target`.
+const RNM_KEYS: [(&str, &str); 21] = [
+    ("rnm.enabled", "false"),
+    ("rnm.order", "[\"bump\"]"),
+    ("rnm.bump.strength", "0.5"),
+    ("rnm.bump.flip_green", "true"),
+    ("rnm.bump.mask", "false"),
+    ("rnm.bump2.strength", "0.5"),
+    ("rnm.bump2.flip_green", "true"),
+    ("rnm.bump2.mask", "false"),
+    ("rnm.detail.strength", "0.5"),
+    ("rnm.detail.flip_green", "true"),
+    ("rnm.detail.mask", "false"),
+    ("rnm.detail2.strength", "0.5"),
+    ("rnm.detail2.flip_green", "true"),
+    ("rnm.detail2.mask", "false"),
+    ("rnm.bent.strength", "0.5"),
+    ("rnm.bent.flip_green", "true"),
+    ("rnm.bent.mask", "false"),
+    ("rnm.bent.mode", "\"detail\""),
+    ("rnm.bent.ao_power", "1.0"),
+    ("rnm.bent.ao", "false"),
+    ("rnm.target", "\"n\""),
+];
+
+/// `rnm.bump.strength` and `0.5` as the inline table `rnm = { bump = { strength = 0.5 } }`.
+fn nested(path: &str, val: &str) -> String {
+    let (head, last) = path.rsplit_once('.').unwrap();
+    let mut s = format!("{last} = {val}");
+    for k in head.rsplit('.') {
+        s = format!("{k} = {{ {s} }}");
+    }
+    s
+}
+
+/// Note GW3: `rnm.*` is refused with the removal message in a project's defaults, a `[files]` entry, a rule, a user
+/// preset and `--set` (with and without `file:`).
+#[test]
+fn rnm_keys_are_refused() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (path, val) in RNM_KEYS {
+        let table = nested(path, val);
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.png\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"a.png\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        for set in [format!("{path}={val}"), format!("file:a.png.{path}={val}")] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains(path) && e.contains("removed in 3.0"),
+                "{path}: {e}"
+            );
+        }
+    }
+}
+
+/// Review Focus 4: a file called `rnm` is an ordinary `[files]` key; only the `rnm` profile table is refused. A pin
+/// of existing behaviour: it passes before the rows exist, and keeps passing because they are leaf rows.
+#[test]
+fn a_file_called_rnm_is_not_refused() {
+    for text in [
+        "[files.\"rnm\"]\nsubtype = \"normal\"\n",
+        "[files.\"rnm\"]\nsubtype = \"normal\"\npacking = { enabled = false }\n",
+        "[defaults]\npacking = { enabled = false }\n[files.\"rnm\"]\nsubtype = \"normal\"\n",
+    ] {
+        ConfigFile::parse(text, "sdc.toml").unwrap_or_else(|e| panic!("{text}: {e}"));
+    }
+}
+
+/// Note GW3: the four `RNM-*` codes left with the blend; an allow list that names one gets the 3.0 removal message
+/// from config, `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn rnm_codes_in_allow_are_refused() {
+    for code in [
+        "RNM-NO-BASE",
+        "RNM-IGNORED-EYE",
+        "RNM-MASK-ORPHAN",
+        "RNM-LAYER-SHADOWED",
+    ] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(
+            e.to_string().contains(code) && e.to_string().contains("removed in 3.0"),
+            "{e}"
+        );
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 3.0"), "{e}");
+        let e = engine::overrides::parse_set(&format!("allow=[\"{code}\"]")).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 3.0"), "{e}");
+    }
+}
+
+/// Note GW3: `helper.role` values that named a normal layer are refused, in a project and in `--set`; the other roles load.
+#[test]
+fn a_layer_role_is_refused() {
+    for role in [
+        "bump",
+        "bumpmask",
+        "bump2",
+        "bumpmask2",
+        "detailnorm",
+        "detailnormmask",
+        "detailnorm2",
+        "detailnormmask2",
+        "bent",
+        "bentmask",
+    ] {
+        let e = ConfigFile::parse(
+            &format!("[files.\"a.png\"]\nhelper.role = \"{role}\"\n"),
+            "sdc.toml",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("helper.role") && e.contains("removed in 3.0"),
+            "{role}: {e}"
+        );
+        let e =
+            engine::overrides::parse_set(&format!("file:a.png.helper.role={role}")).unwrap_err();
+        assert!(
+            e.contains("helper.role") && e.contains("removed in 3.0"),
+            "{role}: {e}"
+        );
+    }
+    ConfigFile::parse("[files.\"a.png\"]\nhelper.role = \"opacity\"\n", "sdc.toml").unwrap();
+}

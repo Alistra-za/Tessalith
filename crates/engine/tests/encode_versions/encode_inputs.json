@@ -152,11 +152,11 @@
     "subtype": "pbr_albedo"
   },
   "textures/rnm/iron_n.dds": {
-    "sha256": "ffd4381b0cca7c62158753d25987231068afc06edff46d9b97c26af9e0de8bb8",
+    "sha256": "f761ef1375b9a8cf49e7de41db441cfd459e1f169e0534e4506d46eff87360d3",
     "subtype": "pbr_normal"
   },
   "textures/rnm/iron_rmaos.dds": {
-    "sha256": "1bfeb3cd920dde5145a8a81a5b24bba5257d0cfe7dc7451b5cf306757f110433",
+    "sha256": "87f3391f6f0e3f9c2b7318098676f607e10900a5b27f8d43e9767f24c5cdf40d",
     "subtype": "rmaos"
   },
   "vanilla/textures/h/backlight_tint.dds": {
@@ -252,7 +252,7 @@
     "subtype": "diffuse"
   },
   "vanilla/textures/rnm/iron_n.dds": {
-    "sha256": "57dfa93a4960756422f163d92cdd2558fd8b1439212b01a959fbe1f4f2b43cae",
+    "sha256": "c2b5f140c6d8d4c07513512d3741f5cc1c75336fb44e71bc2e879677937f1541",
     "subtype": "normal"
   }
 }

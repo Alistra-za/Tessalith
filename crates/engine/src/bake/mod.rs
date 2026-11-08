@@ -189,10 +189,6 @@ pub struct BakeJob {
     /// The `_n`'s size and modification time when `Engine::plan` read it (final review I7); `None` is not checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<SourceStamp>,
-    /// The `_n` job's active RNM blend at plan time (Note W18, owner 2026-10-12): the lengths come from the `_n` as its
-    /// own encode writes it, after the layers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rnm: Option<crate::rnm::RnmJob>,
     /// The member's post-resize size when it does not pair with the `_n`; the lengths are fitted to it, and `shift` is 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<(u32, u32)>,
@@ -203,7 +199,8 @@ impl BakeJob {
     /// the level shift (DECISIONS R12). Recorded in the manifest so `if-changed` re-encodes when any changes; the
     /// `_n`'s path and its own output settings (format, effort) are not part of it.
     /// The `_n`'s `resize` is part of it, with its `resize_floor` when that is not the default (so existing
-    /// identities hold, Note FM29); its RNM settings join only when layers apply (Note W18).
+    /// identities hold, Note FM29). The tuple keeps a null where the removed RNM settings were (Note GW3), so no
+    /// existing bake's identity moved.
     pub fn identity_sha256(&self) -> String {
         let np = &self.normal_profile;
         let resize = if np.resize_floor == crate::config::DEFAULT_RESIZE_FLOOR {
@@ -217,7 +214,7 @@ impl BakeJob {
             np.mips.normal_base,
             self.shift,
             resize,
-            self.rnm.as_ref().map(|_| &np.rnm),
+            Option::<()>::None,
         );
         match self.fit {
             None => crate::manifest::sha256_json(&base),
@@ -235,28 +232,19 @@ impl BakeJob {
             img,
             crate::ops::SourceTransfer::of(&info),
             &self.normal_profile,
-            self.rnm.as_ref(),
             self.fit,
         )
     }
 
     /// Peak bytes the bake holds, for `--mem-budget` admission (DECISIONS R4, Task 7 review I2): the `_n`'s
-    /// [`decode_peak`], plus (Note BB) its RNM layers' [`crate::rnm::RnmJob::admission_bytes`] at the `_n`'s
-    /// preprocessed size, which `load_lengths` blends into, plus the fit term (`w * h * 23` for a member-sized
-    /// resample and pyramid when `fit` is set). Each part is 0 when the `_n`'s header cannot be read (the load then
-    /// fails with its own error).
+    /// [`decode_peak`], plus the fit term (`w * h * 23` for a member-sized resample and pyramid when `fit` is set).
+    /// Each part is 0 when the `_n`'s header cannot be read (the load then fails with its own error).
     pub fn estimated_bytes(&self) -> u64 {
-        let layers = || {
-            let r = self.rnm.as_ref()?;
-            let dims = crate::load::image_size(&self.normal).ok()?;
-            let np = &self.normal_profile;
-            Some(r.admission_bytes(&np.rnm, crate::resize::target_dims(dims, np)))
-        };
         // A fit also holds the member-sized resample and its pyramid (~23 per member texel).
         let fit = self
             .fit
             .map_or(0, |(w, h)| u64::from(w) * u64::from(h) * 23);
-        decode_peak(&self.normal) + layers().unwrap_or(0) + fit
+        decode_peak(&self.normal) + fit
     }
 
     /// Peak bytes of baking a `w`×`h` `_n` whose decoded texels are `decoded` bytes wide. The peak is inside
@@ -272,20 +260,16 @@ impl BakeJob {
     }
 }
 
-/// [`BakeJob::load_lengths`] on an image already decoded: preprocess `img` with the `_n`'s `normal_profile`, blend
-/// its `rnm` layers, write mip 0 as the `_n`'s job does (unit length unless `mips.normal_base = keep`) and keep only
-/// the footprint lengths. The image is dropped before this returns.
+/// [`BakeJob::load_lengths`] on an image already decoded: preprocess `img` with the `_n`'s `normal_profile`,
+/// write mip 0 as the `_n`'s job does (unit length unless `mips.normal_base = keep`) and keep only the footprint
+/// lengths. The image is dropped before this returns.
 pub fn lengths_from(
     img: Rgba32F,
     transfer: crate::ops::SourceTransfer,
     normal_profile: &Profile,
-    rnm: Option<&crate::rnm::RnmJob>,
     fit: Option<(u32, u32)>,
 ) -> Result<LengthPyramid, String> {
     let mut work = crate::ops::preprocess_with(img, normal_profile, transfer);
-    if let Some(r) = rnm {
-        crate::rnm::blend::apply(&mut work.img, r, normal_profile)?;
-    }
     if normal_profile.mips.normal_base == crate::config::NormalBase::Renormalize {
         for px in &mut work.img.px {
             crate::mips::normalize_vector(px, work.domain);
@@ -573,7 +557,6 @@ mod tests {
             normal_profile: profile(Subtype::PbrNormal),
             shift: 0,
             stamp: None,
-            rnm: None,
             fit: None,
         };
         let plain = job.estimated_bytes();
@@ -675,7 +658,6 @@ mod tests {
             normal_profile: profile(Subtype::PbrNormal),
             shift: 0,
             stamp: None,
-            rnm: None,
             fit: None,
         };
         // 8-bit RGB: the decoded image (3) + its `into_rgba32f` conversion (16) per texel.
@@ -691,43 +673,6 @@ mod tests {
         assert_eq!(job(d.path().join("missing_n.png")).estimated_bytes(), 0);
     }
 
-    /// Note BB: the bake blends the `_n`'s layers too, so it adds the largest layer's decode and its resample to
-    /// the `_n` size.
-    #[test]
-    fn a_bake_with_rnm_layers_is_admitted_for_its_largest_layer() {
-        let d = tempfile::tempdir().unwrap();
-        let n = d.path().join("a_n.png");
-        ::image::RgbImage::new(64, 32).save(&n).unwrap();
-        let layer = |name: &str, w: u32| {
-            let p = d.path().join(name);
-            ::image::RgbImage::new(w, w / 2).save(&p).unwrap();
-            crate::rnm::RnmLayer {
-                id: crate::config::LayerId::Detail,
-                file: crate::rnm::RnmFile {
-                    path: p,
-                    stamp: None,
-                },
-                mask: None,
-            }
-        };
-        let mut job = BakeJob {
-            normal: n,
-            normal_profile: profile(Subtype::PbrNormal),
-            shift: 0,
-            stamp: None,
-            rnm: None,
-            fit: None,
-        };
-        let base = job.estimated_bytes();
-        let mut small = layer("small.png", 32);
-        small.id = crate::config::LayerId::Bump;
-        job.rnm = Some(crate::rnm::RnmJob {
-            layers: vec![small, layer("big.png", 256)],
-            ao: None,
-        });
-        assert_eq!(job.estimated_bytes(), base + 256 * 128 * 19 + 64 * 32 * 16);
-    }
-
     #[test]
     fn the_bake_identity_follows_decode_settings_and_shift_only() {
         let b = BakeJob {
@@ -735,7 +680,6 @@ mod tests {
             normal_profile: profile(Subtype::PbrNormal),
             shift: 0,
             stamp: None,
-            rnm: None,
             fit: None,
         };
         let mut moved = b.clone();
@@ -762,7 +706,6 @@ mod tests {
             normal_profile: profile(Subtype::PbrNormal),
             shift: 0,
             stamp: None,
-            rnm: None,
             fit: None,
         };
         assert_eq!(
@@ -777,31 +720,6 @@ mod tests {
         assert_ne!(with(Some((64, 32))).identity_sha256(), b.identity_sha256());
     }
 
-    /// Note W18: RNM settings join the identity only when the bake carries a blend.
-    #[test]
-    fn identity_includes_rnm_only_when_layers_apply() {
-        let b = BakeJob {
-            normal: "a/iron_n.png".into(),
-            normal_profile: profile(Subtype::PbrNormal),
-            shift: 0,
-            stamp: None,
-            rnm: None,
-            fit: None,
-        };
-        let mut layered = b.clone();
-        layered.rnm = Some(crate::rnm::RnmJob {
-            layers: vec![],
-            ao: None,
-        });
-        let mut strong = layered.clone();
-        strong.normal_profile.rnm.detail.strength = Some(0.5);
-        assert_ne!(b.identity_sha256(), layered.identity_sha256());
-        assert_ne!(layered.identity_sha256(), strong.identity_sha256());
-        let mut off = b.clone();
-        off.normal_profile.rnm.detail.strength = Some(0.5);
-        assert_eq!(b.identity_sha256(), off.identity_sha256());
-    }
-
     /// S-mips-7: the `_n`'s `resize` changes the identity.
     #[test]
     fn identity_follows_resize() {
@@ -810,7 +728,6 @@ mod tests {
             normal_profile: profile(Subtype::PbrNormal),
             shift: 0,
             stamp: None,
-            rnm: None,
             fit: None,
         };
         let mut resized = b.clone();

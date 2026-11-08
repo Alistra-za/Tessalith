@@ -38,7 +38,6 @@ mod psd;
 pub mod quantize;
 pub mod reports;
 pub mod resize;
-pub mod rnm;
 pub mod schemas;
 pub mod session;
 pub mod sets;

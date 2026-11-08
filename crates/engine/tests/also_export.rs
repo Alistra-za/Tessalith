@@ -553,15 +553,6 @@ fn same_identity_fails_when_any_compared_field_differs() {
             Box::new(|j| j.status = JobStatus::Blocked { codes: vec![] }),
         ),
         (
-            "rnm",
-            Box::new(|j| {
-                j.rnm = Some(engine::rnm::RnmJob {
-                    layers: vec![],
-                    ao: None,
-                })
-            }),
-        ),
-        (
             "bake",
             Box::new(|j| {
                 j.bake = Some(engine::bake::BakeJob {
@@ -569,7 +560,6 @@ fn same_identity_fails_when_any_compared_field_differs() {
                     normal_profile: j.profile.clone(),
                     shift: 0,
                     stamp: None,
-                    rnm: None,
                     fit: None,
                 })
             }),

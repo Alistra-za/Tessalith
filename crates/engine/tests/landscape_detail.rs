@@ -1,5 +1,5 @@
-//! XPMF Task 2 (Note GI, design X12, X13, X15): in a landscape set `_detail` is its own detail-normal output, not an
-//! RNM layer; `_noise` is the BC4 projected noise; a MATO-only PBR Landscape set needs no RMAOS.
+//! XPMF Task 2 (Note GI, design X12, X13, X15): in a landscape set `_detail` is its own detail-normal output;
+//! `_noise` is the BC4 projected noise; a MATO-only PBR Landscape set needs no RMAOS.
 use engine::api::*;
 use engine::codes::{Code, Severity};
 use engine::config::*;
@@ -52,19 +52,6 @@ fn job<'a>(p: &'a Plan, name: &str) -> &'a ResolvedJob {
         .unwrap_or_else(|| panic!("no job {name}"))
 }
 
-fn is_layer(j: &ResolvedJob) -> bool {
-    matches!(j.status, JobStatus::NormalLayer { .. })
-}
-
-fn layer_files(j: &ResolvedJob) -> Vec<String> {
-    j.rnm.as_ref().map_or(vec![], |r| {
-        r.layers
-            .iter()
-            .map(|l| l.file.path.file_name().unwrap().to_string_lossy().into())
-            .collect()
-    })
-}
-
 fn three(dir: &Path) {
     for n in ["foo.png", "foo_n.png", "foo_detail.png"] {
         png(dir, n);
@@ -76,10 +63,8 @@ fn assert_detail_is_its_own_output(target: Target, shader: Shader) {
     three(d.path());
     let (p, _) = plan(d.path(), target, shader, &[]);
     let j = job(&p, "foo_detail.png");
-    assert!(!is_layer(j), "{shader:?}: {:?}", j.status);
     assert_eq!(j.profile.subtype, Subtype::DetailNormal, "{shader:?}");
     assert!(j.output.ends_with("foo_detail.dds"), "{:?}", j.output);
-    assert!(job(&p, "foo_n.png").active_rnm().is_none(), "{shader:?}");
 }
 
 #[test]
@@ -92,69 +77,18 @@ fn landscape_detail_is_its_own_output() {
     assert_detail_is_its_own_output(Target::Vanilla, Shader::Landscape);
 }
 
-/// Note GW1: outside a landscape or skin set a `_detail` is an undecided member of its set, not an RNM layer.
+/// Note GW1: outside a landscape or skin set a `_detail` is an undecided member of its set.
 #[test]
 fn pbr_set_detail_is_undecided() {
     let d = tempfile::tempdir().unwrap();
     three(d.path());
     let (p, _) = plan(d.path(), Target::Cs, Shader::Pbr, &[]);
     let j = job(&p, "foo_detail.png");
-    assert!(!is_layer(j));
     assert!(
         matches!(j.status, JobStatus::Unresolved { .. }),
         "{:?}",
         j.status
     );
-    let n = job(&p, "foo_n.png");
-    assert!(layer_files(n).is_empty());
-    assert!(n.active_rnm().is_none());
-}
-
-/// Note GW1: `rnm.target` no longer makes a detail map an RNM layer.
-#[test]
-fn rnm_target_does_not_make_detail_a_layer() {
-    for (target, shader) in [
-        (Target::Cs, Shader::PbrLandscape),
-        (Target::Vanilla, Shader::Landscape),
-    ] {
-        let d = tempfile::tempdir().unwrap();
-        three(d.path());
-        let (p, _) = plan(
-            d.path(),
-            target,
-            shader,
-            &["file:foo_detail.png.rnm.target=n"],
-        );
-        let j = job(&p, "foo_detail.png");
-        assert!(!is_layer(j), "{shader:?}");
-        assert_eq!(j.profile.subtype, Subtype::DetailNormal, "{shader:?}");
-        assert!(layer_files(job(&p, "foo_n.png")).is_empty());
-    }
-}
-
-/// Note GW1: the `n_`/`cnr_` layer prefixes are gone from `_detail`: the files are no layers and `_n` blends nothing.
-#[test]
-fn prefixed_detail_is_no_layer() {
-    for (target, shader) in [
-        (Target::Cs, Shader::PbrLandscape),
-        (Target::Vanilla, Shader::Landscape),
-    ] {
-        let d = tempfile::tempdir().unwrap();
-        for n in [
-            "foo.png",
-            "foo_n.png",
-            "foo_n_detail.png",
-            "foo_cnr_detail.png",
-        ] {
-            png(d.path(), n);
-        }
-        let (p, _) = plan(d.path(), target, shader, &[]);
-        for name in ["foo_n_detail.png", "foo_cnr_detail.png"] {
-            let j = job(&p, name);
-            assert!(!is_layer(j), "{shader:?} {name}: {:?}", j.status);
-        }
-        assert!(layer_files(job(&p, "foo_n.png")).is_empty());
-    }
 }
 
 /// Ruling R5: a landscape set's `_noise` is decided ProjectedNoise by its shader, with or without a `_detail`.
@@ -202,7 +136,7 @@ fn pbr_set_noise_stays_undecided() {
 }
 
 /// Review Focus 4, Note GW1: `_detail_mask` and `_detail2` beside a `_detail` map plan without a blocking warning on
-/// either of them, and the detail map stays DetailNormal. (RNM layer behaviour is covered by the `rnm_*` tests.)
+/// either of them, and the detail map stays DetailNormal.
 #[test]
 fn detail_mask_and_detail2_leave_the_detail_map_alone() {
     for (target, shader) in [
@@ -211,7 +145,6 @@ fn detail_mask_and_detail2_leave_the_detail_map_alone() {
     ] {
         let d = tempfile::tempdir().unwrap();
         three(d.path());
-        // The vocabulary spells the mask `_detail_mask` (or `_detailnormmask`); `_detailmask` is no layer term.
         for n in [
             "foo_detail_mask.png",
             "foo_detail2.png",
@@ -220,8 +153,6 @@ fn detail_mask_and_detail2_leave_the_detail_map_alone() {
             png(d.path(), n);
         }
         let (p, _) = plan(d.path(), target, shader, &[]);
-        // The brief's `foo_detailmask` spelling is no layer term: it is its own set's diffuse, as today.
-        assert!(!is_layer(job(&p, "foo_detailmask.png")), "{shader:?}");
         assert_eq!(
             job(&p, "foo_detail.png").profile.subtype,
             Subtype::DetailNormal
@@ -288,4 +219,34 @@ fn mato_only_set_exports_clean() {
     // DDS_HEADER.dwMipMapCount (offset 28), DX10 dxgiFormat (offset 128); 32x32 has six levels.
     assert_eq!((u32_at(128), u32_at(28)), (80, 6));
     assert!(d.path().join("out").join("foo_detail.dds").exists());
+}
+
+/// Note GW3 (controller's call 1): the old layer names are plain files now. `rock_n` exports with no blend input, and
+/// nothing reports an `RNM-*` code for `rock_bump`.
+#[test]
+fn old_layer_names_are_just_files() {
+    let d = tempfile::tempdir().unwrap();
+    for n in ["rock.png", "rock_n.png", "rock_bump.png"] {
+        png(d.path(), n);
+    }
+    let p = rnm_support::plan_dir(d.path(), vec![]);
+    for j in &p.jobs {
+        for w in &j.warnings {
+            assert!(!w.code.as_str().starts_with("RNM-"), "{:?}", w);
+        }
+    }
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink, "old-layer-names");
+    Engine::new()
+        .unwrap()
+        .run(p, &rep, &CancelToken::default())
+        .unwrap();
+    let m = engine::manifest::Manifest::at(&d.path().join("out"))
+        .load()
+        .unwrap();
+    let n = m
+        .values()
+        .find(|e| e.output.ends_with("rock_n.dds"))
+        .unwrap();
+    assert!(n.sources.is_empty(), "{:?}", n.sources);
 }

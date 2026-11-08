@@ -337,7 +337,6 @@ mod tests {
                 source: None,
                 pack: None,
                 bake: None,
-                rnm: None,
                 derive: None,
                 shader: None,
                 cube: None,

@@ -91,9 +91,7 @@ pub(super) fn plain(j: &ResolvedJob) -> bool {
         && j.cube.is_none()
         && !matches!(
             j.status,
-            JobStatus::Error { .. }
-                | JobStatus::PackingInput { .. }
-                | JobStatus::NormalLayer { .. }
+            JobStatus::Error { .. } | JobStatus::PackingInput { .. }
         )
 }
 
@@ -131,19 +129,6 @@ pub fn plan_fills(
             let sel = helper_requested(ctx, f);
             let role = match sel.role {
                 Some(HelperRole::NotHelper) => continue,
-                Some(HelperRole::Layer(_)) => {
-                    // Packing never sees a layer role, so every hand-set target is reported here.
-                    if let Some(fills) = sel.fills.as_ref().filter(|v| !v.is_empty()) {
-                        out.skipped_targets.insert(
-                            f.path.clone(),
-                            fills
-                                .iter()
-                                .map(|&t| (t, "normal-type roles feed RNM layers only".into()))
-                                .collect(),
-                        );
-                    }
-                    continue;
-                }
                 Some(HelperRole::Raw(r)) => r,
                 // The file's own job decides (Note DR: a skin `_f` has its role there only); any other job converts it
                 // alone (DY2, final review I1). Only a file with no job (failed or cancelled) falls back to its name.
@@ -166,7 +151,7 @@ pub fn plan_fills(
                     .iter()
                     .filter_map(|t| match t {
                         FillTarget::Alpha(a) => Some(*a),
-                        FillTarget::Packed { .. } | FillTarget::Rnm(_) => None,
+                        FillTarget::Packed { .. } => None,
                     })
                     .collect(),
                 None => suggested(role).into_iter().collect(),

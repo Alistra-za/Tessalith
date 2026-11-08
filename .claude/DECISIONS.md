@@ -16,10 +16,10 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW
 - Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV
-- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, GW
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
@@ -1198,4 +1198,5 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 ## Note GW — v3 RNM removed; detail names (owner, 2026-11-06)
 
 - **GW1 `_detail`, `_detailnorm` and `_detail_n` are one detail map on landscape and skin sets.** In a Landscape or PBR Landscape set the three names are `detail_normal`, in an Advanced skin set `skin_detail`, written under their own spelling (`x_detailnorm.png` writes `x_detailnorm.dds`) and never an RNM layer, whatever `rnm.target` says; `x_detail` and `x_detailnorm` join set `x` when it exists or the path is landscape and stay undecided elsewhere, while `x_detail_n` joins only a skin set, a landscape path or an explicit Landscape or PBR Landscape shader, so a `_detail_n` on a set that is Landscape only by a mesh pick, outside a landscape path, needs an explicit shader. Two of the names in one set are the blocking `IN-DUPLICATE`, a saved sub-type wins, and this supersedes GI13 and GI22 in part.
-- **GW2 The GUI has no RNM section, blended preview, normal-card outline or "Blends into" row.** A normal's texture settings panel and its card draw nothing for layer files, the set editor and Problems show no `RNM-*` notes, and a helper panel never offers a layer target; a layer file the engine still plans has no row and no edit in the GUI.
+- **GW2 The GUI has no RNM section, blended preview, normal-card outline or "Blends into" row.** A normal's texture settings panel and its card draw nothing for layer files, the set editor and Problems show no `RNM-*` notes, and a helper panel never offers a layer target; an old layer file is a plain file with no special row.
+- **GW3 RNM is removed from the engine.** `engine::rnm`, `RnmSpec`, `Profile.rnm`, the `RNM-*` codes except `RNM-AO-MISSING`, `VocabRole::NormalLayer`, `HelperRole::Layer`, `FillTarget::Rnm` and the manifest `rnm` input are gone; a project that names an `rnm` key, an `RNM-*` code in `allow` or a layer `helper.role` is refused as removed in 3.0, and a file called `rnm` or `_bump` is just a file. No `encode_version` arm moved, because only normals that had layers change and they re-export anyway when their input list changes; a no-layer bake keeps its `identity_sha256`. The `iron_n` (cs and vanilla) and `iron_rmaos` keys in `encode_versions/encode_inputs.json` and the `iron_n` (cs and vanilla) and `iron_rmaos` keys in `encode_versions/identity.json` changed because the fixture's normal is no longer blended.

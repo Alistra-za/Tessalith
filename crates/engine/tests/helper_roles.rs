@@ -131,23 +131,6 @@ fn hand_role_on_unnamed_file_makes_helper() {
 }
 
 #[test]
-fn hand_layer_role_makes_normal_layer() {
-    let d = fixture(
-        &["x_n.png", "x_extra.png"],
-        &files("x_extra", "helper.role = \"detailnorm\""),
-    );
-    let p = plan(d.path(), Target::Cs, &[]);
-    match job(&p, "x_extra.png").status {
-        JobStatus::NormalLayer { term } => {
-            assert_eq!(term.layer, LayerId::Detail);
-            assert!(!term.mask);
-            assert_eq!(term.prefix, None);
-        }
-        ref other => panic!("{other:?}"),
-    }
-}
-
-#[test]
 fn hand_role_beats_requested_subtype() {
     let d = fixture(
         &["x_ao.png"],
@@ -451,7 +434,7 @@ fn parse_set_helper_fields() {
 #[test]
 fn role_and_target_ids_round_trip() {
     let roles = HelperRole::all();
-    assert_eq!(roles.len(), 1 + 13 + 10);
+    assert_eq!(roles.len(), 1 + 13);
     for r in roles {
         assert_eq!(HelperRole::parse(&r.id()), Some(r), "{}", r.id());
     }

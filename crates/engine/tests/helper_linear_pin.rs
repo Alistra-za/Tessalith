@@ -43,7 +43,6 @@ fn job(f: &InputFile, subtype: Subtype, status: JobStatus, n: u64) -> ResolvedJo
         pack: None,
         bake: None,
         shader: None,
-        rnm: None,
         derive: None,
         cube: None,
         fill: None,
@@ -229,7 +228,6 @@ fn fills_and_reports_pin_first_match_order() {
         not_used: None,
         read: None,
         invert: false,
-        rnm_target: None,
         outputs: vec![PathBuf::from(outputs)],
     };
     assert_eq!(

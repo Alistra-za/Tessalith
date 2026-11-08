@@ -1,4 +1,4 @@
-//! Chunk E Task 2: the GUI has no RNM section, outline or "Blends into" row, even when the engine still reads a layer file.
+//! Chunk E Task 2: the GUI has no RNM section, outline or "Blends into" row, even beside an old layer file.
 mod support;
 use eframe::egui::{self, Color32};
 use egui_kittest::kittest::Queryable;
@@ -63,7 +63,7 @@ fn outlines(h: &Harness<'static, AppModel>, colour: Color32) -> usize {
 #[test]
 fn a_normal_card_has_no_rnm_section_or_outline() {
     let d = tempfile::tempdir().unwrap();
-    // An old project: the normal has a layer file the engine still reads (until the engine drops RNM).
+    // An old project: the normal has a former layer file beside it, which is now a plain file.
     let mut m = fixture(
         d.path(),
         &[
@@ -77,8 +77,10 @@ fn a_normal_card_has_no_rnm_section_or_outline() {
         ],
     );
     assert!(
-        m.item(N).unwrap().job.as_ref().unwrap().rnm.is_some(),
-        "the fixture's normal has a layer"
+        m.item(N).unwrap().job.as_ref().unwrap().bake.is_none()
+            && m.item("m/iron_detailnorm2.png")
+                .is_some_and(|i| i.helper.is_none()),
+        "the old layer file is a plain file"
     );
     let key = m
         .sets
@@ -120,7 +122,7 @@ fn a_normal_card_has_no_rnm_section_or_outline() {
     assert_eq!(panel_rnm, 0, "an RNM section");
 }
 
-/// The layer file's own helper panel: it drew (the Role row), and has no "Blends into" row or layer-target combo.
+/// The old layer file is a plain file: no helper item, and no "Blends into" row or layer-target combo anywhere.
 #[test]
 fn a_layer_files_helper_panel_has_no_blends_into_row() {
     let d = tempfile::tempdir().unwrap();
@@ -130,17 +132,15 @@ fn a_layer_files_helper_panel_has_no_blends_into_row() {
     );
     let layer = "m/iron_detailnorm2.png";
     assert!(
-        m.item(layer).is_some_and(|i| i.helper.is_some()),
-        "the layer file is a helper item"
+        m.item(layer).is_none_or(|i| i.helper.is_none()),
+        "the layer file is not a helper item"
     );
     m.select_item(layer);
     let mut h = harness(m);
     h.run();
     h.run();
-    let drew = h.query_all_by_label("Role").count();
     let blends = h.query_all_by_label("Blends into").count();
     let combos = h.query_all_by_label("Layer target").count();
-    assert!(drew > 0, "the helper panel drew");
     assert_eq!(blends, 0, "a Blends into row");
     assert_eq!(combos, 0, "a layer-target combo");
 }

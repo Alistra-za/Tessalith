@@ -361,27 +361,6 @@ pub const FIELD_PATHS: &[&str] = &[
     "packing.fill.height",
     "packing.fill.opacity",
     "packing.fill.fuzz",
-    "rnm.enabled",
-    "rnm.order",
-    "rnm.bump.strength",
-    "rnm.bump.flip_green",
-    "rnm.bump.mask",
-    "rnm.bump2.strength",
-    "rnm.bump2.flip_green",
-    "rnm.bump2.mask",
-    "rnm.detail.strength",
-    "rnm.detail.flip_green",
-    "rnm.detail.mask",
-    "rnm.detail2.strength",
-    "rnm.detail2.flip_green",
-    "rnm.detail2.mask",
-    "rnm.bent.strength",
-    "rnm.bent.flip_green",
-    "rnm.bent.mask",
-    "rnm.bent.mode",
-    "rnm.bent.ao_power",
-    "rnm.bent.ao",
-    "rnm.target",
     "helper.role",
     "helper.fills",
     "helper.read",
@@ -408,17 +387,9 @@ pub const REENCODE_FIELD: &str = "reencode";
 /// The sub-type field.
 pub const SUBTYPE_FIELD: &str = "subtype";
 
-/// M6 Track F2 (DECISIONS Note W3): which base normal a layer file feeds; a per-file selector, not a profile field.
-pub const RNM_TARGET_FIELD: &str = "rnm.target";
-
-/// A plan-time per-file selector (`reencode`, `rnm.target`, `helper.*`): never merged into a profile.
+/// A plan-time per-file selector (`reencode`, `helper.*`): never merged into a profile.
 pub fn is_selector(field: &str) -> bool {
-    field == REENCODE_FIELD || field == RNM_TARGET_FIELD || crate::helper::FIELDS.contains(&field)
-}
-
-/// `rnm.target`'s value, when it is one of `n`, `cnr`, `both`.
-pub fn rnm_target_value(v: &Value) -> Option<crate::config::RnmTarget> {
-    serde_json::from_value(v.clone()).ok()
+    field == REENCODE_FIELD || crate::helper::FIELDS.contains(&field)
 }
 
 /// A TOML literal (`100`, `true`, `"x"`) keeps its type; anything else (`bc1`, `none`) is a string.
@@ -471,11 +442,6 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
         if field == REENCODE_FIELD {
             return Err(format!(
                 "--set '{s}': reencode is decided per file, before the sub-type: use reencode=true or file:<glob>.reencode=true"
-            ));
-        }
-        if field == RNM_TARGET_FIELD {
-            return Err(format!(
-                "--set '{s}': rnm.target is decided per layer file: use rnm.target=<n|cnr|both> or file:<glob>.rnm.target=<…>"
             ));
         }
         if crate::helper::FIELDS.contains(&field) {
@@ -536,9 +502,6 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     }
     if field == REENCODE_FIELD && !value.is_boolean() {
         return Err(format!("--set '{s}': reencode takes true or false"));
-    }
-    if field == RNM_TARGET_FIELD && rnm_target_value(&value).is_none() {
-        return Err(format!("--set '{s}': rnm.target takes n, cnr or both"));
     }
     if let Some(e) = crate::helper::value_error(field, &value) {
         return Err(format!("--set '{s}': {e}"));

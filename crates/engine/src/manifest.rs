@@ -190,15 +190,11 @@ pub struct SourceRef {
     /// level shift (`BakeJob::identity_sha256`). Absent on every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bake: Option<String>,
-    /// M6 Track F2: an RNM input of a base normal and its role (`detail`, `detail.mask`, `bent.ao.r`, `bent.ao.b`). Absent on
-    /// every other source.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rnm: Option<String>,
     /// Track A (DECISIONS Note CN12): a derived job's source, with the job's `DeriveJob::identity_sha256`. Absent on
     /// every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derive: Option<String>,
-    /// The slots that source fills in a derived job (`albedo`, `rough+metal+ao`, ...), as `rnm` holds its role.
+    /// The slots that source fills in a derived job (`albedo`, `rough+metal+ao`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derive_role: Option<String>,
     /// The face (`posx` .. `negz`) a six-file cube's source fills (DECISIONS DS8). Absent on every other source.
@@ -220,7 +216,6 @@ impl SourceRef {
             role: None,
             invert: false,
             bake: None,
-            rnm: None,
             derive: None,
             derive_role: None,
             cube_face: None,
@@ -249,14 +244,6 @@ impl SourceRef {
     pub fn of_bake(path: &Path, identity: String) -> io::Result<SourceRef> {
         Ok(SourceRef {
             bake: Some(identity),
-            ..SourceRef::of(path)?
-        })
-    }
-
-    /// An RNM input of a base normal, with its role (M6 Track F2).
-    pub fn of_rnm(path: &Path, role: String) -> io::Result<SourceRef> {
-        Ok(SourceRef {
-            rnm: Some(role),
             ..SourceRef::of(path)?
         })
     }

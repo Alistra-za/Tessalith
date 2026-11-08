@@ -200,37 +200,6 @@ fn print_dds_info(info: &DdsInfo) {
     }
 }
 
-/// One compact line per RNM layer of a base normal: file, resolved strength, mask and AO source when used.
-fn print_rnm(job: &ResolvedJob) {
-    let Some(r) = job.active_rnm() else { return };
-    let name = |f: &engine::rnm::RnmFile| {
-        f.path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    };
-    let spec = &job.profile.rnm;
-    let inputs = r.inputs(spec);
-    for (f, role) in inputs.iter().filter(|(_, k)| !k.contains('.')) {
-        let Some(l) = r.layers.iter().find(|l| l.id.id() == *role) else {
-            continue;
-        };
-        let mask = inputs.iter().find(|(_, k)| *k == format!("{role}.mask"));
-        let ao = inputs.iter().find(|(_, k)| k.starts_with("bent.ao"));
-        let ao = ao.filter(|_| *role == "bent");
-        out!(
-            "  rnm {role} {} strength {}{}{}",
-            name(f),
-            spec.layer(l.id).strength,
-            mask.map(|(m, _)| format!(", mask {}", name(m)))
-                .unwrap_or_default(),
-            ao.map(|(a, _)| format!(", AO {}", name(a)))
-                .unwrap_or_default(),
-        );
-    }
-}
-
 fn print_planned(job: &ResolvedJob) {
     out!("{}", job.input.display());
     match job.suggestions.first() {
@@ -255,14 +224,13 @@ fn print_planned(job: &ResolvedJob) {
         JobStatus::Blocked { codes } | JobStatus::Error { codes } => {
             codes.iter().map(|c| c.as_str().to_string()).collect()
         }
-        JobStatus::Ready | JobStatus::PackingInput { .. } | JobStatus::NormalLayer { .. } => vec![],
+        JobStatus::Ready | JobStatus::PackingInput { .. } => vec![],
     };
     let state = serde_json::to_value(&job.status)
         .ok()
         .and_then(|v| v["state"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "-".into());
     out!("  status {state} {}", detail.join("; "));
-    print_rnm(job);
     for w in &job.warnings {
         out!("  {}", warning_line(None, w));
     }
