@@ -3,10 +3,8 @@
 use crate::model::helpers::target_label;
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::RnmTarget;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
-use serde_json::json;
 
 /// The fixed width of the panel's combos (egui-ui-rules 3.5: `ComboBox::width` is only a minimum).
 const COMBO_W: f32 = 200.0;
@@ -25,7 +23,6 @@ enum Edit {
     Fills(Option<Vec<FillTarget>>),
     Read(Option<HelperRead>),
     Invert(bool),
-    LayerTarget(RnmTarget),
     Select(String),
 }
 
@@ -79,21 +76,14 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     ui.heading(&name);
     ui.weak(crate::model::items::helper_target_text(h));
     ui.add_space(4.0);
-    // The engine's `rnm.target` in effect (Note W4's `_cnr` fallback included).
-    let layer_target = h.rnm_target.filter(|_| h.role.is_normal());
     ui.add_enabled_ui(ro.is_none(), |ui| {
         egui::Grid::new(("helper-panel", key))
             .num_columns(3)
             .show(ui, |ui| {
                 role_row(ui, key, h, &ro, &mut edits);
-                match layer_target {
-                    Some(t) => layer_row(ui, key, t, &ro, &mut edits),
-                    None => {
-                        let now = model.current_fills(key, h);
-                        fills_rows(ui, key, h, now, &ro, &mut edits);
-                        read_rows(ui, key, h, &ro, &mut edits);
-                    }
-                }
+                let now = model.current_fills(key, h);
+                fills_rows(ui, key, h, now, &ro, &mut edits);
+                read_rows(ui, key, h, &ro, &mut edits);
             });
         for (t, reason) in &h.skipped_targets {
             ui.weak(format!("Skipped {}: {reason}", target_label(h, *t)));
@@ -110,7 +100,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
             Edit::Fills(f) => model.set_helper_fills(key, f),
             Edit::Read(r) => model.set_helper_read(key, r),
             Edit::Invert(on) => model.set_helper_invert(key, on),
-            Edit::LayerTarget(t) => model.set_field(key, "rnm.target", json!(t)),
             Edit::Select(k) => model.select_item(&k),
         }
     }
@@ -209,31 +198,6 @@ pub(crate) fn role_combo(
     named(&r, egui::WidgetType::ComboBox, "Helper role", Some(&shown));
     why(r, ro);
     picked
-}
-
-fn layer_row(
-    ui: &mut egui::Ui,
-    key: &str,
-    t: RnmTarget,
-    ro: &Option<String>,
-    edits: &mut Vec<Edit>,
-) {
-    ui.label("Blends into");
-    let shown = super::rnm_section::target_label(t);
-    let r = combo(ui, (key, "helper-layer-target"), shown, |ui| {
-        for o in [RnmTarget::N, RnmTarget::Cnr, RnmTarget::Both] {
-            if ui
-                .selectable_label(o == t, super::rnm_section::target_label(o))
-                .clicked()
-            {
-                edits.push(Edit::LayerTarget(o));
-            }
-        }
-    });
-    named(&r, egui::WidgetType::ComboBox, "Layer target", Some(shown));
-    why(r, ro);
-    hint(ui, "rnm.target");
-    ui.end_row();
 }
 
 /// One Grid row per line (`Fills | name ✕ | hint`, then `Add ▾ Reset`), so nothing is centred on a tall cell and the

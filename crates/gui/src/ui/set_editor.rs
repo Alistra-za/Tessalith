@@ -3,11 +3,10 @@
 use super::columns::{border_of, bulk_menu, status_text, AMBER, RED};
 use super::sets_column::{DropState, Pending, SlotNote};
 use super::slot_commands::SlotCmdState;
-use super::status::{code_hover, dot, Status};
+use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::tile_ready;
 use crate::model::bulk::MenuAction;
-use crate::model::code_text::shown_for;
 use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
     PARALLAX_HOVER,
@@ -15,7 +14,6 @@ use crate::model::fields::{
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
-use crate::model::rnm::{rnm_active, rnm_rows};
 use crate::model::sets::{
     card_title, is_json_set, shared_cells, shows_json_panel, slot_clash_text, slot_of, slot_row,
     views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
@@ -390,10 +388,6 @@ fn under_grid(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
         ui.add_space(4.0);
         recipe(ui, r);
     }
-    for w in model.rnm_notes.get(&v.key).into_iter().flatten() {
-        ui.colored_label(AMBER, &*shown_for(Some(w.code), &w.message))
-            .on_hover_ui(|ui| code_hover(ui, &w.message, w.code.as_str()));
-    }
     // R10: the codes live in Problems; one line points there.
     let n = crate::model::bottom::set_problem_count(model, &v.key);
     if n > 0 {
@@ -526,24 +520,6 @@ fn row(
         }
     }
     let top = ui.cursor().min;
-    // The blue outline: this normal blends RNM layers (F2 spec §5.2). The amber one wins.
-    let rnm_layers: Vec<&str> = match (fill, slot) {
-        (
-            SlotFill::Own { item } | SlotFill::Borrowed { item, .. },
-            SlotKind::Normal | SlotKind::Coat,
-        ) => model
-            .item(item)
-            .and_then(|i| i.job.as_ref())
-            .filter(|j| rnm_active(j))
-            .map(|j| {
-                rnm_rows(j, &model.rnm_keys, &|_| None)
-                    .iter()
-                    .map(|r| r.label)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        _ => vec![],
-    };
     let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
     let title = match fill.item() {
         Some(item) if slot != SlotKind::Rmaos => {
@@ -576,10 +552,6 @@ fn row(
     } else {
         t
     };
-    if cell.usable && !rnm_layers.is_empty() {
-        t.clone()
-            .on_hover_text(format!("RNM: {}", rnm_layers.join(" → ")));
-    }
     // Note GI (X16): CS does not draw the projected detail normal in this build.
     let landscape = v
         .shader
@@ -807,8 +779,6 @@ fn row(
             }
             if let (false, Some(p)) = (cell.usable, &v.shader) {
                 lines.push(format!("not used by {}", p.shader.label()));
-            } else if !rnm_layers.is_empty() {
-                lines.push(format!("RNM, {} layers", rnm_layers.len()));
             }
             if let Some(i) = item {
                 let s = match i.status {
@@ -836,21 +806,12 @@ fn row(
     let rect = egui::Rect::from_min_max(top, ui.min_rect().max);
     ui.end_row();
     ui.data_mut(|d| d.insert_temp(row_id, rect));
-    // A filled slot the shader cannot use stays at its place, outlined, and says why (F1 spec §5); a normal blending RNM
-    // layers is outlined in the accent.
-    let outline = if !cell.usable {
-        Some(AMBER)
-    } else if !rnm_layers.is_empty() {
-        // Note FC9: the one accent, not a blue of its own.
-        Some(ui.visuals().selection.stroke.color)
-    } else {
-        None
-    };
-    if let Some(c) = outline {
+    // A filled slot the shader cannot use stays at its place, outlined, and says why (F1 spec §5).
+    if !cell.usable {
         ui.painter().rect_stroke(
             rect,
             2.0,
-            egui::Stroke::new(2.0, c),
+            egui::Stroke::new(2.0, AMBER),
             egui::StrokeKind::Outside,
         );
     }

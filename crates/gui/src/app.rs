@@ -443,7 +443,6 @@ impl eframe::App for SdcApp {
         // Worker results arrive on a channel, not as input events: keep frames coming while one is pending.
         let visible = self.model.busy()
             || self.model.heatmap_pending()
-            || self.model.rnm_preview_pending()
             || self.model.picker.busy()
             || self.meshes.scanning()
             || self.meshes.v3.busy()

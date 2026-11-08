@@ -603,16 +603,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         };
         out.push(row(Level::Warning, set_at(&key, &id), text, None));
     }
-    for (k, ws) in &m.rnm_notes {
-        let at = views
-            .iter()
-            .find(|v| v.key == *k)
-            .map_or(At::Project, |v| set_at(&v.key, &v.id));
-        for w in ws.iter().filter(|w| counts_toward_badge(w)) {
-            let (at, text) = (at.clone(), w.message.clone());
-            out.push(row(Level::Warning, at, text, Some(w.code)));
-        }
-    }
     // Note FC3 (Y4): an entry of the folder the plan could not read, with its folder to open.
     for w in &m.unreadable {
         out.push(Problem {

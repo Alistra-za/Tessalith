@@ -1360,7 +1360,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 group(ui, g, &cx, &mut actions);
             }
             if !compact {
-                super::rnm_section::rnm_section(ui, model, key, &edit_off);
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
                     match v {
                         Some(v) => model.set_field(&k, &f, v),

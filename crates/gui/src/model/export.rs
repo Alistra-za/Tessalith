@@ -115,7 +115,7 @@ impl ExportModel {
             .map(|r| r.path.as_str())
     }
 
-    /// Drop the queued rows of `path` (a raw map packed into a recipe, a used RNM layer).
+    /// Drop the queued rows of `path` (a raw map packed into a recipe, a used layer file).
     fn drop_queued(&mut self, path: &str) {
         let before = self.rows.len();
         self.rows
@@ -205,7 +205,7 @@ impl ExportModel {
                 code: None,
                 ..
             } => {
-                // A used layer shows only in the RNM section; one an RNM-* code explains stays visible.
+                // A used layer file has no row; one a code explains stays visible.
                 if let Some(p) = ev.path.as_deref() {
                     self.drop_queued(p);
                 }

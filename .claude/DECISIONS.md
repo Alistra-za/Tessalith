@@ -21,7 +21,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, GW
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV
@@ -1198,3 +1198,4 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 ## Note GW — v3 RNM removed; detail names (owner, 2026-11-06)
 
 - **GW1 `_detail`, `_detailnorm` and `_detail_n` are one detail map on landscape and skin sets.** In a Landscape or PBR Landscape set the three names are `detail_normal`, in an Advanced skin set `skin_detail`, written under their own spelling (`x_detailnorm.png` writes `x_detailnorm.dds`) and never an RNM layer, whatever `rnm.target` says; `x_detail` and `x_detailnorm` join set `x` when it exists or the path is landscape and stay undecided elsewhere, while `x_detail_n` joins only a skin set, a landscape path or an explicit Landscape or PBR Landscape shader, so a `_detail_n` on a set that is Landscape only by a mesh pick, outside a landscape path, needs an explicit shader. Two of the names in one set are the blocking `IN-DUPLICATE`, a saved sub-type wins, and this supersedes GI13 and GI22 in part.
+- **GW2 The GUI has no RNM section, blended preview, normal-card outline or "Blends into" row.** A normal's texture settings panel and its card draw nothing for layer files, the set editor and Problems show no `RNM-*` notes, and a helper panel never offers a layer target; a layer file the engine still plans has no row and no edit in the GUI.

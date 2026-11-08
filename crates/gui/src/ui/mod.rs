@@ -26,7 +26,6 @@ pub mod preview;
 pub mod problems;
 pub mod rename_dialog;
 pub mod review;
-pub mod rnm_section;
 pub mod set_editor;
 pub mod set_preview;
 pub mod sets_column;

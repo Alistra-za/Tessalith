@@ -102,10 +102,6 @@ pub struct PlanView {
     pub items: Vec<TextureItem>,
     pub sets: Vec<SetItem>,
     pub unmatched: Vec<String>,
-    /// Set key to the RNM-* notes of its layer jobs (a layer file has no item).
-    pub rnm_notes: BTreeMap<String, Vec<Warning>>,
-    /// Layer, mask and AO path to its `[files]` key.
-    pub rnm_keys: BTreeMap<PathBuf, String>,
     /// The export folder the plan ran with: set keys are under it (audit 08c-3).
     pub output_root: PathBuf,
 }
@@ -200,27 +196,13 @@ impl PlanView {
     pub fn build(plan: &Plan, events: &[EngineEvent], session: &Session, root: &Path) -> PlanView {
         let out_root = &plan.request.output_root;
         let mut items = vec![];
-        let mut rnm_notes: BTreeMap<String, Vec<Warning>> = BTreeMap::new();
-        let mut rnm_keys = BTreeMap::new();
         // Note DY16: a file with a helper report is one Helper item; its own raw job and its pack-source item are not.
         let helper_paths: std::collections::HashSet<&Path> =
             plan.helpers.iter().map(|h| h.path.as_path()).collect();
         let mut helper_warnings: BTreeMap<&Path, Vec<Warning>> = BTreeMap::new();
         for job in &plan.jobs {
-            // M6 Track F2 (Note W11): a layer file has no item; its RNM-* notes are kept for its set.
+            // A normal's old layer file has no item; the engine still plans it until it drops layers.
             if matches!(job.status, JobStatus::NormalLayer { .. }) {
-                let notes: Vec<Warning> = job
-                    .warnings
-                    .iter()
-                    .filter(|w| w.code.as_str().starts_with("RNM-"))
-                    .cloned()
-                    .collect();
-                if !notes.is_empty() {
-                    rnm_notes
-                        .entry(job.set_key.clone())
-                        .or_default()
-                        .extend(notes);
-                }
                 continue;
             }
             if matches!(job.status, JobStatus::PackingInput { .. })
@@ -232,17 +214,6 @@ impl PlanView {
                     .or_default()
                     .extend(job.warnings.iter().cloned());
                 continue;
-            }
-            if let Some(r) = &job.rnm {
-                for l in &r.layers {
-                    rnm_keys.insert(l.file.path.clone(), key_of(root, &l.file.path));
-                    if let Some(m) = &l.mask {
-                        rnm_keys.insert(m.path.clone(), key_of(root, &m.path));
-                    }
-                }
-                if let Some(a) = &r.ao {
-                    rnm_keys.insert(a.file.path.clone(), key_of(root, &a.file.path));
-                }
             }
             let packed = job.pack.is_some();
             let key = if let Some(pk) = &job.pack {
@@ -478,8 +449,6 @@ impl PlanView {
             items,
             sets,
             unmatched,
-            rnm_notes,
-            rnm_keys,
             output_root: out_root.clone(),
         }
     }

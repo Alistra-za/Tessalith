@@ -39,8 +39,6 @@ pub mod readout;
 mod reencode;
 pub mod rename;
 pub mod review;
-pub mod rnm;
-pub mod rnm_preview;
 pub mod sections;
 pub mod set_preview;
 pub mod sets;
@@ -477,10 +475,6 @@ pub struct AppModel {
     /// The rename dialog's last plan, for drawing only (Note FA).
     rename_cache: std::cell::RefCell<Option<rename::PlanCache>>,
     pub unmatched_keys: Vec<String>,
-    /// Per-set RNM-* notes from layer jobs (they have no item).
-    pub rnm_notes: std::collections::BTreeMap<String, Vec<engine::codes::Warning>>,
-    /// Layer, mask and AO path to its `[files]` key.
-    pub rnm_keys: std::collections::BTreeMap<PathBuf, String>,
     /// The preset id the last plan resolved (empty before the first plan).
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
@@ -527,8 +521,6 @@ pub struct AppModel {
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
     /// Item 22: per-item DDS sizes by plan revision.
     pub sizes: out_size::SizeCache,
-    /// Item 21: the RNM blended thumbnail job.
-    pub rnm_preview: rnm_preview::RnmPreview,
     /// A note kept in front of the status line until the next Export click (an Export cancelled by an edit, AF4).
     pub status_note: Option<String>,
     /// "Undid: <label>" / "Redid: <label>" in front of the status line until the next edit (item 2).
@@ -800,8 +792,6 @@ impl AppModel {
             sets: vec![],
             sets_root: None,
             unmatched_keys: vec![],
-            rnm_notes: Default::default(),
-            rnm_keys: Default::default(),
             batch_preset: String::new(),
             batch: false,
             selection: Selection::None,
@@ -833,7 +823,6 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
-            rnm_preview: Default::default(),
             status_note: None,
             undo_note: None,
             undo_note_at: None,
@@ -1779,7 +1768,6 @@ impl AppModel {
             } => self.uv_progress(run, done, total, finished),
             WorkerMsg::ScanHasRows { stamp, rows } => self.uv_rows_landed(stamp, rows),
             WorkerMsg::Dims(dims) => self.dims_landed(dims),
-            WorkerMsg::RnmPreview { id, image } => self.rnm_preview_landed(id, image),
             _ => {}
         }
     }
@@ -2242,12 +2230,6 @@ impl AppModel {
                     .collect(),
                 None => vec![(job.input.as_path(), job.source)],
             };
-            let rnm = job
-                .active_rnm()
-                .into_iter()
-                .flat_map(|r| r.inputs(&job.profile.rnm))
-                .map(|(f, _)| (f.path.as_path(), f.stamp));
-            let stamps: Vec<_> = stamps.into_iter().chain(rnm).collect();
             for (path, planned) in stamps {
                 if planned.is_some_and(|p| SourceStamp::of(path) != Some(p)) {
                     changed_paths.insert(path.to_path_buf());
@@ -2264,10 +2246,6 @@ impl AppModel {
                 || item.job.as_ref().is_some_and(|j| {
                     j.pack.as_ref().is_some_and(|pk| {
                         pk.sources.iter().any(|s| changed_paths.contains(&s.path))
-                    }) || j.active_rnm().is_some_and(|r| {
-                        r.inputs(&j.profile.rnm)
-                            .iter()
-                            .any(|(f, _)| changed_paths.contains(&f.path))
                     })
                 });
             n += usize::from(item.changed_on_disk);
@@ -2631,8 +2609,6 @@ impl AppModel {
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
         self.unmatched_keys = view.unmatched;
-        self.rnm_notes = view.rnm_notes;
-        self.rnm_keys = view.rnm_keys;
         self.batch_preset = view.preset_id;
         self.loaded_user_presets = view.user_presets;
         self.suffix_aliases = view.suffix_aliases;
@@ -2703,23 +2679,6 @@ impl AppModel {
             .as_deref()
             .and_then(|k| self.item(k))
             .is_some_and(in_scope);
-        // The RNM layer, mask and AO paths of some items (as `PlanView::build` collects them).
-        fn rnm_paths<'a>(items: impl Iterator<Item = &'a TextureItem>) -> BTreeSet<PathBuf> {
-            items
-                .filter_map(|i| i.job.as_ref()?.rnm.as_ref())
-                .flat_map(|r| {
-                    r.layers
-                        .iter()
-                        .flat_map(|l| {
-                            std::iter::once(&l.file.path).chain(l.mask.as_ref().map(|m| &m.path))
-                        })
-                        .chain(r.ao.as_ref().map(|a| &a.file.path))
-                        .cloned()
-                })
-                .collect()
-        }
-        // The scope sets' paths: the view's replace them.
-        let old_rnm = rnm_paths(self.items.iter().filter(|i| in_scope(i)));
         // A failed file has no set: the partial's own item for its key replaces it.
         let new: BTreeSet<String> = view.items.iter().map(|i| i.key.clone()).collect();
         let mut items = view.items;
@@ -2737,14 +2696,6 @@ impl AppModel {
                 *x = s;
             }
         }
-        // A path a set outside the scope still reads stays (final fix, parked from Task 6).
-        let kept = rnm_paths(self.items.iter().filter(|i| !in_scope(i)));
-        for p in old_rnm.difference(&kept) {
-            self.rnm_keys.remove(p);
-        }
-        self.rnm_notes.retain(|k, _| !scope.contains(k));
-        self.rnm_notes.extend(view.rnm_notes);
-        self.rnm_keys.extend(view.rnm_keys);
         // Note FL7: the views cache moves to the new key with only the scope sets' views built again (the frame after
         // a partial must not rebuild 10k views); the export blocks and asks stay as of the last full plan.
         let old_key = self.view_key();
