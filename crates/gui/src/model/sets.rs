@@ -792,9 +792,14 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
 /// `finish_view` the diffuse's `job.profile.subtype` and its key (`mirrored_stem`). The keys are compared apart
 /// (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets document (in the
-/// views key). `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
-pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>) {
-    (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
+/// views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`). `output_suffix` and
+/// `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
+pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>, bool) {
+    (
+        slot_of(i),
+        i.job.as_ref().map(|j| j.profile.subtype),
+        i.waiting,
+    )
 }
 
 /// Order: the saved `order` first (ids compared folded, the first listing of an id wins), then the rest by id. The
@@ -833,6 +838,8 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         }
     }
     sort_by_saved_order(&mut views, &order);
+    // After the entries, so an entry of a hidden set does not come back as an empty one.
+    views.retain(|v| !card_hidden(m, &entries, &v.id, &v.members));
     // Entry data: created flag, settings, missing members, borrowed slots.
     let own_slots: Vec<(String, BTreeMap<SlotKind, SlotFill>)> = views
         .iter()
@@ -860,6 +867,22 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         v.owns = owns_of(v, &owners);
     }
     views
+}
+
+/// Note GY5: a set whose only member waits for a type has no card, unless the user created it.
+fn card_hidden(m: &AppModel, entries: &[SetEntry], id: &str, members: &[String]) -> bool {
+    matches!(members, [k] if m.item(k).is_some_and(|i| i.waiting))
+        && !entry_of(entries, id).is_some_and(|e| e.created)
+}
+
+/// Note GY5: how many of the plan's sets have a card (the status line's count).
+pub(crate) fn carded_sets(m: &AppModel) -> usize {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let root = m.sets_root();
+    m.sets
+        .iter()
+        .filter(|s| !card_hidden(m, &entries, &set_id(&root, &s.key), &s.members))
+        .count()
 }
 
 /// Whether set-line key `key` (project-relative, possibly without an extension) names something on disk under `root`.
@@ -1048,17 +1071,22 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
     // project with many mapped sets shows it in a profile.
-    if scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
+    let root = m.sets_root();
+    let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
+    // Note GY5: a scope set whose card comes or goes changes the list itself.
+    let card_moves = scope.iter().filter_map(|k| set_of(k)).any(|s| {
+        let shown = views.iter().any(|v| v.key == s.key);
+        shown == card_hidden(m, &entries, &set_id(&root, &s.key), &s.members)
+    });
+    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
         *views = build_views(m);
         return;
     }
-    let root = m.sets_root();
     let scope_ids: Vec<String> = views
         .iter()
         .filter(|v| scope.contains(&v.key))
         .map(|v| v.id.clone())
         .collect();
-    let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
     // A set's own slots by id, from the plan (what `build_views` reads before any borrow).
     let own = |from: &str| {
         let v = views.iter().find(|v| same_id(&v.id, from))?;

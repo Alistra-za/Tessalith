@@ -165,6 +165,8 @@ fn a_recording_after_a_user_edit_is_its_own_step() {
     let root = d.path().join("textures");
     rgb(&root, "a/x.png", [90, 60, 30]);
     rgb(&root, "a/x_mask.png", [200, 200, 200]);
+    // Note GY1: a set mate, so the former helper is not a lone unknown suffix that waits for a type.
+    rgb(&root, "a/x_mask_n.png", [128, 128, 255]);
     let toml = "[files.\"a/x_mask.png\"]\nhelper.role = \"opacity\"\n";
     std::fs::write(root.join("sdc.toml"), toml).unwrap();
     let mut m = support::opened_as_the_app(root, d.path().join("export"));

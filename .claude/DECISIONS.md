@@ -20,11 +20,11 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1233,3 +1233,4 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 - **GY2 A set shader assigns no type.** Only a `[files]` sub-type or a rule's sub-type does: a lone `road_wet.png` in a set with an explicit Advanced Skin shader waits, gets no `skin_wet` suggestion (`_wet` is a suffix only for a member joined to an Advanced skin set) and its set is not shared. Tests `shared_skin::a_set_named_after_its_wet_file_waits_alone` and the lone case of `shared_skin::renaming_a_colour_set_keeps_its_colour`.
 - **GY3 `--allow SUG-LOW-CONFIDENCE` skips a job with no suggestions.** It accepts a suggestion, so an undecided job with none, waiting or not (an `x_detail` in a plain set too), stays unresolved with `Need::Subtype` and writes nothing. Test `unknown_suffix::allow_does_not_convert_a_waiting_file`.
 - **GY4 A kept DDS never waits.** A DDS that is not re-encoded is never planned, so the rule does not apply to it: in the shader's map check (`map_members`) a lone kept `rock_bump.dds` still fills the colour slot by its name, so its set gets the map warnings a lone `rock.dds` gets (SHADER-MISSING-MAP for the normal, no SHADER-EXTRA-MAP). The shader pick never reads it. Test `unknown_suffix::a_lone_kept_dds_keeps_its_map_check`.
+- **GY5 In the GUI a waiting file is undecided and has no set card.** `TextureItem::waiting` is `ResolvedJob::waits_for_type`; the file has one Decide row in Problems and one Undecided row in Review, an amber tile, no `[files]` sub-type from the first open, and Export skips it as undecided. `sets::views` leaves out a set whose only member waits, with its set rows and the texture panel's "← set" link, unless the user created that set; assigning a type brings the card, and Undo takes it away. Tests in `crates/gui/tests/unknown_suffix.rs`.

@@ -3317,7 +3317,7 @@ impl AppModel {
 
     /// "1 texture, 1 set" / "3 textures, 2 sets" (Note FI14).
     fn counts_line(&self) -> String {
-        let (t, s) = (self.items.len(), self.sets.len());
+        let (t, s) = (self.items.len(), sets::carded_sets(self));
         format!(
             "{t} texture{}, {s} set{}",
             review::plural(t),
