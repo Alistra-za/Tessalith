@@ -183,26 +183,27 @@ fn selected_kept_while_hidden(m: &AppModel) -> Result<Option<String>, String> {
     }
 }
 
-/// One pill on and nothing else: the sets shown are the pill's count. No filter: every set is shown.
+/// A pill's count is what clicking it shows, so with exactly one pill on (and any search or shader) the sets shown
+/// are that pill's count; with only a shader on they are the shader's count (Note HP, SC5). No filter: every set.
 fn pills_match_counts(m: &AppModel) -> Result<Option<String>, String> {
     let f = &m.sets_filter;
     let pills = [f.attention, f.ready, f.no_json];
-    let on = pills.iter().filter(|p| **p).count()
-        + usize::from(!f.search.trim().is_empty())
-        + usize::from(f.shader.is_some());
     let shown = m.visible_sets().len();
     let c = m.set_counts();
-    let (what, want) = match on {
-        0 => ("no filter", sets::views(m).len()),
-        1 if f.attention => ("Not ready", c.attention),
-        1 if f.ready => ("Ready", c.ready),
-        1 if f.no_json => ("No JSON", c.no_json),
-        1 => {
+    let (what, want) = match pills.iter().filter(|p| **p).count() {
+        0 if !m.sets_filter_active() => ("no filter", sets::views(m).len()),
+        0 if f.search.trim().is_empty() => {
+            ("the shader", f.shader.map_or(0, |s| m.sets_with_shader(s)))
+        }
+        0 => {
             return Ok(Some(
-                "not checked: the only filter part on has no pill count".into(),
+                "not checked: a search with no pill on has no count".into(),
             ))
         }
-        _ => return Ok(Some("not checked: more than one filter part is on".into())),
+        1 if f.attention => ("Not ready", c.attention),
+        1 if f.ready => ("Ready", c.ready),
+        1 => ("No JSON", c.no_json),
+        _ => return Ok(Some("not checked: more than one pill is on".into())),
     };
     if shown == want {
         Ok(None)
@@ -210,7 +211,6 @@ fn pills_match_counts(m: &AppModel) -> Result<Option<String>, String> {
         Err(format!("{what} shows {shown} sets but counts {want}"))
     }
 }
-
 /// Compares what a filter shows with what `want` says it should: `Err` names the rows wrongly shown and wrongly
 /// hidden. `Ok(Some(note))` when the filter hides everything or changes nothing, which no row-by-row test notices.
 pub fn filter_matches(

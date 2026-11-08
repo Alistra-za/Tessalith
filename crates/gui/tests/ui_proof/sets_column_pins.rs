@@ -1204,3 +1204,100 @@ fn a_top_badge_is_not_trimmed_by_the_combo() {
     let tall = c.badges.iter().filter(|b| b.height() >= 19.5).count();
     assert!(tall >= 1, "a badge keeps its 20 px hit: {:?}", c.badges);
 }
+
+/// Note HP SC5: each pill not yet on, clicked, shows as many sets as its name says; clicking again restores the list.
+fn pills_show_their_counts(h: &mut crate::app_harness::H, at: &str) {
+    for prefix in ["Not ready ", "Ready ", "No JSON "] {
+        let names = named_from(h, prefix);
+        assert_eq!(names.len(), 1, "{at}: one {prefix:?} pill, got {names:?}");
+        let on = |h: &crate::app_harness::H| {
+            let f = &h.state().model.sets_filter;
+            match prefix {
+                "Not ready " => f.attention,
+                "Ready " => f.ready,
+                _ => f.no_json,
+            }
+        };
+        if on(h) {
+            continue;
+        }
+        let n: usize = names[0][prefix.len()..].parse().unwrap();
+        let before = h.state().model.visible_sets().len();
+        let pos = one(h, &names[0]).center();
+        tap(h, pos);
+        assert!(on(h), "{at}: {prefix:?} clicked on");
+        assert_eq!(
+            h.state().model.visible_sets().len(),
+            n,
+            "{at}: {} shows what it counts",
+            names[0]
+        );
+        let now = named_from(h, prefix);
+        let pos = one(h, &now[0]).center();
+        tap(h, pos);
+        assert!(!on(h), "{at}: {prefix:?} clicked off");
+        assert_eq!(
+            h.state().model.visible_sets().len(),
+            before,
+            "{at}: restored"
+        );
+    }
+}
+
+#[test]
+fn each_pill_shows_exactly_its_count() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let at = format!("at {w}x{h_px}");
+        let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        one(&h, "Not ready 1");
+        one(&h, "Ready 0");
+        let weak = h.ctx.global_style().visuals.weak_text_color();
+        assert_eq!(text_colour(&h, "Ready 0"), Some(weak), "{at}: zero is weak");
+        pills_show_their_counts(&mut h, &at);
+
+        let (_d, mut h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+                r#"{"op":"click","at":{"label":"PBR 2"}}"#,
+            ],
+        );
+        pills_show_their_counts(&mut h, &format!("{at} PBR"));
+
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
+        let n = named_from(&h, "Not ready ");
+        let pos = one(&h, &n[0]).center();
+        tap(&mut h, pos);
+        assert!(h.state().model.sets_filter.attention);
+        pills_show_their_counts(&mut h, &format!("{at} Not ready on"));
+    }
+}
+
+#[test]
+fn the_shader_popup_counts_follow_the_search() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
+                r#"{"op":"click","at":{"label":"Sets shader filter"}}"#,
+            ],
+        );
+        for l in [
+            "PBR 1",
+            "Default 1",
+            "Environment Map 1",
+            "Parallax 0",
+            "Glow 0",
+        ] {
+            one(&h, l);
+        }
+        let pos = one(&h, "PBR 1").center();
+        tap(&mut h, pos);
+        assert_eq!(h.state().model.visible_sets().len(), 1, "at {w}x{h_px}");
+    }
+}

@@ -16,7 +16,29 @@ pub struct SetsFilter {
     pub shader: Option<Shader>,
 }
 
-/// What each pill shows, over the sets with a key (K20: a created set with no key counts toward none).
+/// One part of the filter, to switch on for a count (Note HP, SC5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    Attention,
+    Ready,
+    NoJson,
+    Shader(Shader),
+}
+
+/// A copy of `f` with `p` switched on: the filter a click on that part would leave (the parts combine with AND).
+pub fn with_part(f: &SetsFilter, p: Part) -> SetsFilter {
+    let mut f = f.clone();
+    match p {
+        Part::Attention => f.attention = true,
+        Part::Ready => f.ready = true,
+        Part::NoJson => f.no_json = true,
+        Part::Shader(s) => f.shader = Some(s),
+    }
+    f
+}
+
+/// What each pill shows: the keyed sets the list would show with that pill switched on (Note HP, SC5; K20: a
+/// created set with no key counts toward none).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SetCounts {
     pub attention: usize,
@@ -29,7 +51,7 @@ pub struct SetCounts {
 #[derive(Default)]
 pub(crate) struct SetsFilterCache {
     list: Option<(ListKey, Arc<Vec<usize>>)>,
-    counts: Option<(CountsKey, SetCounts)>,
+    counts: Option<(CountsKey, SetsFilter, SetCounts)>,
 }
 
 #[derive(Clone)]
@@ -109,14 +131,7 @@ impl AppModel {
                 .filter(|(_, v)| {
                     // A created set with no key passes only an empty filter, and a set created under this filter
                     // stays shown until the filter changes (Note FC13, CD16).
-                    key.new_sets.contains(&v.id)
-                        || !v.key.is_empty()
-                            && (q.is_empty() || engine::sets::fold_id(&v.id).contains(&q))
-                            && (!f.attention || !bottom::set_ready_in(&flagged, v))
-                            && (!f.ready || bottom::set_ready_in(&flagged, v))
-                            && (!f.no_json || !writes_json_in(self, &entries, v))
-                            && f.shader
-                                .is_none_or(|s| v.shader.as_ref().map(|p| p.shader) == Some(s))
+                    key.new_sets.contains(&v.id) || self.passes(f, v, &flagged, &entries, &q)
                 })
                 .map(|(n, _)| n)
                 .collect()
@@ -125,40 +140,62 @@ impl AppModel {
         list
     }
 
-    /// The pill counts over the sets with a key, cached as the list is.
-    pub fn set_counts(&self) -> SetCounts {
-        let views = sets::views(self);
-        let key = self.sets_counts_key();
-        if let Some((k, c)) = &self.sets_filter_cache.borrow().counts {
-            if *k == key {
-                return *c;
-            }
-        }
+    /// The one per-set test: a keyed set that matches the search, the three pills and the shader of `f`. `q` is the
+    /// folded, trimmed search. The list and every count use it, so a count is what its click shows (Note HP, SC5).
+    fn passes(
+        &self,
+        f: &SetsFilter,
+        v: &SetView,
+        flagged: &bottom::Flagged,
+        entries: &[crate::sets_doc::SetEntry],
+        q: &str,
+    ) -> bool {
+        !v.key.is_empty()
+            && (q.is_empty() || engine::sets::fold_id(&v.id).contains(q))
+            && (!f.attention || !bottom::set_ready_in(flagged, v))
+            && (!f.ready || bottom::set_ready_in(flagged, v))
+            && (!f.no_json || !writes_json_in(self, entries, v))
+            && f.shader
+                .is_none_or(|s| v.shader.as_ref().map(|p| p.shader) == Some(s))
+    }
+
+    /// How many sets the list would show with `p` switched on.
+    fn count_with(&self, p: Part) -> usize {
+        let f = with_part(&self.sets_filter, p);
+        let q = engine::sets::fold_id(f.search.trim());
         let entries = self
             .sets_doc
             .as_ref()
             .map(|d| d.entries())
             .unwrap_or_default();
         let flagged = bottom::flagged(self);
-        let mut c = SetCounts::default();
-        for v in views.iter().filter(|v| !v.key.is_empty()) {
-            let ready = bottom::set_ready_in(&flagged, v);
-            c.ready += usize::from(ready);
-            c.attention += usize::from(!ready);
-            c.no_json += usize::from(!writes_json_in(self, &entries, v));
+        sets::views(self)
+            .iter()
+            .filter(|v| self.passes(&f, v, &flagged, &entries, &q))
+            .count()
+    }
+
+    /// The pill counts, cached by the views, the problems and the whole filter.
+    pub fn set_counts(&self) -> SetCounts {
+        let key = self.sets_counts_key();
+        if let Some((k, f, c)) = &self.sets_filter_cache.borrow().counts {
+            if *k == key && *f == self.sets_filter {
+                return *c;
+            }
         }
-        self.sets_filter_cache.borrow_mut().counts = Some((key, c));
+        let c = SetCounts {
+            attention: self.count_with(Part::Attention),
+            ready: self.count_with(Part::Ready),
+            no_json: self.count_with(Part::NoJson),
+        };
+        self.sets_filter_cache.borrow_mut().counts = Some((key, self.sets_filter.clone(), c));
         c
     }
 
-    /// How many keyed sets the shader filter shows when `s` is picked: its own predicate, so the count equals the
-    /// list. Uncached: only the open shader popup asks.
+    /// How many sets the list shows when shader `s` is picked. Uncached: only the open shader popup asks.
     // shortcut: rebuilds the set views once per shader while the popup is open; cache by revision when set counts reach the thousands.
     pub fn sets_with_shader(&self, s: Shader) -> usize {
-        sets::views(self)
-            .iter()
-            .filter(|v| !v.key.is_empty() && v.shader.as_ref().map(|p| p.shader) == Some(s))
-            .count()
+        self.count_with(Part::Shader(s))
     }
 
     /// Any pill, the shader or search text is on.

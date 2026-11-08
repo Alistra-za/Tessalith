@@ -835,23 +835,32 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
     let c = model.set_counts();
     ui.horizontal_wrapped(|ui| {
         let f = &mut model.sets_filter;
-        for (on, text, hover) in [
+        for (on, text, n, hover) in [
             (
                 &mut f.attention,
                 format!("Not ready {}", c.attention),
+                c.attention,
                 "Only sets that are not ready: a problem in the set or one of its textures",
             ),
             (
                 &mut f.ready,
                 format!("Ready {}", c.ready),
+                c.ready,
                 "Only sets with no problem",
             ),
             (
                 &mut f.no_json,
                 format!("No JSON {}", c.no_json),
+                c.no_json,
                 "Only sets that write no JSON",
             ),
         ] {
+            // Note HP SC5: a pill that would show nothing is weak, and stays clickable.
+            let text = if n == 0 && !*on {
+                egui::RichText::new(text).color(ui.visuals().weak_text_color())
+            } else {
+                egui::RichText::new(text)
+            };
             if ui
                 .add(
                     egui::Button::selectable(*on, text)
