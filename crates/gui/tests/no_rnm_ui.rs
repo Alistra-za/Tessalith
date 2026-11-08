@@ -131,16 +131,19 @@ fn a_layer_files_helper_panel_has_no_blends_into_row() {
         &["iron.png", "iron_n.png", "iron_detailnorm2.png"],
     );
     let layer = "m/iron_detailnorm2.png";
-    assert!(
-        m.item(layer).is_none_or(|i| i.helper.is_none()),
-        "the layer file is not a helper item"
-    );
+    let item = m.item(layer).expect("the old layer file is an item");
+    assert!(item.helper.is_none(), "the layer file is not a helper item");
     m.select_item(layer);
     let mut h = harness(m);
     h.run();
     h.run();
+    let drew = h.query_all_by_label("Sub-type").count();
     let blends = h.query_all_by_label("Blends into").count();
     let combos = h.query_all_by_label("Layer target").count();
+    assert!(
+        drew > 0,
+        "the plain file's settings panel drew (its Sub-type row)"
+    );
     assert_eq!(blends, 0, "a Blends into row");
     assert_eq!(combos, 0, "a layer-target combo");
 }

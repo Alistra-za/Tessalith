@@ -466,6 +466,7 @@ fn a_resized_pair_bakes_from_the_resized_normal() {
 }
 
 /// Pin (Note GW3): a bake with no RNM layer hashes as it did before `rnm` left the tuple, so no such bake re-exports.
+/// `bake/mod.rs::a_bake_identity_follows_fit` pins the same hash.
 #[test]
 fn a_no_layer_bake_keeps_its_identity() {
     let d = tempfile::tempdir().unwrap();

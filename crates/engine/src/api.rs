@@ -887,6 +887,7 @@ fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
     }
     Some(v)
 }
+
 /// A packed job's sources fill the same roles, inverted the same way, as the record's (DECISIONS N7). A schema-1
 /// record has no roles, so it never matches and the output re-encodes once. Ordinary jobs always match.
 fn pack_roles_match(e: &ManifestEntry, job: &ResolvedJob) -> bool {
@@ -3905,6 +3906,36 @@ mod tests {
         assert_eq!(grass, generic + 32 * 64 * 16 * 134 / 100);
         let ratio = grass as f64 / input_bytes(32, 64) as f64;
         assert!((1.3..=1.5).contains(&ratio), "{ratio}");
+    }
+
+    /// Generic admission (kept from the Note BB layered tests): a job larger than the whole budget is admitted alone,
+    /// and a second job waits while the first holds the budget.
+    #[test]
+    fn an_oversized_job_runs_alone_and_blocks_a_second() {
+        let d = tempfile::tempdir().unwrap();
+        let j = png_job(d.path(), "big.png", (64, 64), Subtype::Diffuse);
+        let n = job_bytes(&j);
+        let oversized = Budget::new(n / 2, 8);
+        oversized.acquire(n);
+        assert_eq!(*lock(&oversized.used), (n, 1));
+        // Two jobs of `n` do not fit in `n + n / 2`: the second is admitted only after the first is released.
+        let b = Budget::new(n + n / 2, 8);
+        b.acquire(n);
+        let admitted = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                b.acquire(n);
+                admitted.store(true, Ordering::SeqCst);
+            });
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(
+                !admitted.load(Ordering::SeqCst),
+                "second job admitted beside the first"
+            );
+            b.release(n);
+        });
+        assert!(admitted.load(Ordering::SeqCst));
+        assert_eq!(*lock(&b.used), (n, 1));
     }
 
     /// Note DY: a filled job also holds its helper's decoded image.

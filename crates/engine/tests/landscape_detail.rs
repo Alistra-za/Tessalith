@@ -1,3 +1,4 @@
+//! Also holds Note GW3's old_layer_names_are_just_files (the old RNM layer names are plain files).
 //! XPMF Task 2 (Note GI, design X12, X13, X15): in a landscape set `_detail` is its own detail-normal output;
 //! `_noise` is the BC4 projected noise; a MATO-only PBR Landscape set needs no RMAOS.
 use engine::api::*;
@@ -236,11 +237,13 @@ fn old_layer_names_are_just_files() {
         }
     }
     let sink = Arc::new(VecSink::default());
-    let rep = Reporter::new(sink, "old-layer-names");
+    let rep = Reporter::new(sink.clone(), "old-layer-names");
     Engine::new()
         .unwrap()
         .run(p, &rep, &CancelToken::default())
         .unwrap();
+    let events = serde_json::to_string(&sink.take()).unwrap();
+    assert!(!events.contains("RNM-"), "{events}");
     let m = engine::manifest::Manifest::at(&d.path().join("out"))
         .load()
         .unwrap();

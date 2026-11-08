@@ -871,7 +871,6 @@ fn layered_profile_with(
         profile.cubemap = CubemapSpec::default();
         prov.retain(|k, _| !k.starts_with("cubemap."));
     }
-    // An order that resolves to the default order is the default (no re-encode); any other is stored normalised.
     // Last: `filter_allowed` reads the final format, content, category and alpha policy.
     let dropped = unscoped_filter_falls_back(&mut profile, &mut prov, &sources);
     Ok((profile, prov, dropped))
