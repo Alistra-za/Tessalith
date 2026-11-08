@@ -42,8 +42,11 @@ fn hair() -> ParsedShape {
     card(0, m, 0.3, 0.1, [0.0; 3])
 }
 
-/// A plain opaque card 2 units in front of the hair (toward the camera and the light) over x < 0 only: inside the
-/// raymarch's reach (SelfShadowScale 2.5 × GAME_UNIT_TO_CM 1.428 = 3.57 units, Hair.hlsli:275).
+/// A plain opaque card 2 units in front of the hair (toward the camera) over x < 0 only. The raymarch steps toward
+/// the light in screen space and compares each step with t17: from hair near the card's edge the steps pass behind
+/// the card's projection inside the reach (SelfShadowScale 2.5 × GAME_UNIT_TO_CM 1.428 = 3.57 units, Hair.hlsli:275)
+/// and count as blocked. The world-space light ray from there meets y = 2 only after about 5.4 units, so the shadow
+/// is the screen-space test's, as in game; moving the card to put y = 2 inside the reach is not needed.
 fn occluder() -> ParsedShape {
     card(1, opaque(0), 0.3, 0.15, [-9.6, 2.0, 0.0])
 }
@@ -214,6 +217,136 @@ fn render_a_card_toward_the_light_shadows_the_hair() {
     }
 }
 
+/// Every Lighting.hlsl pixel program the preview builds (the only shape shader it compiles), for every NIF shader
+/// type, forward and DEFERRED, plain and with the flag-driven defines on, under the default CS features: only CS
+/// hair without TRUE_PBR (Hair.hlsli:289, `CS_HAIR_SHADING`) reflects the scene depth at t17 (Note GX1). Compiled
+/// with fxc only, no device.
+#[test]
+fn only_vanilla_hair_reads_the_scene_depth() {
+    use render3d::permutation::{defines, Material, Stage};
+    let features = render3d::cs_settings::preview_defines(render3d::cs_settings::defaults(), true);
+    let features: Vec<&str> = features.iter().map(String::as_str).collect();
+    let plain = |shader_type| Material {
+        shader_type,
+        slsf1: 0,
+        slsf2: 0,
+        skinned: false,
+        alpha_test: false,
+        has_vertex_colors: false,
+        specular_strength: 1.0,
+        projected: false,
+        projected_glint: false,
+        wetness: false,
+    };
+    // (name, material, TRUE_PBR)
+    let variants = |st: u32| {
+        let all = Material {
+            // Specular, Decal, Dynamic_Decal; aniso, soft, rim, back lighting
+            slsf1: 1 | (1 << 26) | (1 << 27),
+            slsf2: (1 << 21) | (1 << 25) | (1 << 26) | (1 << 27),
+            skinned: true,
+            alpha_test: true,
+            has_vertex_colors: true,
+            wetness: true,
+            ..plain(st)
+        };
+        let msn = Material {
+            slsf1: 1 << 12,
+            skinned: true,
+            ..plain(st)
+        };
+        let projected = Material {
+            slsf1: 1 << 23,
+            has_vertex_colors: true,
+            projected: true,
+            ..plain(st)
+        };
+        let pbr = Material {
+            slsf2: (1 << 23) | (1 << 21),
+            ..all
+        };
+        let pbr_projected = Material {
+            slsf2: 1 << 23,
+            projected_glint: true,
+            ..projected
+        };
+        [
+            ("plain", plain(st), false),
+            ("flags", all, false),
+            ("msn", msn, false),
+            ("projected", projected, false),
+            ("pbr", pbr, true),
+            ("pbr projected", pbr_projected, true),
+        ]
+    };
+    let mut jobs = std::collections::BTreeMap::new();
+    for st in 0..20 {
+        for (name, m, pbr) in variants(st) {
+            for deferred in [false, true] {
+                let d = defines(&m, Stage::Pixel, &features, deferred);
+                jobs.entry(format!("{:?}", d.0))
+                    .or_insert((d, Vec::new()))
+                    .1
+                    .push((st, name, pbr, deferred));
+            }
+        }
+    }
+    let jobs: Vec<_> = jobs.into_values().collect();
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Bundled)
+        .get(std::path::Path::new("Lighting.hlsl"))
+        .unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    // None: fxc refuses the permutation (the preview reports a compile error and draws nothing for it).
+    let reads: Vec<(usize, Option<bool>)> = std::thread::scope(|sc| {
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                sc.spawn(|| {
+                    let mut out = vec![];
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((d, _)) = jobs.get(i) else {
+                            return out;
+                        };
+                        let c = render3d::compile::compile(&src, d, "ps_5_0", cache.path());
+                        out.push((
+                            i,
+                            c.ok().map(|c| render3d::draw::reads_depth(&c.reflection)),
+                        ));
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap())
+            .collect()
+    });
+    assert_eq!(reads.len(), jobs.len());
+    let (mut readers, mut refused) = (vec![], vec![]);
+    for (i, r) in reads {
+        for &(st, name, pbr, deferred) in &jobs[i].1 {
+            let at = format!("type {st} {name} deferred {deferred}");
+            match r {
+                Some(true) => readers.push(at.clone()),
+                Some(false) => {}
+                None => refused.push(at.clone()),
+            }
+            if let Some(r) = r {
+                assert_eq!(r, st == 6 && !pbr, "{at}: reads t17 {r}");
+            }
+        }
+    }
+    readers.sort();
+    refused.sort();
+    println!(
+        "{} programs; t17 readers: {readers:#?}\nrefused by fxc: {refused:#?}",
+        jobs.len()
+    );
+    // The hair rows must have compiled, or the assert above proved nothing for them.
+    assert!(readers.iter().any(|r| r.starts_with("type 6 plain")) && readers.len() >= 6);
+}
+
 /// No t17 reader: a plain card where the hair would be, the occluder overlapping it in front (so the depth test
 /// decides pixels) and a blended card over both.
 fn no_reader_shapes() -> Vec<ParsedShape> {
@@ -244,8 +377,8 @@ const NO_READER_SHA256: [(bool, &str); 2] = [
 ];
 
 /// Two pins for a frame with no t17 reader (Note GX1): its pixels are byte-identical to base f9639a84, forward and
-/// deferred, although both targets' depth is now R32_TYPELESS (GX2); and it draws no pre-pass and so makes no copy.
-/// The last assert shows the counter does count: adding a hair card turns the pre-pass on.
+/// deferred, with both targets' depth R32_TYPELESS (GX2); and it draws no pre-pass and its target holds no copy.
+/// The last asserts show the hooks can fail: adding a hair card turns the pre-pass on and makes the copy.
 #[test]
 fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
     use sha2::Digest;
@@ -264,11 +397,25 @@ fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
             "deferred {deferred}: the cards are drawn: {shown}"
         );
         let got = hex::encode(sha2::Sha256::digest(&px));
-        assert_eq!(got, want, "deferred {deferred}: the frame's bytes changed");
+        assert_eq!(
+            got, want,
+            "deferred {deferred}: the frame's bytes changed. The pin depends on WARP's rasteriser and the system \
+             d3dcompiler, so a Windows update can move it. To re-take it, check out the base commit (f9639a84) in a \
+             temporary detached worktree, copy this test there without the last_prepass_draws and has_depth_copy \
+             asserts, run it and pin the hashes its assert reports; never re-pin from this branch"
+        );
         assert_eq!(r.last_prepass_draws(), 0, "deferred {deferred}");
+        assert!(
+            !r.has_depth_copy(),
+            "deferred {deferred}: no reader, no copy"
+        );
     }
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), false, vec![hair(), occluder()]);
     r.render(&scene(), W, H).unwrap();
     assert_eq!(r.last_prepass_draws(), 2, "a hair card turns it on");
+    assert!(
+        r.has_depth_copy(),
+        "the first pre-pass frame makes the copy"
+    );
 }

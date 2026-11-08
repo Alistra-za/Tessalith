@@ -1024,6 +1024,13 @@ impl Renderer {
         self.prepass_draws
     }
 
+    /// Test hook: the current target holds a t17 depth copy (made on its first pre-pass frame, Note GX2).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn has_depth_copy(&self) -> bool {
+        self.target.as_ref().is_some_and(|t| t.depth_copy.is_some())
+    }
+
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
     /// frame), the reference the resolved path must match pixel for pixel.
     #[cfg(feature = "test-hooks")]
@@ -2180,6 +2187,10 @@ impl Renderer {
         // SAFETY: plain context calls; the arrays are live locals of the length passed.
         unsafe {
             self.gpu.ctx.OMSetRenderTargets(None, None);
+            // An error-path `?` in render skips its end-of-frame t17 unbind.
+            self.gpu
+                .ctx
+                .PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
             self.gpu.ctx.CSSetShaderResources(0, Some(&srvs));
             self.gpu
                 .ctx
@@ -2456,6 +2467,21 @@ impl Renderer {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
             self.backdrop = Some(Backdrop::new(&self.gpu));
         }
+        // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
+        // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
+        // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy.
+        let prepass = self.draw_order.iter().any(|id| {
+            self.shapes
+                .get(id)
+                .and_then(|s| s.draw.as_ref())
+                .is_some_and(|d| d.reads_depth && (!d.deferred || deferred_frame))
+        });
+        if prepass {
+            self.target
+                .as_mut()
+                .ok_or("no target")?
+                .ensure_depth_copy(&self.gpu)?;
+        }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
         let clear = match scene.background {
@@ -2485,15 +2511,6 @@ impl Renderer {
             // RT0 alone until a DEFERRED draw: a forward program must never see RT1-7 (its PS_OUTPUT writes
             // MotionVectors and NormalGlossiness too, Lighting.hlsl:303-308).
             let mut bound_all = false;
-            // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
-            // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
-            // pre-pass does, and binds a copy at t17. Other frames skip both.
-            let prepass = self.draw_order.iter().any(|id| {
-                self.shapes
-                    .get(id)
-                    .and_then(|s| s.draw.as_ref())
-                    .is_some_and(|d| d.reads_depth)
-            });
             // The main pass then tests against the final opaque depth, not the depth so far, and still shows what it
             // showed before (Note GX3): the pre-pass writes depth in the same order with the same states, so the last
             // depth writer of a pixel passes again at equal depth and overwrites every earlier fragment, and the
@@ -2511,7 +2528,9 @@ impl Renderer {
             // still pending forward after a toggle, or Failed keeping its forward draw) that wins the depth test
             // over a DEFERRED pixel keeps that pixel's RT4/RT5, so the composite adds the hidden shape's specular
             // and reflectance. Upgrade if either shows: draw non-DEFERRED opaque shapes (and the backdrop, with
-            // depth_states[1]) after the composite, with the blended pass.
+            // depth_states[1]) after the composite, with the blended pass. On a pre-pass frame (Note GX3) the main
+            // pass tests against the final opaque depth, so a hidden DEFERRED fragment never draws and the leak
+            // does not happen there.
             for pass in [None, Some(false), Some(true)] {
                 if pass.is_none() {
                     if !prepass {
@@ -2605,11 +2624,10 @@ impl Renderer {
                         ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
                     }
                     // In the pre-pass the default stays: nothing is written but depth.
-                    if s.reads_depth && pass.is_some() {
-                        ctx.PSSetShaderResources(
-                            draw::DEPTH_TEXTURE,
-                            Some(&[Some(target.depth_copy_srv.clone())]),
-                        );
+                    if let (true, Some((_, srv))) =
+                        (s.reads_depth && pass.is_some(), &target.depth_copy)
+                    {
+                        ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[Some(srv.clone())]));
                     }
                     // D5 R3: the env cube over the 2×2 default at the forward DC registers (t30/t31).
                     if let Some((_, e)) = &self.env {
@@ -2648,7 +2666,9 @@ impl Renderer {
                     }
                 }
                 if pass.is_none() {
-                    ctx.CopyResource(&target.depth_copy, &target.depth);
+                    if let Some((copy, _)) = &target.depth_copy {
+                        ctx.CopyResource(copy, &target.depth);
+                    }
                     ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
                 }
             }
