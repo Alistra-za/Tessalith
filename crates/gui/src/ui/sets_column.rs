@@ -305,7 +305,6 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
     )
 }
 
-/// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
 /// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
 fn fit_title(id: &str, fits: impl Fn(&str) -> bool) -> String {
     use super::header::elide_middle;
@@ -339,6 +338,7 @@ fn fit_title(id: &str, fits: impl Fn(&str) -> bool) -> String {
     "…".to_string()
 }
 
+/// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
 fn small_width(ui: &egui::Ui, text: &str) -> f32 {
     text_width(ui, text, &egui::TextStyle::Small.resolve(ui.style()))
 }
