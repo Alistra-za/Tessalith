@@ -10,7 +10,7 @@ The centre column groups a texture's settings as Type, Colour, Alpha, Mipmaps an
 
 ## Changing a setting
 
-Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#field-reference).
+Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields).
 
 | Row | Key |
 |---|---|
@@ -94,4 +94,4 @@ The drawer at the right edge holds what isn't per texture or is rarely needed: t
 
 ### Resize and size floor
 
-**Resize** is `resize` (None, Half, Quarter, Eighth), **Relative to** is `resize_relative_to` (the texture's own size or one of the set's slots) and **Size floor** is `resize_floor`: the longer side a halving never goes below. A resized texture shows a `DIM-RESIZED` note. Values: [Project config](Project-Config.md#field-reference).
+**Resize** is `resize` (None, Half, Quarter, Eighth), **Relative to** is `resize_relative_to` (the texture's own size or one of the set's slots) and **Size floor** is `resize_floor`: the longer side a halving never goes below. A resized texture shows a `DIM-RESIZED` note. Values: [Project config](Project-Config.md#fields).

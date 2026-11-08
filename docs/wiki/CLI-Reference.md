@@ -253,7 +253,7 @@ Writes the 152-byte 1×1 dynamic-cubemap marker that Community Shaders and ENB r
 sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\steel_e.dds
 ```
 
-It never overwrites a file Tessalith didn't write, or one it can't read. Exit codes: 0 written; 1 kept (such an existing file); 2 usage error (a bad colour, a roughness outside 0 to 1); 3 the write failed.
+An existing file Tessalith didn't write, or can't read, is kept. Exit codes: 0 written; 1 kept (such an existing file); 2 usage error (a bad colour, a roughness outside 0 to 1); 3 the write failed.
 
 ## Exit codes
 
@@ -269,7 +269,7 @@ When several apply, the highest wins: 3, then 2, then 1, then 4, then 0. Intenti
 
 ## Error messages
 
-An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for an internal error). The message names the cause; these are the ones worth a fix. Scan errors are on [Mod scanning](Mod-Scanning.md#error-messages).
+An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for an internal error). The message names the cause; these are the ones worth a fix. Scan errors are on [Mod scanning](Mod-Scanning.md#scan-errors).
 
 ### Inputs and paths
 

@@ -253,7 +253,7 @@ def chart_formats():
             b += text(xa - 5, by + bh - 2, lab, "s", "end") if d < 0 else text(xb + 5, by + bh - 2, lab, "s")
     b += text(10, bot + 32, "Tessalith's rgbcx is patched: BC1 endpoints scored on both the NVIDIA and AMD decoders, "
               "and a wider BC4 block search.", "s")
-    b += text(10, bot + 48, "BC3 to BC5 are decoded rounding to nearest, as GPUs do. The full table is in the wiki (Research).",
+    b += text(10, bot + 48, "BC3 to BC5 are decoded rounding to nearest, as GPUs do. The full table is in docs/research/encoder-benchmark.md.",
               "s")
     b += text(10, bot + 64, "† Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.", "s")
     desc = ("Bar chart grouped by format (BC1 on the NVIDIA and AMD decoders, BC3 smooth and cutout "
@@ -371,7 +371,7 @@ def chart_ssim_vif():
     p2, _ = hbars(76, r2, 1, 520, 770, -3.0, 4.2, 0, [-2, 0, 2, 4], **kw)
     b += p1 + p2
     b += text(10, bot + 40, "Bars below zero are worse than bc7e u6 (Compressonator, n = 7, is a tie). Bold = Tessalith default. "
-              "The full tables are in the wiki (Research).", "s")
+              "Tables: docs/research/encoder-benchmark.md.", "s")
     desc = ("Two bar charts of the mean SSIM and VIF difference against bc7e u6 on 99 real colour "
             "textures. bc7e perceptual is the only encoder above zero, at plus 1.63 SSIM and plus "
             "3.10 VIF. bc7e u5, Compressonator, NVTT Production, ISPC and bc7e u4 are slightly "

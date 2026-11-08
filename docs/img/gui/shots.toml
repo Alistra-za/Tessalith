@@ -27,7 +27,7 @@ used_by = ["GUI-Guide.md"]
 id = "start-screen"
 page = "GUI-Main-Window"
 scenario = "start_screen"
-used_by = ["GUI-Main-Window.md"]
+used_by = ["GUI-Main-Window.md", "Getting-Started.md"]
 
 [[shot]]
 id = "open-menu"
@@ -42,34 +42,10 @@ scenario = "export_to_menu"
 used_by = ["GUI-Main-Window.md"]
 
 [[shot]]
-id = "preset-combo"
-page = "GUI-Main-Window"
-scenario = "preset_combo"
-used_by = ["GUI-Main-Window.md"]
-
-[[shot]]
-id = "command-palette"
-page = "GUI-Keyboard"
-scenario = "command_palette"
-used_by = ["GUI-Keyboard.md"]
-
-[[shot]]
-id = "shortcut-sheet"
-page = "GUI-Keyboard"
-scenario = "shortcut_sheet"
-used_by = ["GUI-Keyboard.md"]
-
-[[shot]]
 id = "advanced-drawer"
-page = "GUI-Advanced-Drawer"
+page = "GUI-Texture-Panel"
 scenario = "advanced_drawer"
-used_by = ["GUI-Advanced-Drawer.md"]
-
-[[shot]]
-id = "advanced-texture-fields"
-page = "GUI-Advanced-Drawer"
-scenario = "advanced_texture_fields"
-used_by = ["GUI-Advanced-Drawer.md"]
+used_by = ["GUI-Texture-Panel.md"]
 
 [[shot]]
 id = "problems-tab"
@@ -78,34 +54,16 @@ scenario = "problems_tab"
 used_by = ["GUI-Problems.md"]
 
 [[shot]]
-id = "messages-tab"
-page = "GUI-Bottom-Tabs"
-scenario = "messages_tab"
-used_by = ["GUI-Bottom-Tabs.md"]
-
-[[shot]]
-id = "filter-popup"
-page = "GUI-Textures-Column"
-scenario = "filter_popup"
-used_by = ["GUI-Textures-Column.md"]
-
-[[shot]]
 id = "tile-menu"
-page = "GUI-Textures-Column"
+page = "GUI-Bulk-and-Rename"
 scenario = "tile_menu"
-used_by = ["GUI-Textures-Column.md"]
+used_by = ["GUI-Bulk-and-Rename.md"]
 
 [[shot]]
 id = "texture-panel"
 page = "GUI-Texture-Panel"
 scenario = "texture_panel"
-used_by = ["GUI-Texture-Panel.md"]
-
-[[shot]]
-id = "members-of-kind"
-page = "GUI-Bulk-and-Rename"
-scenario = "members_of_kind"
-used_by = ["GUI-Bulk-and-Rename.md"]
+used_by = ["GUI-Texture-Panel.md", "Getting-Started.md"]
 
 [[shot]]
 id = "set-card-menu"
@@ -114,24 +72,16 @@ scenario = "set_card_menu"
 used_by = ["GUI-Sets-Column.md"]
 
 [[shot]]
-id = "member-menu"
-page = "GUI-Sets-Column"
-scenario = "member_menu"
-used_by = ["GUI-Sets-Column.md"]
-
-[[shot]]
 id = "review-tab"
 page = "GUI-Review-and-Export"
 scenario = "review_tab"
-used_by = ["GUI-Review-and-Export.md"]
-
-["GUI-Review-and-Export.md"]
+used_by = ["GUI-Review-and-Export.md", "Getting-Started.md"]
 
 [[shot]]
 id = "presets-tab"
-page = "GUI-Presets"
+page = "Presets-and-Targets"
 scenario = "presets_tab"
-used_by = ["GUI-Presets.md"]
+used_by = ["Presets-and-Targets.md"]
 
 [[shot]]
 id = "json-editor"
@@ -140,88 +90,28 @@ scenario = "json_editor"
 used_by = ["GUI-PGPatcher-JSON.md"]
 
 [[shot]]
-id = "close-unsaved"
-page = "GUI-Dialogs"
-scenario = "close_unsaved"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "open-unsaved"
-page = "GUI-Dialogs"
-scenario = "open_unsaved"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "reload-unsaved"
-page = "GUI-Dialogs"
-scenario = "reload_unsaved"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "external-change"
-page = "GUI-Dialogs"
-scenario = "external_change"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "export-running"
-page = "GUI-Dialogs"
-scenario = "export_running"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "error-dialog"
-page = "GUI-Dialogs"
-scenario = "error_dialog"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "reset-all"
-page = "GUI-Dialogs"
-scenario = "reset_all"
-used_by = ["GUI-Dialogs.md"]
-
-[[shot]]
-id = "copy-settings"
-page = "GUI-Bulk-and-Rename"
-scenario = "copy_settings"
-used_by = ["GUI-Bulk-and-Rename.md"]
-
-[[shot]]
 id = "rename-inputs"
 page = "GUI-Bulk-and-Rename"
 scenario = "rename_inputs"
 used_by = ["GUI-Bulk-and-Rename.md"]
 
 [[shot]]
-id = "rename-outputs"
-page = "GUI-Bulk-and-Rename"
-scenario = "rename_outputs"
-used_by = ["GUI-Bulk-and-Rename.md"]
-
-[[shot]]
 id = "marker-dialog"
-page = "GUI-Helpers-and-Cubemaps"
+page = "Cubemaps"
 scenario = "marker_dialog"
-used_by = ["GUI-Helpers-and-Cubemaps.md"]
+used_by = ["Cubemaps.md"]
 
 [[shot]]
 id = "set-editor"
 page = "GUI-Set-Editor"
 scenario = "set_editor"
-used_by = ["GUI-Set-Editor.md"]
-
-[[shot]]
-id = "assign-menu"
-page = "GUI-Set-Editor"
-scenario = "assign_menu"
-used_by = ["GUI-Set-Editor.md"]
+used_by = ["GUI-Set-Editor.md", "Getting-Started.md"]
 
 [[shot]]
 id = "slot-menu"
-page = "GUI-Sets-Column"
+page = "GUI-Set-Editor"
 scenario = "slot_menu"
-used_by = ["GUI-Sets-Column.md"]
+used_by = ["GUI-Set-Editor.md"]
 
 [[shot]]
 id = "pgp-material"
@@ -231,62 +121,60 @@ used_by = ["GUI-PGPatcher-JSON.md"]
 
 [[shot]]
 id = "helper-panel"
-page = "GUI-Helpers-and-Cubemaps"
+page = "Texture-Packing"
 scenario = "helper_panel"
-used_by = ["GUI-Helpers-and-Cubemaps.md"]
+used_by = ["Texture-Packing.md"]
 
 [[shot]]
 id = "cube-panel"
-page = "GUI-Helpers-and-Cubemaps"
+page = "Cubemaps"
 scenario = "cube_panel"
-used_by = ["GUI-Helpers-and-Cubemaps.md"]
+used_by = ["Cubemaps.md"]
 
 [[shot]]
 id = "preview-encoded"
-page = "GUI-Preview"
+page = "Previews"
 scenario = "preview_encoded"
-used_by = ["GUI-Preview.md"]
+used_by = ["Previews.md"]
 
 [[shot]]
 id = "preview-normal"
-page = "GUI-Preview"
+page = "Previews"
 scenario = "preview_normal"
-used_by = ["GUI-Preview.md"]
+used_by = ["Previews.md"]
 
 [[shot]]
 id = "meshes-view"
-page = "GUI-Meshes"
+page = "Mod-Scanning"
 scenario = "meshes_view"
-used_by = ["GUI-Meshes.md"]
+used_by = ["Mod-Scanning.md"]
 
 [[shot]]
 id = "mo2-popup"
-page = "GUI-Main-Window"
+page = "Mod-Scanning"
 scenario = "mo2_popup"
-used_by = ["GUI-Main-Window.md"]
+used_by = ["Mod-Scanning.md"]
 
 [[shot]]
 id = "skin-card"
-page = "GUI-Set-Materials"
+page = "Skin"
 scenario = "skin_card"
-used_by = ["GUI-Set-Materials.md"]
+used_by = ["Skin.md"]
 
 [[shot]]
 id = "landscape-card"
-page = "GUI-Set-Materials"
+page = "PBR-Landscape"
 scenario = "landscape_card"
-used_by = ["GUI-Set-Materials.md"]
-
-["GUI-PGPatcher-JSON.md"]
+used_by = ["PBR-Landscape.md"]
 
 [[exempt]]
 what = "3D set preview content"
-page = "GUI-Set-Preview-3D"
+page = "Previews"
 reason = "needs a D3D11 device"
 
 [[exempt]]
 what = "Complex grass and PBR grass sets"
-page = "GUI-Set-Materials"
+page = "PBR-Landscape"
 reason = "need GRAS records from a real plugin scan"
 
 [[exempt]]
@@ -296,7 +184,7 @@ reason = "its rows hold timings and the export folder, so no two renders match; 
 
 [[exempt]]
 what = "Toasts"
-page = "GUI-Bottom-Tabs"
+page = "GUI-Guide"
 reason = "a toast goes after a few seconds on a clock, so no two renders match"
 
 [[exempt]]

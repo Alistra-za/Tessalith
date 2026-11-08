@@ -1,5 +1,5 @@
-Tessalith 2.0.0
-===============
+Tessalith
+=========
 
 Tessalith converts a folder of source images (PNG, TGA, TIFF, EXR, PSD) to
 DDS for Skyrim SE/AE. It works out what each file is from its name, groups
@@ -37,9 +37,9 @@ Click "More info", then "Run anyway".
 
 Help
 ----
-  Documentation, known issues and bug reports:
+  Documentation and bug reports:
     https://github.com/Alistra-za/Tessalith
-    Wiki pages: Troubleshooting (with the known issues), GUI-Guide, CLI-Reference
+    Wiki pages: Getting-Started, Troubleshooting, CLI-Reference
   If the GUI crashes, attach the newest file in
     %LOCALAPPDATA%\sdc\logs\
   to your report.

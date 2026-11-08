@@ -29,10 +29,10 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 
 ## How the shader is picked
 
-Pick it yourself in the [set editor](GUI-Set-Editor.md#shader), or with `--set set:<id>.shader=<shader>`. Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
+Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor), or with `--set set:<id>.shader=<shader>`. Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
 
 1. Advanced skin members or an `_rfaos`: `advanced_skin`.
-2. A PBR set or PBR members: `pbr_grass` when a grass record uses the albedo (GUI, after a scan with plugins); under `cs`, `pbr_landscape` when the set is under `textures/landscape/`, has a `landscape` folder in its path, or has a Community Shaders texture-set block (GUI); otherwise `pbr`.
+2. A PBR set or PBR members: `pbr_grass` when a grass record uses the albedo (GUI, after a scan with plugins); under `cs`, `pbr_landscape` for a landscape set (GUI; [what counts](PBR-Landscape.md)); otherwise `pbr`.
 3. A complex-grass member: `complex_grass`.
 4. A complex `_m`: `complex_material`.
 5. A `_p`: `parallax`.

@@ -93,7 +93,7 @@ sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\stee
 - `--roughness` is 0 to 1. Leave it out and Community Shaders uses its defaults.
 - The flags are in the [CLI reference](CLI-Reference.md#sdc-cubemap-marker). Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.
 
-In the GUI, **Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw codes; **Roughness** is optional (the *Set roughness* tick). **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. It never overwrites a file Tessalith didn't write: it says it kept it and leaves the dialog open so you can pick another name. The bytes equal what `sdc cubemap-marker` writes.
+In the GUI, **Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw codes; **Roughness** is optional (the *Set roughness* tick). **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. A file Tessalith didn't write is kept: the dialog says so and stays open so you can pick another name. The bytes equal what `sdc cubemap-marker` writes.
 
 ![The marker cube dialog.](../img/gui/Cubemaps/marker-dialog.png)
 

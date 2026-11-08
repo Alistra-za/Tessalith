@@ -55,7 +55,7 @@ When a plan settles, every sub-type taken from a High-confidence suggestion (inc
 - These types alone don't count as your edits: no title dot, and no unsaved question on close. `sdc convert` sees them only after you **Save**.
 - A file you already decided is never touched, and an Undo stays undone until the folder reopens.
 - It re-types only while the type is still Tessalith's own pick. A type you changed is kept.
-- A file that waits for a type records nothing: [why](Texture-Types.md#texture-sets).
+- A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
 
 ## Narrowing the list
 

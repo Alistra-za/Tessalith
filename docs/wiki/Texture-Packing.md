@@ -58,7 +58,7 @@ Use `--set packing.fill.metallic=255` for a whole run, or the packed output's ca
 
 - **Packed file and raw maps both present:** the packed file (`iron_rmaos.png`) wins and the raw maps are reported (`PACK-CONFLICT`). `packing.prefer = "raw"` builds from the raw maps instead.
 - **Sizes:** sources of one recipe may differ if they share an aspect ratio; each smaller one is enlarged to the largest (`PACK-SOURCE-RESIZED` names it). Different aspect ratios fail the recipe (`PACK-SIZE-MISMATCH`).
-- **`packing.enabled = false`** leaves the raw maps alone (`IN-PACKING-INPUT`).
+- **`packing.enabled = false`** turns that packed output off ([key](Project-Config.md#packing)).
 
 ## Helper textures
 

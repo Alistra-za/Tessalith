@@ -32,7 +32,7 @@ On a shader property, pick **Float** or **Colour** and the **Variable**. An alph
 
 These come from an in-game check of each controller and show under the controller.
 - Red: "Env map scale crashes the game on PBR materials." On a PBR shape, Env map scale (8) is greyed in both Variable lists with this text. A controller that already has it blocks the NIF's export, even when the source file had it.
-- Amber, from the last In game simulation: on a shape that is not PBR but that PGPatcher makes PBR, an Env map scale controller gets "PGPatcher makes this shape PBR: its Env map scale controller will crash the game." It does not block export, since PGPatcher's output depends on the JSON at play time.
+- Amber, from the last In game simulation: the same PGPatcher warning as on the shape cards ([In game and Source while editing](GUI-NIF-Edit.md#in-game-and-source-while-editing)), shown on the Env map scale controller. It does not block export, since PGPatcher's output depends on the JSON at play time.
 - Amber, no effect in game: "This controller has no effect: Specular is off when the mesh loads." and "…specular strength is 0 when the mesh loads." (glossiness, specular strength or colour on a non-PBR shape); "This controller has no effect: alpha test is off."; "Refraction strength has no visible effect in game."; "Two controllers drive <name>: only the last one plays."
 
 ## Clips

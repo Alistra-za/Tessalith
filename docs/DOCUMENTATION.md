@@ -26,7 +26,7 @@ Every fact has exactly one home: the one place where it is explained in full, wi
 - **A fact appears at most twice:** its home plus one short reference.
 - **Three times is the cap,** only when a third mention is essential. For example, a warning that prevents data loss may also appear next to the button that causes it.
 - **The same fact reworded still counts.** "BC7 is used for colour with alpha" and "alpha textures encode as BC7" are one statement.
-- **A short reference is one line,** and it links to the home: "Tessalith never overwrites a file it didn't write ([why](wiki/Validation-and-Output.md#re-runs-and-if-changed))". Quick-reference tables, the FAQ, Getting-Started, tooltip lists and the sidebar are all short references.
+- **A short reference is one line,** and it links to the home: "Tessalith never overwrites a file it didn't write ([why](wiki/Validation-and-Output.md#re-runs-and-if-changed))". Quick-reference tables, Getting-Started, tooltip lists and the sidebar are all short references.
 - **Before you add a sentence,** grep docs/ and README.md for the fact. If it already has a home, link to it. If the new place should be the home, move the full text there and turn the old place into a link.
 - **One home per topic family:**
   - GUI behaviour: the GUI pages in docs/wiki;
@@ -58,25 +58,21 @@ The docs grew too large, mostly from over-explaining and over-stating limits. Wr
 
 ## 4. Page size and structure
 - **Size budget:** a wiki page holds at most about 15 KB of text, around 2,500 words. Over that, split it. A page under about 2 KB merges into its parent.
-- **Lookup tables:** reference pages that are mostly tables (CLI-Reference, Project-Config) may run to 30 KB. Past that, split by command or section group.
-- **The GUI guide is split into one page per area of the window.** Each page is named after the area as the UI labels it, for example:
-  - GUI-Main-Window;
-  - GUI-Problems;
-  - GUI-Texture-Panel;
-  - GUI-Set-Editor;
-  - GUI-Review-and-Export;
-  - GUI-Meshes-and-NIF-Edit;
-  - GUI-Bottom-Tabs, which covers Messages, Files and Presets;
-  - GUI-Keyboard, which covers shortcuts and the command palette;
-  - GUI-Settings.
+- **Lookup tables:** reference pages that are mostly tables (Texture-Types, Project-Config, CLI-Reference, Diagnostic-Codes) may run to 30 KB. Past that, split by command or section group.
+- **The GUI guide is split by area of the window, not one page per screen.** A page is named after the area as the UI labels it, and a small area folds into its neighbour. The GUI pages are:
+  - GUI-Guide: the annotated window, the bottom panel, shortcuts and dialogs;
+  - GUI-Main-Window, GUI-Texture-Panel, GUI-Sets-Column, GUI-Set-Editor, GUI-Bulk-and-Rename;
+  - GUI-Problems and GUI-Review-and-Export;
+  - GUI-PGPatcher-JSON;
+  - GUI-NIF-Edit and GUI-NIF-Animation.
   
-  GUI-Guide.md becomes a one-screen overview: an annotated main-window picture that links to each area page. Split further along the same lines when a page outgrows the budget.
+  GUI-Guide.md is the one-screen overview: an annotated main-window picture that links to each area page. Split further along the same lines when a page outgrows the budget.
 - **Every page opens with one to three lines** saying what the page covers and who it is for.
 - **_Sidebar.md lists every page.** A split updates it in the same commit.
 - **Links between pages use the `Page.md#anchor` form,** as publish-wiki.ps1 expects. Check the links after every split with `tools\publish-wiki.ps1 -Out <dir>`.
 
 ## 5. Screenshots
-Every menu, context menu, panel, tab and dialog the guide documents has a screenshot on its page.
+Every menu, context menu, panel and tab the guide documents has a screenshot on its page, unless the screen explains itself (the buttons say what they do) or it cannot be rendered headlessly; those are listed as exempt in shots.toml.
 - **Generated, never hand-taken.** A headless kittest test renders each shot from a generated demo project. The demo uses made-up textures, never game or mod assets. The pattern is `crates/gui/tests/doc_shots.rs`.
 - **Settings are fixed** so the same build renders the same pixels: one window size, one UI scale, the dark theme and the system fonts the app loads (hashes in shots.toml).
 - **Layout:**

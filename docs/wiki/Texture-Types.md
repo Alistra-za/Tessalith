@@ -39,7 +39,7 @@ subtype = "diffuse"
 ```
 
 - **GUI:** a waiting file is Undecided, with a Problems row and a Review row, and no set card until you pick a type. High-confidence suggestions are applied for you; Medium and Low always need you.
-- **CLI:** it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1. `--allow SUG-LOW-CONFIDENCE` doesn't convert it; the `--set` form and [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters) are in the CLI reference. <!-- D:GY5 -->
+- **CLI:** it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1. `--allow SUG-LOW-CONFIDENCE` doesn't convert it; the `--set` form and [`--accept-suggestions`](CLI-Reference.md#why-you-usually-want---accept-suggestions-high) are in the CLI reference. <!-- D:GY5 -->
 
 ## Suffixes
 

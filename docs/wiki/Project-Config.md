@@ -6,7 +6,7 @@ For anyone writing `sdc.toml` by hand or checking what the GUI saved: every key 
 
 - **Project config:** `sdc.toml` in the folder you convert. The CLI reads the one in the first input folder, or `--config <file>`. The GUI reads and writes the one in the folder you open.
 - **User config:** `%APPDATA%\sdc\config.toml`, for personal defaults such as a preferred target. Same format, but `[files]`, `[inputs]` and `[export]` belong to one project: each is refused here with `[files] is only valid in a project sdc.toml, not in <path>`.
-- **Errors:** an unknown key, an unknown value or a wrong type stops the CLI with exit 2. The GUI shows a banner and stays read-only until you fix the file and press **Reload**.
+- **Errors:** an unknown key, an unknown value or a wrong type stops the CLI with exit 2. The GUI refuses the file too ([When `sdc.toml` is rejected](GUI-Main-Window.md#when-sdctoml-is-rejected)).
 - **Checking a file:** `sdc inspect <folder> --recursive > $null` stops with the error and names the problem. `sdc presets schema config` prints the JSON Schema; the repository has it as `schema/config.schema.json` for editor completion.
 
 ## A complete example
@@ -311,7 +311,7 @@ These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` f
 |---|---|---|---|
 | `cubemap.style` | `vanilla_metal`, `room`, `eye`, `hd` | unset | Fills the keys below that nothing else set: `vanilla_metal` 32 px, BC1, blur 0.6, saturation 0.8; `room` 128 px, BC1, blur 0.35; `eye` 256 px, BC7, blur 0.35; `hd` 512 px, BC7, blur 0.1. |
 | `cubemap.layout` | `faces`, `hcross`, `vcross`, `hstrip`, `vstrip` | from the image shape | `faces` is six separate files. A cube DDS must leave it unset. How each is detected: [Ways to make one](Cubemaps.md#ways-to-make-one). |
-| `cubemap.face_size` | a power of two, 4 to 4096 | one source cell rounded to a power of two, at most 4096 | Face edge in pixels ([source cell per layout](Cubemaps.md#settings)). |
+| `cubemap.face_size` | a power of two, 4 to 4096 | by layout | Face edge in pixels ([source cell per layout](Cubemaps.md#settings)). |
 | `cubemap.yaw` | −360 to 360 | 0 | Turns the cube about world up, in degrees. Positive is clockwise seen from above, the way Skyrim headings turn: 90 moves east to south. |
 | `cubemap.mirror` | `true`, `false` | `false` | Swaps world east and west. |
 | `cubemap.face_rotate` | six of 0, 90, 180, 270 | `[0, 0, 0, 0, 0, 0]` | Clockwise turn per face, in the order +X, −X, +Y, −Y, +Z, −Z. Applied before the flip. Works on every layout. |

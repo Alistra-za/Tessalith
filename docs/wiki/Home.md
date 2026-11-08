@@ -30,8 +30,6 @@ The CLI and the files keep the working name `sdc`. It stayed in the file names s
 | `sdc` / `sdc.exe` | The command-line tool. |
 | `tessalith.exe` | The desktop application. |
 | `sdc.toml` | The project config. The GUI writes it and the CLI reads it. |
-| `sdc-project.toml` | The GUI's set definitions, beside `sdc.toml`. The CLI doesn't read it. |
-| `<output>\_sdc\manifest.jsonl` | The record of every file written. Re-runs compare against it. |
 
 Settings, caches and logs: [where Tessalith keeps its files](Installation.md#where-tessalith-keeps-its-files).
 

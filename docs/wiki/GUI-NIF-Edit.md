@@ -38,9 +38,9 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 ## Pending edits, undo and source changes
 
-**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. A row in red did not apply, with the reason. The list is closed until a row turns red, which opens it; click its title to open or close it.
+**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. A row in red did not apply, with the reason.
 
-**Undo.** While an edit is open in the Meshes view, the header **Undo** and **Redo**, the command palette and **Ctrl+Z** / **Ctrl+Y** act on the NIF edit. With no edit open they act on the Textures history. The header buttons say which: **Undo** for the Textures history, **Undo NIF edit: Set shader type** (the step's name) for the NIF one, and the hover names the history. The panel has no Undo or Redo of its own; each pending edit keeps its **Revert**. A slider drag is one step.
+**Undo.** While an edit is open in the Meshes view, the header **Undo** and **Redo**, the command palette and **Ctrl+Z** / **Ctrl+Y** act on the NIF edit. With no edit open they act on the Textures history. The header buttons say which: **Undo** for the Textures history, **Undo NIF edit: Set shader type** (the step's name) for the NIF one, and the hover names the history.
 
 **Source changed.** If the source NIF changes on disk (a mod update), the edits are re-applied by name and role, not by position. The panel says "Source changed: N applied, M conflicts". A conflicting edit has **Take source** (drop your edit) and **Keep mine** (keep it on top of the new source).
 

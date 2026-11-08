@@ -92,4 +92,4 @@ Vanilla and Community Shaders both use it. A complex-grass texture is one image 
 
 - Tag it by setting the set's shader to `complex_grass`, by setting `subtype = "complex_grass"` on the file's `[files]` entry, or let the GUI do it after a scan that included plugins: a texture a GRAS record uses, 1:2, with a valid detection corner and a normal-map bottom half gets a High-confidence suggestion. A complex-grass-shaped diffuse nothing tags gets an info row in Problems with **Tag as grass**. The sub-type picker offers **Complex grass** where the set's shader is a grass shader or no `textures` folder is above the file.
 - The CLI never tags it: without `subtype = "complex_grass"` on the `[files]` entry, `sdc convert` treats the file as a diffuse.
-- The checks and their codes are under [Diagnostic codes](Diagnostic-Codes.md#skin-shaders-and-grass).
+- The checks and their codes are under [Diagnostic codes](Diagnostic-Codes.md#shaders-skin-and-grass).

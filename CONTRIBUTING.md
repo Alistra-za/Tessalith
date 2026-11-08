@@ -105,3 +105,11 @@ After you change anything under `crates\encoders-sys\vendor`, run `.\tools\hash-
 - Output changes: a change that alters written bytes needs a line in [CHANGELOG.md](CHANGELOG.md) (and [docs/presets-changelog.md](docs/presets-changelog.md) for presets).
 - A pub item in `sdc-gui` (or a counter it reads) that only tests use goes behind `#[cfg(feature = "test-hooks")]`; the crate's own dev-dependency turns the feature on for tests, and a release build never does.
 - No game assets in PRs: no `.dds`, `.nif`, `.bsa`, `.esp` or textures from Skyrim or from mods you do not own. Make small test fixtures yourself.
+
+## Design records
+
+- [.claude/DECISIONS.md](.claude/DECISIONS.md) holds the numbered rulings, [docs/presets-changelog.md](docs/presets-changelog.md) the preset changes, and [docs/research/](docs/research/README.md) the measurements behind the encoder, mip-filter and coverage choices.
+
+## Host plugins
+
+Optional plugins for Photoshop, GIMP 3, Paint.NET and chaiNNer that open and save DDS live on the [`host-plugins` branch](https://github.com/Alistra-za/Tessalith/tree/host-plugins). It gets bug fixes but is not kept in step with the engine.

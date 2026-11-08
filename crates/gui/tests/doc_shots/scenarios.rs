@@ -8,7 +8,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable};
 use image::{ImageBuffer, Rgb, RgbaImage};
 use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::rename::RenameMode;
-use sdc_gui::model::{AfterExport, Answer, AppModel, Dialog, DocKind};
+use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,35 +28,17 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("start_screen", start_screen),
     ("open_menu", open_menu),
     ("export_to_menu", export_to_menu),
-    ("preset_combo", preset_combo),
-    ("command_palette", command_palette),
-    ("shortcut_sheet", shortcut_sheet),
     ("advanced_drawer", advanced_drawer),
-    ("advanced_texture_fields", advanced_texture_fields),
     ("problems_tab", problems_tab),
-    ("messages_tab", messages_tab),
-    ("filter_popup", filter_popup),
     ("tile_menu", tile_menu),
     ("texture_panel", texture_panel),
-    ("members_of_kind", members_of_kind),
     ("set_card_menu", set_card_menu),
-    ("member_menu", member_menu),
     ("review_tab", review_tab),
     ("presets_tab", presets_tab),
     ("json_editor", json_editor),
-    ("close_unsaved", close_unsaved),
-    ("open_unsaved", open_unsaved),
-    ("reload_unsaved", reload_unsaved),
-    ("external_change", external_change),
-    ("export_running", export_running),
-    ("error_dialog", error_dialog),
-    ("reset_all", reset_all),
-    ("copy_settings", copy_settings),
     ("rename_inputs", rename_inputs),
-    ("rename_outputs", rename_outputs),
     ("marker_dialog", marker_dialog),
     ("set_editor", set_editor),
-    ("assign_menu", assign_menu),
     ("slot_menu", slot_menu),
     ("pgp_material", pgp_material),
     ("helper_panel", helper_panel),
@@ -296,74 +278,12 @@ fn export_to_menu(dir: &Path) -> Frame {
     shot(&mut h, r.union(b))
 }
 
-/// GUI-Main-Window: the preset combo open.
-fn preset_combo(dir: &Path) -> Frame {
-    fn combo<'a>(h: &'a H) -> egui_kittest::Node<'a> {
-        let all: Vec<_> = h.query_all_by_role(Role::ComboBox).collect();
-        let found = all.iter().position(|n| {
-            let a = n.accesskit_node();
-            a.value()
-                .or_else(|| a.label())
-                .is_some_and(|v| v.starts_with("default ("))
-        });
-        match found {
-            Some(i) => all.into_iter().nth(i).unwrap(),
-            None => panic!(
-                "no preset combo; combos: {:?}",
-                all.iter()
-                    .map(|n| (n.accesskit_node().label(), n.accesskit_node().value()))
-                    .collect::<Vec<_>>()
-            ),
-        }
-    }
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| combo(h).click());
-    let c = combo(&h).rect();
-    shot(&mut h, r.union(c))
-}
-
-/// GUI-Keyboard: the command palette (Ctrl+K) with a search typed.
-fn command_palette(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| {
-        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
-    });
-    shot(&mut h, r)
-}
-
-/// GUI-Keyboard: the F1 shortcut sheet.
-fn shortcut_sheet(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| h.key_press(egui::Key::F1));
-    shot(&mut h, r)
-}
-
-/// GUI-Advanced-Drawer: the drawer open beside a selected texture.
+/// GUI-Texture-Panel: the drawer open beside a selected texture.
 fn advanced_drawer(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall.png"));
     let r = reveal(&mut h, |h| {
         h.state_mut().model.settings.advanced_open = true;
     });
-    shot(&mut h, r)
-}
-
-/// GUI-Advanced-Drawer: the Advanced texture fields (Resize, Size floor) of a texture set to Half with a 128 floor;
-/// the sections above them are collapsed so the rows are in view.
-fn advanced_texture_fields(dir: &Path) -> Frame {
-    let key = "architecture/stone/stonewall.png";
-    let mut h = opened_with(dir, |m| {
-        m.set_field(key, "resize", serde_json::json!("half"));
-        m.set_field(key, "resize_floor", serde_json::json!(128));
-        m.select_item(key);
-    });
-    let r = reveal(&mut h, |h| {
-        h.state_mut().model.settings.advanced_open = true;
-    });
-    for name in ["Preset inspector", "Preview", "Checks", "Mipmaps"] {
-        node(&h, name).click();
-        settle(&mut h, 4);
-    }
-    node(&h, "Size floor");
     shot(&mut h, r)
 }
 
@@ -376,30 +296,7 @@ fn problems_tab(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Bottom-Tabs: the Messages tab after a save.
-fn messages_tab(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |m| {
-        m.messages.clock = || "14:02:37".into();
-        // Real notices: undo and redo of the shader change opened_with made.
-        m.undo();
-        assert!(m.wait_idle(Duration::from_secs(60)));
-        m.redo();
-    });
-    let r = reveal(&mut h, |h| {
-        h.state_mut().model.toggle_tab(BottomTab::Messages)
-    });
-    shot(&mut h, r)
-}
-
-/// GUI-Textures-Column: the Filter ▾ popup.
-fn filter_popup(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| node(h, "Filter ▾").click());
-    let b = node(&h, "Filter ▾").rect();
-    shot(&mut h, r.union(b))
-}
-
-/// GUI-Textures-Column: a tile's right-click menu.
+/// GUI-Bulk-and-Rename: a tile's right-click menu.
 fn tile_menu(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall.png"));
     let r = reveal(&mut h, |h| node(h, "stonewall.png").click_secondary());
@@ -415,28 +312,6 @@ fn texture_panel(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Bulk-and-Rename: two sets selected, their menu with Select members of kind open.
-fn members_of_kind(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |m| {
-        let a = set_key(m, "architecture/stone/stonewall");
-        let b = set_key(m, "architecture/stone/cobble");
-        m.click_set(&a, false, false);
-        m.click_set(&b, true, false);
-    });
-    let r = reveal(&mut h, |h| {
-        node(h, "architecture/stone/stonewall").click_secondary();
-        settle(h, 3);
-        node(h, "Select members of kind ⏵").hover();
-    });
-    // The crop starts at the stonewall card, not at its middle-elided title text (Note HN F3).
-    let card = h
-        .query_all_by_label_contains("Set architecture/stone/stonewall,")
-        .next()
-        .expect("the stonewall card")
-        .rect();
-    shot(&mut h, r.union(card))
-}
-
 /// GUI-Sets-Column: a set card's right-click menu.
 fn set_card_menu(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| select_set(m, "architecture/stone/stonewall"));
@@ -446,14 +321,6 @@ fn set_card_menu(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Sets-Column: a member chip's right-click menu.
-fn member_menu(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| node(h, "N").click_secondary());
-    let b = node(&h, "N").rect();
-    shot(&mut h, r.union(b))
-}
-
 /// GUI-Review-and-Export: Review in the bottom panel.
 fn review_tab(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
@@ -461,7 +328,7 @@ fn review_tab(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Presets: the preset creator on a built-in preset.
+/// Presets-and-Targets: the preset creator on a built-in preset.
 fn presets_tab(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
     let r = reveal(&mut h, |h| {
@@ -487,66 +354,6 @@ fn dialog(dir: &Path, pre: impl FnOnce(&mut AppModel), f: impl FnOnce(&mut AppMo
     shot(&mut h, r)
 }
 
-fn set_dialog(d: Dialog) -> impl FnOnce(&mut AppModel) {
-    move |m| m.dialog = Some(d)
-}
-
-fn close_unsaved(dir: &Path) -> Frame {
-    dialog(dir, |_| {}, set_dialog(Dialog::CloseUnsaved))
-}
-fn open_unsaved(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        set_dialog(Dialog::OpenUnsaved("D:\\Mods\\Banners\\textures".into())),
-    )
-}
-fn reload_unsaved(dir: &Path) -> Frame {
-    dialog(dir, |_| {}, set_dialog(Dialog::ReloadUnsaved))
-}
-fn external_change(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        set_dialog(Dialog::ExternalChange(DocKind::Project)),
-    )
-}
-fn export_running(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        set_dialog(Dialog::ExportRunning(AfterExport::Close)),
-    )
-}
-fn error_dialog(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        set_dialog(Dialog::Error(
-            "Can't read D:\\Mods\\StoneWork\\textures\\sdc.toml: the file is locked by another program.".into(),
-        )),
-    )
-}
-fn reset_all(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |_| {},
-        set_dialog(Dialog::ConfirmResetAll(vec![
-            "architecture/stone/stonewall.png".into(),
-            "architecture/stone/cobble.png".into(),
-        ])),
-    )
-}
-fn copy_settings(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |m| {
-            m.select_item("architecture/stone/stonewall.png");
-            m.click_item("architecture/stone/cobble.png", true, false);
-        },
-        |m| m.open_copy_settings(),
-    )
-}
 fn rename_inputs(dir: &Path) -> Frame {
     dialog(
         dir,
@@ -555,13 +362,6 @@ fn rename_inputs(dir: &Path) -> Frame {
             m.click_item("architecture/stone/cobble.png", true, false);
         },
         |m| m.open_rename(RenameMode::Inputs),
-    )
-}
-fn rename_outputs(dir: &Path) -> Frame {
-    dialog(
-        dir,
-        |m| select_set(m, "architecture/stone/stonewall"),
-        |m| m.open_rename(RenameMode::Outputs),
     )
 }
 fn marker_dialog(dir: &Path) -> Frame {
@@ -598,15 +398,7 @@ fn set_editor(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Set-Editor: an empty slot's Assign… menu.
-fn assign_menu(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |m| select_set(m, "architecture/stone/cobble"));
-    let r = reveal(&mut h, |h| node(h, "Assign…").click());
-    let b = node(&h, "Assign…").rect();
-    shot(&mut h, r.union(b))
-}
-
-/// GUI-Sets-Column: a set-editor slot row's right-click menu (the slot menus).
+/// GUI-Set-Editor: a set-editor slot row's right-click menu (the slot menus).
 fn slot_menu(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| select_set(m, "architecture/stone/cobble"));
     let r = reveal(&mut h, |h| rightmost(h, "RMAOS").click_secondary());
@@ -623,7 +415,7 @@ fn pgp_material(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Helpers-and-Cubemaps: a roughness helper's panel.
+/// Texture-Packing: a roughness helper's panel.
 fn helper_panel(dir: &Path) -> Frame {
     let mut h = opened_extra(
         dir,
@@ -640,7 +432,7 @@ fn helper_panel(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Helpers-and-Cubemaps: a six-face cube's settings.
+/// Cubemaps: a six-face cube's settings.
 fn cube_panel(dir: &Path) -> Frame {
     let faces = ["px", "nx", "py", "ny", "pz", "nz"].map(|f| format!("sky/env_{f}.png"));
     let extra: Vec<&str> = faces.iter().map(|s| s.as_str()).collect();
@@ -656,7 +448,7 @@ fn cube_panel(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Preview: the 2D preview of the stone wall after Encode now.
+/// Previews: the 2D preview of the stone wall after Encode now.
 fn preview_encoded(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall.png"));
     let r = reveal(&mut h, |h| {
@@ -668,7 +460,7 @@ fn preview_encoded(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Preview: a normal map expanded, not yet encoded.
+/// Previews: a normal map expanded, not yet encoded.
 fn preview_normal(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall_n.png"));
     let r = reveal(&mut h, |h| {
@@ -751,7 +543,7 @@ fn meshes(dir: &Path, f: impl FnOnce(&mut sdc_gui::model::meshes::MeshesModel)) 
     h
 }
 
-/// GUI-Meshes: the Meshes view with its mesh list.
+/// Mod-Scanning: the Meshes view with its mesh list.
 fn meshes_view(dir: &Path) -> Frame {
     let mut h = meshes(dir, |_| {});
     Frame {
@@ -760,7 +552,7 @@ fn meshes_view(dir: &Path) -> Frame {
     }
 }
 
-/// GUI-Main-Window: the MO2… popup.
+/// Mod-Scanning: the MO2… popup.
 fn mo2_popup(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
     let r = reveal(&mut h, |h| node(h, "MO2…").click());
@@ -778,12 +570,12 @@ fn material_tab(dir: &Path, set: &'static str, shader: engine::shader::Shader) -
     shot(&mut h, r)
 }
 
-/// GUI-Set-Materials: the Advanced skin card.
+/// Skin: the Advanced skin card.
 fn skin_card(dir: &Path) -> Frame {
     material_tab(dir, "actors/body", engine::shader::Shader::AdvancedSkin)
 }
 
-/// GUI-Set-Materials: the PBR Landscape card.
+/// PBR-Landscape: the PBR Landscape card.
 fn landscape_card(dir: &Path) -> Frame {
     material_tab(dir, "pbr/metal", engine::shader::Shader::PbrLandscape)
 }
