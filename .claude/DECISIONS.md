@@ -189,7 +189,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Packed provenance records each channel's source and channel (`:R`, `:G`, `:B`, `:A`, `:luma`, or the grayscale source). [M12, FM36]
 - `_orm` is a packing input; loose maps win over it; `_rfaos` drops the ORM metallic. [AL1, AL2, AL5]
 - Track A inputs: `_rmaos` by channel, `_curves` and cavity roles are packing inputs. [CN1, CN3, CN92]
-- A raw map given a sub-type converts on its own, not as a packing role. [BP3, W2]
+- A raw map given a sub-type converts on its own, not as a packing role. [BP3]
 - Memory admission counts complex grass. [BB4]
 - Helper textures fill packed channels; hand roles have a fixed precedence; only images are helpers; "Not a helper" opts a file out. [DY]
 - Helper fills run before analysis; cubes and derived jobs never fill; a helper of another size is resized. [DY, FM30]

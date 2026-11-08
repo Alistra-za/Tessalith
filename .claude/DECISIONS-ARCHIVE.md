@@ -569,6 +569,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
 - Curvature (`_curves`, `_curvature`, `_curves_generated`) is read only by Also export, and reaches a plain run as `PACK-UNUSED-INPUT`. An `_ao_generated` file changes the base `_n` job's `rnm.ao.file` identity. [CO116, CO115, CO90]
 
+ARCHIVED (wording before the edit; superseded in part by Note GW4, 2026-11-07)
+- A raw map given a sub-type converts on its own, not as a packing role. [BP3, W2]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
