@@ -483,11 +483,14 @@ fn replay_seeds_captured_depth_and_uses_the_captured_depth_state() {
     fs::remove_file(d.path().join("depth.json")).unwrap();
     let r = load_fixture(d.path()).unwrap();
     assert!(r.depth.is_none());
-    // The target's D32 depth: z = 0 everywhere.
-    assert_eq!(
-        ren.render_replay(&r, true).unwrap().depth,
-        Some(vec![0.0; 16])
-    );
+    // The target's own R32_TYPELESS depth (D32_FLOAT DSV), deferred and forward: z = 0 everywhere.
+    for deferred in [true, false] {
+        assert_eq!(
+            ren.render_replay(&r, deferred).unwrap().depth,
+            Some(vec![0.0; 16]),
+            "deferred {deferred}"
+        );
+    }
     let out = ren.render_replay(&r, true).unwrap();
     for (i, rt) in out.mrt.iter().enumerate() {
         for px in rt.chunks(4) {

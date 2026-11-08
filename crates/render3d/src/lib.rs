@@ -402,6 +402,9 @@ pub struct Renderer {
     last_frame: Option<(Scene, View)>,
     /// Cbuffer uploads of the last frame.
     uploads: usize,
+    /// Depth pre-pass draws of the last frame (test hook, Note GX1).
+    #[cfg(feature = "test-hooks")]
+    prepass_draws: usize,
     /// Test hook: draw with P0's by-name writer (every field, every cbuffer, every frame).
     #[cfg(feature = "test-hooks")]
     reference_writer: bool,
@@ -552,6 +555,8 @@ impl Renderer {
             query,
             last_frame: None,
             uploads: 0,
+            #[cfg(feature = "test-hooks")]
+            prepass_draws: 0,
             #[cfg(feature = "test-hooks")]
             reference_writer: false,
             backdrop: None,
@@ -1012,6 +1017,20 @@ impl Renderer {
         self.uploads
     }
 
+    /// Test hook: depth pre-pass draws of the last [`Renderer::render`] (0 = no pre-pass and no t17 copy, Note GX1).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn last_prepass_draws(&self) -> usize {
+        self.prepass_draws
+    }
+
+    /// Test hook: the current target holds a t17 depth copy (made on its first pre-pass frame, Note GX2).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn has_depth_copy(&self) -> bool {
+        self.target.as_ref().is_some_and(|t| t.depth_copy.is_some())
+    }
+
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
     /// frame), the reference the resolved path must match pixel for pixel.
     #[cfg(feature = "test-hooks")]
@@ -1279,6 +1298,7 @@ impl Renderer {
             vs_cbs,
             ps_cbs,
             srvs,
+            reads_depth: draw::reads_depth(&program.ps.reflection),
             samplers: program.ps.reflection.samplers.iter().map(|s| s.1).collect(),
             model: *world,
             blend: m.blend(),
@@ -2157,7 +2177,8 @@ impl Renderer {
 
     /// Drops the current target (render's recreation branch). The context holds references to bound
     /// views, so they are unbound first: otherwise the old textures outlive this drop while the new ones are made.
-    /// `render` binds only the target's RTVs and DSV (no SRV or UAV of it), and rebinds them every frame.
+    /// `render` leaves only the target's RTVs and DSV bound (it unbinds the t17 depth copy), and rebinds them every
+    /// frame.
     fn release_target(&mut self) {
         // The composite binds the target's SRVs and UAV to the CS stage (and unbinds them); null them here too.
         let srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
@@ -2166,6 +2187,10 @@ impl Renderer {
         // SAFETY: plain context calls; the arrays are live locals of the length passed.
         unsafe {
             self.gpu.ctx.OMSetRenderTargets(None, None);
+            // An error-path `?` in render skips its end-of-frame t17 unbind.
+            self.gpu
+                .ctx
+                .PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
             self.gpu.ctx.CSSetShaderResources(0, Some(&srvs));
             self.gpu
                 .ctx
@@ -2442,6 +2467,21 @@ impl Renderer {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
             self.backdrop = Some(Backdrop::new(&self.gpu));
         }
+        // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
+        // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
+        // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy.
+        let prepass = self.draw_order.iter().any(|id| {
+            self.shapes
+                .get(id)
+                .and_then(|s| s.draw.as_ref())
+                .is_some_and(|d| d.reads_depth && (!d.deferred || deferred_frame))
+        });
+        if prepass {
+            self.target
+                .as_mut()
+                .ok_or("no target")?
+                .ensure_depth_copy(&self.gpu)?;
+        }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
         let clear = match scene.background {
@@ -2471,16 +2511,34 @@ impl Renderer {
             // RT0 alone until a DEFERRED draw: a forward program must never see RT1-7 (its PS_OUTPUT writes
             // MotionVectors and NormalGlossiness too, Lighting.hlsl:303-308).
             let mut bound_all = false;
-            // Opaque, then CS's composite into RT0 (deferred Lit frames only; debug views write psout.Diffuse
-            // alone), then blended draws forward on top, as in game. draw_order is already opaque-then-blended.
+            // The main pass then tests against the final opaque depth, not the depth so far, and still shows what it
+            // showed before (Note GX3): the pre-pass writes depth in the same order with the same states, so the last
+            // depth writer of a pixel passes again at equal depth and overwrites every earlier fragment, and the
+            // shapes after it see the same depth as before. That holds for z-write-off and z-test-off shapes too.
+            let in_prepass = |s: &ShapeDraw| {
+                prepass && !s.blend && s.pipe.z_write && (!s.deferred || target.deferred())
+            };
+            #[cfg(feature = "test-hooks")]
+            let mut prepass_draws = 0;
+            // The pre-pass (None), opaque, then CS's composite into RT0 (deferred Lit frames only; debug views write
+            // psout.Diffuse alone), then blended draws forward on top, as in game. draw_order is already
+            // opaque-then-blended.
             // shortcut: the composite reads every pixel. The clear and the backdrop see RT4 = 0, bit-exact under Linear
             // Lighting but a GameGamma round trip without it. A non-DEFERRED opaque draw on this target (a shape
             // still pending forward after a toggle, or Failed keeping its forward draw) that wins the depth test
             // over a DEFERRED pixel keeps that pixel's RT4/RT5, so the composite adds the hidden shape's specular
             // and reflectance. Upgrade if either shows: draw non-DEFERRED opaque shapes (and the backdrop, with
-            // depth_states[1]) after the composite, with the blended pass.
-            for pass in [false, true] {
-                if pass && target.deferred() && self.debug == DebugOutput::Lit {
+            // depth_states[1]) after the composite, with the blended pass. On a pre-pass frame (Note GX3) the main
+            // pass tests against the final opaque depth, so a hidden DEFERRED fragment never draws and the leak
+            // does not happen there.
+            for pass in [None, Some(false), Some(true)] {
+                if pass.is_none() {
+                    if !prepass {
+                        continue;
+                    }
+                    ctx.OMSetRenderTargets(None, &target.dsv);
+                }
+                if pass == Some(true) && target.deferred() && self.debug == DebugOutput::Lit {
                     if let Some(c) = self.composite.as_mut() {
                         let fv = cs_settings::feature_data(
                             &self.settings,
@@ -2504,11 +2562,15 @@ impl Renderer {
                         continue;
                     };
                     // A DEFERRED program never draws into a forward target (its RT1-7 output would be lost; D-P12).
-                    if s.blend != pass || (s.deferred && !target.deferred()) {
+                    let drawn = match pass {
+                        None => in_prepass(s),
+                        Some(blend) => s.blend == blend && (!s.deferred || target.deferred()),
+                    };
+                    if !drawn {
                         continue;
                     }
                     let want = s.deferred && target.deferred();
-                    if want != bound_all {
+                    if pass.is_some() && want != bound_all {
                         let rtvs = if want {
                             target.rtvs()
                         } else {
@@ -2517,10 +2579,14 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&rtvs), &target.dsv);
                         bound_all = want;
                     }
+                    // The pre-pass already wrote this frame's fields.
+                    let fresh = pass.is_none() || !in_prepass(s);
                     // Test hook only (P0's reference writer, recomputed every frame): the default build takes the
                     // shipped path with no check.
                     #[cfg(feature = "test-hooks")]
-                    let n = if self.reference_writer {
+                    let n = if !fresh {
+                        0
+                    } else if self.reference_writer {
                         let fv = values_for(
                             &self.settings,
                             self.features_on,
@@ -2533,7 +2599,7 @@ impl Renderer {
                         s.update(gpu, &inputs)
                     };
                     #[cfg(not(feature = "test-hooks"))]
-                    let n = s.update(gpu, &inputs);
+                    let n = if fresh { s.update(gpu, &inputs) } else { 0 };
                     uploads += n;
                     ctx.IASetInputLayout(&s.mesh.layout);
                     for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
@@ -2556,6 +2622,12 @@ impl Renderer {
                     }
                     for (reg, v) in &s.srvs {
                         ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
+                    }
+                    // In the pre-pass the default stays: nothing is written but depth.
+                    if let (true, Some((_, srv))) =
+                        (s.reads_depth && pass.is_some(), &target.depth_copy)
+                    {
+                        ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[Some(srv.clone())]));
                     }
                     // D5 R3: the env cube over the 2×2 default at the forward DC registers (t30/t31).
                     if let Some((_, e)) = &self.env {
@@ -2588,11 +2660,30 @@ impl Renderer {
                         ctx.OMSetBlendState(None, None, 0xffff_ffff);
                     }
                     ctx.DrawIndexed(s.mesh.index_count, 0, 0);
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        prepass_draws += usize::from(pass.is_none());
+                    }
+                }
+                if pass.is_none() {
+                    if let Some((copy, _)) = &target.depth_copy {
+                        ctx.CopyResource(copy, &target.depth);
+                    }
+                    ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
                 }
             }
             ctx.OMSetBlendState(None, None, 0xffff_ffff);
             ctx.OMSetDepthStencilState(None, 0);
             ctx.RSSetState(&self.raster);
+            // No view of the target stays bound between frames (`release_target`), and the next copy's destination
+            // is never bound for reading.
+            if prepass {
+                ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                self.prepass_draws = prepass_draws;
+            }
         }
         self.uploads = uploads;
         #[cfg(feature = "test-hooks")]

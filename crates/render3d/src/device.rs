@@ -293,6 +293,32 @@ pub struct Target {
     pub main_uav: Option<ID3D11UnorderedAccessView>,
     /// Deferred only: `depth` as an R32_FLOAT SRV, the composite's DepthTexture (D5; the depth is R32_TYPELESS there).
     pub depth_srv: Option<ID3D11ShaderResourceView>,
+    /// The depth pre-pass's copy of `depth` (R32_TYPELESS) and its R32_FLOAT view: CS's `SharedData::DepthTexture`
+    /// at t17 (Note GX1). A copy, because `depth` stays bound for writing while the shapes read it. Made by
+    /// [`Target::ensure_depth_copy`] on the first pre-pass frame and dropped with the target.
+    pub depth_copy: Option<(ID3D11Texture2D, ID3D11ShaderResourceView)>,
+}
+
+/// An R32_FLOAT view of an R32_TYPELESS texture.
+fn r32_srv(gpu: &Gpu, tex: &ID3D11Texture2D) -> Result<ID3D11ShaderResourceView, String> {
+    let sd = D3D11_SHADER_RESOURCE_VIEW_DESC {
+        Format: DXGI_FORMAT_R32_FLOAT,
+        ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
+        Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+            Texture2D: D3D11_TEX2D_SRV {
+                MostDetailedMip: 0,
+                MipLevels: 1,
+            },
+        },
+    };
+    let mut v = None;
+    // SAFETY: live resource, descriptor and out-pointer are locals.
+    unsafe {
+        gpu.device
+            .CreateShaderResourceView(tex, Some(&sd), Some(&mut v))
+    }
+    .map_err(|e| gpu.fail("CreateShaderResourceView (depth)", e))?;
+    v.ok_or_else(|| gpu.fail("CreateShaderResourceView (depth)", "no view returned"))
 }
 
 fn tex2d_desc(w: u32, h: u32, format: DXGI_FORMAT) -> D3D11_TEXTURE2D_DESC {
@@ -455,16 +481,9 @@ impl Target {
             cd.BindFlags |= (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_UNORDERED_ACCESS.0) as u32;
         }
         let color = create_tex(gpu, &cd)?;
-        // Deferred: typeless, so the composite can read it as R32_FLOAT (D5 R6); the DSV is D32_FLOAT either way.
-        let mut dd = tex2d_desc(
-            w,
-            h,
-            if deferred {
-                DXGI_FORMAT_R32_TYPELESS
-            } else {
-                DXGI_FORMAT_D32_FLOAT
-            },
-        );
+        // Typeless, so the composite can read it as R32_FLOAT (D5 R6) and `depth_copy` stays in its format family
+        // (Note GX2); the DSV is D32_FLOAT.
+        let mut dd = tex2d_desc(w, h, DXGI_FORMAT_R32_TYPELESS);
         dd.BindFlags = D3D11_BIND_DEPTH_STENCIL.0 as u32;
         if deferred {
             dd.BindFlags |= D3D11_BIND_SHADER_RESOURCE.0 as u32;
@@ -528,25 +547,7 @@ impl Target {
             if main_uav.is_none() {
                 return Err(gpu.fail("CreateUnorderedAccessView", "no view returned"));
             }
-            let sd = D3D11_SHADER_RESOURCE_VIEW_DESC {
-                Format: DXGI_FORMAT_R32_FLOAT,
-                ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-                    Texture2D: D3D11_TEX2D_SRV {
-                        MostDetailedMip: 0,
-                        MipLevels: 1,
-                    },
-                },
-            };
-            // SAFETY: live resource, descriptor and out-pointer are locals.
-            unsafe {
-                gpu.device
-                    .CreateShaderResourceView(&depth, Some(&sd), Some(&mut depth_srv))
-            }
-            .map_err(|e| gpu.fail("CreateShaderResourceView (depth)", e))?;
-            if depth_srv.is_none() {
-                return Err(gpu.fail("CreateShaderResourceView (depth)", "no view returned"));
-            }
+            depth_srv = Some(r32_srv(gpu, &depth)?);
         }
         Ok(Target {
             width: w,
@@ -559,7 +560,20 @@ impl Target {
             mrt,
             main_uav,
             depth_srv,
+            depth_copy: None,
         })
+    }
+
+    /// Makes [`Target::depth_copy`] on the first depth pre-pass frame (Note GX1); a no-reader target never has one.
+    pub fn ensure_depth_copy(&mut self, gpu: &Gpu) -> Result<(), String> {
+        if self.depth_copy.is_none() {
+            let mut d = tex2d_desc(self.width, self.height, DXGI_FORMAT_R32_TYPELESS);
+            d.BindFlags = D3D11_BIND_SHADER_RESOURCE.0 as u32;
+            let tex = create_tex(gpu, &d)?;
+            let srv = r32_srv(gpu, &tex)?;
+            self.depth_copy = Some((tex, srv));
+        }
+        Ok(())
     }
 
     /// Clears colour to `rgba`, RT1-7 to 0 (CS Masks2 0 = no occlusion) and depth to 1.0.

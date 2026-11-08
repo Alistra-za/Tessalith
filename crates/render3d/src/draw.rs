@@ -67,6 +67,9 @@ pub struct ShapeDraw {
     pub ps_cbs: Vec<Cb>,
     /// (register, view) for every SRV the PS reflects.
     pub srvs: Vec<(u32, ID3D11ShaderResourceView)>,
+    /// The PS reflects `SharedData::DepthTexture` at [`DEPTH_TEXTURE`] (CS hair self-shadow): render binds the scene
+    /// depth there over the `srvs` default (Note GX1).
+    pub reads_depth: bool,
     pub samplers: Vec<u32>,
     pub model: Mat3x4,
     pub blend: bool,
@@ -115,6 +118,18 @@ pub fn create_program(gpu: &Gpu, vs: Compiled, ps: Compiled) -> Result<Program, 
         ps_obj: p.ok_or("no pixel shader")?,
         vs,
         ps,
+    })
+}
+
+/// CS's `SharedData::DepthTexture` register (SharedData.hlsli:538).
+pub const DEPTH_TEXTURE: u32 = 17;
+
+/// The PS reads the scene depth: `SharedData::DepthTexture` at t17 (SharedData.hlsli:538), reflected with or without
+/// its namespace. PhysicalSky's `TexVolLum` (PhysicalSky/Common.hlsli:516) is also t17 but holds volumetric
+/// luminance, so binding the depth copy over it would be wrong: only these two names match.
+pub fn reads_depth(r: &Reflection) -> bool {
+    r.srvs.iter().any(|s| {
+        s.1 == DEPTH_TEXTURE && matches!(s.0.as_str(), "SharedData::DepthTexture" | "DepthTexture")
     })
 }
 
@@ -215,5 +230,28 @@ impl ShapeDraw {
         self.blend = m.blend();
         self.pipe = if fixed { Pipe::FIXED } else { pipe(m) };
         self.stale = true;
+    }
+}
+
+#[cfg(test)]
+mod reads_depth_tests {
+    use super::reads_depth;
+    use crate::compile::{Reflection, SrvKind};
+
+    fn at(name: &str, reg: u32) -> Reflection {
+        Reflection {
+            srvs: vec![(name.to_string(), reg, SrvKind::Tex2D)],
+            ..Reflection::default()
+        }
+    }
+
+    #[test]
+    fn only_the_depth_texture_at_t17_reads_depth() {
+        assert!(!reads_depth(&at("PhysicalSky::TexVolLum", 17)));
+        assert!(!reads_depth(&at("TexVolLum", 17)));
+        assert!(reads_depth(&at("SharedData::DepthTexture", 17)));
+        assert!(reads_depth(&at("DepthTexture", 17)));
+        assert!(!reads_depth(&at("DepthTexture", 16)));
+        assert!(!reads_depth(&at("SSPLS::LinearDepthTexture", 17)));
     }
 }
