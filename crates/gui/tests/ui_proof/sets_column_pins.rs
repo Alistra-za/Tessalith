@@ -471,3 +471,146 @@ fn a_wheel_scroll_after_the_reveal_stays_put() {
         "the card stays put: {scrolled} -> {later}"
     );
 }
+
+/// The painted Text shape whose galley text is `text`: (galley rows, elided, visual rect).
+fn painted(h: &crate::app_harness::H, text: &str) -> (usize, bool, egui::Rect) {
+    fn find(s: &egui::Shape, text: &str) -> Option<(usize, bool, egui::Rect)> {
+        match s {
+            egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text)),
+            egui::Shape::Text(t) if t.galley.job.text == text => Some((
+                t.galley.rows.len(),
+                t.galley.elided,
+                t.visual_bounding_rect(),
+            )),
+            _ => None,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .find_map(|c| find(&c.shape, text))
+        .unwrap_or_else(|| panic!("no painted {text:?}"))
+}
+
+fn press(h: &mut crate::app_harness::H, pos: egui::Pos2, pressed: bool) {
+    h.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    });
+}
+
+#[test]
+fn the_hidden_set_line_wraps_with_clear_filter_below() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
+        let (_d, h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"click","at":{"label":"armor/gold"}}"#,
+                r#"{"op":"click","at":{"starts":"Not ready"}}"#,
+            ],
+        );
+        let at = format!("at {w}x{h_px}");
+        let (rows, elided, rect) = painted(&h, "armor/gold is hidden by the Sets filter");
+        assert!(!elided, "{at}: the line is not elided");
+        assert!(in_sets_column(&h, rect), "{at}: {rect:?} inside the column");
+        if w < 1100.0 {
+            assert!(rows >= 2, "{at}: wraps to {rows} rows");
+        }
+        let clear = one(&h, "Clear filter");
+        assert!(
+            clear.min.y >= rect.max.y - 0.5,
+            "{at}: Clear filter {clear:?} below the line {rect:?}"
+        );
+    }
+}
+
+#[test]
+fn the_drop_hint_is_weak_text_and_the_accent_under_a_drag() {
+    const HINT: &str = "Drop here to start a new set";
+    let (_d, mut h) = crate::replay(
+        "demo",
+        &[r#"{"op":"type","text":"body","at":{"placeholder":"Search sets"}}"#],
+    );
+    let vis = h.ctx.global_style().visuals.clone();
+    assert_eq!(text_colour(&h, HINT), Some(vis.weak_text_color()));
+    let chip = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            in_sets_column(&h, n.rect())
+                && n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l == "D" || l.starts_with("D, "))
+        })
+        .expect("a D chip in the Sets column")
+        .rect()
+        .center();
+    let hint = painted(&h, HINT).2.center();
+    h.event(egui::Event::PointerMoved(chip));
+    h.run_steps(1);
+    press(&mut h, chip, true);
+    h.run_steps(1);
+    let steps = 4;
+    for i in 1..=steps {
+        h.event(egui::Event::PointerMoved(
+            chip + (hint - chip) * (i as f32 / steps as f32),
+        ));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    let under = text_colour(&h, HINT);
+    // release outside the column so nothing is dropped
+    let out = egui::pos2(5.0, 5.0);
+    h.event(egui::Event::PointerMoved(out));
+    press(&mut h, out, false);
+    h.run_steps(2);
+    assert_eq!(
+        under,
+        Some(vis.selection.stroke.color),
+        "accent under a drag"
+    );
+}
+
+#[test]
+fn card_titles_keep_their_leaf() {
+    let (_d, mut h) = crate::replay(
+        "demo",
+        &[
+            r#"{"op":"resize","w":1400,"h":790}"#,
+            r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
+        ],
+    );
+    for (id, leaf) in [
+        ("architecture/stone/banner", "banner"),
+        ("architecture/stone/cobble", "cobble"),
+        ("architecture/stone/stonewall", "stonewall"),
+    ] {
+        let title = h
+            .query_all_by_label(id)
+            .find(|n| in_sets_column(&h, n.rect()))
+            .unwrap_or_else(|| panic!("no node named {id:?}"))
+            .rect();
+        // the painted title: a text inside the node's rect that ends with the leaf
+        let shown: Vec<_> = texts(&h)
+            .into_iter()
+            .filter(|(t, r)| title.expand(1.0).contains_rect(*r) && t.ends_with(leaf))
+            .collect();
+        assert_eq!(
+            shown.len(),
+            1,
+            "{id}: one painted title ending {leaf:?}, got {shown:?}"
+        );
+        assert!(!painted(&h, &shown[0].0).1, "{id}: not elided");
+        h.event(egui::Event::PointerMoved(title.center()));
+        h.run();
+        let full = texts(&h).into_iter().filter(|(t, _)| t == id).count();
+        // the title shows the full id only when it fits; otherwise the tooltip does
+        assert!(full >= 1, "{id}: shown in full as the title or its tooltip");
+        if shown[0].0 != id {
+            assert_eq!(full, 1, "{id}: the tooltip shows the full id");
+        }
+    }
+}

@@ -713,19 +713,9 @@ fn filter_strips(
     if let Some(id) = model.selected_set_hidden_by_filter() {
         button = true;
         let text = format!("{id} is hidden by the Sets filter");
-        let clear = egui::Sides::new()
-            .shrink_left()
-            .truncate()
-            .show(
-                ui,
-                |ui| {
-                    ui.add(egui::Label::new(&text).truncate())
-                        .on_hover_text(&text);
-                },
-                |ui| ui.button("Clear filter").clicked(),
-            )
-            .1;
-        if clear {
+        // Note HN F2: the sentence wraps in full, the button sits on the next row.
+        ui.add(egui::Label::new(&text).wrap());
+        if ui.button("Clear filter").clicked() {
             model.clear_sets_filter();
         }
     }
@@ -1208,6 +1198,14 @@ fn move_to_hits(views: &[SetView], query: &str) -> MoveHits {
 
 /// The dashed area at the bottom: a texture dropped here starts a new set.
 fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
+    // Note HN F6: weak text, the selection accent while last frame's zone had a dragged texture over it.
+    let hot_id = ui.id().with("new_set_hint_hot");
+    let hot = ui.data(|d| d.get_temp::<bool>(hot_id)).unwrap_or(false);
+    let colour = if hot {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().weak_text_color()
+    };
     let (zone, payload) = item_zone(
         ui,
         editing.on,
@@ -1216,11 +1214,15 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
             ui.set_width(ui.available_width());
             // A one-off hint: it wraps rather than elides (the column's style truncates).
             ui.add(
-                egui::Label::new(egui::RichText::new("Drop here to start a new set").color(AMBER))
+                egui::Label::new(egui::RichText::new("Drop here to start a new set").color(colour))
                     .wrap(),
             );
         },
     );
+    let over = editing.on
+        && zone.contains_pointer()
+        && egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx());
+    ui.data_mut(|d| d.insert_temp(hot_id, over));
     if !editing.on {
         zone.on_hover_text(editing.why);
     }
@@ -1401,7 +1403,20 @@ fn pill(
                     }
                     let wide = ui.available_width() >= need;
                     let name = |ui: &mut egui::Ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&v.id).strong()).truncate());
+                        // Note HN F3: elide the middle so the leaf stays; the node's name is the full id.
+                        let glyph = ui.fonts_mut(|f| {
+                            f.glyph_width(&egui::TextStyle::Body.resolve(ui.style()), '0')
+                        });
+                        let chars = (ui.available_width() / glyph).floor().max(8.0) as usize;
+                        let shown = super::header::elide_middle(&v.id, chars);
+                        let r = ui
+                            .add(egui::Label::new(egui::RichText::new(&shown).strong()).truncate());
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &v.id)
+                        });
+                        if shown != v.id {
+                            r.on_hover_text(&v.id);
+                        }
                     };
                     ui.horizontal(|ui| {
                         position_label(ui, index + 1, total);
