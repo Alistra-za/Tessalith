@@ -5,7 +5,7 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 ## Crates
 | Package | Path | What it is |
 |---|---|---|
-| `engine` | crates/engine | Planning, policy, presets, packing, bake, RNM, mips, encode, DDS write, manifest |
+| `engine` | crates/engine | Planning, policy, presets, packing, bake, mips, encode, DDS write, manifest |
 | `sdc-gui` | crates/gui | egui + wgpu GUI (`tessalith.exe`); kittest tests |
 | `sdc` | crates/cli | CLI (`sdc.exe`) |
 | `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed |

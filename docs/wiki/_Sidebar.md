@@ -23,7 +23,7 @@ GUI
 - [Bulk editing and renaming](GUI-Bulk-and-Rename.md)
 - [Texture settings](GUI-Texture-Panel.md)
 - [Advanced drawer](GUI-Advanced-Drawer.md)
-- [Helpers, RNM, cubemaps](GUI-Helpers-RNM-and-Cubemaps.md)
+- [Helpers, cubemaps](GUI-Helpers-and-Cubemaps.md)
 - [2D preview](GUI-Preview.md)
 - [Set editor](GUI-Set-Editor.md)
 - [3D preview](GUI-Set-Preview-3D.md)

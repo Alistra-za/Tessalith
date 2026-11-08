@@ -142,27 +142,16 @@ fn options(h: &mut H, name: &str) -> Vec<String> {
 #[test]
 fn picker_lists_greyscale_helpers_of_set_only() {
     let d = tempfile::tempdir().unwrap();
-    let files = [
-        "x.png",
-        "x_ao.png",
-        "x_n.png",
-        "x_bump.png",
-        "y.png",
-        "y_ao.png",
-    ];
-    let toml = "[files.\"x_bump.png\"]\nhelper.role = \"bump\"\n";
-    let m = fixture(d.path(), &files, toml);
-    // The bump layer and the other set's helper are helpers, just not this channel's.
+    let files = ["x.png", "x_ao.png", "x_n.png", "y.png", "y_ao.png"];
+    let m = fixture(d.path(), &files, "");
+    // The other set's helper is a helper, just not this channel's.
     let helpers: Vec<&str> = m
         .items
         .iter()
         .filter(|i| i.helper.is_some())
         .map(|i| i.name.as_str())
         .collect();
-    assert!(
-        helpers.contains(&"x_bump.png") && helpers.contains(&"y_ao.png"),
-        "{helpers:?}"
-    );
+    assert!(helpers.contains(&"y_ao.png"), "{helpers:?}");
     let listed: Vec<String> = channel_helpers(&m, RMAOS)
         .into_iter()
         .map(|(_, f, _)| f)
@@ -172,10 +161,7 @@ fn picker_lists_greyscale_helpers_of_set_only() {
     let opts = options(&mut h, AO_SOURCE);
     assert!(opts.iter().any(|o| o == "x_ao.png"), "{opts:?}");
     assert!(opts.iter().any(|o| o == "Value"), "{opts:?}");
-    assert!(
-        !opts.iter().any(|o| o == "x_bump.png" || o == "y_ao.png"),
-        "{opts:?}"
-    );
+    assert!(!opts.iter().any(|o| o == "y_ao.png"), "{opts:?}");
 }
 
 #[test]

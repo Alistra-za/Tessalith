@@ -99,7 +99,7 @@ The JSON Schema is available with `sdc presets schema manifest`.
 - the BC1 encode target, for BC1 and BC3;
 - the record passed validation;
 - the texture type's encode version (bumped only when a release changes that type's output);
-- every source file's content (by SHA-256), including packing sources, the baked normal map and RNM layers;
+- every source file's content (by SHA-256), including packing sources and the baked normal map;
 - the resolved settings (by hash).
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.

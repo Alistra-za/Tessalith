@@ -70,11 +70,9 @@ fn plan(dir: &Path, rough: &Path, normal: &Path, bake: bool, flip_green: bool) -
             normal_profile,
             shift: 0,
             stamp: SourceStamp::of(normal),
-            rnm: None,
             fit: None,
         }),
         shader: None,
-        rnm: None,
         derive: None,
         cube: None,
         fill: None,
@@ -465,4 +463,39 @@ fn a_resized_pair_bakes_from_the_resized_normal() {
         "level 1 mean R: {got} vs reference {want}"
     );
     assert!(got > 102.0, "the bake adds roughness: {got}");
+}
+
+/// Pin (Note GW3): a bake with no RNM layer hashes as it did before `rnm` left the tuple, so no such bake re-exports.
+/// `bake/mod.rs::a_bake_identity_follows_fit` pins the same hash.
+#[test]
+fn a_no_layer_bake_keeps_its_identity() {
+    let d = tempfile::tempdir().unwrap();
+    let n = bumpy_n(d.path(), 32, 0.0);
+    let r = rmaos(d.path(), 32);
+    let p = plan(d.path(), &r, &n, true, false);
+    let id = p.jobs[0].bake.as_ref().unwrap().identity_sha256();
+    assert_eq!(
+        id,
+        "4601ca0e9449fc8e6ae19ec9f0eb557b7c2532c4d9488821f460039552018b7b"
+    );
+}
+
+/// Note GW3: a manifest written by 2.x may carry an `rnm` role on a source. It loads, the field is ignored, and the
+/// job is up to date instead of re-exporting.
+#[test]
+fn an_old_manifest_with_rnm_loads() {
+    let d = tempfile::tempdir().unwrap();
+    let n = bumpy_n(d.path(), 32, 0.0);
+    let r = rmaos(d.path(), 32);
+    assert_eq!(run(plan(d.path(), &r, &n, true, false)).0.converted, 1);
+    let path = Manifest::at(&d.path().join("out")).path().to_path_buf();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\"bake\":"), "{text}");
+    std::fs::write(
+        &path,
+        text.replace("\"bake\":", "\"rnm\":\"detail\",\"bake\":"),
+    )
+    .unwrap();
+    let (s, ev) = run(plan(d.path(), &r, &n, true, false));
+    assert_eq!((s.converted, s.up_to_date), (0, 1), "{ev:#?}");
 }

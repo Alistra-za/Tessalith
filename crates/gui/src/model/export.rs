@@ -115,7 +115,7 @@ impl ExportModel {
             .map(|r| r.path.as_str())
     }
 
-    /// Drop the queued rows of `path` (a raw map packed into a recipe, a used RNM layer).
+    /// Drop the queued rows of `path` (a raw map packed into a recipe).
     fn drop_queued(&mut self, path: &str) {
         let before = self.rows.len();
         self.rows
@@ -199,16 +199,6 @@ impl ExportModel {
                 self.run_row(&ev, RowState::Done { passed });
                 self.note_output(&ev, &output);
                 self.finished_at(now);
-            }
-            EventKind::FileSkipped {
-                kind: SkipKind::NormalLayer,
-                code: None,
-                ..
-            } => {
-                // A used layer shows only in the RNM section; one an RNM-* code explains stays visible.
-                if let Some(p) = ev.path.as_deref() {
-                    self.drop_queued(p);
-                }
             }
             EventKind::FileSkipped { kind, reason, .. } => {
                 let state = match kind {

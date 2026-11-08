@@ -432,7 +432,7 @@ pub fn derive_sets(
 
 /// O4: the Vanilla job writes what its cs twin wrote, so the PBR folder's file can be copied: both ready, same input,
 /// the same key relative to their roots (the cs key folded by `vanilla_rel`, TA12; O6's landscape `_p`), the same
-/// pack, RNM and bake, not derived, and the same profile but for the target.
+/// pack and bake, not derived, and the same profile but for the target.
 pub fn same_identity(cs: &ResolvedJob, cs_root: &Path, van: &ResolvedJob, van_root: &Path) -> bool {
     let folded = vanilla_rel(Path::new(&output_key(cs_root, &cs.output)), &cs.game_path)
         .to_string_lossy()
@@ -442,7 +442,6 @@ pub fn same_identity(cs: &ResolvedJob, cs_root: &Path, van: &ResolvedJob, van_ro
         && cs.input == van.input
         && folded == output_key(van_root, &van.output)
         && cs.pack == van.pack
-        && cs.rnm == van.rnm
         && cs.bake == van.bake
         && van.derive.is_none()
         && Profile {

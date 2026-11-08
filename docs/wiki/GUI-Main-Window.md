@@ -113,9 +113,9 @@ One word for each idea, everywhere in the window. The code, where there is one, 
 - **Field lock.** A field that the target or the sub-type fixes, greyed with the reason (for example the format of a type that allows only one). Not the PGPatcher lock and not a pin.
 - **Half, Quarter, Eighth.** The Resize options. Each halving stops at the *Size floor*. A setting for a texture or a sub-type, not an answer to a question.
 - **Set.** The textures that belong to one material: they share a name stem (and a PGPatcher JSON entry under Community Shaders).
-- **Helper.** A source file that is not a texture of its own: it fills a channel of another output, or blends into the normal. It is never written as a DDS.
+- **Helper.** A source file that is not a texture of its own: it fills a channel of another output. It is never written as a DDS.
 - **PGPatcher JSON.** The editor for the JSON PGPatcher reads, in the *PGPatcher JSON editor…* menu item and set button and in the tab or window title. *+ Add a delete section* adds a PGPatcher "delete" section.
 - **Drop the alpha anyway.** The acknowledgement button of a texture whose varying alpha the chosen format or setting discards, once its alpha type is confirmed: the export writes the texture without its alpha. Every other blocking warning keeps *Acknowledge*.
 - **Not exported yet.** What the Files tab says before the first export of the session; the counts (*converted*, *up to date*, …) appear once there are files.
 - **Sub-type labels.** A sub-type reads as its id with spaces (*pbr albedo*); *Skin RFAOS* is the one name spelled out. The id (`skin_rfaos`) is on hover.
-- **One accent.** The window has one non-status colour (teal), for selection and the RNM outline. Red, amber and green are for status only.
+- **One accent.** The window has one non-status colour (teal), for selection. Red, amber and green are for status only.

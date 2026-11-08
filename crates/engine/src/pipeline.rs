@@ -194,26 +194,11 @@ fn check_stamps(job: &ResolvedJob) -> Result<(), FileError> {
     if let Some(f) = &job.fill {
         stamps.push((f.source.path.as_path(), f.source.stamp));
     }
-    if let Some(r) = job
-        .bake
-        .as_ref()
-        .and_then(|b| b.rnm.as_ref().map(|r| (r, &b.normal_profile)))
-    {
-        for (f, _) in r.0.inputs(&r.1.rnm) {
-            stamps.push((f.path.as_path(), f.stamp));
-        }
-    }
-    if let Some(r) = job.active_rnm() {
-        for (f, _) in r.inputs(&job.profile.rnm) {
-            stamps.push((f.path.as_path(), f.stamp));
-        }
-    }
     let named = job.pack.is_some()
         || job.derive.is_some()
         || faces.is_some()
         || job.bake.is_some()
-        || job.fill.is_some()
-        || job.active_rnm().is_some();
+        || job.fill.is_some();
     for (src, planned) in stamps {
         if let Some(planned) = planned {
             if SourceStamp::of(src) != Some(planned) {
@@ -332,11 +317,6 @@ fn prepare_then<T>(
     } else {
         (preprocess_with(img, p, transfer), None)
     };
-    // M6 Track F2 (DECISIONS Note W1): RNM layers blend into the preprocessed base; alpha is never touched. Admission
-    // counts the largest layer and its resample (`api::job_bytes`, Note BB).
-    if let Some(r) = job.active_rnm() {
-        crate::rnm::blend::apply(&mut work.img, r, p).map_err(fail(Stage::Load))?;
-    }
     stop()?;
 
     enter(Stage::Mipmaps);
@@ -557,28 +537,6 @@ pub fn process_file(
                     SourceRef::of_bake(&b.normal, b.identity_sha256())
                         .map_err(|e| fail(Stage::Load)(format!("{}: {e}", b.normal.display())))?,
                 );
-            }
-            // Note W18: the baked `_n`'s RNM inputs, roles prefixed `bake.`.
-            if let Some(r) = job
-                .bake
-                .as_ref()
-                .and_then(|b| b.rnm.as_ref().map(|r| (r, &b.normal_profile)))
-            {
-                for (f, role) in r.0.inputs(&r.1.rnm) {
-                    sources.push(
-                        SourceRef::of_rnm(&f.path, format!("bake.{role}"))
-                            .map_err(|e| fail(Stage::Load)(format!("{}: {e}", f.path.display())))?,
-                    );
-                }
-            }
-            // M6 Track F2: every RNM input the blend reads, with its role.
-            if let Some(r) = job.active_rnm() {
-                for (f, role) in r.inputs(&job.profile.rnm) {
-                    sources
-                        .push(SourceRef::of_rnm(&f.path, role).map_err(|e| {
-                            fail(Stage::Load)(format!("{}: {e}", f.path.display()))
-                        })?);
-                }
             }
             // Note DY: the helper that fills the alpha, with its read and invert, so `if-changed` re-encodes on either.
             if let Some(f) = &job.fill {

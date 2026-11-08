@@ -726,15 +726,6 @@ pub(super) mod gesture {
         h.state().commits.clone()
     }
 
-    /// Click the widget once: what was committed.
-    pub fn click(draw: fn(&mut egui::Ui, &mut St), role: Role) -> Vec<f64> {
-        let mut h = harness(draw);
-        h.get_by_role(role).click();
-        h.run();
-        h.run();
-        h.state().commits.clone()
-    }
-
     /// Focus the box and press the arrow key, without leaving it: what was committed so far.
     pub fn arrow_held(draw: fn(&mut egui::Ui, &mut St), role: Role, key: egui::Key) -> Vec<f64> {
         let mut h = harness(draw);
@@ -795,6 +786,33 @@ mod tests {
     fn a_number_box_commits_nothing_before_it_is_left() {
         use super::gesture::arrow_held;
         assert!(arrow_held(settled, Role::SpinButton, egui::Key::ArrowUp).is_empty());
+    }
+
+    fn slider_box(ui: &mut egui::Ui, s: &mut St) {
+        let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
+            ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false))
+        });
+        s.take(done);
+    }
+
+    /// FY1: a click on a slider settles it, and commits once.
+    #[test]
+    fn a_click_on_a_slider_commits_once() {
+        use egui_kittest::kittest::Queryable as _;
+        let st = St {
+            cur: 0.0,
+            commits: vec![],
+        };
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(300.0, 100.0))
+            .build_ui_state(slider_box, st);
+        h.run();
+        h.get_by_role(Role::Slider).click();
+        h.run();
+        h.run();
+        let commits = &h.state().commits;
+        assert_eq!(commits.len(), 1, "{commits:?}");
+        assert!(commits[0] > 0.0, "{commits:?}");
     }
 
     #[test]

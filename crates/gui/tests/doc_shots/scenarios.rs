@@ -59,7 +59,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("assign_menu", assign_menu),
     ("slot_menu", slot_menu),
     ("pgp_material", pgp_material),
-    ("rnm_panel", rnm_panel),
     ("helper_panel", helper_panel),
     ("cube_panel", cube_panel),
     ("preview_encoded", preview_encoded),
@@ -624,16 +623,7 @@ fn pgp_material(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Helpers-RNM-and-Cubemaps: a normal map with two RNM layers.
-fn rnm_panel(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| {
-        h.state_mut().model.select_item("armor/iron_n.png")
-    });
-    shot(&mut h, r)
-}
-
-/// GUI-Helpers-RNM-and-Cubemaps: a roughness helper's panel.
+/// GUI-Helpers-and-Cubemaps: a roughness helper's panel.
 fn helper_panel(dir: &Path) -> Frame {
     let mut h = opened_extra(
         dir,
@@ -650,7 +640,7 @@ fn helper_panel(dir: &Path) -> Frame {
     shot(&mut h, r)
 }
 
-/// GUI-Helpers-RNM-and-Cubemaps: a six-face cube's settings.
+/// GUI-Helpers-and-Cubemaps: a six-face cube's settings.
 fn cube_panel(dir: &Path) -> Frame {
     let faces = ["px", "nx", "py", "ny", "pz", "nz"].map(|f| format!("sky/env_{f}.png"));
     let extra: Vec<&str> = faces.iter().map(|s| s.as_str()).collect();

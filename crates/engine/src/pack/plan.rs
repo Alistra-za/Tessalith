@@ -31,7 +31,7 @@ fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// The input of a job that writes (or will, once decided or acknowledged: not a raw input, an RNM layer or an
+/// The input of a job that writes (or will, once decided or acknowledged: not a raw input or an
 /// error), or of another recipe, that also writes `output` (case-insensitive, either separator). The recipe's own
 /// raw sources are raw inputs (Note M8). `outputs` holds every recipe's output (explicit or default), input and
 /// whether it writes, in planning order, collected before any recipe is planned, so a later recipe counts too
@@ -48,9 +48,7 @@ fn other_output(
         .filter(|j| {
             !matches!(
                 j.status,
-                JobStatus::PackingInput { .. }
-                    | JobStatus::NormalLayer { .. }
-                    | JobStatus::Error { .. }
+                JobStatus::PackingInput { .. } | JobStatus::Error { .. }
             )
         })
         .find(|j| fold(&j.output) == want)
@@ -540,7 +538,6 @@ pub(crate) fn recipe_error_job(
         source: None,
         pack: None,
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,

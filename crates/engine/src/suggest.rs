@@ -51,6 +51,11 @@ pub fn is_pbr_set(c: &SuggestContext) -> bool {
                 .any(|r| r.starts_rmaos() && c.set_suffixes.contains(&r.id())))
 }
 
+/// Whether a game path is landscape: under `textures/landscape/` or with a whole `landscape` component.
+pub fn landscape_path(game_path: &str) -> bool {
+    game_path.starts_with("textures/landscape/") || has_component(game_path, "landscape")
+}
+
 pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
     use Confidence::*;
     use Subtype::*;
@@ -60,8 +65,7 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
         reason: why.to_string(),
     };
     let pbr = is_pbr_set(c);
-    let landscape =
-        c.game_path.starts_with("textures/landscape/") || has_component(c.game_path, "landscape");
+    let landscape = landscape_path(c.game_path);
     let ui_or_sky = has_component(c.game_path, "interface") || has_component(c.game_path, "sky");
     // M6 Track E (owner, 2026-10-12; DECISIONS Note U1, reversing Note H's "a bare stem is only a guess"): no suffix
     // is the colour member, at High like `_d`. `hdr_sky` and `_i` stay Medium.
@@ -86,10 +90,11 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
             High,
             "_wet in an Advanced skin set (normal + mask or height)",
         )],
-        Some("detail_n") if c.advanced_skin => vec![s(
+        // Note GW1: the three detail names are one slot. Landscape sets get theirs from the shader (`decide_subtype`).
+        Some("detail" | "detailnorm" | "detail_n") if c.advanced_skin => vec![s(
             SkinDetail,
             High,
-            "_detail_n in an Advanced skin set (detail normal)",
+            "detail map in an Advanced skin set (detail normal)",
         )],
         Some("cnr") | Some("crn") => {
             vec![s(CoatNormal, High, "_cnr/_crn coat normal + roughness")]
@@ -162,7 +167,6 @@ pub fn apply_vocabulary(suggestions: &mut Vec<Suggestion>, v: &Vocab) {
         VocabRole::Emissive => "emissive",
         VocabRole::PackingInput(_) => "packing input",
         VocabRole::CoatColour => "coat colour + strength",
-        VocabRole::NormalLayer(_) => "normal layer",
     };
     for s in suggestions.iter_mut() {
         s.reason = format!("exporter suffix _{} ({role}); {}", v.term, s.reason);

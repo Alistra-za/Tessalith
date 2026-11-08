@@ -44,60 +44,26 @@ impl ThumbCache {
     }
 
     pub fn get(&mut self, ctx: &egui::Context, item: &TextureItem) -> Option<egui::TextureHandle> {
-        let t = item.thumb.as_ref()?;
-        if let Some((old, tex, last)) = self.map.get_mut(&item.key) {
+        Some(self.cached(ctx, &item.key, item.thumb.as_ref()?))
+    }
+
+    /// The texture of `t` under `id`: kept while the same thumbnail is drawn, uploaded again for a new one.
+    fn cached(&mut self, ctx: &egui::Context, id: &str, t: &Arc<Thumbnail>) -> egui::TextureHandle {
+        if let Some((old, tex, last)) = self.map.get_mut(id) {
             if Arc::ptr_eq(old, t) {
                 *last = ctx.cumulative_pass_nr();
-                return Some(tex.clone());
+                return tex.clone();
             }
         }
         let img = egui::ColorImage::from_rgba_unmultiplied(
             [t.width as usize, t.height as usize],
             &t.rgba,
         );
-        let tex = ctx.load_texture(
-            format!("thumb:{}", item.key),
-            img,
-            egui::TextureOptions::LINEAR,
-        );
+        let tex = ctx.load_texture(format!("thumb:{id}"), img, egui::TextureOptions::LINEAR);
         self.map.insert(
-            item.key.clone(),
+            id.to_string(),
             (t.clone(), tex.clone(), ctx.cumulative_pass_nr()),
         );
-        self.evict(ctx, THUMB_CAP);
-        Some(tex)
-    }
-}
-
-impl ThumbCache {
-    /// A texture for a thumbnail that has no item (an RNM layer or mask file); `invert` is the AO channel: shown as inverted grey
-    /// (what the blend reads, `1 - AO`).
-    pub fn get_raw(
-        &mut self,
-        ctx: &egui::Context,
-        key: &str,
-        t: &Arc<Thumbnail>,
-        invert: Option<usize>,
-    ) -> egui::TextureHandle {
-        let id = format!("raw:{key}:{invert:?}");
-        if let Some((old, tex, last)) = self.map.get_mut(&id) {
-            if Arc::ptr_eq(old, t) {
-                *last = ctx.cumulative_pass_nr();
-                return tex.clone();
-            }
-        }
-        let mut rgba = t.rgba.clone();
-        if let Some(ch) = invert {
-            for px in rgba.as_chunks_mut::<4>().0 {
-                let g = 255 - px[ch];
-                px[..3].fill(g);
-            }
-        }
-        let img =
-            egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &rgba);
-        let tex = ctx.load_texture(format!("thumb:{id}"), img, egui::TextureOptions::LINEAR);
-        self.map
-            .insert(id, (t.clone(), tex.clone(), ctx.cumulative_pass_nr()));
         self.evict(ctx, THUMB_CAP);
         tex
     }
@@ -118,15 +84,15 @@ mod tests {
             height: 1,
             rgba: vec![1, 2, 3, 255],
         });
-        let a = c.get_raw(&ctx, "k", &t, None);
-        assert_eq!(a.id(), c.get_raw(&ctx, "k", &t, None).id());
+        let a = c.cached(&ctx, "k", &t);
+        assert_eq!(a.id(), c.cached(&ctx, "k", &t).id());
         let t2 = Arc::new(Thumbnail {
             rgba: vec![9, 9, 9, 255],
             ..(*t).clone()
         });
         assert_ne!(
             a.id(),
-            c.get_raw(&ctx, "k", &t2, None).id(),
+            c.cached(&ctx, "k", &t2).id(),
             "a new thumbnail uploads again"
         );
         drop(t);
@@ -162,7 +128,7 @@ mod evict_tests {
             ctx.run_ui(Default::default(), |_| {})
                 .textures_delta
                 .clear();
-            let _ = c.get_raw(&ctx, k, &t, None);
+            let _ = c.cached(&ctx, k, &t);
         }
         ctx.run_ui(Default::default(), |_| {})
             .textures_delta
@@ -170,10 +136,10 @@ mod evict_tests {
         ctx.run_ui(Default::default(), |_| {})
             .textures_delta
             .clear();
-        let _ = c.get_raw(&ctx, "a", &t, None); // drawn again: now the newest
+        let _ = c.cached(&ctx, "a", &t); // drawn again: now the newest
         c.evict(&ctx, 2);
         let mut left: Vec<_> = c.map.keys().cloned().collect();
         left.sort();
-        assert_eq!(left, ["raw:a:None", "raw:e:None"]);
+        assert_eq!(left, ["a", "e"]);
     }
 }

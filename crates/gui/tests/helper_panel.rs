@@ -1,5 +1,5 @@
 //! Helper textures Task 8 (Note DY17): the helper panel edits the helper file's `helper.*` keys in `sdc.toml` (role,
-//! fills, read from, invert; `rnm.target` for normal-type roles), one undo step each. Temp dirs only.
+//! fills, read from, invert), one undo step each. Temp dirs only.
 mod support;
 use eframe::egui;
 use egui::accesskit::Role;
@@ -268,21 +268,6 @@ fn fills_reset_returns_to_suggestion() {
 }
 
 #[test]
-fn read_and_invert_hidden_for_normal_roles() {
-    let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_n.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
-    assert_eq!(h.query_all_by_label("Read from").count(), 0);
-    assert_eq!(h.query_all_by_label("Invert").count(), 0);
-    assert_eq!(h.query_all_by_label("Add fill target").count(), 0);
-    pick(&mut h, "Layer target", "CNR");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("cnr"))
-    );
-}
-
-#[test]
 fn read_only_project_disables_controls() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(d.path(), &XSET, "target = [\n"), "x_roughness.png");
@@ -462,22 +447,23 @@ fn a_packed_target_is_named_by_its_output() {
     m.set_output_name(&set, Some("steel")).unwrap();
     idle(&mut m);
     let rep = m.item("x_roughness.png").unwrap().helper.clone().unwrap();
+    let tails = m.helper_tails(&rep);
     let rmaos = engine::helper::FillTarget::parse("rmaos.r").unwrap();
     let lost = engine::helper::FillTarget::parse("m.r").unwrap();
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, rmaos),
+        sdc_gui::model::helpers::target_label(&rep, rmaos, tails),
         "steel_rmaos R"
     );
     // Final review M4: a target that did not land is named by the outputs' base name, like the rows beside it.
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, lost),
+        sdc_gui::model::helpers::target_label(&rep, lost, tails),
         lost.label("steel"),
         "no output of its own: another output's base name"
     );
     // Final review K2: the colour output has no suffix, and its stem is the base too.
     let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
     assert_eq!(
-        sdc_gui::model::helpers::target_label(&rep, colour),
+        sdc_gui::model::helpers::target_label(&rep, colour, tails),
         colour.label("steel")
     );
     let h = app(m, "x_roughness.png");
@@ -499,62 +485,24 @@ fn shots() {
         return;
     };
     let d = tempfile::tempdir().unwrap();
-    let files = [
-        "x.png",
-        "x_roughness.png",
-        "x_cnr.png",
-        "x_n.png",
-        "x_detailnorm.png",
-    ];
+    let files = ["x.png", "x_roughness.png", "x_cnr.png", "x_n.png"];
     let toml = "[files.\"x_roughness.png\"]\nhelper.fills = [\"rmaos.r\", \"cnr.a\"]\nhelper.read = \"g\"\n";
     for (w, hgt) in [(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)] {
-        for key in ["x_roughness.png", "x_detailnorm.png"] {
-            let mut m = fixture(d.path(), &files, toml);
-            m.select_item(key);
-            let mut h = Harness::builder()
-                .with_size(egui::vec2(w, hgt))
-                .with_pixels_per_point(1.0)
-                .wgpu()
-                .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-            sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-            h.run_steps(10);
-            let img = h.render().expect("render");
-            let stem = key.trim_end_matches(".png");
-            img.save(Path::new(&out).join(format!("helper-panel-{stem}-{w}.png")))
-                .expect("save png");
-        }
+        let key = "x_roughness.png";
+        let mut m = fixture(d.path(), &files, toml);
+        m.select_item(key);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(w, hgt))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(10);
+        let img = h.render().expect("render");
+        let stem = key.trim_end_matches(".png");
+        img.save(Path::new(&out).join(format!("helper-panel-{stem}-{w}.png")))
+            .expect("save png");
     }
-}
-
-/// Review fix (DY17): a layer with no prefix in a set with `_cnr` and no `_n` blends into `_cnr` (Note W4); the panel
-/// shows the engine's target, and picking a value writes `rnm.target` even when it is the one shown.
-#[test]
-fn layer_target_follows_the_engine() {
-    let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
-    let combo = h.get_by_role_and_label(Role::ComboBox, "Layer target");
-    assert_eq!(combo.accesskit_node().value().as_deref(), Some("CNR"));
-    pick(&mut h, "Layer target", "CNR");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("cnr"))
-    );
-    pick(&mut h, "Layer target", "Normal");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("n"))
-    );
-    let rep = h
-        .state()
-        .item("x_detailnorm.png")
-        .unwrap()
-        .helper
-        .clone()
-        .unwrap();
-    assert_eq!(rep.rnm_target, Some(engine::config::RnmTarget::N));
-    let combo = h.get_by_role_and_label(Role::ComboBox, "Layer target");
-    assert_eq!(combo.accesskit_node().value().as_deref(), Some("Normal"));
 }
 
 /// Review fix (DY17): picking the guessed role writes it, so it becomes assigned and replaces the diffuse's own

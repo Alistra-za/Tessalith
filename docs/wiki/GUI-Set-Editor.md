@@ -26,7 +26,6 @@ Each PGPatcher slot is one row, in slot order, so there are at most 8: Diffuse, 
 - Slot 7 holds the set's `_cnr` or `_f`, whichever it has. With both, the row shows the conflict in red (PGPatcher has one slot 7), lists both files with a ✕ each to take one out of the set, and export warns "_cnr and _f both use slot 7". Its slot commands, file drop and PGPatcher lock (`lock_cnr`) are slot 7's. The same holds for a set with both a `_g` and an `_sk` on slot 3.
 - A `_coat` map fills the Subsurface row, which then reads **Coat colour + strength**: its alpha is the coat strength and is kept.
 - A complex material `_m` (packed or loose) has no row. Its **Enable parallax** box sits under the rows, with a packed `_m`'s fill rows ([Texture settings panel](GUI-Texture-Panel.md#centre)).
-- When RNM normal layers are active, the normal row has an outline in the accent colour (teal); see [RNM normal layers](GUI-Helpers-RNM-and-Cubemaps.md#rnm-normal-layers).
 
 A row has these columns:
 
@@ -37,7 +36,7 @@ A row has these columns:
 | *File* | The name cut to fit (the full name and size on hover), and under it the dimensions and file size. |
 | *Format* | The format dropdown (format and tag together, one undo step). An empty slot shows **Assign…** here, which opens the slot menu, headed by the slot's name ("Emissive / Skin (slot 3)"). A packed output's recipe and fills sit under the dropdown. |
 | *Flags* | Small toggles, each with a hover: **Match on this** (Diffuse, Normal: PGPatcher applies the entry to meshes with this exact texture in this slot; see [Matching](GUI-PGPatcher-JSON.md#matching)) and **Opaque** (Diffuse: strips alpha, so the diffuse is fully opaque). |
-| *Status* | A dot: green ready, amber a warning or decision, red blocks. Its hover gives the reason, such as "borrowed from X", "not used by the shader" or "RNM, 2 layers". |
+| *Status* | A dot: green ready, amber a warning or decision, red blocks. Its hover gives the reason, such as "borrowed from X" or "not used by the shader". |
 
 ![The menu Assign… opens on an empty slot.](../img/gui/GUI-Set-Editor/assign-menu.png)
 
@@ -47,9 +46,9 @@ While a set is selected, the Textures and Sets columns give the centre at least 
 
 ## Packed channel sources
 
-Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**. The list holds the set's greyscale helpers (any role but the RNM layers) and **Value**:
+Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**. The list holds the set's greyscale helpers and **Value**:
 
-- Picking a helper makes it this channel's source: the channel is added to that helper's `helper.fills` and taken out of every other helper's list, as one undo step. The [helper panel](GUI-Helpers-RNM-and-Cubemaps.md#the-helper-panel)'s Fills list shows the same setting.
+- Picking a helper makes it this channel's source: the channel is added to that helper's `helper.fills` and taken out of every other helper's list, as one undo step. The [helper panel](GUI-Helpers-and-Cubemaps.md#the-helper-panel)'s Fills list shows the same setting.
 - **Value** takes the channel out of every helper's list, so the channel uses its value fill: the row then shows the value box and its **Reset** after the picker (`packing.fill.*`). **Reset** removes the fill. Value is greyed out when the channel's file is not a helper ("<file> is not a helper; it feeds this channel by its name"), because no helper setting holds it.
 - Picking the source already shown changes nothing. The engine still decides: a pick that cannot fill the channel shows the helper as not used, with the reason, in its row and panel.
 

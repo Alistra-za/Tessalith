@@ -84,7 +84,6 @@ fn plan_with(
             sources: vec![source(rough, RawMap::Roughness), source(ao, RawMap::Ao)],
         }),
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,

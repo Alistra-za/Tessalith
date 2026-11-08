@@ -84,22 +84,6 @@ Every texture with mips is written at a power-of-two size, before `resize` appli
 
 Packing fields belong on the packed output's key, for example `[files."textures/armor/iron/iron_rmaos"]`.
 
-## RNM normal layers
-
-These apply to a base normal (`_n`, `pbr_normal`, `landscape_normal`, or `_cnr`) that has layer files. See [Texture types](Texture-Packing.md#rnm-normal-layers).
-
-| Field | Values | Default | Notes |
-|---|---|---|---|
-| `rnm.enabled` | `true`, `false` | `true` | Blend the layers into the base normal. |
-| `rnm.order` | list of `bump`, `bump2`, `detail`, `detail2`, `bent` | `["bent", "bump", "bump2", "detail", "detail2"]` | Blend order. Missing ids are appended in the default order. |
-| `rnm.<layer>.strength` | 0 to 2 | bump 0.4, bump2 0.4, detail 0.6, detail2 0.3, bent 0.35 | Layer strength. `<layer>` is `bump`, `bump2`, `detail`, `detail2` or `bent`. |
-| `rnm.<layer>.flip_green` | `true`, `false` | the base's `channels.flip_green` | Invert this layer's green channel. |
-| `rnm.<layer>.mask` | `true`, `false` | `true` | Use the layer's mask file when one exists. |
-| `rnm.bent.mode` | `ao_blend`, `detail` | `ao_blend` | Blend the bent normal weighted by occlusion, or like a detail layer. |
-| `rnm.bent.ao_power` | 0.1 to 8 | 1.5 | Power on the occlusion (1 minus AO). |
-| `rnm.bent.ao` | `true`, `false` | `true` | Read the AO source (a raw `_ao` map, or the B channel of `_rmaos`/`_rfaos`); `false` uses a uniform weight. Supply normal AO (white = open); Tessalith inverts it. |
-| `rnm.target` | `n`, `cnr`, `both` | from the layer's name | Per layer file (`[files]` or `file:` `--set`), or an unscoped `--set` for every layer file; refused in a `subtype:` scope. Which base normal it feeds when a set has both `_n` and `_cnr`. |
-
 ## Cubemap
 
 These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. See [Cubemaps](Cubemaps.md).

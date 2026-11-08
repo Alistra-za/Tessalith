@@ -227,12 +227,12 @@ fn signature(job: &ResolvedJob) -> String {
     let p = sha256_json(&job.profile).unwrap_or_default();
     let head = match &job.pack {
         Some(pk) => format!("{p}:{}", pack_key(pk).unwrap_or_default()),
-        None => format!("{p}:{:?}:{:?}", job.source, job.active_rnm()),
+        None => format!("{p}:{:?}", job.source),
     };
     format!("{head}:{}", extra_inputs_key(job))
 }
 
-/// What a job reads besides its profile, `source` and RNM layers: the bake's `_n`, the derive's and cube's files
+/// What a job reads besides its profile, `source`: the bake's `_n`, the derive's and cube's files
 /// and the fill's helper, each with its settings and stamp (Debug: plain structs, no maps, so equal jobs match).
 /// Shared with the set preview's signature (Note FA1).
 pub fn extra_inputs_key(job: &ResolvedJob) -> String {
@@ -878,11 +878,9 @@ mod tests {
                 normal_profile: profile,
                 shift: 1,
                 stamp: stamped(2),
-                rnm: None,
                 fit: None,
             }),
             shader: None,
-            rnm: None,
             derive: Some(DeriveJob {
                 kind: DeriveKind::LegacyN,
                 landscape: false,

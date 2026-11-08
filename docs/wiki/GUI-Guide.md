@@ -35,7 +35,7 @@ The line under the header is the [status line](GUI-Main-Window.md#status-line-an
 - [Bulk editing and renaming](GUI-Bulk-and-Rename.md): selecting several, editing them together, the rename dialog and the input name box.
 - [Texture settings panel](GUI-Texture-Panel.md): the settings of one texture, deciding, BC7 weighting, how edits are written.
 - [Advanced drawer](GUI-Advanced-Drawer.md): batch, preview and interface settings.
-- [Helpers, RNM layers and cubemaps](GUI-Helpers-RNM-and-Cubemaps.md): the Helpers group and panel, RNM layers, the cube controls.
+- [Helpers and cubemaps](GUI-Helpers-and-Cubemaps.md): the Helpers group and panel, the cube controls.
 - [The 2D preview](GUI-Preview.md): source beside encode, readouts.
 - [The set editor](GUI-Set-Editor.md): slot rows, packed channel sources, the shader.
 - [The 3D preview](GUI-Set-Preview-3D.md): a set on a mesh with Community Shaders.

@@ -490,11 +490,8 @@ fn a_member_with_no_recipe_role_is_reported_not_written() {
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
     let dir = inputs.join("textures/pbr/arm");
     png(&dir.join("steel_g.png"), 16, 16, [255, 0, 0, 255]);
-    png(&dir.join("steel_detail.png"), 16, 16, [128, 128, 255, 255]);
     let (cs, _) = plan(request(&inputs, &d.path().join("pbr"), Target::Cs));
-    let mut sets = derive_sets(&cs);
-    // An RNM layer has no job role under `cs` either; the PBR set lists it as a member (Task 7 reads it so).
-    sets[0].members.push(dir.join("steel_detail.png"));
+    let sets = derive_sets(&cs);
     let mut r = request(&inputs, &d.path().join("vanilla"), Target::Vanilla);
     r.derive = Some(DeriveRequest {
         mode: DeriveMode::Vanilla,
@@ -517,21 +514,11 @@ fn a_member_with_no_recipe_role_is_reported_not_written() {
         })
         .collect();
     assert!(
-        notes
-            .iter()
-            .any(|(m, r)| m.ends_with("steel_g.png") && *r != "detail layer not in the vanilla _n"),
+        notes.iter().any(|(m, r)| m.ends_with("steel_g.png")
+            && *r == "no vanilla or complex-material map uses it"),
         "{notes:?}"
     );
-    assert!(
-        notes
-            .iter()
-            .any(|(m, r)| m.ends_with("steel_detail.png")
-                && *r == "detail layer not in the vanilla _n"),
-        "{notes:?}"
-    );
-    assert!(p.jobs.iter().all(
-        |j| !slash(&j.output).contains("steel_g") && !slash(&j.output).contains("steel_detail")
-    ));
+    assert!(p.jobs.iter().all(|j| !slash(&j.output).contains("steel_g")));
 }
 
 #[test]
@@ -861,7 +848,7 @@ fn plan_and_run(
 }
 
 /// Review I1: every discovered file gets exactly one terminal event, whatever the derive step did with it: read by
-/// a derived job, not read (`_g`, an RNM layer), left out (`drop`), in a set with no albedo or a DDS source, or a
+/// a derived job, not read (`_g`, `steel_bump`), left out (`drop`), in a set with no albedo or a DDS source, or a
 /// source of a size-mismatch error job. Task 5: in both modes, with a landscape set whose `_p` is read by the diffuse
 /// and kept as its own job (O6), and a grass set whose `_n` the vanilla diffuse does not read.
 #[test]
@@ -877,7 +864,7 @@ fn one_terminal_event_each(mode: DeriveMode) {
     let dir = inputs.join("textures/pbr/arm");
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), true);
     png(&dir.join("steel_g.png"), 16, 16, [255, 0, 0, 255]);
-    png(&dir.join("steel_detail.png"), 16, 16, [128, 128, 255, 255]);
+    png(&dir.join("steel_bump.png"), 16, 16, [128, 128, 255, 255]);
     for base in ["box", "nod"] {
         png(&dir.join(format!("{base}.png")), 16, 16, [90, 90, 90, 255]);
         png(
@@ -966,7 +953,7 @@ fn one_terminal_event_each(mode: DeriveMode) {
             let nod = d.sets.iter_mut().find(|s| is(s, "nod")).unwrap();
             (nod.albedo, nod.normal) = (None, None);
             let steel = d.sets.iter_mut().find(|s| is(s, "steel")).unwrap();
-            steel.members.push(dir.join("steel_detail.png"));
+            steel.members.push(dir.join("steel_bump.png"));
         }
     });
     let discovered: Vec<(String, String)> = ev
@@ -1639,5 +1626,30 @@ fn env_m_vote_is_read_at_the_colour_members_own_key_for_a_d_set() {
             .as_ref()
             .is_some_and(|d| d.kind == DeriveKind::EnvM)),
         "{outs:?}"
+    );
+}
+
+/// Note GW1: outside a landscape set `_detail` is no detail map and no layer, so it waits for a decision and the PBR
+/// set is left out of Also with the reason named.
+#[test]
+fn an_undecided_detail_file_leaves_a_pbr_set_out_of_also() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
+    png(
+        &inputs.join("textures/pbr/arm/steel_detail.png"),
+        16,
+        16,
+        [128, 128, 255, 255],
+    );
+    let (cs, _) = plan(request(&inputs, &d.path().join("pbr"), Target::Cs));
+    let (sets, _, notes) = engine::also::derive_sets(&cs, &BTreeSet::new());
+    assert!(sets.is_empty(), "{sets:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.why == "not derived: 1 map undecided in the PBR export"),
+        "{:?}",
+        notes.iter().map(|n| &n.why).collect::<Vec<_>>()
     );
 }

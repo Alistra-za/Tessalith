@@ -9,7 +9,7 @@
 //! DIM-RESIZED (the power of two or `resize` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
 //! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
 //! CFG-PRESET-SKIPPED (a user preset folder file that failed to load, skipped) and CFG-GREEN-CONFLICT (an explicit
-//! `flip_green` that contradicts `green_convention`) (M6 Track D) and the five `RNM-*` codes of RNM normal layers (M6 Track F2).
+//! `flip_green` that contradicts `green_convention`) (M6 Track D).
 //! and the five `GRASS-*` codes and VAL-GRASS-DETECT (complex grass design 2026-10-12 §3.6, §3.7, §4)
 //! and IN-ALIAS-INVALID / IN-ALIAS-STALE (an `[inputs]` alias that was refused or matched no file, M6 Track F3b)
 //! and ALPHA-PARALLAX-NO-ALPHA (`alpha.parallax` on for a complex `_m` whose source has no alpha, DECISIONS AH2).
@@ -135,10 +135,6 @@ codes! {
     PackUnusedInput = "PACK-UNUSED-INPUT" => Warning,
     PackRecipeConflict = "PACK-RECIPE-CONFLICT" => Warning,
     PackRecipeUnbuildable = "PACK-RECIPE-UNBUILDABLE" => Warning,
-    RnmNoBase = "RNM-NO-BASE" => Warning,
-    RnmIgnoredEye = "RNM-IGNORED-EYE" => Warning,
-    RnmMaskOrphan = "RNM-MASK-ORPHAN" => Warning,
-    RnmLayerShadowed = "RNM-LAYER-SHADOWED" => Warning,
     ShaderAuto = "SHADER-AUTO" => Info,
     ShaderUnavailable = "SHADER-UNAVAILABLE" => Warning,
     ShaderExtraMap = "SHADER-EXTRA-MAP" => Warning,
@@ -165,7 +161,7 @@ codes! {
     DeriveNoAlbedo = "DERIVE-NO-ALBEDO" => Warning,
     // A derived output lands on another job's output (TA12); the other job is kept.
     DerivePathConflict = "DERIVE-PATH-CONFLICT" => Error,
-    // A member with no recipe role (TA11), or an RNM detail layer (TA28; its own reason).
+    // A member with no recipe role (TA11).
     DeriveNotConverted = "DERIVE-NOT-CONVERTED" => Info,
     // Data {glossiness, specular_strength, env_map}: suggested NIF values for the set.
     DeriveNifSuggest = "DERIVE-NIF-SUGGEST" => Info,
@@ -259,7 +255,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 96);
+        assert_eq!(Code::ALL.len(), 92);
         assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);

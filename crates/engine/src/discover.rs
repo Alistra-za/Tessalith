@@ -397,7 +397,7 @@ pub fn canonicalise_outputs(files: &mut [InputFile], aliases: &BTreeMap<String, 
         let name = match (&split.alias, vocab_of(&stem)) {
             (Some(_), _) => suffixed(),
             (None, Some(v)) => match v.role {
-                VocabRole::PackingInput(_) | VocabRole::NormalLayer(_) => None,
+                VocabRole::PackingInput(_) => None,
                 VocabRole::Colour => Some(format!("{}.dds", split.base)),
                 VocabRole::Normal(_) | VocabRole::Emissive | VocabRole::CoatColour => suffixed(),
             },

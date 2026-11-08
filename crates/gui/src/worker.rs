@@ -110,11 +110,6 @@ pub enum WorkerMsg {
         stamp: crate::model::cs_pbr::Stamp,
         rows: bool,
     },
-    /// The RNM blended thumbnail of job `id` (`AppModel::rnm_preview_frame`); the reason when the blend failed.
-    RnmPreview {
-        id: u64,
-        image: Result<Arc<crate::model::rnm_preview::RnmThumb>, String>,
-    },
     /// Source sizes read from file headers (`AppModel::kick_dims`).
     Dims(Vec<(crate::model::out_size::DimKey, Option<(u32, u32)>)>),
     Encoded {

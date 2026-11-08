@@ -59,7 +59,7 @@ fn decided(j: &ResolvedJob) -> bool {
 fn writable(j: &ResolvedJob) -> bool {
     !matches!(
         j.status,
-        JobStatus::Error { .. } | JobStatus::PackingInput { .. } | JobStatus::NormalLayer { .. }
+        JobStatus::Error { .. } | JobStatus::PackingInput { .. }
     )
 }
 
@@ -324,7 +324,6 @@ fn attach(jobs: &mut [ResolvedJob], n: usize, members: &[usize], opted_out: bool
         return false;
     };
     let (normal, normal_profile, stamp) = (nj.input.clone(), nj.profile.clone(), nj.source);
-    let rnm = nj.active_rnm().cloned();
     let mut any = false;
     for &m in members {
         let Some(mdims) = post_resize_dims(&jobs[m]) else {
@@ -344,7 +343,6 @@ fn attach(jobs: &mut [ResolvedJob], n: usize, members: &[usize], opted_out: bool
             normal_profile: normal_profile.clone(),
             shift,
             stamp,
-            rnm: rnm.clone(),
             fit,
         });
         any = true;
@@ -396,7 +394,7 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         dirs: Default::default(),
     };
     let mut baking = BTreeSet::new();
-    // Audit EP-5 (Note BJ): job indices per set, built once (as `plan_rnm` does); set keys never change below.
+    // Audit EP-5 (Note BJ): job indices per set, built once; set keys never change below.
     let mut by_set: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, j) in jobs.iter().enumerate() {
         by_set.entry(j.set_key.clone()).or_default().push(i);

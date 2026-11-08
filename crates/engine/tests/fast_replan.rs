@@ -129,12 +129,6 @@ fn rows() -> Vec<Row> {
             &["dir/c_px", "dir/c_nz"],
         ),
         row(
-            "rnm.target on the layer",
-            &[("dir/d_detailnorm.png", Some("rnm.target = \"n\""))],
-            Scoped,
-            &["dir/d"],
-        ),
-        row(
             "packing field on the packed key e_p",
             &[("dir/e_p", Some("packing.fill.specular = 64"))],
             Scoped,

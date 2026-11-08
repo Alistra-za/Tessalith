@@ -25,7 +25,7 @@ Tessalith converts a folder of source images for Skyrim SE/AE. It works out what
 - SRGB / UNORM (Linear) tag chosen per map type and target shader. Sizes round to a power of two automatically.
 - Cutout alpha: coverage-preserving mips, on by default. Normal mips are renormalised, and their variance is baked into TruePBR roughness.
 - Loose maps are packed into `_rmaos` / `_rfaos` / complex `_m`, with suffix-based channel remapping (ORM to RMAOS is instant). The complex-material `_m` gate is checked.
-- RNM normal-layer blending (`_bump`, `_detailnorm`, `_bent`, with optional masks `_bumpmask`, `_detailnormmask`, `_bentmask`). See [RNM normal layers](docs/wiki/Texture-Packing.md#rnm-normal-layers).
+- Detail normals (`_detail`, `_detailnorm`, `_detail_n`) on landscape and Advanced skin sets. See [Detail names](docs/wiki/Texture-Types.md#detail-names).
 - Complex grass (1:2 image, halves mipped apart) and [cubemaps](docs/wiki/Cubemaps.md).
 
 **Skyrim and mod aware**
@@ -99,7 +99,7 @@ The exe is unsigned, so Windows SmartScreen may warn on first run ([Installation
 | Start | Use | Reference |
 |---|---|---|
 | [Home](docs/wiki/Home.md) | [GUI guide](docs/wiki/GUI-Guide.md) | [CLI reference](docs/wiki/CLI-Reference.md) |
-| [Installation](docs/wiki/Installation.md) | [Texture types](docs/wiki/Texture-Types.md) (packing, TruePBR, RNM, grass) | [Project config](docs/wiki/Project-Config.md) |
+| [Installation](docs/wiki/Installation.md) | [Texture types](docs/wiki/Texture-Types.md) (packing, TruePBR, grass) | [Project config](docs/wiki/Project-Config.md) |
 | [Getting started](docs/wiki/Getting-Started.md) | [Mod scanning](docs/wiki/Mod-Scanning.md) | [Presets and targets](docs/wiki/Presets-and-Targets.md) |
 | [FAQ](docs/wiki/FAQ.md) | [NIF editing](docs/wiki/GUI-NIF-Edit.md) | [Validation and output](docs/wiki/Validation-and-Output.md) |
 | [Troubleshooting](docs/wiki/Troubleshooting.md) | [Research behind the defaults](docs/wiki/Research.md) | |

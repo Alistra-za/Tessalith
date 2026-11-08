@@ -201,9 +201,9 @@ used_by = ["GUI-Bulk-and-Rename.md"]
 
 [[shot]]
 id = "marker-dialog"
-page = "GUI-Helpers-RNM-and-Cubemaps"
+page = "GUI-Helpers-and-Cubemaps"
 scenario = "marker_dialog"
-used_by = ["GUI-Helpers-RNM-and-Cubemaps.md"]
+used_by = ["GUI-Helpers-and-Cubemaps.md"]
 
 [[shot]]
 id = "set-editor"
@@ -230,22 +230,16 @@ scenario = "pgp_material"
 used_by = ["GUI-PGPatcher-JSON.md"]
 
 [[shot]]
-id = "rnm-panel"
-page = "GUI-Helpers-RNM-and-Cubemaps"
-scenario = "rnm_panel"
-used_by = ["GUI-Helpers-RNM-and-Cubemaps.md"]
-
-[[shot]]
 id = "helper-panel"
-page = "GUI-Helpers-RNM-and-Cubemaps"
+page = "GUI-Helpers-and-Cubemaps"
 scenario = "helper_panel"
-used_by = ["GUI-Helpers-RNM-and-Cubemaps.md"]
+used_by = ["GUI-Helpers-and-Cubemaps.md"]
 
 [[shot]]
 id = "cube-panel"
-page = "GUI-Helpers-RNM-and-Cubemaps"
+page = "GUI-Helpers-and-Cubemaps"
 scenario = "cube_panel"
-used_by = ["GUI-Helpers-RNM-and-Cubemaps.md"]
+used_by = ["GUI-Helpers-and-Cubemaps.md"]
 
 [[shot]]
 id = "preview-encoded"

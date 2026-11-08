@@ -11,7 +11,7 @@ use crate::config::*;
 use crate::discover::{canonicalise_outputs, discover_reporting, InputFile, InputKind};
 use crate::events::{EventKind, Reporter, SkipKind, Stage};
 use crate::group::{
-    group_sets_with, join_skin_detail, join_skin_wet, member_split, SuffixSplit, TextureSet,
+    group_sets_with, join_detail_n, join_skin_wet, member_split, SuffixSplit, TextureSet,
 };
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
@@ -702,9 +702,8 @@ fn job_dims_by(
 
 /// [`estimated_bytes`] of the job's input, plus what its variance bake holds (DECISIONS R4; the M4 carry "the
 /// summed-area table counts against `--mem-budget`", a length pyramid since R5), plus (S-mips-11) 8 B/texel for a
-/// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus (Note BB) the active
-/// RNM layers' [`crate::rnm::RnmJob::admission_bytes`] at the resized size and, for complex grass, one more float
-/// chain (both half chains and the stacked chain are live together in `grass::build`).
+/// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus, for complex grass,
+/// one more float chain (both half chains and the stacked chain are live together in `grass::build`).
 fn job_bytes(job: &ResolvedJob) -> u64 {
     let p = &job.profile;
     let own = input_dims(&job.input);
@@ -730,9 +729,6 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         } else {
             0
         };
-        let layers = job
-            .active_rnm()
-            .map_or(0, |r| r.admission_bytes(&p.rnm, to));
         // Note CN13: a derived job also holds the colour maps it reads, its scalars (and `_curves`/cavity) image and
         // the recipe's output, twice the input for the grass stack.
         let derived = job.derive.as_ref().map_or(0, |dj| {
@@ -746,7 +742,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             let output = if dj.kind == GrassStack { 2 } else { 1 };
             texels * 16 * (colour + 1 + detail + output)
         });
-        texels * (filter + resize) + grass + layers + derived
+        texels * (filter + resize) + grass + derived
     });
     // DECISIONS DS8: a cube holds every source plus three float cubes of its face size (base, blur copy, mip chain).
     let cube = job.cube.as_ref().map_or(0, |c| {
@@ -833,25 +829,18 @@ fn unresolved_code(job: &ResolvedJob) -> Code {
         .unwrap_or(Code::SugLowConfidence)
 }
 
-/// (SHA-256, bake identity, RNM role, derive identity, fill identity) of one recorded source.
-type SourceKey = (
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
+/// (SHA-256, bake identity, derive identity, fill identity) of one recorded source.
+type SourceKey = (String, Option<String>, Option<String>, Option<String>);
 
-/// Every recorded source of `job` now, in record order: the pack sources, then the baked `_n` (DECISIONS R12), then
-/// the RNM inputs (M6 Track F2), as `SourceKey`s. Empty for an ordinary file that does not bake; `None` when a
-/// source cannot be hashed (then the output is not up to date).
+/// Every recorded source of `job` now, in record order: the pack sources, then the baked `_n` (DECISIONS R12), as
+/// `SourceKey`s. Empty for an ordinary file that does not bake; `None` when a source cannot be hashed (then the
+/// output is not up to date).
 fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
     let mut v = vec![];
     if let Some(pk) = &job.pack {
         for s in &pk.sources {
             v.push((
                 sha256_file(&s.path).ok()?,
-                None,
                 None,
                 None,
                 Some(pack::source_fill(pk, s)),
@@ -865,7 +854,6 @@ fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
             v.push((
                 sha256_file(&s.path).ok()?,
                 None,
-                None,
                 Some(identity.clone()),
                 None,
             ));
@@ -878,7 +866,7 @@ fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
         .filter(|c| c.sources.len() > 1)
         .flat_map(|c| &c.sources)
     {
-        v.push((sha256_file(&s.path).ok()?, None, None, None, None));
+        v.push((sha256_file(&s.path).ok()?, None, None, None));
     }
     if let Some(b) = &job.bake {
         v.push((
@@ -886,30 +874,12 @@ fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
             Some(b.identity_sha256()),
             None,
             None,
-            None,
         ));
-        if let Some(r) = &b.rnm {
-            for (f, role) in r.inputs(&b.normal_profile.rnm) {
-                v.push((
-                    sha256_file(&f.path).ok()?,
-                    None,
-                    Some(format!("bake.{role}")),
-                    None,
-                    None,
-                ));
-            }
-        }
-    }
-    if let Some(r) = job.active_rnm() {
-        for (f, role) in r.inputs(&job.profile.rnm) {
-            v.push((sha256_file(&f.path).ok()?, None, Some(role), None, None));
-        }
     }
     // Note DY: the helper that fills the alpha, last, as `process_file` records it.
     if let Some(f) = &job.fill {
         v.push((
             sha256_file(&f.source.path).ok()?,
-            None,
             None,
             None,
             Some(f.identity()),
@@ -926,7 +896,7 @@ fn pack_roles_match(e: &ManifestEntry, job: &ResolvedJob) -> bool {
         Some(pk) => e
             .sources
             .iter()
-            .filter(|r| r.bake.is_none() && r.rnm.is_none())
+            .filter(|r| r.bake.is_none())
             .map(|r| (r.role, r.invert))
             .eq(pk
                 .sources
@@ -996,7 +966,6 @@ pub(crate) fn is_up_to_date(
                 (
                     r.sha256.clone(),
                     r.bake.clone(),
-                    r.rnm.clone(),
                     r.derive.clone(),
                     r.fill.clone(),
                 )
@@ -1130,8 +1099,7 @@ pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
 }
 
-/// Note HE7: the images that write nothing of their own (a raw map, a hand-set normal layer, a skin `_f`; a normal
-/// layer found by its name is not counted, so two of those stay `IN-DUPLICATE`): pack planning
+/// Note HE7: the images that write nothing of their own (a raw map, a skin `_f`): pack planning
 /// consumes them or reports them unused, so two of one name are not duplicates and `prepare` leaves them out of the
 /// `IN-DUPLICATE` comparison. The first by path feeds the channel (M13). The fast re-plan runs this on the old and the
 /// new state, so an edit that moves any file in or out is seen.
@@ -1152,10 +1120,7 @@ pub(crate) fn waiting_images(
         for &i in set.members.iter().filter(|i| !typed.contains(i)) {
             let f = &files[i];
             let writes_nothing = match hand[i] {
-                Some(r) => matches!(
-                    r,
-                    crate::helper::HelperRole::Raw(_) | crate::helper::HelperRole::Layer(_)
-                ),
+                Some(r) => matches!(r, crate::helper::HelperRole::Raw(_)),
                 None => {
                     pack::plan::raw_role(f).is_some() || pack::plan::is_skin_f(ctx, &predicted, f)
                 }
@@ -1235,7 +1200,29 @@ pub(crate) fn join_members(
                 .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
         };
         join_skin_wet(sets, files, aliases, is_skin);
-        join_skin_detail(sets, files, aliases, is_skin);
+    }
+    // Note GW1: `x_detail_n` joins any detail host, on every target (Landscape is on both).
+    join_detail_n(sets, files, aliases, detail_host(ctx, files, explicit));
+}
+
+/// Note GW1: a set takes the detail names `_detail`, `_detailnorm` and `_detail_n` as one map when it is an Advanced skin
+/// set (cs), or is landscape by its path (`suggest::landscape_path`) or by an explicit Landscape or PBR Landscape.
+/// shortcut: a Landscape picked later (from a mesh) is not seen here, so such a set needs an explicit shader for
+/// `_detail_n`; `plan_sets` repeats the IN-DUPLICATE rule after the pick.
+pub(crate) fn detail_host<'a>(
+    ctx: &'a ResolveCtx<'a>,
+    files: &'a [InputFile],
+    explicit: &'a BTreeMap<String, Shader>,
+) -> impl Fn(&TextureSet) -> bool + 'a {
+    move |s| {
+        let first = s.members.first().map(|&i| &files[i]);
+        first.is_some_and(|f| {
+            (ctx.target == Target::Cs && pack::plan::set_is_advanced_skin(ctx, s, f))
+                || crate::suggest::landscape_path(&f.game_path)
+        }) || matches!(
+            explicit.get(&s.key),
+            Some(Shader::Landscape | Shader::PbrLandscape)
+        )
     }
 }
 
@@ -1587,8 +1574,8 @@ impl Engine {
         // A touched set's suffixes were rebuilt from its members' names.
         drop_typed_roles(&mut sets, &files, &typed);
         // Note HG2: decided on the edited sets, so a created or renamed set is shared by the same rule.
+        let (explicit, _) = explicit_shaders(req, &sets);
         if target == Target::Cs {
-            let (explicit, _) = explicit_shaders(req, &sets);
             crate::group::mark_shared_skin(&mut sets, &files, registry.alias_table(), &explicit);
         }
         for s in &stale {
@@ -1677,11 +1664,20 @@ impl Engine {
             );
         }
         let waits = waiting_images(&ctx, target, &sets, &files, &typed, &hand);
-        let dups = crate::group::duplicate_outputs_with(&files, |f| {
+        let counts = |f: &InputFile| {
             !losers.contains(&f.path)
                 && !waits.contains(&f.path)
                 && (f.kind != InputKind::Dds || reencodes(&ctx, f))
-        });
+        };
+        let mut dups = crate::group::duplicate_outputs_with(&files, counts);
+        // Note GW1: two detail maps of one host write different files for one slot.
+        dups.extend(crate::group::duplicate_details(
+            &sets,
+            &files,
+            registry.alias_table(),
+            detail_host(&ctx, &files, &explicit),
+            counts,
+        ));
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
             req: req.clone(),
@@ -1705,7 +1701,7 @@ impl Engine {
     }
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
-    /// derive, RNM, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
+    /// derive, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
     /// `pbr_sets`). `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
     /// and skips the batch-wide steps: the SET-EDIT-STALE shader warnings, CFG-FILE-UNMATCHED, the BV2 writer dedupe
     /// and the progress counters (the request is the skeleton's). Its skipped entries are the scope files' only.
@@ -2017,7 +2013,7 @@ impl Engine {
             })
             .collect();
         // Note GI27: a set whose `_noise` or `_detail` the Vanilla derive keeps is typed as its PBR phase typed it,
-        // so the 6c pass below re-types them (a detail layer into a detail normal, a medium `_noise`).
+        // so the 6c pass below re-types them (a detail map into a detail normal, a medium `_noise`).
         let kept_maps: BTreeSet<&Path> = (req.derive.iter())
             .flat_map(|d| d.sets.iter().filter(|s| d.keeps_landscape(s)))
             .flat_map(|s| s.kept_maps.iter().map(PathBuf::as_path))
@@ -2043,6 +2039,31 @@ impl Engine {
             shaders: &picks,
             ..base_ctx
         };
+        // Note GW1: a Landscape picked now (from a mesh) makes its set a detail host too, so two detail maps in it
+        // are IN-DUPLICATE like any other host's. `prepare` could not see the pick; its groups are not repeated.
+        let late: Vec<usize> = crate::group::duplicate_details(
+            &sets,
+            files,
+            registry.alias_table(),
+            |s| {
+                picks
+                    .get(&s.key)
+                    .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+            },
+            |f| f.kind != InputKind::Dds || reencodes(&ctx, f),
+        )
+        .into_iter()
+        .flatten()
+        .filter(|i| !dup_idx.contains(i))
+        .collect();
+        skipped.extend(late.iter().map(|&i| SkippedFile {
+            path: files[i].path.clone(),
+            output: files[i].output.clone(),
+            set: set_of.get(&i).map(|k| k.to_string()),
+            code: Some(Code::InDuplicate),
+            reason: "two inputs map to one output; exclude one".into(),
+        }));
+        let late_paths: BTreeSet<&Path> = late.iter().map(|&i| files[i].path.as_path()).collect();
         // Note CO103: images whose B is empty, for a generated AO beside a pre-packed `_rmaos` (pack planning).
         let flat_b: BTreeSet<PathBuf> = pass1
             .iter()
@@ -2094,14 +2115,18 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
-            // Note GI (X13, R5): a PBR Landscape `_detail` layer or `_noise` is typed again (detail normal, noise).
-            let landscape_retype = matches!(
-                &old.status,
-                JobStatus::NormalLayer { term } if term.layer == crate::config::LayerId::Detail
-            ) || old
-                .suggestions
-                .first()
-                .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
+            if late_paths.contains(f.path.as_path()) {
+                continue;
+            }
+            // Note GI (R5), GW1: a PBR Landscape detail map or `_noise` is typed again (detail normal, noise).
+            let landscape_retype = split_for((set, f))
+                .suffix
+                .as_deref()
+                .is_some_and(crate::group::is_detail_suffix)
+                || old
+                    .suggestions
+                    .first()
+                    .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
@@ -2183,7 +2208,7 @@ impl Engine {
             &flat_a,
             &fills,
         );
-        // As step 3b drops its losers, so later steps (the RNM bent AO) never read a replaced generated AO.
+        // As step 3b drops its losers, so later steps never read a replaced generated AO.
         for s in &mut sets {
             s.members
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
@@ -2587,8 +2612,8 @@ impl Engine {
                 );
             }
         }
-        // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes,
-        // the RNM layers and `file_planned` read the sizes. A cube's size comes from pass 1's facts; any other map's
+        // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes
+        // and `file_planned` read the sizes. A cube's size comes from pass 1's facts; any other map's
         // from `input_dims`, which reads the file's header again (a few header reads per relative job).
         let known = |p: &Path| {
             cube_facts
@@ -2630,9 +2655,6 @@ impl Engine {
         for j in &mut jobs {
             j.shader = picks.get(&j.set_key).cloned();
         }
-        // M6 Track F2: RNM layers attach to their base normals once the shaders are known (eye sets are skipped),
-        // before the bakes, so a baking roughness member copies its `_n`'s blend (Note W18).
-        crate::rnm::plan::plan_rnm(&ctx, &sets, files, registry.alias_table(), &mut jobs);
         let helpers = crate::helper::report::reports(&ctx, &sets, files, &jobs, &fills);
         let bake_cx = crate::bake::plan::BakeCtx {
             target,
@@ -3106,26 +3128,6 @@ impl Engine {
                         },
                     )
                 }
-                // M6 Track F2: a layer is reported once, with its RNM-* warning when it feeds nothing.
-                JobStatus::NormalLayer { .. } => {
-                    let w = job
-                        .warnings
-                        .iter()
-                        .find(|w| w.code.as_str().starts_with("RNM-"));
-                    rep.emit_job(
-                        Some(&key(&job.output)),
-                        set,
-                        path,
-                        EventKind::FileSkipped {
-                            kind: SkipKind::NormalLayer,
-                            code: w.map(|w| w.code),
-                            reason: w.map_or_else(
-                                || "RNM normal layer, used through its base normal".to_string(),
-                                |w| w.message.clone(),
-                            ),
-                        },
-                    )
-                }
                 JobStatus::Blocked { codes } => skip(
                     &job.output,
                     set,
@@ -3503,13 +3505,9 @@ fn map_members(
         {
             continue;
         }
-        // Trace-debug #25 (Note BQ): an RNM layer or mask is never converted on its own, as the shader pick knows.
         if let Some(j) = jobs.by_input(&f.path).find(|j| j.pack.is_none()) {
             // Note DR: a skin `_f` packing input has no file-name role, so its job status leaves it out.
-            if matches!(
-                j.status,
-                JobStatus::NormalLayer { .. } | JobStatus::PackingInput { .. }
-            ) {
+            if matches!(j.status, JobStatus::PackingInput { .. }) {
                 continue;
             }
             out.push(crate::shader::MemberMap {
@@ -3918,82 +3916,11 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
             fill: None,
         }
-    }
-
-    /// Note BB: a 64 `_n` with a 256 detail layer (the 8K-on-2K ratio, 4x) and the base-only bytes of that job.
-    fn layered_normal(dir: &Path) -> (ResolvedJob, u64) {
-        let mut j = png_job(dir, "a_n.png", (64, 64), Subtype::Normal);
-        let base = job_bytes(&j);
-        let layer = dir.join("detail.png");
-        image::RgbImage::new(256, 256).save(&layer).unwrap();
-        j.rnm = Some(crate::rnm::RnmJob {
-            layers: vec![crate::rnm::RnmLayer {
-                id: LayerId::Detail,
-                file: crate::rnm::RnmFile {
-                    path: layer,
-                    stamp: None,
-                },
-                mask: None,
-            }],
-            ao: None,
-        });
-        (j, base)
-    }
-
-    /// Note BB: a layered normal is admitted for its largest layer's decode (8-bit RGB: 3 + 16 per layer texel)
-    /// plus that layer resampled to the base (16 per base texel), on top of the base.
-    #[test]
-    fn a_layer_bigger_than_its_normal_is_admitted_for_its_decode_and_resample() {
-        let d = tempfile::tempdir().unwrap();
-        let (mut j, base) = layered_normal(d.path());
-        assert_eq!(job_bytes(&j), base + 256 * 256 * 19 + 64 * 64 * 16);
-        // Off, the layers are not loaded, so they are not admitted.
-        j.profile.rnm.enabled = false;
-        assert_eq!(job_bytes(&j), base);
-    }
-
-    /// Note BB: under a budget that holds two base-only jobs, two layered ones run one at a time.
-    #[test]
-    fn two_layered_normals_are_not_admitted_together_under_a_small_budget() {
-        let d = tempfile::tempdir().unwrap();
-        let (j, base) = layered_normal(d.path());
-        let n = job_bytes(&j);
-        // One layered job fits, two do not; two base-only jobs would.
-        let b = Budget::new(n + base, 8);
-        b.acquire(n);
-        let admitted = std::sync::atomic::AtomicBool::new(false);
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                b.acquire(n);
-                admitted.store(true, Ordering::SeqCst);
-            });
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            assert!(
-                !admitted.load(Ordering::SeqCst),
-                "second layered job admitted beside the first"
-            );
-            b.release(n);
-        });
-        assert!(admitted.load(Ordering::SeqCst));
-        assert_eq!(*lock(&b.used), (n, 1));
-    }
-
-    /// Note BB: a layered job bigger than the whole budget is admitted alone, as any oversized file is.
-    #[test]
-    fn a_layered_normal_over_the_whole_budget_still_runs_alone() {
-        let d = tempfile::tempdir().unwrap();
-        let (j, base) = layered_normal(d.path());
-        let n = job_bytes(&j);
-        assert!(n > 2 * base, "{n} <= {}", 2 * base);
-        let b = Budget::new(2 * base, 8);
-        b.acquire(n);
-        assert_eq!(*lock(&b.used), (n, 1));
     }
 
     /// Note BB: complex grass holds both half chains and the stacked chain at once, one float chain (16 B/texel ×
@@ -4008,6 +3935,36 @@ mod tests {
         assert_eq!(grass, generic + 32 * 64 * 16 * 134 / 100);
         let ratio = grass as f64 / input_bytes(32, 64) as f64;
         assert!((1.3..=1.5).contains(&ratio), "{ratio}");
+    }
+
+    /// Generic admission (kept from the Note BB layered tests): a job larger than the whole budget is admitted alone,
+    /// and a second job waits while the first holds the budget.
+    #[test]
+    fn an_oversized_job_runs_alone_and_blocks_a_second() {
+        let d = tempfile::tempdir().unwrap();
+        let j = png_job(d.path(), "big.png", (64, 64), Subtype::Diffuse);
+        let n = job_bytes(&j);
+        let oversized = Budget::new(n / 2, 8);
+        oversized.acquire(n);
+        assert_eq!(*lock(&oversized.used), (n, 1));
+        // Two jobs of `n` do not fit in `n + n / 2`: the second is admitted only after the first is released.
+        let b = Budget::new(n + n / 2, 8);
+        b.acquire(n);
+        let admitted = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                b.acquire(n);
+                admitted.store(true, Ordering::SeqCst);
+            });
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(
+                !admitted.load(Ordering::SeqCst),
+                "second job admitted beside the first"
+            );
+            b.release(n);
+        });
+        assert!(admitted.load(Ordering::SeqCst));
+        assert_eq!(*lock(&b.used), (n, 1));
     }
 
     /// Note DY: a filled job also holds its helper's decoded image.
@@ -4122,7 +4079,6 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
@@ -4187,7 +4143,6 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
@@ -4270,7 +4225,6 @@ mod tests {
                         role: None,
                         invert: false,
                         bake: None,
-                        rnm: None,
                         derive: None,
                         derive_role: None,
                         cube_face: None,

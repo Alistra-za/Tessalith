@@ -586,7 +586,10 @@ fn draw_dock<'a>(
                 let name = format!("{}, fills {} {}", item.name, v.slot_text(d.slot), d.channel);
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
                 member_acts(model, v, &d.helper, None, true, &r, acts, member_menu);
-                let target = item.helper.as_ref().map(|h| helper_target_text(h));
+                let target = item
+                    .helper
+                    .as_ref()
+                    .map(|h| helper_target_text(h, v.tails()));
                 r.on_hover_text(match target {
                     Some(t) => format!("{}\n{t}", item.name),
                     None => item.name.clone(),
@@ -1650,7 +1653,7 @@ fn pill(
                             // Named by its file and why it is here (REPORT M1); an unused helper is dimmed.
                             let role = match (kind, &item.helper, &item.job) {
                                 (Some(k), ..) => format!("{} (its slot is taken)", v.slot_text(k)),
-                                (None, Some(h), _) => helper_target_text(h),
+                                (None, Some(h), _) => helper_target_text(h, v.tails()),
                                 (None, None, Some(j)) => subtype_name(j.profile.subtype),
                                 _ => "not converted".to_string(),
                             };

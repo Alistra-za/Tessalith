@@ -298,6 +298,26 @@ mod tests {
         out
     }
 
+    /// Bump height (mean RGB) to DirectX normals: slope `k·(h[+1] − h[−1])` per texel, +v up the image, Y negated.
+    fn bump_normals(img: &Rgba32F, k: f32) -> Rgba32F {
+        let (w, h) = (img.width as i64, img.height as i64);
+        let hgt = |x: i64, y: i64| {
+            let p = img.at(x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32);
+            (p[0] + p[1] + p[2]) / 3.0
+        };
+        let mut out = Rgba32F::new(img.width, img.height, [0.0, 0.0, 1.0, 1.0]);
+        for y in 0..h {
+            for x in 0..w {
+                let du = hgt(x + 1, y) - hgt(x - 1, y);
+                let dv = hgt(x, y - 1) - hgt(x, y + 1);
+                let mut n = [-k * du, k * dv, 1.0, 0.0];
+                crate::mips::normalize_vector(&mut n, crate::ops::Domain::Normal);
+                *out.at_mut(x as u32, y as u32) = [n[0], n[1], n[2], 1.0];
+            }
+        }
+        out
+    }
+
     fn zero_b(img: &Rgba32F) -> Rgba32F {
         let mut out = img.clone();
         for p in &mut out.px {
@@ -319,7 +339,7 @@ mod tests {
     fn a_dx_bump_map_has_low_curl_as_stored_and_high_flipped() {
         // Gaussian blobs at diagonal offsets: h_xy != 0, so the wrong sign shows.
         let h = blobs(128);
-        let n = crate::rnm::blend::bump_normals(&h, 4.0); // DirectX vectors
+        let n = bump_normals(&h, 4.0); // DirectX vectors
         let enc = encode01(&n);
         let c = curl(&enc);
         assert!(c.as_stored < 0.1 * c.flipped, "{c:?}");
@@ -331,7 +351,7 @@ mod tests {
     #[test]
     fn a_bc5_style_rg_normal_gives_the_same_curl_as_its_rgb_form() {
         // The same encoded normal with B zeroed (as decode.rs:96-104 gives BC5): z is rebuilt, so the curl matches.
-        let enc = encode01(&crate::rnm::blend::bump_normals(&blobs(128), 4.0));
+        let enc = encode01(&bump_normals(&blobs(128), 4.0));
         let rg = zero_b(&enc);
         let (a, b) = (curl(&enc), curl(&rg));
         assert!(
@@ -350,7 +370,7 @@ mod tests {
                 *h.at_mut(x, y) = [v, v, v, 1.0];
             }
         }
-        let c = curl(&encode01(&crate::rnm::blend::bump_normals(&h, 4.0)));
+        let c = curl(&encode01(&bump_normals(&h, 4.0)));
         assert!(c.as_stored < 0.1 * c.flipped, "{c:?}");
     }
 
@@ -366,11 +386,9 @@ mod tests {
             let v = (s >> 8) as f32 / (1u32 << 24) as f32;
             *p = [v, v, v, 1.0];
         }
-        let c = curl(&encode01(&crate::rnm::blend::bump_normals(&h, 1.0)));
+        let c = curl(&encode01(&bump_normals(&h, 1.0)));
         assert!(c.flipped > 0.0 && c.as_stored < 1e-6 * c.flipped, "{c:?}");
-        let c2 = curl(&flip_g(&encode01(&crate::rnm::blend::bump_normals(
-            &h, 1.0,
-        ))));
+        let c2 = curl(&flip_g(&encode01(&bump_normals(&h, 1.0))));
         assert!(c2.flipped < 1e-6 * c2.as_stored, "{c2:?}");
     }
 

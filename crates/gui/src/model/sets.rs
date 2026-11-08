@@ -364,7 +364,62 @@ pub struct SetView {
     pub recipes: Vec<engine::events::RecipeReport>,
 }
 
+/// The joined tails a set's member names carry past the base (Note GW1): `_detail_n` in a Landscape, PBR Landscape
+/// or Advanced skin set, `_wet` in an Advanced skin set only, and `_detail` / `_detailnorm` in those and in a plain
+/// set that joined one (`Detail`). A lone `rock_detail` is its own set with no tail, as in the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tails {
+    Plain,
+    Detail,
+    Landscape,
+    Skin,
+}
+
 impl SetView {
+    /// The tails this set's member names read (see [`Tails`]).
+    pub fn tails(&self) -> Tails {
+        if self.skin || self.shared {
+            Tails::Skin
+        } else if self.landscape_host() {
+            Tails::Landscape
+        } else if self.joined_detail() {
+            Tails::Detail
+        } else {
+            Tails::Plain
+        }
+    }
+
+    /// The engine's detail host rule for landscape (`api::detail_host`): the pick or the saved choice is Landscape or
+    /// PBR Landscape, or the first member's path says landscape.
+    fn landscape_host(&self) -> bool {
+        let is = |s: Shader| matches!(s, Shader::Landscape | Shader::PbrLandscape);
+        self.shader.as_ref().is_some_and(|p| is(p.shader))
+            || self.shader_choice.is_some_and(is)
+            || self.members.first().is_some_and(|k| {
+                engine::suggest::landscape_path(&k.replace('\\', "/").to_lowercase())
+            })
+    }
+
+    /// A member is `<another member's base>_detail` or `_detailnorm`: the engine joined it (`group_sets_with`).
+    fn joined_detail(&self) -> bool {
+        let stems: Vec<String> = self
+            .members
+            .iter()
+            .filter_map(|k| Path::new(k).file_stem())
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .collect();
+        let bases: Vec<String> = stems
+            .iter()
+            .map(|s| engine::group::split_suffix_with(s, &BTreeMap::new()).base)
+            .collect();
+        stems.iter().any(|s| {
+            engine::group::DETAIL_SPELLINGS.iter().any(|sp| {
+                s.strip_suffix(&format!("_{sp}"))
+                    .is_some_and(|b| bases.iter().any(|o| o == b))
+            })
+        })
+    }
+
     pub(crate) fn new(key: String, id: String, members: Vec<String>) -> SetView {
         SetView {
             key,
@@ -1252,7 +1307,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
                 continue;
             };
-            let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
+            let Some(rel) = renamed_output(&from, name, v.tails()) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1338,20 +1393,25 @@ impl<'a> DefaultOutputs<'a> {
         Some(engine::manifest::output_key(self.out_root, &output))
     }
 }
-/// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
-/// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
-/// (`group::member_split`). `""` for the colour member.
-pub fn member_tail(stem: &str, skin: bool) -> &str {
-    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
-    // `member_split` reads only the set's suffixes: a skin set may hold both joined members.
+/// What follows the base name of a member `stem` of a set: its Skyrim suffix or exporter term (`_n`, `_roughness`),
+/// and the joined `_wet`, `_detail_n`, `_detail` and `_detailnorm` of the sets that take them ([`Tails`]), as the engine reads them (`group::member_split`). `""` for the colour member.
+pub fn member_tail(stem: &str, tails: Tails) -> &str {
+    use engine::group::{member_split, TextureSet, DETAIL_SPELLINGS, SKIN_DETAIL, SKIN_WET};
+    // `member_split` reads only the set's suffixes: a skin set may hold every joined member.
+    let mut suffixes: BTreeSet<String> = BTreeSet::new();
+    if tails != Tails::Plain {
+        suffixes.extend(DETAIL_SPELLINGS.map(String::from));
+    }
+    if matches!(tails, Tails::Landscape | Tails::Skin) {
+        suffixes.insert(SKIN_DETAIL.into());
+    }
+    if tails == Tails::Skin {
+        suffixes.insert(SKIN_WET.into());
+    }
     let set = TextureSet {
         key: String::new(),
         members: vec![],
-        suffixes: if skin {
-            [SKIN_WET, SKIN_DETAIL].map(String::from).into()
-        } else {
-            BTreeSet::new()
-        },
+        suffixes,
         shared_skin: false,
     };
     let base = member_split(stem, &set, &BTreeMap::new()).base;
@@ -1362,12 +1422,12 @@ pub fn member_tail(stem: &str, skin: bool) -> &str {
 /// `job_key` (an output path relative to the export root) with its base name replaced by `name`: the folder and the
 /// suffix stay (`armor/wall_n.dds`, `steel` → `armor/steel_n.dds`; in a skin set `x_wet.dds` → `steel_wet.dds`).
 /// Applying it twice gives the same path, because `check_output_name` refuses a name that ends in a suffix.
-pub fn renamed_output(job_key: &str, name: &str, skin: bool) -> Option<PathBuf> {
+pub fn renamed_output(job_key: &str, name: &str, tails: Tails) -> Option<PathBuf> {
     let p = Path::new(job_key);
     let stem = p.file_stem()?.to_string_lossy();
     // Everything after the base stays: a Skyrim suffix, or an exporter term an output keeps (`_roughness` on a
     // target that packs nothing), so two members never land on one name.
-    let file = format!("{name}{}.dds", member_tail(&stem, skin));
+    let file = format!("{name}{}.dds", member_tail(&stem, tails));
     Some(match p.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.join(file),
         _ => PathBuf::from(file),
@@ -1388,6 +1448,16 @@ pub fn check_named(name: &str, field: &str) -> Result<(), String> {
         return Err(format!(
             "{field}: ends in {}, a map suffix; each output keeps its own ({name:?})",
             &name[base.len()..]
+        ));
+    }
+    // Note GW1: `_detail` and `_detailnorm` are tails in the sets that joined them.
+    let lower = name.to_lowercase();
+    if let Some(sp) = engine::group::DETAIL_SPELLINGS
+        .iter()
+        .find(|sp| lower.ends_with(&format!("_{sp}")))
+    {
+        return Err(format!(
+            "{field}: ends in _{sp}, a map suffix; each output keeps its own ({name:?})"
         ));
     }
     Ok(())

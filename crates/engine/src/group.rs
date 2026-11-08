@@ -84,8 +84,6 @@ pub enum VocabRole {
     PackingInput(RawMap),
     /// `_coat`: the PBR coat colour, the `_s` member (`pbr_subsurface`; DECISIONS Note S-shader-9).
     CoatColour,
-    /// An RNM normal layer or its mask (M6 Track F2); never written on its own.
-    NormalLayer(crate::rnm::LayerTerm),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,7 +101,6 @@ impl Vocab {
             VocabRole::Normal(_) => Some("n".into()),
             VocabRole::Emissive => Some("g".into()),
             VocabRole::CoatColour => Some("s".into()),
-            VocabRole::NormalLayer(t) => Some(t.canonical()),
             VocabRole::PackingInput(r) => Some(r.id()),
         }
     }
@@ -115,7 +112,7 @@ const fn term(term: &'static str, role: VocabRole) -> Vocab {
 
 /// Spec §4.4 exporter vocabulary, longest term first so `_base_color` wins over `_color`. None of these is a
 /// §6.1 suffix, and none ends in `_<§6.1 suffix>`, so a stem has at most one reading.
-/// `_norm` is rnm.py's alias of `_n` (M6 Track F2).
+/// `_norm` is an alias of `_n`.
 pub static VOCABULARY: [Vocab; 37] = {
     use GreenConvention::*;
     use RawMap::*;
@@ -164,12 +161,8 @@ pub static VOCABULARY: [Vocab; 37] = {
 /// The vocabulary term a stem ends in (case-insensitive) and the base before it. A stem that is only a term
 /// (`_normal`) is left alone, as with §6.1 suffixes.
 pub fn split_vocab(stem: &str) -> Option<(String, &'static Vocab)> {
-    // Note CO: the generated marker comes off before the layer terms too (08e-8).
+    // Note CO: the generated marker comes off first.
     let stem = split_generated(stem).0;
-    // M6 Track F2: layer terms (longest first) before the exporter vocabulary, so `_detail_mask` is one term.
-    if let Some(hit) = crate::rnm::split_layer(stem) {
-        return Some(hit);
-    }
     let lower = stem.to_ascii_lowercase();
     VOCABULARY.iter().find_map(|v| {
         let tail = format!("_{}", v.term);
@@ -264,6 +257,8 @@ pub fn group_sets_with(
     aliases: &BTreeMap<String, String>,
 ) -> (Vec<TextureSet>, Vec<Vec<usize>>) {
     let mut sets: BTreeMap<String, TextureSet> = BTreeMap::new();
+    // (file, its own set key, the key of the set it would join, split) for each `x_detail` / `x_detailnorm`.
+    let mut details: Vec<(usize, String, String, DetailSplit)> = vec![];
     for (i, f) in files.iter().enumerate() {
         let stem = f
             .rel
@@ -274,6 +269,16 @@ pub fn group_sets_with(
         let SuffixSplit { base, suffix, .. } = split_suffix_with(&stem, aliases);
         let dir = f.output.parent().map(fold).unwrap_or_default();
         let key = format!("{dir}/{}", base.to_lowercase());
+        if suffix.is_none() {
+            if let Some(d) = split_detail(&stem) {
+                details.push((
+                    i,
+                    key.clone(),
+                    format!("{dir}/{}", d.base.to_lowercase()),
+                    d,
+                ));
+            }
+        }
         let set = sets.entry(key.clone()).or_insert_with(|| TextureSet {
             key,
             members: vec![],
@@ -285,14 +290,60 @@ pub fn group_sets_with(
             set.suffixes.insert(s);
         }
     }
+    // Note GW1: `x_detail` and `x_detailnorm` are members of set `x` when it exists or the path is landscape.
+    for (i, from, to, d) in details {
+        if !sets.contains_key(&to) && !crate::suggest::landscape_path(&files[i].game_path) {
+            continue;
+        }
+        if let Some(s) = sets.get_mut(&from) {
+            s.members.retain(|&m| m != i);
+            if s.members.is_empty() {
+                sets.remove(&from);
+            }
+        }
+        let set = sets.entry(to.clone()).or_insert_with(|| TextureSet {
+            key: to,
+            members: vec![],
+            suffixes: BTreeSet::new(),
+            shared_skin: false,
+        });
+        set.members.push(i);
+        set.members.sort_unstable();
+        set.suffixes.insert(d.spelling.to_string());
+    }
     (sets.into_values().collect(), duplicate_outputs(files))
+}
+
+/// Note GW1: the two spellings of the detail map that are no §6.1 suffix (`_detail_n` is [`SKIN_DETAIL`]).
+pub const DETAIL_SPELLINGS: [&str; 2] = ["detail", "detailnorm"];
+
+/// `x_detail` or `x_detailnorm` split into its base and its spelling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetailSplit {
+    pub base: String,
+    pub spelling: &'static str,
+}
+
+/// `x_detail` / `x_detailnorm` (ASCII case-insensitive) -> base `x` and the spelling; `None` for any other stem.
+pub fn split_detail(stem: &str) -> Option<DetailSplit> {
+    DETAIL_SPELLINGS.iter().find_map(|&spelling| {
+        tail_split(stem, spelling).map(|s| DetailSplit {
+            base: s.base,
+            spelling,
+        })
+    })
+}
+
+/// Whether `suffix` names a detail map in a set: `detail`, `detailnorm` or `detail_n`.
+pub fn is_detail_suffix(suffix: &str) -> bool {
+    suffix == SKIN_DETAIL || DETAIL_SPELLINGS.contains(&suffix)
 }
 
 /// The skin `_wet` suffix (DECISIONS Note R-skin-1). Not a §6.1 suffix: see [`join_skin_wet`].
 pub const SKIN_WET: &str = "wet";
 
 /// The skin `_detail_n` member (Advanced skin detail normal). Its tail `_detail` + the §6.1 suffix `n` makes it a
-/// normal of set `x_detail` until [`join_skin_detail`] moves it into set `x`.
+/// normal of set `x_detail` until [`join_detail_n`] moves it into set `x`.
 pub const SKIN_DETAIL: &str = "detail_n";
 
 /// The last segment of a set key (its lower-case base name).
@@ -332,7 +383,7 @@ fn detail_tail_split(stem: &str) -> Option<SuffixSplit> {
 
 /// [`split_suffix_with`] for a member of `set`: as `split_suffix_with`, except that the skin `_wet` member of a set
 /// [`join_skin_wet`] joined it to (`x_wet` in set `x`, which then lists the suffix `wet`) splits to its base and
-/// the suffix `wet`, and likewise `x_detail_n` (suffix `detail_n`, [`join_skin_detail`]).
+/// the suffix `wet`, and likewise `x_detail_n` (suffix `detail_n`, [`join_detail_n`]).
 pub fn member_split(
     stem: &str,
     set: &TextureSet,
@@ -351,6 +402,16 @@ pub fn member_split(
     if s.suffix.as_deref() == Some("n") && set.suffixes.contains(SKIN_DETAIL) {
         if let Some(d) = detail_tail_split(stem) {
             return d;
+        }
+    }
+    // Note GW1: likewise `x_detail` / `x_detailnorm` in a set that lists the spelling.
+    if s.suffix.is_none() {
+        if let Some(d) = split_detail(stem).filter(|d| set.suffixes.contains(d.spelling)) {
+            return SuffixSplit {
+                base: d.base,
+                suffix: Some(d.spelling.to_string()),
+                alias: None,
+            };
         }
     }
     s
@@ -445,14 +506,15 @@ pub fn join_skin_wet(
     sets.retain(|s| !s.members.is_empty());
 }
 
-/// `_detail_n` joins an Advanced skin set as its detail normal, on the same terms as [`join_skin_wet`]: the `n`
-/// member `x_detail_n` of set `x_detail` moves into set `x` when `is_skin(x)`. Other members of `x_detail` stay;
-/// a set left empty is removed. Landscape `_detail`/`_detailnorm` (rnm) are not touched.
-pub fn join_skin_detail(
+/// `_detail_n` joins a detail host (an Advanced skin, Landscape or PBR Landscape set; Note GW1) as its detail normal,
+/// on the same terms as [`join_skin_wet`]: the `n` member `x_detail_n` of set `x_detail` moves into set `x` when
+/// `is_host(x)`. Other members of `x_detail` stay; a set left empty is removed. `_detail` and `_detailnorm` need no
+/// host: [`group_sets_with`] joins them.
+pub fn join_detail_n(
     sets: &mut Vec<TextureSet>,
     files: &[InputFile],
     aliases: &BTreeMap<String, String>,
-    is_skin: impl Fn(&TextureSet) -> bool,
+    is_host: impl Fn(&TextureSet) -> bool,
 ) {
     let is_n = |i: usize| {
         let stem = files[i]
@@ -485,7 +547,7 @@ pub fn join_skin_detail(
                         .is_some_and(|d| d.base.to_lowercase() == key_base(base_key).to_lowercase())
             })
             .collect();
-        if !moved.is_empty() && is_skin(&sets[to]) {
+        if !moved.is_empty() && is_host(&sets[to]) {
             moves.push((from, to, moved));
         }
     }
@@ -583,6 +645,35 @@ pub fn mark_shared_skin(
             s.suffixes.extend(tails.into_iter().map(String::from));
         }
     }
+}
+
+/// Note GW1: two detail maps (`detail`, `detailnorm`, `detail_n`) in one detail host are one IN-DUPLICATE group, since
+/// they write different files for the one slot. The set's detail members, in file order, among the inputs `include`
+/// accepts (the filter `duplicate_outputs_with` gets).
+pub fn duplicate_details(
+    sets: &[TextureSet],
+    files: &[InputFile],
+    aliases: &BTreeMap<String, String>,
+    is_host: impl Fn(&TextureSet) -> bool,
+    include: impl Fn(&InputFile) -> bool,
+) -> Vec<Vec<usize>> {
+    sets.iter()
+        .filter(|s| is_host(s))
+        .map(|s| {
+            s.members
+                .iter()
+                .copied()
+                .filter(|&i| include(&files[i]))
+                .filter(|&i| {
+                    member_split(&stem_of(&files[i]), s, aliases)
+                        .suffix
+                        .as_deref()
+                        .is_some_and(is_detail_suffix)
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| v.len() > 1)
+        .collect()
 }
 
 /// Groups of two or more inputs that map to one output path, compared case-insensitively, among the inputs

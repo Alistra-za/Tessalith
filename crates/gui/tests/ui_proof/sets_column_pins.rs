@@ -2,7 +2,6 @@
 use crate::support::in_sets_column;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
-use engine::config::RnmTarget as R;
 use engine::helper::{AlphaTarget as A, FillTarget as F};
 use sdc_gui::model::helpers::{docked, fill_channel, fill_slot};
 use sdc_gui::model::items::{helper_target_text, ItemKind};
@@ -50,8 +49,6 @@ fn fill_targets_map_to_the_chip_they_fill() {
             None,
             "G",
         ),
-        (F::Rnm(R::Cnr), Some(SlotKind::Coat), "layer"),
-        (F::Rnm(R::N), Some(SlotKind::Normal), "layer"),
     ] {
         assert_eq!((fill_slot(t), fill_channel(t)), (slot, ch), "{t:?}");
     }
@@ -79,7 +76,10 @@ fn the_helpers_fixture_has_a_two_chip_helper_a_filled_chip_helper_and_an_unused_
     );
     assert_eq!(rep("props/crate_opacity.png").fills, [F::Alpha(A::Diffuse)]);
     assert_eq!(
-        helper_target_text(&rep("props/crate_metallic.png")),
+        helper_target_text(
+            &rep("props/crate_metallic.png"),
+            m.helper_tails(&rep("props/crate_metallic.png"))
+        ),
         "not used: no targets chosen"
     );
     let views = sets::views(&m);
@@ -110,33 +110,6 @@ fn the_helpers_fixture_has_a_two_chip_helper_a_filled_chip_helper_and_an_unused_
             ("props/crate_opacity.png".into(), SlotKind::Diffuse, "alpha"),
             ("props/crate_roughness.png".into(), SlotKind::Rmaos, "R"),
             ("props/crate_roughness.png".into(), SlotKind::Coat, "alpha"),
-        ]
-    );
-}
-
-#[test]
-fn the_demos_iron_layers_dock_on_its_normal_chip() {
-    let (_d, h) = crate::replay("demo", &[]);
-    let m = &h.state().model;
-    let views = sets::views(m);
-    let v = views
-        .iter()
-        .find(|v| v.id == "armor/iron")
-        .expect("iron's set");
-    let mut got: Vec<_> = docked(m, v)
-        .into_iter()
-        .map(|d| (d.helper, d.slot, d.channel))
-        .collect();
-    got.sort();
-    assert_eq!(
-        got,
-        [
-            ("armor/iron_bump.png".into(), SlotKind::Normal, "layer"),
-            (
-                "armor/iron_detailnorm.png".into(),
-                SlotKind::Normal,
-                "layer"
-            ),
         ]
     );
 }
@@ -264,18 +237,6 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
     assert_eq!(
         named_from(&h, "crate_opacity.png, "),
         ["crate_opacity.png, fills Diffuse alpha"]
-    );
-    let (_d, h) = crate::replay("demo", &[]);
-    for l in [
-        "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
-        "iron_bump.png, fills Normal _n layer",
-        "iron_detailnorm.png, fills Normal _n layer",
-    ] {
-        one(&h, l);
-    }
-    assert_eq!(
-        named_from(&h, "iron_bump.png, "),
-        ["iron_bump.png, fills Normal _n layer"]
     );
 }
 
