@@ -968,6 +968,23 @@ fn enter_on_a_focused_button_maps_nothing() {
     assert!(v.txst.is_none(), "Enter on Clear also mapped the row");
 }
 
+#[test]
+fn clear_removes_the_target_and_the_list_goes_back_to_the_scan() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = with_target(d.path(), one_of_each());
+    let n = m.target().unwrap().meshes.len() + 2;
+    let mut h = open_dialog(m, &id, 1280.0);
+    assert_eq!(row_names(&h).len(), n, "{:?}", row_names(&h));
+    h.get_by_role_and_label(Role::Button, "Clear").click();
+    h.run();
+    assert!(h.state().target().is_none());
+    assert!(project_text(h.state()).find("target_mod").is_none());
+    let rows = row_names(&h);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("Record "), "{rows:?}");
+    assert!(h.query_by_role_and_label(Role::Button, "Clear").is_none());
+}
+
 /// Screenshots of the dialog at 1100, 1280 and 1600 px into `SDC_SHOT_DIR` (skipped without it). Run alone, like
 /// the other `render_` tests.
 #[test]
