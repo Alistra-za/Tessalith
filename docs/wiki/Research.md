@@ -1,112 +1,54 @@
 # Research behind the defaults
 
-Each default comes from a literature review of BCn encoders, mip filtering and Skyrim's shaders, a local benchmark of about 12,500 encodes over three rounds, and a set of measured spikes. The design is summarised in [How Tessalith came about](../research/design-overview.md); the tables are in [docs/research](../research/README.md).
+For modders who ask why Tessalith picked a format, encoder or filter. One bullet per choice: what was measured, what it decided, and a link to the numbers in [docs/research](../research/README.md). The newest bench is round 3, with the BC1 Dual rescore of 2026-11-04; each research page gives the date and build it measured.
 
 ## What matters most
 
-Picking the right format and colour space for a texture moves quality by 5 to 15 dB. A Skyrim semantic mistake (wrong tag, lost alpha data) leaves the texture broken. The top BC7 encoders sit within 0.16 to 0.32 dB of each other ([why](../research/encoder-benchmark.md#the-format-matters-more-than-the-encoder)).
+- Picking the right format and colour space moves quality by 5 to 15 dB, and a semantic mistake (wrong tag, lost alpha data) breaks the texture ([why](../research/encoder-benchmark.md#the-format-matters-more-than-the-encoder)).
+- The top BC7 encoders sit within 0.16 to 0.32 dB of each other, so the encoder matters less than the format.
 
-## Encoders
+## Why these encoders?
 
-- BC7: on the only independent multi-encoder benchmark (Aras Pranckevičius, 2020), bc7e "slow" averaged 47.40 dB luma PSNR against 46.28 dB for ISPC TC "slow", at about 10 times the speed. Local runs put bc7e level 5 within ±0.03 dB of level 6 at 0.22 against 0.28 s/Mpix, and level 4 below level 3 on gradients. Drove: bc7e at `veryslow` (level 5) as the default; level 4 is not offered.
-- BC7 `max` (bc7e with patch 0002) beat `veryslow` on a 150-texture Skyrim sample: +0.18 dB RGB on diffuse, +0.037° on normal maps and +0.24 dB on alpha, at 2.7 to 2.9 times the time. Drove: `max` is an opt-in effort level.
-- DirectXTex/texconv was the weakest BC7 encoder at every setting. Compressonator is unmaintained, never uses BC7 modes 4/5 and writes BC7 headers with required flags missing. Drove: neither encodes; texconv is a test oracle only.
-- BC1: all tested encoders fell within 0.66 dB of each other, with rgbcx level 18 on top (38.47 dB). Drove: rgbcx 18 for BC1 and BC3. When BC3 is picked is in the [encoder benchmark](../research/encoder-benchmark.md).
-- BC1 selectors scored against NVIDIA and AMD decoding together (rgbcx `cBC1Dual`) beat the Ideal target for every one of 93 textures on both vendors, at 1.6 times the encode time ([numbers](../research/encoder-benchmark.md#bc1-dual-nvidia-and-amd-scored-together-2026-11-02-note-fm17)). Drove: BC1 and BC3 colour always use it; there is no decoder setting.
-- Perceptual (luma-weighted) error raised normal-map angular error by 37%, and cost 1.6 dB on packed data and 2.7 to 3.5 dB when alpha carries data. Drove: `encoder.perceptual` is off by default and locked off except for colour maps whose alpha is not data.
-- RDO only trades quality for smaller archives (42.25 dB fell to 39.51 dB at λ = 1 in one published run) and never reduces GPU memory. Drove: no RDO.
-- A scalar C++ port of bc7e (spike S4) was slower and less exact. Drove: bc7e ships as prebuilt objects.
+- **BC7:** bc7e at `veryslow` (level 5) is the default. In the only independent multi-encoder benchmark (Aras Pranckevičius, 2020) bc7e "slow" beat ISPC TC "slow" by 1.1 dB at about 10 times the speed. Locally, level 5 is within ±0.03 dB of level 6 at 0.22 against 0.28 s/Mpix. Level 4 isn't offered: it lost to level 3 on gradients ([bc7e tuning](../research/bc7e-tuning.md)).
+- **BC7 `max`:** an opt-in level. On 150 Skyrim textures it gained 0.18 dB RGB on diffuse and 0.24 dB on alpha over `veryslow`, at 2.7 to 2.9 times the time.
+- **BC7 alpha weights:** a weighted BC7 can stand in for BC3 on data maps whose alpha matters ([the setting](GUI-Texture-Panel.md#bc7-weighting-against-bc3)).
 
-## Formats and Skyrim conventions
+![Grouped bar chart of mean RGB and alpha PSNR for BC3 and the BC7 weightings on three texture classes. On colour with smooth alpha, Alpha ×8 gives 51.40 dB alpha against 47.24 for BC3 and keeps 46.60 dB RGB against 41.00. On a normal map or packed rmaos with specular in alpha, BC3 keeps the highest alpha, and BC7 alpha rises with the weight.](../img/bc7-alpha-weights.svg)
 
-- Community Shaders reads the `_n` blue channel directly and never rebuilds Z, so a BC5 `_n` decodes with Z = -1 and loses the specular alpha. Benchmarks that favour BC5 for normals rebuild Z, which Skyrim does not. Drove: normals are BC7, and BC4/BC5 on a normal map is a blocking warning ([where BC5 is used](../research/encoder-benchmark.md)).
-- Vanilla diffuse stores gamma-encoded colour in UNORM files, and an `_SRGB` tag darkens it in vanilla shaders, CS non-PBR paths and LOD. TruePBR expects albedo tagged `_SRGB`. Drove: `_SRGB` only for TruePBR colour (albedo, `_g`, `_s`, `_f`) and only under `cs`; `_SRGB` under a `lod` path is flagged.
-- BC1 alpha on cutouts lost anti-aliased edges and visible RGB quality against BC7 ([encoder benchmark](../research/encoder-benchmark.md)). Drove: BC1 alpha is opt-in (`encoder.bc1_alpha`); the compact presets use BC1 only for colour without alpha.
-- Spike S2: small BC7 textures with full chains ran in game with no crash. Drove: no small-texture fallback to another format.
-- Skyrim SE loads both legacy `BC4U`/`BC5U` and DX10 BC4/BC5 headers, unsigned only. Drove: the [header choice](../research/design-overview.md).
+- **texconv and Compressonator don't encode.** texconv was the weakest BC7 encoder at every setting, and Compressonator is unmaintained and writes BC7 headers with required flags missing. texconv is the test oracle only.
+- **BC1 and BC3:** rgbcx level 18 led BC1 (38.47 dB, all encoders within 0.66 dB).
+- **BC1 Dual:** rgbcx scores BC1 selectors against NVIDIA and AMD decoding together. It beat the Ideal target on all 93 textures on both vendors at 1.6 times the encode time, so BC1 and BC3 colour always use it and there's no decoder setting ([numbers](../research/encoder-benchmark.md#bc1-dual-nvidia-and-amd-scored-together-2026-11-02-note-fm17)). <!-- D:FM17 -->
+- **The format picks the encoder:** rgbcx for BC1, BC3, BC4 and BC5, ISPC for BC6H, bc7e for BC7. Uncompressed formats run none. <!-- D:FM15 -->
+- **Perceptual weighting is off,** and locked off except for colour maps whose alpha isn't data. It raised normal-map angular error by 37% and cost 1.6 dB on packed data.
+- **No RDO.** It only shrinks archives (42.25 dB fell to 39.51 dB at λ = 1 in one published run) and never reduces GPU memory.
 
-## Alpha
+## Why this format and tag?
 
-- Stray alpha in a source costs about 1 dB on real images and up to 17 dB on smooth ones. Drove: the `remove` policy drops the alpha channel before any mip or encode step.
-- Even with alpha removed, bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (ISPC 15%, texconv 2.4%), because its mode 6 picks the shared p-bit for RGB alone. Forcing 255 costs 0.5 to 1.0 dB RGB on average (spike S5). On 28 real `_m` files encoded without the fix, 7 had 40% or more of their alpha off 255 (spike S6). Drove: exact-opaque alpha is on by default only for `_m` and env masks, where CS, ENB and PGPatcher read the alpha. Turning it off on a BC7 `_m` needs an explicit acknowledgement.
-- A RenderDoc read of the Community Shaders lighting shader (spike S8) gave the complex-material gate: the smallest mip's alpha must be below 251/255, with a separate rule for grey env masks. Drove: the `_m` margin check warns at 247 and applies the shader's grey rule; near-opaque source alpha uses the same 251 cut-off.
-- Box-filtered alpha thins out alpha-tested foliage at distance. Coverage-preserving mips (Castaño's method, also behind AlphaBloom's Auto Coverage) keep the share of texels that pass the alpha test the same at every level. Drove: Tessalith's solver passes exactly mip 0's share at every level, splits ties in a Bayer order and keeps remapped texels two codes clear of the threshold so BC7 cannot flip them. Default threshold 127.
+- **Normals are BC7, not BC5.** Community Shaders reads the `_n` blue channel and never rebuilds Z, so a BC5 `_n` decodes with Z = -1 and loses the specular alpha. Benchmarks that favour BC5 rebuild Z, which Skyrim doesn't. BC4/BC5 on a normal map is a blocking warning.
+- **`_SRGB` only for TruePBR colour under `cs`.** Vanilla diffuse stores gamma-encoded colour in UNORM files, and an `_SRGB` tag darkens it in vanilla shaders, CS non-PBR paths and LOD. TruePBR expects albedo tagged `_SRGB`. `_SRGB` under a `lod` path is flagged ([the rule](Texture-Types.md#srgb-or-unorm)).
+- **BC1 alpha is opt-in.** On cutouts it lost anti-aliased edges and visible RGB quality against BC7, so the compact presets use BC1 only for colour without alpha.
+- **Small BC7 textures keep their format.** Full chains from 16 to 128 px ran in game without a crash (spike S2), so there's no fallback.
 
-## Mips
+## Why these alpha rules?
 
-- Gamma-encoded averaging, overshoot and ringing decide the mip filter ([mipmaps and alpha](../research/mipmaps-and-alpha.md)). No published PSNR benchmark of mip filters for game textures exists. Drove: box stays the default for everything, colour is filtered in linear light, and Kaiser is fixed at width 3, α 4 (the NVIDIA Texture Tools wiki found larger radii ring).
-- Building every level from the previous one cost tent 1.1 to 2.7 dB and Mitchell 0.8 to 1.8 dB against a direct Lanczos-8 reference. Drove: tent, Mitchell and Kaiser build each level directly from mip 0; box stays recursive, where it is exact.
+- **Stray alpha is removed before mips.** It costs about 1 dB on real images and up to 17 dB on smooth ones.
+- **Exact opaque is on by default for `_m` and env masks only.** bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (spike S5), and 7 of 28 real `_m` files had 40% or more of their alpha off 255 (spike S6). CS, ENB and PGPatcher read that alpha. Forcing 255 costs 0.5 to 1.0 dB RGB on average.
+- **The complex-material gate is 251/255.** A RenderDoc read of the CS lighting shader (spike S8) showed the smallest mip's alpha must stay below 251/255. The `_m` margin check warns at 247.
+- **Cutout mips keep coverage.** Box-filtered alpha thins out foliage at distance. Castaño's coverage-preserving method keeps the share of texels that pass the alpha test the same at every level. Default threshold 127 ([method](../research/mipmaps-and-alpha.md)).
 
-## Normal maps
+## Why these mip filters?
 
-- Averaging unit normals shortens them, and the lost length is exactly the variance the mip throws away. Unity HDRP, The Order: 1886 and Call of Duty: WWII convert it to extra GGX roughness and renormalise the stored normal. Drove: every normal level is renormalised, and in a TruePBR set the variance goes into roughness with a vMF fit, κ = (3L − L³)/(1 − L²), clamped at t = 0.25 (HDRP's `NORMALMAP_HIGHEST_VARIANCE`).
-- Quantisation noise alone on a flat normal map lifts zero roughness at lower mips ([mipmaps and alpha](../research/mipmaps-and-alpha.md)). Drove: a noise floor at L = 0.999 that adds no variance (about a 2° tilt).
+- **Box is the default,** colour is filtered in linear light, and Kaiser is fixed at width 3, α 4: larger radii ring ([mip filters](../research/mipmaps-and-alpha.md)). No published PSNR benchmark of mip filters for game textures exists.
+- **Tent, Mitchell and Kaiser build every level from mip 0.** Chaining them cost 0.8 to 2.7 dB against a direct Lanczos-8 reference. Box stays recursive, where that's exact.
 
-## BC4/BC5 search radius
+## Why renormalise normal mips?
 
-- Upstream rgbcx modelled BC4 decoding with floored interpolants while the GPU and bcdec round to nearest, so a wider search could make results worse (BC5 at radius 10 scored 47.9 dB against 58.0 dB at radius 5). Patching rgbcx to round like the decoder fixed this; a wider radius then gained almost nothing. Drove: the default radius and the `fast` one ([tables](../research/encoder-benchmark.md#bc4bc5-search-radius)).
-- rgbcx anchors its BC4 6-value mode on the block's minimum and maximum, which wastes the mode's fixed 0 and 255 entries; BC3 cutout alpha trailed NVIDIA Texture Tools `-highest` by about 2 dB. Drove: a wider block search in the vendored rgbcx for BC4, both BC5 channels and BC3 alpha, at every radius, never worse per block than the unpatched search, at about 2 times the BC4 search time. BC3 alpha keeps the unpatched block where the search would flip more texels across 128. Cutout alpha gains 3.2 dB ([BC4-family encoding](../research/bc4-family.md)). <!-- D:FJ1,FJ2 -->
+- Averaging unit normals shortens them, and the lost length is the variance the mip throws away. Unity HDRP and other engines turn it into extra GGX roughness. In a TruePBR set Tessalith does the same with a vMF fit, clamped at t = 0.25, and renormalises every level.
+- Quantisation noise alone on a flat normal map lifts roughness at lower mips, so a noise floor at L = 0.999 adds no variance (about a 2° tilt).
 
-## Encoder measurements
+## Why the BC4/BC5 search?
 
-The data behind the README charts, drawn by `tools/readme-charts.py`. "—" means not measured; "n/a" means the encoder has no such format.
+- Upstream rgbcx modelled BC4 decoding with floored interpolants while GPUs round to nearest, so a wider search could make results worse. Tessalith's rgbcx rounds like the decoder.
+- rgbcx anchored BC4's 6-value mode on the block's minimum and maximum. A wider block search in the vendored rgbcx gains 3.2 dB on cutout alpha at about twice the BC4 search time ([BC4-family encoding](../research/bc4-family.md)). <!-- D:FJ1,FJ2 -->
 
-### BC7: GPU and CPU encoders, speed and quality
-
-Δ is against bc7e u6, in dB. "Real" means real textures.
-
-| Encoder | Speed (s/Mpix) | Δ RGB (real) | Δ (real alpha) |
-|---|--:|--:|--:|
-| NVTT Normal (GPU) / texconv GPU | 0.03–0.09 | −1.4 / −1.8 | −0.75 / −2.8 |
-| ISPC basic | 0.11 | −0.75 | −0.69 |
-| bc7e u4 | 0.12 | −0.39 | −0.36 |
-| bc7e u5 | 0.22 | +0.01 | −0.03 |
-| bc7e u6 | 0.28 | 0 | 0 |
-| bc7e max‡ | ~0.6 | +0.15 | +0.04 |
-| ISPC slow | 0.30 | −0.59 | −0.67 |
-| NVTT Production/Highest | ~14 | −0.32 | −0.37 |
-| texconv CPU (-bc x) | ~16–20 | −1.6 | −2.4 |
-| Compressonator q1.0 | ~33 | −0.16 | −1.50 |
-
-NVIDIA Texture Tools 3 is not part of Tessalith; its rows are a reference.
-
-‡ `max` is opt-in (`encoder.effort = "max"`). Its Δ comes from the same bench round as the other rows (7 colour textures, 4 with alpha). On the 92 colour textures of bench round 3 it gains +0.19 dB RGB and beats u6 on all 92; on the 96 with smooth alpha it gains +0.12 dB premultiplied. It takes 2.7 times the time of u5 (`veryslow`) in the [bc7e tuning](../research/bc7e-tuning.md) runs, about 0.6 s/Mpix on this table's scale.
-
-### BC7: bc7e u5 against the other CPU encoders at maximum settings
-
-| Measure | bc7e -u5 | NVTT 3 Production | Compressonator q1.0 | Intel ISPC slow | texconv -bc x |
-|---|--:|--:|--:|--:|--:|
-| Real colour textures (Δ dB) | +0.03 | −0.27 | −0.16† | −0.44 | −1.47 |
-| Smooth gradients, synthetic (Δ dB) | 0.00 | +3.86 | +3.21 | +0.73 | −6.89 |
-| Real decals, smooth alpha (Δ dB) | −0.02 | −0.06 | −1.50† | −0.58 | −2.04 |
-| Packed data maps (RGB PSNR, dB) | 41.22 | 41.58 | —† | 41.20 | 40.38 |
-| Normal maps (mean angle error) | 1.77° | 1.71° | —† | 1.79° | 2.19° |
-| Opaque input decoded with alpha 254 | 28%* | 0% | 1.1% | 15% | 2.4% |
-| Time per megapixel | 0.22 s | ~14 s | ~33 s | 0.30 s | ~20 s |
-
-\* An optional patch (mode 6 p-bit override, exact opaque) is for when alpha 254 is not acceptable.
-
-† Compressonator q1.0 was measured on the original 4–7 images only. On those images it was 0.15 dB behind NVTT on packed data and 0.27° behind on normals. Its alpha-254 and timing rows are from the original run.
-
-### Other formats: best encoders per format
-
-| Format and measure | rgbcx (Tessalith) | Intel ISPC | NVTT 3 -highest | Compressonator | texconv (CPU) |
-|---|--:|--:|--:|--:|--:|
-| BC1 colour, NVIDIA decoder (RGB PSNR, dB) | 39.51 | 37.99 | 39.38 | 38.83 | 37.30 |
-| BC1 colour, AMD decoder (RGB PSNR, dB) | 39.75 | 38.00 | 39.62 | 38.93 | 37.30 |
-| BC3 colour + smooth alpha (premultiplied PSNR, dB) | 49.50 | 48.03 | 49.29 | 48.74 | 48.08 |
-| BC3 cutout alpha (alpha PSNR, dB) | 50.30 | 45.73 | 49.13 | 49.31 | 47.43 |
-| BC4 masks (PSNR, dB) | 49.10 | 47.13 | 49.02 | 48.65 | 46.83 |
-| BC5 normals (RG PSNR, dB) | 47.16 | 45.32 | 47.16 | 46.87 | 45.51 |
-| BC5 normals (mean angle error) | 1.89° | 1.99° | 1.90° | 1.90° | 1.98° |
-| BC6H HDR (multi-exposure PSNR, dB) | n/a | 50.38 | 48.00 | —† | 49.62 |
-| BC6H brightest highlight kept (worst image) | n/a | 22% | 94% | 29%† | 29% |
-
-Each row has its own image set, so compare encoders within a row, not across rows; the README chart plots each row against Tessalith's encoder. BC1 to BC5 are bench round 3 (93 colour textures, 96 with smooth alpha, 95 cutouts, 93 masks, 93 normal maps), scored the way GPUs decode: BC1 on the NVIDIA and AMD models, BC3 alpha, BC4 and BC5 rounding to nearest. The rgbcx column is Tessalith's patched build: BC1 Dual endpoints ([BC1 Dual rescore](../research/encoder-benchmark.md#bc1-dual-rescore-2026-11-04)) and the wider BC4 block search above. Its BC3 colour half in this table is the Ideal-model encode, not Dual. On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 2.2 dB lower in mPSNR (4 HDR images).
-
-† Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.
-
-## Studies
-
-- Scores on SSIM and VIF besides PSNR: [SSIM and VIF rescoring](../research/encoder-benchmark.md#ssim-and-vif-rescoring-2026-10-21).
-- Whether a weighted BC7 can replace BC3 for delicate alpha: [BC3 against BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21).
+The encoder tables behind the README charts are in [encoder-benchmark](../research/encoder-benchmark.md).

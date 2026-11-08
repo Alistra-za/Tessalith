@@ -1,8 +1,10 @@
 # CLI reference
 
-`sdc` is the command-line front end of Tessalith. It has five subcommands:
+For anyone scripting `sdc`: batch conversions, CI, checking a downloaded mod. Every command, flag, exit code, log line and error message is here. If you use the GUI, start at [Getting started](Getting-Started.md); field values are on [Project config](Project-Config.md).
 
-| Subcommand | What it does |
+## Commands
+
+| Command | What it does |
 |---|---|
 | [`convert`](#sdc-convert) | Convert images or folders to DDS. |
 | [`inspect`](#sdc-inspect) | Show the plan for images, or the header and alpha statistics of DDS files. Writes nothing. |
@@ -10,76 +12,59 @@
 | [`presets`](#sdc-presets) | List and show presets; print JSON schemas. |
 | [`cubemap-marker`](#sdc-cubemap-marker) | Write the 1×1 dynamic-cubemap marker DDS. |
 
-`sdc --version` prints the version, then the version of each linked encoder, one per line. `sdc --help` and `sdc <subcommand> --help` print the built-in help. The help text calls the program "Skyrim SE/AE DDS converter (working name)"; that is Tessalith.
+- `sdc --version` prints the Tessalith version and the version of each linked encoder. Paste it into bug reports.
+- `sdc --help` and `sdc <command> --help` print the built-in help.
+- `convert` writes its log to stderr; `inspect`, `validate` and `presets` print their results to stdout. With `--json`, stdout carries only JSON.
 
-Human-readable output from `convert` goes to stderr. The result verbs (`inspect`, `validate`, `presets`) print their results to stdout. With `--json`, stdout carries only JSON.
-
-## Shared batch flags
-
-`convert` and `inspect` accept the same set of input and settings flags.
+## Flags shared by convert and inspect
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `<inputs>...` | required | Image files or folders. Several are allowed. |
-| `--recursive` | off | Walk folders recursively; otherwise only the files directly inside each folder are read. Files you name explicitly are always included. |
-| `--target cs\|vanilla` | see below | The target game setup. |
-| `--preset <id or file.toml>` | see below | Select a preset by id, or load a preset file and select the id it declares. |
+| `--recursive` | off | Walk folders recursively; otherwise only the files directly inside each folder are read. Files you name are always included. |
+| `--target cs\|vanilla` | see [Which target](Presets-and-Targets.md#which-target) | The target game setup. |
+| `--preset <id or file.toml>` | see [Which target](Presets-and-Targets.md#which-target) | Select a preset by id, or load a preset file and select the id it declares. |
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
 | `--config <file>` | `sdc.toml` in the first input folder | The project config file. |
 | `--set <override>` | none | Override a profile field. Repeatable. See [--set syntax](#--set-syntax). |
-| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence sub-type suggestion. High-confidence alpha suggestions apply either way. With `none`, a file whose sub-type is only suggested stays unresolved. |
-| `--allow <CODE>` | none | Acknowledge a blocking warning code for the whole batch. Repeatable. An unknown code is a usage error. |
+| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence sub-type suggestion. With `none`, a file whose sub-type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
+| `--allow <CODE>` | none | Acknowledge a blocking code for the whole batch. Repeatable. An unknown code is a usage error. |
 | `--json` | off | Write JSON Lines events to stdout. Human output stays on stderr. |
 
-How the target is chosen, highest first: `--target`, then `target` in the project `sdc.toml`, then `target` in the user config, then the selected preset's own target, then `cs`.
+The user config and the user presets always load ([where they are](Installation.md#where-tessalith-keeps-its-files)).
 
-How the preset is chosen, highest first: `--preset`, then `preset` in the project `sdc.toml`, then `preset` in the user config, then the default for the target: `cs-quality` or `vanilla-quality`.
+### Why you usually want `--accept-suggestions high`
 
-The user config and the user presets are always loaded ([where they are](Installation.md#where-tessalith-keeps-its-files)). See [Presets and targets](Presets-and-Targets.md).
-
-### Why `--accept-suggestions high` matters
-
-A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence sub-type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise those files are reported as unresolved:
+A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence sub-type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise the file is reported as unresolved:
 
 ```text
 skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-A lone file with an unknown suffix (`rock_bump.png`) has no suggestion, so the flag doesn't help: `sdc convert` exits 1 with `unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry`. [Why it waits](Texture-Types.md#texture-sets). Give it a type with its path under the input folder:
+A lone file with an unknown suffix (`rock_bump.png`) has no suggestion, so the flag doesn't help: `sdc convert` exits 1 with `unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry` ([why it waits](Texture-Types.md#how-files-form-a-set)). Give it a type with its path under the input folder:
 
 ```text
 sdc convert --set "file:textures/x/rock_bump.png.subtype=diffuse"
 ```
 
-Files decided by a rule, a `--set`, a `[files]` entry or a set shader are not affected; a set shader doesn't decide a file that waits. The GUI accepts High-confidence suggestions and writes each one into `sdc.toml` as a `[files]` entry, so a project saved from the GUI converts the same way here without the flag. For a folder the GUI has not saved, pass the flag to match it.
-
-`sdc` never reads the scan database, but the GUI writes what the Meshes scan decided into `sdc.toml` too (a sub-type the meshes' shader gives, grass found on a GRAS model, an alpha meaning), so a saved project agrees. Two stay GUI-only: a mesh *Remove* on a texture whose alpha varies (`sdc` asks for its alpha meaning instead), and the environment-map `_m` the GUI's Also export derives from the meshes (`sdc convert` writes no `_m`).
+The GUI accepts High suggestions and writes each into `sdc.toml` as a `[files]` entry, so a project saved from the GUI converts the same way here without the flag. What `sdc` doesn't read from the GUI (the mesh scan, the environment-map `_m`) is listed on [Review and Export](GUI-Review-and-Export.md).
 
 ### --set syntax
 
-| Form | Applies to |
-|---|---|
-| `field=value` | Every file. |
-| `subtype:<id>.field=value` | Every file of that sub-type. Cannot set `subtype`, `reencode` or `helper.*`. |
-| `file:<glob>.field=value` | Files matching the glob. The only form for `helper.role`, `helper.fills`, `helper.read` and `helper.invert`: an unscoped `--set helper.role=ao` is refused ("helper.role is set per file: use file:<glob>.helper.role=<…>"), since it would make every image a helper. |
-| `set:<set id>.shader=<shader>` | Picks the shader of a texture set. Only `shader` can be set this way. The set id is what `inspect` prints after `set` (the output folder relative to the output root, plus the lower-case base name). An id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. |
+| Form | Applies to | Can't set |
+|---|---|---|
+| `field=value` | Every file. | `helper.*` |
+| `subtype:<id>.field=value` | Every file of that sub-type. | `subtype`, `reencode`, `helper.*` |
+| `file:<glob>.field=value` | Files matching the glob ([glob rules](Project-Config.md#rules)). | |
+| `set:<set id>.shader=<shader>` | A texture set's shader ([shader ids](Set-Shaders.md)). The set id is what `inspect` prints after `set`; an id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. | Anything but `shader` |
 
-Values are parsed as TOML literals (`true`, `127`, `0.5`); anything that is not a valid literal is taken as a string, so you can write `format=bc1` without quotes. A misspelt field or sub-type is an error, never ignored.
-
-File globs:
-
-- Match like a rule's [`glob`](Project-Config.md#rules).
-- `*` does not cross `/`. Use `**` for any depth.
-- Since the glob may contain dots, the field is taken as the longest known field name at the end of the key.
-
-Examples:
+- `helper.role`, `helper.fills`, `helper.read` and `helper.invert` take only the `file:` form: an unscoped `helper.role=ao` would make every image a helper.
+- Values are TOML literals (`true`, `127`, `0.5`); anything else is a string, so `format=bc1` needs no quotes.
+- A misspelt field or sub-type is an error, never ignored.
 
 ```powershell
 # Every texture at fast effort
 sdc convert src --recursive --accept-suggestions high --set encoder.effort=fast
-
-# BC7 with alpha weighted x8 (bc7e only; ENC-WEIGHTS-IGNORED elsewhere)
-sdc convert src --recursive --accept-suggestions high --set encoder.bc7_weights=alpha8
 
 # All diffuse maps as BC1 (a diffuse that keeps its alpha then raises FMT-BC1-ALPHA)
 sdc convert src --recursive --accept-suggestions high --set subtype:diffuse.format=bc1
@@ -87,24 +72,9 @@ sdc convert src --recursive --accept-suggestions high --set subtype:diffuse.form
 # One file is a cutout at threshold 100
 sdc convert src --recursive --accept-suggestions high --set "file:**/fence01.png.alpha.policy=cutout" --set "file:**/fence01.png.alpha.threshold=100"
 
-# A file name with no clue: tell Tessalith what it is
-sdc convert src --recursive --set "file:**/mask_a.png.subtype=generic_data"
-
-# Helper textures: a mask with no clue in its name is the diffuse's opacity, read from green;
-# a specular map is converted on its own; a roughness map also fills the _cnr alpha
-sdc convert src --recursive --accept-suggestions high --set "file:**/iron_mask.png.helper.role=opacity" --set "file:**/iron_mask.png.helper.read=g"
-sdc convert src --recursive --accept-suggestions high --set "file:**/iron_specular.png.helper.role=none"
-sdc convert src --recursive --accept-suggestions high --set 'file:**/iron_roughness.png.helper.fills=["rmaos.r", "cnr.a"]'
-
-# Re-encode existing DDS inputs instead of skipping them
-sdc convert src --recursive --set reencode=true
-
 # Pick a set's shader
 sdc convert src --recursive --accept-suggestions high --set "set:textures/armor/iron/iron.shader=envmap"
-sdc convert src --recursive --accept-suggestions high --set "set:iron.shader=envmap"   # every set named iron
 ```
-
-The full field list, with allowed values, is in [Project config](Project-Config.md#field-reference).
 
 ## sdc convert
 
@@ -116,31 +86,24 @@ Plans the batch, then encodes every file whose status is ready.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-o, --output <dir>` | `.\sdc-out` | Output root ([layout](Validation-and-Output.md#output-layout)). With `[export] also` in the project `sdc.toml`, the folder the PBR, Vanilla and CM folders go in (see below). |
+| `-o, --output <dir>` | `.\sdc-out` | Output root ([layout](Validation-and-Output.md#where-the-files-go)). With `[export] also` in the project `sdc.toml`, the folder the PBR, Vanilla and CM folders go in. |
 | `--jobs <n>` | `0` (all cores) | Worker threads. |
-| `--mem-budget <size>` | 50% of RAM | Memory budget for files in flight. Bytes, or a `G`/`M` suffix (binary): `8G`, `512M`. `0` is an error; leave the flag out for the default. |
-| `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists. See below. |
+| `--mem-budget <size>` | 50% of RAM | Memory budget for files in flight. Bytes, or a `G`/`M` suffix (binary): `8G`, `512M`. |
+| `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists ([what each does](Validation-and-Output.md#re-runs-and-if-changed)). |
 | `--dry-run` | off | Plan and report, write nothing. |
+
+The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
 
 ### Also export as Vanilla / CM
 
-When the project `sdc.toml` has `[export] also` (see [Project Config](Project-Config.md#export)), `sdc convert` runs three passes and writes `<project> PBR`, `<project> Vanilla` and `<project> CM` under `-o`. `<project>` is the first input folder's name (or the folder of the first input file). The PBR folder is the plain cs export; the other two are converted from its PBR sets.
+- With `[export] also` in the project `sdc.toml` ([keys](Project-Config.md#export)), `sdc convert` makes `-o` the parent of `<project> PBR`, `<project> Vanilla` and `<project> CM`. `<project>` is the first input folder's name.
+- It needs the `cs` target: `Also export needs the cs mode: the PBR folder is the cs export` (exit 2).
+- A bad `[export.legacy]` value or folder name is an error (exit 2) on this path only.
+- The CLI reads no mesh scan, so it writes no vanilla environment `_m`.
+- On stderr it lists the files in the three folders this export didn't write ("not written by this export"), and each PBR set left out of Vanilla and CM, with the reason.
+- What each folder holds: [Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm). The GUI's **Copy CLI command** passes the Also export location as `-o`.
 
-- It needs the `cs` target: "Also export needs the cs mode: the PBR folder is the cs export" (exit 2).
-- A bad `[export.legacy]` value or folder name is an error (exit 2) on this path only; a plain run does not check them.
-- The CLI reads no Meshes scan, so it writes no vanilla env `_m`.
-- After the passes it prints, on stderr, one line per file in the three folders that this export did not write ("not written by this export") and one per PBR set left out of Vanilla and CM, with the reason.
-- The GUI's **Copy CLI command** passes the Also export location as `-o`.
-
-### --on-existing
-
-| Value | Behaviour |
-|---|---|
-| `if-changed` | Re-encode only when the manifest record differs ([what is compared, and an output with no record](Validation-and-Output.md#re-runs-and-if-changed)). |
-| `skip` | Keep every existing output. Counted as skipped on purpose. |
-| `overwrite` | Always re-encode. |
-
-### Human log
+### Reading the log
 
 Each line on stderr has one of these shapes:
 
@@ -156,31 +119,24 @@ info  <input>: CFG-FILTER-IGNORED <message>
 done: N converted, N up to date, N skipped (N on purpose), N failed, N failed validation, N cancelled
 ```
 
-Warnings of severity warning or above are printed, plus the info code `CFG-FILTER-IGNORED`. Paths use forward slashes. Raw maps consumed by a packed output are not listed.
+- Codes of severity warning and above are printed, plus the info code `CFG-FILTER-IGNORED`. Paths use forward slashes.
+- A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
+- Raw maps consumed by a packed output get no line of their own.
 
-The `done` counters:
-
-| Counter | Counts |
+| `done` counter | Counts |
 |---|---|
 | converted | Files encoded and written in this run. |
 | up to date | Outputs left alone by `if-changed`. |
 | skipped | Files not converted for any other reason: unresolved, blocked, duplicate output, DDS input, existing output with no record, `--on-existing skip`, a pre-packed file replaced under `packing.prefer = "raw"` (`PACK-CONFLICT`), a generated file replaced by a real map (`GEN-REPLACED`). |
-| on purpose | The part of skipped that you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, `PACK-CONFLICT` and `GEN-REPLACED` as above. |
+| on purpose | The part of skipped you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, `PACK-CONFLICT` and `GEN-REPLACED`. |
 | failed | Files that failed to load, resolve, encode or write. |
 | failed validation | Files written whose validation reported an error. |
 | cancelled | Files not started because you pressed Ctrl-C. |
 
 ### Cancelling
 
-The first Ctrl-C prints:
-
-```text
-cancelling: finishing current bands... (Ctrl-C again to exit immediately)
-```
-
-Running files stop at their next band boundary and no new file starts. Nothing half-written is left behind (outputs are written to a temporary file and renamed). The cancelled files are listed in `batch_done`, and the exit code is 1. A Ctrl-C during planning is honoured too.
-
-A second Ctrl-C exits at once with code 3. That can leave `.sdc-*.tmp` files in the output folders (delete them by hand) and, with `--json`, no `batch_done` event. A file renamed into place just before the abort may have no manifest record; the next run reports it as `OUT-UNKNOWN-EXISTING`, and `--on-existing overwrite` replaces it.
+- The first Ctrl-C prints `cancelling: finishing current bands... (Ctrl-C again to exit immediately)`. Running files stop at their next band boundary and no new file starts. Nothing half-written is left (outputs are written to a temporary file and renamed). The cancelled files are listed in `batch_done`, and the exit code is 1. A Ctrl-C during planning counts too.
+- A second Ctrl-C exits at once with code 3. That can leave `.sdc-*.tmp` files in the output folders (delete them by hand) and, with `--json`, no `batch_done` event. A file renamed into place just before the abort may have no manifest record; the next run reports it as `OUT-UNKNOWN-EXISTING`, and `--on-existing overwrite` replaces it.
 
 ### Examples
 
@@ -207,19 +163,7 @@ sdc convert src --recursive --accept-suggestions high --allow DIM-SMALL
 sdc inspect [OPTIONS] <INPUTS>...
 ```
 
-Takes the [shared batch flags](#shared-batch-flags). Nothing is written. Missing inputs are a usage error (`input not found: <path>`).
-
-For a DDS input it prints the header and an alpha report per mip:
-
-```text
-C:/out/textures/armor/iron/iron.dds
-  format Bc7 srgb  1024x1024  11 mips  Dx10 header  cubemap false
-  mip 0 1024x1024  alpha min 255 =255 100.0% =254 0.0% <254 0.0%
-  mip 1 512x512  alpha min 255 =255 100.0% =254 0.0% <254 0.0%
-  ...
-```
-
-Header problems are listed as `header issue:` lines. The `=254` column matters for BC7: an opaque texture whose alpha decodes as 254 can show as slightly transparent in some shaders.
+Takes the [shared flags](#flags-shared-by-convert-and-inspect), writes nothing, and treats a missing input as a usage error. A DDS input is always reported by its header (format, size, mips, header form, per-mip alpha) and never re-encoded, even with `reencode`; header problems are `header issue:` lines.
 
 For image inputs it runs the whole plan as a dry run and prints, per set:
 
@@ -240,9 +184,7 @@ and per file:
   <severity> <CODE> <message>
 ```
 
-Skipped and failed files are the ones `convert` would report, each as its path followed by an indented `skipped <CODE> <reason>` or `cannot be read: <error>` line. `inspect` never re-encodes DDS inputs, even with `reencode`; a DDS is always reported by its header.
-
-Exit codes: 0, or 1 if an input could not be read, or 2 for a usage or config error.
+Skipped and failed files are the ones `convert` would report: the path, then an indented `skipped <CODE> <reason>` or `cannot be read: <error>` line. Exit codes: 0, 1 if an input couldn't be read, 2 for a usage or config error.
 
 ## sdc validate
 
@@ -250,17 +192,17 @@ Exit codes: 0, or 1 if an input could not be read, or 2 for a usage or config er
 sdc validate [OPTIONS] <DDS>...
 ```
 
-Runs the post-encode checks on DDS files that already exist, including files made by other tools. Give `.dds` files; a folder is refused (`<path> is a folder; give .dds files`).
+Runs the post-encode checks ([which ones](Validation-and-Output.md#what-is-checked)) on DDS files that already exist, including files made by other tools. Give `.dds` files: a folder is refused (`<path> is a folder; give .dds files`).
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--target cs\|vanilla` | `cs` | Whose rules apply. |
-| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A sub-type the target does not have is an error. |
+| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A sub-type the target doesn't have is an error. |
 | `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the sub-type's default, except that a sub-type whose default is `remove` is inferred as `data`. |
-| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders do not promise it. |
+| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
 
-The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules rather than on Tessalith's preferred format. A cube DDS is judged as a `cubemap`, and a 2D file whose name ends in `_e` or that sits under `textures\cubemaps\` fails (the game reads it as a cube). See [Validation and output](Validation-and-Output.md#cube-checks). A format Tessalith never writes has only its header checked and is reported as not judged.
+The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules, not on Tessalith's preferred format. A format Tessalith never writes has only its header checked and is reported as not judged. A cube DDS is judged as a `cubemap`, and a 2D file whose name ends in `_e` or that sits under `textures\cubemaps\` fails, because the game reads it as a cube ([checks](Cubemaps.md#checks)).
 
 ```text
 ok    C:/out/rock.dds (diffuse, alpha remove)
@@ -271,7 +213,7 @@ skip  C:/out/old.dds (diffuse)
 validated 3: 1 ok, 1 failed validation, 0 unreadable, 1 not judged
 ```
 
-Exit codes: 1 if any file could not be read, otherwise 4 if any failed, otherwise 0.
+Exit codes: 1 if any file couldn't be read, otherwise 4 if any failed, otherwise 0.
 
 ## sdc presets
 
@@ -279,15 +221,13 @@ Exit codes: 1 if any file could not be read, otherwise 4 if any failed, otherwis
 sdc presets [--preset-file <file>]... <COMMAND>
 ```
 
-`--preset-file` loads extra preset files after the user presets folder. User presets that fail to load are skipped with `CFG-PRESET-SKIPPED` on stderr.
+`--preset-file` loads extra preset files after the user presets folder. A user preset that fails to load is skipped with `CFG-PRESET-SKIPPED` on stderr.
 
 | Command | What it does |
 |---|---|
 | `list [--json]` | Lists selectable presets: id, version, target, description, suffix aliases, and the source file for user presets. |
 | `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each sub-type (or one) as JSON, with the provenance of each field. |
-| `schema <which> [--out <dir>]` | Prints a JSON Schema: `profile`, `preset`, `config`, `event`, `manifest`, `dds-info`, `dds-validation`. `all` writes every schema to `--out` and requires it (`schema all needs --out <dir>`). |
-
-Examples:
+| `schema <which> [--out <dir>]` | Prints a JSON Schema: `profile`, `preset`, `config`, `event`, `manifest`, `dds-info`, `dds-validation`. `all` writes every schema into `--out`, which it requires. |
 
 ```powershell
 sdc presets list
@@ -301,21 +241,19 @@ sdc presets schema all --out schemas
 sdc cubemap-marker [--color <R,G,B>] [--roughness <0..1>] -o <file.dds>
 ```
 
-Writes the 1×1 dynamic-cubemap marker that Community Shaders and ENB read as "reflect the live scene". The file is 152 bytes: a six-face RGBA8 cube with the colour on +X and every other face black. See [Cubemaps](Cubemap-Sources.md#dynamic-marker).
+Writes the 152-byte 1×1 dynamic-cubemap marker that Community Shaders and ENB read as "reflect the live scene". What the colour and roughness mean: [Dynamic marker](Cubemaps.md#dynamic-marker).
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--color <R,G,B>` | `0,0,0` | The reflection colour as raw code values ([how they are read](Cubemap-Sources.md#dynamic-marker)). |
-| `--roughness <0..1>` | none | Stored in alpha ([how](Cubemap-Sources.md#dynamic-marker)). |
+| `--color <R,G,B>` | `0,0,0` | The reflection colour as raw code values. |
+| `--roughness <0..1>` | none | Stored in alpha. |
 | `-o`, `--out <file>` | required | The DDS file to write. |
 
 ```powershell
 sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\steel_e.dds
 ```
 
-An existing file that Tessalith did not write, or cannot read, is kept, not overwritten.
-
-Exit codes: 0 written; 1 kept (an existing file Tessalith did not write, or one it cannot read); 2 usage error (a bad colour or a roughness outside 0 to 1); 3 the write failed.
+It never overwrites a file Tessalith didn't write, or one it can't read. Exit codes: 0 written; 1 kept (such an existing file); 2 usage error (a bad colour, a roughness outside 0 to 1); 3 the write failed.
 
 ## Exit codes
 
@@ -327,64 +265,66 @@ Exit codes: 0 written; 1 kept (an existing file Tessalith did not write, or one 
 | 3 | Fatal: an I/O failure on the output root or manifest, an internal error (`sdc: internal error`), or a second Ctrl-C. |
 | 4 | Every file was handled, but at least one failed validation. |
 
-When several apply, the highest-precedence one wins: 3, then 2, then 1, then 4, then 0. Intentional skips, up-to-date files and raw maps consumed by packing never cause exit 1.
+When several apply, the highest wins: 3, then 2, then 1, then 4, then 0. Intentional skips, up-to-date files and raw maps consumed by packing never cause exit 1.
 
-Errors that stop a run before it starts print `sdc: <message>` to stderr, for example `sdc: input not found: C:\Work\missing` or `sdc: unknown preset 'cs-qualty'` (the messages are in [Troubleshooting](Troubleshooting.md#error-messages)).
+## Error messages
+
+An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for an internal error). The message names the cause; these are the ones worth a fix. Scan errors are on [Mod scanning](Mod-Scanning.md#error-messages).
+
+### Inputs and paths
+
+| Message | Cause and fix |
+|---|---|
+| `input not found: <path>` | The path doesn't exist. |
+| `<path> is a folder; give .dds files` | `validate` takes files, not folders. |
+| `--mem-budget '<s>': …` | Not a whole number of bytes with an optional `G` or `M` suffix, or zero. Leave the flag out for the default. |
+
+### `--set` and `--allow`
+
+| Message | Cause and fix |
+|---|---|
+| `--set '<s>': unknown field '<f>'` and `unknown sub-type '<id>'` | A misspelt field or sub-type. [The field list](Project-Config.md#fields). |
+| `--set '<s>': a sub-type scope cannot set the sub-type` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
+| `--set '<s>': a set scope sets only shader` | `set:<id>.` takes `shader` and nothing else. |
+| `--allow <X>: unknown code` | A misspelt code. A code removed in an earlier version gets a message that names the fix instead. [All codes](Diagnostic-Codes.md). |
+| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
+
+### Presets and config
+
+| Message | Cause and fix |
+|---|---|
+| `unknown preset '<id>'` | A preset id that isn't loaded. `sdc presets list` shows the ids. |
+| `preset inheritance cycle at '<id>'` | Presets whose `base` chain loops. |
+| `<file>: config schema_version N is newer than this sdc supports (1)` | The file was written by a newer version. A preset gives `preset schema_version N is newer …`. |
+| `<file>: <key>: removed in <version>; <fix>` | A key or value Tessalith no longer reads (for example `subtype = "rfaos"`, removed in 2.0: use `skin_rfaos`). The text names the key, the version and what to write; `--set` gives the same text. The GUI stays read-only until the file is fixed. <!-- D:FM10 --> |
+| `[files] is only valid in a project sdc.toml, not in <path>` | `[files]`, `[inputs]` or `[export]` in the user config. |
+
+### While running
+
+| Message | Cause and fix |
+|---|---|
+| `source changed since planning; re-run` and `size changed since planning; re-run` | A source file changed between planning and encoding. Run again. |
+| `sdc: internal error` | A crash inside `sdc` (exit 3). Report it with the input that caused it. |
 
 ## JSON event stream
 
-`convert --json` and `inspect --json` write one JSON object per line to stdout. The stream's schema is available with `sdc presets schema event`. The current event schema version is 2.
-
-Every event has these fields:
-
-| Field | Meaning |
-|---|---|
-| `schema` | Event schema version (2). |
-| `seq` | Sequence number within the batch. Events are delivered in `seq` order. |
-| `ts` | Timestamp, RFC 3339, UTC, millisecond precision. |
-| `batch` | Batch id, the same for every event of one run. |
-| `set` | The texture set's id, when the event belongs to a set. |
-| `path` | The input file, forward slashes, when the event belongs to a file. |
-| `job_key` | The output path relative to the output root. Absent on batch-level events. |
-| `kind` | The event type, below. |
-
-Event kinds and their extra fields:
+`convert --json` and `inspect --json` write one JSON object per line to stdout, in `seq` order. The event schema (version 2) is authoritative: `sdc presets schema event`. Every event carries `schema`, `seq`, `ts`, `batch`, `kind`, and, when they apply, `set`, `path` and `job_key` (the output path relative to the output root).
 
 | `kind` | Extra fields |
 |---|---|
 | `batch_started` | `target`, `preset`, `inputs` (count). |
 | `file_discovered` | `output`. |
-| `set_resolved` | `members`, `pbr`, `bake`, `recipes` (each: `output`, `subtype`, `channels` [R,G,B,A provenance], `status` run/conflict/failed/disabled, `reason`), `shader` (`shader`, `provenance` = `set`, `auto:<rule>` or `fallback`, `wanted`), `warnings`. |
-| `file_planned` | `job`: the full resolved job, including the profile, provenance of every field, suggestions, warnings and status. |
+| `set_resolved` | `members`, `pbr`, `bake`, `recipes`, `shader` (`shader`, `provenance`, `wanted`), `warnings`. |
+| `file_planned` | `job`: the resolved job with its profile, the provenance of every field, suggestions, warnings and status. |
 | `file_started` | none. |
 | `progress` | `stage`, `done`, `total`. |
-| `warning` | `code`, `severity` (info/warning/blocking/error), `message`, `data`. |
-| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha` per level, `coverage` per level, `bc6h_peak_ratio`). |
+| `warning` | `code`, `severity`, `message`, `data`. |
+| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha`, `coverage`, `bc6h_peak_ratio`). |
 | `file_skipped` | `skip`, `code`, `reason`. |
 | `file_failed` | `stage`, `error`. |
 | `batch_done` | `converted`, `up_to_date`, `skipped`, `skipped_intentional`, `failed`, `validation_failed`, `cancelled` (list of inputs). |
 
-`skip` values: `up_to_date`, `on_existing_skip`, `unresolved`, `blocked`, `duplicate`, `dds_input`, `packing_input`, `unknown_existing`, `pack_conflict`, `packed_source`.
-
-`stage` values: `discover`, `group`, `load`, `analyse`, `resolve`, `preprocess`, `mipmaps`, `compress`, `write`, `validate`.
-
-A `file_done` line, wrapped here for reading:
-
-```json
-{"schema":2,"seq":41,"ts":"2026-10-14T09:12:03.512Z","batch":"19a2f3c7e10-1f40-0",
- "set":"textures/armor/iron/iron","path":"C:/src/textures/armor/iron/iron_m.png",
- "job_key":"textures/armor/iron/iron_m.dds","kind":"file_done",
- "output":"C:/out/textures/armor/iron/iron_m.dds",
- "validation":{"passed":true,"levels":11,"min_mip_psnr_db":41.7,"alpha":[],"coverage":[],"bc6h_peak_ratio":null}}
-```
-
-Reading the stream in PowerShell:
-
-```powershell
-sdc convert src --recursive --accept-suggestions high --json 2>$null |
-  ForEach-Object { $_ | ConvertFrom-Json } |
-  Where-Object kind -eq 'file_failed' |
-  Select-Object path, stage, error
-```
-
-`validate --json` writes a different record, one per file: `kind` = `dds_validation`, `schema` (1), `path`, `readable`, `subtype`, `alpha_policy`, `judged`, `note`, `passed`, `summary`, `warnings`. A file that cannot be read gets a shorter record: `kind`, `schema`, `path`, `readable` (false), `passed` (false) and `error`. `inspect --json` writes DDS info objects for DDS inputs (schema `dds-info`) and the event stream for images.
+- `skip` values: `up_to_date`, `on_existing_skip`, `unresolved`, `blocked`, `duplicate`, `dds_input`, `packing_input`, `unknown_existing`, `pack_conflict`, `packed_source`, `generated_replaced`.
+- `stage` values: `discover`, `group`, `load`, `analyse`, `resolve`, `preprocess`, `mipmaps`, `compress`, `write`, `validate`.
+- `validate --json` writes one `dds_validation` record per file (`schema` 1; `path`, `readable`, `subtype`, `alpha_policy`, `judged`, `note`, `passed`, `summary`, `warnings`). An unreadable file gets a shorter record: `kind`, `schema`, `path`, `readable` (false), `passed` (false), `error`.
+- `inspect --json` writes `dds-info` objects for DDS inputs and the event stream for images.

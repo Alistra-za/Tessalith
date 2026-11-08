@@ -20,7 +20,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 | Emissive, Glint, Fuzz settings | Their own values. Shown while the feature is on. |
 | NiAlphaProperty | The `alphaprop_*` keys ([below](#nialphaproperty)). |
 | Matching | The texture paths the entry matches (`match1` to `match8`). |
-| CS PBR records | Community Shaders' records ([Set materials](GUI-Set-Materials.md#community-shaders-pbr-records)). |
+| CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, Rename, UV and cubemap, vertex colours and depth, texture locks. |
 
 Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
@@ -88,9 +88,9 @@ These keys set the shape's alpha blending and testing in the NIF. A key that's o
 
 ## Where the JSON goes
 
-After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name.
+After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name. The GUI writes it; `sdc` on the command line does not.
 
-- Only sets that exported fully go in. Advanced skin sets have no entry.
+- Only sets that exported fully go in. Advanced skin sets have no entry ([Skin](Skin.md)).
 - **IMPORTANT** Tessalith never overwrites a JSON it didn't write without asking you first. An identical file is left alone without a prompt.
 
 ## The JSON editor
@@ -99,10 +99,7 @@ Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button bes
 
 ![The JSON editor.](../img/gui/GUI-PGPatcher-JSON/json-editor.png)
 
-- Each entry shows its set's keys with the same controls as the Material tab. **Show** jumps to the set.
-- **+ key** adds any schema key. Keys Tessalith doesn't know show in amber and are kept as you wrote them.
-- The **▾** [path picker](GUI-Set-Editor.md#path-pickers) on a match lists the scanned textures for that slot. Without a scan it lists only your project's paths.
-- **JSON text** shows the file exactly as it would be written now, with **Copy**.
+Each entry has the same controls as the Material tab; **+ key** adds any schema key, and keys Tessalith doesn't know show in amber and are kept as you wrote them.
 
 ### Deleting vanilla shapes
 
@@ -110,13 +107,9 @@ Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button bes
 
 If a delete section would hit one of your own sets, that set is struck through and outlined amber, and its set editor warns you too.
 
-### Errors and warnings
-
-The header reads "N errors, M warnings". Errors block Export; warnings are what Export will ask you about. **Next error** (F8) and **Prev** (Shift+F8) jump between them. The search box narrows the entries by set name or any path in them, but the counts always cover everything.
-
 ## Quick Q/A
 
-**Why is my set missing from the JSON?** It matches nothing, it didn't export fully, it's an Advanced skin set, or the project isn't in `cs` mode.
+**Why is my set missing from the JSON?** It matches nothing, it didn't export fully, it's an Advanced skin set, you exported with `sdc`, or the project isn't in `cs` mode.
 
 **Why does my coat value do nothing?** Multilayer is off. The value is kept ("kept, not used") and goes into the JSON when you turn Multilayer back on.
 

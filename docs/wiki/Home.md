@@ -1,60 +1,47 @@
 # Tessalith wiki
 
-Tessalith converts source images (PNG, TGA, TIFF, EXR, PSD and others) into DDS textures for Skyrim Special Edition and Anniversary Edition. It runs on Windows only and ships as two programs that share one conversion engine:
+For mod and modlist authors who make new DDS textures for Skyrim SE/AE and want them to come out right the first time. Tessalith is Windows only. It ships as `tessalith.exe` (the GUI) and `sdc` (the command line); both run one engine and read one `sdc.toml` per project, so they write the same bytes.
 
-- `sdc`, the command-line tool.
-- `tessalith.exe`, the desktop application (the window says Tessalith).
+It builds for two targets: `cs` (the default) for Community Shaders including TruePBR, and `vanilla` for textures that load without it. [Presets and targets](Presets-and-Targets.md) says which to pick.
 
-Each project folder can hold an `sdc.toml` file that records how its textures are converted. The GUI writes it and both programs read it, so you can set a project up in the GUI and then run it from a script.
+## I want to…
 
-Tessalith builds for two targets:
+- **Convert my first set:** [Getting started](Getting-Started.md).
+- **Name my files so they're picked up:** [Texture types and naming](Texture-Types.md).
+- **Pack loose PBR maps, or use helper textures:** [Packing PBR maps and helpers](Texture-Packing.md).
+- **Pick a target, or make smaller files:** [Presets and targets](Presets-and-Targets.md).
+- **Ship PBR, Vanilla and Complex material from one source:** [Set shaders and Also export](Set-Shaders.md).
+- **Write the PGPatcher JSON:** [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
+- **Set up Advanced skin, landscape or grass:** [Skin and Advanced skin](Skin.md), [PBR Landscape, grass, XPMF and CS PBR records](PBR-Landscape.md).
+- **Make a cubemap:** [Cubemaps](Cubemaps.md).
+- **Check the result before release:** [Previews](Previews.md), [Validation and output](Validation-and-Output.md).
+- **Learn the window:** [GUI guide](GUI-Guide.md).
+- **Scan my mods, edit a NIF, animate one:** [Meshes and mod scanning](Mod-Scanning.md), [Editing a NIF](GUI-NIF-Edit.md), [NIF animation](GUI-NIF-Animation.md).
+- **Script it:** [CLI reference](CLI-Reference.md). Every `sdc.toml` key is on [Project config](Project-Config.md).
+- **Fix something that went wrong:** [Troubleshooting](Troubleshooting.md). A code in a Problems row or the `sdc` log is on [Diagnostic codes](Diagnostic-Codes.md).
+- **Know why a default is what it is:** [Research behind the defaults](Research.md).
 
-| Target | Value | Use it when |
-|---|---|---|
-| Community Shaders | `cs` (default) | You play with Community Shaders, including TruePBR materials. |
-| Vanilla | `vanilla` | You want textures that load without Community Shaders. A set given the complex material shader packs the complex `_m` (environment, gloss, metal, height). |
+## Names you'll see
 
-This wiki covers version 2.0.0. Tessalith is licensed GPL-3.0-or-later. Its conversion engine (the `engine` and `encoders-sys` crates) is MPL-2.0.
+The CLI and the files keep the working name `sdc`. It stayed in the file names so existing projects keep loading.
 
-## Pages
-
-| Page | What it covers |
+| You see | What it is |
 |---|---|
-| [Installation](Installation.md) | The release zip, requirements, building from source, the encoder libraries. |
-| [Getting started](Getting-Started.md) | A first project from source folder to finished DDS files, in the CLI and in the GUI. |
-| [CLI reference](CLI-Reference.md) | Every `sdc` subcommand and flag, exit codes, the JSON event stream. |
-| [Project config](Project-Config.md) | Every `sdc.toml` key, its default, and how settings layer. |
-| [Presets and targets](Presets-and-Targets.md) | The built-in presets, writing your own, and what each target allows. |
-| [GUI guide](GUI-Guide.md) | Every panel in the GUI: the converter, set editor, bulk editing, 3D preview, PGPatcher JSON editor, settings. |
-| [Texture types](Texture-Types.md) | Sub-types, file suffixes, naming, formats, packing and set shaders. |
-| [Mod scanning](Mod-Scanning.md) | Scanning meshes and plugins from an MO2 instance or a folder, and what the scan feeds back. |
-| [NIF editing](GUI-NIF-Edit.md) | Editing a mesh's shader, alpha and controllers in the Meshes view, and exporting the edited NIF. |
-| [Validation and output](Validation-and-Output.md) | What gets checked after encoding, the output layout, the manifest, re-run behaviour. |
-| [Troubleshooting](Troubleshooting.md) | Every diagnostic code, common errors, and the in-game checklist. |
-| [FAQ](FAQ.md) | Short answers to common questions. |
-| [Research behind the defaults](Research.md) | The benchmarks, spikes and literature behind each default. |
+| `sdc` / `sdc.exe` | The command-line tool. |
+| `tessalith.exe` | The desktop application. |
+| `sdc.toml` | The project config. The GUI writes it and the CLI reads it. |
+| `sdc-project.toml` | The GUI's set definitions, beside `sdc.toml`. The CLI doesn't read it. |
+| `<output>\_sdc\manifest.jsonl` | The record of every file written. Re-runs compare against it. |
 
-## Names you will see
+Settings, caches and logs: [where Tessalith keeps its files](Installation.md#where-tessalith-keeps-its-files).
 
-The command line, files and folders keep the working name `sdc`:
+## Words the window uses
 
-| You type or see | What it is |
-|---|---|
-| `sdc` / `sdc.exe` | Command-line tool. Its `--help` text still calls itself a working name. |
-| `tessalith` / `tessalith.exe` | Desktop application. |
-| `sdc.toml` | Project config file. |
-| `sdc-project.toml` | GUI-only set definitions, stored next to `sdc.toml`. |
-| `%APPDATA%\sdc\`, `%LOCALAPPDATA%\sdc\` | Your settings, presets, scan database and logs ([list](Installation.md#where-tessalith-keeps-its-files)). |
-| `<output>\_sdc\manifest.jsonl` | Record of every file written ([manifest](Installation.md#where-tessalith-keeps-its-files)). |
+- **Set:** the textures of one material. They share a base name, and under `cs` one PGPatcher JSON entry.
+- **Helper:** a source file that fills a channel of another output. It's never written as a DDS.
+- **Undecided:** a texture waiting for your answer. Export skips it until you give one.
+- **Not ready:** a set with a problem in itself or in one of its textures.
 
-## What Tessalith does with a folder
+## Licence
 
-1. Finds every image in the input folders.
-2. Groups files into texture sets by base name (`rock01.png`, `rock01_n.png`, `rock01_rmaos.png` form one set).
-3. Works out a sub-type for each file from its suffix or name, for example `_n` is a normal map.
-4. Resolves the settings for each file from built-in defaults, the preset, your config files, rules and command-line overrides.
-5. Packs raw maps into the packed layout the target expects ([packing](Presets-and-Targets.md#packed-maps-per-target)).
-6. Builds mipmaps, encodes with the chosen encoder, writes the DDS atomically.
-7. Decodes the result again and validates it, then records it in the manifest.
-
-A file whose type Tessalith cannot work out is reported as unresolved, not guessed; fix it by renaming or with a `[files]` entry ([Texture types](Texture-Types.md)).
+GPL-3.0-or-later. The engine (the `engine` and `encoders-sys` crates) is MPL-2.0, and the vendored encoders keep their own licences: see [THIRD_PARTY_NOTICES.md](https://github.com/Alistra-za/Tessalith/blob/main/THIRD_PARTY_NOTICES.md).

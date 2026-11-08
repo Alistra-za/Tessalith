@@ -1,22 +1,22 @@
-# Texture types
+# Texture types and naming
 
-The sub-type (what a texture is for) sets its format, colour tag, alpha handling and mip settings. This page covers how files are named, grouped and typed, and what each type becomes.
+For anyone naming source files: this page says what each file becomes (set, sub-type, format, colour tag, alpha) and what the artist checks are telling you. Packing raw maps is on [Texture packing](Texture-Packing.md); shaders and the extra exports are on [Set shaders](Set-Shaders.md).
 
-## Input formats
+## Which files Tessalith reads
 
-| Extension | Notes |
+| Extension | How it is read |
 |---|---|
-| `.png`, `.tga`, `.tif`, `.tiff`, `.bmp`, `.jpg`, `.jpeg`, `.webp` | Read as stored. |
-| `.exr`, `.hdr` | Float sources. A TruePBR emissive needs one (peaking above 1.0) to become BC6H. `hdr_sky` is BC6H whatever the source. An `.exr` with alpha is read as premultiplied; set `alpha.exr_straight = true` for one saved with straight alpha (in the GUI: the Problems row's **Straight alpha**, or the tick box in the texture's Alpha group). |
-| `.psd`, `.psb` | The merged composite image only; layers are never read. RGB and Grayscale documents, 8, 16 and 32 bits per channel. The file must be saved with Maximize Compatibility on; without it the file is refused. Colour that Photoshop matted against white is un-matted. |
-| `.kra`, `.ora` | Not read: `IN-DECODE` ("Krita and OpenRaster files are not read; export the image as PNG"). |
-| `.dds` | Skipped by default (`IN-DDS-SKIPPED`). Set `reencode = true` on the file to convert it anyway, at a quality cost (`LOSS-REENCODE`). |
+| `.png`, `.tga`, `.tif`, `.tiff`, `.bmp`, `.jpg`, `.jpeg`, `.webp` | As stored. |
+| `.exr`, `.hdr` | Float. A TruePBR emissive needs one (peaking above 1.0) to become BC6H; `hdr_sky` is BC6H whatever the source. An `.exr` alpha is read as premultiplied. For straight alpha set `alpha.exr_straight = true` (GUI: the Problems row's **Straight alpha**, or the tick box in the texture's Alpha group). |
+| `.psd`, `.psb` | The merged image only, never layers. RGB or Grayscale, 8, 16 or 32 bits. Save with Maximize Compatibility on, or the file is refused. Colour Photoshop matted against white is un-matted. |
+| `.kra`, `.ora` | Refused with `IN-DECODE`: export the image as PNG. |
+| `.dds` | Skipped (`IN-DDS-SKIPPED`). Set `reencode = true` on the file to convert it anyway, at a quality cost (`LOSS-REENCODE`). |
 
-Other extensions inside a folder are ignored. Images larger than 16384 pixels on a side fail with `DIM-TOO-LARGE`. Any size is accepted: [Format and size](Project-Config-Fields.md#format-and-size) says what size gets written. Embedded ICC profiles are ignored and the pixels are read as stored. NaN or infinite samples are replaced (`IN-NONFINITE`).
+Other extensions in a folder (`.xcf`, `.pdn`) are ignored: export to PNG or TGA first. Images over 16384 px on a side fail with `DIM-TOO-LARGE`. Any smaller size is accepted; [Format and size](Project-Config.md#format-and-size) says what size gets written.
 
-## Texture sets
+## How files form a set
 
-Files in the same output folder that share a base name form a texture set. The base name is the file name minus its suffix:
+Files in the same output folder with the same base name (the file name minus its suffix) form a set:
 
 ```text
 textures\armor\iron\
@@ -27,27 +27,28 @@ textures\armor\iron\
   iron_trim_n.png   set "iron_trim", suffix _n
 ```
 
-A file waits for a type instead of becoming a colour map when all of these hold: it has no sub-type in a `[files]` entry or a rule, its name has an underscore but no recognised suffix (aliases count), and it is alone in its set, counted after joins and set edits. `rock_bump.png` on its own waits: you can't tell if it's a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it. Files under `textures\cubemaps`, `landscape`, `sky` and `interface` never wait. A set's shader doesn't give the type. A kept `.dds` never waits. In the GUI, a file that a scanned mesh uses as its diffuse, or a GRAS model's diffuse, doesn't wait either: the mesh says what it is. <!-- D:GY1 -->
+A file **waits for a type** instead of becoming a colour map when all three hold: no `[files]` entry or rule gives it a sub-type, its name has an underscore but no known suffix (aliases count), and it is alone in its set. `rock_bump.png` alone waits, because nothing says whether it is a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it.
 
-To assign the type, set `subtype` in the file's `[files]` entry in `sdc.toml` (or pick it in the GUI), keyed by the path under the input folder:
+Never waiting: files under `textures\cubemaps`, `landscape`, `sky` and `interface`, a kept `.dds`, and (in the GUI) a file that a scanned mesh or a GRAS model uses as its diffuse, because the mesh says what it is. A set's shader doesn't give the type. <!-- D:GY1 -->
+
+To give the type, set `subtype` in the file's `[files]` entry, keyed by the path under the input folder, or pick it in the GUI:
 
 ```toml
 [files."textures/x/rock_bump.png"]
 subtype = "diffuse"
 ```
 
-In the GUI a waiting file is Undecided, with a Problems row, a Review row and no set card until you pick a type (the card stays when you created the set or set something on it, such as a shader). On the command line it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1; `--allow SUG-LOW-CONFIDENCE` doesn't convert it, and the [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters) has the `--set` form. <!-- D:GY5 -->
-
-Some decisions depend on the whole set: whether it is a PBR set, its shader, which raw maps get packed together, and whether a normal map's detail is baked into roughness.
+- **GUI:** a waiting file is Undecided, with a Problems row and a Review row, and no set card until you pick a type. High-confidence suggestions are applied for you; Medium and Low always need you.
+- **CLI:** it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1. `--allow SUG-LOW-CONFIDENCE` doesn't convert it; the `--set` form and [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters) are in the CLI reference. <!-- D:GY5 -->
 
 ## Suffixes
 
-Suffixes are matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmask` over `_m`.
+Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmask` over `_m`.
 
 | Suffix | Suggested sub-type | Confidence |
 |---|---|---|
 | none, or `_d` | `diffuse`; `pbr_albedo` in a PBR set; `skin_albedo` in an Advanced skin set; `landscape_diffuse` when a folder in the path is named `landscape`; `ui_sky` under `interface` or `sky` folders; `hdr_sky` for a float source under `sky` | High (`hdr_sky` Medium) |
-| `_n` | `normal`; `pbr_normal` in a PBR set; `landscape_normal` when a folder in the path is named `landscape` | High |
+| `_n` | `normal`; `pbr_normal` in a PBR set; `landscape_normal` under a `landscape` folder | High |
 | `_msn` | `msn` (model-space normal) | High |
 | `_s` | `msn_specular` when the set has `_msn`; `pbr_subsurface` in a PBR set; otherwise `subsurface_tint` | High, High, Low |
 | `_m`, `_em`, `_envmask` | `envmask`; `complex_material` when the alpha minimum is below 251 | High for both |
@@ -63,33 +64,28 @@ Suffixes are matched case-insensitively, longest first, so `_msn` wins over `_n`
 | `_sk` | `skin_sk` in an Advanced skin set; otherwise `backlight_tint` | High, Low |
 | `_i` | `diffuse` (multilayer inner layer) | Medium |
 | `_wet` | `skin_wet`, only in a `cs` Advanced skin set; elsewhere `_wet` is part of the base name | High |
-| `_detail`, `_detailnorm`, `_detail_n` | `detail_normal` or `skin_detail`, by the set: see [Detail names](#detail-names); `x_detail_n` in any other set keeps its own set stem (`x_detail`) | High in a skin set; in a landscape set the shader decides |
-| `_e`, or a file under `textures\cubemaps\` | `cubemap`; the six-face suffixes `_posx` to `_negz` (or `_px` to `_nz`) after the name are cut off first | High |
+| `_detail`, `_detailnorm`, `_detail_n` | `detail_normal` or `skin_detail`, by the set: see [Detail names](#detail-names) | High in a skin set; in a landscape set the shader decides |
+| `_e`, or a file under `textures\cubemaps\` | `cubemap`; the face suffixes `_posx` to `_negz` (or `_px` to `_nz`) are cut off first | High |
 
-A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or it has a raw roughness, glossiness, metallic or AO map. A set is an Advanced skin set when it has or builds an `_rfaos`; a set whose shader you set to Advanced Skin (GUI, or `--set set:<id>.shader=advanced_skin`) builds one unless `packing.recipe` says otherwise or it has only a metallic map, and its diffuse is `skin_albedo` either way (also when written as plain `diffuse`). In the GUI, pinning the set's Diffuse slot turns this off: the set then reads and packs as it would without the shader choice, unless its diffuse is already written as `skin_albedo`. In an Advanced skin set a plain `_f` is the skin fuzz mask: a greyscale map packed into the `_rfaos` G channel and not converted on its own. A `_f` never makes a set Advanced skin by itself, and one you give a sub-type converts alone as fuzz.
-
-Medium and Low suggestions always need your confirmation. High suggestions are applied automatically in the GUI; for the command line see [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters).
-
-A file whose name fits none of these rules is read as a colour map (`rock_nm.png` becomes a diffuse) when it has other files in its set; alone, with an underscore, it [waits for a type](#texture-sets). Rename it, add an `[inputs]` alias, or set `subtype` in a `[files]` entry.
+- **A PBR set** (under `cs`) has a `pbr` folder in its path, or an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or a raw roughness, glossiness, metallic or AO map.
+- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. In the GUI, pinning the set's Diffuse slot turns this off. In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself.
+- **A name that fits none of the above** is read as a colour map when the set has other files (`rock_nm.png` becomes a diffuse); alone, it [waits for a type](#how-files-form-a-set). Rename it, add an `[inputs]` alias, or set `subtype`.
 
 ### Detail names
 
-The three spellings in the suffix table all mean the set's detail normal. What the file becomes depends on the set:
+The three detail spellings all mean the set's detail normal. What the file becomes depends on the set:
 
 | Set | The detail file becomes |
 |---|---|
-| Landscape or PBR Landscape | `detail_normal` |
+| Landscape or PBR Landscape (a `landscape` folder in the path, or the set's shader) | `detail_normal` |
 | Advanced skin (`cs` only) | `skin_detail` |
 
-- **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or XPMF profile looks for that name.
-- **Two detail files in one landscape or skin set** are `IN-DUPLICATE`, an error, also when Landscape is picked from a mesh. Rename or remove one.
-- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. There, `iron_detail_n.png` keeps its own set stem: it is a normal in set `iron_detail`. A lone `rock_detail.png` with no set `rock` is a set of its own.
-- **Landscape here** means a `landscape` folder in the path, or Landscape or PBR Landscape set as the set's shader. A set whose shader is only picked from a mesh scan, outside a landscape path, needs the shader set explicitly before `_detail_n` joins it.
-- **The GUI refuses an output name** that ends in one of the three spellings, because the set would read the file back as a detail map.
+- **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or [XPMF profile](PBR-Landscape.md#projected-noise-and-detail-normal) looks for that name.
+- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. `iron_detail_n.png` there keeps its own set stem, as a normal in set `iron_detail`.
 
 ### Exporter names
 
-Tessalith also understands the names that texturing tools commonly export:
+Names that texturing tools commonly export are understood too:
 
 | Term | Read as | Written as |
 |---|---|---|
@@ -102,105 +98,144 @@ Tessalith also understands the names that texturing tools commonly export:
 | `_roughness`, `_rough` | Raw roughness | packed |
 | `_metallic`, `_metalness`, `_metal` | Raw metallic | packed |
 | `_ao`, `_ambientocclusion`, `_occlusion` | Raw AO | packed |
-| `_orm` | Channel-packed AO, roughness and metallic ([channels](Texture-Packing.md#packing-raw-maps)) | packed |
+| `_orm` | AO in R, roughness in G, metallic in B ([how it packs](Texture-Packing.md#packing-loose-maps)) | packed |
 | `_specular`, `_spec` | Raw specular | packed |
 | `_glossiness`, `_gloss` | Raw glossiness | packed (inverted into roughness) |
 | `_height`, `_displacement`, `_disp` | Raw height | packed |
 | `_opacity` | Raw opacity | the colour texture's alpha ([helper](Texture-Packing.md#helper-textures)) |
 | `_fuzz`, `_sheen` | Raw fuzz | packed |
-| `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by Also export as (Vanilla / Complex material) |
-| `_cavity` | Raw cavity | read only by Also export as (Vanilla / Complex material) |
+| `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by [Also export](Set-Shaders.md#also-export-as-vanilla-and-cm) |
+| `_cavity` | Raw cavity | read only by Also export |
 
-A normal map named only `_normal`, `_nrm` or `_norm` does not say which way its green channel points. Tessalith assumes DirectX (Skyrim's), converts it without a flip and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> If the map is OpenGL, set `channels.green_convention = "opengl"` on the file (the GUI offers a *Treat as OpenGL* button on that note) or name it `_normalgl`.
+**Green direction.** Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doesn't say which way its green points, so Tessalith assumes DirectX, doesn't flip, and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> A map from Substance or Blender is often OpenGL: name it `_normalgl`, or set `channels.green_convention = "opengl"` on the file (the GUI's note has a **Treat as OpenGL** button for it). A file named `_n` is taken as DirectX.
 
-You can add your own suffixes through a preset's `suffix_aliases`. See [Presets and targets](Presets-and-Targets.md#suffix-aliases).
+Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Presets-and-Targets.md#suffix-aliases).
 
-## Sub-types
+## Sub-types: what each file becomes
 
-There are 34 sub-types in five categories.
+One row per sub-type. **vanilla** says whether the sub-type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and `--allow CFG-UNAVAILABLE` (or the GUI's acknowledge button) converts it as the fallback named there. With no fallback, change the sub-type or the target.
 
-| Sub-type | Category | Default format | Tag (`cs`) | Default alpha | Notes |
-|---|---|---|---|---|---|
-| `diffuse` | Color | BC7 | UNORM | remove | Alpha meaning comes from the mesh: you or a scan decide. |
-| `landscape_diffuse` | Color | BC7 | UNORM | data | Alpha is the snow/height mask. BC1 is refused (`FMT-LANDSCAPE-BC1`). |
-| `pbr_albedo` | Color | BC7 | sRGB | remove | `cs` only. |
-| `pbr_emissive` | Color | BC6H for float sources above 1.0, else BC7 | n/a or sRGB | remove | `cs` only. `FMT-HDR-SOURCE` explains the choice. |
-| `glow` | Color | BC7 | UNORM | remove | |
-| `pbr_subsurface` | Color | BC7 | sRGB | data | `cs` only. Also the coat colour map. |
-| `pbr_fuzz` | Color | BC7 | sRGB | data | `cs` only. |
-| `subsurface_tint` | Color | BC7 | UNORM | remove | |
-| `backlight_tint` | Color | BC7 | UNORM | remove | |
-| `ui_sky` | Color | BC7 | UNORM | remove | No mipmaps. |
-| `skin_albedo` | Color | BC7 | UNORM | remove | `cs` Advanced skin. UNORM because the CS skin shader reads it that way. |
-| `normal` | Normal | BC7 | UNORM | data | Alpha often holds specular. |
-| `landscape_normal` | Normal | BC7 | UNORM | data | |
-| `pbr_normal` | Normal | BC7 | UNORM | remove | `cs` only. Vanilla specular in alpha is dropped. |
-| `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)). The detail names pick it in a landscape set ([Detail names](#detail-names)); in other sets no suffix suggests it, so pick it on the file. |
-| `msn` | Normal | BC7 | UNORM | remove | Model-space normal. Pick the baker it came from with [`channels.msn_source`](Project-Config-Fields.md#channels) (*Baked in* in the GUI). |
-| `coat_normal` | Normal | BC7 | UNORM | data | `cs` only. Normal plus coat roughness in alpha; bakes its own detail into that roughness. |
-| `skin_wet` | Normal | BC7 | UNORM | data | `cs` Advanced skin: a normal with a mask in alpha. A grey source is not written (`SKIN-WET-GREY`). The Community Shaders loader reads BC1, BC3, BC7 and RGBA8 only (`FMT-CS-SKIN-LOADER`, which `--allow` cannot lift). <!-- D:HB3,HB4 --> |
-| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | `cs` Advanced skin, the detail names: a tangent normal with a strength mask in alpha. BC5 is allowed on it, and it is not held to the BC5 normal check. <!-- D:HB4 --> |
-| `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | Environment mask (`_m`). |
-| `height` | Grayscale | BC4 | UNORM | remove | Parallax height (`_p`). |
-| `projected_noise` | Grayscale | BC4 | UNORM | remove | `_noise`: a landscape set's projected-noise map for an XPMF profile. |
-| `msn_specular` | Grayscale | BC4 | UNORM | remove | `_s` beside an `_msn`. |
-| `skin_sk` | Grayscale | BC4 | UNORM | remove | `cs` Advanced skin; red channel only. |
-| `gray` | Grayscale | BC4 | UNORM | remove | A plain grey map you pick on the file; no suffix, scan or shader suggests it. BC4 or R8 only. Reads the red channel unless [`channels.grayscale_source`](Project-Config-Fields.md#channels) names another. <!-- D:FM37 --> |
-| `complex_material` | MixedPacked | BC7 | UNORM | data, exact opaque | Complex `_m`. Under every target. |
-| `rmaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |
-| `skin_rfaos` | MixedPacked | BC7 | UNORM | data | `cs` only. |
-| `flow` | MixedPacked | BC5 | UNORM | remove | `cs` only. Hair flow; at 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
-| `generic_two_channel` | MixedPacked | BC5 | UNORM | remove | |
-| `generic_data` | MixedPacked | BC7 | UNORM | data | Use for any data map Tessalith has no type for. |
-| `complex_grass` | MixedPacked | BC7 only | UNORM only | cutout (when the alpha varies) | Always BC7 UNORM at its own size. See [Complex grass](Set-Shaders.md#complex-grass). |
-| `hdr_sky` | Hdr | BC6H | n/a | | `cs` only. |
-| `cubemap` | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | An `_e` environment cube ([Cubemaps](Cubemaps.md)). BC1, BC3, BC7, RGBA8 or RGB8 only. |
+| Sub-type | Category | Default format | Tag (`cs`) | Default alpha | vanilla | Notes |
+|---|---|---|---|---|---|---|
+| `diffuse` | Color | BC7 | UNORM | remove | yes | The mesh decides the alpha. |
+| `landscape_diffuse` | Color | BC7 | UNORM | data | yes | Alpha is the snow/height mask. BC1 refused (`FMT-LANDSCAPE-BC1`). |
+| `pbr_albedo` | Color | BC7 | sRGB | remove | `diffuse` | `cs` only. |
+| `pbr_emissive` | Color | BC6H for a float source above 1.0, else BC7 | n/a or sRGB | remove | `glow` | `cs` only. `FMT-HDR-SOURCE`. |
+| `glow` | Color | BC7 | UNORM | remove | yes | |
+| `pbr_subsurface` | Color | BC7 | sRGB | data | no | `cs` only. Also the coat colour map. |
+| `pbr_fuzz` | Color | BC7 | sRGB | data | no | `cs` only. |
+| `subsurface_tint` | Color | BC7 | UNORM | remove | yes | |
+| `backlight_tint` | Color | BC7 | UNORM | remove | yes | |
+| `ui_sky` | Color | BC7 | UNORM | remove | yes | No mips. |
+| `skin_albedo` | Color | BC7 | UNORM | remove | no | Advanced skin. UNORM because the CS skin shader reads it that way. |
+| `cubemap` | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | yes | See [Cubemaps](Cubemaps.md). BC1, BC3, BC7, RGBA8 or RGB8 only. |
+| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. |
+| `landscape_normal` | Normal | BC7 | UNORM | data | yes | |
+| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. Vanilla specular in alpha is dropped. |
+| `detail_normal` | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
+| `msn` | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
+| `coat_normal` | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
+| `skin_wet` | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only BC1, BC3, BC7 and RGBA8 here (`FMT-CS-SKIN-LOADER`; `--allow` can't lift it). <!-- D:HB3,HB4 --> |
+| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
+| `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | yes | `_m`. |
+| `height` | Grayscale | BC4 | UNORM | remove | yes | `_p`. |
+| `projected_noise` | Grayscale | BC4 | UNORM | remove | yes | `_noise`, for an XPMF profile. |
+| `msn_specular` | Grayscale | BC4 | UNORM | remove | yes | `_s` beside an `_msn`. |
+| `skin_sk` | Grayscale | BC4 | UNORM | remove | no | Red channel only. |
+| `gray` | Grayscale | BC4 | UNORM | remove | yes | A plain grey map you pick on the file. BC4 or R8 only. Reads red unless [`channels.grayscale_source`](Project-Config.md#channels) says otherwise. <!-- D:FM37 --> |
+| `complex_material` | MixedPacked | BC7 | UNORM | data, exact opaque | yes | Complex `_m`. |
+| `rmaos` | MixedPacked | BC7 | UNORM | data | no | `cs` only. |
+| `skin_rfaos` | MixedPacked | BC7 | UNORM | data | no | |
+| `flow` | MixedPacked | BC5 | UNORM | remove | no | Hair flow. At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
+| `generic_two_channel` | MixedPacked | BC5 | UNORM | remove | yes | |
+| `generic_data` | MixedPacked | BC7 | UNORM | data | yes | Any data map Tessalith has no type for. |
+| `complex_grass` | MixedPacked | BC7 only | UNORM only | cutout (when alpha varies) | yes | Own size. Both targets accept it; only CS and ENB read it. See [Complex grass](PBR-Landscape.md#complex-grass). |
+| `hdr_sky` | Hdr | BC6H | n/a | | no | `cs` only. |
 
-Notes on the defaults:
+- **Default alpha is a start.** Analysis decides: no alpha channel resolves to `remove`; alpha is opaque when its minimum is 251 or more, or when fewer than 0.1 % of texels are below 251 and no connected group of them is larger than 16 texels (stray noise from a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes answer.
+- **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
+- **Normal maps are never BC4 or BC5:** the game would decode Z as −1 and lose the alpha (`FMT-BC5-NORMAL`, blocking).
+- **HDR formats** (BC6H, RGBA16F) exist only under `cs`; an emissive becomes BC6H only from a float source above 1.0.
 
-- The "default alpha" is the starting point. Analysis changes it: a source with no alpha channel resolves to `remove`, and alpha counts as opaque when its minimum is 251 or more, or when the texels below 251 are fewer than 0.1 % of the image and no connected group of them is larger than 16 texels (stray noise left by a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes supply one.
-- Exact opaque means opaque alpha decodes as exactly 255 in BC7, not 254. It is on for `_m` maps because PGPatcher and ENB read their alpha; turning it off for a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
-- Normal maps are never BC4 or BC5: the game would decode Z as -1 and lose alpha (`FMT-BC5-NORMAL`, blocking).
+### sRGB or UNORM
 
-The full list of format, tag and target rules is on [Presets and targets](Presets-and-Targets.md).
+Under `cs`, PBR colour maps (`pbr_albedo`, `pbr_emissive` as BC7, `pbr_subsurface`, `pbr_fuzz`) are tagged `_SRGB` (`TAG-UNORM-PBR` if not) and everything else is UNORM, `diffuse` and `skin_albedo` included (`TAG-SRGB-NONPBR`). Vanilla tags nothing `_SRGB` (`TAG-SRGB-VANILLA`), and neither does anything under a `lod` folder, because LOD shaders reject it (`TAG-SRGB-LOD`). A wrong tag makes the texture look too dark or washed out.
 
-### Formats
+## Alpha
 
-| Format | Id | Contents | Use |
-|---|---|---|---|
-| BC1 | `bc1` | RGB; 1-bit alpha only with `encoder.bc1_alpha` ([alpha policies](#alpha-policies)) | Opaque colour in the compact presets. |
-| BC3 | `bc3` | RGBA | Available, not chosen by any built-in preset. |
-| BC4 | `bc4` | One channel | Grayscale maps. |
-| BC5 | `bc5` | Two channels | Flow and generic two-channel maps. |
-| BC6H | `bc6h_uf16` | HDR RGB, unsigned | HDR emissive and sky, `cs` only. |
-| BC7 | `bc7` | RGBA | Default for almost everything. |
-| RGBA8 | `rgba8` | Uncompressed, written as B8G8R8A8 | |
-| RGB8 | `rgb8` | Uncompressed 24-bit B8G8R8, legacy header | No alpha and no `_SRGB`, see below. |
-| R8 | `r8` | Uncompressed, one channel | |
-| RG8 | `rg8` | Uncompressed, two channels | |
-| RGBA16F | `rgba16f` | Uncompressed half-float | `cs` only. |
-
-RGB8 is offered wherever RGBA8 is offered with a linear tag, cubemaps included. It has two limits. A texture that keeps its alpha is refused (`FMT-RGB8-ALPHA`, blocking), so the source must be opaque or use the `remove` policy; empty `data` alpha is accepted as for BC1 ([BC1 alpha](#alpha-policies)). The tag must be linear, because the legacy header it needs has no `_SRGB` form (`header = "dx10"` is refused for the same reason). <!-- D:FM38 -->
-
-As a DDS input, Tessalith also reads BC2, signed BC6H, BGRX8, RGBA32F and three legacy layouts: 24-bit R8G8B8 (the format above), A8L8 (grey with alpha) and L16 (grey, from the high byte). It never writes A8L8 or L16. R5G6B5, A1R5G5B5, A4R4G4B4, X8B8G8R8 and A8 are not read.
-
-Which encoder each format uses is in [Format and encoder](Project-Config.md#format-and-encoder).
-
-## Packing, helpers and shaders
-
-- How raw maps pack and how helper textures feed other outputs: [Texture packing](Texture-Packing.md).
-- Set shaders, height maps, `_generated` files, complex grass and the extra exports: [Shaders and height maps](Set-Shaders.md).
-
-## Alpha policies
-
-| Policy | Meaning | Mip handling |
+| Policy | Meaning | Mips |
 |---|---|---|
 | `remove` | No alpha; stored opaque. | |
-| `cutout` | Alpha testing against `alpha.threshold` with `alpha.compare`. | Coverage preserved per mip (unless `mips.coverage = "off"`), so foliage does not thin out in the distance. |
+| `cutout` | Alpha test against `alpha.threshold` with `alpha.compare`. | Coverage preserved per mip (unless `mips.coverage = "off"`), so foliage doesn't thin out at a distance. |
 | `blend` | Alpha blending. | Box-averaged opacity. |
 | `cutout_blend` | Both. | Coverage preserved. |
-| `data` | Alpha is data (specular, height, a mask). | Treated as a plain channel. |
+| `data` | Alpha is data (specular, height, a mask). | A plain channel. |
 
-Discarding varying alpha by accident is blocked (`LOSS-ALPHA-DATA`), except when you chose `remove` yourself or the file is a `pbr_normal`.
+Throwing away varying alpha by accident is blocked (`LOSS-ALPHA-DATA`), unless you chose `remove` yourself or the file is a `pbr_normal`.
 
-**BC1 alpha.** BC1 is opaque unless you turn on `encoder.bc1_alpha` (GUI: **1-bit alpha**); nothing turns it on for you. With it on, a `cutout`, `blend` or `cutout_blend` texture keeps 1-bit alpha: each mip is built with coverage preserved (`blend` included), then texels below the alpha-test cutoff become transparent black and the rest opaque. The cutoff is `alpha.threshold` + 1 with `gt` and `alpha.threshold` with `ge` (128 by default). When more than 1 % of the source texels have alpha between 1 and 254, `ALPHA-BC1-ONE-BIT` warns that those soft edges turn hard. Without the setting, BC1 with alpha is `FMT-BC1-ALPHA` (blocking). `data` alpha is refused too, unless it is empty: no alpha channel, or exactly 255 everywhere in the image that is written (a packed `_rmaos` whose specular took its default, or a target whose helper fill is solid 255; one stray texel makes it data). An opaque BC1 reads alpha as 255, so the file is the same as with `remove`, and the policy stays `data`. A `complex_material` stays refused, because its empty alpha is written as 0 and BC1 cannot hold that with colour; use BC7 or BC3. <!-- D:FM20,FM39 -->
+### BC1 and 1-bit alpha
+
+- BC1 is opaque unless you turn on `encoder.bc1_alpha` (GUI: **1-bit alpha**); nothing turns it on for you. Without it, BC1 with alpha is `FMT-BC1-ALPHA` (blocking), and so is `data` alpha, unless that alpha is empty (no channel, or 255 everywhere). A `complex_material` stays refused: its empty alpha is written as 0, which BC1 can't hold with colour. <!-- D:FM20,FM39 -->
+- With it on, a `cutout`, `blend` or `cutout_blend` texture keeps 1-bit alpha: texels below the cutoff become transparent black, the rest opaque. The cutoff is `alpha.threshold` + 1 with `gt` and `alpha.threshold` with `ge` (128 by default). `ALPHA-BC1-ONE-BIT` warns when more than 1 % of the source texels have alpha between 1 and 254.
+
+## Artist checks
+
+Four checks read the numbers Tessalith already measures while it plans, and warn about maps that will probably look wrong in game. They only warn: none blocks an export, asks you anything or changes "ready", and none reaches Review or the Files rows. The Problems tab lists them with a grey **check** dot and a **Checks** pill ([Problems](GUI-Problems.md)). Each has a switch in **Advanced → Checks** (all on, saved in `gui.toml`); a switch hides its results at once, with no re-plan.
+
+| Check | What it flags | Code |
+|---|---|---|
+| **Low detail** | A top mip that adds almost nothing over mip 1 (an upscale, a 2K made from a 1K). | `CHK-LOW-DETAIL` |
+| **Green direction** | A normal that curls like OpenGL when read as DirectX (an Info hint; it never flips by itself, and the **Treat as OpenGL** button is one undo step). A blue channel that points the wrong way. | `CHK-GREEN-GUESS`, `CHK-Z-SIGN` |
+| **Parallax** | A height map or complex `_m` alpha that uses too little range, clips, is mostly white, or is steep enough to tear. Landscape sets whose `displacementScale` differs by more than 2×. | `CHK-PARALLAX`, `CHK-PARALLAX-SCALE` |
+| **UV coverage** | UV islands closer than 8 texels for more than 2 % of the used texels, so colours bleed across them at a distance (mip 3 and up). | `CHK-UV-GUTTER` |
+
+The green-direction test is weak on straight ridges: look at the map.
+
+### UV coverage
+
+It reads the Meshes scan, so scan your MO2 instance first ([Mod scanning](Mod-Scanning.md)). Switch on the preview's **UV coverage** toggle for one texture ([Previews](Previews.md)), or press **Check all UV coverage** in Advanced → Checks for every colour texture of the folder (a bar shows *done / total*; **Stop checking UV coverage** ends it). The toggle is greyed out, with the reason, when:
+
+- no scan has finished (an empty scan counts as none);
+- a scan is running, or was stopped ("The Meshes scan was stopped: scan again to check UV coverage");
+- the sub-type is anything but diffuse, PBR albedo or skin albedo. Landscape diffuses are left out: terrain doesn't use NIF shapes.
+
+### Low detail
+
+With **Low detail** on, Export measures each texture it writes and writes it at its planned size; a texture that adds little detail gets the warning in Problems. Nothing is asked and nothing is held back. To write it at half size, set **Advanced → Resize** to *Half* ([`resize`](Project-Config.md#format-and-size)). Only textures that *Half* would shrink, with no resize set yet, are measured. <!-- D:FM29 -->
+
+## Height maps
+
+The Parallax check judges a height map against the neutral height (the value that shifts nothing) for the set's shader. White is raised and black is deepest on every path.
+
+| Path | Neutral | Where the height lives |
+|---|---|---|
+| Vanilla parallax | 0.5 | `_p`, red |
+| Complex material | 0.5 | `_m` alpha. Parallax is on only where alpha is strictly between 4/255 and 251/255; 4/255 or less keeps complex material on with no parallax |
+| PBR parallax | 0.5 | `_p`, red |
+| PBR multilayer with inner-layer (coat) parallax | 1.0 (white); black is the deepest recess and nothing is raised | `_p`, red |
+| Landscape, vanilla and PBR | 0.5 per layer | The layer alpha or displacement map |
+| Vanilla multilayer | Not a height map: the layer texture's alpha is a depth, so the height checks are skipped | The layer texture's alpha |
+
+A mostly white `_p` is normal on the coat path and a warning on the 0.5 paths.
+
+## Files named _generated
+
+A file named `<base>_<role>_generated.png` is read as an ordinary source. Make them in any tool.
+
+| File | Used as |
+|---|---|
+| `<base>_p_generated.png` | The set's `_p` |
+| `<base>_height_generated.png` | The raw height packed into a complex material `_m` alpha (vanilla target) |
+| `<base>_ao_generated.png` | The AO packed into the `_rmaos` blue channel (PBR sets, `cs` only) |
+| `<base>_curves_generated.png` | The set's `_curves` (read only by Also export) |
+
+- `_generated` after one of those roles is stripped when grouping, so the file joins its set by base name. A real map for the same slot wins and the generated file is skipped (`GEN-REPLACED`, Info).
+- `_ao_generated` is read as visibility (1 = open). It fills B of a pre-packed `_rmaos`/`_rfaos` whose blue is flat white, keeping R, G and A (`GEN-AO`, Info).
+- `_curves_generated` is read only by Also export's soft light, as a 0.5-centred map with peaks bright. A plain export doesn't use it.
+
+## Where next
+
+- Raw maps and helper textures: [Texture packing](Texture-Packing.md).
+- Shaders and the Vanilla/CM export: [Set shaders](Set-Shaders.md).
+- Targets, presets and your own suffixes: [Presets and targets](Presets-and-Targets.md).
+- Which encoder each format uses: [Research](Research.md).

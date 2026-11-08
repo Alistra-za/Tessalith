@@ -1,52 +1,97 @@
 # GUI guide
 
-A map of the GUI (`tessalith.exe`): the main window with its areas numbered, each linked to the page that explains it.
+A map of the GUI (`tessalith.exe`) for anyone who just opened it, plus the keys, the bottom panel and the dialog rules that apply everywhere. For a first set from source folder to DDS, start with [Getting started](Getting-Started.md).
 
-## Main window
+## The main window
 
 ![Tessalith's main window with a folder open: the header on top, the Textures and Sets columns, the settings of the selected texture, the Advanced strip at the right and the bottom panel with its Problems tab. Numbered red markers point at the areas listed below.](../img/gui/GUI-Guide/main-window.png)
 
-The picture shows a small made-up mod. The [2D preview](GUI-Preview.md) is not shown: it replaces the centre when you double-click a tile.
+The picture shows a small made-up mod. Double-clicking a tile replaces the centre with the 2D preview: see [Previews](Previews.md).
 
-1. **Open, Undo, Redo** (header, far left). Pick a folder or a recent one, and step back and forward through your decisions. See [Header](GUI-Main-Window.md#header).
-2. **MO2…, Preset** (header). **MO2…** is the scan source, and **Preset** is the preset the folder converts with. The Mode (the target, `cs` or `vanilla`) is set in the [Presets](GUI-Presets.md#presets) tab, not in the header. All three are saved with the project. See [Header](GUI-Main-Window.md#header).
-3. **Textures / Meshes tabs and the column eyes** (header, middle). Switch between the converter and the [mod scanning](Mod-Scanning.md) view, and show or hide the Textures and Sets columns. See [Header](GUI-Main-Window.md#header).
-4. **Export to ▾** (header, right; **More ▾** with no project open). The folder the converted textures go to for this project. Its menu opens it, changes it and switches on the Vanilla and CM extras. See [Export to](GUI-Main-Window.md#export-to).
-5. **Save** (header, right). Writes `sdc.toml` and `sdc-project.toml`. **Ctrl+S** does the same. See [Keyboard](GUI-Keyboard.md#keyboard).
-6. **Export** (header, right edge). Converts the folder. If something is blocked or undecided, Review opens in the bottom panel first. See [Export](GUI-Main-Window.md#export) and [Review and Export](GUI-Review-and-Export.md).
-7. **Texture filters** (top of the Textures column). Pills with counts (*Undecided*, *Warnings*, *Failed*, *Not in a set*), the **Filter ▾** popup, the tile size buttons and the search box. See [Textures column](GUI-Textures-Column.md#filters).
-8. **Texture tiles** (Textures column). One tile per source file with its thumbnail, name and badges. An amber border means it still needs an answer; click a tile to select it, double-click for the preview. See [Textures column](GUI-Textures-Column.md) and [Deciding](GUI-Texture-Panel.md#deciding).
-9. **Sets filters** (top of the Sets column). Pills for *Not ready*, *Ready* and *No JSON*, a **Filter ▾** and a search box for sets. See [Sets column](GUI-Sets-Column.md#filter).
-10. **A set card** (Sets column). A set groups the textures of one material: its shader, a status dot, a warning count and a chip for each slot (D, N, P, RMAOS or RFAOS and so on). Drag a texture onto a card to move it there. See [Sets column](GUI-Sets-Column.md#set-cards).
-11. **Settings of the selected texture** (centre). Output summary, then the groups Type, Colour, Alpha, Mipmaps and Compression. A texture that needs an answer shows an *Undecided* box above them. Selecting a set shows its recipes instead. See [Texture settings panel](GUI-Texture-Panel.md#centre).
-12. **Advanced** (right edge). The drawer with batch, preview and interface settings. Click the strip to open it. See [Advanced drawer](GUI-Advanced-Drawer.md).
-13. **Bottom panel tabs** (full width, bottom). **Problems** lists every warning with its fix, **Review** joins while an export is reviewed, **Messages** holds this session's notes and **Files** shows an export's progress. Click a tab to open or collapse the panel. See [The bottom panel](GUI-Bottom-Tabs.md), [Problems](GUI-Problems.md) and [Review](GUI-Review-and-Export.md#review).
+1. **Open, Undo, Redo**: [Main window](GUI-Main-Window.md#header).
+2. **MO2…, Preset**: the scan source and the preset the folder converts with. The Mode (the target, `cs` or `vanilla`) is set in the **Presets** centre tab, opened from **Preset ▾ → Presets…**: [Presets and targets](Presets-and-Targets.md).
+3. **Textures / Meshes tabs and the column eyes**: [Main window](GUI-Main-Window.md#header); the Meshes view is [Mod scanning](Mod-Scanning.md).
+4. **Export to ▾**: [Export to](GUI-Main-Window.md#export-to).
+5. **Save**: writes `sdc.toml` and `sdc-project.toml`.
+6. **Export**: [Review and Export](GUI-Review-and-Export.md#the-export-button).
+7. **Texture filters**: [Finding a texture](GUI-Main-Window.md#finding-a-texture).
+8. **Texture tiles**: [Finding a texture](GUI-Main-Window.md#finding-a-texture). An amber border means the texture waits for an answer: [Deciding](GUI-Texture-Panel.md#deciding).
+9. **Sets filters**: [Finding a set](GUI-Sets-Column.md#finding-a-set).
+10. **A set card**: [Sets column](GUI-Sets-Column.md#reading-a-set-card).
+11. **Settings of the selected texture**: [Texture settings](GUI-Texture-Panel.md). Selecting a set opens the [Set editor](GUI-Set-Editor.md) instead.
+12. **Advanced** (right edge): [Texture settings](GUI-Texture-Panel.md#advanced-drawer).
+13. **Bottom panel tabs**: **Problems** ([Problems](GUI-Problems.md)), **Review** (only while an export is being reviewed: [Review](GUI-Review-and-Export.md#review)), **Messages** ([below](#messages)) and **Files** ([Files tab](GUI-Review-and-Export.md#the-files-tab)).
 
 The line under the header is the [status line](GUI-Main-Window.md#status-line-and-banner).
 
-## Pages
+## The bottom panel
 
-- [Main window](GUI-Main-Window.md): opening a folder, the header, the columns and words.
-- [Dialogs](GUI-Dialogs.md): keys and buttons.
-- [GUI settings and recovery](GUI-Settings.md): where settings live, crashes.
-- [Keyboard and command palette](GUI-Keyboard.md): every shortcut.
-- [Textures column](GUI-Textures-Column.md): tiles, filters, sort and tile size.
-- [Sets column](GUI-Sets-Column.md): set cards, the Sets filter, moving and reordering sets, slot menus.
-- [Bulk editing and renaming](GUI-Bulk-and-Rename.md): selecting several, editing them together, the rename dialog and the input name box.
-- [Texture settings panel](GUI-Texture-Panel.md): the settings of one texture, deciding, BC7 weighting, how edits are written.
-- [Advanced drawer](GUI-Advanced-Drawer.md): batch, preview and interface settings.
-- [Helpers and cubemaps](GUI-Helpers-and-Cubemaps.md): the Helpers group and panel, the cube controls.
-- [The 2D preview](GUI-Preview.md): source beside encode, readouts.
-- [The set editor](GUI-Set-Editor.md): slot rows, packed channel sources, the shader.
-- [The 3D preview](GUI-Set-Preview-3D.md): a set on a mesh with Community Shaders.
-- [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md): TruePBR settings, the JSON file and the JSON editor.
-- [Set materials](GUI-Set-Materials.md): the skin, terrain and grass material cards.
-- [The bottom panel, Messages and toasts](GUI-Bottom-Tabs.md): the panel's tabs and the session log.
-- [Problems](GUI-Problems.md): every row and its fix button, deciding from the list.
-- [Artist checks](GUI-Artist-Checks.md): the four checks, the UV overlay, low detail.
-- [Review and Export](GUI-Review-and-Export.md): Export, the Review panel, the Files tab.
-- [Also export as Vanilla and CM](GUI-Also-Export.md): the extra Vanilla and CM folders.
-- [Presets](GUI-Presets.md): the preset creator.
-- [The Meshes view](GUI-Meshes.md): the mesh list, mesh detail and shape cards.
-- [Editing a NIF](GUI-NIF-Edit.md): the edit panel, warnings, pending edits and export.
-- [NIF animation](GUI-NIF-Animation.md): playback, controllers, clips, In game.
+Click a tab to open the panel on it. Click the tab that is showing, or the **▼** at the right, to collapse it. Drag its top edge to resize.
+
+### Messages
+
+Every status-line note and every toast (*Saved*, *Export finished*, *Scan finished*, the *Undid / Redid* note) is also logged in the **Messages** tab, newest first. **Clear** empties it, and it is gone when you close the window. **Ctrl+M** opens the tab, or collapses the panel when it already shows Messages. <!-- D:CD5 -->
+
+Anything that needs a decision is a [dialog](#dialogs), not a toast.
+
+## Keyboard
+
+Press **F1** or **?** for the list of shortcuts, grouped by where they work. **Ctrl+K** opens the command palette: type part of an action's, a texture's or a set's name, and Enter runs it or selects it. A fresh palette highlights nothing, so Enter never starts Export by chance.
+
+### Keys in text fields
+
+While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act, so a shortcut never eats what you type.
+
+- **Ctrl+S**, **Save**, **Export** and Review's **Export** end the edit first and keep what you typed, then save or export.
+- **Esc** in a field that commits when you leave it (a name, a match path) cancels the edit.
+- No shortcut acts while a dialog, a menu or a box is open. A key whose action is off, such as Ctrl+Z with nothing to undo, does nothing.
+
+### All shortcuts
+
+| Area | Keys | Action |
+|---|---|---|
+| Global | Ctrl+K | Command palette |
+| Global | F1 or ? | Keyboard shortcuts |
+| Global | Ctrl+M | Messages |
+| Global | Ctrl+S | Save |
+| Global | Ctrl+Z | Undo |
+| Global | Ctrl+Y or Ctrl+Shift+Z | Redo |
+| Textures grid | Ctrl+A | Select every visible texture (every set when a set is active) |
+| Textures grid | Left | Select the texture to the left |
+| Textures grid | Right | Select the texture to the right |
+| Textures grid | Up | Select the texture above |
+| Textures grid | Down | Select the texture below |
+| Textures grid | Shift+Left | Extend the selection to the left |
+| Textures grid | Shift+Right | Extend the selection to the right |
+| Textures grid | Shift+Up | Extend the selection up a row |
+| Textures grid | Shift+Down | Extend the selection down a row |
+| Textures grid | Enter or Space | Open the expanded preview of the active texture |
+| Preview | Esc | Close the preview |
+| Preview | [ | Previous texture |
+| Preview | ] | Next texture |
+| Preview | L | Magnifier lens on or off |
+| Preview | T | Tile the picture 3×3 on or off |
+| Preview | 1 | Show RGBA |
+| Preview | 2 | Show R |
+| Preview | 3 | Show G |
+| Preview | 4 | Show B |
+| Preview | 5 | Show A |
+| Preview | 6 | Show the α-mask |
+| Preview | PageUp | Larger mip |
+| Preview | PageDown | Smaller mip |
+| Sets | F2 | Rename the outputs of the selected sets, or the inputs of the selected textures |
+| 3D preview | Home | Recentre the 3D view (as a double-click) |
+| 3D preview | V | Next 3D debug view (Lit, Albedo, Normals, …) |
+| 3D preview | Ctrl+Shift+C | Copy the 3D view as an image |
+| JSON editor | F8 | Next error in the PGPatcher JSON editor |
+| JSON editor | Shift+F8 | Previous error in the PGPatcher JSON editor |
+| Problems list | Enter or Space | Accept the focused Problems row's suggestion and go to the next row |
+| Dialogs | Enter | Press the dialog's safe default |
+| Dialogs | Esc | Cancel the dialog |
+
+## Dialogs
+
+- **Esc**, or a click outside, cancels. The rename dialogs, **Copy settings** and **Fill from names** ignore a click outside, so a stray click can't lose what you typed.
+- **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 -->
+
+Where to go next: [Troubleshooting](Troubleshooting.md) covers crash recovery.

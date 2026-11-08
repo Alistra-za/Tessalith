@@ -1,22 +1,8 @@
 # Troubleshooting
 
-Not listed here? See [Known issues](#known-issues) for open problems in this version.
+For anyone whose conversion skipped a file, looks wrong in game, or whose GUI won't cooperate. Problems are listed by what you see. A code from a Problems row or the `sdc` log is on [Diagnostic codes](Diagnostic-Codes.md), `sdc` error messages are on [CLI reference](CLI-Reference.md#error-messages), and scan errors are on [Mod scanning](Mod-Scanning.md#scan-errors).
 
-## Known issues
-
-Things you may run into in version 2.0.0, and what to do about them.
-
-**The graphics device can be lost.** The cause is not proven; it often happens after a long session, around alt-tab or screen capture. Tessalith shows a message that the device was lost and that unsaved edits were kept, then restarts or closes. Unsaved edits come back the next time you open the folder ([crash recovery](GUI-Settings.md#when-something-goes-wrong)). The crash log is in the logs folder ([where](Installation.md#where-tessalith-keeps-its-files)); attach it if you report the crash.
-
-**An Advanced skin set wrote no `.csskin.json`.** The set needs its own diffuse (a borrowed diffuse writes no file; the host set's card sets the material), and an amber Problems row says which case it is. See [Set materials](GUI-Set-Materials.md#advanced-skin-card).
-
-**PBR grass is approximated in the 3D preview.** The preview draws the PBR grass shader type with the normal PBR shader: no wind, no wrapped diffuse, no grass LOD. The exported files are not affected.
-
-**Renaming a colour map's output path loses the shader suggestion.** The suggestion looks meshes up by the new path, and no mesh uses it. Pick the shader by hand.
-
-**Reporting a problem.** Open an issue on the Tessalith GitHub page with the Tessalith version (the exe's file properties, or `sdc --version`), your GPU and driver, your Community Shaders and PGPatcher versions, the crash log if the app crashed, the project's `sdc.toml`, and what you did, what you expected and what happened.
-
-## Common problems
+## Files are skipped or wait for you
 
 ### Every file is "unresolved" on the command line
 
@@ -24,151 +10,72 @@ Things you may run into in version 2.0.0, and what to do about them.
 skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-`sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#texture-sets) says why.
+`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](CLI-Reference.md#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
 
 ### A colour map asks what its alpha means
 
-A diffuse (or albedo, UI or skin colour) whose alpha varies cannot be decided from the image alone: the mesh decides whether it is a cutout, a blend or unused. Set `alpha.policy` on the file, answer the question in the GUI, or scan your mods so the GUI can read the meshes ([Mod scanning](Mod-Scanning.md)). Alpha that counts as opaque (stray noise near 255, see [Texture types](Texture-Types.md)) does not ask.
+The mesh decides whether a varying alpha is a cutout, a blend or unused, so the image alone can't answer. Set `alpha.policy` on the file, use the **Alpha type** dropdown, or scan your mods so the meshes answer ([Alpha from the meshes](GUI-Texture-Panel.md#alpha-from-the-meshes)).
 
-### A normal map reports IN-GREEN-UNSTATED
+### A normal map waits for a type
 
-The file is named `_normal`, `_nrm` or `_norm`, which does not say whether its green channel is DirectX (Skyrim's convention) or OpenGL. It is converted as DirectX. If it is really OpenGL, set it:
+A lone `rock_nm.png` has no suffix Tessalith knows, so it waits instead of becoming a colour map. Rename it `_n`, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
 
-```toml
-[files."textures/armor/iron/iron_normal.png"]
-channels.green_convention = "opengl"   # or "directx"
-```
-
-Or rename the file `_normalgl`, `_normaldx` or `_n` (`_n` means DirectX). Nothing is blocked, so there is nothing to allow.
+## It looks wrong in game
 
 ### A texture is black under torchlight
 
-Look for `CHK-GREEN-GUESS` on its normal map (the ⓘ badge on the set card, or the texture's settings panel). A normal map whose green channel points the wrong way lights from the wrong side. The check reads the map's slopes and says it "looks OpenGL"; it is a hint, weak on straight ridges. If it is right, press **Treat as OpenGL (flip green)**, or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel points the wrong way too.
+Look for `CHK-GREEN-GUESS` on its normal map: the ⓘ badge on the set card, or the texture's settings. A normal map whose green points the wrong way lights from the wrong side. The check reads the map's slopes and says it looks OpenGL; it's a hint, and weak on straight ridges, so look at the map too. If it's right, press **Treat as OpenGL (flip green)** or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel is flipped as well.
 
 ### Dark seams at a distance
 
-Look for `CHK-UV-GUTTER`. UV islands closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The warning needs a Meshes scan ([Check all UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)).
+Look for `CHK-UV-GUTTER`. UV islands closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The check needs a Meshes scan ([UV coverage](Texture-Types.md#uv-coverage)).
 
-### UV coverage is greyed out
+## Packing and helpers
 
-The overlay and the check read your Meshes scan, so scan your MO2 instance in the Meshes view first. The toggle's hover gives the reason ([UV coverage](GUI-Artist-Checks.md#check-all-uv-coverage)). Only colour textures (diffuse, PBR albedo, skin albedo) have UV coverage; landscape diffuses are left out. The toggle is also off after a failed read (its hover lists the errors), and **Check all UV coverage** stays off until the **UV coverage** check is turned on.
+### A PBR set isn't packed, or its raw maps are unused
 
-### A normal map came out as a diffuse
+Raw maps are packed only under the target that reads them. Under `vanilla` only metallic or specular builds an `_m`; roughness, AO and the rest are `PACK-UNUSED-INPUT`. Check the target ([packed maps per target](Texture-Packing.md)).
 
-Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm` (alone in its set it waits for a type instead, [see why](Texture-Types.md#texture-sets)). Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
+### My opacity map isn't used
 
-### A texture is written at a different size
+The Helpers row says "not used" with the reason, and the `sdc` log gives the same reason as `PACK-UNUSED-INPUT`. Each reason and its fix: [Which data wins](Texture-Packing.md#which-data-wins).
 
-A texture with mips is written at a power of two (rule and examples: [Format and size](Project-Config-Fields.md#format-and-size)), so a 1000x1000 source becomes 1024x1024 and gets `DIM-RESIZED`. To keep the exact size, set `mips.levels = "none"`; the texture then gets the `DIM-NPOT` warning.
-
-### DDS files in the folder are skipped
-
-DDS inputs are skipped by default (`IN-DDS-SKIPPED`) because re-encoding a compressed DDS loses quality. Use the source image instead, or set `reencode = true` on the file.
-
-### Existing outputs are not replaced (OUT-UNKNOWN-EXISTING)
-
-The output folder holds a DDS that the manifest has no record of, for example from another tool or an older copy. `if-changed` never overwrites such a file. Delete it, use a fresh output folder, or run once with `--on-existing overwrite`.
-
-### A packed channel uses a default value (PACK-DEFAULTED)
-
-The set has no source for that channel, for example no specular map for `_rmaos`. Add the map, or set a fill: `--set packing.fill.specular=128`, or `packing.fill.specular = 128` on the packed output's `[files]` key.
-
-### The PBR set is not packed, or its raw maps are reported as unused
-
-Raw maps are packed only under the target that reads them. Under `vanilla`, only metallic or specular builds an `_m`; roughness, AO and the rest are `PACK-UNUSED-INPUT`. An opacity map is not packed: it fills the colour texture's alpha (next entry). Check the target.
-
-### My opacity map is not used
-
-An `_opacity` file (or a mask you gave the role Opacity) fills the alpha of its set's colour texture. Its GUI row, in the Helpers group under the tiles, says "→ <texture> alpha" when it is used and "not used" with the reason when it is not; on the command line the reason is the `PACK-UNUSED-INPUT` message. The reasons, and what to do:
-
-| Reason | Why | Fix |
-|---|---|---|
-| `x.png already has alpha` | A suggested helper only fills an empty alpha (none, fully opaque, or flat). Your colour PNG has a real alpha. | Assign the helper: in its panel pick the Opacity role again (it then reads *set by you*) or add the target, or set `helper.role = "opacity"` on the file. An assigned helper replaces the alpha. |
-| `512x512, target 1024x1024: sizes differ` | The helper and the colour texture are not the same size. | Resize one of them, or assign the helper: an assigned helper of the same aspect ratio is resized to fit. |
-| `no colour texture planned` | The set has no plain colour texture to fill (only a PBR or skin output that is not a target, or none at all), or the file did not join the set. | Check the set in the Sets column; give the file the same base name as the colour texture. |
-| `diffuse.a is filled by <other file>` | Another helper fills that alpha. An assigned one beats a suggested one; otherwise the first by path wins. | Remove the target from the other helper, or assign this one. |
-| `no targets chosen` | Its `helper.fills` is `[]`. | Reset Fills in the panel, or remove the key. |
-| `<file> was not analysed` | The helper or the colour texture failed to load. | Fix the load error shown for that file. |
-
-If the file is not listed as a helper at all, its name has no term Tessalith knows, so it is an ordinary tile: pick *Opacity* in **Helper role** in its settings, or write `helper.role = "opacity"` on its `[files]` entry (`--set "file:**/<name>.helper.role=opacity"`). To convert an opacity map as its own texture instead, set its role to *Not a helper* (`helper.role = "none"`). See [Helper textures](Texture-Packing.md#helper-textures).
-
-### sRGB or UNORM is blocked
-
-| Code | Fix |
-|---|---|
-| `TAG-UNORM-PBR` | A PBR colour map under `cs` must be `_SRGB`. Remove the `color.tag = "unorm"` override. |
-| `TAG-SRGB-NONPBR` | Under `cs`, only PBR colour maps take `_SRGB`. Remove the `color.tag = "srgb"` override, or set the sub-type to the PBR one. |
-| `TAG-SRGB-VANILLA` | `vanilla` has no `_SRGB`. |
-| `TAG-SRGB-LOD` | [Diagnostic codes](Diagnostic-Codes.md#format-and-tag). |
+## The GUI
 
 ### The GUI is read-only
 
-`sdc.toml` failed to load or was rejected. The banner names the problem. Fix the file in a text editor and press **Reload**. If `sdc-project.toml` failed to load, only sets and the JSON are read-only; its red Problems row names the line and has **Open in editor** and **Reload**. A save refused because a file has Windows' read-only flag leaves a Problems row with **Clear read-only flag**.
+`sdc.toml` failed to load or was rejected. The banner names the problem: fix the file in a text editor and press **Reload**. If `sdc-project.toml` failed, only sets and the JSON are read-only; its red Problems row names the line and has **Open in editor** and **Reload**. A save refused because the file has Windows' read-only flag leaves a row with **Clear read-only flag**.
 
-### The GUI does not start
+### The GUI won't start
 
-It needs the Windows system font Segoe UI (`segoeui.ttf`) and says so if it is missing ([fonts](Installation.md#requirements)). The 2D preview and the 3D view need a GPU; without one, the preview is off and everything else works.
+It needs the Windows font Segoe UI and says so when it's missing ([what you need](Installation.md#what-you-need)). The previews need a GPU; without one they're off and everything else works.
 
-### The 3D preview shows plain textures
+### The 3D preview shows plain textures, or PBR grass looks different
 
-What the PGPatcher simulation needs is in [What it assumes](GUI-Set-Preview-3D.md#what-it-assumes).
+The PGPatcher simulation needs the `cs` target and a PBR set, and PBR grass is drawn with the plain PBR shader. Both are on [What the 3D view assumes](Previews.md#what-the-3d-view-assumes). The exported files aren't affected.
 
-### Leftover .sdc-*.tmp files
+## Crashes and recovery
 
-A hard abort can leave temporary files in the output folders ([atomic writes](Validation-and-Output.md#atomic-writes)); they are safe to delete.
+### A background job failed
 
-## Error messages
+An "internal error in …" dialog appears and the window keeps running. A failed plan or export shows its error in a dialog and in the status line.
 
-| Message | Cause |
-|---|---|
-| `input not found: <path>` | An input path does not exist. |
-| `<path> is a folder; give .dds files` | `validate` takes files, not folders. |
-| `--mem-budget '<s>': must be greater than 0 (omit the flag for the default, 50% of RAM)` | `--mem-budget 0`. |
-| `--mem-budget '<s>': use bytes or a G/M suffix` | A size ending in something other than a digit, `G` or `M`, such as `8Q`. |
-| `--mem-budget '<s>': not a valid size` | A number that is not a whole number, such as `1.5G`. |
-| `--allow <X>: unknown code` | A misspelt code. |
-| `--set '<s>': unknown field '<f>'` | A misspelt field name. |
-| `--set '<s>': unknown sub-type '<id>'` | A misspelt sub-type. |
-| `--set '<s>': a sub-type scope cannot set the sub-type` | `subtype:<id>.subtype=…`. |
-| `--set '<s>': reencode takes true or false` | |
-| `--set '<s>': a set scope sets only `shader`` | `set:<id>.<anything but shader>`. |
-| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
-| `unknown preset '<id>'` | A preset id that is not loaded. |
-| `preset inheritance cycle at '<id>'` | Presets whose `base` chain loops. |
-| `<file>: config schema_version N is newer than this sdc supports (1)` | A config written by a newer version. A preset gives `preset schema_version N is newer …`. |
-| `<file>: <key>: removed in <version>; <fix>` | A key or value that Tessalith does not read (for example `subtype = "rfaos"`, removed in 2.0: use `skin_rfaos`). The text names the key, the version that removed it and what to write; `--set` gives the same text. The file is read-only in the GUI until fixed. <!-- D:FM10 --> |
-| `[files] is only valid in a project sdc.toml, not in <path>` | `[files]` or `[inputs]` in the user config. |
-| `schema all needs --out <dir>` | |
-| `source changed since planning; re-run` | A source file changed between planning and encoding. Run again. |
-| `sdc: internal error` | A crash inside `sdc` (exit 3). Please report it with the input that caused it. |
+### After a crash
 
-Scan errors are listed on [Mod scanning](Mod-Scanning.md#error-messages).
+The error goes to `%LOCALAPPDATA%\sdc\logs\crash-<date>-<time>.log`, and your unsaved edits are written beside their files as `sdc.toml.recovery` and `sdc-project.toml.recovery`. The originals aren't touched. When you open the folder again the edits come back as one Undo step, "Restore crash edits", with a toast. <!-- D:FB5 --> If a file doesn't parse, its `.recovery` stays and the banner says where.
 
-## Diagnostic codes
+### The graphics device was lost
 
-What each code means and what to do about it: [Diagnostic code reference](Diagnostic-Codes.md).
+The log has a "wgpu device lost" line. It isn't a crash: a message appears with **Restart**, and Tessalith reopens the same folder with your edits restored. A long session, alt-tab and screen capture are common triggers, but the cause isn't proven.
 
-## In-game checklist
+## Reporting a problem
 
-Tessalith's validation checks the files, not the game. After installing converted textures, check them in game. These checks follow the in-game tests behind Tessalith's defaults, and each notes the tested result where one set a current default.
+Open an issue on [GitHub](https://github.com/Alistra-za/Tessalith/issues/new/choose); the bug form lists what to attach.
 
-1. **Textures load.** Look at each converted object. If one is missing, compare the output path with the path the mesh uses (the GUI's Meshes view shows a mesh's texture slots).
-2. **Brightness of PBR colour maps.** Under Community Shaders, compare PBR albedo, emissive (`_g`) and fuzz (`_f`) with linear lighting on and off. They are written `_SRGB` (or BC6H for HDR emissive), which was the tested result; a washed-out look points to a UNORM override (`TAG-UNORM-PBR`).
-3. **Ordinary diffuse brightness.** A non-PBR diffuse that looks too dark under Community Shaders points to an `_SRGB` override (`TAG-SRGB-NONPBR`).
-4. **Small textures.** Textures from 16 to 128 px with full mip chains loaded without crashes in testing. If a small texture crashes the game, report it.
-5. **Complex `_m` maps (CS, or vanilla with the complex material shader).** Check parallax and complex shading at a distance. `VAL-M-COMPLEX-MARGIN` warns when the smallest mip's alpha nears the point where Community Shaders turns complex material off ([rule](Validation-and-Output.md#validation)).
-6. **Plain `_m` maps and PGPatcher.** A plain `_m` stored with alpha whose decoded alpha is 50% or more non-white is treated as complex by PGPatcher. Tessalith keeps `_m` alpha exactly opaque by default (`exact_opaque`) and warns with `VAL-PGPATCHER-50`.
-7. **Cutouts at a distance.** Foliage and fences with `cutout` keep their coverage in smaller mips. If they thin out or thicken, check the `alpha.threshold` against the mesh and look for `VAL-COVERAGE`.
-8. **TruePBR sets.** Run PGPatcher after installing the JSON, then check that the PBR material shows on the intended meshes and not on others (watch for delete sections that hit your own sets).
+## Quick Q/A
 
-To compare two variants of the same texture in game, convert them into two output folders and overlay one mod at a time:
+**Will it re-encode my existing DDS files?** No, not by default: [Which files Tessalith reads](Texture-Types.md#which-files-tessalith-reads).
 
-```powershell
-# Variant A: the defaults
-sdc convert src -o out\a --recursive --target cs --accept-suggestions high
+**Does the CLI use my GUI set edits or the scan?** No: [Does the CLI use my GUI edits?](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits)
 
-# Variant B: emissive as BC7 sRGB instead of BC6H (matters for float emissive sources)
-sdc convert src -o out\b --recursive --target cs --accept-suggestions high --set "file:**/*_g.png.format=bc7" --set "file:**/*_g.png.color.tag=srgb"
-```
-
-Use `--dry-run` first to see what a command would do without writing files.
+**Does it write the PGPatcher JSON?** The GUI does, for PBR sets under `cs`: [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
