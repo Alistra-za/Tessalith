@@ -111,6 +111,10 @@
           ],
           "description": "Green (Y) convention of a normal source (spec §3.2, §4.4, DECISIONS Note H); None = unstated.\n`opengl` makes Resolve set `flip_green`."
         },
+        "msn_source": {
+          "$ref": "#/$defs/MsnSource",
+          "description": "The baker a model-space normal came from (Note IA1); read only by `msn`."
+        },
         "reconstruct_z": {
           "type": "boolean"
         },
@@ -837,6 +841,15 @@
       ],
       "type": "object"
     },
+    "MsnSource": {
+      "enum": [
+        "skyrim",
+        "swap_gb",
+        "invert_b",
+        "invert_gb"
+      ],
+      "type": "string"
+    },
     "NormalBase": {
       "enum": [
         "renormalize",
@@ -952,6 +965,10 @@
             }
           ],
           "description": "Green (Y) convention of a normal source (spec §3.2, §4.4, DECISIONS Note H); None = unstated.\n`opengl` makes Resolve set `flip_green`."
+        },
+        "msn_source": {
+          "$ref": "#/$defs/MsnSource",
+          "description": "The baker a model-space normal came from (Note IA1); read only by `msn`."
         },
         "reconstruct_z": {
           "type": "boolean"

@@ -176,6 +176,15 @@ impl Bc7Weights {
     }
 }
 cfg_enum!(GreenConvention, "lowercase" { Directx, Opengl });
+// What Preprocess does to a model-space normal (`msn`) to reach Skyrim's layout (Note IA1): `skyrim` nothing,
+// `swap_gb` for a Blender object-space bake, `invert_b` for Marmoset right-handed or Substance, `invert_gb` for
+// Marmoset left-handed.
+cfg_enum!(#[derive(Default)] MsnSource, "snake_case" { #[default] Skyrim, SwapGb, InvertB, InvertGb });
+impl MsnSource {
+    pub fn is_skyrim(&self) -> bool {
+        *self == MsnSource::Skyrim
+    }
+}
 
 fn yes() -> bool {
     true
@@ -535,6 +544,9 @@ pub struct ChannelSpec {
     /// `opengl` makes Resolve set `flip_green`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub green_convention: Option<GreenConvention>,
+    /// The baker a model-space normal came from (Note IA1); read only by `msn`.
+    #[serde(default, skip_serializing_if = "MsnSource::is_skyrim")]
+    pub msn_source: MsnSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

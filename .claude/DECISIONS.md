@@ -16,12 +16,12 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY
@@ -1260,3 +1260,10 @@ Source: the owner's "fix 1 and 2 on v3" on two of GG's OPEN items, settled from 
 
 - **GZ1 A PBR shape with SLSF2.24 gets the layer.** On a PBR shape SLSF2.24 is not multi-layer parallax: CS's TruePBR.cpp turns it into `PBRFlags::TwoLayer` (the coat) at load and clears the flag, and its PBR permutation list has TruePbr | VC | ProjectedUV with technique None. The coat reads `PBRParams2` and `MultiLayerParallaxData`; the layer writes `MaterialObjectRGBScale`, `ParallaxOccData` and `SparkleParams` and samples t3, t8, t10 and t11, so nothing collides. `projected_eligible` now skips SLSF2.24 only on a non-PBR shape (`m.is_pbr() || !SLSF2.24`); a PBR coat toggle stays a cbuffer edit. **Amends GG6** (DECISIONS-1.x.md, frozen; the digest line cites GZ1).
 - **GZ2 `TextureProj` row 2 is the shape's model row 2.** Lighting.hlsl:254-255 computes `TexProj = mul(World3x3, TextureProj[2].xyz)` and the PS projects along `normalize(TexProj)`. With row 2 = the model's row 2 (nifly 3×4, the rows `World` gets; the camera shift changes only the translation), World3x3 · row 2 = s² · world up for any rotation and uniform scale, so a rotated static takes snow on its world-top faces. Rows 0 and 1 stay as captured (they feed TexCoord0.zw, which the triplanar path does not read). An identity model writes the captured matrix unchanged. `write_material` takes the layer with the model (`Option<(&ProjectedLayer, &Mat3x4)>`), from `ShapeDraw::model` on an edit and from the shape's world at build. **Amends GG2** (DECISIONS-1.x.md, frozen) where it fixed the whole captured matrix.
+
+## Note IA — Model-space normal baker conversion (NIF team for the owner, 2026-11-08)
+
+Source: the owner's MSN convention table and "add a small msn conversion feature … reusing the existing invert and channel swapping; no automated checks". Code: `engine::config::MsnSource`, `ChannelSpec::msn_source`, `engine::ops` (`Domain::Msn`); GUI `model::fields::MSN_SOURCE`, `ui::settings_panel::options_of`. Tests: `ops::tests::msn_source_reaches_the_skyrim_layout`, `crates/gui/tests/msn_source.rs`.
+
+- **IA1 `channels.msn_source` turns a baker's model-space normal into Skyrim's layout.** Values: `skyrim` (default, no change, not serialised), `swap_gb` (Blender object-space bake), `invert_b` (Marmoset right-handed, or Substance, whose DirectX and OpenGL MSN are the same), `invert_gb` (Marmoset left-handed). Preprocess applies it right after the `msn` decode to [-1, 1]: a swap exchanges G and B, an invert negates the channel (the same as 1 − v on the stored value). Only `msn` reads it; every other sub-type ignores it, and no check guesses the baker (owner: none wanted). An unset field leaves every output byte as before, so no `encode_version` arm moves. It is a per-file key (`FIELD_PATHS`), settable in `[files]`, rules, presets and `--set`.
+- **IA2 The GUI row is "Baked in", in the Type group, shown only for `msn`.** Options are named by the baker with the change in brackets: "Skyrim MSN (no change)", "Blender object-space (swap G and B)", "Marmoset right-handed or Substance (invert B)", "Marmoset left-handed (invert G and B)" (owner: one row for the two invert-B bakers). It writes the key like any field row (undo, ↺ reset).

@@ -5,8 +5,10 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields in display order, with the label each row shows.
-pub const FIELDS: [(&str, &str); 16] = [
+pub const FIELDS: [(&str, &str); 17] = [
     ("subtype", "Sub-type"),
+    // Note IA2: shown only for `msn` (`hidden_reason`).
+    (MSN_SOURCE, "Baked in"),
     ("color.content", "Content"),
     ("color.tag", "DDS tag"),
     ("alpha.policy", "Alpha"),
@@ -25,6 +27,9 @@ pub const FIELDS: [(&str, &str); 16] = [
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
     ("encoder.perceptual", "Perceptual"),
 ];
+
+/// The model-space normal's baker row (Note IA2), in the Type group.
+pub const MSN_SOURCE: &str = "channels.msn_source";
 
 /// Hover text of the BC1/BC3 "Perceptual" check box (FM42).
 pub const PERCEPTUAL_HOVER: &str =
@@ -159,6 +164,9 @@ pub fn group_of(field: &str) -> &'static str {
     if matches!(field, "mips.coverage" | "encoder.bc1_alpha") {
         return "Alpha";
     }
+    if field == MSN_SOURCE {
+        return "Type";
+    }
     match field.split('.').next().unwrap_or("") {
         "subtype" => "Type",
         "color" => "Colour",
@@ -248,6 +256,7 @@ pub fn field_hidden(p: &Profile, field: &str) -> bool {
 pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
     match field {
         "mips.coverage" if !is_cutout(p) => Some("used only by cutout and cutout + blend"),
+        MSN_SOURCE if p.subtype != Subtype::Msn => Some("model-space normal (msn) only"),
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
         "encoder.bc1_alpha" if p.format != Format::Bc1 => Some("BC1 only"),
@@ -428,6 +437,7 @@ pub(crate) fn unset_default(field: &str) -> Value {
         "resize_relative_to" => Value::from("self"),
         "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
         "encoder.bc1_alpha" => Value::from(false),
+        MSN_SOURCE => Value::from("skyrim"),
         _ => Value::Null,
     }
 }
