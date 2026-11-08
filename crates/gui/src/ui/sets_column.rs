@@ -135,17 +135,17 @@ fn chip_rows(v: &SetView, width: f32, frame_x: f32, gap: f32) -> usize {
 /// Note FM32: a new column width moves every remembered card height by the chip rows it adds or removes, so a card off
 /// screen is no longer the height of the old width (the scroll bar length stays right without drawing it). A card not
 /// in `views` any more is forgotten. The estimate leaves out the name row, which wraps below the pill when narrow;
-/// drawing the card measures it exactly.
+/// drawing the card measures it exactly. Returns whether the width changed from a known one.
 fn reflow_heights(
     st: &mut DropState,
     views: &[SetView],
     width: f32,
     gap: egui::Vec2,
     frame_x: f32,
-) {
+) -> bool {
     let old = std::mem::replace(&mut st.card_w, width);
     if old <= 0.0 || (old - width).abs() < 0.5 {
-        return;
+        return false;
     }
     let by_id: HashMap<&str, &SetView> = views.iter().map(|v| (v.id.as_str(), v)).collect();
     st.card_h.retain(|id, h| {
@@ -156,6 +156,7 @@ fn reflow_heights(
         *h = (*h + (rows(width) - rows(old)) * (CHIP + gap.y)).max(0.0);
         true
     });
+    true
 }
 
 /// The warning tooltip shows this many lines, then "… and K more".
@@ -843,7 +844,13 @@ pub fn draw(
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
     let gap = ui.spacing().item_spacing;
     let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x;
-    reflow_heights(st, &views, ui.available_width(), gap, frame_x);
+    let reflowed = reflow_heights(st, &views, ui.available_width(), gap, frame_x);
+    // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
+    if reflowed && model.nav.reveal_set.is_none() {
+        if let [k] = model.selected_sets().as_slice() {
+            model.nav.reveal_set = Some(k.clone());
+        }
+    }
     let est = if st.card_h.is_empty() {
         CARD_EST
     } else {

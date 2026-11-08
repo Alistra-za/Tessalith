@@ -420,3 +420,54 @@ fn sets_with_shader_counts_keyed_sets_per_pick() {
         assert_eq!(m.visible_sets().len(), n, "{s:?} shows what it counts");
     }
 }
+
+const OPEN_GOLD: [&str; 3] = [
+    r#"{"op":"resize","w":1055,"h":770}"#,
+    r#"{"op":"click","at":{"label":"armor/gold"}}"#,
+    r#"{"op":"settle","frames":6}"#,
+];
+const GOLD_CARD: &str = "Set armor/gold, position 5 of 9";
+
+/// The open card's rect and the Sets panel's outer rect.
+fn card_and_panel(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
+    let cards: Vec<_> = h.query_all_by_label(GOLD_CARD).map(|n| n.rect()).collect();
+    assert_eq!(cards.len(), 1, "one {GOLD_CARD:?} node, got {cards:?}");
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+        .expect("the Sets panel")
+        .outer_rect;
+    (cards[0], panel)
+}
+
+#[test]
+fn opening_a_set_in_a_narrow_window_keeps_its_card_in_view() {
+    let (_d, h) = crate::replay("demo", &OPEN_GOLD);
+    let (card, panel) = card_and_panel(&h);
+    assert!(
+        card.top() >= panel.top() - 0.5 && card.bottom() <= panel.bottom() + 0.5,
+        "card {card:?} inside the Sets panel {panel:?}"
+    );
+}
+
+/// Pins that a user scroll after the reveal is not undone: the reveal fires on a width change only.
+#[test]
+fn a_wheel_scroll_after_the_reveal_stays_put() {
+    let scroll =
+        r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"up","times":8}"#;
+    let top_after = |frames: &str| {
+        let mut lines = OPEN_GOLD.to_vec();
+        lines.push(scroll);
+        lines.push(frames);
+        card_and_panel(&crate::replay("demo", &lines).1).0.top()
+    };
+    let before = card_and_panel(&crate::replay("demo", &OPEN_GOLD).1).0.top();
+    let scrolled = top_after(r#"{"op":"settle","frames":2}"#);
+    let later = top_after(r#"{"op":"settle","frames":8}"#);
+    assert!(
+        (scrolled - before).abs() > 1.0,
+        "the wheel moved the card: {before} -> {scrolled}"
+    );
+    assert!(
+        (later - scrolled).abs() < 0.5,
+        "the card stays put: {scrolled} -> {later}"
+    );
+}
