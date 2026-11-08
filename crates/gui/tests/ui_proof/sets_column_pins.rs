@@ -1877,3 +1877,30 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
         assert!(empty.is_empty(), "{at}: unnamed CheckBoxes at {empty:?}");
     }
 }
+
+/// Note HP (SH1): a card scrolled below the fold honours an AccessKit ScrollIntoView request, as the driver and a
+/// screen reader send it, and so does the driver's own click.
+#[test]
+fn an_off_screen_card_scrolls_into_view_on_request() {
+    const LAST: &str = "Set props/crate, position 10 of 10";
+    let resize = resize_line(1400.0, 790.0);
+    let lines = [resize.as_str(), r#"{"op":"settle","frames":6}"#];
+    let inside = |h: &crate::app_harness::H| {
+        let panel = PanelState::load(&h.ctx, egui::Id::new("sets"))
+            .unwrap()
+            .outer_rect;
+        panel.contains_rect(h.get_by_label(LAST).rect())
+    };
+    let (_d, mut h) = crate::replay("helpers", &lines);
+    assert!(!inside(&h), "the last card starts below the fold");
+    h.get_by_label(LAST).scroll_to_me();
+    crate::app_harness::settle(&mut h, 6);
+    assert!(
+        inside(&h),
+        "ScrollIntoView brings the card into the Sets column"
+    );
+    // the driver path: click aims at the card, scrolling it into view first
+    let click = format!(r#"{{"op":"click","at":{{"label":"{LAST}"}}}}"#);
+    let (_d, h) = crate::replay("helpers", &[lines[0], lines[1], click.as_str()]);
+    assert!(inside(&h), "the driver's click reached the last card");
+}

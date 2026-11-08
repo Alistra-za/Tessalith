@@ -1025,6 +1025,7 @@ fn card_node(
     n.set_label(format!("Set {}, position {} of {total}", v.id, index + 1));
     n.set_selected(selected);
     n.add_action(egui::accesskit::Action::Focus);
+    n.add_action(egui::accesskit::Action::ScrollIntoView);
     n.set_bounds(egui::accesskit::Rect {
         x0: rect.min.x.into(),
         y0: rect.min.y.into(),
@@ -1049,10 +1050,13 @@ fn stand_in(
     let layer = ui.layer_id();
     let ctx = ui.ctx();
     // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
-    let gained = ctx.memory_mut(|m| {
+    let mut gained = ctx.memory_mut(|m| {
         m.interested_in_focus(id, layer);
         m.focused() == Some(id) && held != Some(id)
     });
+    // egui consumes ScrollIntoView only in a registered widget; a stand-in has none, so read the request here.
+    gained |=
+        ctx.input(|i| i.has_accesskit_action_request(id, egui::accesskit::Action::ScrollIntoView));
     ctx.accesskit_node_builder(id, |n| card_node(n, v, at, selected, rect));
     (rect, gained)
 }
