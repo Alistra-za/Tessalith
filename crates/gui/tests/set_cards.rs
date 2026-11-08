@@ -153,8 +153,22 @@ fn slot_chips_are_labelled_and_empty_ones_are_dim() {
     );
     let mut h = harness(m);
     h.run();
+    // A chip with docked helpers is named "<letter>, <file>, filled by <helpers>" (Note HN).
+    let card = card_of(&h, ROCK);
     for l in ["D", "N", "RMAOS", "P"] {
-        assert_eq!(on_card(&h, l).len(), 1, "one {l:?} chip on rock01's card");
+        let prefix = format!("{l}, ");
+        let named = h
+            .query_all_by_label_contains(&prefix)
+            .filter(|n| card.contains_rect(n.rect()))
+            .filter(|n| {
+                n.accesskit_node()
+                    .label()
+                    .unwrap_or_default()
+                    .starts_with(&prefix)
+            })
+            .count();
+        let n = on_card(&h, l).len() + named;
+        assert_eq!(n, 1, "one {l:?} chip on rock01's card");
     }
     assert!(h.query_by_label_contains("Height _p (empty)").is_none());
     on_card(&h, "P")[0].hover();

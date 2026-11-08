@@ -3,7 +3,7 @@
 mod support;
 use eframe::egui;
 use eframe::egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::pbr_export::json_entries;
@@ -1167,8 +1167,17 @@ fn an_rfaos_slot_reads_rfaos_everywhere() {
     let count = |h: &Harness<'_, AppModel>, role, text: &str| {
         h.query_all_by_role_and_label(role, text).count()
     };
-    assert_eq!(count(&h, Role::Button, "RFAOS"), 2);
-    assert_eq!(count(&h, Role::Button, "RMAOS"), 2);
+    // A chip with docked helpers is named "<letter>, <file>, filled by <helpers>" (Note HN).
+    let chips = |h: &Harness<'_, AppModel>, text: &str| {
+        h.query_all_by_role(Role::Button)
+            .filter(|n| {
+                let name = n.accesskit_node().label().unwrap_or_default();
+                name == text || name.starts_with(&format!("{text}, "))
+            })
+            .count()
+    };
+    assert_eq!(chips(&h, "RFAOS"), 2);
+    assert_eq!(chips(&h, "RMAOS"), 2);
     assert_eq!(count(&h, Role::Label, "RFAOS"), 1);
     assert_eq!(count(&h, Role::Label, "RMAOS"), 0);
     h.query_all_by_role_and_label(Role::Button, "RFAOS")

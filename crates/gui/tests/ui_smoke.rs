@@ -84,7 +84,8 @@ fn an_opened_folder_shows_items_filters_and_the_undecided_count() {
         h.get_by_label_contains(label);
     }
     // The packed output's tile, and the two raw maps' helper rows (Note DY16): each row's name and its "→" target.
-    assert_eq!(h.query_all_by_label_contains("rock01_rmaos").count(), 5);
+    // (Note HN: the RMAOS chip is named for its file and its helpers, so it counts too.)
+    assert_eq!(h.query_all_by_label_contains("rock01_rmaos").count(), 6);
     assert_eq!(
         h.query_all_by_label_contains("fills to rock01_rmaos")
             .count(),
@@ -123,7 +124,13 @@ fn clicking_a_tile_selects_it_and_the_needs_decision_filter_narrows_the_grid() {
     h.run();
     assert!(h.state().filter.needs_decision);
     h.get_by_label_contains("leaf.png");
-    assert!(h.query_by_label_contains("rock01_roughness.png").is_none());
+    // The helper's badge still sits on the set card (Note HN); the grid no longer shows it.
+    assert_eq!(
+        h.query_all_by_label_contains("rock01_roughness.png")
+            .filter(|n| !in_sets_column(&h, n.rect()))
+            .count(),
+        0
+    );
 }
 
 #[test]

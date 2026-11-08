@@ -93,3 +93,57 @@ journey!(
         r#"{"op":"expect","fact":"/selection","equals":"item:architecture/stone/cobble_rmaos.png"}"#
     ]
 );
+
+journey!(
+    d1_a_badge_on_a_filled_chip_opens_its_helper,
+    "helpers",
+    [
+        r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"click","at":{"label":"crate_opacity.png, fills Diffuse alpha"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_opacity.png"}"#
+    ]
+);
+
+journey!(
+    d2_a_badge_on_the_packed_rmaos_chip_opens_its_helper,
+    "helpers",
+    [
+        r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"click","at":{"label":"crate_roughness.png, fills RMAOS R"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#
+    ]
+);
+
+journey!(
+    d3_a_helper_that_fills_two_chips_has_a_badge_on_each,
+    "helpers",
+    [
+        r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"click","at":{"label":"crate_roughness.png, fills Coat _cnr alpha"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#,
+        r#"{"op":"click","at":{"label":"props/crate"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"set:props/crate"}"#,
+        r#"{"op":"click","at":{"label":"crate_roughness.png, fills RMAOS R"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#
+    ]
+);
+
+journey!(
+    d4_an_unused_helper_stays_in_the_trailing_row,
+    "helpers",
+    [
+        r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"click","at":{"label":"crate_metallic.png, not used: no targets chosen"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_metallic.png"}"#
+    ]
+);
+
+journey!(
+    g10_the_roughness_helper_is_found_from_its_badge,
+    "helpers",
+    [
+        r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
+        r#"{"op":"click","at":{"label":"crate_roughness.png, fills RMAOS R"}}"#,
+        r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#
+    ]
+);
