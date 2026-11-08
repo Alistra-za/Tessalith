@@ -571,7 +571,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
     for v in views.iter().filter(|v| !m.record_ignored(v)) {
-        let Some(map) = &v.txst else { continue };
+        let Some(map) = v.txst.as_ref().filter(|t| !t.is_base()) else {
+            continue;
+        };
         if m.record_of(map).is_some_and(|r| r.slots != map.slots) {
             out.push(Problem {
                 fix: Some(Fix::UseRecordPaths(v.id.clone())),
@@ -844,7 +846,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // empty scan says nothing (a scan that has not run is not a record that went away).
     if !m.known.records.is_empty() {
         for v in views.iter().filter(|v| !m.record_ignored(v)) {
-            let Some(map) = v.txst.as_ref().filter(|t| m.record_of(t).is_none()) else {
+            let Some(map) = v
+                .txst
+                .as_ref()
+                .filter(|t| !t.is_base() && m.record_of(t).is_none())
+            else {
                 continue;
             };
             out.push(row(

@@ -82,6 +82,15 @@ pub struct TxstMap {
     pub formid: String,
     pub edid: String,
     pub slots: BTreeMap<u8, String>,
+    /// Note HL: a mesh path or file base of the target mod (`base = "textures/…"`) instead of a record; the
+    /// plugin, FormID and EDID are then empty and not written.
+    pub base: Option<String>,
+}
+
+impl TxstMap {
+    pub fn is_base(&self) -> bool {
+        self.base.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -220,6 +229,7 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             plugin: text("plugin"),
             formid: text("formid"),
             edid: text("edid"),
+            base: Some(text("base")).filter(|s| !s.is_empty()),
             slots: b
                 .iter()
                 .filter_map(|(k, v)| {
@@ -1221,12 +1231,16 @@ impl SetsDoc {
             }
             Some(m) => {
                 let mut b = Table::new();
-                for (k, v) in [
-                    ("plugin", &m.plugin),
-                    ("formid", &m.formid),
-                    ("edid", &m.edid),
-                ] {
-                    b.insert(k, toml_edit::value(v.as_str()));
+                if let Some(base) = &m.base {
+                    b.insert("base", toml_edit::value(base.as_str()));
+                } else {
+                    for (k, v) in [
+                        ("plugin", &m.plugin),
+                        ("formid", &m.formid),
+                        ("edid", &m.edid),
+                    ] {
+                        b.insert(k, toml_edit::value(v.as_str()));
+                    }
                 }
                 for (n, p) in &m.slots {
                     b.insert(&format!("slot{n}"), toml_edit::value(p.as_str()));

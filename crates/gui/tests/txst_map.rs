@@ -425,6 +425,7 @@ fn record(slots: &[(u8, &str)]) -> TxstMap {
         formid: "000800".into(),
         edid: "MyBody".into(),
         slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+        base: None,
     }
 }
 
@@ -2504,6 +2505,7 @@ fn a_new_record_starts_with_every_fill_on() {
         formid: "2".into(),
         edid: "B".into(),
         slots: [(2, BODY_N.to_string())].into(),
+        base: None,
     };
     m.map_record(M, other).unwrap();
     idle(&mut m);

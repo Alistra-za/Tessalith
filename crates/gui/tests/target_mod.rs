@@ -398,3 +398,217 @@ fn the_reader_never_writes_into_the_target_mod() {
     assert_eq!(m.target().unwrap().root, t);
     assert_eq!(snapshot(&t), before);
 }
+
+// ---- base mappings (Note HL3) ----
+
+use sdc_gui::model::target_mod::MeshPath;
+use sdc_gui::model::txst_map::TargetPick;
+
+const BOOTS_BASE: &str = "textures/fs6/fs6_boots_ir";
+
+/// A DAZ-shaped vanilla set `Runner Boots_01` (colour, `_n`, `_p`) and its set id.
+fn boots(dir: &Path) -> (AppModel, String) {
+    let r = dir.join("textures/textures/boots");
+    std::fs::create_dir_all(&r).unwrap();
+    png(&r, "Runner Boots_01.png", [90, 60, 40]);
+    png(&r, "Runner Boots_01_n.png", [128, 128, 255]);
+    png(&r, "Runner Boots_01_p.png", [40, 40, 40]);
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    m.set_target(engine::config::Target::Vanilla);
+    m.decide(
+        "textures/boots/Runner Boots_01.png",
+        Answer::Subtype(Subtype::Diffuse),
+    );
+    m.decide(
+        "textures/boots/Runner Boots_01_n.png",
+        Answer::Subtype(Subtype::Normal),
+    );
+    m.decide(
+        "textures/boots/Runner Boots_01_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    m.decide(
+        "textures/boots/Runner Boots_01_p.png",
+        Answer::Subtype(Subtype::Height),
+    );
+    idle(&mut m);
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.to_lowercase().ends_with("runner boots_01"))
+        .expect("the boots set")
+        .id
+        .clone();
+    (m, id)
+}
+
+fn files(base: &str, slots: &[u8]) -> FileBase {
+    let suffix = |n: u8| match n {
+        1 => "",
+        2 => "_n",
+        6 => "_m",
+        _ => unreachable!(),
+    };
+    FileBase {
+        base: base.into(),
+        slots: slots
+            .iter()
+            .map(|&n| (n, format!("{base}{}.dds", suffix(n))))
+            .collect(),
+    }
+}
+
+fn exported(m: &mut AppModel) -> Vec<String> {
+    export_through(m);
+    idle(m);
+    let root = m.export_root();
+    let mut all = vec![];
+    if root.is_dir() {
+        files_under(&root, &mut all);
+    }
+    let mut got: Vec<String> = all
+        .iter()
+        .map(|p| {
+            p.strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    got.sort();
+    got
+}
+
+fn project_text(m: &AppModel) -> String {
+    m.sets_doc.as_ref().unwrap().text()
+}
+
+#[test]
+fn a_vanilla_set_mapped_to_a_file_base_writes_the_targets_names() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let got = exported(&mut m);
+    for want in [
+        "textures/fs6/fs6_boots_ir.dds",
+        "textures/fs6/fs6_boots_ir_n.dds",
+    ] {
+        assert!(got.iter().any(|g| g == want), "{want} in {got:?}");
+    }
+    assert!(got.iter().all(|g| !g.ends_with(".json")), "{got:?}");
+    let text = project_text(&m);
+    assert!(text.contains(&format!("base = \"{BOOTS_BASE}\"")), "{text}");
+    assert!(!text.contains("plugin"), "{text}");
+}
+
+#[test]
+fn a_slot_the_base_lacks_goes_to_base_plus_suffix() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let got = exported(&mut m);
+    assert!(
+        got.iter().any(|g| g == "textures/fs6/fs6_boots_ir_p.dds"),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn a_mesh_path_mapping_uses_the_meshes_slot_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    let mesh = MeshPath {
+        base: "textures/a/body".into(),
+        slots: [
+            (1, "textures/a/body.dds".to_string()),
+            (2, "textures/a/body_msn.dds".to_string()),
+        ]
+        .into(),
+        meshes: 1,
+    };
+    m.map_target(&id, TargetPick::Mesh(mesh)).unwrap();
+    idle(&mut m);
+    let got = exported(&mut m);
+    assert!(
+        got.iter().any(|g| g == "textures/a/body_msn.dds"),
+        "{got:?}"
+    );
+    assert!(got.iter().any(|g| g == "textures/a/body.dds"), "{got:?}");
+}
+
+#[test]
+fn a_base_mapping_has_no_record_rows() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    scan(&mut m, vec![trec("A", "Plug.esp", "0x1", &[])]);
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    assert!(project_text(&m).contains("base = "), "mapped");
+    let rows = problems(&m);
+    assert!(
+        rows.iter().all(|p| !p.text.starts_with("Record ")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn picking_another_source_replaces_the_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    let rec = trec("Boots", "Plug.esp", "0x1", &[(1, "textures/x/y.dds")]);
+    m.map_target(&id, TargetPick::Record(rec)).unwrap();
+    idle(&mut m);
+    assert!(project_text(&m).contains("plugin"));
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let text = project_text(&m);
+    assert_eq!(text.matches("txst").count(), 1, "{text}");
+    assert!(text.contains("base = "), "{text}");
+    assert!(!text.contains("plugin"), "{text}");
+}
+
+#[test]
+fn the_same_base_in_another_case_is_not_a_new_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let before = project_text(&m);
+    assert!(before.contains("base = "), "mapped");
+    m.map_target(
+        &id,
+        TargetPick::Files(files("TEXTURES/FS6/FS6_Boots_IR", &[1, 2, 6])),
+    )
+    .unwrap();
+    idle(&mut m);
+    assert_eq!(project_text(&m), before);
+}
+
+#[test]
+fn target_replaces_lists_the_files_the_target_already_ships() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    m.set_target_mod(Some(target_folder(d.path()))).unwrap();
+    landed(&mut m);
+    let view = |m: &AppModel| {
+        let all = sdc_gui::model::sets::views(m);
+        all.iter().find(|v| v.id == id).cloned().unwrap()
+    };
+    assert!(m.target_replaces(&view(&m)).is_empty(), "default names");
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(
+        m.target_replaces(&view(&m)),
+        [
+            "textures/fs6/fs6_boots_ir.dds",
+            "textures/fs6/fs6_boots_ir_n.dds"
+        ]
+    );
+}
