@@ -740,8 +740,18 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
         .expect("the Sets filter button")
         .focus();
     h.step();
-    // The first card past the screen is the next stop after the last drawn one.
-    let next = off[0];
+    // The first card wholly past the panel is the next stop that is only a stand-in. (A card whose position label
+    // is cut off by the bottom edge is drawn, so its Tab stops are its own parts, not a stand-in.)
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+        .expect("the Sets panel")
+        .outer_rect;
+    let next = *off
+        .iter()
+        .find(|&&n| {
+            h.query_all_by_label(&node_name(n))
+                .all(|c| !c.rect().intersects(panel))
+        })
+        .expect("a card wholly past the panel");
     let mut presses = 0;
     while pos_rect(&h, next, 60).is_none() && presses < 600 {
         h.key_press(egui::Key::Tab);

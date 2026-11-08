@@ -21,16 +21,20 @@ const TILE_STROKE: f32 = 2.0;
 const SCROLL_ALLOWANCE: f32 = 18.0;
 /// A side panel's own chrome: `Frame::side_top_panel`'s 8 px margins and the 1 px separator.
 const PANEL_CHROME: f32 = 2.0 * 8.0 + 1.0;
-/// A set pill's chrome (`Frame::group`: 6 px margin and 1 px stroke a side) and egui's 8 px item spacing.
+/// A set pill's chrome (`Frame::group`: 6 px margin and 1 px stroke a side).
 const PILL_CHROME: f32 = 2.0 * (6.0 + 1.0);
-const ITEM_SPACING: f32 = 8.0;
 /// The Textures column's narrowest width: its heading over one tile.
 pub const TEXTURES_MIN: f32 =
     TILE + 2.0 * (TILE_MARGIN + TILE_STROKE) + SCROLL_ALLOWANCE + PANEL_CHROME;
-/// The Sets column's narrowest width: its heading over a pill with two members in a row (one alone is under
-/// egui's 96 px default).
+/// Note HP: the space between a card's chips across and down (room for a badge on each chip's corner), and the
+/// inset of the chip rows from the card's margin.
+pub const DOCK_GAP_X: f32 = 16.0;
+pub const DOCK_GAP_Y: f32 = 8.0;
+pub const DOCK_INSET: f32 = 2.0;
+/// The Sets column's narrowest width: its heading over a pill with two members in a row and the dock gap between them
+/// (one alone is under egui's 96 px default).
 pub const SETS_MIN: f32 =
-    2.0 * MEMBER + ITEM_SPACING + PILL_CHROME + SCROLL_ALLOWANCE + PANEL_CHROME;
+    2.0 * MEMBER + DOCK_GAP_X + 2.0 * DOCK_INSET + PILL_CHROME + SCROLL_ALLOWANCE + PANEL_CHROME;
 
 /// The arrow beside a column heading that collapses the column to its strip (the strip's own arrow expands it).
 pub fn collapse_arrow(ui: &mut egui::Ui, model: &mut AppModel, column: crate::ui::Column) {

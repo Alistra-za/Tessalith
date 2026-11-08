@@ -654,6 +654,9 @@ fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
             a.label().or_else(|| a.value())
         })
         .filter(|l| !l.is_empty())
+        // The Sets list scrolls under this panel: its drop hint, scrolled out of view, still has a box in the
+        // panel's rect once the cards are tall enough (Note HP).
+        .filter(|l| l != "Drop here to start a new set")
         .map(|l| l.replace(skip, "<tmp>"))
         .collect();
     out.sort();

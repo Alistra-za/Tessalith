@@ -710,6 +710,32 @@ fn off_window_flags_a_button_cut_by_the_edge() {
     assert_eq!(o[0].subject.label, "Far");
 }
 
+/// Note HP: the dock's badge hit rects sit on a chip's corner by design; anything else that overlaps still counts.
+#[test]
+fn overlap_spares_a_badge_centred_on_a_chip_corner() {
+    let hit = |ui: &mut egui::Ui, at: egui::Rect, name: &str| {
+        let r = ui.interact(at, ui.id().with(name), egui::Sense::click());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    };
+    let chip = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), vec2(32.0, 32.0));
+    let overlaps = |badge: egui::Rect| {
+        let f = found(300.0, 200.0, move |ui| {
+            hit(ui, chip, "chip");
+            hit(ui, badge, "badge");
+        });
+        of(&f, "overlap").len()
+    };
+    // 18x20, centre 1 px left of the top-right corner (a clamped badge)
+    let corner = egui::Rect::from_center_size(chip.right_top() - vec2(1.0, 0.0), vec2(18.0, 20.0));
+    assert_eq!(overlaps(corner), 0, "a badge on the corner");
+    // 20x20 centred on the top edge's midpoint is a real overlap
+    let mid = egui::Rect::from_center_size(chip.center_top(), vec2(20.0, 20.0));
+    assert_eq!(overlaps(mid), 1, "a badge on the edge's middle");
+    // two buttons sharing an edge
+    let side = egui::Rect::from_min_size(chip.right_top(), vec2(32.0, 32.0));
+    assert_eq!(overlaps(side), 0, "touching edges");
+}
+
 #[test]
 fn overlap_flags_two_buttons_on_top_of_each_other() {
     let f = found(300.0, 200.0, |ui| {

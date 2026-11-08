@@ -197,56 +197,173 @@ fn packed(h: &crate::app_harness::H) -> (String, String) {
     (item.clone(), m.item(item).unwrap().name.clone())
 }
 
+/// The painted `Shape::Rect`s of the frame, flattened.
+fn rect_shapes(h: &crate::app_harness::H) -> Vec<egui::epaint::RectShape> {
+    fn flat(s: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            egui::Shape::Rect(r) => out.push(r.clone()),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| flat(&c.shape, &mut out));
+    out
+}
+
+fn shared_area(a: egui::Rect, b: egui::Rect) -> f32 {
+    let i = a.intersect(b);
+    i.width().max(0.0) * i.height().max(0.0)
+}
+
+fn near(a: egui::Rect, w: f32, h: f32) -> bool {
+    (a.width() - w).abs() <= 0.5 && (a.height() - h).abs() <= 0.5
+}
+
+/// The crate card, its badges (Buttons named ", fills "), its chips (other 32x32 Buttons and Labels) and its
+/// other interactive parts (combos).
+struct CrateCard {
+    card: egui::Rect,
+    badges: Vec<egui::Rect>,
+    chips: Vec<egui::Rect>,
+    others: Vec<egui::Rect>,
+}
+
+fn crate_card(h: &crate::app_harness::H) -> CrateCard {
+    let cards: Vec<_> = h
+        .query_all(egui_kittest::kittest::by())
+        .filter(|n| n.accesskit_node().raw_bounds().is_some())
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Set props/crate, "))
+        })
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(cards.len(), 1, "one crate card, got {cards:?}");
+    let card = cards[0];
+    let (mut badges, mut chips, mut others) = (vec![], vec![], vec![]);
+    for n in h.query_all(egui_kittest::kittest::by()) {
+        if n.accesskit_node().raw_bounds().is_none() {
+            continue;
+        }
+        let r = n.rect();
+        if !card.contains_rect(r) || r == card {
+            continue;
+        }
+        let label = n.accesskit_node().label().unwrap_or_default();
+        let role = n.accesskit_node().role();
+        if role == Role::Button && label.contains(", fills ") {
+            badges.push(r);
+        } else if matches!(role, Role::Button | Role::Label | Role::Unknown) && near(r, 32.0, 32.0)
+        {
+            chips.push(r);
+        } else if role == Role::ComboBox {
+            others.push(r);
+        }
+    }
+    CrateCard {
+        card,
+        badges,
+        chips,
+        others,
+    }
+}
+
 #[test]
-fn the_dock_puts_each_badge_in_its_chips_top_cells() {
-    for (w, h_px, open) in [(1600.0, 900.0, false), (1055.0, 770.0, true)] {
-        let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
+fn the_dock_straddles_each_chips_top_corner() {
+    for (w, h_px, open, narrow) in [
+        (1400.0, 790.0, false, false),
+        (1055.0, 770.0, true, false),
+        (1055.0, 770.0, true, true),
+    ] {
+        let resize = resize_line(w, h_px);
         let mut lines = vec![resize.as_str(), SEARCH];
         if open {
             lines.push(r#"{"op":"click","at":{"label":"props/crate"}}"#);
         }
-        let (_d, h) = crate::replay("helpers", &lines);
-        let (_, packed_name) = packed(&h);
-        for (badge, chip, letter) in [
-            (
-                "crate_opacity.png, fills D alpha".to_string(),
-                "D, crate.png, filled by crate_opacity.png".to_string(),
-                "D",
-            ),
-            (
-                "crate_roughness.png, fills RMAOS R".to_string(),
-                format!("RMAOS, {packed_name}, filled by crate_roughness.png"),
-                "RMAOS",
-            ),
-            (
-                "crate_roughness.png, fills CNR alpha".to_string(),
-                "CNR, crate_cnr.png, filled by crate_roughness.png".to_string(),
-                "CNR",
-            ),
-        ] {
-            let b = one(&h, &badge);
-            let c = one(&h, &chip);
-            let at = format!("{badge} at {w}x{h_px}");
+        let (_d, mut h) = crate::replay("helpers", &lines);
+        if narrow {
+            sets_width(&mut h, SETS_MIN);
+        }
+        let at = format!("at {w}x{h_px} narrow {narrow}");
+        let c = crate_card(&h);
+        assert_eq!(c.badges.len(), 3, "{at}: three badges, got {:?}", c.badges);
+        if narrow {
+            let mut rows: Vec<i32> = c.chips.iter().map(|r| r.top().round() as i32).collect();
+            rows.sort();
+            rows.dedup();
+            assert!(rows.len() >= 2, "{at}: chip rows {rows:?}");
+        }
+        let shapes = rect_shapes(&h);
+        for (i, b) in c.badges.iter().enumerate() {
+            let s = format!("{at}: badge {i} {b:?}");
             assert!(
-                (b.width() - 12.0).abs() <= 0.5 && (b.height() - 12.0).abs() <= 0.5,
-                "{at}: 12x12, got {b:?}"
+                (18.0 - 0.5..=20.0 + 0.5).contains(&b.width())
+                    && (18.0 - 0.5..=20.0 + 0.5).contains(&b.height()),
+                "{s}: 18 to 20 px a side"
             );
-            assert!(c.contains_rect(b.shrink(0.5)), "{at}: {b:?} inside {c:?}");
-            assert!(b.top() - c.top() <= 1.5, "{at}: in a top cell");
             assert!(
-                c.right() - b.right() <= 1.5,
-                "{at}: the first badge is the right cell"
+                c.card.contains_rect(*b),
+                "{s}: inside the card {:?}",
+                c.card
             );
-            for (t, r) in texts(&h) {
-                if t == letter && c.contains_rect(r.shrink(0.5)) {
-                    assert!(
-                        !r.intersects(b),
-                        "{at}: the letter {t:?} {r:?} meets the badge"
-                    );
+            let on_corner = |p: &egui::Rect, ch: &egui::Rect| {
+                [ch.left_top(), ch.right_top()]
+                    .iter()
+                    .any(|q| (p.center() - *q).abs().max_elem() <= 0.5)
+            };
+            let painted = shapes
+                .iter()
+                .find(|r| {
+                    near(r.rect, 16.0, 16.0)
+                        && b.expand(0.5).contains_rect(r.rect)
+                        && c.chips.iter().any(|ch| on_corner(&r.rect, ch))
+                })
+                .map(|r| r.rect);
+            let Some(painted) = painted else {
+                panic!("{s}: holds no painted 16x16 on a chip's top corner");
+            };
+            // every chip but the one this badge sits on, and the other parts
+            let others = c.chips.iter().filter(|ch| !on_corner(&painted, ch));
+            for o in others.chain(&c.others) {
+                assert!(
+                    shared_area(*b, *o) <= 0.5,
+                    "{s}: meets {o:?} by {} px2",
+                    shared_area(*b, *o)
+                );
+            }
+            for (j, o) in c.badges.iter().enumerate() {
+                if j != i {
+                    assert!(shared_area(*b, *o) <= 0.5, "{s}: meets badge {j} {o:?}");
                 }
             }
         }
     }
+}
+
+#[test]
+fn a_selected_badge_has_a_two_pixel_selection_stroke() {
+    let (_d, mut h) = crate::replay("helpers", &[SEARCH]);
+    let badge = one(&h, "crate_roughness.png, fills RMAOS R");
+    h.event(egui::Event::PointerMoved(badge.center()));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        press(&mut h, badge.center(), pressed);
+    }
+    crate::app_harness::settle(&mut h, 6);
+    let accent = h.ctx.global_style().visuals.selection.stroke.color;
+    let badge = one(&h, "crate_roughness.png, fills RMAOS R");
+    let hit = rect_shapes(&h).into_iter().any(|r| {
+        near(r.rect, 16.0, 16.0)
+            && badge.expand(0.5).contains_rect(r.rect)
+            && r.stroke.width == 2.0
+            && r.stroke.color == accent
+    });
+    assert!(hit, "a 2 px selection stroke on the selected badge");
 }
 
 #[test]

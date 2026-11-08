@@ -219,6 +219,18 @@ pub fn run_checks(s: &Snapshot) -> Vec<Finding> {
         .map(|(i, n)| (i, n.clip.map_or(n.rect, |c| c.intersect(n.rect))))
         .filter(|(_, r)| positive(*r))
         .collect();
+    // Note HP: a helper badge is centred on its chip's corner by design: a rect whose centre is within 2 px of a
+    // corner of the other is not an overlap. A rect centred on an edge's middle still is.
+    let on_corner = |a: Rect, b: Rect| {
+        [
+            b.left_top(),
+            b.right_top(),
+            b.left_bottom(),
+            b.right_bottom(),
+        ]
+        .iter()
+        .any(|p| (a.center() - *p).abs().max_elem() <= 2.0)
+    };
     for (a, &(i, ri)) in cands.iter().enumerate() {
         for &(j, rj) in &cands[a + 1..] {
             if s.nodes[i].layer != s.nodes[j].layer {
@@ -229,6 +241,8 @@ pub fn run_checks(s: &Snapshot) -> Vec<Finding> {
                 && o.height() > 1.0
                 && !ri.expand(0.5).contains_rect(rj)
                 && !rj.expand(0.5).contains_rect(ri)
+                && !on_corner(ri, rj)
+                && !on_corner(rj, ri)
             {
                 out.push(Finding {
                     check: "overlap",
