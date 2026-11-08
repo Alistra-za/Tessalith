@@ -2,7 +2,7 @@
 //! `sdc.toml` (the file on disk is never touched); Outputs mode gives sets an output base name (`output_name`, or
 //! the PGPatcher `rename` on a CS PBR set). One pure plan, `plan_rename`, feeds both the preview and Apply.
 use super::items::ItemKind;
-use super::sets::{check_output_name, member_tail, renamed_output, slot_of, views, SetView};
+use super::sets::{check_output_name, member_tail, renamed_output, slot_of, views, SetView, Tails};
 use super::{AppModel, Dialog};
 use crate::pgp::prefix::check_file_name;
 use engine::config::Target;
@@ -161,8 +161,8 @@ const PACKED: &str = "skipped (a packed output has no file of its own)";
 const LOCKED: &str = "skipped (locked)";
 
 /// The tail a name ends in, as the kind column shows it: `_n`, `_normal`, a skin set's `_wet`, or "colour".
-fn role_of(stem: &str, skin: bool) -> String {
-    match member_tail(stem, skin) {
+fn role_of(stem: &str, tails: Tails) -> String {
+    match member_tail(stem, tails) {
         "" => "colour".into(),
         t => t.to_string(),
     }
@@ -288,16 +288,16 @@ fn first_by_id(views: &[SetView]) -> HashMap<String, usize> {
 fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameRow> {
     let views = views(m);
     let locked = locked_slots(&views);
-    // The members of Advanced skin sets: their `_wet` and `_detail_n` are tails (`member_tail`).
-    let skin: HashSet<&str> = views
+    // The members of skin and landscape sets: their `_wet` and `_detail_n` are tails (`member_tail`).
+    let tails_of: HashMap<&str, Tails> = views
         .iter()
-        .filter(|v| v.skin || v.shared)
-        .flat_map(|v| v.members.iter().map(String::as_str))
+        .filter(|v| v.tails() != Tails::Plain)
+        .flat_map(|v| v.members.iter().map(|k| (k.as_str(), v.tails())))
         .collect();
     let project = m.project.as_ref();
     let mut out = vec![];
     for key in &d.keys {
-        let in_skin = skin.contains(key.as_str());
+        let in_skin = tails_of.get(key.as_str()).copied().unwrap_or(Tails::Plain);
         let Some(it) = m.item(key) else { continue };
         let current = project
             .and_then(|p| p.read_as(key))
@@ -459,7 +459,7 @@ fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<Rename
         r.problem = check_output_name(&new).err();
         let renamed: Vec<String> = outputs
             .iter()
-            .filter_map(|(_, jk)| renamed_output(jk, &new, v.skin || v.shared))
+            .filter_map(|(_, jk)| renamed_output(jk, &new, v.tails()))
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .collect();
         r.output = match renamed.len() {
@@ -528,7 +528,7 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
             continue;
         };
         for (_, jk) in &outs[at] {
-            let Some(p) = renamed_output(jk, &r.new, views[at].skin || views[at].shared) else {
+            let Some(p) = renamed_output(jk, &r.new, views[at].tails()) else {
                 continue;
             };
             let l = lower(&p.to_string_lossy());

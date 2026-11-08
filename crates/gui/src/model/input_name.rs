@@ -100,7 +100,7 @@ impl AppModel {
         };
         let j = self.item(item)?.job.as_ref()?;
         let full = no_ext(&j.game_path);
-        let tail = member_tail(split_path(full).1, v.skin || v.shared);
+        let tail = member_tail(split_path(full).1, v.tails());
         let name = &full[..full.len() - tail.len()];
         Some((name.to_string(), tail.to_string()))
     }
@@ -177,7 +177,7 @@ impl AppModel {
             let cur = current(k);
             let (_, name) = split_path(&cur);
             let (stem, ext) = split_ext(name);
-            let tail = member_tail(stem, v.skin || v.shared);
+            let tail = member_tail(stem, v.tails());
             d.keys.push(k.clone());
             d.typed.insert(k.clone(), format!("{new_base}{tail}.{ext}"));
         }

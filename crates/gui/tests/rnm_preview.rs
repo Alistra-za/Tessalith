@@ -23,7 +23,7 @@ fn fixture(dir: &Path) -> AppModel {
     })
     .save(r.join("iron_n.png"))
     .unwrap();
-    for f in ["iron_bump.png", "iron_detailnorm.png"] {
+    for f in ["iron_bump.png", "iron_detailnorm2.png"] {
         ImageBuffer::from_fn(64, 64, |x, y| Luma([((x * 7 + y * 3) % 256) as u8]))
             .save(r.join(f))
             .unwrap();

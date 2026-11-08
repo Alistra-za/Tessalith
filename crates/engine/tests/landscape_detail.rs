@@ -92,20 +92,27 @@ fn landscape_detail_is_its_own_output() {
     assert_detail_is_its_own_output(Target::Vanilla, Shader::Landscape);
 }
 
+/// Note GW1: outside a landscape or skin set a `_detail` is an undecided member of its set, not an RNM layer.
 #[test]
-fn pbr_set_detail_stays_rnm() {
+fn pbr_set_detail_is_undecided() {
     let d = tempfile::tempdir().unwrap();
     three(d.path());
     let (p, _) = plan(d.path(), Target::Cs, Shader::Pbr, &[]);
-    assert!(is_layer(job(&p, "foo_detail.png")));
+    let j = job(&p, "foo_detail.png");
+    assert!(!is_layer(j));
+    assert!(
+        matches!(j.status, JobStatus::Unresolved { .. }),
+        "{:?}",
+        j.status
+    );
     let n = job(&p, "foo_n.png");
-    assert_eq!(layer_files(n), ["foo_detail.png"]);
-    assert!(n.active_rnm().is_some());
+    assert!(layer_files(n).is_empty());
+    assert!(n.active_rnm().is_none());
 }
 
-/// X13: a hand-set `rnm.target` keeps the file an RNM layer.
+/// Note GW1: `rnm.target` no longer makes a detail map an RNM layer.
 #[test]
-fn rnm_target_keeps_layer() {
+fn rnm_target_does_not_make_detail_a_layer() {
     for (target, shader) in [
         (Target::Cs, Shader::PbrLandscape),
         (Target::Vanilla, Shader::Landscape),
@@ -118,14 +125,16 @@ fn rnm_target_keeps_layer() {
             shader,
             &["file:foo_detail.png.rnm.target=n"],
         );
-        assert!(is_layer(job(&p, "foo_detail.png")), "{shader:?}");
-        assert_eq!(layer_files(job(&p, "foo_n.png")), ["foo_detail.png"]);
+        let j = job(&p, "foo_detail.png");
+        assert!(!is_layer(j), "{shader:?}");
+        assert_eq!(j.profile.subtype, Subtype::DetailNormal, "{shader:?}");
+        assert!(layer_files(job(&p, "foo_n.png")).is_empty());
     }
 }
 
-/// Ruling R6: an `n_`/`cnr_` base prefix in the name targets a base by hand, so the file stays an RNM layer.
+/// Note GW1: the `n_`/`cnr_` layer prefixes are gone from `_detail`: the files are no layers and `_n` blends nothing.
 #[test]
-fn prefixed_detail_stays_layer() {
+fn prefixed_detail_is_no_layer() {
     for (target, shader) in [
         (Target::Cs, Shader::PbrLandscape),
         (Target::Vanilla, Shader::Landscape),
@@ -142,9 +151,9 @@ fn prefixed_detail_stays_layer() {
         let (p, _) = plan(d.path(), target, shader, &[]);
         for name in ["foo_n_detail.png", "foo_cnr_detail.png"] {
             let j = job(&p, name);
-            assert!(is_layer(j), "{shader:?} {name}: {:?}", j.status);
+            assert!(!is_layer(j), "{shader:?} {name}: {:?}", j.status);
         }
-        assert_eq!(layer_files(job(&p, "foo_n.png")), ["foo_n_detail.png"]);
+        assert!(layer_files(job(&p, "foo_n.png")).is_empty());
     }
 }
 
@@ -192,9 +201,10 @@ fn pbr_set_noise_stays_undecided() {
     assert!(j.warnings.iter().any(|w| w.code == Code::SugLowConfidence));
 }
 
-/// Review Focus 4: the mask and Detail2 stay layers whose base is gone; no panic, no Error, no new blocker.
+/// Review Focus 4, Note GW1: `_detail_mask` and `_detail2` (still layer terms until RNM is removed) beside a
+/// `_detail` map: no panic, no Error, no new blocker, and the detail map stays DetailNormal.
 #[test]
-fn detail_mask_and_detail2_stay_layers() {
+fn detail_mask_and_detail2_leave_the_detail_map_alone() {
     for (target, shader) in [
         (Target::Cs, Shader::PbrLandscape),
         (Target::Vanilla, Shader::Landscape),
@@ -216,21 +226,19 @@ fn detail_mask_and_detail2_stay_layers() {
             job(&p, "foo_detail.png").profile.subtype,
             Subtype::DetailNormal
         );
-        let mut observed = vec![];
         for name in ["foo_detail_mask.png", "foo_detail2.png"] {
             let j = job(&p, name);
-            assert!(is_layer(j), "{shader:?} {name}: {:?}", j.status);
             assert!(
                 j.warnings.iter().all(|w| w.severity < Severity::Blocking),
                 "{shader:?} {name}: {:?}",
                 j.warnings
             );
-            observed.push(j.warnings.iter().map(|w| w.code).collect::<Vec<_>>());
         }
-        // Pinned as observed: the mask's layer was retyped, so it is RNM-MASK-ORPHAN (Warning); Detail2 needs no
-        // Detail layer, so it still blends into `_n` with no code.
-        assert_eq!(observed, [vec![Code::RnmMaskOrphan], vec![]], "{shader:?}");
-        assert_eq!(layer_files(job(&p, "foo_n.png")), ["foo_detail2.png"]);
+        assert!(p
+            .jobs
+            .iter()
+            .flat_map(|j| &j.warnings)
+            .all(|w| w.severity < Severity::Blocking));
     }
 }
 

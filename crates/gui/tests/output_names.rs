@@ -178,3 +178,26 @@ fn renamed_output_keeps_folder_and_suffix() {
         Some(PathBuf::from("a/x_n.dds"))
     );
 }
+
+/// Note GW1: `_detail` and `_detailnorm` are tails in every set, `_detail_n` in a landscape or skin set, `_wet` in a
+/// skin set only.
+#[test]
+fn renamed_output_keeps_the_detail_names() {
+    for tails in [Tails::Plain, Tails::Landscape, Tails::Skin] {
+        for tail in ["detail", "detailnorm"] {
+            assert_eq!(
+                renamed_output(&format!("a/body_{tail}.dds"), "x", tails),
+                Some(PathBuf::from(format!("a/x_{tail}.dds"))),
+                "{tails:?} {tail}"
+            );
+        }
+    }
+    assert_eq!(
+        renamed_output("a/body_detail_n.dds", "x", Tails::Landscape),
+        Some(PathBuf::from("a/x_detail_n.dds"))
+    );
+    assert_eq!(
+        renamed_output("a/body_wet.dds", "x", Tails::Landscape),
+        Some(PathBuf::from("a/x.dds"))
+    );
+}

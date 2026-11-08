@@ -42,23 +42,20 @@ fn plain_layer_feeds_n_with_its_mask() {
     for n in [
         "iron.png",
         "iron_n.png",
-        "iron_detailnorm.png",
-        "iron_detailnormmask.png",
+        "iron_bump.png",
+        "iron_bumpmask.png",
     ] {
         png(d.path(), n);
     }
     let p = plan_dir(d.path(), vec![]);
     let n = job(&p, "iron_n.png");
-    assert_eq!(
-        layer_ids(n),
-        vec![(LayerId::Detail, "iron_detailnorm.png".into())]
-    );
+    assert_eq!(layer_ids(n), vec![(LayerId::Bump, "iron_bump.png".into())]);
     assert!(n.rnm.as_ref().unwrap().layers[0]
         .mask
         .as_ref()
         .unwrap()
         .path
-        .ends_with("iron_detailnormmask.png"));
+        .ends_with("iron_bumpmask.png"));
     assert!(n.active_rnm().is_some());
 }
 
@@ -71,7 +68,7 @@ fn n_and_cnr_targets_and_sharing() {
         "iron_n.png",
         "iron_cnr.png",
         "iron_bump.png",
-        "iron_cnr_detailnorm.png",
+        "iron_cnr_bump2.png",
     ] {
         png(d.path(), n);
     }
@@ -82,7 +79,7 @@ fn n_and_cnr_targets_and_sharing() {
     );
     assert_eq!(
         layer_ids(job(&p, "iron_cnr.png")),
-        vec![(LayerId::Detail, "iron_cnr_detailnorm.png".into())]
+        vec![(LayerId::Bump2, "iron_cnr_bump2.png".into())]
     );
     let p = plan_dir(d.path(), vec!["file:iron_bump.png.rnm.target=both".into()]);
     assert_eq!(layer_ids(job(&p, "iron_cnr.png")).len(), 2);

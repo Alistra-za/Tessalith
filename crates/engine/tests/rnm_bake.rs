@@ -41,7 +41,7 @@ fn detail(dir: &Path, h: u32) {
             200u8,
         ])
     })
-    .save(dir.join("in/iron_detailnorm.png"))
+    .save(dir.join("in/iron_detailnorm2.png"))
     .unwrap();
 }
 
@@ -93,7 +93,7 @@ fn bake_records_rnm_inputs() {
         .iter()
         .filter_map(|r| r.rnm.clone())
         .collect();
-    assert!(roles.contains(&"bake.detail".to_string()), "{roles:?}");
+    assert!(roles.contains(&"bake.detail2".to_string()), "{roles:?}");
 }
 
 #[test]

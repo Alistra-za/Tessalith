@@ -11,7 +11,7 @@ use crate::config::*;
 use crate::discover::{canonicalise_outputs, discover_reporting, InputFile, InputKind};
 use crate::events::{EventKind, Reporter, SkipKind, Stage};
 use crate::group::{
-    group_sets_with, join_skin_detail, join_skin_wet, member_split, SuffixSplit, TextureSet,
+    group_sets_with, join_detail_n, join_skin_wet, member_split, SuffixSplit, TextureSet,
 };
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
@@ -1235,7 +1235,28 @@ pub(crate) fn join_members(
                 .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
         };
         join_skin_wet(sets, files, aliases, is_skin);
-        join_skin_detail(sets, files, aliases, is_skin);
+    }
+    // Note GW1: `x_detail_n` joins any detail host, on every target (Landscape is on both).
+    join_detail_n(sets, files, aliases, detail_host(ctx, files, explicit));
+}
+
+/// Note GW1: a set takes the detail names `_detail`, `_detailnorm` and `_detail_n` as one map when it is an Advanced skin
+/// set (cs), or is landscape by its path (`suggest::landscape_path`) or by an explicit Landscape or PBR Landscape.
+/// shortcut: a Landscape picked later (from a mesh) is not seen, so such a set needs an explicit shader for `_detail_n`.
+pub(crate) fn detail_host<'a>(
+    ctx: &'a ResolveCtx<'a>,
+    files: &'a [InputFile],
+    explicit: &'a BTreeMap<String, Shader>,
+) -> impl Fn(&TextureSet) -> bool + 'a {
+    move |s| {
+        let first = s.members.first().map(|&i| &files[i]);
+        first.is_some_and(|f| {
+            (ctx.target == Target::Cs && pack::plan::set_is_advanced_skin(ctx, s, f))
+                || crate::suggest::landscape_path(&f.game_path)
+        }) || matches!(
+            explicit.get(&s.key),
+            Some(Shader::Landscape | Shader::PbrLandscape)
+        )
     }
 }
 
@@ -1677,11 +1698,19 @@ impl Engine {
             );
         }
         let waits = waiting_images(&ctx, target, &sets, &files, &typed, &hand);
-        let dups = crate::group::duplicate_outputs_with(&files, |f| {
+        let mut dups = crate::group::duplicate_outputs_with(&files, |f| {
             !losers.contains(&f.path)
                 && !waits.contains(&f.path)
                 && (f.kind != InputKind::Dds || reencodes(&ctx, f))
         });
+        // Note GW1: two detail maps of one host write different files for one slot.
+        let (explicit, _) = explicit_shaders(req, &sets);
+        dups.extend(crate::group::duplicate_details(
+            &sets,
+            &files,
+            registry.alias_table(),
+            detail_host(&ctx, &files, &explicit),
+        ));
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
             req: req.clone(),
@@ -2094,14 +2123,15 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
-            // Note GI (X13, R5): a PBR Landscape `_detail` layer or `_noise` is typed again (detail normal, noise).
-            let landscape_retype = matches!(
-                &old.status,
-                JobStatus::NormalLayer { term } if term.layer == crate::config::LayerId::Detail
-            ) || old
-                .suggestions
-                .first()
-                .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
+            // Note GI (R5), GW1: a PBR Landscape detail map or `_noise` is typed again (detail normal, noise).
+            let landscape_retype = split_for((set, f))
+                .suffix
+                .as_deref()
+                .is_some_and(crate::group::is_detail_suffix)
+                || old
+                    .suggestions
+                    .first()
+                    .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {

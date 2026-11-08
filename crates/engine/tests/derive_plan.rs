@@ -490,11 +490,11 @@ fn a_member_with_no_recipe_role_is_reported_not_written() {
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
     let dir = inputs.join("textures/pbr/arm");
     png(&dir.join("steel_g.png"), 16, 16, [255, 0, 0, 255]);
-    png(&dir.join("steel_detail.png"), 16, 16, [128, 128, 255, 255]);
+    png(&dir.join("steel_bump.png"), 16, 16, [128, 128, 255, 255]);
     let (cs, _) = plan(request(&inputs, &d.path().join("pbr"), Target::Cs));
     let mut sets = derive_sets(&cs);
     // An RNM layer has no job role under `cs` either; the PBR set lists it as a member (Task 7 reads it so).
-    sets[0].members.push(dir.join("steel_detail.png"));
+    sets[0].members.push(dir.join("steel_bump.png"));
     let mut r = request(&inputs, &d.path().join("vanilla"), Target::Vanilla);
     r.derive = Some(DeriveRequest {
         mode: DeriveMode::Vanilla,
@@ -525,13 +525,16 @@ fn a_member_with_no_recipe_role_is_reported_not_written() {
     assert!(
         notes
             .iter()
-            .any(|(m, r)| m.ends_with("steel_detail.png")
+            .any(|(m, r)| m.ends_with("steel_bump.png")
                 && *r == "detail layer not in the vanilla _n"),
         "{notes:?}"
     );
-    assert!(p.jobs.iter().all(
-        |j| !slash(&j.output).contains("steel_g") && !slash(&j.output).contains("steel_detail")
-    ));
+    assert!(
+        p.jobs
+            .iter()
+            .all(|j| !slash(&j.output).contains("steel_g")
+                && !slash(&j.output).contains("steel_bump"))
+    );
 }
 
 #[test]
@@ -877,7 +880,7 @@ fn one_terminal_event_each(mode: DeriveMode) {
     let dir = inputs.join("textures/pbr/arm");
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), true);
     png(&dir.join("steel_g.png"), 16, 16, [255, 0, 0, 255]);
-    png(&dir.join("steel_detail.png"), 16, 16, [128, 128, 255, 255]);
+    png(&dir.join("steel_bump.png"), 16, 16, [128, 128, 255, 255]);
     for base in ["box", "nod"] {
         png(&dir.join(format!("{base}.png")), 16, 16, [90, 90, 90, 255]);
         png(
@@ -966,7 +969,7 @@ fn one_terminal_event_each(mode: DeriveMode) {
             let nod = d.sets.iter_mut().find(|s| is(s, "nod")).unwrap();
             (nod.albedo, nod.normal) = (None, None);
             let steel = d.sets.iter_mut().find(|s| is(s, "steel")).unwrap();
-            steel.members.push(dir.join("steel_detail.png"));
+            steel.members.push(dir.join("steel_bump.png"));
         }
     });
     let discovered: Vec<(String, String)> = ev

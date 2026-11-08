@@ -286,8 +286,8 @@ fn a_partial_keeps_the_rnm_keys_other_sets_read() {
     for f in [
         "iron_n.png",
         "iron_bump.png",
-        "iron_detailnorm.png",
-        "iron_detailnormmask.png",
+        "iron_detailnorm2.png",
+        "iron_detailnormmask2.png",
     ] {
         image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([(x * 3) as u8]))
             .save(r.join(f))

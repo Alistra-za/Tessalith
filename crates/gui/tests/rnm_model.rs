@@ -46,8 +46,8 @@ const FULL: [&str; 5] = [
     "iron.png",
     "iron_n.png",
     "iron_bump.png",
-    "iron_detailnorm.png",
-    "iron_detailnormmask.png",
+    "iron_detailnorm2.png",
+    "iron_detailnormmask2.png",
 ];
 
 #[test]
@@ -60,8 +60,8 @@ fn layers_are_helpers_not_tiles() {
     for (n, i) in m.items.iter().enumerate() {
         let p = i.input.to_string_lossy().replace("\\", "/");
         if p.ends_with("_bump.png")
-            || p.ends_with("_detailnorm.png")
-            || p.ends_with("_detailnormmask.png")
+            || p.ends_with("_detailnorm2.png")
+            || p.ends_with("_detailnormmask2.png")
         {
             layers += 1;
             assert_eq!(i.kind, sdc_gui::model::items::ItemKind::Helper, "{p}");
@@ -80,24 +80,24 @@ fn rows_follow_the_order_with_defaults() {
     let job = m.item("m/iron_n.png").unwrap().job.clone().unwrap();
     let rows = rnm_rows(&job, &m.rnm_keys, &|_| None);
     let ids: Vec<LayerId> = rows.iter().map(|r| r.id).collect();
-    assert_eq!(ids, vec![Bump, Detail]);
-    assert_eq!((rows[0].strength, rows[1].strength), (0.4, 0.6));
+    assert_eq!(ids, vec![Bump, Detail2]);
+    assert_eq!((rows[0].strength, rows[1].strength), (0.4, 0.3));
     assert!(!rows[0].flip_green, "a bump never follows the base (W8)");
     assert!(matches!(rows[1].mask, Some((_, true))));
     assert_eq!(rows[0].key, "m/iron_bump.png");
     assert_eq!(
-        order_after_move(&job, Detail, true),
-        vec![Detail, Bump, Bent, Bump2, Detail2]
+        order_after_move(&job, Detail2, true),
+        vec![Detail2, Bump, Bent, Bump2, Detail]
     );
 
-    m.set_field("m/iron_n.png", "rnm.order", json!(["detail", "bump"]));
+    m.set_field("m/iron_n.png", "rnm.order", json!(["detail2", "bump"]));
     idle(&mut m);
     let job = m.item("m/iron_n.png").unwrap().job.clone().unwrap();
     let ids: Vec<LayerId> = rnm_rows(&job, &m.rnm_keys, &|_| None)
         .iter()
         .map(|r| r.id)
         .collect();
-    assert_eq!(ids, vec![Detail, Bump]);
+    assert_eq!(ids, vec![Detail2, Bump]);
 }
 
 #[test]
@@ -129,11 +129,11 @@ fn layer_target_edit_changes_the_set_preview_signature() {
             "iron.png",
             "iron_n.png",
             "iron_cnr.png",
-            "iron_detailnorm.png",
+            "iron_detailnorm2.png",
         ],
     );
     let sig = |m: &mut AppModel, t: &str| {
-        m.set_field("m/iron_detailnorm.png", "rnm.target", json!(t));
+        m.set_field("m/iron_detailnorm2.png", "rnm.target", json!(t));
         idle(m);
         let item = m.item("m/iron_cnr.png").unwrap();
         assert!(item.job.as_ref().unwrap().active_rnm().is_some() || t == "n");
@@ -153,7 +153,7 @@ fn editing_a_layer_file_flags_its_base_normal() {
     assert_eq!(m.check_sources(), 0);
     std::thread::sleep(Duration::from_millis(20));
     ImageBuffer::from_fn(32, 32, |_, _| Rgb([128u8, 128, 255]))
-        .save(d.path().join("m/iron_detailnorm.png"))
+        .save(d.path().join("m/iron_detailnorm2.png"))
         .unwrap();
     assert!(m.check_sources() >= 1);
     assert!(m.item("m/iron_n.png").unwrap().changed_on_disk);

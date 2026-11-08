@@ -9,18 +9,18 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
-- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV
-- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, GW
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
@@ -1194,3 +1194,7 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 - **GV2 The engine has no solver.** `engine::from_normal` (height, AO and curvature from a normal) and the `GEN-STALE` code are gone. An `allow` list that names `GEN-STALE` is refused with "removed in 3.0"; `_generated` files are still read as ordinary sources, and the Also export still reads `_curves_generated`.
 - **GV3 The docs say what a `_generated` file still is.** `docs/wiki/GUI-Generate-From-Normal.md` and every link to it are gone; `Set-Shaders.md#generated-files` is the one home: a `_generated` file is an ordinary source that a real map beats (`GEN-REPLACED`), `_ao_generated` feeds `_rmaos` B (`GEN-AO`) and `_curves_generated` is read by Also export. Rulings wholly about the solver, the dialog or `GEN-STALE` moved to the archive; mixed ones were edited to this rule (archive table `2026-11-07-gv.tsv`).
 - **GV4 The 3.0 generate removal reverses the 2.0 debloat review's "kept on purpose: AO/curvature" (item not in the repo), owner 2026-11-06.** GV1-GV3 supersede the frozen 1.x CO rulings where they describe the solver, the dialog, its offers, provenance or the stale flag, FC3's GEN-STALE row, FB13's AO box and DP1-DP3; `tools/decisions-archive/2026-11-07-gv.tsv` lists each cut. CO1-CO10, CO75, CO89, CO90, CO92, CO94, CO102-CO106, CO108, CO115 and CO116 stay, as edited in the digest.
+
+## Note GW — v3 RNM removed; detail names (owner, 2026-11-06)
+
+- **GW1 `_detail`, `_detailnorm` and `_detail_n` are one detail map on landscape and skin sets.** In a Landscape or PBR Landscape set the three names are `detail_normal`, in an Advanced skin set `skin_detail`, written under their own spelling (`x_detailnorm.png` writes `x_detailnorm.dds`) and never an RNM layer, whatever `rnm.target` says; `x_detail` and `x_detailnorm` join set `x` when it exists or the path is landscape and stay undecided elsewhere, while `x_detail_n` joins only a skin set, a landscape path or an explicit Landscape or PBR Landscape shader, so a `_detail_n` on a set that is Landscape only by a mesh pick, outside a landscape path, needs an explicit shader. Two of the names in one set are the blocking `IN-DUPLICATE`, a saved sub-type wins, and this supersedes GI13 and GI22 in part.

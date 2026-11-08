@@ -45,7 +45,7 @@ const FULL: [&str; 4] = [
     "iron.png",
     "iron_n.png",
     "iron_bump.png",
-    "iron_detailnorm.png",
+    "iron_detailnorm2.png",
 ];
 const BENT: [&str; 4] = ["iron.png", "iron_n.png", "iron_bent.png", "iron_ao.png"];
 
@@ -64,7 +64,7 @@ fn rnm_section_lists_layers_in_order() {
     let mut h = panel(fixture(d.path(), &FULL));
     h.run();
     assert!(!h.get_all_by_label("RNM").collect::<Vec<_>>().is_empty());
-    let (bump, detail) = (h.get_by_label("bump"), h.get_by_label("detail"));
+    let (bump, detail) = (h.get_by_label("bump"), h.get_by_label("detail 2"));
     assert!(
         bump.rect().min.y < detail.rect().min.y,
         "bump is above detail"
@@ -95,7 +95,7 @@ fn moving_a_layer_writes_the_order_and_a_redraw_writes_nothing() {
         .unwrap()
         .file_value(N, "rnm.order")
         .unwrap();
-    assert_eq!(v[0], json!("detail"));
+    assert_eq!(v[0], json!("detail2"));
     assert_eq!(v[1], json!("bump"));
 }
 

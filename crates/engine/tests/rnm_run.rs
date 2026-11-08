@@ -52,28 +52,28 @@ fn layers_change_the_normal_and_only_n_is_written() {
     }
     run(plan_dir(d.path(), vec![]));
     let plain = texels(d.path(), "iron_n.dds");
-    detail(d.path(), "iron_detailnorm.png", 32, 32);
+    detail(d.path(), "iron_detailnorm2.png", 32, 32);
     let s = run(plan_dir(d.path(), vec![]));
     assert_eq!(s.converted, 1, "only the _n re-encodes");
     assert_ne!(texels(d.path(), "iron_n.dds"), plain);
-    assert!(!d.path().join("out/iron_detailnorm.dds").exists());
+    assert!(!d.path().join("out/iron_detailnorm2.dds").exists());
 }
 
 /// Review Focus 1: each edit re-encodes; an unrelated edit does not.
 #[test]
 fn edits_re_encode() {
     let d = tempfile::tempdir().unwrap();
-    for n in ["iron.png", "iron_n.png", "iron_detailnormmask.png"] {
+    for n in ["iron.png", "iron_n.png", "iron_detailnormmask2.png"] {
         png(d.path(), n);
     }
-    detail(d.path(), "iron_detailnorm.png", 32, 32);
+    detail(d.path(), "iron_detailnorm2.png", 32, 32);
     run(plan_dir(d.path(), vec![]));
     for set in [
-        "rnm.detail.strength=0.9",
-        "rnm.detail.flip_green=true",
-        "rnm.detail.mask=false",
+        "rnm.detail2.strength=0.9",
+        "rnm.detail2.flip_green=true",
+        "rnm.detail2.mask=false",
         "rnm.enabled=false",
-        "rnm.order=[\"detail\",\"bent\"]",
+        "rnm.order=[\"detail2\",\"bent\"]",
     ] {
         let s = run(plan_dir(d.path(), vec![set.into()]));
         assert_eq!(s.converted, 1, "{set}");
@@ -87,7 +87,7 @@ fn edits_re_encode() {
     ));
     assert_eq!(s.converted, 0);
     // Touching the layer file re-encodes.
-    detail(d.path(), "iron_detailnorm.png", 32, 31);
+    detail(d.path(), "iron_detailnorm2.png", 32, 31);
     assert_eq!(run(plan_dir(d.path(), vec![])).converted, 1);
 }
 
@@ -107,7 +107,7 @@ fn cnr_alpha_is_untouched() {
     let sets = || vec!["mips.levels=1".to_string(), "format=rgba8".to_string()];
     assert_eq!(run(plan_dir(d.path(), sets())).failed, 0);
     let rgb_before = texels(d.path(), "iron_cnr.dds");
-    detail(d.path(), "iron_cnr_detailnorm.png", 32, 32);
+    detail(d.path(), "iron_cnr_detailnorm2.png", 32, 32);
     assert_eq!(run(plan_dir(d.path(), sets())).failed, 0);
     let now = texels(d.path(), "iron_cnr.dds");
     assert_ne!(now, rgb_before, "the layer must have changed RGB");
@@ -122,7 +122,7 @@ fn odd_sizes_convert() {
     for n in ["iron.png", "iron_n.png"] {
         png(d.path(), n);
     }
-    detail(d.path(), "iron_detailnorm.png", 96, 40);
+    detail(d.path(), "iron_detailnorm2.png", 96, 40);
     detail(d.path(), "iron_bump.png", 7, 9);
     let s = run(plan_dir(d.path(), vec![]));
     assert_eq!(s.failed, 0);
@@ -185,10 +185,10 @@ fn target_edit_re_encodes_the_cnr() {
 #[test]
 fn rnm_layers_get_no_extra_map_warning() {
     let d = tempfile::tempdir().unwrap();
-    for n in ["iron.png", "iron_n.png", "iron_detailnormmask.png"] {
+    for n in ["iron.png", "iron_n.png", "iron_detailnormmask2.png"] {
         png(d.path(), n);
     }
-    detail(d.path(), "iron_detailnorm.png", 32, 32);
+    detail(d.path(), "iron_detailnorm2.png", 32, 32);
     let mut req = BatchRequest::new(
         vec![d.path().join("in")],
         d.path().join("out"),

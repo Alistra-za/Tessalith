@@ -270,14 +270,14 @@ fn fills_reset_returns_to_suggestion() {
 #[test]
 fn read_and_invert_hidden_for_normal_roles() {
     let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_n.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
+    let files = ["x.png", "x_n.png", "x_cnr.png", "x_detailnorm2.png"];
+    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm2.png");
     assert_eq!(h.query_all_by_label("Read from").count(), 0);
     assert_eq!(h.query_all_by_label("Invert").count(), 0);
     assert_eq!(h.query_all_by_label("Add fill target").count(), 0);
     pick(&mut h, "Layer target", "CNR");
     assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
+        value(&h, "x_detailnorm2.png", "rnm.target"),
         Some(json!("cnr"))
     );
 }
@@ -504,11 +504,11 @@ fn shots() {
         "x_roughness.png",
         "x_cnr.png",
         "x_n.png",
-        "x_detailnorm.png",
+        "x_detailnorm2.png",
     ];
     let toml = "[files.\"x_roughness.png\"]\nhelper.fills = [\"rmaos.r\", \"cnr.a\"]\nhelper.read = \"g\"\n";
     for (w, hgt) in [(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)] {
-        for key in ["x_roughness.png", "x_detailnorm.png"] {
+        for key in ["x_roughness.png", "x_detailnorm2.png"] {
             let mut m = fixture(d.path(), &files, toml);
             m.select_item(key);
             let mut h = Harness::builder()
@@ -531,23 +531,23 @@ fn shots() {
 #[test]
 fn layer_target_follows_the_engine() {
     let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
+    let files = ["x.png", "x_cnr.png", "x_detailnorm2.png"];
+    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm2.png");
     let combo = h.get_by_role_and_label(Role::ComboBox, "Layer target");
     assert_eq!(combo.accesskit_node().value().as_deref(), Some("CNR"));
     pick(&mut h, "Layer target", "CNR");
     assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
+        value(&h, "x_detailnorm2.png", "rnm.target"),
         Some(json!("cnr"))
     );
     pick(&mut h, "Layer target", "Normal");
     assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
+        value(&h, "x_detailnorm2.png", "rnm.target"),
         Some(json!("n"))
     );
     let rep = h
         .state()
-        .item("x_detailnorm.png")
+        .item("x_detailnorm2.png")
         .unwrap()
         .helper
         .clone()

@@ -474,16 +474,27 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
     // S-shader-4: the set's shader re-types a member (eye `_n` → msn, landscape colour → landscape_diffuse).
     if let Some(p) = ctx.shaders.get(&f.set.key) {
         let id = p.shader.id();
-        // Note GI (R5): a landscape set's `_noise` is its projected noise, whatever origin the pick has.
-        if matches!(
+        // Note GI (R5): a landscape set's `_noise` is its projected noise, whatever origin the pick has. Note GW1:
+        // likewise its `_detail`, `_detailnorm` and `_detail_n` are its detail normal.
+        let landscape = matches!(
             p.shader,
             crate::shader::Shader::Landscape | crate::shader::Shader::PbrLandscape
-        ) && suggestions
+        );
+        let retyped = if !landscape {
+            None
+        } else if suggestions
             .first()
             .is_some_and(|s| s.subtype == Subtype::ProjectedNoise)
         {
+            Some(Subtype::ProjectedNoise)
+        } else {
+            f.suffix
+                .is_some_and(crate::group::is_detail_suffix)
+                .then_some(Subtype::DetailNormal)
+        };
+        if let Some(subtype) = retyped {
             return SubtypeDecision {
-                subtype: Subtype::ProjectedNoise,
+                subtype,
                 provenance: Provenance::Shader(id.into()),
                 decided: true,
                 suggestions,
@@ -2392,30 +2403,7 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
             d.provenance,
             Provenance::User | Provenance::Rule(_) | Provenance::ProjectFile
         ) {
-            // Note GI (X13, R6): a landscape set's `_detail` is its own detail normal, unless `rnm.target` or an
-            // `n_`/`cnr_` name prefix targets a base by hand.
-            let landscape = ctx.shaders.get(&f.set.key).map(|p| p.shader).filter(|s| {
-                matches!(
-                    s,
-                    crate::shader::Shader::Landscape | crate::shader::Shader::PbrLandscape
-                )
-            });
-            match landscape {
-                Some(s)
-                    if term.layer == LayerId::Detail
-                        && !term.mask
-                        && term.prefix.is_none()
-                        && rnm_target_requested(ctx, f.input).is_none() =>
-                {
-                    d = SubtypeDecision {
-                        subtype: Subtype::DetailNormal,
-                        provenance: Provenance::Shader(s.id().into()),
-                        decided: true,
-                        suggestions: d.suggestions,
-                    };
-                }
-                _ => return normal_layer_job(ctx, f, *term),
-            }
+            return normal_layer_job(ctx, f, *term);
         }
     }
     if gras_diffuse {

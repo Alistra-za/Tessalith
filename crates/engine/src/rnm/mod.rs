@@ -61,19 +61,17 @@ macro_rules! layer_vocab {
 }
 
 /// F2 spec §2.1: the owner's ten suffixes, then rnm.py's aliases. Matched longest first ([`split_layer`]), before the
-/// exporter vocabulary.
-pub static LAYER_VOCABULARY: [Vocab; 51] = layer_vocab![
+/// exporter vocabulary. `detail` and `detailnorm` are not here: they are detail maps (Note GW1, `group::split_detail`).
+pub static LAYER_VOCABULARY: [Vocab; 45] = layer_vocab![
     "bump" => Bump false,
     "bump2" => Bump2 false,
     "bumpmask" => Bump true,
     "bumpmask2" => Bump2 true,
-    "detailnorm" => Detail false,
     "detailnorm2" => Detail2 false,
     "detailnormmask" => Detail true,
     "detailnormmask2" => Detail2 true,
     "bent" => Bent false,
     "bentmask" => Bent true,
-    "detail" => Detail false,
     "detail2" => Detail2 false,
     "detail_mask" => Detail true,
     "detail2_mask" => Detail2 true,

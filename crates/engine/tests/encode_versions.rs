@@ -552,6 +552,8 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         put(d.path(), rel, img);
     }
     rnm_fixture(d.path());
+    // Note GW1: `_detailnorm` is no layer by name any more; the hand role keeps `iron_n` blended as it was.
+    sets.push("file:**/rnm/iron_detailnorm.png.helper.role=detailnorm".to_string());
     let guarded = || {
         Subtype::ALL
             .into_iter()

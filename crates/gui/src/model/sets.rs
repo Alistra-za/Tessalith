@@ -364,7 +364,42 @@ pub struct SetView {
     pub recipes: Vec<engine::events::RecipeReport>,
 }
 
+/// The joined tails a set's member names carry past the base (Note GW1): `_detail` and `_detailnorm` in every set,
+/// `_detail_n` in a Landscape, PBR Landscape or Advanced skin set, `_wet` in an Advanced skin set only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tails {
+    Plain,
+    Landscape,
+    Skin,
+}
+
+impl From<bool> for Tails {
+    /// `true`: an Advanced skin set.
+    fn from(skin: bool) -> Self {
+        if skin {
+            Tails::Skin
+        } else {
+            Tails::Plain
+        }
+    }
+}
+
 impl SetView {
+    /// The tails this set's member names read (see [`Tails`]).
+    pub fn tails(&self) -> Tails {
+        if self.skin || self.shared {
+            Tails::Skin
+        } else if self
+            .shader
+            .as_ref()
+            .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+        {
+            Tails::Landscape
+        } else {
+            Tails::Plain
+        }
+    }
+
     pub(crate) fn new(key: String, id: String, members: Vec<String>) -> SetView {
         SetView {
             key,
@@ -1252,7 +1287,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
                 continue;
             };
-            let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
+            let Some(rel) = renamed_output(&from, name, v.tails()) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1338,20 +1373,24 @@ impl<'a> DefaultOutputs<'a> {
         Some(engine::manifest::output_key(self.out_root, &output))
     }
 }
-/// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
-/// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
-/// (`group::member_split`). `""` for the colour member.
-pub fn member_tail(stem: &str, skin: bool) -> &str {
-    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
-    // `member_split` reads only the set's suffixes: a skin set may hold both joined members.
+/// What follows the base name of a member `stem` of a set (`tails`: a `bool` is "an Advanced skin set"): its Skyrim
+/// suffix or exporter term (`_n`, `_roughness`), and the joined `_wet`, `_detail_n`, `_detail` and `_detailnorm` of
+/// the sets that take them ([`Tails`]), as the engine reads them (`group::member_split`). `""` for the colour member.
+pub fn member_tail(stem: &str, tails: impl Into<Tails>) -> &str {
+    use engine::group::{member_split, TextureSet, DETAIL_SPELLINGS, SKIN_DETAIL, SKIN_WET};
+    // `member_split` reads only the set's suffixes: a skin set may hold every joined member.
+    let tails = tails.into();
+    let mut suffixes: BTreeSet<String> = DETAIL_SPELLINGS.map(String::from).into();
+    if tails != Tails::Plain {
+        suffixes.insert(SKIN_DETAIL.into());
+    }
+    if tails == Tails::Skin {
+        suffixes.insert(SKIN_WET.into());
+    }
     let set = TextureSet {
         key: String::new(),
         members: vec![],
-        suffixes: if skin {
-            [SKIN_WET, SKIN_DETAIL].map(String::from).into()
-        } else {
-            BTreeSet::new()
-        },
+        suffixes,
         shared_skin: false,
     };
     let base = member_split(stem, &set, &BTreeMap::new()).base;
@@ -1362,12 +1401,12 @@ pub fn member_tail(stem: &str, skin: bool) -> &str {
 /// `job_key` (an output path relative to the export root) with its base name replaced by `name`: the folder and the
 /// suffix stay (`armor/wall_n.dds`, `steel` → `armor/steel_n.dds`; in a skin set `x_wet.dds` → `steel_wet.dds`).
 /// Applying it twice gives the same path, because `check_output_name` refuses a name that ends in a suffix.
-pub fn renamed_output(job_key: &str, name: &str, skin: bool) -> Option<PathBuf> {
+pub fn renamed_output(job_key: &str, name: &str, tails: impl Into<Tails>) -> Option<PathBuf> {
     let p = Path::new(job_key);
     let stem = p.file_stem()?.to_string_lossy();
     // Everything after the base stays: a Skyrim suffix, or an exporter term an output keeps (`_roughness` on a
     // target that packs nothing), so two members never land on one name.
-    let file = format!("{name}{}.dds", member_tail(&stem, skin));
+    let file = format!("{name}{}.dds", member_tail(&stem, tails));
     Some(match p.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.join(file),
         _ => PathBuf::from(file),

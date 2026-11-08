@@ -704,6 +704,11 @@ impl PresetRegistry {
                     "suffix alias '{alias}' is an exporter vocabulary term"
                 )));
             }
+            if crate::group::DETAIL_SPELLINGS.contains(&alias.as_str()) {
+                return Err(bad(format!(
+                    "suffix alias '{alias}' is a detail map name (DECISIONS Note GW)"
+                )));
+            }
             // Audit 08e-11: layer terms are file-name terms too (`rnm::split_layer`).
             if crate::rnm::LAYER_VOCABULARY.iter().any(|v| v.term == alias) {
                 return Err(bad(format!(

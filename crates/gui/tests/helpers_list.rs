@@ -254,16 +254,16 @@ fn layer_files_now_have_rows() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(
         d.path(),
-        &["x.png", "x_n.png", "x_detailnorm.png"],
+        &["x.png", "x_n.png", "x_detailnorm2.png"],
         "",
     ));
-    let (name, _) = row(&h, "x_detailnorm.png");
+    let (name, _) = row(&h, "x_detailnorm2.png");
     assert!(name.contains("fills to x_n"), "{name}");
     h.state_mut().select_item("x_n.png");
     h.run();
     h.run();
     assert!(h.query_all_by_label("RNM").count() > 0, "the RNM section");
-    h.get_by_label("detail");
+    h.get_by_label("detail 2");
 }
 
 #[test]
@@ -668,7 +668,7 @@ fn shots() {
         "x_roughness.png",
         "x_opacity.png",
         "x_n.png",
-        "x_detailnorm.png",
+        "x_detailnorm2.png",
         "y_opacity.png",
         &long,
     ];

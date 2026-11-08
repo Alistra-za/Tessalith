@@ -100,16 +100,11 @@ fn report_lists_every_helper_once() {
     checker(d.path(), "x_ao.png", 100, 255);
     checker(d.path(), "x_opacity.png", 0, 255);
     normal(d.path(), "x_n.png");
-    normal(d.path(), "x_detailnorm.png");
+    normal(d.path(), "x_bump.png");
     let p = plan(d.path(), &[DIFFUSE]);
     assert_eq!(
         names(&p),
-        [
-            "x_ao.png",
-            "x_detailnorm.png",
-            "x_opacity.png",
-            "x_roughness.png"
-        ]
+        ["x_ao.png", "x_bump.png", "x_opacity.png", "x_roughness.png"]
     );
     let rmaos = |channel| FillTarget::Packed {
         suffix: "rmaos",
@@ -127,7 +122,7 @@ fn report_lists_every_helper_once() {
     // A PBR set's `_n` is a PbrNormal: never an alpha target (Ruling 4).
     assert!(!op.options.contains(&FillTarget::Alpha(AlphaTarget::N)));
     assert!(op.options.contains(&rmaos(3)));
-    let dn = report(&p, "x_detailnorm.png");
+    let dn = report(&p, "x_bump.png");
     assert_eq!(dn.fills, [FillTarget::Rnm(RnmTarget::N)]);
     assert_eq!(dn.fills[0].label("x"), "x_n");
     assert!(dn.outputs[0].ends_with("x_n.dds"), "{:?}", dn.outputs);
@@ -256,9 +251,9 @@ fn report_says_rnm_is_off() {
     let d = tempfile::tempdir().unwrap();
     rgb(d.path(), "x.png");
     normal(d.path(), "x_n.png");
-    normal(d.path(), "x_detailnorm.png");
+    normal(d.path(), "x_bump.png");
     let p = plan(d.path(), &[DIFFUSE, "file:**/x_n.png.rnm.enabled=false"]);
-    let dn = report(&p, "x_detailnorm.png");
+    let dn = report(&p, "x_bump.png");
     assert!(dn.fills.is_empty(), "{dn:#?}");
     assert_eq!(
         dn.not_used.as_deref(),
@@ -302,7 +297,7 @@ fn no_helper_fixture_plans_carry_no_fill() {
         .unwrap();
         sets.push(format!("file:**/a/{id}.png.subtype={id}"));
     }
-    // golden.rs `pbr_fixture` and the RNM bake set (its `_detailnorm` is an RNM layer: reported only when RNM is on).
+    // golden.rs `pbr_fixture` and the RNM bake set (its `_bump` is an RNM layer: reported only when RNM is on).
     for (rel, flat) in [
         ("pbr/rock.png", false),
         ("pbr/rock_n.png", true),
@@ -310,7 +305,7 @@ fn no_helper_fixture_plans_carry_no_fill() {
         ("rnm/iron.png", false),
         ("rnm/iron_n.png", true),
         ("rnm/iron_rmaos.png", false),
-        ("rnm/iron_detailnorm.png", true),
+        ("rnm/iron_bump.png", true),
     ] {
         let p = d.path().join("in/textures").join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -421,31 +416,22 @@ fn layer_report_names_its_rnm_target() {
     let d = tempfile::tempdir().unwrap();
     rgb(d.path(), "x.png");
     normal(d.path(), "x_cnr.png");
-    normal(d.path(), "x_detailnorm.png");
+    normal(d.path(), "x_bump.png");
     let p = plan(d.path(), &[DIFFUSE]);
+    assert_eq!(report(&p, "x_bump.png").rnm_target, Some(RnmTarget::Cnr));
     assert_eq!(
-        report(&p, "x_detailnorm.png").rnm_target,
-        Some(RnmTarget::Cnr)
-    );
-    assert_eq!(
-        report(&p, "x_detailnorm.png").fills,
+        report(&p, "x_bump.png").fills,
         [FillTarget::Rnm(RnmTarget::Cnr)]
     );
     normal(d.path(), "x_n.png");
     let p = plan(d.path(), &[DIFFUSE]);
-    assert_eq!(
-        report(&p, "x_detailnorm.png").rnm_target,
-        Some(RnmTarget::N)
-    );
+    assert_eq!(report(&p, "x_bump.png").rnm_target, Some(RnmTarget::N));
     toml(
         d.path(),
-        "[files.\"textures/a/x_detailnorm\"]\nrnm.target = \"both\"\n",
+        "[files.\"textures/a/x_bump\"]\nrnm.target = \"both\"\n",
     );
     let p = plan(d.path(), &[DIFFUSE]);
-    assert_eq!(
-        report(&p, "x_detailnorm.png").rnm_target,
-        Some(RnmTarget::Both)
-    );
+    assert_eq!(report(&p, "x_bump.png").rnm_target, Some(RnmTarget::Both));
     // Greyscale roles have none.
     checker(d.path(), "x_roughness.png", 40, 200);
     let p = plan(d.path(), &[DIFFUSE]);
