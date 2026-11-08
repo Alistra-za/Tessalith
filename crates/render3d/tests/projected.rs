@@ -11,6 +11,7 @@ use render3d::scene::{Camera, DirLight, Scene};
 use render3d::{Glint, ProjectedLayer, Renderer, ShapeId, ShapeStatus};
 
 const DIFFUSE: &str = "textures/effects/projecteddiffuse.dds";
+const IDENT: [[f32; 4]; 3] = common::IDENT;
 
 /// The ash draws' layer (mato-capture-results.md).
 fn ash() -> ProjectedLayer {
@@ -64,9 +65,13 @@ fn eligible_shapes() {
         m.shader_type = t;
         assert!(!projected_eligible(&m), "type {t}");
     }
-    let mut mlp = pbr();
+    // SLSF2.24: vanilla parallax layers skip; PBR reads it as the coat (TwoLayer) and CS projects onto it (Note GZ1).
+    let mut mlp = MaterialState::builtin_default();
     mlp.slsf2 |= 1 << 24;
     assert!(!projected_eligible(&mlp));
+    let mut coat = pbr();
+    coat.slsf2 |= 1 << 24;
+    assert!(projected_eligible(&coat));
     // Model-space normals: the PS has no tbnTr for the projection's triplanar weights.
     let mut msn = MaterialState::builtin_default();
     msn.slsf1 |= 1 << 12;
@@ -183,7 +188,7 @@ fn flags(w: &CbWriter) -> u32 {
 #[test]
 fn constants_from_layer() {
     let mut w = writer();
-    write_projected(&mut w, &ash(), true);
+    write_projected(&mut w, &ash(), true, &IDENT);
     assert_eq!(floats(&w, "ProjectedUVParams"), [0.4, 0.0, 0.05, 0.5]);
     assert_eq!(floats(&w, "ProjectedUVParams2"), [1.0, 1.0, 1.0, 1.0]);
     assert_eq!(floats(&w, "ProjectedUVParams3"), [0.2, 0.8, 0.0, 1.0]);
@@ -197,17 +202,39 @@ fn constants_from_layer() {
     );
     // Not PBR: the PBR-only fields stay as they were.
     let mut v = writer();
-    write_projected(&mut v, &ash(), false);
+    write_projected(&mut v, &ash(), false, &IDENT);
     assert_eq!(floats(&v, "ProjectedUVParams"), [0.4, 0.0, 0.05, 0.5]);
     assert_eq!(floats(&v, "MaterialObjectRGBScale"), [0.0; 3]);
     assert_eq!(floats(&v, "ParallaxOccData"), [0.0; 4]);
+}
+
+/// Row 2 is the model's row 2, so the VS's `mul(World3x3, TextureProj[2])` is world up for a rotated, scaled
+/// static (Note GZ2); rows 0 and 1 stay as captured.
+#[test]
+fn texture_proj_row_2_is_world_up() {
+    // 90° about X (y → z, z → −y), scale 2, translated: the translation never reaches row 2's xyz.
+    let model = [
+        [2.0, 0.0, 0.0, 5.0],
+        [0.0, 0.0, -2.0, 6.0],
+        [0.0, 2.0, 0.0, 7.0],
+    ];
+    let mut w = writer();
+    write_projected(&mut w, &ash(), true, &model);
+    let t = floats(&w, "TextureProj");
+    assert_eq!(t[..8], [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(t[8..], [0.0, 2.0, 0.0, 0.0]);
+    let world_dir: Vec<f32> = model
+        .iter()
+        .map(|r| r[0] * t[8] + r[1] * t[9] + r[2] * t[10])
+        .collect();
+    assert_eq!(world_dir, [0.0, 0.0, 4.0], "s²·up");
 }
 
 #[test]
 fn snow_glint_constants() {
     let mut w = writer();
     w.set_u32("PBRFlags", &[4]);
-    write_projected(&mut w, &snow(), true);
+    write_projected(&mut w, &snow(), true, &IDENT);
     assert_eq!(floats(&w, "SparkleParams"), [1.0, 27.0, 1.0, 5.0]);
     assert_eq!(flags(&w), 4 | (1 << 12), "ORed into the material's flags");
     assert_eq!(
@@ -216,7 +243,7 @@ fn snow_glint_constants() {
     );
     // A vanilla shape gets no glint.
     let mut v = writer();
-    write_projected(&mut v, &snow(), false);
+    write_projected(&mut v, &snow(), false, &IDENT);
     assert_eq!(flags(&v), 0);
     assert_eq!(floats(&v, "SparkleParams"), [0.0; 4]);
 }
@@ -229,7 +256,7 @@ fn zero_noise_scale_is_finite() {
             noise_uv_scale: scale,
             ..snow()
         };
-        write_projected(&mut w, &l, true);
+        write_projected(&mut w, &l, true, &IDENT);
         assert_eq!(floats(&w, "ProjectedUVParams")[2], 0.0);
         for (n, _) in FIELDS.iter().filter(|f| f.0 != "PBRFlags") {
             assert!(floats(&w, n).iter().all(|x| x.is_finite()), "{n}");
@@ -317,7 +344,7 @@ fn projected_registers_bind_resolved_textures() {
 }
 
 /// With the layer on, an edit that makes it stop or start applying is a permutation (review I3): `classify` alone
-/// sees no define change for type 0 ↔ 14 or a PBR SLSF2.24 toggle. The stand-in reflects t3 only under PROJECTED_UV,
+/// sees no define change for type 0 ↔ 14 or a vanilla SLSF2.24 toggle. The stand-in reflects t3 only under PROJECTED_UV,
 /// so the rebuilt draw's bindings show which program it has.
 #[test]
 fn eligibility_flip_is_a_permutation() {
@@ -353,9 +380,9 @@ fn eligibility_flip_is_a_permutation() {
     assert!(projected(&mut r));
     let mut sparkle = plain.clone();
     sparkle.shader_type = 14;
-    let mut mlp = pbr_plain.clone();
+    let mut mlp = plain.clone();
     mlp.slsf2 |= 1 << 24;
-    for (from, to) in [(&plain, &sparkle), (&pbr_plain, &mlp)] {
+    for (from, to) in [(&plain, &sparkle), (&plain, &mlp)] {
         // Without the layer these edits are cbuffer-only.
         assert_eq!(classify(from, to, &[], false), EditKind::Cbuffer);
         assert_eq!(
@@ -375,6 +402,18 @@ fn eligibility_flip_is_a_permutation() {
         );
         assert!(projected(&mut r));
     }
+    // A PBR coat (SLSF2.24) keeps the layer (Note GZ1): the toggle stays a cbuffer edit.
+    let mut coat = pbr_plain.clone();
+    coat.slsf2 |= 1 << 24;
+    assert!(r
+        .set_material(ShapeId(0), pbr_plain.clone(), &|_| None)
+        .is_ok());
+    assert!(projected(&mut r));
+    assert_eq!(
+        r.set_material(ShapeId(0), coat, &|_| None),
+        Ok(EditKind::Cbuffer)
+    );
+    assert!(projected(&mut r));
 }
 
 // ---- render_projected_*: the installed CS (`SDC_CS_SHADERS`); run alone with --test-threads=1. ----
@@ -532,6 +571,52 @@ fn render_projected_tints_up_faces() {
         (0..3).all(|c| (black_noise[c] as i32 - on_red[c] as i32).abs() <= 1),
         "full coverage with the black noise: {on_red:?} vs {black_noise:?}"
     );
+}
+
+/// Note GZ on the bundled CS: a plane turned to face up by its NIF rotation (not its vertices) takes the layer as
+/// `up_quad` does (GZ2), and a PBR coat (SLSF2.24) compiles with `PROJECTED_UV` and takes it too (GZ1).
+#[test]
+fn render_projected_rotated_static_and_coat() {
+    let cache = tempfile::tempdir().unwrap();
+    let Some(mut r) = cs_renderer(cache.path()) else {
+        return;
+    };
+    let mut turned = up_quad(0, grey_pbr());
+    turned.mesh = std::sync::Arc::new(render3d::builtin_mesh(render3d::Builtin::Plane));
+    turned.world = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+    ];
+    let mut coat = grey_pbr();
+    coat.slsf2 |= 1 << 24;
+    let white = common::dds_rgba8(1, 1, &[[255; 4]]);
+    let (w, h) = (128, 128);
+    let mut off_on = |shape: render3d::ParsedShape| {
+        r.set_projected_layer(None, &|_| None);
+        let parsed = render3d::ParsedNif {
+            shapes: vec![shape],
+            ..Default::default()
+        };
+        let rep = r.load_parsed(&parsed, &grey_textures);
+        assert!(rep.compile_errors.is_empty(), "{rep:?}");
+        let off = centre(&r.render(&top_scene(), w, h).unwrap(), w, h);
+        r.set_projected_layer(Some(ash()), &|p| (p == DIFFUSE).then(|| white.clone()));
+        assert_eq!(r.shapes()[0].status, ShapeStatus::Drawing);
+        let (ps, ..) = r.draw_diag(ShapeId(0)).unwrap();
+        assert!(ps.iter().any(|(k, _)| k == "PROJECTED_UV"), "{ps:?}");
+        (off, centre(&r.render(&top_scene(), w, h).unwrap(), w, h))
+    };
+    let (_, up) = off_on(up_quad(0, grey_pbr()));
+    let (_, rotated) = off_on(turned);
+    println!("up {up:?} rotated {rotated:?}");
+    assert!(
+        (0..3).all(|c| (up[c] as i32 - rotated[c] as i32).abs() <= 2),
+        "{up:?} vs {rotated:?}"
+    );
+    let (off, on) = off_on(up_quad(0, coat));
+    println!("coat off {off:?} on {on:?}");
+    assert!(on[0] > off[0] && on[0] > on[2], "{off:?} → {on:?}");
 }
 
 #[test]
