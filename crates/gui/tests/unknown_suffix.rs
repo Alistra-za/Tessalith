@@ -6,11 +6,12 @@ use eframe::egui::{containers::panel::PanelState, Id};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::Subtype;
+use engine::shader::Shader;
 use image::{ImageBuffer, Rgb};
 use sdc_gui::model::bottom::{problems, At};
 use sdc_gui::model::items::ItemStatus;
-use sdc_gui::model::sets::views;
-use sdc_gui::model::AppModel;
+use sdc_gui::model::sets::{slot_of, views};
+use sdc_gui::model::{Answer, AppModel, Selection};
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -38,8 +39,23 @@ fn idle(m: &mut AppModel) {
     assert!(m.wait_idle(Duration::from_secs(60)), "model did not settle");
 }
 
+fn card_key(m: &AppModel, stem: &str) -> Option<String> {
+    views(m)
+        .iter()
+        .find(|v| v.key.ends_with(stem))
+        .map(|v| v.key.clone())
+}
+
 fn has_card(m: &AppModel, stem: &str) -> bool {
-    views(m).iter().any(|v| v.key.ends_with(stem))
+    card_key(m, stem).is_some()
+}
+
+/// The Problems rows of the rock file itself.
+fn texture_rows(m: &AppModel) -> usize {
+    problems(m)
+        .iter()
+        .filter(|p| p.at == At::Texture(ROCK.into()))
+        .count()
 }
 
 /// The Problems rows about the rock: its own, and any of a set named after it.
@@ -184,6 +200,9 @@ fn assigning_a_type_brings_the_card() {
     assert!(has_card(m, "rock_bump"), "a card appears after the plan");
     assert!(!sets_column_labels(&h, "rock_bump").is_empty());
     assert_eq!(back_link(&h).as_deref(), Some("← clutter/rock_bump"));
+    // The card is selected when Undo takes it away: the selection goes with it.
+    let key = card_key(m, "rock_bump").expect("the card");
+    h.state_mut().select_set(&key);
     h.state_mut().undo();
     idle(h.state_mut());
     h.run();
@@ -191,6 +210,84 @@ fn assigning_a_type_brings_the_card() {
     assert!(m.item(ROCK).unwrap().waiting);
     assert!(!has_card(m, "rock_bump"), "Undo takes the card away");
     assert!(sets_column_labels(&h, "rock_bump").is_empty());
+    assert_eq!(m.selection, Selection::None);
+}
+
+/// Controller ruling: a set the user created keeps its card, and its only member still waits.
+#[test]
+fn a_created_set_keeps_its_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = folder(d.path());
+    let id = m.drop_new_set(ROCK).expect("a new set");
+    idle(&mut m);
+    let v = views(&m);
+    let card = v
+        .iter()
+        .find(|v| v.id == id)
+        .expect("the created set's card");
+    assert_eq!(card.members, vec![ROCK.to_string()]);
+    assert!(m.item(ROCK).unwrap().waiting);
+    assert_eq!(texture_rows(&m), 1, "{:#?}", problems(&m));
+}
+
+/// Controller ruling: a set the user set something on (GY2's explicit shader) keeps its card and the choice.
+#[test]
+fn a_set_with_a_chosen_shader_keeps_its_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = folder(d.path());
+    m.set_shader("clutter/rock_bump", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    let v = views(&m);
+    let card = v
+        .iter()
+        .find(|v| v.key.ends_with("rock_bump"))
+        .expect("the card stays");
+    assert_eq!(card.shader_choice, Some(Shader::AdvancedSkin));
+    assert!(
+        m.item(ROCK).unwrap().waiting,
+        "a set shader assigns no type (GY2)"
+    );
+    assert_eq!(texture_rows(&m), 1);
+}
+
+/// `sets::view_reads` carries `waiting`: an explicit `generic_data` changes neither the slot nor the sub-type, only
+/// whether the file waits, and the card must still come. The fast re-plan's partial would bring it on its own, so it
+/// is dropped: only the full plan lands, on a warm views cache that it splices (`full_plan_changes`).
+#[test]
+fn a_type_that_changes_only_waiting_brings_the_card() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = folder(d.path());
+    let reads = |m: &AppModel| {
+        let i = m.item(ROCK).unwrap();
+        (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
+    };
+    let before = reads(&m);
+    assert!(!has_card(&m, "rock_bump"), "the views cache is warm");
+    m.hold_plan_results = true;
+    m.decide(ROCK, Answer::Subtype(Subtype::GenericData));
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let full = loop {
+        m.poll();
+        let held = m.take_held();
+        if let Some(x) = held
+            .into_iter()
+            .find(|x| !matches!(x, WorkerMsg::Partial { .. }))
+        {
+            break x;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "the full plan did not arrive"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    m.hold_plan_results = false;
+    m.handle_held(full);
+    idle(&mut m);
+    assert_eq!(before, reads(&m), "only waiting moved");
+    assert!(!m.item(ROCK).unwrap().waiting);
+    assert!(has_card(&m, "rock_bump"));
 }
 
 #[test]
@@ -203,10 +300,11 @@ fn the_first_open_records_no_decision() {
     assert_eq!(doc.file_value(ROCK, "subtype"), None);
 }
 
-/// Task 1's trap: `ResolvedJob::unknown_suffix` is not serialised. A reopen on a warm analysis cache plans the rock
-/// again and still finds it waiting.
+/// Task 1's trap: `ResolvedJob::unknown_suffix` is not serialised. No GUI path deserialises a job (worker messages,
+/// the analysis store and the fast re-plan all keep them in memory), so this pins a re-plan: a second model on the same
+/// session plans the rock again and still finds it waiting.
 #[test]
-fn a_reopen_with_a_warm_cache_still_waits() {
+fn a_replan_on_the_same_session_still_waits() {
     let d = tempfile::tempdir().unwrap();
     let first = folder(d.path());
     let session = first.session.clone().expect("the session");

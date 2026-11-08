@@ -1183,9 +1183,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     let mut actions = vec![];
     if !compact {
         let set_key = model.item(key).and_then(|i| i.set_key.clone());
-        // Note GY5: only a set with a card (a waiting file's set has none).
-        let carded = |k: &String| crate::model::sets::views(model).iter().any(|v| &v.key == k);
-        if let Some(sk) = set_key.filter(carded) {
+        // Note GY5: only a set with a card (a waiting file's set may have none).
+        if let Some(sk) = set_key.filter(|k| crate::model::sets::has_card(model, k)) {
             let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
             if ui.link(format!("← {label}")).clicked() {
                 model.select_set(&sk);

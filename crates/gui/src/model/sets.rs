@@ -829,7 +829,12 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         .unwrap_or_default();
     let order = m.sets_doc.as_ref().map(|d| d.order()).unwrap_or_default();
 
-    let mut views: Vec<SetView> = m.sets.iter().map(|s| base_view(m, &root, s)).collect();
+    let mut views: Vec<SetView> = m
+        .sets
+        .iter()
+        .filter(|s| !card_hidden(m, &entries, &root, s))
+        .map(|s| base_view(m, &root, s))
+        .collect();
     // Created sets that have no members yet, and entries whose files have all gone (spec §7.1: shown as missing,
     // never silently dropped).
     for e in &entries {
@@ -838,8 +843,6 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         }
     }
     sort_by_saved_order(&mut views, &order);
-    // After the entries, so an entry of a hidden set does not come back as an empty one.
-    views.retain(|v| !card_hidden(m, &entries, &v.id, &v.members));
     // Entry data: created flag, settings, missing members, borrowed slots.
     let own_slots: Vec<(String, BTreeMap<SlotKind, SlotFill>)> = views
         .iter()
@@ -869,19 +872,30 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     views
 }
 
-/// Note GY5: a set whose only member waits for a type has no card, unless the user created it.
-fn card_hidden(m: &AppModel, entries: &[SetEntry], id: &str, members: &[String]) -> bool {
-    matches!(members, [k] if m.item(k).is_some_and(|i| i.waiting))
-        && !entry_of(entries, id).is_some_and(|e| e.created)
+/// Note GY5: a set whose only member waits for a type has no card, unless the user created it or set something on it
+/// (it has a sets-doc entry).
+fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> bool {
+    matches!(s.members.as_slice(), [k] if m.item(k).is_some_and(|i| i.waiting))
+        && entry_of(entries, &set_id(root, &s.key)).is_none()
 }
 
-/// Note GY5: how many of the plan's sets have a card (the status line's count).
+/// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).
+pub(crate) fn has_card(m: &AppModel, key: &str) -> bool {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    m.sets
+        .iter()
+        .find(|s| s.key == key)
+        .is_some_and(|s| !card_hidden(m, &entries, &m.sets_root(), s))
+}
+
+/// Note GY5: how many of the plan's sets have a card (the status line's count; run per plan and per undo, not per
+/// frame).
 pub(crate) fn carded_sets(m: &AppModel) -> usize {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let root = m.sets_root();
     m.sets
         .iter()
-        .filter(|s| !card_hidden(m, &entries, &set_id(&root, &s.key), &s.members))
+        .filter(|s| !card_hidden(m, &entries, &root, s))
         .count()
 }
 
@@ -1069,15 +1083,15 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     // shortcut: the lookups below are linear in the sets per scope set; a partial over many sets (a bulk edit)
     // builds every view instead. Index the sets by key if a big bulk edit's frame shows in a profile.
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
-    // project with many mapped sets shows it in a profile.
     let root = m.sets_root();
     let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
     // Note GY5: a scope set whose card comes or goes changes the list itself.
     let card_moves = scope.iter().filter_map(|k| set_of(k)).any(|s| {
         let shown = views.iter().any(|v| v.key == s.key);
-        shown == card_hidden(m, &entries, &set_id(&root, &s.key), &s.members)
+        shown == card_hidden(m, &entries, &root, s)
     });
+    // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
+    // project with many mapped sets shows it in a profile.
     if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
         *views = build_views(m);
         return;

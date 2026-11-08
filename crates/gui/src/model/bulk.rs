@@ -319,7 +319,7 @@ impl AppModel {
             .iter()
             .filter(|k| {
                 if sets {
-                    self.sets.iter().any(|s| &s.key == *k)
+                    super::sets::has_card(self, k)
                 } else {
                     self.item(k).is_some()
                 }
