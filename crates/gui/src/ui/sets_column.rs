@@ -306,6 +306,39 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 }
 
 /// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
+/// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
+fn fit_title(id: &str, fits: impl Fn(&str) -> bool) -> String {
+    use super::header::elide_middle;
+    let len = id.chars().count();
+    if fits(id) {
+        return id.to_string();
+    }
+    for n in (1..len).rev() {
+        let t = elide_middle(id, n);
+        if t.contains('/') && fits(&t) {
+            return t;
+        }
+    }
+    let leaf = id.rsplit('/').next().unwrap_or(id);
+    let leaf_len = leaf.chars().count();
+    if leaf != id {
+        let t = format!("…/{leaf}");
+        if fits(&t) {
+            return t;
+        }
+    }
+    for keep in (1..=leaf_len).rev() {
+        let t = format!(
+            "…{}",
+            leaf.chars().skip(leaf_len - keep).collect::<String>()
+        );
+        if fits(&t) {
+            return t;
+        }
+    }
+    "…".to_string()
+}
+
 fn small_width(ui: &egui::Ui, text: &str) -> f32 {
     text_width(ui, text, &egui::TextStyle::Small.resolve(ui.style()))
 }
@@ -1402,15 +1435,19 @@ fn pill(
                         need += small_width(ui, &check_badge_text(&checks).1) + btn;
                     }
                     let wide = ui.available_width() >= need;
+                    // Note HN F3: elide the middle so the leaf stays; the node's name is the full id.
+                    let shown_for = |ui: &egui::Ui| {
+                        let font = egui::TextStyle::Body.resolve(ui.style());
+                        let room = ui.available_width();
+                        fit_title(&v.id, |t| text_width(ui, t, &font) <= room)
+                    };
                     let name = |ui: &mut egui::Ui| {
-                        // Note HN F3: elide the middle so the leaf stays; the node's name is the full id.
-                        let glyph = ui.fonts_mut(|f| {
-                            f.glyph_width(&egui::TextStyle::Body.resolve(ui.style()), '0')
-                        });
-                        let chars = (ui.available_width() / glyph).floor().max(8.0) as usize;
-                        let shown = super::header::elide_middle(&v.id, chars);
-                        let r = ui
-                            .add(egui::Label::new(egui::RichText::new(&shown).strong()).truncate());
+                        let shown = shown_for(ui);
+                        // Extend: the shown text already fits, so egui never end-cuts the leaf.
+                        let r = ui.add(
+                            egui::Label::new(egui::RichText::new(&shown).strong())
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &v.id)
                         });
@@ -1418,7 +1455,7 @@ fn pill(
                             r.on_hover_text(&v.id);
                         }
                     };
-                    ui.horizontal(|ui| {
+                    let own_line = ui.horizontal(|ui| {
                         position_label(ui, index + 1, total);
                         let sense = if editing.reorder {
                             egui::Sense::drag()
@@ -1445,10 +1482,21 @@ fn pill(
                                     );
                                 },
                             );
+                            false
                         } else {
-                            name(ui);
+                            // Beside the position and handle the leaf would be cut: give the title its own line.
+                            let shown = shown_for(ui);
+                            let own = shown != v.id
+                                && !shown.ends_with(v.id.rsplit('/').next().unwrap_or(&v.id));
+                            if !own {
+                                name(ui);
+                            }
+                            own
                         }
                     });
+                    if own_line.inner {
+                        ui.horizontal(name);
+                    }
                     if !wide {
                         ui.horizontal_wrapped(|ui| {
                             status_pill(ui, model, v, status);

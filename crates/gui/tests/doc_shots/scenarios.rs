@@ -430,7 +430,13 @@ fn members_of_kind(dir: &Path) -> Frame {
         settle(h, 3);
         node(h, "Select members of kind ⏵").hover();
     });
-    shot(&mut h, r)
+    // The crop starts at the stonewall card, not at its middle-elided title text (Note HN F3).
+    let card = h
+        .query_all_by_label_contains("Set architecture/stone/stonewall,")
+        .next()
+        .expect("the stonewall card")
+        .rect();
+    shot(&mut h, r.union(card))
 }
 
 /// GUI-Sets-Column: a set card's right-click menu.

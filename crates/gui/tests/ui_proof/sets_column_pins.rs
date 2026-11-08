@@ -591,41 +591,88 @@ fn the_drop_hint_is_weak_text_and_the_accent_under_a_drag() {
 
 #[test]
 fn card_titles_keep_their_leaf() {
-    let (_d, mut h) = crate::replay(
-        "demo",
-        &[
-            r#"{"op":"resize","w":1400,"h":790}"#,
-            r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
-        ],
-    );
-    for (id, leaf) in [
+    // 1400 wide the titles may fit; 1055 with gold open the column narrows and they must be cut
+    keep_leaf_at(1400, 790, false, &[0]);
+    keep_leaf_at(1055, 770, true, &[0, 6]);
+}
+
+/// Checks the stone cards' titles at one window size; `scrolls` are the wheel steps down from the top.
+fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
+    let ids = [
         ("architecture/stone/banner", "banner"),
         ("architecture/stone/cobble", "cobble"),
         ("architecture/stone/stonewall", "stonewall"),
-    ] {
-        let title = h
-            .query_all_by_label(id)
-            .find(|n| in_sets_column(&h, n.rect()))
-            .unwrap_or_else(|| panic!("no node named {id:?}"))
-            .rect();
-        // the painted title: a text inside the node's rect that ends with the leaf
-        let shown: Vec<_> = texts(&h)
-            .into_iter()
-            .filter(|(t, r)| title.expand(1.0).contains_rect(*r) && t.ends_with(leaf))
-            .collect();
-        assert_eq!(
-            shown.len(),
-            1,
-            "{id}: one painted title ending {leaf:?}, got {shown:?}"
+    ];
+    let mut checked = vec![];
+    for &down in scrolls {
+        let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
+        let wheel = format!(
+            r#"{{"op":"scroll","at":{{"label":"Set architecture/stone/banner, position 2 of 9"}},"dir":"down","times":{down}}}"#
         );
-        assert!(!painted(&h, &shown[0].0).1, "{id}: not elided");
-        h.event(egui::Event::PointerMoved(title.center()));
-        h.run();
-        let full = texts(&h).into_iter().filter(|(t, _)| t == id).count();
-        // the title shows the full id only when it fits; otherwise the tooltip does
-        assert!(full >= 1, "{id}: shown in full as the title or its tooltip");
-        if shown[0].0 != id {
-            assert_eq!(full, 1, "{id}: the tooltip shows the full id");
+        let mut lines = vec![resize.as_str()];
+        if open {
+            // no search here: it would hide the open card; scroll to the top, then down
+            lines.extend(OPEN_GOLD);
+            lines.push(
+                r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"up","times":8}"#,
+            );
+            if down > 0 {
+                lines.push(&wheel);
+            }
+        } else {
+            lines.push(r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#);
+        }
+        lines.push(r#"{"op":"settle","frames":6}"#);
+        let (_d, mut h) = crate::replay("demo", &lines);
+        // the list starts under the filter row
+        let list_top = texts(&h)
+            .into_iter()
+            .filter(|(t, r)| t.starts_with("Filter") && in_sets_column(&h, *r))
+            .map(|(_, r)| r.max.y)
+            .fold(0.0, f32::max);
+        let panel_bottom = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+            .expect("the Sets panel")
+            .outer_rect
+            .bottom();
+        for (id, leaf) in ids {
+            let Some(title) = h
+                .query_all_by_label(id)
+                .map(|n| n.rect())
+                .find(|r| in_sets_column(&h, *r) && r.min.y > list_top && r.max.y < panel_bottom)
+            else {
+                continue;
+            };
+            checked.push(id);
+            // the painted title: a text inside the node's rect that ends with the leaf
+            let shown: Vec<_> = texts(&h)
+                .into_iter()
+                .filter(|(t, r)| title.expand(1.0).contains_rect(*r) && t.ends_with(leaf))
+                .collect();
+            assert_eq!(
+                shown.len(),
+                1,
+                "{id} at {w}x{h_px}: one painted title ending {leaf:?}, got {shown:?}"
+            );
+            assert!(!painted(&h, &shown[0].0).1, "{id}: not elided");
+            h.event(egui::Event::PointerMoved(title.center()));
+            h.run();
+            let full = texts(&h).into_iter().filter(|(t, _)| t == id).count();
+            // the title shows the full id only when it fits; otherwise the tooltip does
+            assert!(full >= 1, "{id}: shown in full as the title or its tooltip");
+            let cut = shown[0].0 != id;
+            assert!(cut || !open, "{id} at {w}x{h_px}: cut in the narrow column");
+            if cut {
+                assert_eq!(full, 1, "{id}: the tooltip is exactly the full id");
+                let again = texts(&h).iter().filter(|(t, _)| *t == shown[0].0).count();
+                assert_eq!(again, 1, "{id}: no second hover line of the cut text");
+            }
         }
     }
+    checked.sort();
+    checked.dedup();
+    assert_eq!(
+        checked.len(),
+        3,
+        "every stone title was on screen once: {checked:?}"
+    );
 }
