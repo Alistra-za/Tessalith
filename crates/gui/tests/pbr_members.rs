@@ -220,18 +220,26 @@ fn the_subtype_combo_lists_the_pbr_group_first() {
 
 const MSN: &str = "m/rock02_msn.png";
 
+/// Note IA3 (owner): a model-space normal is not a tangent normal, so a diffuse going PBR or Advanced skin leaves it.
 #[test]
-fn a_msn_member_switches_to_pbr_normal() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = fixture(d.path());
-    assert_eq!(
-        m.item(MSN).unwrap().job.as_ref().unwrap().profile.subtype,
-        Subtype::Msn,
-        "the fixture infers msn"
-    );
-    m.decide("m/rock02.png", Answer::Subtype(Subtype::PbrAlbedo));
-    idle(&mut m);
-    assert_eq!(subtype(&m, MSN), Some(json!("pbr_normal")));
+fn a_msn_member_keeps_msn_when_its_diffuse_goes_pbr() {
+    for diffuse in [Subtype::PbrAlbedo, Subtype::SkinAlbedo] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = fixture(d.path());
+        assert_eq!(
+            m.item(MSN).unwrap().job.as_ref().unwrap().profile.subtype,
+            Subtype::Msn,
+            "the fixture infers msn"
+        );
+        m.decide("m/rock02.png", Answer::Subtype(diffuse));
+        idle(&mut m);
+        assert_eq!(subtype(&m, MSN), None, "{diffuse:?} writes no sub-type");
+        assert_eq!(
+            m.item(MSN).unwrap().job.as_ref().unwrap().profile.subtype,
+            Subtype::Msn,
+            "{diffuse:?} leaves the msn"
+        );
+    }
 }
 
 #[test]

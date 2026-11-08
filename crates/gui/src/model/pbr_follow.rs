@@ -13,10 +13,11 @@ use engine::config::{PackRecipe, Subtype};
 use engine::presets::Provenance;
 use serde_json::json;
 
-/// The PBR counterpart of an inferred member sub-type; `None` leaves the member alone (`height` stays `height`).
+/// The PBR counterpart of an inferred member sub-type; `None` leaves the member alone (`height` stays `height`, and
+/// `msn` stays `msn`: a model-space normal is not a tangent-space one, Note IA3).
 fn pbr_counterpart(st: Subtype) -> Option<Subtype> {
     match st {
-        Subtype::Normal | Subtype::Msn => Some(Subtype::PbrNormal),
+        Subtype::Normal => Some(Subtype::PbrNormal),
         Subtype::Glow => Some(Subtype::PbrEmissive),
         _ => None,
     }
