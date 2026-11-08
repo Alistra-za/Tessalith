@@ -442,20 +442,35 @@ pub fn filter_records<'a>(list: &'a [TxstRecord], query: &str) -> Vec<&'a TxstRe
 
 /// [`filter_records`] as indexes into `list`, for a picker that keeps its hits between frames.
 pub fn record_hits(list: &[TxstRecord], query: &str) -> Vec<usize> {
+    hits(list, query, record_hay)
+}
+
+/// [`record_hits`] over the Map to target… rows: a record by the same fields, a mesh path or file base by its base.
+pub fn pick_hits(rows: &[TargetPick], query: &str) -> Vec<usize> {
+    hits(rows, query, |p| match p {
+        TargetPick::Record(r) => record_hay(r),
+        TargetPick::Mesh(m) => m.base.clone(),
+        TargetPick::Files(f) => f.base.clone(),
+    })
+}
+
+fn record_hay(r: &TxstRecord) -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        r.edid,
+        r.plugin,
+        r.winner,
+        r.formid,
+        r.slots.get(&1).map_or("", String::as_str)
+    )
+}
+
+fn hits<T>(list: &[T], query: &str, hay: impl Fn(&T) -> String) -> Vec<usize> {
     let q = query.trim().replace('\\', "/").to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
     (0..list.len())
         .filter(|&i| {
-            let r = &list[i];
-            let hay = format!(
-                "{}\n{}\n{}\n{}\n{}",
-                r.edid,
-                r.plugin,
-                r.winner,
-                r.formid,
-                r.slots.get(&1).map_or("", String::as_str)
-            )
-            .to_lowercase();
+            let hay = hay(&list[i]).to_lowercase();
             words.iter().all(|w| hay.contains(w))
         })
         .collect()
@@ -475,7 +490,7 @@ impl TxstRecord {
 }
 
 /// What a set can be mapped to (Note HL): a target mod's record, mesh path or file base.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetPick {
     Record(TxstRecord),
     Mesh(MeshPath),

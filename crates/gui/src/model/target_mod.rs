@@ -218,6 +218,11 @@ impl AppModel {
         Ok(())
     }
 
+    /// A folder chosen in the Map to target… dialog: stored, or the refusal kept for the dialog to show.
+    pub fn target_picked(&mut self, path: PathBuf) {
+        self.target_pick_error = self.set_target_mod(Some(path)).err();
+    }
+
     /// Read the project's target mod again on a worker (a new target, a new folder, a finished scan). A read of an
     /// older request is dropped when it lands.
     pub(crate) fn refresh_target_mod(&mut self) {

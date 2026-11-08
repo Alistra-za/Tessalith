@@ -428,6 +428,8 @@ pub struct AppModel {
     known_rev: u64,
     /// Note HL: what the last read of the project's target mod found (`None` until it lands or with no target).
     pub(crate) target_mod: Option<Arc<target_mod::TargetMod>>,
+    /// Why the last Choose… in the Map to target… dialog was refused; the dialog shows it in red.
+    pub target_pick_error: Option<&'static str>,
     /// The newest `refresh_target_mod`; a read of an older one is dropped.
     pub(crate) target_mod_gen: u64,
     /// Part of `ViewKey`: the export-overlap block follows a new target at once.
@@ -797,6 +799,7 @@ impl AppModel {
             known_rev: 0,
             target_mod: None,
             target_mod_gen: 0,
+            target_pick_error: None,
             target_mod_rev: 0,
             used_by: Default::default(),
             original: Default::default(),

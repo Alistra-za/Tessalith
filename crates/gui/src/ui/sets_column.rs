@@ -10,13 +10,15 @@ use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files};
-use crate::model::known_paths::TxstRecord;
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
+use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::sets::{
     badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
     DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
+use crate::model::target_mod::{FileBase, MeshPath};
+use crate::model::txst_map::TargetPick;
 use crate::model::AppModel;
 use crate::sets_doc::TxstMap;
 use eframe::egui;
@@ -64,15 +66,22 @@ pub enum Pending {
         query: String,
         sel: usize,
     },
-    /// Note HG: Map to texture set record…, the set, the typed query, the hits of `seen` (the query and the scan they
-    /// were filtered for) as indexes into `known.records`, and the chosen record. Nothing is written until Map.
-    MapRecord {
-        id: String,
-        query: String,
-        hits: Vec<usize>,
-        seen: Option<(String, usize)>,
-        sel: Option<TxstRecord>,
-    },
+    /// Notes HG, HL4: Map to target…, the set, the typed query, the list `rows` (built for `seen`'s scan and target
+    /// stamps), the hits of `seen` as indexes into `rows`, the used-by counts of the rows drawn so far, and the chosen
+    /// row. Nothing is written until Map.
+    MapTarget(Box<MapTargetState>),
+}
+
+/// What [`Pending::MapTarget`] holds (boxed: it is the largest variant by far).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapTargetState {
+    id: String,
+    query: String,
+    rows: Vec<TargetPick>,
+    hits: Vec<usize>,
+    seen: Option<(String, (usize, usize))>,
+    used: HashMap<usize, u32>,
+    sel: Option<TargetPick>,
 }
 
 /// Item 17: files dropped from Explorer this frame, and where (`None` when the position is unknown).
@@ -173,9 +182,9 @@ enum Act {
     NewSet(String),
     Reorder(String, usize),
     OpenMoveTo(String),
-    /// Note HG: open the texture set record picker on a set.
-    MapRecord(String),
-    /// Note HG: remove a set's record mapping.
+    /// Notes HG, HL4: open the Map to target… dialog on a set.
+    MapTarget(String),
+    /// Note HG: remove a set's mapping.
     UnmapRecord(String),
     OpenRename(String),
     Delete(String, usize),
@@ -1383,21 +1392,33 @@ pub fn draw(
                     sel: 0,
                 })
             }
-            Act::MapRecord(id) => {
-                // A mapped set opens on its current record, when the scan still has it.
+            Act::MapTarget(id) => {
+                model.target_pick_error = None;
+                // A mapped set opens on its current record, mesh path or file base, when the scan or target still has it.
                 let sel = crate::model::sets::views(model)
                     .iter()
                     .find(|v| engine::sets::same_id(&v.id, &id))
                     .and_then(|v| v.txst.as_ref())
-                    .and_then(|t| model.record_of(t))
-                    .cloned();
-                st.pending = Some(Pending::MapRecord {
+                    .and_then(|t| match &t.base {
+                        None => model.record_of(t).cloned().map(TargetPick::Record),
+                        Some(b) => model.target().and_then(|tm| {
+                            let same = |x: &str| x.eq_ignore_ascii_case(b);
+                            let mesh = tm.meshes.iter().find(|m| same(&m.base));
+                            let files = tm.files.iter().find(|f| same(&f.base));
+                            mesh.cloned()
+                                .map(TargetPick::Mesh)
+                                .or(files.cloned().map(TargetPick::Files))
+                        }),
+                    });
+                st.pending = Some(Pending::MapTarget(Box::new(MapTargetState {
                     id,
                     query: String::new(),
+                    rows: vec![],
                     hits: vec![],
                     seen: None,
+                    used: HashMap::new(),
                     sel,
-                });
+                })));
             }
             Act::UnmapRecord(id) => {
                 if let Err(why) = model.unmap_record(&id) {
@@ -2328,18 +2349,17 @@ fn menu(
         acts.push(Act::FillNames(v.id.clone()));
         ui.close();
     }
-    // Note HG: one reason at a time; the scan comes first, as the PBR refusal can't be fixed by scanning.
-    let why_not = if model.known.records.is_empty() {
-        Some("Scan your mods first")
-    } else if model.record_ignored(v) {
-        Some("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs")
-    } else {
-        None
-    };
+    // Note HL4: a scan or a target mod gives the dialog something to list. A PGPatcher PBR set's record rows are
+    // refused in the dialog (its mesh and file rows work), so the menu item stays on.
+    let has_target = model
+        .sets_doc
+        .as_ref()
+        .is_some_and(|d| d.target_mod().is_some());
+    let why_not = (model.known.records.is_empty() && !has_target).then_some("Scan your mods first");
     let label = if v.txst.is_some() {
-        "Change record…"
+        "Change mapping…"
     } else {
-        "Map to texture set record…"
+        "Map to target…"
     };
     let map = ui.add_enabled(why_not.is_none(), egui::Button::new(label));
     let map = match why_not {
@@ -2347,10 +2367,10 @@ fn menu(
         _ => tip(map),
     };
     if map.clicked() {
-        acts.push(Act::MapRecord(v.id.clone()));
+        acts.push(Act::MapTarget(v.id.clone()));
         ui.close();
     }
-    if v.txst.is_some() && tip(ui.button("Remove record mapping")).clicked() {
+    if v.txst.is_some() && tip(ui.button("Remove mapping")).clicked() {
         acts.push(Act::UnmapRecord(v.id.clone()));
         ui.close();
     }
@@ -2379,8 +2399,8 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
         move_to_modal(ctx, model, st);
         return;
     }
-    if matches!(st.pending, Some(Pending::MapRecord { .. })) {
-        map_record_modal(ctx, model, st);
+    if matches!(st.pending, Some(Pending::MapTarget(_))) {
+        map_target_modal(ctx, model, st);
         return;
     }
     let Some(p) = st.pending.clone() else { return };
@@ -2416,7 +2436,7 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
         Pending::Rename { .. }
         | Pending::FillNames { .. }
         | Pending::MoveTo { .. }
-        | Pending::MapRecord { .. } => return,
+        | Pending::MapTarget(_) => return,
     };
     let buttons: Vec<(&str, _, bool)> = footer.iter().map(|b| (b.0.as_str(), b.1, true)).collect();
     let mut answer = None;
@@ -2669,90 +2689,238 @@ fn move_to_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) 
     }
 }
 
-/// One picker row: EDID, FormID, plugin (and the winner when it differs) and the colour path, each cut to its column
-/// with the whole text on hover (the label's own tooltip) and in the row's AccessKit name.
-fn record_row(ui: &mut egui::Ui, r: &TxstRecord, selected: bool) -> egui::Response {
-    let h = ui.spacing().interact_size.y;
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
-    let name = format!("{} ({}, {})", r.edid, r.formid, r.plugin);
-    resp.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name)
-    });
-    if !ui.is_rect_visible(rect) {
-        return resp;
+/// The kind column of a Map to target… row.
+fn pick_kind(p: &TargetPick) -> &'static str {
+    match p {
+        TargetPick::Record(_) => "Record",
+        TargetPick::Mesh(_) => "Mesh",
+        TargetPick::Files(_) => "File",
     }
-    if selected {
-        ui.painter()
-            .rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
-    } else if resp.hovered() {
-        ui.painter()
-            .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
-    }
-    let plugin = if r.winner.eq_ignore_ascii_case(&r.plugin) {
-        r.plugin.clone()
-    } else {
-        format!("{} (won by {})", r.plugin, r.winner)
-    };
-    let colour = r.slots.get(&1).map_or("", String::as_str);
-    // (text, start, end) as fractions of the row; the last gap keeps a cell off its neighbour.
-    let cells = [
-        (r.edid.as_str(), 0.0, 0.27),
-        (r.formid.as_str(), 0.27, 0.37),
-        (plugin.as_str(), 0.37, 0.65),
-        (colour, 0.65, 1.0),
-    ];
-    for (text, a, b) in cells {
-        let cell = egui::Rect::from_min_max(
-            egui::pos2(rect.min.x + a * rect.width() + 4.0, rect.min.y),
-            egui::pos2(rect.min.x + b * rect.width() - 4.0, rect.max.y),
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(cell)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| {
-                ui.add(egui::Label::new(text).truncate().selectable(false));
-            },
-        );
-    }
-    resp
 }
 
-/// Map to texture set record… (Note HG): type to filter, click a row, read what each file would write, then Map. It
-/// writes nothing before Map, and Enter does not map (there is no Default button). Esc or Cancel closes; a click
-/// outside does not (it holds the typed text). The list is virtual: the scan holds thousands of records.
-fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
-    let Some(Pending::MapRecord {
-        id,
-        query,
-        hits,
-        seen,
-        sel,
-    }) = &mut st.pending
-    else {
+/// The path a row's "used by" count is about: its slot 1.
+fn pick_slot1(p: &TargetPick) -> Option<&str> {
+    let slots = match p {
+        TargetPick::Record(r) => &r.slots,
+        TargetPick::Mesh(m) => &m.slots,
+        TargetPick::Files(f) => &f.slots,
+    };
+    slots.get(&1).map(String::as_str)
+}
+
+/// The list the dialog shows: the target's records (every scan record with no target mod), then its mesh paths, then
+/// its file bases.
+fn target_rows(model: &AppModel) -> Vec<TargetPick> {
+    let mut rows: Vec<TargetPick> = model
+        .target_records()
+        .into_iter()
+        .cloned()
+        .map(TargetPick::Record)
+        .collect();
+    if let Some(t) = model.target() {
+        rows.extend(t.meshes.iter().cloned().map(TargetPick::Mesh));
+        rows.extend(t.files.iter().cloned().map(TargetPick::Files));
+    }
+    rows
+}
+
+/// One list row of Map to target…: the kind, the EDID or path, and `used by (N)`, each cut to its cell with the whole
+/// text on hover and in the row's AccessKit name. `why`: the hover of a row that can't be picked (drawn disabled).
+fn target_row(
+    ui: &mut egui::Ui,
+    pick: &TargetPick,
+    used: u32,
+    selected: bool,
+    why: Option<&str>,
+) -> egui::Response {
+    const KIND_W: f32 = 56.0;
+    const USED_W: f32 = 88.0;
+    let h = ui.spacing().interact_size.y;
+    let main = match pick {
+        TargetPick::Record(r) => {
+            let plugin = if r.winner.eq_ignore_ascii_case(&r.plugin) {
+                r.plugin.clone()
+            } else {
+                format!("{} (won by {})", r.plugin, r.winner)
+            };
+            format!("{} ({}, {})", r.edid, r.formid, plugin)
+        }
+        TargetPick::Mesh(m) => m.base.clone(),
+        TargetPick::Files(f) => f.base.clone(),
+    };
+    let kind = pick_kind(pick);
+    let used_text = format!("used by ({used})");
+    let name = format!("{kind} {main} · {used_text}");
+    let resp = ui
+        .add_enabled_ui(why.is_none(), |ui| {
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Button, why.is_none(), selected, &name)
+            });
+            if !ui.is_rect_visible(rect) {
+                return resp;
+            }
+            if selected {
+                ui.painter()
+                    .rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+            } else if resp.hovered() && why.is_none() {
+                ui.painter()
+                    .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
+            }
+            let (x0, x1) = (rect.min.x + 4.0, rect.max.x - 4.0);
+            let cells = [
+                (kind, x0, x0 + KIND_W - 4.0, !selected),
+                (main.as_str(), x0 + KIND_W, x1 - USED_W, false),
+                (used_text.as_str(), x1 - USED_W + 4.0, x1, !selected),
+            ];
+            for (text, a, b, weak) in cells {
+                let cell = egui::Rect::from_min_max(
+                    egui::pos2(a, rect.min.y),
+                    egui::pos2(b.max(a), rect.max.y),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(cell)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        let t = egui::RichText::new(text);
+                        let t = if weak { t.weak() } else { t };
+                        ui.add(egui::Label::new(t).truncate().selectable(false));
+                    },
+                );
+            }
+            resp
+        })
+        .inner;
+    match why {
+        Some(w) => resp.on_disabled_hover_text(w),
+        None => resp,
+    }
+}
+
+const TARGET_ROW: &str = "Target mod (read only; Export writes to the export folder)";
+const WHY_IGNORED: &str = "PGPatcher PBR sets name their outputs in the JSON; use Rename outputs";
+
+/// Map to target… (Notes HG, HL4): the target mod row, one list of its records, mesh paths and file bases (every scan
+/// record with no target mod), then what each file would write. It writes nothing before Map. Enter maps the chosen
+/// row while no widget has focus; Esc or Cancel closes; a click outside does not (it holds the typed text). The list
+/// is virtual: the scan holds thousands of records.
+fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
+    let Some(Pending::MapTarget(state)) = &mut st.pending else {
         return;
     };
+    let MapTargetState {
+        id,
+        query,
+        rows,
+        hits,
+        seen,
+        used,
+        sel,
+    } = &mut **state;
     use super::dialogs::Role;
+    let first = seen.is_none();
     let known = model.known.clone();
-    let stamp = std::sync::Arc::as_ptr(&known) as usize;
-    let title = format!("Map {id} to a texture set record");
+    let stamp = (
+        std::sync::Arc::as_ptr(&known) as usize,
+        model
+            .target()
+            .map_or(0, |t| std::sync::Arc::as_ptr(t) as usize),
+    );
+    // Only a changed scan or target rebuilds the rows; a changed query filters them again.
+    let stale = seen.as_ref().is_none_or(|(_, s)| *s != stamp);
+    if stale {
+        *rows = target_rows(model);
+        used.clear();
+        if sel.as_ref().is_some_and(|s| !rows.contains(s)) {
+            *sel = None;
+        }
+    }
+    if stale || seen.as_ref().is_none_or(|(q, _)| q != query) {
+        *hits = crate::model::txst_map::pick_hits(rows, query);
+        *seen = Some((query.clone(), stamp));
+    }
+    // A PGPatcher PBR set on Community Shaders ignores a record; its mesh and file rows still work.
+    let (ignored, mapped) = crate::model::sets::views(model)
+        .iter()
+        .find(|v| engine::sets::same_id(&v.id, id))
+        .map_or((false, false), |v| {
+            (model.record_ignored(v), v.txst.is_some())
+        });
+    let off = |p: &TargetPick| ignored && matches!(p, TargetPick::Record(_));
+    let can_map = sel.as_ref().is_some_and(|p| !off(p));
+    let target_path = model.sets_doc.as_ref().and_then(|d| d.target_mod());
+    let no_records = model
+        .target()
+        .is_some_and(|t| !t.plugins.is_empty() && !rows.iter().any(|r| pick_kind(r) == "Record"));
+    let title = if mapped {
+        "Change mapping…"
+    } else {
+        "Map to target…"
+    };
     let buttons = [
         ("Cancel", Role::Plain, true),
-        ("Map", Role::Plain, sel.is_some()),
+        ("Map", Role::Default, can_map),
     ];
-    let hovers = [None, Some("Pick a record first")];
+    let pick_first = if sel.is_some() {
+        WHY_IGNORED
+    } else {
+        "Pick a row first"
+    };
+    let hovers = [None, Some(pick_first)];
+    let (mut choose, mut clear, mut typed_enter) = (false, false, false);
     let (keys, clicked) = super::dialogs::dialog_hover(
         ctx,
-        "set-map-record",
+        "set-map-target",
         false,
         640.0,
-        &title,
+        title,
         &buttons,
         &hovers,
         |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(format!("Set: {id}")).weak()).truncate());
+            ui.label(TARGET_ROW);
+            egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| match &target_path {
+                    Some(p) => {
+                        let full = p.display().to_string();
+                        let r = ui.add(
+                            egui::Label::new(super::header::elide_middle(&full, 60))
+                                .truncate()
+                                .show_tooltip_when_elided(false),
+                        );
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                true,
+                                format!("Target mod folder: {full}"),
+                            )
+                        });
+                        r.on_hover_text(&full);
+                    }
+                    None => {
+                        let text = "No target mod: the list shows every record of the scan";
+                        ui.add(egui::Label::new(egui::RichText::new(text).weak()).truncate());
+                    }
+                },
+                |ui| {
+                    if target_path.is_some() && ui.button("Clear").clicked() {
+                        clear = true;
+                    }
+                    let choose_button = egui::Button::new("Choose…");
+                    choose = crate::model::picker::button(ui, &model.picker, choose_button);
+                },
+            );
+            if let Some(e) = model.target_pick_error {
+                ui.colored_label(RED, e);
+            }
+            if no_records {
+                ui.weak(crate::model::target_mod::RECORDS_NOT_IN_SCAN);
+            }
             // Before the field, so it does not move its cursor with them (as Move to… does). They only move the
-            // highlight; Enter still maps nothing.
+            // highlight.
             let (up, down) = ui.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
@@ -2774,7 +2942,7 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
                 )
             });
             field.widget_info(|| egui::WidgetInfo {
-                label: Some("Search texture set records".into()),
+                label: Some("Search targets".into()),
                 ..egui::WidgetInfo::text_edit(
                     true,
                     query.as_str(),
@@ -2782,98 +2950,125 @@ fn map_record_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
                     "EDID, plugin, FormID or path",
                 )
             });
-            if !field.has_focus() && !field.lost_focus() && seen.is_none() {
+            // The field gives up its focus on Enter, so this frame's Enter was typed there and maps nothing.
+            typed_enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if first && !field.has_focus() && !field.lost_focus() {
                 field.request_focus();
             }
-            // Only a changed query (or a scan that landed) filters again.
-            if !seen
-                .as_ref()
-                .is_some_and(|(q, s)| q == query && *s == stamp)
-            {
-                *hits = crate::model::txst_map::record_hits(&known.records, query);
-                *seen = Some((query.clone(), stamp));
-            }
-            ui.weak(format!("{} of {} records", hits.len(), known.records.len()));
+            let noun = if rows.iter().all(|r| pick_kind(r) == "Record") {
+                "records"
+            } else {
+                "rows"
+            };
+            ui.weak(format!("{} of {} {noun}", hits.len(), rows.len()));
             let row_h = ui.spacing().interact_size.y;
             let mut moved = None;
             if up || down {
                 let at = sel
                     .as_ref()
-                    .and_then(|s| hits.iter().position(|&i| known.records.get(i) == Some(s)));
-                let next = match (at, down) {
-                    (None, _) => 0,
-                    (Some(p), true) => (p + 1).min(hits.len().saturating_sub(1)),
-                    (Some(p), false) => p.saturating_sub(1),
+                    .and_then(|s| hits.iter().position(|&i| rows.get(i) == Some(s)));
+                let order: Vec<usize> = match (at, down) {
+                    (None, _) => (0..hits.len()).collect(),
+                    (Some(p), true) => (p + 1..hits.len()).collect(),
+                    (Some(p), false) => (0..p).rev().collect(),
                 };
-                if let Some(r) = hits.get(next).and_then(|&i| known.records.get(i)) {
+                let row_at = |n: usize| hits.get(n).and_then(|&i| rows.get(i));
+                let next = order
+                    .into_iter()
+                    .find(|&n| row_at(n).is_some_and(|r| !off(r)));
+                if let Some((n, r)) = next.and_then(|n| Some((n, row_at(n)?))) {
                     *sel = Some(r.clone());
-                    moved = Some(next);
+                    moved = Some(n);
                 }
             }
             // `show_rows` builds only the rows on screen, so a moved highlight scrolls by offset, from last frame's
             // offset and view height.
-            let view_id = egui::Id::new("map-record-list-view");
-            let (off, view) = ui
+            let view_id = egui::Id::new("map-target-list-view");
+            let (off_y, view) = ui
                 .data(|d| d.get_temp::<(f32, f32)>(view_id))
                 .unwrap_or((0.0, row_h * 9.0));
+            // A bar that shows without hovering (egui-ui-rules 3.2); the dialog's own ui, so nothing else changes.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
             let mut area = egui::ScrollArea::vertical()
-                .id_salt("map-record-list")
+                .id_salt("map-target-list")
                 .max_height(row_h * 9.0)
                 .auto_shrink([false, true]);
             if let Some(n) = moved {
                 let top = n as f32 * (row_h + ui.spacing().item_spacing.y);
-                if top < off {
+                if top < off_y {
                     area = area.vertical_scroll_offset(top);
-                } else if top + row_h > off + view {
+                } else if top + row_h > off_y + view {
                     area = area.vertical_scroll_offset(top + row_h - view);
                 }
             }
             let out = area.show_rows(ui, row_h, hits.len(), |ui, range| {
                 for n in range {
-                    let Some(r) = hits.get(n).and_then(|&i| known.records.get(i)) else {
-                        continue;
-                    };
-                    if record_row(ui, r, sel.as_ref() == Some(r)).clicked() {
-                        *sel = Some(r.clone());
+                    let i = hits[n];
+                    let Some(p) = rows.get(i) else { continue };
+                    let count = *used
+                        .entry(i)
+                        .or_insert_with(|| pick_slot1(p).map_or(0, |s| model.used_by(s)));
+                    let why = off(p).then_some(WHY_IGNORED);
+                    if target_row(ui, p, count, sel.as_ref() == Some(p), why).clicked() {
+                        *sel = Some(p.clone());
                     }
                 }
             });
             ui.data_mut(|d| d.insert_temp(view_id, (out.state.offset.y, out.inner_rect.height())));
-            if let Some(r) = sel.as_ref() {
+            if let Some(p) = sel.as_ref() {
                 ui.separator();
-                let head = format!("{} ({}, {})", r.edid, r.formid, r.plugin);
+                let head = match p {
+                    TargetPick::Record(r) => format!("{} ({}, {})", r.edid, r.formid, r.plugin),
+                    TargetPick::Mesh(m) => m.base.clone(),
+                    TargetPick::Files(f) => f.base.clone(),
+                };
                 ui.add(egui::Label::new(egui::RichText::new(head).strong()).truncate());
                 egui::ScrollArea::vertical()
-                    .id_salt("map-record-preview")
+                    .id_salt("map-target-preview")
                     .max_height(row_h * 5.0)
                     .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for (file, path) in model.record_preview(id, r) {
-                            match path {
-                                Some(p) => {
-                                    ui.add(egui::Label::new(format!("{file} → {p}")).truncate())
-                                }
-                                None => ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(format!("{file}: keeps its own path"))
+                    .show(ui, |ui| match p {
+                        TargetPick::Record(r) => {
+                            for (file, path) in model.record_preview(id, r) {
+                                match path {
+                                    Some(p) => {
+                                        ui.add(egui::Label::new(format!("{file} → {p}")).truncate())
+                                    }
+                                    None => ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(format!(
+                                                "{file}: keeps its own path"
+                                            ))
                                             .weak(),
-                                    )
-                                    .truncate(),
-                                ),
-                            };
+                                        )
+                                        .truncate(),
+                                    ),
+                                };
+                            }
+                        }
+                        TargetPick::Mesh(MeshPath { slots, .. })
+                        | TargetPick::Files(FileBase { slots, .. }) => {
+                            for (n, path) in slots {
+                                ui.add(egui::Label::new(format!("slot{n}: {path}")).truncate());
+                            }
                         }
                     });
             }
         },
     );
+    if choose {
+        model.pick(ctx, PickerPurpose::TargetMod, PickerSpec::folder());
+    }
+    if clear {
+        model.target_pick_error = model.set_target_mod(None).err();
+    }
     if keys.cancel || clicked == Some(0) {
         st.pending = None;
-    } else if clicked == Some(1) {
-        if let Some(Pending::MapRecord {
-            id, sel: Some(r), ..
-        }) = st.pending.take()
-        {
-            if let Err(why) = model.map_record(&id, r.to_map()) {
+    } else if clicked == Some(1) || (keys.enter && can_map && !typed_enter) {
+        if let Some(Pending::MapTarget(state)) = st.pending.take() {
+            let MapTargetState { id, sel, .. } = *state;
+            let Some(p) = sel else { return };
+            if let Err(why) = model.map_target(&id, p) {
                 st.pending = Some(Pending::Refused(why));
             }
         }

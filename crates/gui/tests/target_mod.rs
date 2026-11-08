@@ -674,3 +674,304 @@ fn two_bases_with_equal_slots_are_not_one_cached_mapping() {
     idle(&mut m);
     assert_eq!(base_of(&m).as_deref(), Some("textures/a/two"));
 }
+
+// ---- the Map to target… dialog (Note HL4) ----
+
+use eframe::egui;
+use egui::accesskit::Role;
+use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::Harness;
+use sdc_gui::model::target_mod::RECORDS_NOT_IN_SCAN;
+
+fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
+    let h = Harness::builder()
+        .with_size(egui::vec2(w, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+const TARGET_ROW: &str = "Target mod (read only; Export writes to the export folder)";
+
+/// The boots project with the target folder read and a scan holding `records`.
+fn with_target(dir: &Path, records: Vec<TxstRecord>) -> (AppModel, String) {
+    let (mut m, id) = boots(dir);
+    assert_eq!(m.set_target_mod(Some(target_folder(dir))), Ok(()));
+    landed(&mut m);
+    scan(&mut m, records);
+    idle(&mut m);
+    (m, id)
+}
+
+fn open_dialog(m: AppModel, id: &str, w: f32) -> Harness<'static, AppModel> {
+    let mut h = harness(m, w);
+    h.run();
+    let tail = id.rsplit('/').next().unwrap().to_string();
+    let pill = h
+        .query_all_by_label(id)
+        .next()
+        .or_else(|| h.query_all_by_label_contains(&tail).next());
+    pill.expect("the set pill").click_secondary();
+    h.run();
+    h.get_by_label("Map to target…").click();
+    h.run();
+    h
+}
+
+const KINDS: [&str; 3] = ["Record ", "Mesh ", "File "];
+
+fn is_row(l: &str) -> bool {
+    KINDS.iter().any(|k| l.starts_with(k))
+}
+
+/// The AccessKit names of the list rows, in order.
+fn row_names(h: &Harness<'static, AppModel>) -> Vec<String> {
+    h.query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| is_row(l))
+        .collect()
+}
+
+fn one_of_each() -> Vec<TxstRecord> {
+    vec![trec(
+        "FS6Rec",
+        "Plug.esp",
+        "0x800",
+        &[(1, "textures/fs6/rec_d.dds")],
+    )]
+}
+
+#[test]
+fn the_set_menu_offers_map_to_target() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    scan(&mut m, one_of_each());
+    let mut h = harness(m, 1280.0);
+    h.run();
+    let tail = id.rsplit('/').next().unwrap().to_string();
+    h.query_all_by_label_contains(&tail)
+        .next()
+        .expect("the set pill")
+        .click_secondary();
+    h.run();
+    h.get_by_label("Map to target…");
+    assert!(h.query_by_label("Map to texture set record…").is_none());
+}
+
+#[test]
+fn the_dialog_names_the_target_mod_read_only() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    scan(&mut m, one_of_each());
+    let h = open_dialog(m, &id, 1280.0);
+    h.get_by_label(TARGET_ROW);
+    h.get_by_role_and_label(Role::Button, "Choose…");
+    assert!(h.query_by_role_and_label(Role::Button, "Clear").is_none());
+    let rows = row_names(&h);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("Record FS6Rec"), "{rows:?}");
+}
+
+#[test]
+fn the_list_has_records_meshes_and_files_with_counts() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = with_target(d.path(), one_of_each());
+    let meshes: Vec<String> = m
+        .target()
+        .unwrap()
+        .meshes
+        .iter()
+        .map(|x| x.base.clone())
+        .collect();
+    let mut h = open_dialog(m, &id, 1280.0);
+    h.get_by_role_and_label(Role::Button, "Clear");
+    let rows = row_names(&h);
+    // The record, one row per distinct mesh path of the fixture NIF, the file base.
+    assert_eq!(rows.len(), meshes.len() + 2, "{rows:?}");
+    assert!(rows[0].starts_with("Record "), "{rows:?}");
+    for (row, base) in rows[1..].iter().zip(&meshes) {
+        assert!(
+            row.starts_with("Mesh ") && row.contains(base.as_str()),
+            "{row}"
+        );
+    }
+    assert!(rows.last().unwrap().starts_with("File "), "{rows:?}");
+    for row in &rows {
+        assert!(row.contains("used by ("), "{row}");
+    }
+    assert!(rows[0].ends_with("used by (1)"), "{rows:?}");
+    assert!(rows.last().unwrap().ends_with("used by (0)"), "{rows:?}");
+    h.get_by_label("Search targets").type_text("boots");
+    h.run();
+    let rows = row_names(&h);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("File ") && rows[0].contains("fs6_boots_ir"));
+}
+
+#[test]
+fn the_picker_says_records_come_from_the_scan() {
+    let d = tempfile::tempdir().unwrap();
+    let other = trec("Other", "Elsewhere.esp", "0x1", &[(1, "textures/o.dds")]);
+    let (m, id) = with_target(d.path(), vec![other]);
+    let mut h = open_dialog(m, &id, 1280.0);
+    h.get_by_label(RECORDS_NOT_IN_SCAN);
+    let rows = row_names(&h);
+    assert!(rows.iter().all(|r| !r.starts_with("Record ")), "{rows:?}");
+    let file = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("File "))
+        })
+        .expect("the file row");
+    file.click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Map").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    let all = sdc_gui::model::sets::views(h.state());
+    let v = all.iter().find(|v| v.id == id).unwrap();
+    assert_eq!(
+        v.txst.as_ref().and_then(|t| t.base.as_deref()),
+        Some(BOOTS_BASE)
+    );
+}
+
+#[test]
+fn record_rows_are_disabled_on_an_albedo_pbr_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(m.set_target_mod(Some(target_folder(t.path()))), Ok(()));
+    landed(&mut m);
+    scan(&mut m, one_of_each());
+    assert!(sdc_gui::model::sets::views(&m)
+        .iter()
+        .any(|v| v.id == "landscape/rock01" && v.pbr));
+    let mut h = open_dialog(m, "landscape/rock01", 1280.0);
+    let mut seen = [false; 3];
+    for n in h.query_all_by_role(Role::Button) {
+        let Some(l) = n.accesskit_node().label() else {
+            continue;
+        };
+        let Some(i) = KINDS.iter().position(|k| l.starts_with(k)) else {
+            continue;
+        };
+        assert_eq!(n.accesskit_node().is_disabled(), i == 0, "{l}");
+        seen[i] = true;
+    }
+    assert_eq!(seen, [true; 3]);
+    let rec = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Record "))
+        })
+        .unwrap();
+    rec.hover();
+    h.run();
+    h.get_by_label("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs");
+}
+
+#[test]
+fn a_refused_target_is_said_in_the_dialog() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    scan(&mut m, one_of_each());
+    let mut h = open_dialog(m, &id, 1280.0);
+    h.state_mut().target_picked(d.path().join("export"));
+    h.run();
+    assert!(h.state().target().is_none());
+    h.get_by_label(TARGET_IS_EXPORT);
+}
+
+#[test]
+fn the_dialog_fits_at_1100_px() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = with_target(d.path(), one_of_each());
+    let h = open_dialog(m, &id, 1100.0);
+    let edge = h.get_by_role_and_label(Role::Button, "Map").rect().max.x;
+    assert!(row_names(&h).len() >= 3);
+    for n in h.query_all_by_role(Role::Button) {
+        let Some(l) = n.accesskit_node().label() else {
+            continue;
+        };
+        if !is_row(&l) {
+            continue;
+        }
+        let rect = n.rect();
+        let c = h
+            .ctx
+            .viewport(|v| {
+                v.this_pass
+                    .widgets
+                    .layers()
+                    .flat_map(|(_, ws)| ws)
+                    .find(|w| w.rect == rect)
+                    .map(|w| w.interact_rect)
+            })
+            .expect("the row is a widget");
+        assert!(
+            c.max.x <= edge + 0.5,
+            "{l}: ends at {}, dialog at {edge}",
+            c.max.x
+        );
+    }
+}
+
+#[test]
+fn clear_removes_the_target_and_the_list_goes_back_to_the_scan() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = with_target(d.path(), one_of_each());
+    let n = m.target().unwrap().meshes.len() + 2;
+    let mut h = open_dialog(m, &id, 1280.0);
+    assert_eq!(row_names(&h).len(), n, "{:?}", row_names(&h));
+    h.get_by_role_and_label(Role::Button, "Clear").click();
+    h.run();
+    assert!(h.state().target().is_none());
+    assert!(project_text(h.state()).find("target_mod").is_none());
+    let rows = row_names(&h);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("Record "), "{rows:?}");
+    assert!(h.query_by_role_and_label(Role::Button, "Clear").is_none());
+}
+
+/// Screenshots of the dialog at 1100, 1280 and 1600 px into `SDC_SHOT_DIR` (skipped without it). Run alone, like
+/// the other `render_` tests.
+#[test]
+fn render_map_to_target_dialog() {
+    let Some(out) = std::env::var_os("SDC_SHOT_DIR") else {
+        return;
+    };
+    let long = trec(
+        "A_Very_Long_Editor_Id_That_Goes_On_And_On_For_A_While_Before_It_Ends",
+        "Plug.esp",
+        "0xABCDEF",
+        &[(1, "textures/fs6/rec_d.dds")],
+    );
+    for w in [1100.0, 1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut records = one_of_each();
+        records.push(long.clone());
+        for n in 0..12 {
+            records.push(trec(&format!("Filler{n:02}"), "Plug.esp", "0x900", &[]));
+        }
+        let (m, id) = with_target(d.path(), records);
+        let mut h = open_dialog(m, &id, w);
+        let row = h
+            .query_all_by_role(Role::Button)
+            .find(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l.starts_with("Record Filler"))
+            })
+            .unwrap();
+        row.click();
+        h.run();
+        let img = h.render().expect("render");
+        img.save(Path::new(&out).join(format!("map-target-{w}.png")))
+            .expect("save png");
+    }
+}
