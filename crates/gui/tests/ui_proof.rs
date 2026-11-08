@@ -734,6 +734,14 @@ fn overlap_spares_a_badge_centred_on_a_chip_corner() {
     // two buttons sharing an edge
     let side = egui::Rect::from_min_size(chip.right_top(), vec2(32.0, 32.0));
     assert_eq!(overlaps(side), 0, "touching edges");
+    // a big rect centred on the corner is not a badge (over 24 px)
+    let big_chip = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), vec2(60.0, 60.0));
+    let big = egui::Rect::from_center_size(big_chip.right_top(), vec2(60.0, 60.0));
+    let f = found(300.0, 200.0, move |ui| {
+        hit(ui, big_chip, "chip");
+        hit(ui, big, "big");
+    });
+    assert_eq!(of(&f, "overlap").len(), 1, "two 60x60 buttons on a corner");
 }
 
 #[test]
