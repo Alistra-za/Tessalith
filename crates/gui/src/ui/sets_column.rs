@@ -114,6 +114,8 @@ pub struct DropState {
     /// Note FM32: the widget with the keyboard focus when the last frame's list ended. A stand-in that holds the focus
     /// and was not the holder then took it this frame (Tab), as opposed to a focused card the wheel scrolled away.
     pub focus: Option<egui::Id>,
+    /// Note HP: the Sets filter last frame, to tell a change from the first frame (`None`).
+    pub filter: Option<crate::model::sets_filter::SetsFilter>,
 }
 
 /// Review I1: a reveal re-aims at most this many frames, so a key that names no visible card cannot loop.
@@ -1061,6 +1063,22 @@ pub fn draw(
     };
     let card_h = |id: &str| st.card_h.get(id).copied().unwrap_or(est);
     // A set the palette picked scrolls into view (item 19); `reveal_at` is its place in `visible`.
+    // Note HP (SC3): a changed filter, search or shader starts the list at its top, unless the one open set still
+    // shows: that one is revealed. The first frame has no earlier filter, so it counts as no change.
+    let changed = st
+        .filter
+        .replace(model.sets_filter.clone())
+        .is_some_and(|f| f != model.sets_filter);
+    let mut to_top = false;
+    if changed {
+        match model.selected_sets().as_slice() {
+            [k] if visible.iter().any(|&i| views[i].key == *k) => {
+                model.nav.reveal_set = Some(k.clone());
+            }
+            _ => to_top = model.nav.reveal_set.is_none(),
+        }
+        st.reveal_tries = 0;
+    }
     let reveal = model.nav.reveal_set.take();
     let reveal_at = reveal.as_deref().and_then(|k| {
         visible
@@ -1095,7 +1113,12 @@ pub fn draw(
             .sum();
         ((now - was).abs() > 0.5).then(|| (off + now - was).max(0.0))
     };
-    let target = jump.or_else(anchored);
+    let target = if to_top {
+        st.anchor = None;
+        Some(0.0)
+    } else {
+        jump.or_else(anchored)
+    };
     let mut resized = false;
     let mut reveal_drawn = false;
     // The first card in view (id, top in the content) and the off-screen card that took the focus, if any.

@@ -1301,3 +1301,109 @@ fn the_shader_popup_counts_follow_the_search() {
         assert_eq!(h.state().model.visible_sets().len(), 1, "at {w}x{h_px}");
     }
 }
+
+/// A filter change starts the list at its top: the old offset showed a set under the "hidden by filter" line (SC3).
+#[test]
+fn a_filter_change_starts_the_list_at_its_top() {
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0), (1055.0, 400.0)] {
+        let resize = resize_line(w, h_px);
+        let open = resize_line(w, 790.0);
+        let (_d, h) = crate::replay_mid(
+            "demo",
+            |_| {},
+            &[
+                open.as_str(),
+                r#"{"op":"click","at":{"label":"armor/gold"}}"#,
+            ],
+            |_| {},
+            &[
+                resize.as_str(),
+                r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"down","times":5}"#,
+                r#"{"op":"settle","frames":2}"#,
+                r#"{"op":"click","at":{"starts":"Not ready"}}"#,
+                r#"{"op":"settle","frames":3}"#,
+            ],
+        );
+        let clear = one(&h, "Clear filter");
+        let first = one_node(&h, "Set architecture/stone/stonewall, position");
+        assert!(
+            first.min.y >= clear.max.y - 0.5 && in_sets_column(&h, first),
+            "at {w}x{h_px}: the first set {first:?} sits below Clear filter {clear:?} inside the column"
+        );
+    }
+}
+
+/// The one open set that still passes the new filter is revealed instead of the top.
+#[test]
+fn a_filter_change_reveals_the_open_set_when_it_stays_visible() {
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0), (1055.0, 560.0)] {
+        let resize = resize_line(w, h_px);
+        let open = resize_line(w, 790.0);
+        let (_d, h) = crate::replay_mid(
+            "demo",
+            |_| {},
+            &[
+                open.as_str(),
+                r#"{"op":"click","at":{"label":"armor/gold"}}"#,
+            ],
+            |_| {},
+            &[
+                resize.as_str(),
+                r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"down","times":5}"#,
+                r#"{"op":"settle","frames":2}"#,
+                r#"{"op":"click","at":{"starts":"Ready"}}"#,
+                r#"{"op":"settle","frames":6}"#,
+            ],
+        );
+        let card = one_node(&h, "Set armor/gold, position");
+        let panel = PanelState::load(&h.ctx, egui::Id::new("sets"))
+            .expect("the Sets panel")
+            .outer_rect;
+        assert!(
+            card.top() >= panel.top() - 0.5 && card.bottom() <= panel.bottom() + 0.5,
+            "at {w}x{h_px}: the open card {card:?} inside the Sets panel {panel:?}"
+        );
+    }
+}
+
+/// Review Focus 2: typing a search after a scroll starts at the top, and a later wheel scroll is not undone.
+#[test]
+fn typing_a_search_after_a_scroll_starts_at_the_top() {
+    const BANNER: &str = "Set architecture/stone/banner, position";
+    for (w, h_px) in [(1055.0, 770.0), (1055.0, 400.0)] {
+        let resize = resize_line(w, h_px);
+        let typed = [
+            resize.as_str(),
+            r#"{"op":"scroll","at":{"label":"Set actors/body, position 1 of 9"},"dir":"down","times":5}"#,
+            r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#,
+            r#"{"op":"settle","frames":3}"#,
+        ];
+        let (_d, h) = crate::replay("demo", &typed);
+        let search = h
+            .query_all_by_role(Role::TextInput)
+            .map(|n| n.rect())
+            .find(|r| in_sets_column(&h, *r))
+            .expect("the search box");
+        let banner = one_node(&h, BANNER);
+        assert!(
+            banner.min.y >= search.max.y,
+            "the first set {banner:?} starts below the search box {search:?}"
+        );
+        let top_after = |settle: &str| {
+            let mut lines = typed.to_vec();
+            lines.push(
+            r#"{"op":"scroll","at":{"label":"Set architecture/stone/banner, position 2 of 9"},"dir":"down","times":2}"#,
+        );
+            lines.push(r#"{"op":"settle","frames":2}"#);
+            lines.push(settle);
+            let (_d, h) = crate::replay("demo", &lines);
+            one_node(&h, BANNER).top()
+        };
+        let scrolled = top_after(r#"{"op":"settle","frames":1}"#);
+        let later = top_after(r#"{"op":"settle","frames":6}"#);
+        assert!(
+            (later - scrolled).abs() < 0.5,
+            "the wheel scroll stays put: {scrolled} -> {later}"
+        );
+    }
+}
