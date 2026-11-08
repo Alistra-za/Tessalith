@@ -2235,7 +2235,7 @@ fn it_is_greyed_with_no_scan() {
 }
 
 #[test]
-fn it_stays_on_for_a_pbr_set() {
+fn it_is_greyed_on_a_pbr_set_without_a_target_mod() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::pbr_opened(d.path());
     scan(&mut m, vec![arch()]);
@@ -2244,9 +2244,13 @@ fn it_stays_on_for_a_pbr_set() {
     h.run();
     pill_of(&h, "landscape/rock01").click_secondary();
     h.run();
-    // Its mesh and file rows work, so only the record rows are refused (in the dialog: tests/target_mod.rs).
+    // Every row is a record row and records are ignored: nothing could be mapped. With a target mod the item stays
+    // on for its mesh and file rows (tests/target_mod.rs `record_rows_are_disabled_on_an_albedo_pbr_set`).
     let item = h.get_by_label("Map to target…");
-    assert!(!item.accesskit_node().is_disabled());
+    assert!(item.accesskit_node().is_disabled());
+    item.hover();
+    h.run();
+    h.get_by_label("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs");
 }
 
 fn open_picker(h: &mut Harness<'static, AppModel>) {
@@ -2530,7 +2534,7 @@ fn a_new_record_starts_with_every_fill_on() {
 }
 
 #[test]
-fn the_arrow_keys_move_the_highlight_and_enter_maps_nothing() {
+fn the_arrow_keys_move_the_highlight_and_enter_in_the_field_maps_nothing() {
     let d = tempfile::tempdir().unwrap();
     let m = unmapped(d.path());
     let mut h = harness(m, 1280.0);

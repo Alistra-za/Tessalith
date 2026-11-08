@@ -2350,12 +2350,19 @@ fn menu(
         ui.close();
     }
     // Note HL4: a scan or a target mod gives the dialog something to list. A PGPatcher PBR set's record rows are
-    // refused in the dialog (its mesh and file rows work), so the menu item stays on.
+    // refused in the dialog; with a target mod its mesh and file rows still map, without one nothing could. The scan
+    // reason comes first (HG8c).
     let has_target = model
         .sets_doc
         .as_ref()
         .is_some_and(|d| d.target_mod().is_some());
-    let why_not = (model.known.records.is_empty() && !has_target).then_some("Scan your mods first");
+    let why_not = if model.known.records.is_empty() && !has_target {
+        Some("Scan your mods first")
+    } else if model.record_ignored(v) && !has_target {
+        Some("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs")
+    } else {
+        None
+    };
     let label = if v.txst.is_some() {
         "Change mapping…"
     } else {

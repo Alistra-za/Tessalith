@@ -887,55 +887,85 @@ fn a_refused_target_is_said_in_the_dialog() {
     h.get_by_label(TARGET_IS_EXPORT);
 }
 
+/// A long EDID next to the short ones: every cell of a row (kind, EDID or path, `used by (N)`) stays inside the
+/// row and the dialog, in its own column, on one line.
 #[test]
 fn the_dialog_fits_at_1100_px() {
     let d = tempfile::tempdir().unwrap();
-    let (m, id) = with_target(d.path(), one_of_each());
+    let long = trec(
+        "A_Very_Long_Editor_Id_That_Goes_On_And_On_For_A_While_Before_It_Ends_Somewhere_Far_Right",
+        "Plug.esp",
+        "0xABCDEF",
+        &[(1, "textures/fs6/rec_d.dds")],
+    );
+    let mut records = one_of_each();
+    records.push(long);
+    let (m, id) = with_target(d.path(), records);
     let h = open_dialog(m, &id, 1100.0);
     let edge = h.get_by_role_and_label(Role::Button, "Map").rect().max.x;
-    assert!(row_names(&h).len() >= 3);
-    for n in h.query_all_by_role(Role::Button) {
-        let Some(l) = n.accesskit_node().label() else {
-            continue;
-        };
-        if !is_row(&l) {
-            continue;
+    let rows: Vec<egui::Rect> = h
+        .query_all_by_role(Role::Button)
+        .filter(|n| n.accesskit_node().label().is_some_and(|l| is_row(&l)))
+        .map(|n| n.rect())
+        .collect();
+    assert!(rows.len() >= 4, "{rows:?}");
+    let labels: Vec<egui::Rect> = h.query_all_by_role(Role::Label).map(|n| n.rect()).collect();
+    let mut long_seen = false;
+    for row in &rows {
+        let mut cells: Vec<egui::Rect> = labels
+            .iter()
+            .copied()
+            .filter(|c| row.contains(c.center()))
+            .collect();
+        cells.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        assert_eq!(cells.len(), 3, "{row:?}: {cells:?}");
+        for c in &cells {
+            assert!(c.max.x <= row.max.x + 0.5, "cell {c:?} past row {row:?}");
+            assert!(c.max.x <= edge + 0.5, "cell {c:?} past dialog edge {edge}");
+            assert!(
+                c.height() <= row.height() + 1.0,
+                "cell {c:?} wrapped in {row:?}"
+            );
         }
-        let rect = n.rect();
-        let c = h
-            .ctx
-            .viewport(|v| {
-                v.this_pass
-                    .widgets
-                    .layers()
-                    .flat_map(|(_, ws)| ws)
-                    .find(|w| w.rect == rect)
-                    .map(|w| w.interact_rect)
-            })
-            .expect("the row is a widget");
-        assert!(
-            c.max.x <= edge + 0.5,
-            "{l}: ends at {}, dialog at {edge}",
-            c.max.x
-        );
+        for w in cells.windows(2) {
+            assert!(
+                w[0].max.x <= w[1].min.x + 0.5,
+                "{:?} runs into {:?}",
+                w[0],
+                w[1]
+            );
+        }
+        long_seen |= cells[1].width() > 300.0;
     }
+    assert!(long_seen, "the long EDID row never filled its cell");
 }
 
+/// Enter maps the chosen row only while no widget has focus: with Clear focused it presses Clear and maps nothing.
 #[test]
-fn clear_removes_the_target_and_the_list_goes_back_to_the_scan() {
+fn enter_on_a_focused_button_maps_nothing() {
     let d = tempfile::tempdir().unwrap();
     let (m, id) = with_target(d.path(), one_of_each());
-    let n = m.target().unwrap().meshes.len() + 2;
     let mut h = open_dialog(m, &id, 1280.0);
-    assert_eq!(row_names(&h).len(), n, "{:?}", row_names(&h));
-    h.get_by_role_and_label(Role::Button, "Clear").click();
+    h.get_by_label("Search targets").type_text("boots");
     h.run();
-    assert!(h.state().target().is_none());
-    assert!(project_text(h.state()).find("target_mod").is_none());
-    let rows = row_names(&h);
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(rows[0].starts_with("Record "), "{rows:?}");
-    assert!(h.query_by_role_and_label(Role::Button, "Clear").is_none());
+    let file = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("File "))
+        })
+        .expect("the file row");
+    file.click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Clear").focus();
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    let all = sdc_gui::model::sets::views(h.state());
+    let v = all.iter().find(|v| v.id == id).unwrap();
+    assert!(v.txst.is_none(), "Enter on Clear also mapped the row");
 }
 
 /// Screenshots of the dialog at 1100, 1280 and 1600 px into `SDC_SHOT_DIR` (skipped without it). Run alone, like
