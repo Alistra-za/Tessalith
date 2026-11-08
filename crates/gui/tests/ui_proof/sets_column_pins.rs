@@ -9,6 +9,8 @@ use sdc_gui::model::items::{helper_target_text, ItemKind};
 use sdc_gui::model::labels::subtype_name;
 use sdc_gui::model::sets::{self, SlotFill, SlotKind};
 use sdc_gui::model::Selection;
+use sdc_gui::ui::columns::{SETS_MIN, TEXTURES_MIN};
+use sdc_gui::ui::set_editor::ROWS_MIN;
 
 #[test]
 fn fill_targets_map_to_the_chip_they_fill() {
@@ -443,6 +445,121 @@ const OPEN_GOLD: [&str; 3] = [
 ];
 const GOLD_CARD: &str = "Set armor/gold, position 5 of 9";
 
+/// Sets the Sets column to width `w`, as a drag leaves it (`<id>/chosen`), and lets the layout follow.
+fn sets_width(h: &mut crate::app_harness::H, w: f32) {
+    h.ctx
+        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), w));
+    crate::app_harness::settle(h, 6);
+}
+
+fn narrow_sets(h: &mut crate::app_harness::H) {
+    sets_width(h, SETS_MIN);
+}
+
+/// (Sets width, Textures width, "Search sets" box width, centre width) of the last frame.
+fn widths(h: &crate::app_harness::H) -> (f32, f32, f32, f32) {
+    use egui::containers::panel::PanelState;
+    let panel = |id: &str| {
+        PanelState::load(&h.ctx, egui::Id::new(id))
+            .unwrap()
+            .outer_rect
+    };
+    let search = h
+        .query_all_by_role(Role::TextInput)
+        .find(|n| n.accesskit_node().placeholder() == Some("Search sets"))
+        .expect("the Search sets box")
+        .rect()
+        .width();
+    let centre = h
+        .ctx
+        .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("centre-rect")))
+        .expect("the centre rect")
+        .width();
+    (
+        panel("sets").width(),
+        panel("textures").width(),
+        search,
+        centre,
+    )
+}
+
+fn resize_line(w: f32, h: f32) -> String {
+    format!(r#"{{"op":"resize","w":{w},"h":{h}}}"#)
+}
+
+#[test]
+fn opening_a_set_takes_the_editors_room_from_textures_first() {
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) =
+            crate::replay("demo", &[resize.as_str(), r#"{"op":"settle","frames":6}"#]);
+        let (s0, t0, q0, _) = widths(&h);
+        h.get_by_label("armor/gold").click();
+        crate::app_harness::settle(&mut h, 6);
+        let (s1, t1, q1, c1) = widths(&h);
+        let at = format!(
+            "at {w}x{h_px}: sets {s0}->{s1}, textures {t0}->{t1}, search {q0}->{q1}, centre {c1}"
+        );
+        assert!(
+            s1 >= s0 - 1.0 && q1 >= q0 - 1.0,
+            "{at}: Sets keeps its room"
+        );
+        assert!(c1 >= ROWS_MIN - 1.0, "{at}: the editor keeps its rows");
+        if w < 1100.0 {
+            assert!(
+                t0 - t1 >= 50.0 && t1 >= TEXTURES_MIN - 0.5,
+                "{at}: Textures yields"
+            );
+        } else {
+            assert!((t1 - t0).abs() <= 1.0, "{at}: Textures unchanged");
+        }
+    }
+}
+
+#[test]
+fn a_tight_window_takes_textures_to_its_minimum_before_sets() {
+    // At 900 the card's title is cut away and the card cannot be driven into view, so open it at 1055 first.
+    let (open, tight) = (resize_line(1055.0, 770.0), resize_line(900.0, 770.0));
+    let (_d, h) = crate::replay(
+        "demo",
+        &[
+            open.as_str(),
+            r#"{"op":"click","at":{"label":"armor/gold"}}"#,
+            tight.as_str(),
+            r#"{"op":"settle","frames":6}"#,
+        ],
+    );
+    let (s, t, _, c) = widths(&h);
+    let at = format!("sets {s}, textures {t}, centre {c}");
+    assert!(
+        (t - TEXTURES_MIN).abs() <= 1.0,
+        "Textures at its minimum: {at}"
+    );
+    assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
+}
+
+#[test]
+fn closing_the_set_gives_textures_its_width_back() {
+    let resize = resize_line(1055.0, 770.0);
+    let (_d, mut h) = crate::replay("demo", &[resize.as_str(), r#"{"op":"settle","frames":6}"#]);
+    let t0 = widths(&h).1;
+    h.get_by_label("armor/gold").click();
+    crate::app_harness::settle(&mut h, 6);
+    assert!(widths(&h).1 < t0 - 50.0, "Textures yielded while open");
+    let key = {
+        let views = sets::views(&h.state().model);
+        let v = views.iter().find(|v| v.id == "armor/gold").unwrap();
+        let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Diffuse) else {
+            panic!("armor/gold's colour chip")
+        };
+        item.clone()
+    };
+    h.state_mut().model.select_item(&key);
+    crate::app_harness::settle(&mut h, 6);
+    let t1 = widths(&h).1;
+    assert!((t1 - t0).abs() <= 1.0, "Textures back to {t0}, got {t1}");
+}
+
 /// The open card's rect and the Sets panel's outer rect.
 fn card_and_panel(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
     let cards: Vec<_> = h.query_all_by_label(GOLD_CARD).map(|n| n.rect()).collect();
@@ -455,7 +572,8 @@ fn card_and_panel(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
 
 #[test]
 fn opening_a_set_in_a_narrow_window_keeps_its_card_in_view() {
-    let (_d, h) = crate::replay("demo", &OPEN_GOLD);
+    let (_d, mut h) = crate::replay("demo", &OPEN_GOLD);
+    sets_width(&mut h, SETS_MIN);
     let (card, panel) = card_and_panel(&h);
     assert!(
         card.top() >= panel.top() - 0.5 && card.bottom() <= panel.bottom() + 0.5,
@@ -470,12 +588,13 @@ fn a_wheel_scroll_after_the_reveal_stays_put() {
     let scroll =
         r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"up","times":8}"#;
     let top_after = |frames: &str| {
-        let mut lines = OPEN_GOLD.to_vec();
-        lines.push(scroll);
-        lines.push(frames);
-        card_and_panel(&crate::replay("demo", &lines).1).0.top()
+        let (_d, h) = crate::replay_mid("demo", |_| {}, &OPEN_GOLD, narrow_sets, &[scroll, frames]);
+        card_and_panel(&h).0.top()
     };
-    let before = card_and_panel(&crate::replay("demo", &OPEN_GOLD).1).0.top();
+    let before = {
+        let (_d, h) = crate::replay_mid("demo", |_| {}, &OPEN_GOLD, narrow_sets, &[]);
+        card_and_panel(&h).0.top()
+    };
     let scrolled = top_after(r#"{"op":"settle","frames":2}"#);
     let later = top_after(r#"{"op":"settle","frames":8}"#);
     assert!(
@@ -521,13 +640,21 @@ fn press(h: &mut crate::app_harness::H, pos: egui::Pos2, pressed: bool) {
 fn the_hidden_set_line_wraps_with_clear_filter_below() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
-        let (_d, h) = crate::replay(
+        // Opening a set no longer narrows Sets at 1055, so the narrow case sets the width itself.
+        let narrow = |h: &mut crate::app_harness::H| {
+            if w < 1100.0 {
+                narrow_sets(h);
+            }
+        };
+        let (_d, h) = crate::replay_mid(
             "demo",
+            |_| {},
             &[
                 resize.as_str(),
                 r#"{"op":"click","at":{"label":"armor/gold"}}"#,
-                r#"{"op":"click","at":{"starts":"Not ready"}}"#,
             ],
+            narrow,
+            &[r#"{"op":"click","at":{"starts":"Not ready"}}"#],
         );
         let at = format!("at {w}x{h_px}");
         let (rows, elided, rect) = painted(&h, "armor/gold is hidden by the Sets filter");
@@ -610,21 +737,27 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
         let wheel = format!(
             r#"{{"op":"scroll","at":{{"label":"Set architecture/stone/banner, position 2 of 9"}},"dir":"down","times":{down}}}"#
         );
-        let mut lines = vec![resize.as_str()];
+        let (mut first, mut rest) = (vec![resize.as_str()], vec![]);
         if open {
-            // no search here: it would hide the open card; scroll to the top, then down
-            lines.extend(OPEN_GOLD);
-            lines.push(
+            // no search here: it would hide the open card; open it, narrow Sets, scroll to the top, then down
+            first.extend(OPEN_GOLD);
+            rest.push(
                 r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"up","times":8}"#,
             );
             if down > 0 {
-                lines.push(&wheel);
+                rest.push(&wheel);
             }
         } else {
-            lines.push(r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#);
+            first.push(r#"{"op":"type","text":"stone","at":{"placeholder":"Search sets"}}"#);
         }
-        lines.push(r#"{"op":"settle","frames":6}"#);
-        let (_d, mut h) = crate::replay("demo", &lines);
+        rest.push(r#"{"op":"settle","frames":6}"#);
+        // Opening a set no longer narrows Sets at 1055, so the narrow case sets the width itself.
+        let narrow = |h: &mut crate::app_harness::H| {
+            if open {
+                narrow_sets(h);
+            }
+        };
+        let (_d, mut h) = crate::replay_mid("demo", |_| {}, &first, narrow, &rest);
         // the list starts under the filter row
         let list_top = texts(&h)
             .into_iter()

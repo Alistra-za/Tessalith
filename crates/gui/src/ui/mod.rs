@@ -178,10 +178,22 @@ pub fn draw_with_scan(
         // Each column stops at its minimum and leaves the columns after it theirs and the centre its floor.
         let mut floor = centre_floor(ui.ctx(), model);
         // Note FB2: the 2D set editor's one column needs its slot rows' width, so the columns yield it.
-        if !three_d && set_editor_shown(model, false) {
+        let editor = !three_d && set_editor_shown(model, false);
+        if editor {
             floor = floor.max(set_editor::ROWS_MIN);
         }
-        let textures_max = ui.available_width() - columns::SETS_MIN - floor;
+        // Note HP: the editor's floor comes out of Textures first, then Sets.
+        let sets_room = {
+            let (hidden, collapsed) = Column::Sets.flags(&mut model.settings);
+            if !editor || *hidden || *collapsed {
+                columns::SETS_MIN
+            } else {
+                chosen_width(ui.ctx(), "sets")
+                    .unwrap_or(SETS_W)
+                    .max(columns::SETS_MIN)
+            }
+        };
+        let textures_max = ui.available_width() - sets_room - floor;
         column_panel(
             ui,
             Column::Textures,
@@ -195,7 +207,7 @@ pub fn draw_with_scan(
         column_panel(
             ui,
             Column::Sets,
-            260.0,
+            SETS_W,
             columns::SETS_MIN..=ui.available_width() - floor,
             model,
             |ui, model| {
@@ -530,6 +542,14 @@ fn column_panel(
             content(ui, model)
         });
     }
+}
+
+/// The Sets column's width before the user drags it.
+const SETS_W: f32 = 260.0;
+
+/// The width the user dragged panel `id` to (what `chosen_width_panel` stores), if any.
+fn chosen_width(ctx: &egui::Context, id: &str) -> Option<f32> {
+    ctx.data_mut(|d| d.get_persisted::<f32>(egui::Id::new(id).with("chosen")))
 }
 
 /// Shows `panel` (whose id is `id`) at the width the user dragged to, `<id>/chosen`, or `width` before any drag.

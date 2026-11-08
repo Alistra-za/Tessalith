@@ -48,12 +48,40 @@ pub fn run_journey(fixture: &str, lines: &[&str]) {
 /// Replays `lines` like `run_journey` and returns the harness (and its temp dir) for further checks. Keep the
 /// `TempDir` alive as long as the harness: dropping it deletes the project folder the app reads.
 pub fn replay(fixture: &str, lines: &[&str]) -> (tempfile::TempDir, app_harness::H) {
+    replay_with(fixture, |_| {}, lines)
+}
+
+/// `replay`, with `before` run once the fixture has opened and before the first line.
+pub fn replay_with(
+    fixture: &str,
+    before: impl FnOnce(&mut app_harness::H),
+    lines: &[&str],
+) -> (tempfile::TempDir, app_harness::H) {
+    replay_mid(fixture, before, lines, |_| {}, &[])
+}
+
+/// `replay_with`, then `mid` between `first` and `rest` (a change the first lines' clicks must not see).
+pub fn replay_mid(
+    fixture: &str,
+    before: impl FnOnce(&mut app_harness::H),
+    first: &[&str],
+    mid: impl FnOnce(&mut app_harness::H),
+    rest: &[&str],
+) -> (tempfile::TempDir, app_harness::H) {
     app_data();
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
+    before(&mut h);
+    play(&mut h, &run, first);
+    mid(&mut h);
+    play(&mut h, &run, rest);
+    (d, h)
+}
+
+fn play(h: &mut app_harness::H, run: &fixtures::Run, lines: &[&str]) {
     let script = parse_script(&lines.join("\n")).unwrap();
     for (i, (line, step)) in script.iter().enumerate() {
-        match fixtures::app_step(&mut h, &run, step) {
+        match fixtures::app_step(h, run, step) {
             Err(e) => panic!("step {} `{line}`: {e}", i + 1),
             // A journey's check must decide: a note is a check that proved nothing.
             Ok(Some(note)) if matches!(step, Step::Check { .. }) => {
@@ -62,7 +90,6 @@ pub fn replay(fixture: &str, lines: &[&str]) -> (tempfile::TempDir, app_harness:
             Ok(_) => {}
         }
     }
-    (d, h)
 }
 
 /// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
