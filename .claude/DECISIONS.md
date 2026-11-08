@@ -19,7 +19,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW
-- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
@@ -96,7 +96,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 ### Analysis and alpha
 
 - The alpha question is one dropdown on the resolved type. [FM35]
-- No-suffix files are the colour member, at High confidence; the GUI accepts High suggestions and records them in the project. [U1, U3, FC1]
+- No-suffix files are the colour member, at High confidence, unless a lone file with an underscore and no recognised suffix waits for a type (GY1); the GUI accepts High suggestions and records them in the project. [U1, U3, FC1, GY1]
 - Mesh alpha evidence (NiAlphaProperty from the scan) decides a varying alpha's meaning through the `mesh:alpha` layer; the first plan asks until the scan evidence is read, then re-plans. [U5, U6, U7, U9]
 - "(auto)" in the Sub-type row means the decision came from evidence, with the reason on hover. [U4]
 - `_coat` is coat colour + strength (canonical `s`). [U2, S-shader-9]

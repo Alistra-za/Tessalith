@@ -26,6 +26,10 @@ skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidenc
 
 `sdc` does not apply suggestions by default. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions automatically. See [CLI reference](CLI-Reference.md#why---accept-suggestions-high-matters).
 
+### One file says "unknown suffix" and `sdc convert` exits 1
+
+A file like `rock_bump.png`, alone in its set, waits for a type instead of becoming a colour map, and `--accept-suggestions high` doesn't change that. The message names the fix, and the rule is in [Texture types](Texture-Types.md#texture-sets).
+
 ### A colour map asks what its alpha means
 
 A diffuse (or albedo, UI or skin colour) whose alpha varies cannot be decided from the image alone: the mesh decides whether it is a cutout, a blend or unused. Set `alpha.policy` on the file, answer the question in the GUI, or scan your mods so the GUI can read the meshes ([Mod scanning](Mod-Scanning.md)). Alpha that counts as opaque (stray noise near 255, see [Texture types](Texture-Types.md)) does not ask.
@@ -55,7 +59,7 @@ The overlay and the check read your Meshes scan, so scan your MO2 instance in th
 
 ### A normal map came out as a diffuse
 
-Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm`. Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
+Its name has no normal suffix (for example `rock_nm.png`), so it was read as the colour map of a set called `rock_nm` (alone in its set it waits for a type instead, [see why](Texture-Types.md#texture-sets)). Rename it, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
 
 ### A texture is written at a different size
 

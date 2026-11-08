@@ -26,6 +26,10 @@ textures\armor\iron\
   iron_trim.png     set "iron_trim", colour map (_trim is not a suffix)
 ```
 
+A file waits for a type instead of becoming a colour map when all of these hold: it has no sub-type in a `[files]` entry or a rule, its name has an underscore but no recognised suffix (aliases count), and it is alone in its set. `rock_bump.png` on its own waits: you can't tell if it's a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it. Files under `textures\cubemaps`, `landscape`, `sky` and `interface` never wait. A set's shader doesn't give the type. A kept `.dds` never waits.
+
+In the GUI a waiting file is Undecided and has no set card until you pick a type. On the command line it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1; `--allow SUG-LOW-CONFIDENCE` doesn't convert it. <!-- D:GY1 -->
+
 Some decisions depend on the whole set: whether it is a PBR set, its shader, which raw maps get packed together, and whether a normal map's detail is baked into roughness.
 
 ## Suffixes
@@ -58,7 +62,7 @@ A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `
 
 Medium and Low suggestions always need your confirmation. High suggestions are applied automatically in the GUI; for the command line see [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters).
 
-A file whose name fits none of these rules is read as a colour map (`rock_nm.png` becomes a diffuse). Rename it, add an `[inputs]` alias, or set `subtype` in a `[files]` entry.
+A file whose name fits none of these rules is read as a colour map (`rock_nm.png` becomes a diffuse) when it has other files in its set; alone, it [waits for a type](#texture-sets). Rename it, add an `[inputs]` alias, or set `subtype` in a `[files]` entry.
 
 ### Detail names
 
