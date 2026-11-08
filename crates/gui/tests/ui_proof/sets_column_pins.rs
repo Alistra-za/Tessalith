@@ -157,6 +157,15 @@ fn one(h: &crate::app_harness::H, label: &str) -> egui::Rect {
     b[0]
 }
 
+/// The names of the Sets-column Buttons that start with `prefix`.
+fn named_from(h: &crate::app_harness::H, prefix: &str) -> Vec<String> {
+    h.query_all_by_role(Role::Button)
+        .filter(|n| in_sets_column(h, n.rect()))
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| l.starts_with(prefix))
+        .collect()
+}
+
 /// The painted texts of the frame, flattened.
 fn texts(h: &crate::app_harness::H) -> Vec<(String, egui::Rect)> {
     fn flat(s: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
@@ -251,8 +260,11 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
     ] {
         one(&h, &l);
     }
-    // a badge's helper is not also in the trailing row
-    assert!(buttons(&h, "crate_opacity.png, fills to crate alpha").is_empty());
+    // a badge's helper is not also in the trailing row: its only Button is the badge itself
+    assert_eq!(
+        named_from(&h, "crate_opacity.png, "),
+        ["crate_opacity.png, fills Diffuse alpha"]
+    );
     let (_d, h) = crate::replay("demo", &[]);
     for l in [
         "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
@@ -261,7 +273,10 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
     ] {
         one(&h, l);
     }
-    assert!(buttons(&h, "iron_bump.png").is_empty());
+    assert_eq!(
+        named_from(&h, "iron_bump.png, "),
+        ["iron_bump.png, fills Normal _n layer"]
+    );
 }
 
 #[test]

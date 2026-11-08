@@ -84,8 +84,12 @@ fn an_opened_folder_shows_items_filters_and_the_undecided_count() {
         h.get_by_label_contains(label);
     }
     // The packed output's tile, and the two raw maps' helper rows (Note DY16): each row's name and its "→" target.
-    // (Note HN: the RMAOS chip is named for its file and its helpers, so it counts too.)
-    assert_eq!(h.query_all_by_label_contains("rock01_rmaos").count(), 6);
+    // (Note HN: the Sets column's RMAOS chip is named for its file too, so the count leaves that column out.)
+    let in_grid = h
+        .query_all_by_label_contains("rock01_rmaos")
+        .filter(|n| !in_sets_column(&h, n.rect()))
+        .count();
+    assert_eq!(in_grid, 5);
     assert_eq!(
         h.query_all_by_label_contains("fills to rock01_rmaos")
             .count(),
