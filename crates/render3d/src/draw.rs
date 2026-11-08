@@ -67,6 +67,9 @@ pub struct ShapeDraw {
     pub ps_cbs: Vec<Cb>,
     /// (register, view) for every SRV the PS reflects.
     pub srvs: Vec<(u32, ID3D11ShaderResourceView)>,
+    /// The PS reflects `SharedData::DepthTexture` at [`DEPTH_TEXTURE`] (CS hair self-shadow): render binds the scene
+    /// depth there over the `srvs` default (Note GX1).
+    pub reads_depth: bool,
     pub samplers: Vec<u32>,
     pub model: Mat3x4,
     pub blend: bool,
@@ -116,6 +119,16 @@ pub fn create_program(gpu: &Gpu, vs: Compiled, ps: Compiled) -> Result<Program, 
         vs,
         ps,
     })
+}
+
+/// CS's `SharedData::DepthTexture` register (SharedData.hlsli:538).
+pub const DEPTH_TEXTURE: u32 = 17;
+
+/// The PS reads the scene depth: `SharedData::DepthTexture` at t17 (PhysicalSky's TexVolLum shares the register).
+pub fn reads_depth(r: &Reflection) -> bool {
+    r.srvs
+        .iter()
+        .any(|s| s.1 == DEPTH_TEXTURE && s.0.ends_with("DepthTexture"))
 }
 
 /// Which reflected SRV kind lives at `reg`, if the PS reads it.

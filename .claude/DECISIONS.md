@@ -23,13 +23,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW
 
@@ -1219,3 +1219,10 @@ The 3D preview uses a pinned CS tree embedded in the exe, with CS's default sett
 
 - **GW4 The 3.0 RNM removal reverses the 2.0 debloat review's pick that kept RNM (item not in the repo), owner 2026-11-06.** GW1-GW3 supersede the frozen 1.x RNM rulings W1 to W12 and W14 to W18 (W13, the `_norm` alias, stays), Y5, AL4, BB1-BB3, BQ9, GI22, AG115-AG117 and FV3, the RNM-outline halves of FC9 and FC13, and DY17's layer target; `tools/decisions-archive/2026-11-07-gw.tsv` lists each digest line and note item they cut, and the CO90 identity sentence. AL6, BC8, DY2, DY13a, X8, GI13, CO115, CO116, AV4, BB4, BB5 and DY10e stay, as edited in the digest; FM12, FY1, HE7, the FM44 reference and planning sub-bullets and the FV preamble are edited the same way. No live digest line carries RNM wording any more, the W line at 58 (plain normals) included.
 - **GW5 The docs say what is left.** `Texture-Types.md#detail-names` is the one home for the three detail names and the set each becomes; `GUI-Helpers-and-Cubemaps.md` (renamed from `GUI-Helpers-RNM-and-Cubemaps.md`) and `Texture-Packing.md` lost their RNM sections, `Project-Config-Fields.md` and `Diagnostic-Codes.md` lost the `rnm.*` rows and `RNM-*` codes, and the CHANGELOG says layer files are no longer blended, so those normals change on the next export. The RNM panel screenshot, its `doc_shots` scenario and the workflow section tables' RNM paths are gone.
+
+## Note GX — Preview scene depth at t17 (NIF team, 2026-11-07)
+
+- **GX1 A depth pre-pass feeds t17 on frames with a scene-depth reader.** When a drawn shape's pixel shader reflects `SharedData::DepthTexture` at t17 (CS hair self-shadow, `Hair.hlsli:289`), `Renderer::render` first draws the opaque shapes (forward and DEFERRED programs) with depth write on into the depth alone, each with its own programs and depth state, so `discard` applies as in the Lighting draw. It then copies that depth into `Target::depth_copy` and binds its R32_FLOAT view at t17 for every t17 reader in the opaque and blended passes. A frame without a reader does neither. The main pass is unchanged: LESS_EQUAL passes the equal depth. This follows the game's Utility pre-pass before the Lighting draws (G3 in `G1-G8-results.md`).
+- **GX2 Both targets' depth is R32_TYPELESS, with a D32_FLOAT DSV and a per-target copy.** The forward depth was D32_FLOAT, and a D32_FLOAT to R32 copy does nothing, so it is typeless now, as the deferred one already was. The copy is made with the target and remade with it on a resize. The game binds an R16_UNORM depth at the frame's size there (capture b9-tex frame50765 ev5718 and cs-1.9.0 frame14158 ev33358: 2176×1224, BufferDim the same). The preview keeps 32-bit float, and the raymarch reads only `.x`.
+- **GX3 The pre-pass leaves out what the game's leaves out.** It skips blended shapes, shapes whose pipe has z-write off, and DEFERRED programs on a forward target, which never draw anyway (D-P12). A pre-pass draw's PS reads the t17 default, which is harmless because it writes no colour.
+- **GX4 The raymarch's other inputs already matched (Step 0, no change).** `CameraData` is (far, near, far − near, far · near), so `GetScreenDepth` returns view z for the 0-at-near, 1-at-far projection. `BufferDim` is the target size, `DynamicResolutionParams1/2` are 1 (as captured), and `CameraView`/`CameraProj` are the frame's own matrices (camera-relative, as `WorldPosition` is). The hit test `sampleDepth < rayDepth` therefore compares view z with view z, the depth buffer is cleared to 1.0 (far) and tested LESS_EQUAL, and no pin moved.

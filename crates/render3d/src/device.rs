@@ -293,6 +293,10 @@ pub struct Target {
     pub main_uav: Option<ID3D11UnorderedAccessView>,
     /// Deferred only: `depth` as an R32_FLOAT SRV, the composite's DepthTexture (D5; the depth is R32_TYPELESS there).
     pub depth_srv: Option<ID3D11ShaderResourceView>,
+    /// The depth pre-pass's copy of `depth` (R32_TYPELESS) and its R32_FLOAT view: CS's `SharedData::DepthTexture`
+    /// at t17 (Note GX1). A copy, because `depth` stays bound for writing while the shapes read it.
+    pub depth_copy: ID3D11Texture2D,
+    pub depth_copy_srv: ID3D11ShaderResourceView,
 }
 
 fn tex2d_desc(w: u32, h: u32, format: DXGI_FORMAT) -> D3D11_TEXTURE2D_DESC {
@@ -455,21 +459,38 @@ impl Target {
             cd.BindFlags |= (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_UNORDERED_ACCESS.0) as u32;
         }
         let color = create_tex(gpu, &cd)?;
-        // Deferred: typeless, so the composite can read it as R32_FLOAT (D5 R6); the DSV is D32_FLOAT either way.
-        let mut dd = tex2d_desc(
-            w,
-            h,
-            if deferred {
-                DXGI_FORMAT_R32_TYPELESS
-            } else {
-                DXGI_FORMAT_D32_FLOAT
-            },
-        );
+        // Typeless, so the composite can read it as R32_FLOAT (D5 R6) and `depth_copy` shares its format family (a
+        // D32_FLOAT → R32 copy does nothing, Note GX1); the DSV is D32_FLOAT.
+        let mut dd = tex2d_desc(w, h, DXGI_FORMAT_R32_TYPELESS);
         dd.BindFlags = D3D11_BIND_DEPTH_STENCIL.0 as u32;
         if deferred {
             dd.BindFlags |= D3D11_BIND_SHADER_RESOURCE.0 as u32;
         }
         let depth = create_tex(gpu, &dd)?;
+        let mut copy_desc = tex2d_desc(w, h, DXGI_FORMAT_R32_TYPELESS);
+        copy_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE.0 as u32;
+        let depth_copy = create_tex(gpu, &copy_desc)?;
+        let r32_srv = |tex: &ID3D11Texture2D| -> Result<ID3D11ShaderResourceView, String> {
+            let sd = D3D11_SHADER_RESOURCE_VIEW_DESC {
+                Format: DXGI_FORMAT_R32_FLOAT,
+                ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
+                Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+                    Texture2D: D3D11_TEX2D_SRV {
+                        MostDetailedMip: 0,
+                        MipLevels: 1,
+                    },
+                },
+            };
+            let mut v = None;
+            // SAFETY: live resource, descriptor and out-pointer are locals.
+            unsafe {
+                gpu.device
+                    .CreateShaderResourceView(tex, Some(&sd), Some(&mut v))
+            }
+            .map_err(|e| gpu.fail("CreateShaderResourceView (depth)", e))?;
+            v.ok_or_else(|| gpu.fail("CreateShaderResourceView (depth)", "no view returned"))
+        };
+        let depth_copy_srv = r32_srv(&depth_copy)?;
         let dsv_desc = D3D11_DEPTH_STENCIL_VIEW_DESC {
             Format: DXGI_FORMAT_D32_FLOAT,
             ViewDimension: D3D11_DSV_DIMENSION_TEXTURE2D,
@@ -528,25 +549,7 @@ impl Target {
             if main_uav.is_none() {
                 return Err(gpu.fail("CreateUnorderedAccessView", "no view returned"));
             }
-            let sd = D3D11_SHADER_RESOURCE_VIEW_DESC {
-                Format: DXGI_FORMAT_R32_FLOAT,
-                ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-                    Texture2D: D3D11_TEX2D_SRV {
-                        MostDetailedMip: 0,
-                        MipLevels: 1,
-                    },
-                },
-            };
-            // SAFETY: live resource, descriptor and out-pointer are locals.
-            unsafe {
-                gpu.device
-                    .CreateShaderResourceView(&depth, Some(&sd), Some(&mut depth_srv))
-            }
-            .map_err(|e| gpu.fail("CreateShaderResourceView (depth)", e))?;
-            if depth_srv.is_none() {
-                return Err(gpu.fail("CreateShaderResourceView (depth)", "no view returned"));
-            }
+            depth_srv = Some(r32_srv(&depth)?);
         }
         Ok(Target {
             width: w,
@@ -559,6 +562,8 @@ impl Target {
             mrt,
             main_uav,
             depth_srv,
+            depth_copy,
+            depth_copy_srv,
         })
     }
 
