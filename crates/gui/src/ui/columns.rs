@@ -26,19 +26,58 @@ const PILL_CHROME: f32 = 2.0 * (6.0 + 1.0);
 /// The Textures column's narrowest width: its heading over one tile.
 pub const TEXTURES_MIN: f32 =
     TILE + 2.0 * (TILE_MARGIN + TILE_STROKE) + SCROLL_ALLOWANCE + PANEL_CHROME;
-/// Note HP12: the Textures width `max` (outer) rounded up to whole tile columns, never past `cap`. A width that holds
-/// less than one tile, or already a whole number of them, is returned as it is.
+/// Note HP12: the width one more tile column adds to the Textures column: a tile's outer width and the gap `gap`.
+pub fn tile_step(tile: f32, gap: f32) -> f32 {
+    tile.max(ColumnPrefs::TILE_RANGE.0) + 2.0 * (TILE_MARGIN + TILE_STROKE) + gap
+}
+
+/// Note HP12: the Textures width `max` (outer) rounded up to whole tile columns, when that stays within `cap`. A width
+/// that holds less than one tile, already a whole number of them, or whose next column is past `cap` is returned as it
+/// is: Sets gives its room only for a tile column it buys.
 pub fn round_up_to_tiles(ui: &egui::Ui, tile: f32, max: f32, cap: f32) -> f32 {
-    let step = tile.max(ColumnPrefs::TILE_RANGE.0)
-        + 2.0 * (TILE_MARGIN + TILE_STROKE)
-        + ui.spacing().item_spacing.x;
-    let fit = (max - PANEL_CHROME - SCROLL_ALLOWANCE + ui.spacing().item_spacing.x) / step;
+    rounded_width(
+        tile_step(tile, ui.spacing().item_spacing.x),
+        ui.spacing().item_spacing.x,
+        max,
+        cap,
+    )
+}
+
+fn rounded_width(step: f32, gap: f32, max: f32, cap: f32) -> f32 {
+    let fit = (max - PANEL_CHROME - SCROLL_ALLOWANCE + gap) / step;
     if fit < 1.0 {
         return max;
     }
     let cols = (fit - 1e-3).ceil();
-    (cols * step - ui.spacing().item_spacing.x + SCROLL_ALLOWANCE + PANEL_CHROME)
-        .clamp(max, cap.max(max))
+    let rounded = cols * step - gap + SCROLL_ALLOWANCE + PANEL_CHROME;
+    if rounded <= cap {
+        rounded.max(max)
+    } else {
+        max
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review fix: a cap below the next whole column leaves the width as it is (Sets keeps its room).
+    #[test]
+    fn rounding_does_not_take_room_for_a_column_it_cannot_reach() {
+        let (step, gap) = (tile_step(96.0, 8.0), 8.0);
+        let max = TEXTURES_MIN + 0.1 * step; // just over one column
+        let next = TEXTURES_MIN + step;
+        assert_eq!(rounded_width(step, gap, max, next - 1.0), max);
+        assert_eq!(rounded_width(step, gap, max, max), max);
+        assert!((rounded_width(step, gap, max, next) - next).abs() < 0.01);
+        assert!((rounded_width(step, gap, max, next + 50.0) - next).abs() < 0.01);
+        // already whole, or under one tile: unchanged
+        assert_eq!(rounded_width(step, gap, next, next + 50.0), next);
+        assert_eq!(
+            rounded_width(step, gap, TEXTURES_MIN - 5.0, 500.0),
+            TEXTURES_MIN - 5.0
+        );
+    }
 }
 
 /// Note HP: the space between a card's chips across and down (room for a badge on each chip's corner), and the

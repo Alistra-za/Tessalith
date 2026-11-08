@@ -10,7 +10,7 @@ use sdc_gui::model::items::{helper_target_text, ItemKind};
 use sdc_gui::model::labels::subtype_name;
 use sdc_gui::model::sets::{self, SlotFill, SlotKind};
 use sdc_gui::model::Selection;
-use sdc_gui::ui::columns::{SETS_MIN, TEXTURES_MIN};
+use sdc_gui::ui::columns::{tile_step, SETS_MIN, TEXTURES_MIN};
 use sdc_gui::ui::set_editor::ROWS_MIN;
 
 #[test]
@@ -699,10 +699,14 @@ fn opening_a_set_takes_the_editors_room_from_textures_first() {
         let at = format!(
             "at {w}x{h_px}: sets {s0}->{s1}, textures {t0}->{t1}, search {q0}->{q1}, centre {c1}"
         );
+        // Note HP12: rounding Textures up adds less than one tile column, so Sets gives up less than one tile step.
+        let step = tile_step(
+            h.state().model.prefs.tile,
+            h.ctx.global_style().spacing.item_spacing.x,
+        );
         assert!(
-            // Note HP12: Sets gives up at most the part of a tile column that rounds Textures up (under 120 px)
-            s1 >= SETS_MIN - 0.5 && s1 >= s0 - 30.0 && q1 >= q0 - 30.0,
-            "{at}: Sets keeps its room"
+            s1 >= SETS_MIN - 0.5 && s1 > s0 - step && q1 > q0 - step,
+            "{at}: Sets keeps its room (gives up under {step})"
         );
         assert!(c1 >= ROWS_MIN - 1.0, "{at}: the editor keeps its rows");
         if w < 1100.0 {
@@ -1886,11 +1890,17 @@ fn an_off_screen_card_scrolls_into_view_on_request() {
     const LAST: &str = "Set props/crate, position 10 of 10";
     let resize = resize_line(1400.0, 790.0);
     let lines = [resize.as_str(), r#"{"op":"settle","frames":6}"#];
+    // The card's rect must lie in the Sets list: below the filter row and above the panel's bottom (not under the
+    // header rows, which the panel's outer rect also holds).
     let inside = |h: &crate::app_harness::H| {
         let panel = PanelState::load(&h.ctx, egui::Id::new("sets"))
             .unwrap()
             .outer_rect;
-        panel.contains_rect(h.get_by_label(LAST).rect())
+        let top = one(h, "Filter, Sets shader filter").bottom();
+        let card = h.get_by_label(LAST).rect();
+        card.top() >= top
+            && card.bottom() <= panel.bottom()
+            && card.x_range() == card.x_range().intersection(panel.x_range())
     };
     let (_d, mut h) = crate::replay("helpers", &lines);
     assert!(!inside(&h), "the last card starts below the fold");
@@ -1904,6 +1914,16 @@ fn an_off_screen_card_scrolls_into_view_on_request() {
     let click = format!(r#"{{"op":"click","at":{{"label":"{LAST}"}}}}"#);
     let (_d, h) = crate::replay("helpers", &[lines[0], lines[1], click.as_str()]);
     assert!(inside(&h), "the driver's click reached the last card");
+    let m = &h.state().model;
+    let Selection::Set(key) = &m.selection else {
+        panic!("the click selected a set, got {:?}", m.selection);
+    };
+    let views = sets::views(m);
+    assert_eq!(
+        views.iter().find(|v| &v.key == key).map(|v| v.id.as_str()),
+        Some("props/crate"),
+        "the click selected props/crate"
+    );
 }
 
 /// Proof fix (SH3): a title that fits whole keeps the one-row heading, so its status pill sits on the title row
@@ -1951,7 +1971,10 @@ fn a_shrunk_textures_column_holds_whole_tile_columns() {
         assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
         if w < 1100.0 {
             assert_eq!(cols, 2, "{at}");
-            let step = h.state().model.prefs.tile + 12.0 + 8.0;
+            let step = tile_step(
+                h.state().model.prefs.tile,
+                h.ctx.global_style().spacing.item_spacing.x,
+            );
             let off = (t - TEXTURES_MIN) % step;
             assert!(
                 off < 1.0 || step - off < 1.0,
@@ -1990,16 +2013,20 @@ fn the_shader_combo_shows_a_long_value_whole_and_leaves_48_px_free() {
 /// row's helper tile says the word its tag paints.
 #[test]
 fn painted_words_are_in_the_names() {
-    let (_d, h) = crate::replay("demo", &[]);
-    one(&h, "Filter, Sets shader filter");
-    let (_d, h) = crate::replay(
-        "demo",
-        &[
-            r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
-            r#"{"op":"click","at":{"label":"PBR 2"}}"#,
-        ],
-    );
-    one(&h, "Filter (1), Sets shader filter: PBR");
-    let (_d, h) = crate::replay("helpers", &[SEARCH]);
-    one(&h, "crate_metallic.png, unused: no targets chosen");
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay("demo", &[resize.as_str()]);
+        one(&h, "Filter, Sets shader filter");
+        let (_d, h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"click","at":{"label":"Filter, Sets shader filter"}}"#,
+                r#"{"op":"click","at":{"label":"PBR 2"}}"#,
+            ],
+        );
+        one(&h, "Filter (1), Sets shader filter: PBR");
+        let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        one(&h, "crate_metallic.png, unused: no targets chosen");
+    }
 }

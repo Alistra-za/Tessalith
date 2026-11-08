@@ -177,19 +177,32 @@ pub fn alpha_asked(item: &TextureItem) -> Option<AlphaPolicy> {
 
 /// Note DY16: where a helper went, from the engine's report: "fills RMAOS R, D alpha" or "not used: <reason>".
 pub fn helper_target_text(h: &HelperReport) -> String {
-    target_line(h, |_, t| fill_text(t))
+    target_line(h, "not used", |_, t| fill_text(t))
+}
+
+/// Note HP12: `helper_target_text` for the trailing-row tile, which paints the tag "unused" and so names itself with
+/// that word.
+pub fn helper_tag_text(h: &HelperReport) -> String {
+    target_line(h, "unused", |_, t| fill_text(t))
 }
 
 /// Note HP: `helper_target_text` with the file after each fill ("fills RMAOS R  x_rmaos, D alpha  x").
 pub fn helper_target_files(h: &HelperReport) -> String {
-    target_line(h, |h, t| format!("{}  {}", fill_text(t), target_file(h, t)))
+    target_line(h, "not used", |h, t| {
+        format!("{}  {}", fill_text(t), target_file(h, t))
+    })
 }
 
-fn target_line(h: &HelperReport, one: impl Fn(&HelperReport, FillTarget) -> String) -> String {
+/// `word` is how a helper that fills nothing is called ("not used", or "unused" where a tag paints that).
+fn target_line(
+    h: &HelperReport,
+    word: &str,
+    one: impl Fn(&HelperReport, FillTarget) -> String,
+) -> String {
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
-            Some(r) => format!("not used: {r}"),
-            None => "not used".to_string(),
+            Some(r) => format!("{word}: {r}"),
+            None => word.to_string(),
         };
     }
     let to: Vec<String> = h.fills.iter().map(|t| one(h, *t)).collect();

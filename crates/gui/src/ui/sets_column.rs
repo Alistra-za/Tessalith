@@ -9,7 +9,7 @@ use super::status::Status;
 use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
-use crate::model::items::{helper_target_files, helper_target_text};
+use crate::model::items::{helper_tag_text, helper_target_files};
 use crate::model::known_paths::TxstRecord;
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
@@ -1038,8 +1038,8 @@ fn card_node(
 }
 
 /// Note FM32 (R4): a card outside the clip rect allocates `size` and stands in with the card's widget id: a Tab stop
-/// and an AccessKit node named for the set. Returns its rect and whether it took the focus this frame (`held` is the
-/// holder last frame). K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep theirs.
+/// and an AccessKit node named for the set. Returns its rect and whether the card is wanted in view: it took the
+/// focus this frame (`held` is the holder last frame) or got an AccessKit ScrollIntoView request. K9: `allocate_space` takes one auto id, as the card's scope does, so later cards keep theirs.
 fn stand_in(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -1053,15 +1053,15 @@ fn stand_in(
     let layer = ui.layer_id();
     let ctx = ui.ctx();
     // Registered by hand: a `Response` per card cost 15% of a frame at 300 sets.
-    let mut gained = ctx.memory_mut(|m| {
+    let mut wanted = ctx.memory_mut(|m| {
         m.interested_in_focus(id, layer);
         m.focused() == Some(id) && held != Some(id)
     });
     // egui consumes ScrollIntoView only in a registered widget; a stand-in has none, so read the request here.
-    gained |=
+    wanted |=
         ctx.input(|i| i.has_accesskit_action_request(id, egui::accesskit::Action::ScrollIntoView));
     ctx.accesskit_node_builder(id, |n| card_node(n, v, at, selected, rect));
-    (rect, gained)
+    (rect, wanted)
 }
 
 pub fn draw(
@@ -1258,7 +1258,7 @@ pub fn draw(
             } else {
                 // R4: a card outside the clip rect stands in for its last height. The focus it takes scrolls the real
                 // card into view (Note FM32).
-                let (rect, gained) = stand_in(
+                let (rect, wanted) = stand_in(
                     ui,
                     id,
                     probe.size(),
@@ -1267,7 +1267,7 @@ pub fn draw(
                     (index, views.len()),
                     selected,
                 );
-                if gained {
+                if wanted {
                     if v.key.is_empty() {
                         ui.scroll_to_rect_animation(
                             rect,
@@ -1705,7 +1705,8 @@ fn pill(
                                 .map(|w| (v.id.as_str(), w)),
                         )
                         .collect();
-                    // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges (Note FI13).
+                    // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
+                    // (Notes FI13, HP12).
                     let sp = ui.spacing().item_spacing.x;
                     let btn = 2.0 * ui.spacing().button_padding.x + sp;
                     let body = egui::TextStyle::Body.resolve(ui.style());
@@ -2037,7 +2038,7 @@ fn chip_row<'a>(
                 format!("{} (its slot is taken)", v.slot_text(k))
             }
             // the tag paints "unused", so the name and hover say it too (Note HP12)
-            (None, Some(h), _) => helper_target_text(h).replacen("not used", "unused", 1),
+            (None, Some(h), _) => helper_tag_text(h),
             (None, None, Some(j)) => subtype_name(j.profile.subtype),
             _ => "not converted".to_string(),
         };
@@ -2091,8 +2092,8 @@ fn shader_combo(
         };
         format!("{}{tag}", p.shader.label())
     });
-    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at the card's inner width less COMBO_FREE). The
-    // row's free left part allocates nothing, so a click there reaches the card.
+    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at the card's inner width
+    // less COMBO_FREE). The row's free left part allocates nothing, so a click there reaches the card.
     let (w, natural) = combo_w(ui, &text);
     let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
     ui.allocate_ui_with_layout(
