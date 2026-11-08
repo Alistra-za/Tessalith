@@ -90,11 +90,12 @@ impl Drop for HookVar {
 
 #[test]
 fn a_failed_pbr_encode_is_encoded_again_in_vanilla_not_copied() {
+    // No underscore in the name: a lone `cup_panic_hook` would wait for a type (Note GY1).
     let (_d, m, loc) = project(|m| {
         cup(m);
-        gradient(&m.join("textures/clutter/cup_panic_hook.png"));
+        gradient(&m.join("textures/clutter/cuppanichook.png"));
     });
-    let key = "textures/clutter/cup_panic_hook.dds";
+    let key = "textures/clutter/cuppanichook.dds";
     let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
     // A clean export copies it; then its source changes and the PBR encode fails, leaving a stale PBR file and record.
     also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]))
@@ -102,12 +103,12 @@ fn a_failed_pbr_encode_is_encoded_again_in_vanilla_not_copied() {
         .unwrap();
     assert!(record(&van, key).raw.get("copied_from").is_some());
     png(
-        &m.join("textures/clutter/cup_panic_hook.png"),
+        &m.join("textures/clutter/cuppanichook.png"),
         16,
         16,
         [250, 10, 10, 255],
     );
-    std::env::set_var("SDC_TEST_PANIC_ON", "cup_panic_hook.png");
+    std::env::set_var("SDC_TEST_PANIC_ON", "cuppanichook.png");
     let _hook = HookVar("SDC_TEST_PANIC_ON");
     let sink = Arc::new(ClearHookOnPbrDone(VecSink::default()));
     let s = also_with(

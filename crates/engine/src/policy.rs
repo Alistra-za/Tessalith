@@ -383,6 +383,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
         alpha: f.analysis.alpha,
         is_float: f.info.is_float,
         advanced_skin: set_is_advanced_skin(ctx, f.set, f.input),
+        alone_in_set: f.set.members.len() == 1,
     });
     if let Some((alias, canonical, preset)) = alias_parts(ctx, f) {
         for s in &mut suggestions {
@@ -1274,6 +1275,19 @@ pub struct ResolvedJob {
     /// before analysis and again at load (`helper::apply_fill`); `None` for every other job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<crate::helper::FillJob>,
+}
+
+/// Note GY1: the reason of a file that waits for a type (`suggest::unknown_suffix`).
+pub const UNKNOWN_SUFFIX: &str =
+    "unknown suffix: assign a type with --set <file>:...subtype=<type> or a [files] entry";
+
+impl ResolvedJob {
+    /// Note GY1: an unknown suffix, alone in its set, with no type assigned: unresolved, no suggestion, no set card.
+    pub fn waits_for_type(&self) -> bool {
+        self.suggestions.is_empty()
+            && matches!(&self.status, JobStatus::Unresolved { reasons, .. }
+                if reasons.iter().any(|r| r == UNKNOWN_SUFFIX))
+    }
 }
 
 /// A source file's size and modification time, to tell whether it changed between planning and conversion.
@@ -2331,8 +2345,10 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     let suffix_alias = alias_use(ctx, f);
     let mut reasons = vec![];
     let mut needs = vec![];
+    // Note GY1: `--allow SUG-LOW-CONFIDENCE` accepts a suggestion; with none there is nothing to accept.
+    let no_pick = !d.decided && d.suggestions.is_empty();
     if !d.decided {
-        if !allowed(ctx, f, Code::SugLowConfidence) {
+        if no_pick || !allowed(ctx, f, Code::SugLowConfidence) {
             needs.push(Need::Subtype);
         }
         reasons.push(match d.suggestions.first() {
@@ -2342,6 +2358,14 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                 s.confidence,
                 s.reason
             ),
+            None if crate::suggest::unknown_suffix(
+                f.suffix,
+                &f.input.game_path,
+                f.set.members.len() == 1,
+            ) =>
+            {
+                UNKNOWN_SUFFIX.into()
+            }
             None => "no sub-type could be suggested; set one".into(),
         });
     }
@@ -2479,7 +2503,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     // triggers LOSS-ALPHA-DATA against the default `remove`), then blocking codes.
     let status = if !errors.is_empty() {
         JobStatus::Error { codes: errors }
-    } else if !reasons.is_empty() && !allowed(ctx, f, Code::SugLowConfidence) {
+    } else if !reasons.is_empty() && (no_pick || !allowed(ctx, f, Code::SugLowConfidence)) {
         JobStatus::Unresolved { reasons, needs }
     } else if !blocking.is_empty() {
         JobStatus::Blocked { codes: blocking }

@@ -170,6 +170,8 @@ fn an_explicit_shader_does_not_change_the_wet_join() {
     let colour = tempfile::tempdir().unwrap();
     put(colour.path(), "textures/s/e/x.png");
     put(colour.path(), "textures/s/e/x_wet.png");
+    // Note GY1: a normal on `x_wet`, so the unjoined `x_wet` is not a lone unknown suffix.
+    put(colour.path(), "textures/s/e/x_wet_n.png");
     let (c, _) = plan_with(
         &colour,
         Target::Cs,
@@ -285,7 +287,8 @@ fn a_stale_rename_does_not_lend_its_shader() {
 }
 
 /// The member rule reads names, not the set's current name, so an ordinary set's members keep their meaning through a
-/// rename: `road_wet` is the colour, alone or as the base of `road_wet_n`, and `x_detail_n` is no detail map.
+/// rename: `road_wet` is the colour as the base of `road_wet_n`, waits for a type alone (Note GY1: the set shader assigns
+/// none, and `_wet` is no suffix), and `x_detail_n` is no detail map.
 #[test]
 fn renaming_a_colour_set_keeps_its_colour() {
     let plan = |files: &[&str], from: &str, to: &str| {
@@ -306,30 +309,33 @@ fn renaming_a_colour_set_keeps_its_colour() {
     let detail = plan(&["x_detail_n"], "x_detail", "y");
     // With a sibling of its base `x_detail_n` is that base's normal, in a set of any name.
     let sibling = plan(&["x_detail_n", "x_detail_sk"], "x_detail", "y");
+    let lone_wet = job(&lone, "road_wet.png");
+    assert!(lone_wet.waits_for_type(), "{:?}", lone_wet.status);
+    assert!(lone_wet
+        .suggestions
+        .iter()
+        .all(|s| s.subtype != Subtype::SkinWet));
     assert_eq!(
         [
-            sub(&lone, "road_wet.png"),
             sub(&with_n, "road_wet.png"),
             sub(&detail, "x_detail_n.png"),
             sub(&sibling, "x_detail_n.png"),
         ],
-        [
-            Subtype::SkinAlbedo,
-            Subtype::SkinAlbedo,
-            Subtype::Normal,
-            Subtype::PbrNormal,
-        ]
+        [Subtype::SkinAlbedo, Subtype::Normal, Subtype::PbrNormal]
     );
 }
 
-/// Pin: a lone `_wet` file is its set's colour member, whatever shader the set has: the set has no `_n` or `_sk`.
+/// Note GY1: a lone `_wet` file waits for a type, whatever shader the set has (a set shader assigns no type); `_wet`
+/// is not read as a suffix, and the set has no `_n` or `_sk`, so it is not shared.
 #[test]
-fn a_set_named_after_its_wet_file_keeps_its_colour() {
+fn a_set_named_after_its_wet_file_waits_alone() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "textures/s/road_wet.png");
     let id = "textures/s/road_wet";
     let (p, ev) = plan_with(&d, Target::Cs, &[(id, Shader::AdvancedSkin)], vec![]);
-    assert_eq!(sub(&p, "road_wet.png"), Subtype::SkinAlbedo);
+    let j = job(&p, "road_wet.png");
+    assert!(j.waits_for_type(), "{:?}", j.status);
+    assert!(j.suggestions.iter().all(|s| s.subtype != Subtype::SkinWet));
     assert!(not_shared(&resolved_of(&ev, id).1));
 }
 

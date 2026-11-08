@@ -32,6 +32,8 @@ pub struct SuggestContext<'a> {
     pub is_float: bool,
     /// The set holds or builds an `_rfaos` (`pack::plan::set_is_advanced_skin`): Advanced skin sub-types apply.
     pub advanced_skin: bool,
+    /// The file is its set's only member, counted after joins and set edits (Note GY1).
+    pub alone_in_set: bool,
 }
 
 pub(crate) fn has_component(path: &str, name: &str) -> bool {
@@ -56,6 +58,17 @@ pub fn landscape_path(game_path: &str) -> bool {
     game_path.starts_with("textures/landscape/") || has_component(game_path, "landscape")
 }
 
+/// Note GY1: a stem with no recognised suffix (§6.1, alias or vocabulary) that has an underscore, alone in its set.
+/// [`suggest`] gives it nothing unless a path arm says what it is; `iron` and `iron_ore` beside `iron_ore_n` are colour.
+pub fn unknown_suffix(suffix: Option<&str>, game_path: &str, alone_in_set: bool) -> bool {
+    let name = game_path.rsplit('/').next().unwrap_or(game_path);
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    alone_in_set
+        && suffix.is_none()
+        && stem.contains('_')
+        && crate::group::split_vocab(stem).is_none()
+}
+
 pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
     use Confidence::*;
     use Subtype::*;
@@ -68,7 +81,7 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
     let landscape = landscape_path(c.game_path);
     let ui_or_sky = has_component(c.game_path, "interface") || has_component(c.game_path, "sky");
     // M6 Track E (owner, 2026-10-12; DECISIONS Note U1, reversing Note H's "a bare stem is only a guess"): no suffix
-    // is the colour member, at High like `_d`. `hdr_sky` and `_i` stay Medium.
+    // is the colour member, at High like `_d`, unless it waits for a type (Note GY1). `hdr_sky` and `_i` stay Medium.
     match c.suffix {
         Some("n") if landscape => vec![s(LandscapeNormal, High, "_n under textures/landscape")],
         Some("n") if pbr || c.advanced_skin => {
@@ -143,6 +156,8 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
             vec![s(HdrSky, Medium, "float source under sky/")]
         }
         Some("d") | None if ui_or_sky => vec![s(UiSky, High, "colour under interface/ or sky/")],
+        // Note GY1: after the path arms, so the path still says what the file is.
+        None if unknown_suffix(c.suffix, c.game_path, c.alone_in_set) => vec![],
         Some("d") | None if c.advanced_skin => {
             vec![s(
                 SkinAlbedo,
@@ -246,6 +261,7 @@ mod tests {
             alpha,
             is_float: false,
             advanced_skin: false,
+            alone_in_set: false,
         }
     }
 

@@ -539,6 +539,8 @@ fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha: Option<Mip0
             DdsPixelFormat::Rgba16f | DdsPixelFormat::Rgba32f | DdsPixelFormat::Bc6hUf16
         ),
         advanced_skin: false,
+        // A DDS on its own has no set: its name alone answers.
+        alone_in_set: false,
     };
     suggest(&ctx)
         .first()

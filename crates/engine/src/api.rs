@@ -1269,6 +1269,7 @@ pub(crate) fn set_is_pbr(target: Target, set: &TextureSet, files: &[InputFile]) 
         alpha: AlphaContent::None,
         is_float: false,
         advanced_skin: false,
+        alone_in_set: set.members.len() == 1,
     }))
 }
 
@@ -3536,6 +3537,7 @@ fn map_members(
                 alpha: AlphaContent::None,
                 is_float: false,
                 advanced_skin: false,
+                alone_in_set: set.members.len() == 1,
             })
             .first()
             .map(|s| s.subtype);

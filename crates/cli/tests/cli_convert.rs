@@ -638,6 +638,31 @@ fn unresolved_files_are_skipped_with_exit_1() {
     assert!(fx.dds("textures/a/wall_i.dds").exists());
 }
 
+/// Note GY1: a lone file with an unknown suffix waits for a type: exit 1, and the console names the file and the
+/// `--set` that assigns one. Assigning it converts it.
+#[test]
+fn an_unknown_suffix_exits_1_and_names_the_fix() {
+    let fx = Fx::new();
+    fx.rgb("rock_bump.png");
+    let o = fx.convert(&["--accept-suggestions", "high"]);
+    assert_eq!(code(&o), 1);
+    let log = text(&o.stderr);
+    assert!(
+        log.lines()
+            .any(|l| l.contains("rock_bump.png") && l.contains("--set")),
+        "{log}"
+    );
+    assert!(!fx.dds("textures/a/rock_bump.dds").exists());
+    let o = fx.convert(&[
+        "--accept-suggestions",
+        "high",
+        "--set",
+        "file:**/rock_bump.png.subtype=diffuse",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(fx.dds("textures/a/rock_bump.dds").exists());
+}
+
 /// DECISIONS S-mips-13: an unscoped filter the `_n` cannot use is an Info line on the console, not an error.
 #[test]
 fn unscoped_kaiser_prints_a_colour_only_line() {

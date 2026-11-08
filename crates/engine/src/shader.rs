@@ -807,6 +807,7 @@ pub fn pick_for_set(
             alpha: crate::presets::AlphaContent::None,
             is_float: false,
             advanced_skin: false,
+            alone_in_set: set.members.len() == 1,
         }),
         gras: set.members.iter().any(|&m| {
             let f = &files[m];
