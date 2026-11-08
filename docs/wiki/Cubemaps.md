@@ -129,4 +129,4 @@ The messages read:
 
 ## In the GUI
 
-The GUI controls for each of these settings are in [Cubemaps in the GUI](GUI-Helpers-RNM-and-Cubemaps.md#cubemaps).
+The GUI controls for each of these settings are in [Cubemaps in the GUI](GUI-Helpers-and-Cubemaps.md#cubemaps).

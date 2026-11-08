@@ -62,7 +62,7 @@ What to check:
 | `set ... shader pbr (auto:pbr)` | The set's shader, and why it was chosen. `auto:<rule>` means Tessalith picked it; `set` means you did; `fallback` means the shader you asked for is not available under this target. |
 | `pack ... run` | A packed output that will be built. `conflict`, `failed` or `disabled` means it will not, and the reason follows. |
 | `R source:... A default:1` | Where each channel comes from. `source:<file>:R` reads the file's red channel (`:G`, `:B`, `:A` or `:luma` when `channels.grayscale_source` picks another, and a `1-` prefix means inverted, as when gloss stands in for roughness). `default:` means no source map was found and the neutral default (on a 0 to 1 scale) is used; `fill:` means you set an 8-bit value. |
-| `status ready` | The file will be converted. `unresolved`, `blocked` or `error` means it will not, and the reasons follow on the same line. `packing_input` (a raw map waiting to be packed) and `normal_layer` (an RNM layer) are not converted on their own either; they feed another output. |
+| `status ready` | The file will be converted. `unresolved`, `blocked` or `error` means it will not, and the reasons follow on the same line. `packing_input` (a raw map waiting to be packed) is not converted on its own either; it feeds another output. |
 | Lines starting with `warning` or `blocking` | Diagnostic codes. See [Troubleshooting](Troubleshooting.md). |
 
 If a file shows `status unresolved`, the reason says what is missing: usually a sub-type that is only a Medium or Low confidence guess or the meaning of a varying alpha channel. Fix it with one of the methods in Step 2.

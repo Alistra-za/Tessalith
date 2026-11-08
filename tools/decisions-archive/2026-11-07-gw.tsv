@@ -1,0 +1,37 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- Memory admission: a plan-pass	Digest	93	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: RNM layers and a bake's layers add to admission (BB2, BB3); stays: the cache-hit rule, the over-budget job runs alone, the helper decode bytes (AV4, BB5, DY10e)
+Digest¶- Memory admission counts RNM layers	Digest	193	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: the RNM layer term (BB1); stays: complex grass admission (BB4)
+Digest¶### Bake and RNM	Digest	212	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: the section name; stays: the section, now Bake
+Digest¶- RNM layers blend on the preprocessed	Digest	220	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: no layer is blended, so the roughness bake reads the plain `_n` (W1, W18)
+Digest¶- `rnm.target` is a per-file selector	Digest	221	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: `rnm.target`, strengths and the bump slope are gone (W3, W7, W8)
+Digest¶- Bases: `n` = `normal`	Digest	222	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: there are no layer bases (W5)
+Digest¶- A layer with no prefix targets	Digest	230	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: layer targets, RNM-NO-BASE and RNM-LAYER-SHADOWED are gone (W4)
+Digest¶- Every `rnm.*` field is optional	Digest	231	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: `Profile.rnm` and `rnm.order` are gone (W6)
+Digest¶- The bent layer's AO source	Digest	232	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: there is no bent layer (W9, AL4, W16, FV3)
+Digest¶- RNM decode clamps z	Digest	233	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: the RNM decode is gone (Y5)
+Digest¶- Curvature (	Digest	236	back	GW3	a no-layer bake keeps its `identity_sha256`	partial	2026-11-07		goes: an `_ao_generated` file changes the `_n` job's `rnm.ao.file` identity (CO90); stays: Also export reads curvature, a plain run gets PACK-UNUSED-INPUT (CO115, CO116)
+Digest¶- The config schema's `FileEntry`	Digest	285	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: `FileEntry` carries its own `rnm` (PartialRnmSpec plus target); stays: `reencode` and the FIELD_PATHS walk (BC8)
+Digest¶- A suffix alias naming exporter vocabulary	Digest	286	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: an RNM layer term such as `bump` or `bentmask` is refused as an alias; stays: `orm`, `curves`, `curvature`, `cavity` (AL6, CN4, BV9)
+Digest¶- A MATO-only landscape set	Digest	337	back	GW1	are one detail map on landscape and skin sets	partial	2026-11-07		goes: a name-prefixed `_detail` stays an RNM layer (GI22); stays: the MATO-only set, the CS note and the rest (GI10, GI15 and the other cites)
+Digest¶- Landscape sets have two optional maps	Digest	344	back	GW1	are one detail map on landscape and skin sets	partial	2026-11-07		goes: `_detail` alone is the detail output; stays: projected noise and the detail output, now named by all three spellings (GI12, GI13, GI14, GI20)
+Digest¶- `_wet` and `_detail_n` (HB4)	Digest	200	back	GW1	are one detail map on landscape and skin sets	partial	2026-11-07		goes: `x_detail_n` groups as before outside a skin set; stays: `_wet` and the skin join (HB4, I3, BP2, BV9)
+Digest¶- The RNM section shows a 128 px	Digest	514	back	GW2	The GUI has no RNM section	archive-item	2026-11-07		whole: the RNM section and its preview are gone (AG115, AG116, AG117, FC13)
+Digest¶- Complex grass has no alpha question	Digest	123	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: a layer suffix on a grass stem; stays: the grass rules and the raw-map suffix (X12, X9, X8)
+Digest¶- A hand-set `helper.role` (images only)	Digest	205	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: `NormalLayer` as a helper's own job; stays: the hand role rules (DY2, DY2a, DY13a, DY20)
+Digest¶- The map check leaves out	Digest	296	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: `NormalLayer` jobs (layers and masks) left out of the map check; stays: the grass and Eye rules (BQ9, X9, BQ12)
+FV3	FV	1040	back	GW3	RNM is removed from the engine	archive-item	2026-11-07		whole: there is no bent layer or AO source to order
+FV¶Engine fixes for trace-debug minors	FV	1038	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: "FV3: the manifest role names the AO file and channel"; stays: FV1 and FV2
+FM12	FM	726	back	GW3	a no-layer bake keeps its `identity_sha256`	partial	2026-11-07		goes: the RNM settings join the bake identity when layers apply (W18); stays: `resize` hashed always, `hand_placed` removed, `ch:<rgba>` sources
+FM¶- **Where the reference lives.**	FM	948	back	GW2	The GUI has no RNM section	partial	2026-11-07		goes: the RNM preview as a reader of `target_dims`; stays: the rest of the reference rule
+FM¶- **Planning.**	FM	949	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: RNM in the planning order; stays: `plan_references` before shaders and bakes
+FY1	FY	1053	back	GW2	The GUI has no RNM section	partial	2026-11-07		goes: the RNM `drag_slider`, `held_value` use, `rnm_section.rs` tests and the strength-slider pin; stays: the commit-once widget for Advanced and the cube section
+HE7	HE	1133	back	GW3	RNM is removed from the engine	partial	2026-11-07		goes: a hand-set normal layer writes no file, and the layer-by-name `IN-DUPLICATE` aside; stays: a raw map and a skin `_f` write no file, two raw twins are not duplicates
+Index¶- Engine policy (formats	Index	12	back	GW		partial	2026-11-07		goes: the line before GW (GW1-GW3 govern it)
+Index¶- Packing and helpers:	Index	16	back	GW		partial	2026-11-07		goes: the line before GW (GW3 removes the layer helpers)
+Index¶- Bake and RNM:	Index	17	back	GW		partial	2026-11-07		goes: the name "Bake and RNM" and the line before GW (the line is now Bake)
+Index¶- Presets and config:	Index	19	back	GW		partial	2026-11-07		goes: the line before GW (the `rnm.*` keys are refused)
+Index¶- Exports (PGPatcher	Index	21	back	GW		partial	2026-11-07		goes: the line before GW (the detail names reach the XPMF slots)
+Index¶- CLI:	Index	22	back	GW		partial	2026-11-07		goes: the line before GW (`sdc inspect` prints no rnm lines)
+Index¶- GUI Files and Inspector:	Index	23	back	GW		partial	2026-11-07		goes: the line before GW (GW2 governs it)
+Index¶- GUI Settings panel:	Index	24	back	GW		partial	2026-11-07		goes: the line before GW (GW2 governs it)
+Index¶- Process and docs:	Index	34	back	GW		partial	2026-11-07		goes: the line before GW (GW4 and GW5 govern the docs)

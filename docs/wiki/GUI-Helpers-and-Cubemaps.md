@@ -1,6 +1,6 @@
-# Helpers, RNM layers and cubemaps in the GUI
+# Helpers and cubemaps in the GUI
 
-The controls for helper textures (masks and raw maps that fill a channel of another output), RNM normal layers and cubemaps. For anyone packing loose maps, blending detail normals or making a cube. What each role, channel and cube setting means is on the concept pages: [Helper textures](Texture-Packing.md#helper-textures), [RNM normal layers](Texture-Packing.md#rnm-normal-layers) and [Cubemaps](Cubemaps.md).
+The controls for helper textures (masks and raw maps that fill a channel of another output) and cubemaps. For anyone packing loose maps or making a cube. What each role, channel and cube setting means is on the concept pages: [Helper textures](Texture-Packing.md#helper-textures) and [Cubemaps](Cubemaps.md).
 
 ## Helper textures
 
@@ -28,7 +28,7 @@ Click a row to open its panel.
 
 The centre shows the helper's name, a link back to its set, and the same "fills to … / not used: …" line. Every control writes the helper file's own `[files]` entry in `sdc.toml` as one undo step, and the folder is planned again. With `sdc.toml` read-only, the controls are greyed out with the reason on hover.
 
-![The panel of a helper texture.](../img/gui/GUI-Helpers-RNM-and-Cubemaps/helper-panel.png)
+![The panel of a helper texture.](../img/gui/GUI-Helpers-and-Cubemaps/helper-panel.png)
 
 - **Role.** What the file is. The hint says *guessed from the name* or *set by you*.
   - **Not a helper** (first in the list) makes it an ordinary texture: it becomes a tile and is converted on its own (`helper.role = "none"`).
@@ -41,7 +41,6 @@ The centre shows the helper's name, a link back to its set, and the same "fills 
   - Targets the engine skipped are listed under the controls ("Skipped iron alpha: iron.png already has alpha").
 - **Read from.** Which channel of the helper is used: **Auto (R)**, **R**, **G**, **B**, **A** or **Luminance** (`helper.read`). Auto removes the setting. Use it for a mask stored in another channel.
 - **Invert.** Flips what the helper feeds, white to black (`helper.invert = true`). A gloss map feeding the packed roughness needs no Invert: give it the role *Glossiness*, and packing turns gloss into roughness (Invert there would write gloss into the roughness channel). An alpha fill has no automatic conversion, so there Invert is the only flip.
-- **Blends into** (RNM layers only, in place of Fills, Read from and Invert): *Normal*, *CNR* or *Both*, the `rnm.target` of the layer file. It shows the target in effect, including the `_cnr` fallback for a set without `_n`.
 - **Show <output>** buttons under the controls select each output the helper fills.
 
 ### Making an ordinary texture a helper
@@ -52,24 +51,11 @@ A texture you made **Not a helper** shows "Not a helper (set by you)" in its set
 
 The set card's channel rows edit the same `helper.fills` lists ([Packed channel sources](GUI-Set-Editor.md#packed-channel-sources)).
 
-## RNM normal layers
-
-A set's `_bump`, `_bump2`, `_detailnorm`, `_detailnorm2` and `_bent` files (and their masks) blend into the set's `_n` (or `_cnr`) before the mips are made ([RNM normal layers](Texture-Packing.md#rnm-normal-layers)). Layer files are never tiles: they are rows in the Helpers group, whose panel has the **Blends into** switch. The blend itself is set on the normal.
-
-![The panel of an RNM normal map.](../img/gui/GUI-Helpers-RNM-and-Cubemaps/rnm-panel.png)
-
-- Select the normal: its settings have an **RNM** section with a switch for the whole blend, one strength slider per layer, the layer order and, for `_bent`, the AO options (*AO blend* or *Like a detail*, *AO power*, *use AO*).
-- The normal (or `_cnr`) card has an outline in the accent colour (teal) while RNM is active (layers present and enabled). A slot the shader cannot use keeps its amber outline instead.
-- When the set has both an `_n` and a `_cnr`, each layer has a **target** switch (*Normal*, *CNR* or *Both*), written as `rnm.target` on the layer file's `[files]` entry. The layer's helper panel (**Blends into**) edits the same key.
-- Under the RNM switch, **Blended normal** shows the result at 128 px: the normal with every enabled layer blended in, drawn as `(n + 1) / 2`. It uses the export's blend, built in the background, and refreshes when a strength slider is released or the layer order changes. It is a small-size look, not the final pixels. When the blend fails it says "Preview unavailable: {reason}".
-- The `_bent` AO line shows the AO source (a raw AO map, or the B channel of `_rmaos`/`_rfaos`) as an inverted thumbnail, with a *use AO* tick. The note under it says Tessalith inverts the AO for you ([RNM layers](Texture-Packing.md#rnm-normal-layers)).
-- Set-level notes (no base for a layer, a layer ignored on an eye set, an orphan mask) appear under the set grid.
-
 ## Cubemaps
 
 A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown) gets a **Cubemap** section in its settings panel and a cross in the preview. Everything the panel writes goes to `sdc.toml` as the matching `cubemap.*` key, so the GUI and the CLI make the same bytes. What each setting does is in [Cubemaps](Cubemaps.md#settings).
 
-![The panel of a six-face cubemap.](../img/gui/GUI-Helpers-RNM-and-Cubemaps/cube-panel.png)
+![The panel of a six-face cubemap.](../img/gui/GUI-Helpers-and-Cubemaps/cube-panel.png)
 
 **In the Textures column.** The six faces are one item ([Textures column](GUI-Textures-Column.md)). The size estimate counts all six faces and their mips. A six-file set's settings are written to all six face entries in `sdc.toml`, so the faces keep matching.
 
@@ -101,4 +87,4 @@ A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown)
 - **Save…** opens the file dialog (Enter never writes), in `<textures folder>\cubemaps` when that folder exists, named `marker_e.dds`.
 - It never overwrites a file Tessalith did not write: it says it kept it and leaves the dialog open, so you can pick another name. The bytes equal what `sdc cubemap-marker` writes.
 
-![The marker cube dialog.](../img/gui/GUI-Helpers-RNM-and-Cubemaps/marker-dialog.png)
+![The marker cube dialog.](../img/gui/GUI-Helpers-and-Cubemaps/marker-dialog.png)

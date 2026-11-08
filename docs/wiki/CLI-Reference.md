@@ -54,7 +54,7 @@ Files decided by a rule, a `--set`, a `[files]` entry or a set shader are not af
 | Form | Applies to |
 |---|---|
 | `field=value` | Every file. |
-| `subtype:<id>.field=value` | Every file of that sub-type. Cannot set `subtype`, `reencode`, `rnm.target` or `helper.*`. |
+| `subtype:<id>.field=value` | Every file of that sub-type. Cannot set `subtype`, `reencode` or `helper.*`. |
 | `file:<glob>.field=value` | Files matching the glob. The only form for `helper.role`, `helper.fills`, `helper.read` and `helper.invert`: an unscoped `--set helper.role=ao` is refused ("helper.role is set per file: use file:<glob>.helper.role=<…>"), since it would make every image a helper. |
 | `set:<set id>.shader=<shader>` | Picks the shader of a texture set. Only `shader` can be set this way. The set id is what `inspect` prints after `set` (the output folder relative to the output root, plus the lower-case base name). An id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. |
 
@@ -230,8 +230,7 @@ and per file:
 <input path>
   suggested <sub-type> (<confidence> confidence: <reason>)
   sub-type <id>  format <format>  tag <srgb|unorm|n/a>  alpha <policy>  output <relative output path>
-  status <ready|unresolved|blocked|error|packing_input|normal_layer> <reasons or codes>
-  rnm <layer> <file> strength <s>[, mask <file>][, AO <file>]
+  status <ready|unresolved|blocked|error|packing_input> <reasons or codes>
   <severity> <CODE> <message>
 ```
 
@@ -359,7 +358,7 @@ Event kinds and their extra fields:
 | `file_failed` | `stage`, `error`. |
 | `batch_done` | `converted`, `up_to_date`, `skipped`, `skipped_intentional`, `failed`, `validation_failed`, `cancelled` (list of inputs). |
 
-`skip` values: `up_to_date`, `on_existing_skip`, `unresolved`, `blocked`, `duplicate`, `dds_input`, `packing_input`, `normal_layer`, `unknown_existing`, `pack_conflict`, `packed_source`.
+`skip` values: `up_to_date`, `on_existing_skip`, `unresolved`, `blocked`, `duplicate`, `dds_input`, `packing_input`, `unknown_existing`, `pack_conflict`, `packed_source`.
 
 `stage` values: `discover`, `group`, `load`, `analyse`, `resolve`, `preprocess`, `mipmaps`, `compress`, `write`, `validate`.
 

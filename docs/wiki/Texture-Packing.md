@@ -1,6 +1,6 @@
 # Texture packing and helper textures
 
-How raw maps such as roughness, metallic and AO pack into the files each shader reads, how helper textures feed other outputs, and how RNM normal layers blend. For modders whose sources come as separate maps.
+How raw maps such as roughness, metallic and AO pack into the files each shader reads and how helper textures feed other outputs. For modders whose sources come as separate maps.
 
 ## Packing raw maps
 
@@ -65,7 +65,7 @@ If a set has both a ready-made packed file (`iron_rmaos.png`) and raw maps for i
 
 ## Helper textures
 
-A **helper** is a source file that fills one channel of another output of its own set and is never written as its own DDS: the raw maps above, an opacity map, the RNM layers below, and fuzz or subsurface weight maps you mark by hand. The GUI lists every helper in a Helpers group under the tiles (see [Helper textures in the GUI](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures)); the CLI reads the same settings from `sdc.toml` ([Project config](Project-Config.md#files)), so both write the same bytes.
+A **helper** is a source file that fills one channel of another output of its own set and is never written as its own DDS: the raw maps above, an opacity map, and fuzz or subsurface weight maps you mark by hand. The GUI lists every helper in a Helpers group under the tiles (see [Helper textures in the GUI](GUI-Helpers-and-Cubemaps.md#helper-textures)); the CLI reads the same settings from `sdc.toml` ([Project config](Project-Config.md#files)), so both write the same bytes.
 
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
@@ -74,7 +74,6 @@ A **helper** is a source file that fills one channel of another output of its ow
 | Fuzz weight, PBR (`fuzzweight`) | the PBR `_f` alpha (`f.a`) | packed channels |
 | Subsurface weight, PBR (`subsurfaceweight`) | the PBR `_s` alpha (`s.a`) | packed channels |
 | Roughness, glossiness, metallic, AO, height, fuzz mask (skin), `_orm`, curvature, cavity | the packed channels of the tables above, unchanged | any planned alpha target; the `_cnr` alpha (`cnr.a`, coat roughness) is offered but never suggested |
-| Bump, detail normal and the other RNM layers | the base normal, by `rnm.target` (below) | none (Read from and Invert do not apply) |
 
 Fuzz weight and subsurface weight have no file-name term: a file is one only when you set its role.
 
@@ -101,38 +100,3 @@ A helper that fills nothing is reported, never a failure: `PACK-UNUSED-INPUT` (o
 In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail that the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces do not look too shiny. Mip 0 stays as authored. The amount is limited by `mips.bake_clamp`. A `_cnr` bakes its own detail into its coat roughness. <!-- D:HD1 -->
 
 The bake needs both files in the batch; if not, it is skipped and reported: `SET-MISSING-COMPANION` or `SET-COMPANION-DDS`. Sizes need not match: a smaller, larger or differently shaped map bakes from the `_n` at the matching detail, and its mip chain does not change. A map with no mips (`mips.levels = "none"`) is not baked. <!-- D:HD2,HD5 --> A companion that is only on disk, outside the batch, skips the bake without a message. A shared `_rmaos` (borrowed by several sets in the GUI) is never baked.
-
-## RNM normal layers
-
-A set can add detail normal maps that are blended into its base normal (`_n`, or `_cnr`) with reoriented normal mapping before the mips are built. Layer files are never written on their own; they are [helpers](#helper-textures), listed as helper rows in the GUI.
-
-| Layer | File suffixes | Mask suffixes | Default strength |
-|---|---|---|---|
-| bump | `_bump` | `_bumpmask`, `_bump_mask` | 0.4 |
-| bump2 | `_bump2` | `_bumpmask2`, `_bump2_mask` | 0.4 |
-| detail | `_detailnorm`, `_detail` | `_detailnormmask`, `_detail_mask` | 0.6 |
-| detail2 | `_detailnorm2`, `_detail2` | `_detailnormmask2`, `_detail2_mask` | 0.3 |
-| bent | `_bent` | `_bentmask`, `_bent_mask` | 0.35 |
-
-Any of these can be prefixed `n_` or `cnr_` (for example `iron_cnr_bump.png`) to say which base it feeds. Without a prefix it feeds `_n`, or `_cnr` when the set has no `_n`. Override with `rnm.target` on the layer file. In a landscape set a plain `_detail` or `_detailnorm` file is the set's detail normal, not a layer ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)).
-
-The blend order is [`rnm.order`](Project-Config-Fields.md#rnm-normal-layers). The `bent` layer by default weights itself by occlusion read from a raw `_ao` map, the R channel of an `_orm`, or the B channel of `_rmaos`/`_rfaos`; supply normal AO (white = open), Tessalith inverts it. A file's hand-set [`helper.role`](Project-Config.md#files) (`ao`, `orm` or `rmaos`) decides which it is before its name does, and any other role, `none` included, takes it out.
-
-How the layers are blended (code: `crates/engine/src/rnm/`):
-
-- **Method:** RNM for `_bump`, `_bump2`, `_detailnorm` and `_detailnorm2`. Bump layers are height maps: slopes taken from the mean of RGB become normals first.
-- **Bent:** `_bent` defaults to an AO blend: a renormalised linear mix weighted by strength × (1 − AO)^1.5 × mask. AO comes from `_ao` (R), `_orm` (R) or `_rmaos`/`_rfaos` (B), or from the file whose `helper.role` you set to one of those. With no AO map the weight is uniform. `rnm.bent.mode = "detail"` blends it with RNM instead.
-- **Strength:** it scales the layer's slope (0 is flat, 1 is as authored). A mask's R channel scales it per texel. `rnm.order` moves the layers it lists to the front.
-- **Where:** into the set's `_n` or `_cnr`, after decode and green flip, before mips. Layers are resampled to the base size. Alpha is untouched, so `_cnr` coat roughness passes through. The TruePBR roughness bake reads the blended normal.
-- **Bent default assumption:** the defaults assume `_bent` is a high-to-low mesh bake from the same normal source. It then holds all the detail the normal has, and the mask only reduces the AO strength. When that is not true, mix it differently (see `rnm.bent.mode`).
-
-Ways to put a detail normal on a base normal, and why RNM is used:
-
-| Method | How it combines | Preserves | Artifacts | Cost | Use for |
-|---|---|---|---|---|---|
-| Linear / overlay | Per-channel add or overlay, renormalise | Neither map exactly | Flattened detail; overlay treats vectors as colour | Lowest | Faint detail, previews |
-| Partial derivative (PD) / UDN | PD adds slopes (xy/z); UDN adds xy, keeps base z | Slopes at small angles | UDN flattens detail; both lose accuracy as the base tilts | Low | Real-time multi-layer shaders |
-| Whiteout | Adds xy, multiplies z, renormalise | More detail than UDN | Still approximate on steep bases | Low | Cheap shader blends |
-| RNM (Barré-Brisebois and Hill) | Rotates the detail into the base normal's frame | Detail as seen on the tilted surface; flat inputs leave the other unchanged | None in normal use; needs unit vectors | A little more | Highest quality: baking or high-end shaders |
-
-Settings are in [Project config](Project-Config-Fields.md#rnm-normal-layers). `sdc inspect` prints one `rnm` line per layer. Codes: `RNM-NO-BASE`, `RNM-IGNORED-EYE` (eye normals are model-space), `RNM-MASK-ORPHAN`, `RNM-LAYER-SHADOWED`.

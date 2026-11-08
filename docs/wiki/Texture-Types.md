@@ -51,7 +51,7 @@ Suffixes are matched case-insensitively, longest first, so `_msn` wins over `_n`
 | `_sk` | `skin_sk` in an Advanced skin set; otherwise `backlight_tint` | High, Low |
 | `_i` | `diffuse` (multilayer inner layer) | Medium |
 | `_wet` | `skin_wet`, only in a `cs` Advanced skin set; elsewhere `_wet` is part of the base name | High |
-| `_detail_n` | `skin_detail`, only in a `cs` Advanced skin set; elsewhere it keeps its usual grouping | High |
+| `_detail`, `_detailnorm`, `_detail_n` | `detail_normal` or `skin_detail`, by the set: see [Detail names](#detail-names) | High |
 | `_e`, or a file under `textures\cubemaps\` | `cubemap`; the six-face suffixes `_posx` to `_negz` (or `_px` to `_nz`) after the name are cut off first | High |
 
 A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or it has a raw roughness, glossiness, metallic or AO map. A set is an Advanced skin set when it has or builds an `_rfaos`; a set whose shader you set to Advanced Skin (GUI, or `--set set:<id>.shader=advanced_skin`) builds one unless `packing.recipe` says otherwise or it has only a metallic map, and its diffuse is `skin_albedo` either way (also when written as plain `diffuse`). In the GUI, pinning the set's Diffuse slot turns this off: the set then reads and packs as it would without the shader choice, unless its diffuse is already written as `skin_albedo`. In an Advanced skin set a plain `_f` is the skin fuzz mask: a greyscale map packed into the `_rfaos` G channel and not converted on its own. A `_f` never makes a set Advanced skin by itself, and one you give a sub-type converts alone as fuzz.
@@ -59,6 +59,21 @@ A set is a PBR set (under `cs`) when its path has a `pbr` folder, or it has an `
 Medium and Low suggestions always need your confirmation. High suggestions are applied automatically in the GUI; for the command line see [`--accept-suggestions`](CLI-Reference.md#why---accept-suggestions-high-matters).
 
 A file whose name fits none of these rules is read as a colour map (`rock_nm.png` becomes a diffuse). Rename it, add an `[inputs]` alias, or set `subtype` in a `[files]` entry.
+
+### Detail names
+
+The three spellings in the suffix table all mean the set's detail normal. What the file becomes depends on the set:
+
+| Set | The detail file becomes |
+|---|---|
+| Landscape or PBR Landscape | `detail_normal` |
+| Advanced skin (`cs` only) | `skin_detail` |
+
+- **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or XPMF profile looks for that name.
+- **Two detail files in one set** are `IN-DUPLICATE`, an error. Rename or remove one.
+- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. A lone `rock_detail.png` with no set `rock` is a set of its own.
+- **Landscape here** means a `landscape` folder in the path, or Landscape or PBR Landscape set as the set's shader. A set whose shader is only picked from a mesh scan, outside a landscape path, needs the shader set explicitly before `_detail_n` joins it.
+- **The GUI refuses an output name** that ends in one of the three spellings, because the set would read the file back as a detail map.
 
 ### Exporter names
 
@@ -108,11 +123,11 @@ There are 34 sub-types in five categories.
 | `normal` | Normal | BC7 | UNORM | data | Alpha often holds specular. |
 | `landscape_normal` | Normal | BC7 | UNORM | data | |
 | `pbr_normal` | Normal | BC7 | UNORM | remove | `cs` only. Vanilla specular in alpha is dropped. |
-| `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile. Not an RNM base: no layers blend into it. A `_detail` or `_detailnorm` file in a landscape set is read as it ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)); in other sets no suffix suggests it, so pick it on the file. |
+| `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)). The detail names pick it in a landscape set ([Detail names](#detail-names)); in other sets no suffix suggests it, so pick it on the file. |
 | `msn` | Normal | BC7 | UNORM | remove | Model-space normal. |
 | `coat_normal` | Normal | BC7 | UNORM | data | `cs` only. Normal plus coat roughness in alpha; bakes its own detail into that roughness. |
 | `skin_wet` | Normal | BC7 | UNORM | data | `cs` Advanced skin: a normal with a mask in alpha. A grey source is not written (`SKIN-WET-GREY`). The Community Shaders loader reads BC1, BC3, BC7 and RGBA8 only (`FMT-CS-SKIN-LOADER`, which `--allow` cannot lift). <!-- D:HB3,HB4 --> |
-| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | `cs` Advanced skin, `_detail_n`: a tangent normal with a strength mask in alpha. BC5 is allowed on it, and it is not held to the BC5 normal check. <!-- D:HB4 --> |
+| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | `cs` Advanced skin, the detail names: a tangent normal with a strength mask in alpha. BC5 is allowed on it, and it is not held to the BC5 normal check. <!-- D:HB4 --> |
 | `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | Environment mask (`_m`). |
 | `height` | Grayscale | BC4 | UNORM | remove | Parallax height (`_p`). |
 | `projected_noise` | Grayscale | BC4 | UNORM | remove | `_noise`: a landscape set's projected-noise map for an XPMF profile. |
@@ -161,7 +176,7 @@ Which encoder each format uses is in [Format and encoder](Project-Config.md#form
 
 ## Packing, helpers and shaders
 
-- How raw maps pack, helper textures and RNM normal layers: [Texture packing](Texture-Packing.md).
+- How raw maps pack and how helper textures feed other outputs: [Texture packing](Texture-Packing.md).
 - Set shaders, height maps, `_generated` files, complex grass and the extra exports: [Shaders and height maps](Set-Shaders.md).
 
 ## Alpha policies

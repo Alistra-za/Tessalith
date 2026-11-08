@@ -139,14 +139,10 @@ Every warning has a code and a severity:
 | `PACK-RECIPE-CONFLICT` | warning | The `_rfaos` and `_rmaos` keys of one set disagree on `packing.recipe`; the `_rfaos` entry wins. | Keep the recipe on one key. |
 | `PACK-RECIPE-UNBUILDABLE` | warning | An `rfaos` recipe the set cannot build; `_rmaos` was built ([recipes](Texture-Packing.md#community-shaders-cs)). | Add roughness, glossiness or AO, or drop the setting. |
 
-### RNM, skin, shaders and grass
+### Skin, shaders and grass
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `RNM-NO-BASE` | warning | A layer or mask has no base normal to feed. | Add the base, or set `rnm.target`. |
-| `RNM-IGNORED-EYE` | warning | A layer in an eye set; eye normals are model-space. | Remove or move the layer. |
-| `RNM-MASK-ORPHAN` | warning | A mask without its layer. | Add the layer, or remove the mask. |
-| `RNM-LAYER-SHADOWED` | warning | Two files fill one layer of one base. | Rename or remove one, or change `rnm.target`. |
 | `SHADER-AUTO` | info | The set's shader was picked automatically, with the rule. | |
 | `SHADER-UNAVAILABLE` | warning | The shader is not available under the target; it fell back. | Change the shader or target. |
 | `SHADER-EXTRA-MAP` | warning | A member the shader does not use; it still converts ([set shaders](Set-Shaders.md#set-shaders)). | |

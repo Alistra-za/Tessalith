@@ -32,6 +32,15 @@ ARCHIVED (wording before the edit; superseded in part by Note GU, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
   - **What is gated.** The counters and getters `filtered_builds`, `problems_builds`, `problem_lookups`, `export_files_builds`, `view_builds`, `set_cards_drawn`, `helper_rows_drawn`, `cache_builds`, `gen_lookups`, `header_reads_on_this_thread`, `plan_calls`, `uv_reads_on_this_thread`, `visible_builds`, `row_builds`, `project_builds` and `dds_thumb_requests`; the plan-hold hooks (`hold_plan_results`, `take_held`, `handle_held`, `end_export_with`); the Meshes pill-read gate (`project_gate`, `project_alive`, `project_started`, `hold_rows_read`); the Set 3D encoder and viewport stand-ins (`hold_workers`, `inject`, `inject_as`, `inject_stale`, `has_alt`, `token_of`, `alt_token_of`, `set_plugin_reader`, `attach_test_thread`, `fake_render_thread`, `render_sent_for_test`, `loaded_for_test`); and small getters (`votes_pending`, `generation`, `plan_marks`, `gen_dims_len`, `clear_gen_dims`, `gen_preview_opts`). A build without the feature does none of the counting.
 
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- **FM12 The manifest-compatibility shims are gone (audit §3, 2026-11-02).** 2.0 re-encodes everything once (FM9), so manifests need not stay valid. `BakeJob::identity_sha256` always hashes the `_n`'s `resize`; its RNM settings still join only when layers apply (`self.rnm.as_ref().map(|_| &np.rnm)`, Note W18). `PackJob::hand_placed` is removed (and from `schema/event.schema.json`): `pack::source_fill` always returns `ch:<rgba>`, the channels the source feeds, after `read:<id>` when there is one (Note DY21), so every packed source of every record names its channels. `PackSource.read` keeps its `skip_serializing_if`. Hashes and records change; output bytes do not (`identity.json` unchanged).
+
+ARCHIVED (wording before the edit; superseded in part by Note GW2, 2026-11-07)
+  - **Where the reference lives.** The planner writes it into the job's profile, `Profile::resize_reference: Option<(u32, u32)>` (`None` for `self`, `(0, 0)` for no single map, skipped when `None`; controller ruling T28B-d accepts this over a `target_dims` parameter), so every reader of `target_dims` (pipeline, DIM checks, bake plan and its `_n` profile copy, admission, `estimated_bytes`, the GUI size estimate and preview signatures, RNM preview) and the profile hash agree with no new parameter; a changed reference size moves the hash, so `if-changed` re-encodes. It is not a setting: a `[files]` entry, rule or `--set` naming it is refused as an unknown field, and a value in a preset table is overwritten by the planner for every job. `schemas::partial_profile_schema` drops it from the config and preset schemas (the partial profile and the by-product `Profile` definition there); the profile, manifest and event schemas keep it, since plans and records carry it.
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+  - **Planning.** `resize::plan_references` runs in `plan_sets` after the derive step, before shaders, RNM, bakes and `FilePlanned`. Sizes are pass 1's (`cube_facts`, else `input_dims`). A packed or derived map's own size, and its size as a reference, is its sources' common size (`api::job_dims_by`, the FM30 size before `target_dims`); a cube's is its source cell (`cube::layout::source_cell`). The pass recomputes `DIM-RESIZED` only for jobs with a reference (`policy::resized_warning`); a `self` job's warnings stay exactly as `check_profile` made them (unit test `resize::a_self_jobs_dim_resized_is_left_alone`). `DIM-SMALL` stays from `check_profile`, which saw the size without the reference; only a `resize_floor` below 4 could make it stale, since the relative size never falls below the floor.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -224,6 +233,33 @@ ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
 
 ARCHIVED (wording before the edit; superseded in part by Note GV, 2026-11-07)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Bake and RNM: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV
 
 ## Digest
 
@@ -473,6 +509,66 @@ ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
 - Plain slot and match labels; a one-line Textures heading; a reason on the greyed AO box. [FB13]
 
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- Complex grass has no alpha question (varying alpha: top half cutout, bottom half data); its set gets no `SHADER-EXTRA-MAP` / `SHADER-MISSING-MAP`; a grass stem ending in a raw-map or layer suffix is read as that. [X12, X9, X8]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- Memory admission counts RNM layers and complex grass. [BB1, BB4]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW1, 2026-11-07)
+- `_wet` and `_detail_n` (HB4) are suffixes only on `cs` in an Advanced skin set (a real `_rfaos` member or a resolved recipe building `_rfaos`); `group::join_skin_wet` and `group::join_skin_detail` (after grouping, before set edits) move `x_wet` and `x_detail_n` into set `x`, folding Unicode; elsewhere they stay in the name (`road_wet`; `x_detail_n` groups as before). A set listing `wet` keeps a suffix-less `*_wet` member through a Set Rename. [I3, BP2, BV9]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- A hand-set `helper.role` (images only) makes the file a helper even when a rule or `[files]` names its sub-type; `none` converts it alone. Otherwise a helper's role is its own `PackingInput`/`NormalLayer` job's; a raw map typed to convert alone fills nothing. A hand-role file with no known suffix joins its base set in the same output folder. [DY2, DY2a, DY13a, DY20]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+### Bake and RNM
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- RNM layers blend on the preprocessed base, before the mips; the roughness bake reads the blended `_n`. [W1, W18]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- `rnm.target` is a per-file selector; layer strength 0..=2, `rnm.bent.ao_power` 0.1..=8; bump slope at the bump's own size, DirectX green. [W3, W7, W8]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- Bases: `n` = `normal`, `pbr_normal`, `landscape_normal`; `cnr` = `coat_normal`; an Eye set ignores layers. [W5]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- A layer with no prefix targets `n`, falling back to `cnr` when the set has no `_n`; a prefixed layer targets its prefix; a layer whose targets name no base gets `RNM-NO-BASE`. Candidates for one layer id rank a prefix naming this base, then no prefix, then the other prefix, ties by path; the first wins and each loser gives `RNM-LAYER-SHADOWED` on the base job. [W4]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- Every `rnm.*` field is optional and `Profile.rnm` is skipped at its default, so no existing profile hash moves. `rnm.order` drops duplicates (first kept) and appends the missing ids in the order `bent, bump, bump2, detail, detail2`. `rnm.*` on a sub-type that cannot be a base is reset to the default. [W6]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- The bent layer's AO source, in order: raw AO (R), `_orm` (R), `_rmaos`/`_rfaos` (B), read only for `bent` in `ao_blend` with `rnm.bent.ao = true`, else uniform weight. A file's hand-set `helper.role` (`ao`, `orm`, `rmaos`) says which it is and any other role (`none` included) takes it out; the file name decides only a file with no hand-set role. The manifest role carries the channel (`bent.ao.r`, `bent.ao.b`), so swapping a byte-identical file between them re-encodes the normal. [W9, AL4, W16, FV3]
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- RNM decode clamps z to at least 0: a no-op at strength ≤ 1; above 1 it deviates from rnm.py, which does not clamp. [Y5]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- The config schema's `FileEntry` carries `reencode` (boolean) and its own `rnm` (`PartialRnmSpec` plus `target`); a test walks every `FIELD_PATHS` path except `subtype` through it. [BC8]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- A suffix alias naming exporter vocabulary is `CFG-INVALID`: `orm` (message "orm is a built-in packing input"), `curves`, `curvature`, `cavity`, and an RNM layer term such as `bump` or `bentmask`. [AL6, CN4, BV9]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- The map check leaves out `NormalLayer` jobs (layers and masks), gives a `complex_grass` set no `SHADER-EXTRA-MAP`/`SHADER-MISSING-MAP` (one file holds diffuse and normal), and raises no `_msn` without `_s` note when the set's shader is Eye. [BQ9, X9, BQ12]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW1, 2026-11-07)
+- A MATO-only landscape set needs no RMAOS. CS does not draw the projected normal and detail samples in this build (slot hover says so); they still export. A landscape `_noise` is always ProjectedNoise; a name-prefixed `_detail` stays an RNM layer. The two new kinds have no slot number, so no slot-keyed map gets them. The card shows every refusal `prepare` can know. The preview takes the profile's textures, coverage, then MATO DATA, cycling the layer when texture paths change. [GI10, GI15, GI16, GI17, GI18, GI19, GI21, GI22, GI25, GI28, GI29]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW1, 2026-11-07)
+- Landscape sets have two optional maps, projected noise (BC4_UNORM, `noise` is a global suffix) and `_detail` as its own output. [GI12, GI13, GI14, GI20]
+
+ARCHIVED (superseded by Note GW2, 2026-11-07)
+- The RNM section shows a 128 px blended thumbnail (one job in flight, dropped when its key changed); the strength slider writes on release; a failure reads "Preview unavailable: {reason}". [AG115, AG116, AG117, FC13]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Memory admission: a plan-pass cache hit admits at 0 bytes, a cold file costs one stat; a job over the budget runs alone when nothing else is in flight; RNM layers add at the resized base size and a bake's layers at the `_n`'s resized size (sums); a helper's decode bytes count beside its target's. [AV4, BB2, BB3, BB5, DY10e]
+
+ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
+- Curvature (`_curves`, `_curvature`, `_curves_generated`) is read only by Also export, and reaches a plain run as `PACK-UNUSED-INPUT`. An `_ao_generated` file changes the base `_n` job's `rnm.ao.file` identity. [CO116, CO115, CO90]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -496,6 +592,12 @@ ARCHIVED (superseded by Note GV2, 2026-11-07)
 ARCHIVED (superseded by Note GV2, 2026-11-07)
 - **FV5 An NPOT normal solved at its power of two is unchanged (R1; no fix).** The torus test came out green: 1000² against 1024² differ by a mean 0.0001 in height, and the resampled normal's mean slope is 1.0238 times the 1024² one's, against the 1.024 the per-pixel slope convention predicts, so `to_pot` keeps resampling the normal. The slope comparison is the pin, because the height is range-normalised and would hide a uniform slope bias (`from_normal::an_npot_torus_solves_like_its_power_of_two_twin`).
 
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` and `encode_versions` are unchanged. No `encode_version` arm is set: each change reaches only inputs handled wrongly before, and the identity of those outputs changes by itself (FV2: the cavity source carries `invert`; FV3: the manifest role names the AO file and channel).
+
+ARCHIVED (superseded by Note GW3, 2026-11-07)
+- **FV3 The RNM bent layer's AO follows a hand-set `helper.role` first (T40; supersedes W9 in part).** An image member whose `helper.role` is `ao`, `orm` or `rmaos` is that AO source (R, R, B); any other hand-set role, `none` included, takes the file out; a file with no hand-set role is read by its name as W9 and AL4 say. The order stays AO, `_orm`, `_rmaos`. `_n` bytes change only for a set with a hand-set role. Test `rnm_plan::a_hand_set_role_picks_the_bent_layers_ao_before_the_name`.
+
 ## Note FY — backlog batch B8: gui refactors and dead code (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
@@ -504,7 +606,15 @@ ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GV2, 2026-11-07)
 - **FY6 The two warning-text parsers carry `shortcut:` notes (L76).** `from_normal::replaced_by` (GEN-REPLACED) and `Cx::errors` in the cube section (CFG-INVALID); the upgrade is structured warning data, which needs an engine event change.
 
+ARCHIVED (wording before the edit; superseded in part by Note GW2, 2026-11-07)
+- **FY1 One commit-once-per-gesture widget (L29).** `advanced::held` holds the in-flight and the sent value in egui memory (pending, sent, busy: R2) and settles on a drag end, on leaving the box (FN2: typed text and arrow keys on a number box are one edit), or on a click. `settled_drag` (Advanced fill boxes, busy), the cube section's `num`, the RNM `drag_slider` and `held_value` (busy false) wrap it; `colour` and `settings_panel::commit_slider` stay. The RNM slider's value box is built with `update_while_editing(false)`, so typed text is one edit too, and the result is clamped to the range. A slider passes `on_blur` false, so an arrow key settles at once (as `the_rnm_strength_slider_does_not_snap_back_while_the_plan_runs` pins); a number box defers it to leaving the box. `held_value` also settles on `lost_focus` now, which changes nothing a caller sees: its boxes took an arrow key at once and still do. Tests in `ui/advanced.rs`, `cube_section.rs` and `rnm_section.rs` (typed value, arrow key and click commit once).
+
 ## Note HC — 2.1 bug batch (main team, 2026-11-05)
 
 ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
 - **HC1 A specular fills the flat alpha of a pre-packed `_rmaos`/`_rfaos` image (owner, 2026-11-05).** Before, the image won under `packing.prefer = prepacked` and the specular read "not used", even with a hand-set `rmaos.a` fill. Now, when the set's only other loose map is a specular (a generated AO the image's empty B takes may join it) and the image's alpha is flat, the image joins the recipe as CO104 does: A from the specular, the other channels from the image. "Flat" is the alpha verdict `plan_fills` reads (`AlphaFacts::empty`), so any constant counts, not only 255. An alpha with content, or another loose map, keeps the M9 result. A pre-packed DDS is never joined (images only, as CO103). No `encode_version` arm moves: the recipe and its bytes for given sources are unchanged, and the new source list re-encodes that set by itself. Tests `generated_files::a_specular_fills_the_flat_alpha_of_a_prepacked_rmaos` and its neighbours.
+
+## Note HE — 2.1 leftovers (main team, 2026-11-06)
+
+ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
+- **HE7 Two raw maps of one name are not duplicates (owner's report, 2026-11-06, `mouth_ao.psd` + `mouth_ao.png` in one Advanced Skin set: "cannot use either, is stuck using fill even when one is removed from the set"; the ruling is an agent ruling).** A raw map, a hand-set normal layer (`helper.role` layer) and a skin `_f` write no file at their own output (final review M5, agent ruling: a normal layer found only by its name, `x_detail.png` + `x_detail.tga`, is not counted, so two of those stay `IN-DUPLICATE`; the rule is not extended): pack planning consumes them or reports `PACK-UNUSED-INPUT` "not converted". So `prepare` leaves such an image out of the `IN-DUPLICATE` comparison (AF7 already compares only the jobs that write): `x_ao.png` + `x_ao.tga` give no `IN-DUPLICATE`, the first by path feeds the channel (M13) and the other is `PACK-UNUSED-INPUT`, which the AO source picker can swap. The rule follows the writer, not the name: a file whose sub-type is requested, or whose `helper.role` is `none`, writes and is compared as before, so two of those are still `IN-DUPLICATE`; two files with no raw name (`wall.png` + `wall.tga`) stay duplicates; a `_f` outside an Advanced Skin set is a PBR map that writes. My calls (agent ruling): a `[[rules]]` entry that types a raw name is invisible to `prepare` (rules need the analysis), and the BV2 writer dedupe is its backstop, so two rule-typed twins never both write; a file removed from the set by `SetEdit::Remove` is a set of its own that packs the same default output, so the BV2 dedupe still flags that one file. The fast re-plan runs the same rule (`api::waiting_images`) on the old and the new state over every set and returns `NeedsFull(DUPLICATE_CHANGE)` when a file moves in or out while another file shares its output, so a skin `_f` typed by hand, or a neighbour's sub-type that unmakes the skin set, is seen; on a cs PBR set `PBR_SUBTYPE` already forced a full plan for such edits. Tests in `crates/engine/tests/raw_twins.rs`, `a_sub_type_edit_on_a_twin_plans_in_full` in `fast_replan.rs`, `picker_can_switch_between_twins` in `helper_picker.rs`.
