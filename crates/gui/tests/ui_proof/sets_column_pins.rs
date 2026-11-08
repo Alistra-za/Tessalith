@@ -1,6 +1,7 @@
 //! kittest pins for the Sets column polish, Note HN, on the driver's fixtures.
 use crate::support::in_sets_column;
 use eframe::egui::{self, accesskit::Role};
+use egui::containers::panel::PanelState;
 use egui_kittest::kittest::{NodeT, Queryable};
 use engine::config::RnmTarget as R;
 use engine::helper::{AlphaTarget as A, FillTarget as F};
@@ -536,6 +537,44 @@ fn a_tight_window_takes_textures_to_its_minimum_before_sets() {
         "Textures at its minimum: {at}"
     );
     assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
+}
+
+/// Textures' width at 1055 with armor/gold open, Sets expanded or (`hide`: hidden / collapsed) not.
+fn textures_with_gold_open(hidden: bool, collapsed: bool) -> f32 {
+    let resize = resize_line(1055.0, 770.0);
+    let before = |h: &mut crate::app_harness::H| {
+        let s = &mut h.state_mut().model.settings;
+        (s.sets_hidden, s.sets_collapsed) = (hidden, collapsed);
+    };
+    let (_d, mut h) = crate::replay_with(
+        "demo",
+        before,
+        &[resize.as_str(), r#"{"op":"settle","frames":6}"#],
+    );
+    let key = sets::views(&h.state().model)
+        .iter()
+        .find(|v| v.id == "armor/gold")
+        .unwrap()
+        .key
+        .clone();
+    h.state_mut().model.select_set(&key);
+    crate::app_harness::settle(&mut h, 6);
+    PanelState::load(&h.ctx, egui::Id::new("textures"))
+        .unwrap()
+        .outer_rect
+        .width()
+}
+
+#[test]
+fn a_hidden_or_collapsed_sets_column_leaves_textures_only_sets_min_of_room() {
+    let open = textures_with_gold_open(false, false);
+    for (hidden, collapsed) in [(true, false), (false, true)] {
+        let t = textures_with_gold_open(hidden, collapsed);
+        assert!(
+            t - open >= 100.0,
+            "hidden {hidden} collapsed {collapsed}: Textures {t} vs {open} with Sets open"
+        );
+    }
 }
 
 #[test]

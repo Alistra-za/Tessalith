@@ -72,20 +72,22 @@ pub fn replay_mid(
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = fixtures::start(fixture, d.path(), false).unwrap();
     before(&mut h);
-    play(&mut h, &run, first);
+    play(&mut h, &run, first, 0);
     mid(&mut h);
-    play(&mut h, &run, rest);
+    play(&mut h, &run, rest, first.len());
     (d, h)
 }
 
-fn play(h: &mut app_harness::H, run: &fixtures::Run, lines: &[&str]) {
+/// Runs `lines`, numbering steps from `done + 1` (the lines already played).
+fn play(h: &mut app_harness::H, run: &fixtures::Run, lines: &[&str], done: usize) {
     let script = parse_script(&lines.join("\n")).unwrap();
     for (i, (line, step)) in script.iter().enumerate() {
+        let n = done + i + 1;
         match fixtures::app_step(h, run, step) {
-            Err(e) => panic!("step {} `{line}`: {e}", i + 1),
+            Err(e) => panic!("step {n} `{line}`: {e}"),
             // A journey's check must decide: a note is a check that proved nothing.
             Ok(Some(note)) if matches!(step, Step::Check { .. }) => {
-                panic!("step {} `{line}`: check did not decide: {note}", i + 1)
+                panic!("step {n} `{line}`: check did not decide: {note}")
             }
             Ok(_) => {}
         }
