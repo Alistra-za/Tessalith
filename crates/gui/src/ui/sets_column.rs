@@ -391,8 +391,12 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, v: &SetView, s: Status) {
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .inner_margin(egui::Margin::symmetric(PILL_PAD_X as i8, 1))
         .show(ui, |ui| {
-            let kind =
-                egui::Label::new(egui::RichText::new(kind_text(model, v)).small()).truncate();
+            let kind = egui::Label::new(
+                egui::RichText::new(kind_text(model, v))
+                    .small()
+                    .color(ui.visuals().widgets.inactive.text_color()),
+            )
+            .truncate();
             // In the card row's right-to-left layout the first widget lands rightmost: the dot stays left.
             if ui.layout().prefer_right_to_left() {
                 ui.add(kind);
@@ -1686,14 +1690,7 @@ fn pill(
                     // Note HP: the rects a badge's hit area must keep clear of: the combo, then every chip and tile.
                     let mut fixed: Vec<egui::Rect> = vec![];
                     if !v.key.is_empty() {
-                        let top = ui.min_rect().bottom();
-                        shader_combo(ui, model, v, editing, acts);
-                        // shortcut: the combo's row stands in for the combo itself, so a badge keeps off a little
-                        // more than it must; Task 4 gives the combo its own row and rect.
-                        fixed.push(egui::Rect::from_min_max(
-                            egui::pos2(card_rect.left(), top),
-                            egui::pos2(card_rect.right(), ui.min_rect().bottom()),
-                        ));
+                        fixed.push(shader_combo(ui, model, v, editing, acts));
                     }
                     if v.key.is_empty() && v.created && v.missing.is_empty() {
                         ui.weak("Drop a texture here to start");
@@ -1959,7 +1956,7 @@ fn shader_combo(
     v: &SetView,
     editing: &Editing,
     acts: &mut Vec<Act>,
-) {
+) -> egui::Rect {
     let text = v.shader.as_ref().map_or(String::new(), |p| {
         let tag = match p.provenance {
             ShaderOrigin::Set => "",
@@ -1969,29 +1966,58 @@ fn shader_combo(
         };
         format!("{}{tag}", p.shader.label())
     });
-    // A5: its own row, the card's width (a ComboBox never wraps, so it is never wider than the row).
-    ui.add_enabled_ui(editing.on, |ui| {
-        egui::ComboBox::from_id_salt(("shader", &v.id))
-            .width(ui.available_width())
-            .truncate()
-            .selected_text(text)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(v.shader_choice.is_none(), "Auto")
-                    .clicked()
-                {
-                    acts.push(Act::Shader(v.id.clone(), None));
-                }
-                for s in shader_options(model.target) {
+    // Note HP: its own row under the title, right-aligned and as wide as its value (capped at half the card). The
+    // row's free left part allocates nothing, so a click there reaches the card.
+    let (w, natural) = combo_w(ui, &text);
+    let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(
+        row,
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.add_enabled_ui(editing.on, |ui| {
+                let r = super::helper_panel::combo(ui, ("shader", &v.id), &text, w, |ui| {
                     if ui
-                        .selectable_label(v.shader_choice == Some(s), s.label())
+                        .selectable_label(v.shader_choice.is_none(), "Auto")
                         .clicked()
                     {
-                        acts.push(Act::Shader(v.id.clone(), Some(s)));
+                        acts.push(Act::Shader(v.id.clone(), None));
                     }
+                    for s in shader_options(model.target) {
+                        if ui
+                            .selectable_label(v.shader_choice == Some(s), s.label())
+                            .clicked()
+                        {
+                            acts.push(Act::Shader(v.id.clone(), Some(s)));
+                        }
+                    }
+                });
+                super::helper_panel::named(
+                    &r,
+                    egui::WidgetType::ComboBox,
+                    &format!("Shader for {}", v.id),
+                    Some(&text),
+                );
+                if natural > w {
+                    r.clone().on_hover_text(&text);
                 }
-            });
-    });
+                r.rect
+            })
+            .inner
+        },
+    )
+    .inner
+}
+
+/// The shader combo's width: its shown text, the arrow and the padding, capped at half the card's inner width;
+/// and the uncapped width, to tell a cut value.
+fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
+    let sp = ui.spacing();
+    let natural = text_width(ui, shown, &egui::TextStyle::Button.resolve(ui.style()))
+        + sp.icon_width
+        + sp.icon_spacing
+        + 2.0 * sp.button_padding.x;
+    let cap = ui.available_width() / 2.0 - sp.item_spacing.x / 2.0;
+    (natural.min(cap), natural)
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.

@@ -93,17 +93,18 @@ fn why(r: egui::Response, ro: &Option<String>) -> egui::Response {
     }
 }
 
-/// A combo in an exact-width slot; `f` draws the options. Returns its response.
-fn combo(
+/// A combo in an exact-width (`w`) slot; `f` draws the options. Returns its response.
+pub(super) fn combo(
     ui: &mut egui::Ui,
     id: (&str, &str),
     shown: &str,
+    w: f32,
     f: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
     let h = ui.spacing().interact_size.y;
-    ui.allocate_ui(egui::vec2(COMBO_W, h), |ui| {
+    ui.allocate_ui(egui::vec2(w, h), |ui| {
         egui::ComboBox::from_id_salt(id)
-            .width(COMBO_W)
+            .width(w)
             .truncate()
             .selected_text(shown)
             .show_ui(ui, f)
@@ -241,7 +242,7 @@ pub(crate) fn role_combo(
 ) -> Option<HelperRole> {
     let mut picked = None;
     let shown = current.label();
-    let r = combo(ui, (key, "helper-role"), &shown, |ui| {
+    let r = combo(ui, (key, "helper-role"), &shown, COMBO_W, |ui| {
         // "Not a helper" first (`all()`'s order), so it is in view without scrolling the long list.
         for role in HelperRole::all() {
             let new = role != current || !hand_set;
@@ -267,7 +268,7 @@ fn layer_row(
 ) {
     ui.label("Blends into");
     let shown = super::rnm_section::target_label(t);
-    let r = combo(ui, (key, "helper-layer-target"), shown, |ui| {
+    let r = combo(ui, (key, "helper-layer-target"), shown, COMBO_W, |ui| {
         for o in [RnmTarget::N, RnmTarget::Cnr, RnmTarget::Both] {
             if ui
                 .selectable_label(o == t, super::rnm_section::target_label(o))
@@ -348,7 +349,7 @@ fn fills_rows(
         if more.is_empty() {
             ui.allocate_space(egui::vec2(COMBO_W, row_h));
         } else {
-            let r = combo(ui, (key, "helper-add-fill"), "Add target", |ui| {
+            let r = combo(ui, (key, "helper-add-fill"), "Add target", COMBO_W, |ui| {
                 for o in &more {
                     if ui
                         .selectable_label(false, target_job(h, *o, ui.style()))
@@ -387,7 +388,7 @@ fn read_rows(
 ) {
     ui.label("Read from");
     let shown = READS.iter().find(|r| r.0 == h.read).map_or("", |r| r.1);
-    let r = combo(ui, (key, "helper-read"), shown, |ui| {
+    let r = combo(ui, (key, "helper-read"), shown, COMBO_W, |ui| {
         for (v, label) in READS {
             if ui.selectable_label(v == h.read, label).clicked() && v != h.read {
                 edits.push(Edit::Read(v));

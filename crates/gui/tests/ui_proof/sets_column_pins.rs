@@ -1031,3 +1031,176 @@ fn painted_job(h: &crate::app_harness::H, text: &str) -> std::sync::Arc<egui::te
         .find_map(|c| find(&c.shape, text))
         .unwrap_or_else(|| panic!("no painted {text:?}"))
 }
+
+fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+    let lum = |c: egui::Color32| {
+        let f = |v: u8| {
+            let v = f32::from(v) / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[test]
+fn the_status_pill_text_reads() {
+    let (_d, mut h) = crate::replay("demo", &[]);
+    let fill = h.ctx.global_style().visuals.panel_fill;
+    // None is the frame's default text colour (gray 140 today).
+    let c = text_colour(&h, "vanilla").unwrap_or(egui::Color32::from_gray(140));
+    for bg in [fill, egui::Color32::from_gray(60)] {
+        let r = contrast(c, bg);
+        assert!(r >= 4.5, "dark: {c:?} on {bg:?} is {r}:1");
+    }
+    h.ctx.set_visuals(egui::Visuals::light());
+    crate::app_harness::settle(&mut h, 3);
+    let c = text_colour(&h, "vanilla").unwrap_or(h.ctx.global_style().visuals.text_color());
+    let fill = h.ctx.global_style().visuals.panel_fill;
+    let r = contrast(c, fill);
+    assert!(r >= 4.5, "light: {c:?} on {fill:?} is {r}:1");
+}
+
+/// Every drawn card: (its rect, its shader combo's rect, name, value).
+fn card_combos(h: &crate::app_harness::H) -> Vec<(egui::Rect, egui::Rect, String, String)> {
+    let cards: Vec<egui::Rect> = h
+        .query_all(egui_kittest::kittest::by())
+        .filter(|n| n.accesskit_node().raw_bounds().is_some())
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Set ") && l.contains(", position "))
+        })
+        .map(|n| n.rect())
+        .filter(|r| in_sets_column(h, *r))
+        .collect();
+    let mut out = vec![];
+    for n in h.query_all_by_role(Role::ComboBox) {
+        let r = n.rect();
+        if let Some(c) = cards.iter().find(|c| c.contains_rect(r)) {
+            out.push((
+                *c,
+                r,
+                n.accesskit_node().label().unwrap_or_default(),
+                n.accesskit_node().value().unwrap_or_default(),
+            ));
+        }
+    }
+    out
+}
+
+#[test]
+fn the_card_combo_is_named_and_stays_in_the_right_half() {
+    for (w, h_px, narrow) in [(1400.0, 790.0, false), (1055.0, 770.0, true)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
+        if narrow {
+            sets_width(&mut h, SETS_MIN);
+        }
+        let at = format!("at {w}x{h_px}");
+        let combos = card_combos(&h);
+        assert!(!combos.is_empty(), "{at}: some cards are drawn");
+        for (card, c, name, _) in &combos {
+            assert!(!name.is_empty(), "{at}: a combo in {card:?} has no name");
+            assert!(
+                c.min.x >= card.center().x - 0.5
+                    && c.max.x <= card.max.x + 0.5
+                    && c.max.x >= card.max.x - 8.0,
+                "{at}: {name} {c:?} sits in the right half of {card:?}, flush right"
+            );
+            let title = texts(&h)
+                .into_iter()
+                .filter(|(_, r)| card.contains_rect(*r) && r.max.y < c.center().y)
+                .map(|(_, r)| r.max.y)
+                .fold(f32::MIN, f32::max);
+            assert!(title <= c.min.y + 0.5, "{at}: {name} under the title row");
+        }
+        for (id, value) in [
+            ("actors/body", "Default (auto)"),
+            ("architecture/stone/stonewall", "Environment Map (auto)"),
+            ("architecture/stone/cobble", "PBR"),
+        ] {
+            let name = format!("Shader for {id}");
+            let hit: Vec<_> = combos.iter().filter(|c| c.2 == name).collect();
+            // The narrow column shows fewer cards: only the drawn ones are checked.
+            assert!(
+                hit.len() <= 1 && (narrow || hit.len() == 1),
+                "{at}: {name:?}"
+            );
+            if let Some(c) = hit.first() {
+                assert_eq!(c.3, value, "{at}: {name} value");
+            }
+        }
+        if !narrow {
+            let (_, elided, _) = painted(&h, "Default (auto)");
+            assert!(!elided, "{at}: Default (auto) is whole");
+        }
+    }
+}
+
+/// Releases and presses nothing but the pointer at `pos`, then settles.
+fn tap(h: &mut crate::app_harness::H, pos: egui::Pos2) {
+    h.event(egui::Event::PointerMoved(pos));
+    press(h, pos, true);
+    press(h, pos, false);
+    crate::app_harness::settle(h, 3);
+}
+
+#[test]
+fn a_click_on_a_cards_middle_opens_the_set() {
+    let (_d, h) = crate::replay(
+        "demo",
+        &[
+            r#"{"op":"click","at":{"label":"Set actors/body, position 1 of 9"}}"#,
+            r#"{"op":"settle","frames":3}"#,
+            r#"{"op":"expect","fact":"/selection","equals":"set:actors/body"}"#,
+        ],
+    );
+    assert!(!egui::Popup::is_any_open(&h.ctx), "no popup opened");
+}
+
+/// The rect of the one node whose label starts with `prefix`.
+fn one_node(h: &crate::app_harness::H, prefix: &str) -> egui::Rect {
+    let r: Vec<_> = h
+        .query_all(egui_kittest::kittest::by())
+        .filter(|n| n.accesskit_node().raw_bounds().is_some())
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(prefix))
+        })
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(r.len(), 1, "one node {prefix:?}, got {r:?}");
+    r[0]
+}
+
+#[test]
+fn a_click_left_of_the_combo_opens_the_set() {
+    let (_d, mut h) = crate::replay("demo", &[]);
+    let card = one_node(&h, "Set architecture/stone/stonewall, position ");
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| n.rect())
+        .find(|r| card.contains_rect(*r))
+        .expect("the stonewall card's combo");
+    tap(&mut h, egui::pos2(card.left() + 12.0, combo.center().y));
+    let Selection::Set(key) = &h.state().model.selection else {
+        panic!("a set is selected, got {:?}", h.state().model.selection);
+    };
+    assert!(key.ends_with("architecture/stone/stonewall"), "{key}");
+    assert!(!egui::Popup::is_any_open(&h.ctx), "no popup opened");
+}
+
+#[test]
+fn a_top_badge_is_not_trimmed_by_the_combo() {
+    let (_d, h) = crate::replay("helpers", &[resize_line(1400.0, 790.0).as_str(), SEARCH]);
+    let c = crate_card(&h);
+    let tall = c.badges.iter().filter(|b| b.height() >= 19.5).count();
+    assert!(tall >= 1, "a badge keeps its 20 px hit: {:?}", c.badges);
+}

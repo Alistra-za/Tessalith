@@ -97,9 +97,13 @@ fn idle(m: &mut AppModel) {
 }
 
 #[test]
-fn a_card_shows_name_pill_and_a_full_width_shader() {
+fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()));
+    h.run();
+    // The default column is too narrow for half a card to hold "PBR Landscape (auto)": widen it, as a drag leaves it.
+    h.ctx
+        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 460.0_f32));
     h.run();
     let card = card_rect(&h);
     let kind = on_card(&h, "PBR Landscape");
@@ -121,9 +125,19 @@ fn a_card_shows_name_pill_and_a_full_width_shader() {
     );
     let w = combo.rect().width();
     assert!(
-        (card.width() - w).abs() <= 20.0,
-        "the shader ({w}) spans the card ({})",
+        w < card.width() / 2.0,
+        "the shader ({w}) is under half the card ({})",
         card.width()
+    );
+    assert!(
+        combo.rect().min.y >= kind.max.y - 0.5,
+        "the shader row is under the pill"
+    );
+    assert!(
+        (card.max.x - combo.rect().max.x).abs() <= 8.0,
+        "the shader's right edge {} is the card's inner right {}",
+        combo.rect().max.x,
+        card.max.x
     );
     let texts: Vec<_> = shapes(&h)
         .into_iter()
