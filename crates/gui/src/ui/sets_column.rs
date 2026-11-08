@@ -604,7 +604,12 @@ fn draw_dock<'a>(
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        format!("+{k}"),
+                        // "+10" is wider than the 12 px cell: from ten up the cell says "+" and the hover lists them
+                        if k < 10 {
+                            format!("+{k}")
+                        } else {
+                            "+".to_string()
+                        },
                         font,
                         egui::Color32::WHITE,
                     );
@@ -621,6 +626,23 @@ fn draw_dock<'a>(
                 r.on_hover_text(lines.join("\n"));
             }
         }
+    }
+}
+
+/// A member chip's name: its letter, and when helpers fill it, its file and their files ("D, crate.png, filled by x").
+fn chip_name(model: &AppModel, letter: &str, member: &str, entries: &[&Docked]) -> String {
+    match model.item(member) {
+        Some(item) if !entries.is_empty() => {
+            let mut files: Vec<&str> = vec![];
+            for d in entries {
+                let f = model.item(&d.helper).map_or(&*d.helper, |i| &*i.name);
+                if !files.contains(&f) {
+                    files.push(f);
+                }
+            }
+            format!("{letter}, {}, filled by {}", item.name, files.join(", "))
+        }
+        _ => letter.to_string(),
     }
 }
 
@@ -1561,24 +1583,7 @@ fn pill(
                             }
                             let entries: Vec<&Docked> =
                                 dock.iter().filter(|d| d.slot == k).collect();
-                            let name = match model.item(mk) {
-                                Some(item) if !entries.is_empty() => {
-                                    let mut files: Vec<&str> = vec![];
-                                    for d in &entries {
-                                        let f =
-                                            model.item(&d.helper).map_or(&*d.helper, |i| &*i.name);
-                                        if !files.contains(&f) {
-                                            files.push(f);
-                                        }
-                                    }
-                                    format!(
-                                        "{letter}, {}, filled by {}",
-                                        item.name,
-                                        files.join(", ")
-                                    )
-                                }
-                                _ => letter.clone(),
-                            };
+                            let name = chip_name(model, &letter, mk, &entries);
                             r.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
                             });

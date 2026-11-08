@@ -153,6 +153,7 @@ impl AppModel {
 
     /// How many keyed sets the shader filter shows when `s` is picked: its own predicate, so the count equals the
     /// list. Uncached: only the open shader popup asks.
+    // shortcut: rebuilds the set views once per shader while the popup is open; cache by revision when set counts reach the thousands.
     pub fn sets_with_shader(&self, s: Shader) -> usize {
         sets::views(self)
             .iter()

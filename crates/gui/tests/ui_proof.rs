@@ -45,7 +45,8 @@ pub fn run_journey(fixture: &str, lines: &[&str]) {
     replay(fixture, lines);
 }
 
-/// Replays `lines` like `run_journey` and returns the harness (and its temp dir) for further checks.
+/// Replays `lines` like `run_journey` and returns the harness (and its temp dir) for further checks. Keep the
+/// `TempDir` alive as long as the harness: dropping it deletes the project folder the app reads.
 pub fn replay(fixture: &str, lines: &[&str]) -> (tempfile::TempDir, app_harness::H) {
     app_data();
     let d = tempfile::tempdir().unwrap();

@@ -463,7 +463,8 @@ fn opening_a_set_in_a_narrow_window_keeps_its_card_in_view() {
     );
 }
 
-/// Pins that a user scroll after the reveal is not undone: the reveal fires on a width change only.
+/// Pins that a user scroll after the reveal is not undone: the reveal fires on a width change only. It scrolls up
+/// because the reveal leaves the card in view, so a scroll down never left the panel and pinned nothing.
 #[test]
 fn a_wheel_scroll_after_the_reveal_stays_put() {
     let scroll =

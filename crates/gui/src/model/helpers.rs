@@ -1,5 +1,6 @@
 //! Note DY17: the helper panel's edits. Each writes one `helper.*` selector of the helper file's own `[files]` entry in
-//! `sdc.toml` as one undo step, then plans again; a read-only `sdc.toml` takes none (`AppModel::edit`).
+//! `sdc.toml` as one undo step, then plans again; a read-only `sdc.toml` takes none (`AppModel::edit`). Note HN: it
+//! also holds the read-only dock mapping (which chip and channel a fill lands on).
 use super::sets::{SetView, SlotKind};
 use super::AppModel;
 use engine::helper::report::HelperReport;
@@ -80,7 +81,11 @@ pub fn fill_slot(t: FillTarget) -> Option<SlotKind> {
 pub fn fill_channel(t: FillTarget) -> &'static str {
     match t {
         FillTarget::Alpha(_) => "alpha",
-        FillTarget::Packed { channel, .. } => ["R", "G", "B", "A"][usize::from(channel.min(3))],
+        FillTarget::Packed { channel, .. } => {
+            debug_assert!(channel < 4, "a packed channel is 0..=3, got {channel}");
+            // the clamp keeps a release build from indexing past A
+            ["R", "G", "B", "A"][usize::from(channel.min(3))]
+        }
         FillTarget::Rnm(_) => "layer",
     }
 }
@@ -94,7 +99,7 @@ pub struct Docked {
     pub channel: &'static str,
 }
 
-/// The helpers of the set's members, one entry per reported fill that lands on a chip, in member then `fills` order.
+/// The helpers of the set's members, one entry per reported fill that lands on a chip.
 pub fn docked(model: &AppModel, v: &SetView) -> Vec<Docked> {
     v.members
         .iter()
