@@ -8,14 +8,14 @@ use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
 use crate::model::bulk::MenuAction;
-use crate::model::helpers::{docked, Docked};
+use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_target_files, helper_target_text};
 use crate::model::known_paths::TxstRecord;
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, shader_options, shared_cells, slot_row, DropChoice,
-    DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
+    badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
 use crate::model::AppModel;
 use crate::sets_doc::TxstMap;
@@ -223,30 +223,75 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
     let p = ui.painter();
     p.rect_filled(rect, 2.0, vis.extreme_bg_color);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-    p.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        letter,
-        egui::TextStyle::Small.resolve(ui.style()),
-        vis.weak_text_color(),
-    );
+    if outline.is_none() {
+        paint_letter(ui, rect, letter, true);
+    } else {
+        // The missing entry's "?" stays centred.
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            egui::TextStyle::Small.resolve(ui.style()),
+            ui.visuals().weak_text_color(),
+        );
+    }
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, letter));
     r
 }
 
-/// The letter in a filled chip's bottom-left corner, on a dark backing so it reads over any thumbnail.
-fn paint_letter(ui: &egui::Ui, rect: egui::Rect, letter: &str) {
+/// Note HP: a tile's label in its bottom-left corner. `dim` (an empty chip, no thumbnail under it) is weak text with
+/// no backing; otherwise white on a dark backing so it reads over any thumbnail. Text wider than the chip is cut with `…`.
+fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool) {
     let font = egui::TextStyle::Small.resolve(ui.style());
-    let g = ui
-        .painter()
-        .layout_no_wrap(letter.to_string(), font, egui::Color32::WHITE);
+    let colour = if dim {
+        ui.visuals().weak_text_color()
+    } else {
+        egui::Color32::WHITE
+    };
+    let lay = |s: String| ui.painter().layout_no_wrap(s, font.clone(), colour);
+    let mut g = lay(text.to_string());
+    let mut shown = text.to_string();
+    while g.size().x > CHIP - 2.0 && shown.pop().is_some() {
+        g = lay(format!("{}…", shown.trim_end()));
+    }
     let at = rect.left_bottom() + egui::vec2(1.0, -1.0 - g.size().y);
-    ui.painter().rect_filled(
-        egui::Rect::from_min_size(at, g.size()).expand(1.0),
-        2.0,
-        egui::Color32::from_black_alpha(170),
-    );
-    ui.painter().galley(at, g, egui::Color32::WHITE);
+    if !dim {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(at, g.size()).expand(1.0),
+            2.0,
+            egui::Color32::from_black_alpha(170),
+        );
+    }
+    ui.painter().galley(at, g, colour);
+}
+
+/// Note HP (Decision 7): the trailing-row tile's tag. A member whose slot is taken: its slot letter; an unused helper:
+/// "unused"; a helper whose fills land on no chip: its first fill; any other member: its `member_tail`, or "—".
+fn tile_tag(model: &AppModel, v: &SetView, key: &str) -> String {
+    let own = v
+        .slots
+        .iter()
+        .find(|(_, f)| matches!(f, SlotFill::Own { item } if item == key));
+    if let Some((k, _)) = own {
+        return chip_letter(v, *k);
+    }
+    let Some(item) = model.item(key) else {
+        return String::new();
+    };
+    if let Some(h) = &item.helper {
+        return h
+            .fills
+            .first()
+            .map_or("unused".to_string(), |t| fill_text(*t));
+    }
+    let stem = std::path::Path::new(&item.name)
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
+    match member_tail(&stem, v.skin || v.shared) {
+        "" => "—".to_string(),
+        t => t.to_string(),
+    }
 }
 
 /// The pill's hover (R15): the long badge, then one line each for blocked, owns, missing entries and recipes.
@@ -1797,7 +1842,7 @@ fn pill(
                                     };
                                     let own = fixed.len();
                                     fixed.push(r.rect);
-                                    paint_letter(ui, r.rect, &letter);
+                                    paint_letter(ui, r.rect, &letter, false);
                                     if from.is_some() {
                                         ui.painter().rect_stroke(
                                             r.rect,
@@ -1907,6 +1952,7 @@ fn pill(
                                     ui.set_opacity(was);
                                     if let Some(r) = r {
                                         fixed.push(r.rect);
+                                        paint_letter(ui, r.rect, &tile_tag(model, v, mk), false);
                                         let name = format!("{}, {role}", item.name);
                                         r.widget_info(|| {
                                             egui::WidgetInfo::labeled(

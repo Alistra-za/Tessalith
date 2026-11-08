@@ -1463,3 +1463,140 @@ fn typing_a_search_after_a_scroll_starts_at_the_top() {
         );
     }
 }
+
+/// Note HP: the painted texts of the frame with their colour (the colour a label was laid out with).
+fn coloured_texts(h: &crate::app_harness::H) -> Vec<(String, egui::Rect, egui::Color32)> {
+    fn flat(s: &egui::Shape, out: &mut Vec<(String, egui::Rect, egui::Color32)>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            egui::Shape::Text(t) => out.push((
+                t.galley.job.text.clone(),
+                t.galley.rect.translate(t.pos.to_vec2()),
+                t.galley.job.sections[0].format.color,
+            )),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| flat(&c.shape, &mut out));
+    out
+}
+
+/// The text painted inside `tile`: its offset from the tile's top left, its colour and its rect.
+fn tile_label(
+    h: &crate::app_harness::H,
+    tile: egui::Rect,
+    text: &str,
+) -> (egui::Vec2, egui::Color32, egui::Rect) {
+    let found: Vec<_> = coloured_texts(h)
+        .into_iter()
+        .filter(|(t, r, _)| t == text && tile.expand(1.0).contains(r.center()))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "one painted {text:?} in {tile:?}: {found:?}"
+    );
+    let (_, r, c) = found[0];
+    (r.min - tile.left_top(), c, r)
+}
+
+/// The Sets-column Button whose name starts with `prefix`.
+fn tile_named(h: &crate::app_harness::H, prefix: &str) -> egui::Rect {
+    let r: Vec<_> = h
+        .query_all_by_role(Role::Button)
+        .filter(|n| in_sets_column(h, n.rect()))
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(prefix))
+        })
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(r.len(), 1, "one Button {prefix:?}, got {r:?}");
+    r[0]
+}
+
+/// The one text painted in `tile`.
+fn any_text(h: &crate::app_harness::H, tile: egui::Rect) -> String {
+    let found: Vec<_> = coloured_texts(h)
+        .into_iter()
+        .filter(|(_, r, _)| tile.expand(1.0).contains(r.center()))
+        .collect();
+    assert_eq!(found.len(), 1, "one painted text in {tile:?}: {found:?}");
+    found[0].0.clone()
+}
+
+fn same_offset(a: egui::Vec2, b: egui::Vec2, at: &str) {
+    assert!(
+        (a.x - b.x).abs() <= 1.0 && (a.y - b.y).abs() <= 1.0,
+        "{at}: label offset {a:?} against the D chip's {b:?}"
+    );
+}
+
+#[test]
+fn labels_sit_bottom_left_on_every_tile() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let search = |s: &str| {
+            format!(r#"{{"op":"type","text":"{s}","at":{{"placeholder":"Search sets"}}}}"#)
+        };
+        // an empty chip's letter sits where the D chip's does, dimmed
+        let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
+        let at = format!("cobble at {w}x{h_px}");
+        let weak = h.ctx.global_style().visuals.weak_text_color();
+        let card = one_node(&h, "Set architecture/stone/cobble, ");
+        let mut d_off = None;
+        let mut empties = vec![];
+        for n in h.query_all(egui_kittest::kittest::by()) {
+            if n.accesskit_node().raw_bounds().is_none() {
+                continue;
+            }
+            let r = n.rect();
+            if !card.contains_rect(r) || !near(r, 32.0, 32.0) {
+                continue;
+            }
+            let label = n.accesskit_node().label().unwrap_or_default();
+            match n.accesskit_node().role() {
+                Role::Button if label == "D" => d_off = Some((r, "D")),
+                Role::Label => empties.push(r),
+                _ => {}
+            }
+        }
+        let (d_chip, d_text) = d_off.expect("the D chip");
+        let (d_off, ..) = tile_label(&h, d_chip, d_text);
+        assert!(!empties.is_empty(), "{at}: the card has an empty chip");
+        for chip in empties {
+            let letter = any_text(&h, chip);
+            let (off, colour, _) = tile_label(&h, chip, &letter);
+            same_offset(off, d_off, &format!("{at}, empty {letter}"));
+            assert_eq!(colour, weak, "{at}, empty {letter}: weak text colour");
+        }
+        // a trailing-row tile's tag, in the same corner
+        for (q, file, tag) in [
+            ("gold", "gold_m.png, ", "_m"),
+            ("stonewall", "stonewall_m.png, ", "_m"),
+        ] {
+            let (_d, h) = crate::replay("demo", &[resize.as_str(), search(q).as_str()]);
+            let tile = tile_named(&h, file);
+            let (off, ..) = tile_label(&h, tile, tag);
+            same_offset(off, d_off, &format!("{q} at {w}x{h_px}"));
+        }
+        let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        let tile = tile_named(&h, "crate_metallic.png, ");
+        let (off, _, label) = tile_label(&h, tile, "unused");
+        same_offset(off, d_off, &format!("crate at {w}x{h_px}"));
+        assert!(tile.contains_rect(label), "unused inside its tile");
+        // Task 3 review: no helper badge covers the label
+        for b in crate_card(&h).badges {
+            assert_eq!(
+                shared_area(b, label),
+                0.0,
+                "badge {b:?} covers the label {label:?}"
+            );
+        }
+    }
+}
