@@ -76,6 +76,7 @@ fn plan(dir: &Path, rough: &Path, normal: &Path, bake: bool, flip_green: bool) -
         derive: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     };
     Plan {
         request,

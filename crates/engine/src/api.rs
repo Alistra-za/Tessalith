@@ -3537,7 +3537,8 @@ fn map_members(
                 alpha: AlphaContent::None,
                 is_float: false,
                 advanced_skin: false,
-                alone_in_set: set.members.len() == 1,
+                // Note GY4: a kept DDS is never planned, so it never waits; its name still fills a slot.
+                alone_in_set: false,
             })
             .first()
             .map(|s| s.subtype);
@@ -3922,6 +3923,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
     }
 
@@ -4085,6 +4087,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         let texels = 48 * 40;
         // `mips.levels = "none"` keeps the 48x40 size (Note FM29).
@@ -4149,6 +4152,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         std::fs::write(&job.output, b"dds").unwrap();
         let enc = EncoderVersions::current();

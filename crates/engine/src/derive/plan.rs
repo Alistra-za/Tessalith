@@ -573,6 +573,7 @@ pub fn finish_derived(
         provenance: Provenance::Recipe(kind.id().into()),
         decided: true,
         suggestions: vec![],
+        waits: false,
     };
     let mut job = resolve_decided(ctx, &facts, decision);
     // CN14: the stack's bottom half is the `_n`, whose specular alpha `remove` would drop (an opaque albedo, mesh

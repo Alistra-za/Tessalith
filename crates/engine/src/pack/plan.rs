@@ -542,6 +542,7 @@ pub(crate) fn recipe_error_job(
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     }
 }
 
@@ -1225,6 +1226,7 @@ pub fn finish_recipe(
         provenance: Provenance::Recipe(c.kind.id().into()),
         decided: true,
         suggestions: vec![],
+        waits: false,
     };
     let mut job = resolve_decided(ctx, &facts, decision);
     for (ch, src) in ["r", "g", "b", "a"].iter().zip(&c.job.channels) {

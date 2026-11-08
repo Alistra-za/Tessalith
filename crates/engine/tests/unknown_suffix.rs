@@ -340,6 +340,77 @@ fn adding_the_normal_settles_the_base() {
     assert_ready(job(&after, "rock_bump_n.png"), Subtype::Normal);
 }
 
+/// Rule item 2's alias half: a preset alias is a recognised suffix, so a lone `rock_diff` with `diff` aliased to `d`
+/// is a colour map; without the alias it waits.
+#[test]
+fn a_lone_aliased_suffix_does_not_wait() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "textures/x/rock_diff.png");
+    assert_waits(job(&plan(d.path()), "rock_diff.png"));
+    let preset = d.path().join("alias.toml");
+    std::fs::write(
+        &preset,
+        "schema_version = 1\nid = \"alias\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n[suffix_aliases]\ndiff = \"d\"\n",
+    )
+    .unwrap();
+    let mut req = request(d.path(), Target::Cs);
+    req.preset_files = vec![preset];
+    let p = plan_req(req);
+    let j = job(&p, "rock_diff.png");
+    assert_does_not_wait(j);
+    assert_ready(j, Subtype::Diffuse);
+}
+
+/// A 16 px BC7 DDS at `<dir>/in/<rel>`.
+fn put_dds(dir: &Path, rel: &str) {
+    use engine::dds::{dds_bytes, level_size, DdsDesc, ResolvedHeader};
+    let p = dir.join("in").join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let desc = DdsDesc {
+        width: 16,
+        height: 16,
+        format: Format::Bc7,
+        srgb: false,
+        header: ResolvedHeader::Dx10,
+    };
+    let levels = vec![vec![0x11; level_size(Format::Bc7, 16, 16)]];
+    std::fs::write(p, dds_bytes(&desc, &levels).unwrap()).unwrap();
+}
+
+/// Note GY4: a kept DDS is never planned, so it never waits. A lone `rock_bump.dds` fills the shader's colour slot by
+/// its name (`map_members`), so its set's map check is the one a lone `rock.dds` gets: SHADER-MISSING-MAP for the
+/// normal, and no SHADER-EXTRA-MAP.
+#[test]
+fn a_lone_kept_dds_keeps_its_map_check() {
+    let map_codes = |name: &str| {
+        let d = tempfile::tempdir().unwrap();
+        put_dds(d.path(), &format!("textures/x/{name}"));
+        let sink = Arc::new(VecSink::default());
+        let rep = Reporter::new(sink.clone(), "unknown-suffix-dds");
+        let p = Engine::new()
+            .unwrap()
+            .plan(request(d.path(), Target::Cs), &rep, &CancelToken::default())
+            .unwrap();
+        assert!(p
+            .skipped
+            .iter()
+            .any(|s| s.path.ends_with(name) && s.code == Some(Code::InDdsSkipped)));
+        sink.take()
+            .iter()
+            .flat_map(|e| match &e.kind {
+                EventKind::SetResolved { warnings, .. } => {
+                    warnings.iter().map(|w| w.code).collect()
+                }
+                _ => vec![],
+            })
+            .filter(|c| matches!(c, Code::ShaderMissingMap | Code::ShaderExtraMap))
+            .collect::<Vec<Code>>()
+    };
+    let bump = map_codes("rock_bump.dds");
+    assert_eq!(bump, map_codes("rock.dds"));
+    assert_eq!(bump, [Code::ShaderMissingMap]);
+}
+
 /// Review Focus 2: `--allow SUG-LOW-CONFIDENCE` has no suggestion to accept on a waiting file.
 #[test]
 fn allow_does_not_convert_a_waiting_file() {

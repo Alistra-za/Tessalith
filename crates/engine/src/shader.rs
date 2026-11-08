@@ -1753,6 +1753,7 @@ mod tests {
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
     }
 

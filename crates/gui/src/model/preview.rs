@@ -921,6 +921,7 @@ mod tests {
                 invert: false,
                 assigned: true,
             }),
+            unknown_suffix: false,
         }
     }
 
