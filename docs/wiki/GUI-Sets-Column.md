@@ -20,7 +20,7 @@ A card's first row has:
 
 Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.
 
-The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` only when the card is too narrow, and always 48 px short of the card's left edge; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
+The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` only when the card is too narrow, and it leaves at least 48 points free on its left; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
 
 | Chip | Meaning |
 |---|---|
@@ -40,7 +40,7 @@ What fits no chip follows in a trailing row of plain thumbnails. Each one has a 
 
 A helper with a badge is not repeated there, unless its badge folded into **+K** or found no free corner.
 
-The open set's card is highlighted. When the column's width changes with one set open, the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name.
+The open set's card is highlighted. When the column's width changes with one set open, the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name. A short name that fits whole in less than 80 points keeps one row.
 
 A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. While you search, a cut title keeps the folder that holds the match (`…/stone/cobble`), so you see why the card is listed. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
 
