@@ -125,6 +125,8 @@ pub struct Docked {
     pub helper: String,
     pub slot: SlotKind,
     pub channel: &'static str,
+    /// The fill itself, for its wording (`fill_text`).
+    pub target: FillTarget,
 }
 
 /// The helpers of the set's members, one entry per reported fill that lands on a chip.
@@ -138,6 +140,7 @@ pub fn docked(model: &AppModel, v: &SetView) -> Vec<Docked> {
                     helper: k.clone(),
                     slot: fill_slot(t)?,
                     channel: fill_channel(t),
+                    target: t,
                 })
             })
         })

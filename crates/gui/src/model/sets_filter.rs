@@ -66,6 +66,13 @@ impl PartialEq for CountsKey {
     }
 }
 
+/// The inputs of a count, read once.
+struct CountBase {
+    views: Arc<Vec<SetView>>,
+    flagged: Arc<bottom::Flagged>,
+    entries: Arc<Vec<crate::sets_doc::SetEntry>>,
+}
+
 #[derive(PartialEq)]
 struct ListKey {
     of: CountsKey,
@@ -159,19 +166,26 @@ impl AppModel {
                 .is_none_or(|s| v.shader.as_ref().map(|p| p.shader) == Some(s))
     }
 
+    /// What every count reads, built once per call that makes several (Note HP).
+    fn count_base(&self) -> CountBase {
+        CountBase {
+            views: sets::views(self),
+            flagged: bottom::flagged(self),
+            entries: self
+                .sets_doc
+                .as_ref()
+                .map(|d| d.entries())
+                .unwrap_or_default(),
+        }
+    }
+
     /// How many sets the list would show with `p` switched on.
-    fn count_with(&self, p: Part) -> usize {
+    fn count_with(&self, base: &CountBase, p: Part) -> usize {
         let f = with_part(&self.sets_filter, p);
         let q = engine::sets::fold_id(f.search.trim());
-        let entries = self
-            .sets_doc
-            .as_ref()
-            .map(|d| d.entries())
-            .unwrap_or_default();
-        let flagged = bottom::flagged(self);
-        sets::views(self)
+        base.views
             .iter()
-            .filter(|v| self.passes(&f, v, &flagged, &entries, &q))
+            .filter(|v| self.passes(&f, v, &base.flagged, &base.entries, &q))
             .count()
     }
 
@@ -183,19 +197,29 @@ impl AppModel {
                 return *c;
             }
         }
+        let base = self.count_base();
         let c = SetCounts {
-            attention: self.count_with(Part::Attention),
-            ready: self.count_with(Part::Ready),
-            no_json: self.count_with(Part::NoJson),
+            attention: self.count_with(&base, Part::Attention),
+            ready: self.count_with(&base, Part::Ready),
+            no_json: self.count_with(&base, Part::NoJson),
         };
         self.sets_filter_cache.borrow_mut().counts = Some((key, self.sets_filter.clone(), c));
         c
     }
 
     /// How many sets the list shows when shader `s` is picked. Uncached: only the open shader popup asks.
-    // shortcut: rebuilds the set views once per shader while the popup is open; cache by revision when set counts reach the thousands.
     pub fn sets_with_shader(&self, s: Shader) -> usize {
-        self.count_with(Part::Shader(s))
+        self.count_with(&self.count_base(), Part::Shader(s))
+    }
+
+    /// `sets_with_shader` for each of `shaders`, reading the views, problems and entries once.
+    // shortcut: one pass over the views per shader each popup frame; cache by revision when set counts reach the thousands.
+    pub fn sets_with_shaders(&self, shaders: &[Shader]) -> Vec<usize> {
+        let base = self.count_base();
+        shaders
+            .iter()
+            .map(|s| self.count_with(&base, Part::Shader(*s)))
+            .collect()
     }
 
     /// Any pill, the shader or search text is on.

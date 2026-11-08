@@ -30,7 +30,7 @@
 - The Sets search box and shader filter now have their own names for screen readers ("Search sets", "Sets shader filter"), and the shader list shows how many sets use each shader (an unused shader is greyed but still pickable).
 - Fixed in the Sets column: opening a set in a narrow window left its card out of view; the "hidden by the Sets filter" line was cut off and now wraps, with **Clear filter** below it; long card titles are cut in the middle so the leaf stays; the "Drop here to start a new set" hint is grey instead of amber.
 - Sets column: a click anywhere free on a card opens the set. The shader combo has its own row at the right of the card, as wide as its value, and a screen reader hears "Shader for <set id>".
-- Helper badges sit on the chip corner, bigger and easier to hit, and every place says a fill the same way ("fills RMAOS R", "fills CNR alpha"). Empty chips and trailing tiles carry their letter or tag bottom-left. The Sets column's minimum width is 133 points, and 4 chips fit a 260-point column.
+- Helper badges sit on the chip corner, bigger and easier to hit, and every place says a fill the same way ("fills RMAOS R", "fills CNR alpha"). Empty chips and trailing tiles carry their letter or tag bottom-left. The Sets column's minimum width is 133 points, and 5 chips fit a 260-point column.
 - Sets column: filter counts are what a click shows (a zero is greyed but works), the list starts at the top when a filter changes, opening a set takes its room from Textures before Sets, a search keeps the matched folder in a cut title, status text is readable in both themes, and the texture settings checkboxes have names.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
 

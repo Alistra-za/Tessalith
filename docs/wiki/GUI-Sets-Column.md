@@ -26,7 +26,7 @@ The **shader** combo has its own row under the first row, at the right, as wide 
 |---|---|
 | Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
 | Dim box with a dimmed letter | An empty slot. |
-| Small thumbnail on the chip's corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits centred on the chip's top-right corner, half outside the chip, and on a filled chip and on an output with no source file of its own, such as an RMAOS built from helpers only. Hover shows the file and its fills line (`eye_rough.png`, "fills RMAOS R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
+| Small thumbnail on the chip's corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits centred on the chip's top-right corner, half outside the chip. A filled chip carries one, and so does an output with no source file of its own, such as an RMAOS built from helpers only. A second helper on the same chip takes the top-left corner. Hover shows the file and its fills line (`eye_rough.png`, "fills RMAOS R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
 | Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
 | Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
 
@@ -54,7 +54,7 @@ Under the heading:
 - the pills *Not ready n*, *Ready n* and *No JSON n*. *Not ready* is every set that is not ready, *No JSON* is a set that writes no JSON;
 - **Filter ▾**, which lists *Any* and the shaders, each with a count ("PBR 2"). It reads **Filter (1) ▾** while one is chosen.
 
-Every number is what clicking it shows: the sets that pass the search, the other pills and the shader, with that click applied. A zero is greyed but still works, and a shader no set uses stays listed, so the list is the same whatever the project holds. A selected pill is painted as usual, zero or not.
+Every number is the sets shown with that pill or shader on: the sets that pass the search and the other filters, plus that one. A selected pill's number is the list you are looking at. A zero is greyed but still works, and a shader no set uses stays listed, so the list is the same whatever the project holds. A selected pill is painted as usual, zero or not.
 
 The filters combine. A filter only hides: the open set and a multi-selection stay selected, the editor and the bulk panel stay, and the heading says "2 selected (1 hidden by filter)".
 

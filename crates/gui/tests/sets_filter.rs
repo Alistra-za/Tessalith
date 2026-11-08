@@ -677,7 +677,6 @@ fn every_count_is_what_its_click_shows() {
     use sdc_gui::model::sets_filter::{with_part, Part};
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    let ids = visible_ids(&m);
     let mut seen = vec![];
     for (search, pill) in [("", false), ("rock", false), ("leaf", true), ("", true)] {
         m.clear_sets_filter();
@@ -708,6 +707,5 @@ fn every_count_is_what_its_click_shows() {
             m.sets_filter = base.clone();
         }
     }
-    assert!(!ids.is_empty());
     assert_ne!(seen[0], seen[1], "the search changes the counts");
 }

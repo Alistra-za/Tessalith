@@ -188,6 +188,12 @@ fn selected_kept_while_hidden(m: &AppModel) -> Result<Option<String>, String> {
 fn pills_match_counts(m: &AppModel) -> Result<Option<String>, String> {
     let f = &m.sets_filter;
     let pills = [f.attention, f.ready, f.no_json];
+    if !m.new_sets_shown().is_empty() {
+        // the list keeps a set made under this filter, which no count includes
+        return Ok(Some(
+            "not checked: a set made under the filter is shown".into(),
+        ));
+    }
     let shown = m.visible_sets().len();
     let c = m.set_counts();
     let (what, want) = match pills.iter().filter(|p| **p).count() {
@@ -211,6 +217,7 @@ fn pills_match_counts(m: &AppModel) -> Result<Option<String>, String> {
         Err(format!("{what} shows {shown} sets but counts {want}"))
     }
 }
+
 /// Compares what a filter shows with what `want` says it should: `Err` names the rows wrongly shown and wrongly
 /// hidden. `Ok(Some(note))` when the filter hides everything or changes nothing, which no row-by-row test notices.
 pub fn filter_matches(

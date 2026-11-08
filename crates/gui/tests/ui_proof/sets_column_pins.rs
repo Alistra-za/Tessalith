@@ -345,25 +345,96 @@ fn the_dock_straddles_each_chips_top_corner() {
     }
 }
 
+/// The badge's drawn 16x16 inside its hit rect.
+fn drawn_badge(h: &crate::app_harness::H, hit: egui::Rect) -> egui::Rect {
+    rect_shapes(h)
+        .into_iter()
+        .map(|r| r.rect)
+        .find(|r| near(*r, 16.0, 16.0) && hit.expand(0.5).contains_rect(*r))
+        .unwrap_or_else(|| panic!("no drawn 16x16 inside {hit:?}"))
+}
+
+/// Note HP: each badge is centred on a top corner of its own chip (named), the first on the right, a second on the
+/// left, and it never covers the chip's painted letter (the letters are bottom-left).
+#[test]
+fn each_badge_sits_on_its_own_chip() {
+    for (w, h_px, open) in [(1400.0, 790.0, false), (1055.0, 770.0, true)] {
+        let resize = resize_line(w, h_px);
+        let mut lines = vec![resize.as_str(), SEARCH];
+        if open {
+            lines.push(r#"{"op":"click","at":{"label":"props/crate"}}"#);
+        }
+        let (_d, h) = crate::replay("helpers", &lines);
+        let (_, packed_name) = packed(&h);
+        let cases = [
+            (
+                "crate_opacity.png, fills D alpha".to_string(),
+                "D, crate.png, filled by crate_opacity.png".to_string(),
+                "D",
+            ),
+            (
+                "crate_roughness.png, fills RMAOS R".to_string(),
+                format!("RMAOS, {packed_name}, filled by crate_roughness.png"),
+                "RMAOS",
+            ),
+            (
+                "crate_roughness.png, fills CNR alpha".to_string(),
+                "CNR, crate_cnr.png, filled by crate_roughness.png".to_string(),
+                "CNR",
+            ),
+        ];
+        for (badge, chip, letter) in cases {
+            let at = format!("{badge} at {w}x{h_px}");
+            let (hit, c) = (one(&h, &badge), one(&h, &chip));
+            let b = drawn_badge(&h, hit);
+            assert!(
+                (b.center() - c.right_top()).abs().max_elem() <= 0.5,
+                "{at}: {b:?} is centred on the top-right corner of {c:?}"
+            );
+            for (t, r) in texts(&h) {
+                if t == letter && c.contains_rect(r.shrink(0.5)) {
+                    assert!(!r.intersects(b), "{at}: the letter {r:?} meets {b:?}");
+                }
+            }
+        }
+    }
+    // a second helper on one chip takes the top-left corner
+    let (_d, h) = crate::replay("demo", &[]);
+    let chip = one(
+        &h,
+        "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
+    );
+    let first = drawn_badge(&h, one(&h, "iron_bump.png, fills N layer"));
+    let second = drawn_badge(&h, one(&h, "iron_detailnorm.png, fills N layer"));
+    assert!((first.center() - chip.right_top()).abs().max_elem() <= 0.5);
+    assert!((second.center() - chip.left_top()).abs().max_elem() <= 0.5);
+}
+
 #[test]
 fn a_selected_badge_has_a_two_pixel_selection_stroke() {
-    let (_d, mut h) = crate::replay("helpers", &[SEARCH]);
-    let badge = one(&h, "crate_roughness.png, fills RMAOS R");
-    h.event(egui::Event::PointerMoved(badge.center()));
-    h.run_steps(1);
-    for pressed in [true, false] {
-        press(&mut h, badge.center(), pressed);
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        let badge = one(&h, "crate_roughness.png, fills RMAOS R");
+        h.event(egui::Event::PointerMoved(badge.center()));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            press(&mut h, badge.center(), pressed);
+        }
+        crate::app_harness::settle(&mut h, 6);
+        let accent = h.ctx.global_style().visuals.selection.stroke.color;
+        let badge = one(&h, "crate_roughness.png, fills RMAOS R");
+        let hit = rect_shapes(&h).into_iter().any(|r| {
+            near(r.rect, 16.0, 16.0)
+                && badge.expand(0.5).contains_rect(r.rect)
+                && r.stroke.width == 2.0
+                && r.stroke.color == accent
+        });
+        assert!(
+            hit,
+            "at {w}x{h_px}: a 2 px selection stroke on the selected badge"
+        );
     }
-    crate::app_harness::settle(&mut h, 6);
-    let accent = h.ctx.global_style().visuals.selection.stroke.color;
-    let badge = one(&h, "crate_roughness.png, fills RMAOS R");
-    let hit = rect_shapes(&h).into_iter().any(|r| {
-        near(r.rect, 16.0, 16.0)
-            && badge.expand(0.5).contains_rect(r.rect)
-            && r.stroke.width == 2.0
-            && r.stroke.color == accent
-    });
-    assert!(hit, "a 2 px selection stroke on the selected badge");
 }
 
 #[test]
@@ -1106,20 +1177,22 @@ fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
 
 #[test]
 fn the_status_pill_text_reads() {
-    let (_d, mut h) = crate::replay("demo", &[]);
-    let fill = h.ctx.global_style().visuals.panel_fill;
-    // None is the frame's default text colour (gray 140 today).
-    let c = text_colour(&h, "vanilla").unwrap_or(egui::Color32::from_gray(140));
-    for bg in [fill, egui::Color32::from_gray(60)] {
-        let r = contrast(c, bg);
-        assert!(r >= 4.5, "dark: {c:?} on {bg:?} is {r}:1");
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
+        let fill = h.ctx.global_style().visuals.panel_fill;
+        let c = text_colour(&h, "vanilla").expect("painted");
+        for bg in [fill, egui::Color32::from_gray(60)] {
+            let r = contrast(c, bg);
+            assert!(r >= 4.5, "dark at {w}x{h_px}: {c:?} on {bg:?} is {r}:1");
+        }
+        h.ctx.set_visuals(egui::Visuals::light());
+        crate::app_harness::settle(&mut h, 3);
+        let c = text_colour(&h, "vanilla").expect("painted");
+        let fill = h.ctx.global_style().visuals.panel_fill;
+        let r = contrast(c, fill);
+        assert!(r >= 4.5, "light at {w}x{h_px}: {c:?} on {fill:?} is {r}:1");
     }
-    h.ctx.set_visuals(egui::Visuals::light());
-    crate::app_harness::settle(&mut h, 3);
-    let c = text_colour(&h, "vanilla").unwrap_or(h.ctx.global_style().visuals.text_color());
-    let fill = h.ctx.global_style().visuals.panel_fill;
-    let r = contrast(c, fill);
-    assert!(r >= 4.5, "light: {c:?} on {fill:?} is {r}:1");
 }
 
 /// Every drawn card: (its rect, its shader combo's rect, name, value).
@@ -1199,6 +1272,74 @@ fn the_card_combo_is_named_and_stays_in_the_right_half() {
     }
 }
 
+/// The text a painted Text shape with job text `text` actually shows (its galley rows, joined).
+fn shown_text(h: &crate::app_harness::H, text: &str) -> String {
+    fn find(s: &egui::Shape, text: &str) -> Option<String> {
+        match s {
+            egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text)),
+            egui::Shape::Text(t) if t.galley.job.text == text => {
+                Some(t.galley.rows.iter().map(|r| r.text()).collect())
+            }
+            _ => None,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .find_map(|c| find(&c.shape, text))
+        .unwrap_or_else(|| panic!("no painted {text:?}"))
+}
+
+/// Review Focus 5: at `SETS_MIN` the stonewall card's combo is cut, and keeps its whole value in AccessKit and on
+/// hover, also on a read-only card (where the hover is the disabled one).
+#[test]
+fn a_cut_combo_keeps_its_value_in_access_and_on_hover() {
+    const VALUE: &str = "Environment Map (auto)";
+    for read_only in [false, true] {
+        let (_d, mut h) = crate::replay_with(
+            "demo",
+            |h| {
+                h.ctx.global_style_mut(|s| {
+                    s.interaction.tooltip_delay = 0.0;
+                    s.interaction.show_tooltips_only_when_still = false;
+                });
+                if read_only {
+                    let bad = tempfile::tempdir().unwrap();
+                    std::fs::write(bad.path().join("sdc-project.toml"), "not = = toml\n").unwrap();
+                    h.state_mut().model.sets_doc =
+                        Some(sdc_gui::sets_doc::SetsDoc::open(bad.path()));
+                    assert!(h.state().model.sets_doc.as_ref().unwrap().read_only());
+                }
+            },
+            &[r#"{"op":"type","text":"stonewall","at":{"placeholder":"Search sets"}}"#],
+        );
+        sets_width(&mut h, SETS_MIN);
+        let at = format!("read_only {read_only}");
+        let (card, combo) = stonewall(&h);
+        let node = h
+            .query_all_by_role_and_label(Role::ComboBox, "Shader for architecture/stone/stonewall")
+            .next()
+            .unwrap_or_else(|| panic!("{at}: the named combo"));
+        assert_eq!(
+            node.accesskit_node().value().as_deref(),
+            Some(VALUE),
+            "{at}"
+        );
+        assert!(combo.min.x >= card.center().x - 0.5, "{at}: right half");
+        assert!(
+            painted(&h, VALUE).1 && shown_text(&h, VALUE).ends_with('…'),
+            "{at}: the painted value is elided"
+        );
+        assert!(h.query_all_by_label_contains(VALUE).next().is_none());
+        h.event(egui::Event::PointerMoved(combo.center()));
+        h.run_steps(6);
+        assert!(
+            h.query_all_by_label_contains(VALUE).next().is_some(),
+            "{at}: the hover shows the whole value"
+        );
+    }
+}
+
 /// Releases and presses nothing but the pointer at `pos`, then settles.
 fn tap(h: &mut crate::app_harness::H, pos: egui::Pos2) {
     h.event(egui::Event::PointerMoved(pos));
@@ -1207,17 +1348,38 @@ fn tap(h: &mut crate::app_harness::H, pos: egui::Pos2) {
     crate::app_harness::settle(h, 3);
 }
 
+/// The stonewall card and its shader combo, as drawn.
+fn stonewall(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
+    let card = one_node(h, "Set architecture/stone/stonewall, position ");
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| n.rect())
+        .find(|r| card.contains_rect(*r))
+        .expect("the stonewall card's combo");
+    (card, combo)
+}
+
+fn assert_stonewall_opens(h: &crate::app_harness::H, at: &str) {
+    let Selection::Set(key) = &h.state().model.selection else {
+        panic!(
+            "{at}: a set is selected, got {:?}",
+            h.state().model.selection
+        );
+    };
+    assert!(key.ends_with("architecture/stone/stonewall"), "{at}: {key}");
+    assert!(!egui::Popup::is_any_open(&h.ctx), "{at}: no popup opened");
+}
+
+/// SC1: the old combo spanned the card, so a click at the card's centre x on the combo row opened its popup.
 #[test]
 fn a_click_on_a_cards_middle_opens_the_set() {
-    let (_d, h) = crate::replay(
-        "demo",
-        &[
-            r#"{"op":"click","at":{"label":"Set actors/body, position 1 of 9"}}"#,
-            r#"{"op":"settle","frames":3}"#,
-            r#"{"op":"expect","fact":"/selection","equals":"set:actors/body"}"#,
-        ],
-    );
-    assert!(!egui::Popup::is_any_open(&h.ctx), "no popup opened");
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
+        let (card, combo) = stonewall(&h);
+        tap(&mut h, egui::pos2(card.center().x, combo.center().y));
+        assert_stonewall_opens(&h, &format!("at {w}x{h_px}"));
+    }
 }
 
 /// The rect of the one node whose label starts with `prefix`.
@@ -1238,27 +1400,43 @@ fn one_node(h: &crate::app_harness::H, prefix: &str) -> egui::Rect {
 
 #[test]
 fn a_click_left_of_the_combo_opens_the_set() {
-    let (_d, mut h) = crate::replay("demo", &[]);
-    let card = one_node(&h, "Set architecture/stone/stonewall, position ");
-    let combo = h
-        .query_all_by_role(Role::ComboBox)
-        .map(|n| n.rect())
-        .find(|r| card.contains_rect(*r))
-        .expect("the stonewall card's combo");
-    tap(&mut h, egui::pos2(card.left() + 12.0, combo.center().y));
-    let Selection::Set(key) = &h.state().model.selection else {
-        panic!("a set is selected, got {:?}", h.state().model.selection);
-    };
-    assert!(key.ends_with("architecture/stone/stonewall"), "{key}");
-    assert!(!egui::Popup::is_any_open(&h.ctx), "no popup opened");
+    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str()]);
+        let (card, combo) = stonewall(&h);
+        tap(&mut h, egui::pos2(card.left() + 12.0, combo.center().y));
+        assert_stonewall_opens(&h, &format!("at {w}x{h_px}"));
+    }
 }
 
+/// A top badge keeps its whole 20 px hit, except the one under the shader combo, which the combo (8 px above the
+/// chips) cuts to the 18 px floor (HP1).
 #[test]
-fn a_top_badge_is_not_trimmed_by_the_combo() {
-    let (_d, h) = crate::replay("helpers", &[resize_line(1400.0, 790.0).as_str(), SEARCH]);
-    let c = crate_card(&h);
-    let tall = c.badges.iter().filter(|b| b.height() >= 19.5).count();
-    assert!(tall >= 1, "a badge keeps its 20 px hit: {:?}", c.badges);
+fn a_top_badge_keeps_its_hit_except_under_the_combo() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        let c = crate_card(&h);
+        // a top badge is centred on the first chip row's top edge; a lower row's is cut to 18 by the chip above
+        let top = c.chips.iter().map(|r| r.top()).fold(f32::MAX, f32::min);
+        let tops: Vec<_> = c
+            .badges
+            .iter()
+            .filter(|b| (b.center().y - top).abs() <= 2.0)
+            .collect();
+        assert!(!tops.is_empty(), "at {w}x{h_px}: top badges are drawn");
+        for b in tops {
+            let under_combo = c
+                .others
+                .iter()
+                .any(|o| o.min.x < b.max.x && b.min.x < o.max.x);
+            let least = if under_combo { 17.5 } else { 19.5 };
+            assert!(
+                b.height() >= least,
+                "at {w}x{h_px}: a top badge keeps its hit (combo above: {under_combo}): {b:?}"
+            );
+        }
+    }
 }
 
 /// Note HP SC5: each pill not yet on, clicked, shows as many sets as its name says; clicking again restores the list.
@@ -1310,6 +1488,20 @@ fn each_pill_shows_exactly_its_count() {
         one(&h, "Ready 0");
         let weak = h.ctx.global_style().visuals.weak_text_color();
         assert_eq!(text_colour(&h, "Ready 0"), Some(weak), "{at}: zero is weak");
+        assert_ne!(
+            text_colour(&h, "Not ready 1"),
+            Some(weak),
+            "{at}: a non-zero pill is not weak"
+        );
+        let pos = one(&h, "Ready 0").center();
+        tap(&mut h, pos);
+        assert_ne!(
+            text_colour(&h, "Ready 0"),
+            Some(weak),
+            "{at}: a selected zero pill is not weak"
+        );
+        let pos = one(&h, "Ready 0").center();
+        tap(&mut h, pos);
         pills_show_their_counts(&mut h, &at);
 
         let (_d, mut h) = crate::replay(
@@ -1547,7 +1739,7 @@ fn labels_sit_bottom_left_on_every_tile() {
         // an empty chip's letter sits where the D chip's does, dimmed
         let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
         let at = format!("cobble at {w}x{h_px}");
-        let weak = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
+        let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
         // the letter reads on the chip's own fill in both themes
         for v in [egui::Visuals::dark(), egui::Visuals::light()] {
             let dim = sdc_gui::ui::sets_column::dim_letter_colour(&v);
@@ -1583,7 +1775,7 @@ fn labels_sit_bottom_left_on_every_tile() {
             let letter = any_text(&h, chip);
             let (off, colour, _) = tile_label(&h, chip, &letter);
             same_offset(off, d_off, &format!("{at}, empty {letter}"));
-            assert_eq!(colour, weak, "{at}, empty {letter}: weak text colour");
+            assert_eq!(colour, dim, "{at}, empty {letter}: the dim letter colour");
         }
         // a trailing-row tile's tag, in the same corner
         for (q, file, tag) in [
@@ -1611,6 +1803,40 @@ fn labels_sit_bottom_left_on_every_tile() {
     }
 }
 
+/// Note HP: an empty chip is named "<letter>, empty", and no Label inside a set card has an empty name.
+#[test]
+fn empty_chips_are_named_and_no_card_label_is_nameless() {
+    for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
+        let resize = resize_line(w, h_px);
+        let (_d, h) = crate::replay(
+            "demo",
+            &[
+                resize.as_str(),
+                r#"{"op":"type","text":"cobble","at":{"placeholder":"Search sets"}}"#,
+            ],
+        );
+        let at = format!("at {w}x{h_px}");
+        let card = one_node(&h, "Set architecture/stone/cobble, ");
+        let labels: Vec<String> = h
+            .query_all_by_role(Role::Label)
+            .filter(|n| card.contains_rect(n.rect()))
+            // a Label's text is its AccessKit value
+            .map(|n| {
+                let a = n.accesskit_node();
+                a.label().or_else(|| a.value()).unwrap_or_default()
+            })
+            .collect();
+        assert!(
+            labels.iter().all(|l| !l.is_empty()),
+            "{at}: nameless Label in the card: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|l| l == "G, empty"),
+            "{at}: an empty G chip, got {labels:?}"
+        );
+    }
+}
+
 /// Note HP (M1): the texture settings checkboxes are named by their row, none has an empty name.
 #[test]
 fn the_texture_settings_checkboxes_have_their_row_names() {
@@ -1625,6 +1851,8 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
             ],
         );
         let at = format!("at {w}x{h_px}");
+        // The RMAOS settings panel draws two checkbox rows, "Exact opaque alpha" and "Mipmaps" (measured); the two
+        // column toggles ("Textures column", "Sets column") are the other CheckBoxes. All must have a name.
         let named = h
             .query_all_by_role_and_label(Role::CheckBox, "Exact opaque alpha")
             .count();

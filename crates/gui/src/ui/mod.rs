@@ -197,7 +197,7 @@ pub fn draw_with_scan(
         column_panel(
             ui,
             Column::Textures,
-            380.0,
+            TEXTURES_W,
             columns::TEXTURES_MIN..=textures_max,
             model,
             |ui, model| {
@@ -543,6 +543,9 @@ fn column_panel(
         });
     }
 }
+
+/// The Textures column's width before the user drags it.
+const TEXTURES_W: f32 = 380.0;
 
 /// The Sets column's width before the user drags it.
 const SETS_W: f32 = 260.0;

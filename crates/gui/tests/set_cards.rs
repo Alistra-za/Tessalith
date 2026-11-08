@@ -181,11 +181,13 @@ fn slot_chips_are_labelled_and_empty_ones_are_dim() {
                     .starts_with(&prefix)
             })
             .count();
-        let n = on_card(&h, l).len() + named;
+        // an empty chip is named "<letter>, empty" (Note HP)
+        let empty = format!("{l}, empty");
+        let n = on_card(&h, l).len() + on_card(&h, &empty).len() + named;
         assert_eq!(n, 1, "one {l:?} chip on rock01's card");
     }
     assert!(h.query_by_label_contains("Height _p (empty)").is_none());
-    on_card(&h, "P")[0].hover();
+    on_card(&h, "P, empty")[0].hover();
     h.run();
     h.run();
     h.get_by_label("Height _p (empty)");

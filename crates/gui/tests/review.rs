@@ -637,9 +637,34 @@ fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
     let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom-review"))
         .expect("the Review panel")
         .outer_rect;
+    // The Sets list scrolls under this panel: a card or the drop hint scrolled out of view still has a box in the
+    // panel's rect once the cards are tall enough (Note HP). Everything under the Sets column's own node is left out.
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+        .expect("the Sets column")
+        .outer_rect;
+    let search = h
+        .root()
+        .children_recursive()
+        .find(|n| n.accesskit_node().placeholder() == Some("Search sets"))
+        .expect("the Search sets box");
+    // Containers have no box of their own: the column's node is the topmost ancestor of the search box whose
+    // descendants all lie inside the Sets column's width.
+    let inside = |n: &egui_kittest::Node<'_>| {
+        n.children_recursive()
+            .filter_map(|c| c.accesskit_node().bounding_box())
+            .all(|b| b.x0 >= f64::from(sets.min.x) - 2.0 && b.x1 <= f64::from(sets.max.x) + 2.0)
+    };
+    let column = std::iter::successors(search.parent(), |n| n.parent())
+        .take_while(|n| inside(n))
+        .last()
+        .expect("the Sets column's node");
+    let in_sets: std::collections::HashSet<_> = std::iter::once(column.accesskit_node().id())
+        .chain(column.children_recursive().map(|n| n.accesskit_node().id()))
+        .collect();
     let mut out: Vec<String> = h
         .root()
         .children_recursive()
+        .filter(|n| !in_sets.contains(&n.accesskit_node().id()))
         .filter(|n| {
             n.accesskit_node().bounding_box().is_some_and(|b| {
                 b.x0 >= f64::from(panel.min.x)
@@ -654,9 +679,6 @@ fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
             a.label().or_else(|| a.value())
         })
         .filter(|l| !l.is_empty())
-        // The Sets list scrolls under this panel: its drop hint, scrolled out of view, still has a box in the
-        // panel's rect once the cards are tall enough (Note HP).
-        .filter(|l| l != "Drop here to start a new set")
         .map(|l| l.replace(skip, "<tmp>"))
         .collect();
     out.sort();
