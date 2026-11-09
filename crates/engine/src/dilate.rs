@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn push_pull_blends_all_four_channels_between_two_regions() {
         let mut img = Rgba32F::new(8, 1, [0.0; 4]);
-        let (a, b) = ([0.1, 0.2, 0.3, 0.4], [0.9, 0.5, 0.6, 0.8]);
+        let (a, b) = ([0.1, 0.3, 0.5, 0.7], [0.2, 0.4, 0.6, 0.8]);
         *img.at_mut(0, 0) = a;
         *img.at_mut(7, 0) = b;
         let valid = mask_where(&img, |x, _| x == 0 || x == 7);
@@ -264,10 +264,12 @@ mod tests {
             );
             assert!(img.px[3][c] > a[c] && img.px[3][c] < b[c], "ch {c}");
         }
-        // the channels stay apart: no channel is copied into another
-        let mut mid = img.px[3];
-        mid.sort_by(f32::total_cmp);
-        assert!(mid.windows(2).all(|w| w[1] - w[0] > 0.01), "{mid:?}");
+        // channel gaps are 0.2 at both ends, so they are 0.2 at every blend weight: no channel leaked into another
+        let m = img.px[3];
+        assert!(
+            m.windows(2).all(|w| (w[1] - w[0] - 0.2).abs() < 1e-4),
+            "{m:?}"
+        );
     }
 
     #[test]

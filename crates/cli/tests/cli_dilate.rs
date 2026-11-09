@@ -83,10 +83,28 @@ fn dir() -> tempfile::TempDir {
 }
 
 #[test]
-fn masked_texels_stay_bit_exact_and_every_other_texel_is_filled() {
+fn masked_texels_stay_bit_exact_for_a_data_map() {
+    bit_exact("foo_p.png", &[1, 2, 3, 4]);
+}
+
+#[test]
+fn masked_texels_stay_bit_exact_for_a_colour_map() {
+    // sRGB decode then encode is not the identity at 16 bits, so only a never-touched masked texel passes
+    bit_exact("foo_d.png", &[1, 2, 3, 4]);
+    bit_exact("foo.png", &[3, 4]);
+}
+
+#[test]
+fn masked_texels_stay_bit_exact_for_a_normal_map() {
+    // random codes are not unit vectors, so a renormalised masked texel would change
+    bit_exact("foo_n.png", &[3, 4]);
+}
+
+/// Masked texels equal the input code for code and every other texel is filled, at 8 and 16 bits.
+fn bit_exact(name: &str, chans: &[u8]) {
     const N: u32 = 16;
     for depth in [8u8, 16] {
-        for ch in 1u8..=4 {
+        for &ch in chans {
             let d = dir();
             let max = if depth == 8 { 255u32 } else { 65535 };
             let on = |x: u32, y: u32| x < 6 && y < 9;
@@ -108,13 +126,13 @@ fn masked_texels_stay_bit_exact_and_every_other_texel_is_filled() {
             codes[0] = max as u16;
             let last = codes.len() - 1;
             codes[last.min(1)] = 1;
-            let src = d.path().join("foo_p.png");
+            let src = d.path().join(name);
             write_png(&src, N, N, ch, depth, &codes);
             write_mask(&d.path().join("foo_matid.png"), N, N, on);
             let (code, out, err) = run(&[&s(&src)]);
-            assert_eq!(code, 0, "{ch}ch {depth}bit: {err}");
+            assert_eq!(code, 0, "{name} {ch}ch {depth}bit: {err}");
             assert!(out.contains("wrote"), "{out}");
-            let (c2, d2, got) = read_png(&d.path().join("dilated").join("foo_p.png"));
+            let (c2, d2, got) = read_png(&d.path().join("dilated").join(name));
             assert_eq!((c2, d2), (ch, depth));
             assert_eq!(got.len(), codes.len());
             for t in 0..(N * N) as usize {
@@ -131,6 +149,51 @@ fn masked_texels_stay_bit_exact_and_every_other_texel_is_filled() {
                         "{ch}ch {depth}bit texel {x},{y} not filled: {b:?}"
                     );
                 }
+            }
+        }
+    }
+}
+
+/// A TGA (8-bit RGB) and a TIFF (16-bit RGB) go through the same path and come out as PNG of the same depth.
+#[test]
+fn tga_and_tiff_inputs_are_filled_and_masked_texels_kept() {
+    let d = dir();
+    let on = |x: u32, _: u32| x < 3;
+    let mut seed = 99u32;
+    for (name, depth) in [("a_p.tga", 8u8), ("b_p.tif", 16)] {
+        let max = if depth == 8 { 255u32 } else { 65535 };
+        let codes: Vec<u16> = (0..8 * 8 * 3)
+            .map(|i| {
+                if on(i as u32 / 3 % 8, 0) {
+                    (1 + rng(&mut seed) % max) as u16
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let bytes: Vec<u8> = if depth == 8 {
+            codes.iter().map(|&c| c as u8).collect()
+        } else {
+            codes.iter().flat_map(|c| c.to_ne_bytes()).collect()
+        };
+        let ct = if depth == 8 {
+            image::ColorType::Rgb8
+        } else {
+            image::ColorType::Rgb16
+        };
+        image::save_buffer(d.path().join(name), &bytes, 8, 8, ct).unwrap();
+        let stem = &name[..1];
+        write_mask(&d.path().join(format!("{stem}_matid.png")), 8, 8, on);
+        let (code, _, err) = run(&[&s(&d.path().join(name))]);
+        assert_eq!(code, 0, "{name}: {err}");
+        let (ch, dp, got) = read_png(&d.path().join("dilated").join(format!("{stem}_p.png")));
+        assert_eq!((ch, dp), (3, depth), "{name}");
+        for t in 0..64usize {
+            let (a, b) = (&codes[t * 3..][..3], &got[t * 3..][..3]);
+            if on(t as u32 % 8, 0) {
+                assert_eq!(a, b, "{name} texel {t}");
+            } else {
+                assert!(b.iter().all(|&v| v > 0), "{name} texel {t} not filled");
             }
         }
     }

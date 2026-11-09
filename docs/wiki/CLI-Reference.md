@@ -417,7 +417,7 @@ The mask for `rock_n.png` is `rock_matid.png` (or `.tga`, `.tif`, `.tiff`), then
 
 How the fill treats the map depends on the suffix, as Tessalith reads it. Colour maps are filled in linear light. Normal maps are filled as stored and the filled texels renormalised to unit length. Everything else is filled as stored, and so is a name Tessalith can't place (`rock_x`); the output line says so. Alpha is always filled as data.
 
-Files named `*_matid.*` or `*_uvmask.*`, and anything inside a `dilated` folder, are never inputs. Inputs are 8- and 16-bit PNG, TGA and TIFF. EXR, HDR and 32-bit TIFF are refused. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
+Files named `*_matid.*` or `*_uvmask.*`, and any input with a folder named `dilated` in its path, are never inputs. Inputs are 8- and 16-bit PNG, TGA and TIFF. EXR, HDR and 32-bit TIFF are refused. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
 
 ```powershell
 sdc dilate textures\rock_n.png
