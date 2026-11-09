@@ -37,6 +37,10 @@ pub struct GuiSettings {
     /// Note HC4: the kinds of Problems row a user hid, by project root (lower case, `/`): code names.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub problems_hidden: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// Note HF4: the set groups a user collapsed, by project root and group name (`model::input_name::match_key`). A
+    /// group that is open is not stored.
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub group_collapsed: std::collections::BTreeSet<String>,
 }
 
 /// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on.

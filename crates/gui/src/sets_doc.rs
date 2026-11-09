@@ -3,6 +3,7 @@
 //! read-only (DECISIONS P8); `sdc.toml` editing is unaffected.
 use crate::model::cm_json::{block_of as cm_block_of, CmBlock};
 use crate::model::cs_pbr::{self, block_of, field, fields, CsBlock, Kind, Template};
+use crate::model::set_groups::{GroupTarget, SetGroup};
 use crate::pgp::settings::Settings;
 use crate::project::{
     dotted_table, item_json, json_to_toml, set_value, sub_table, toml_to_json, SaveError, TomlFile,
@@ -18,6 +19,7 @@ use toml_edit::{Array, ArrayOfTables, Item, Table, TableLike, Value};
 
 pub const FILE_NAME: &str = "sdc-project.toml";
 const GENERATED: &str = "generated";
+const GROUPS: &str = "groups";
 
 /// `json_to_toml` that also writes objects, as nested inline tables; `null` members are dropped.
 fn json_to_toml_deep(v: &Json) -> Option<Value> {
@@ -635,6 +637,123 @@ impl SetsDoc {
         self.set_project("order", Some(Value::Array(arr)));
     }
 
+    /// Note HF4: the `[[groups]]` tables, in file order. A table with no name is skipped, a repeated name (ignoring
+    /// case) keeps its first table.
+    pub fn groups(&self) -> Vec<SetGroup> {
+        let mut out: Vec<SetGroup> = vec![];
+        let tables = self
+            .f
+            .doc
+            .get(GROUPS)
+            .and_then(Item::as_array_of_tables)
+            .into_iter()
+            .flatten();
+        for t in tables {
+            let Some(name) = t.get("name").and_then(Item::as_str) else {
+                continue;
+            };
+            if out.iter().any(|g| same_id(&g.name, name)) {
+                continue;
+            }
+            out.push(SetGroup {
+                name: name.to_string(),
+                sets: strings(t.get("sets")),
+                excluded: t.get("excluded").and_then(Item::as_bool).unwrap_or(false),
+            });
+        }
+        out
+    }
+
+    /// Note HF4: store `groups` as the `[[groups]]` tables (none left: the key goes). An unchanged list is no edit.
+    /// A group with no sets is dropped: a group goes with its last set.
+    fn write_groups(&mut self, groups: &[SetGroup]) {
+        let groups: Vec<&SetGroup> = groups.iter().filter(|g| !g.sets.is_empty()).collect();
+        let current = self.groups();
+        if self.read_only()
+            || (current.len() == groups.len() && current.iter().zip(&groups).all(|(a, b)| a == *b))
+        {
+            return;
+        }
+        let mut tables = ArrayOfTables::new();
+        for g in groups {
+            let mut t = Table::new();
+            t.insert("name", toml_edit::value(g.name.as_str()));
+            let mut arr = Array::new();
+            for s in &g.sets {
+                arr.push(s.as_str());
+            }
+            t.insert("sets", toml_edit::value(arr));
+            if g.excluded {
+                t.insert("excluded", toml_edit::value(true));
+            }
+            tables.push(t);
+        }
+        if tables.is_empty() {
+            self.f.doc.remove(GROUPS);
+        } else {
+            self.f.doc.insert(GROUPS, Item::ArrayOfTables(tables));
+        }
+        self.f.touch();
+    }
+
+    /// Note HF4: put each of `ids` in the group `target` (`None`: in none), after taking it out of the group it was in.
+    /// A group left with no sets goes. The caller has checked the target (`Existing` exists, `New` is unused).
+    pub fn move_to_group(&mut self, ids: &[String], target: &GroupTarget) {
+        let mut groups = self.groups();
+        for g in &mut groups {
+            g.sets.retain(|s| !ids.iter().any(|i| same_id(i, s)));
+        }
+        match target {
+            GroupTarget::None => {}
+            GroupTarget::Existing(n) => {
+                if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, n)) {
+                    g.sets.extend(ids.iter().cloned());
+                }
+            }
+            GroupTarget::New(n) => groups.push(SetGroup {
+                name: n.clone(),
+                sets: ids.to_vec(),
+                excluded: false,
+            }),
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: rename group `old` to `new`; the caller has checked that `new` is free.
+    pub fn rename_group(&mut self, old: &str, new: &str) {
+        let mut groups = self.groups();
+        if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, old)) {
+            g.name = new.to_string();
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: remove group `name`; its sets stay.
+    pub fn ungroup(&mut self, name: &str) {
+        let mut groups = self.groups();
+        groups.retain(|g| !same_id(&g.name, name));
+        self.write_groups(&groups);
+    }
+
+    pub fn set_group_excluded(&mut self, name: &str, on: bool) {
+        let mut groups = self.groups();
+        if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, name)) {
+            g.excluded = on;
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: set `from` is now `to` in every group (a rename carries membership, as `order` does).
+    fn rename_in_groups(&mut self, from: &str, to: &str) {
+        let mut groups = self.groups();
+        for s in groups.iter_mut().flat_map(|g| g.sets.iter_mut()) {
+            if same_id(s, from) {
+                *s = to.to_string();
+            }
+        }
+        self.write_groups(&groups);
+    }
+
     /// Note HF1: the textures in no set (`[project] no_set`, `[files]`-style keys): not on a card, never written.
     pub fn no_set(&self) -> Vec<String> {
         strings(self.f.doc.get("project").and_then(|p| p.get("no_set")))
@@ -897,6 +1016,8 @@ impl SetsDoc {
         for f in files {
             self.set_no_set(f, true);
         }
+        // Note HF4: the set leaves its group in the same step; a group left with no sets goes.
+        self.move_to_group(&[id.to_string()], &GroupTarget::None);
     }
 
     /// Rename set `from` to `to`. A created set just changes its id; an automatic set records `renamed_from`. Other
@@ -940,6 +1061,7 @@ impl SetsDoc {
                 }
             }
         }
+        self.rename_in_groups(from, to);
         self.f.touch();
     }
 
@@ -973,6 +1095,12 @@ impl SetsDoc {
             self.rename_set(from, to);
             self.table_mut(to).remove("renamed_from");
             self.f.touch();
+        } else if !entries
+            .iter()
+            .any(|e| same_id(&e.id, from) || same_id(&e.id, to))
+        {
+            // Note HF4: a set that is only in a group has no entry to move; its place in the group follows.
+            self.rename_in_groups(from, to);
         }
     }
 

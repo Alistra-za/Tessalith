@@ -45,3 +45,14 @@ The list is `no_set` under `[project]` in `sdc-project.toml`. An older `remove` 
 ## Where set edits are saved
 
 Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. What `sdc convert` does with this file: [Review and Export](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits).
+
+Set groups are one `[[groups]]` table each. `sets` holds set ids, like `[project] order`, and `excluded` is only there while it's `true`:
+
+```toml
+[[groups]]
+name = "Armor"
+sets = ["armor/steel", "armor/iron"]
+excluded = true
+```
+
+A group sits where its first set sits in the column, and its other sets follow it, in order. Names are unique, upper or lower case alike. A set with no card (a lone file waiting for a type, or a set whose files are all in no set) isn't shown or counted in its group, and being in a group never gives it a card. Whether a group is collapsed is kept per project in `gui.toml`, not in this file.

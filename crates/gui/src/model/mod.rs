@@ -40,6 +40,7 @@ mod reencode;
 pub mod rename;
 pub mod review;
 pub mod sections;
+pub mod set_groups;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;

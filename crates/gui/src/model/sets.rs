@@ -866,6 +866,11 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         }
     }
     sort_by_saved_order(&mut views, &order);
+    // Note HF4: a group's members come straight after its first member, so `index`, Move up, Move down and Move to
+    // see what is on screen.
+    if let Some(d) = m.sets_doc.as_ref() {
+        super::set_groups::pull_groups(&mut views, &d.groups());
+    }
     // Entry data: created flag, settings, missing members, borrowed slots.
     let own_slots: Vec<(String, BTreeMap<SlotKind, SlotFill>)> = views
         .iter()
@@ -2540,16 +2545,24 @@ impl AppModel {
         if !self.sets_editable() {
             return false;
         }
-        let mut ids: Vec<String> = set_views(self).into_iter().map(|v| v.id).collect();
-        let Some(from) = ids.iter().position(|i| same_id(i, id)) else {
+        let before: Vec<String> = set_views(self).into_iter().map(|v| v.id).collect();
+        let Some(from) = before.iter().position(|i| same_id(i, id)) else {
             return false;
         };
-        let moved = ids.remove(from);
-        let to = to.min(ids.len());
-        if to == from {
+        // Note HF4: the first member of a group moves its whole block, as the column shows it; any other set moves
+        // alone, and one dropped inside another group's block lands after the block (the view order pulls it there).
+        let block = self
+            .groups()
+            .into_iter()
+            .find(|g| g.sets.first().is_some_and(|f| same_id(f, id)))
+            .map_or_else(|| vec![before[from].clone()], |g| g.sets);
+        let mut ids = before.clone();
+        ids.retain(|i| !block.iter().any(|b| same_id(b, i)));
+        let at = to.min(ids.len());
+        ids.splice(at..at, block);
+        if ids == before {
             return false;
         }
-        ids.insert(to, moved);
         self.edit_docs("Reorder sets", None, true, move |_, s| s.set_order(&ids));
         true
     }
