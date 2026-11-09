@@ -4,6 +4,7 @@ use super::fields::{
     all_fields, encoding_options, field_view, filter_option_lock, hidden_reason, views_of,
     weighting_option_lock, FieldView, EDGE_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD, WEIGHTING,
 };
+use super::set_groups::GroupTarget;
 use super::sets::{
     engine_inputs, game_path_in, locked_items, member_game_path, slot_gives, slot_of, SlotCommand,
     SlotKind, NOTHING, SLOT_LOCKED,
@@ -143,7 +144,7 @@ impl AppModel {
     }
 
     /// The keys of the sets the column shows, in display order (R17: the Sets filter applied).
-    fn set_order(&self) -> Vec<String> {
+    pub(super) fn set_order(&self) -> Vec<String> {
         let views = super::sets::views(self);
         self.visible_sets()
             .iter()
@@ -971,6 +972,15 @@ pub enum MenuAction {
     ShowInExplorer(String),
     /// Note HF1: the selected no-set textures go back to the sets their names make.
     BackToAutomaticSet,
+    /// Note HF6: the "Move to group" submenu of the sets' menu; the `ToGroup`, `ToNewGroup` and `ToNoGroup` entries
+    /// follow it and the menu draws them inside it.
+    MoveToGroup,
+    /// The selected sets join the group of this name.
+    ToGroup(String),
+    /// The UI opens the name dialog; `run_menu` does nothing.
+    ToNewGroup,
+    /// The selected sets leave their groups.
+    ToNoGroup,
 }
 
 /// The slot menu's PGPatcher lock entry, off and on (Note AN).
@@ -1248,11 +1258,47 @@ impl AppModel {
             },
         ];
         v.extend(self.rename_entries(true));
+        v.extend(self.group_entries());
         v.extend(kind_chips(self, &sets).into_iter().map(|c| MenuEntry {
             action: MenuAction::SelectMembersOfKind(c.kind),
             label: format!("{} ({})", c.label, c.members.len()),
             disabled: None,
         }));
+        v
+    }
+
+    /// Note HF6: "Move to group" and its choices for the selected sets: each group, a new one, none. A read-only
+    /// `sdc-project.toml` disables the lot with the reason.
+    fn group_entries(&self) -> Vec<MenuEntry> {
+        let off = self.sets_read_only_reason();
+        let entry = |action, label: String, disabled| MenuEntry {
+            action,
+            label,
+            disabled,
+        };
+        let ids = self.selected_set_ids();
+        let in_any = ids.iter().any(|i| self.group_of(i).is_some());
+        let mut v = vec![entry(
+            MenuAction::MoveToGroup,
+            "Move to group".into(),
+            off.clone(),
+        )];
+        v.extend(
+            self.groups()
+                .into_iter()
+                .map(|g| entry(MenuAction::ToGroup(g.name.clone()), g.name, off.clone())),
+        );
+        v.push(entry(
+            MenuAction::ToNewGroup,
+            "New group…".into(),
+            off.clone(),
+        ));
+        let none = (!in_any).then(|| "not in a group".to_string());
+        v.push(entry(
+            MenuAction::ToNoGroup,
+            "No group".into(),
+            off.or(none),
+        ));
         v
     }
 
@@ -1478,6 +1524,17 @@ impl AppModel {
             MenuAction::BackToAutomaticSet => {
                 let keys = self.selected_items();
                 return self.back_to_automatic_set(&keys).err();
+            }
+            MenuAction::MoveToGroup | MenuAction::ToNewGroup => {}
+            MenuAction::ToGroup(name) => {
+                return self
+                    .move_to_group(&self.selected_set_ids(), GroupTarget::Existing(name))
+                    .err();
+            }
+            MenuAction::ToNoGroup => {
+                return self
+                    .move_to_group(&self.selected_set_ids(), GroupTarget::None)
+                    .err();
             }
         }
         None

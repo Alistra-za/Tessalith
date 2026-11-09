@@ -13,16 +13,18 @@ use crate::model::items::{helper_tag_text, helper_target_files};
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
+use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
     DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
-use crate::model::AppModel;
+use crate::model::{AppModel, Selection};
 use crate::sets_doc::TxstMap;
 use eframe::egui;
 use engine::codes::Warning;
+use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use std::collections::{HashMap, HashSet};
 
@@ -59,6 +61,18 @@ pub enum Pending {
         set: String,
         rows: Vec<FillProposal>,
         ticks: Vec<bool>,
+    },
+    /// Note HF6: the rename dialog of group `name`: the name being typed and why the last try was refused.
+    RenameGroup {
+        name: String,
+        text: String,
+        error: Option<String>,
+    },
+    /// Note HF6: the name dialog of a new group for sets `ids`.
+    NewGroup {
+        ids: Vec<String>,
+        text: String,
+        error: Option<String>,
     },
     /// Note CF5: Move to…, the set, the typed number or name, and the highlighted row.
     MoveTo {
@@ -128,6 +142,9 @@ pub struct DropState {
     pub focus: Option<egui::Id>,
     /// Note HP: the Sets filter last frame, to tell a change from the first frame (`None`).
     pub filter: Option<crate::model::sets_filter::SetsFilter>,
+    /// Note HF6: the selection last frame (`None` on the first). A selection that moved opens the group of what it
+    /// moved to: a click on a texture, Go to set.
+    pub selection: Option<Selection>,
 }
 
 /// Review I1: a reveal re-aims at most this many frames, so a key that names no visible card cannot loop.
@@ -204,6 +221,19 @@ enum Act {
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
     Slot(MenuAction),
+    /// Note HF6: a click on a group's header folds or opens it.
+    ToggleGroup(String),
+    GroupExcluded(String, bool),
+    OpenRenameGroup(String),
+    Ungroup(String),
+    /// "Select all sets" on a header.
+    SelectGroup(String),
+    /// A set (id) let go on a group's header (name).
+    JoinGroup(String, String),
+    /// The set menu's pick: these sets (ids) go to a group or none.
+    MoveToGroup(Vec<String>, GroupTarget),
+    /// The set menu's New group…: ask for a name.
+    OpenNewGroup(Vec<String>),
 }
 
 /// The card's heading is one row only when the name keeps this much beside the pill and badges; otherwise the pill
@@ -1079,6 +1109,327 @@ fn stand_in(
     (rect, wanted)
 }
 
+/// Note HF6: a group's members sit this far in from the header's left (owner: indented; the number is mine).
+const GROUP_INDENT: f32 = 12.0;
+
+/// What the column draws, top to bottom: a group's header (an index into the heads) or a set's card (an index into
+/// the views).
+enum Row {
+    Header(usize),
+    Card(usize),
+}
+
+/// A group's header this frame, read from the views: `total` counts its members that have a card, `shown` those that
+/// pass the filter, `status` is the worst of the shown ones.
+struct Head {
+    name: String,
+    total: usize,
+    shown: usize,
+    status: Status,
+    excluded: bool,
+    collapsed: bool,
+}
+
+impl Head {
+    /// `7`, or `2 of 7` while a filter hides some.
+    fn count_text(&self) -> String {
+        if self.shown < self.total {
+            format!("{} of {}", self.shown, self.total)
+        } else {
+            self.total.to_string()
+        }
+    }
+
+    /// The header's AccessKit name: `Group Armor, 7 sets, warning, collapsed`.
+    fn node_name(&self) -> String {
+        let sets = if self.total == 1 && self.shown == 1 {
+            "1 set".to_string()
+        } else {
+            format!("{} sets", self.count_text())
+        };
+        let state = if self.collapsed {
+            "collapsed"
+        } else {
+            "expanded"
+        };
+        let tag = if self.excluded { ", excluded" } else { "" };
+        format!(
+            "Group {}, {sets}, {}, {state}{tag}",
+            self.name,
+            self.status.label()
+        )
+    }
+}
+
+/// Blocks, then warning, then ready: the worst of a group's sets is the header's dot.
+fn rank(s: Status) -> u8 {
+    match s {
+        Status::Blocks => 2,
+        Status::Warning => 1,
+        _ => 0,
+    }
+}
+
+/// Note HF6: the rows of the column, the headers they point at, and each view's group (an index into the heads; empty
+/// when there are no groups). A header comes before its first shown member and only when some member passes; a
+/// collapsed group draws no member. The views are already in group order (`pull_groups`).
+fn build_rows(
+    model: &AppModel,
+    views: &[SetView],
+    visible: &[usize],
+    status_of: &dyn Fn(&SetView) -> Status,
+) -> (Vec<Row>, Vec<Head>, Vec<Option<usize>>) {
+    let stored = model
+        .sets_doc
+        .as_ref()
+        .map(|d| d.groups())
+        .unwrap_or_default();
+    if stored.is_empty() {
+        return (
+            visible.iter().map(|&i| Row::Card(i)).collect(),
+            vec![],
+            vec![],
+        );
+    }
+    // A set named by two groups belongs to the first, as in the view order.
+    let mut of: HashMap<String, usize> = HashMap::new();
+    for (g, group) in stored.iter().enumerate() {
+        for s in &group.sets {
+            of.entry(fold_id(s)).or_insert(g);
+        }
+    }
+    let grouped: Vec<Option<usize>> = views
+        .iter()
+        .map(|v| of.get(&fold_id(&v.id)).copied())
+        .collect();
+    let mut heads: Vec<Head> = stored
+        .into_iter()
+        .map(|g| Head {
+            collapsed: model.group_collapsed(&g.name),
+            name: g.name,
+            total: 0,
+            shown: 0,
+            status: Status::Ready,
+            excluded: g.excluded,
+        })
+        .collect();
+    for g in grouped.iter().flatten() {
+        heads[*g].total += 1;
+    }
+    for &i in visible {
+        if let Some(g) = grouped[i] {
+            let s = status_of(&views[i]);
+            let h = &mut heads[g];
+            h.shown += 1;
+            if rank(s) > rank(h.status) {
+                h.status = s;
+            }
+        }
+    }
+    let mut rows = Vec::with_capacity(visible.len() + heads.len());
+    let mut placed = vec![false; heads.len()];
+    for &i in visible {
+        match grouped[i] {
+            Some(g) => {
+                if !std::mem::replace(&mut placed[g], true) {
+                    rows.push(Row::Header(g));
+                }
+                if !heads[g].collapsed {
+                    rows.push(Row::Card(i));
+                }
+            }
+            None => rows.push(Row::Card(i)),
+        }
+    }
+    (rows, heads, grouped)
+}
+
+/// Note HF6: what a reveal (`nav.reveal_set`: Move to…, the palette) or a selection that moved (a click on a texture,
+/// Go to set) leads to is shown, so the group it sits in opens. A filter that hides the set leaves the group as it
+/// is. `seen` is last frame's selection: the first frame only records it.
+fn open_groups_of(
+    model: &mut AppModel,
+    views: &[SetView],
+    visible: &[usize],
+    seen: &mut Option<Selection>,
+    reveal: Option<&str>,
+) {
+    let moved = seen.as_ref().is_some_and(|s| *s != model.selection);
+    if seen.as_ref() != Some(&model.selection) {
+        *seen = Some(model.selection.clone());
+    }
+    let mut keys: Vec<String> = reveal.map(str::to_string).into_iter().collect();
+    if moved {
+        keys.extend(match &model.selection {
+            Selection::Item(k) => model.set_key_of_item(k),
+            Selection::Set(k) => Some(k.clone()),
+            Selection::None => None,
+        });
+    }
+    for k in keys {
+        let Some(v) = visible
+            .iter()
+            .map(|&i| &views[i])
+            .find(|v| !v.key.is_empty() && v.key == k)
+        else {
+            continue;
+        };
+        if let Some(g) = model.group_of(&v.id) {
+            if model.group_collapsed(&g.name) {
+                model.set_group_collapsed(&g.name, false);
+            }
+        }
+    }
+}
+
+/// The chevron: right while the group is folded, down while it is open. Painted, so no font has to carry it.
+fn chevron(ui: &mut egui::Ui, collapsed: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
+    let (c, colour) = (rect.center(), ui.visuals().widgets.inactive.fg_stroke.color);
+    let points = if collapsed {
+        vec![
+            egui::pos2(c.x - 2.5, c.y - 4.5),
+            egui::pos2(c.x + 3.5, c.y),
+            egui::pos2(c.x - 2.5, c.y + 4.5),
+        ]
+    } else {
+        vec![
+            egui::pos2(c.x - 4.5, c.y - 2.5),
+            egui::pos2(c.x + 4.5, c.y - 2.5),
+            egui::pos2(c.x, c.y + 3.5),
+        ]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        colour,
+        egui::Stroke::NONE,
+    ));
+}
+
+/// Note HF6: a group's header: chevron, name, then the `Excluded` tag, the count and the worst status dot on the
+/// right. A click on the row folds or opens the group; the right-click menu holds its edits. Returns the set let go
+/// on it this frame (a dropped texture does nothing: the header takes only sets).
+fn group_header(
+    ui: &mut egui::Ui,
+    h: &Head,
+    height: f32,
+    editing: &Editing,
+    acts: &mut Vec<Act>,
+) -> Option<String> {
+    // The widget id is the group's name, so a fold above never moves it (an open menu stays open).
+    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    let resp = ui.interact(
+        rect,
+        ui.id().with(("set-group", &h.name)),
+        egui::Sense::click(),
+    );
+    let over_set = editing.on
+        && egui::DragAndDrop::has_payload_of_type::<DragSet>(ui.ctx())
+        && resp.contains_pointer();
+    let (fill, accent) = {
+        let v = ui.visuals();
+        let hot = resp.hovered() || over_set;
+        (
+            if hot {
+                v.widgets.hovered.weak_bg_fill
+            } else {
+                v.faint_bg_color
+            },
+            v.selection.stroke,
+        )
+    };
+    ui.painter().rect_filled(rect, 6.0, fill);
+    if over_set {
+        ui.painter()
+            .rect_stroke(rect, 6.0, accent, egui::StrokeKind::Inside);
+    }
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(PILL_PAD_X, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.style_mut().interaction.selectable_labels = false;
+    egui::Sides::new().shrink_left().truncate().show(
+        &mut row,
+        |ui| {
+            chevron(ui, h.collapsed);
+            // Cut short, the whole name is on hover and in the AccessKit name.
+            let name = ui.add(egui::Label::new(egui::RichText::new(&h.name).strong()).truncate());
+            name.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &h.name));
+        },
+        |ui| {
+            super::status::dot(ui, h.status);
+            ui.add(
+                egui::Label::new(egui::RichText::new(h.count_text()).weak())
+                    .wrap_mode(egui::TextWrapMode::Extend),
+            );
+            if h.excluded {
+                egui::Frame::NONE
+                    .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                    .corner_radius(4.0)
+                    .inner_margin(egui::Margin::symmetric(4, 0))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new("Excluded").small())
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        )
+                    });
+            }
+        },
+    );
+    let name = h.node_name();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+    ui.ctx()
+        .accesskit_node_builder(resp.id, |n| n.set_expanded(!h.collapsed));
+    if resp.clicked() {
+        acts.push(Act::ToggleGroup(h.name.clone()));
+    }
+    resp.context_menu(|ui| group_menu(ui, h, editing, acts));
+    let hovered_by_set = editing.on && resp.dnd_hover_payload::<DragSet>().is_some();
+    hovered_by_set
+        .then(|| resp.dnd_release_payload::<DragSet>())
+        .flatten()
+        .map(|p| p.0.clone())
+}
+
+/// Note HF6: a header's right-click menu. The edits are off while `sdc-project.toml` is read-only, with the reason;
+/// Select all sets only reads.
+fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act>) {
+    let edit = |ui: &mut egui::Ui, label: &str| {
+        let r = ui.add_enabled(editing.on, egui::Button::new(label));
+        if editing.on {
+            r
+        } else {
+            r.on_disabled_hover_text(editing.why)
+        }
+    };
+    let flip = if h.excluded {
+        "Include in export"
+    } else {
+        "Exclude from export"
+    };
+    let hover = "A whole-project export skips this group's sets and leaves the files they wrote before as they are";
+    if edit(ui, flip).on_hover_text(hover).clicked() {
+        acts.push(Act::GroupExcluded(h.name.clone(), !h.excluded));
+        ui.close();
+    }
+    if edit(ui, "Rename…").clicked() {
+        acts.push(Act::OpenRenameGroup(h.name.clone()));
+        ui.close();
+    }
+    if edit(ui, "Ungroup")
+        .on_hover_text("Remove the group; its sets stay")
+        .clicked()
+    {
+        acts.push(Act::Ungroup(h.name.clone()));
+        ui.close();
+    }
+    if ui.button("Select all sets").clicked() {
+        acts.push(Act::SelectGroup(h.name.clone()));
+        ui.close();
+    }
+}
+
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -1126,6 +1477,16 @@ pub fn draw(
         .collect();
     // One fetch per frame: each drawn card asks `set_ready_in`, not `problems()` (Task 6).
     let flagged = crate::model::bottom::flagged(model);
+    // A card's dot, and (worst of its members) a header's.
+    let status_of = |v: &SetView| {
+        if blocked.contains(&v.id) {
+            Status::Blocks
+        } else if !crate::model::bottom::set_ready_in(&flagged, v) {
+            Status::Warning
+        } else {
+            Status::Ready
+        }
+    };
     let mut acts = vec![];
     // `dropped`: the set let go over a card this frame, with that card's index (R1).
     let (mut dropped, mut hovered) = (None, None);
@@ -1175,11 +1536,25 @@ pub fn draw(
         st.reveal_tries = 0;
     }
     let reveal = model.nav.reveal_set.take();
+    // Note HF6: what a reveal or a moved selection leads to is shown: its group opens before the rows are built.
+    open_groups_of(
+        model,
+        &views,
+        &visible,
+        &mut st.selection,
+        reveal.as_deref(),
+    );
+    let (rows, heads, grouped) = build_rows(model, &views, &visible, &status_of);
+    let head_h = ui.spacing().interact_size.y + 6.0;
     let reveal_at = reveal.as_deref().and_then(|k| {
-        visible
-            .iter()
-            .position(|&i| !views[i].key.is_empty() && views[i].key == k)
+        rows.iter().position(
+            |r| matches!(r, Row::Card(i) if !views[*i].key.is_empty() && views[*i].key == k),
+        )
     });
+    let row_h = |r: &Row| match r {
+        Row::Header(_) => head_h,
+        Row::Card(i) => card_h(&views[*i].id),
+    };
     // Review I1: a target outside last frame's view jumps to the offset the known heights give. `scroll_to_rect` on
     // an estimated rect glided to the wrong card, and its relative target double-counted when aimed again. Note FM32:
     // the target lands at the top of the view, a little below it (the sum of the rounded allocations above it is not
@@ -1189,11 +1564,8 @@ pub fn draw(
         .filter(|_| st.reveal_seen != reveal)
         .and_then(|n| {
             let (off, view_h) = st.view?;
-            let top: f32 = visible[..n]
-                .iter()
-                .map(|&i| card_h(&views[i].id) + gap.y)
-                .sum();
-            let h = card_h(&views[visible[n]].id);
+            let top: f32 = rows[..n].iter().map(|r| row_h(r) + gap.y).sum();
+            let h = row_h(&rows[n]);
             let outside = top + h <= off || top >= off + view_h;
             outside.then(|| (top - 2.0 * gap.y).max(0.0))
         });
@@ -1201,11 +1573,10 @@ pub fn draw(
     // mean of the measured ones moves, a resize re-flowed them), the offset moves by the same amount.
     let anchored = || {
         let ((id, was), (off, _)) = st.anchor.as_ref().zip(st.view)?;
-        let n = visible.iter().position(|&i| views[i].id == *id)?;
-        let now: f32 = visible[..n]
+        let n = rows
             .iter()
-            .map(|&i| card_h(&views[i].id) + gap.y)
-            .sum();
+            .position(|r| matches!(r, Row::Card(i) if views[*i].id == *id))?;
+        let now: f32 = rows[..n].iter().map(|r| row_h(r) + gap.y).sum();
         ((now - was).abs() > 0.5).then(|| (off + now - was).max(0.0))
     };
     let target = if to_top {
@@ -1228,72 +1599,92 @@ pub fn draw(
         // those roundings drifts from the heights over hundreds of cards.
         let mut top = 0.0;
         // `index` is the set's place among all sets: the reorder and Move up / Move down use it (K19).
-        for (pos, &index) in visible.iter().enumerate() {
+        for (pos, row) in rows.iter().enumerate() {
+            // Note HF6: a header is always drawn (one short row); a dropped set joins its group.
+            let index = match *row {
+                Row::Header(g) => {
+                    let out = group_header(ui, &heads[g], head_h, &editing, &mut acts);
+                    if let Some(set) = out {
+                        acts.push(Act::JoinGroup(set, heads[g].name.clone()));
+                    }
+                    top += head_h + gap.y;
+                    continue;
+                }
+                Row::Card(i) => i,
+            };
             let v = &views[index];
             let h = st.card_h.get(&v.id).copied().unwrap_or(est);
-            let probe =
-                egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
             let id = ui.id().with(("set-card", &v.key, &v.id));
             let selected = !v.key.is_empty() && sel_sets.contains(&v.key);
-            let (rect, used) = if ui.is_rect_visible(probe) {
-                let look = PillLook {
-                    dragging: dragged.as_deref() == Some(v.id.as_str()),
-                    selected,
-                    bulk: sel_sets.len() >= 2,
-                    id,
-                };
-                let out = pill(
-                    ui,
-                    model,
-                    thumbs,
-                    v,
-                    (index, views.len()),
-                    &editing,
-                    if blocked.contains(&v.id) {
-                        Status::Blocks
-                    } else if !crate::model::bottom::set_ready_in(&flagged, v) {
-                        Status::Warning
-                    } else {
-                        Status::Ready
-                    },
-                    look,
-                    sel_items,
-                    &mut acts,
-                );
-                resized |= (out.rect.height() - h).abs() > 0.5;
-                st.card_h.insert(v.id.clone(), out.rect.height());
-                if let Some(d) = out.dropped_set {
-                    dropped = Some((d, index));
-                }
-                if out.hovered_by_set {
-                    hovered = Some(index);
-                }
-                rects.insert(index, out.rect);
-                (out.rect, out.rect.height())
-            } else {
-                // R4: a card outside the clip rect stands in for its last height. The focus it takes scrolls the real
-                // card into view (Note FM32).
-                let (rect, wanted) = stand_in(
-                    ui,
-                    id,
-                    probe.size(),
-                    st.focus,
-                    v,
-                    (index, views.len()),
-                    selected,
-                );
-                if wanted {
-                    if v.key.is_empty() {
-                        ui.scroll_to_rect_animation(
-                            rect,
-                            None,
-                            egui::style::ScrollAnimation::none(),
-                        );
-                    } else {
-                        focused = Some(v.key.clone());
+            let mut card = |ui: &mut egui::Ui| {
+                let probe =
+                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
+                if ui.is_rect_visible(probe) {
+                    let look = PillLook {
+                        dragging: dragged.as_deref() == Some(v.id.as_str()),
+                        selected,
+                        bulk: sel_sets.len() >= 2,
+                        id,
+                    };
+                    let out = pill(
+                        ui,
+                        model,
+                        thumbs,
+                        v,
+                        (index, views.len()),
+                        &editing,
+                        status_of(v),
+                        look,
+                        sel_items,
+                        &mut acts,
+                    );
+                    resized |= (out.rect.height() - h).abs() > 0.5;
+                    st.card_h.insert(v.id.clone(), out.rect.height());
+                    if let Some(d) = out.dropped_set {
+                        dropped = Some((d, index));
                     }
+                    if out.hovered_by_set {
+                        hovered = Some(index);
+                    }
+                    rects.insert(index, out.rect);
+                    (out.rect, out.rect.height())
+                } else {
+                    // R4: a card outside the clip rect stands in for its last height. The focus it takes scrolls the
+                    // real card into view (Note FM32).
+                    let (rect, wanted) = stand_in(
+                        ui,
+                        id,
+                        probe.size(),
+                        st.focus,
+                        v,
+                        (index, views.len()),
+                        selected,
+                    );
+                    if wanted {
+                        if v.key.is_empty() {
+                            ui.scroll_to_rect_animation(
+                                rect,
+                                None,
+                                egui::style::ScrollAnimation::none(),
+                            );
+                        } else {
+                            focused = Some(v.key.clone());
+                        }
+                    }
+                    (rect, h)
                 }
-                (rect, h)
+            };
+            // Note HF6: a member sits GROUP_INDENT in from the left.
+            let (rect, used) = if grouped.get(index).copied().flatten().is_some() {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: GROUP_INDENT as i8,
+                        ..Default::default()
+                    })
+                    .show(ui, card)
+                    .inner
+            } else {
+                card(ui)
             };
             if anchor.is_none() && rect.bottom() > view_top {
                 anchor = Some((v.id.clone(), top));
@@ -1363,6 +1754,14 @@ pub fn draw(
                 super::after_commit(&ctx, model, move |m| m.click_set(&k, ctrl, shift))
             }
             Act::RightClick(k) => model.right_click_set(&k),
+            // Note HF6: New group… asks for a name first; the other picks go to the model.
+            Act::Bulk(MenuAction::ToNewGroup) => {
+                st.pending = Some(Pending::NewGroup {
+                    ids: model.selected_set_ids(),
+                    text: String::new(),
+                    error: None,
+                })
+            }
             Act::Bulk(a) => model.menu_picked(a),
             Act::Problems(k) => {
                 model.open_problems(Some(crate::model::bottom::ProblemsFilter::Set(k)))
@@ -1465,6 +1864,50 @@ pub fn draw(
                 }
             }
             Act::Shader(id, shader) => model.set_shader(&id, shader),
+            // Note HF6: the group edits. A fold is no edit; the others say why when the file refuses.
+            Act::ToggleGroup(name) => {
+                let on = !model.group_collapsed(&name);
+                model.set_group_collapsed(&name, on);
+            }
+            Act::GroupExcluded(name, on) => {
+                if let Err(why) = model.set_group_excluded(&name, on) {
+                    st.pending = Some(Pending::Refused(why));
+                }
+            }
+            Act::OpenRenameGroup(name) => {
+                st.pending = Some(Pending::RenameGroup {
+                    text: name.clone(),
+                    name,
+                    error: None,
+                })
+            }
+            Act::Ungroup(name) => {
+                if let Err(why) = model.ungroup(&name) {
+                    st.pending = Some(Pending::Refused(why));
+                }
+            }
+            Act::SelectGroup(name) => {
+                model.select_group(&name);
+                // Selecting is no reveal: a folded group stays folded.
+                st.selection = Some(model.selection.clone());
+            }
+            Act::JoinGroup(id, name) => {
+                if let Err(why) = model.move_to_group(&[id], GroupTarget::Existing(name)) {
+                    st.pending = Some(Pending::Refused(why));
+                }
+            }
+            Act::MoveToGroup(ids, to) => {
+                if let Err(why) = model.move_to_group(&ids, to) {
+                    st.pending = Some(Pending::Refused(why));
+                }
+            }
+            Act::OpenNewGroup(ids) => {
+                st.pending = Some(Pending::NewGroup {
+                    ids,
+                    text: String::new(),
+                    error: None,
+                })
+            }
         }
     }
 }
@@ -2257,6 +2700,36 @@ fn menu(
         }
     });
     tip(remove.response);
+    // Note HF6: join a group, start one, or leave. The choices are read only while the menu is open.
+    let groups = model.groups();
+    let here = groups
+        .iter()
+        .position(|g| g.sets.iter().any(|s| engine::sets::same_id(s, &v.id)));
+    let to_group = ui.menu_button("Move to group", |ui| {
+        for (n, g) in groups.iter().enumerate() {
+            let r = ui.add_enabled(here != Some(n), egui::Button::new(&g.name));
+            if r.clicked() {
+                let to = GroupTarget::Existing(g.name.clone());
+                acts.push(Act::MoveToGroup(vec![v.id.clone()], to));
+                ui.close();
+            }
+        }
+        if !groups.is_empty() {
+            ui.separator();
+        }
+        if ui.button("New group…").clicked() {
+            acts.push(Act::OpenNewGroup(vec![v.id.clone()]));
+            ui.close();
+        }
+        if ui
+            .add_enabled(here.is_some(), egui::Button::new("No group"))
+            .clicked()
+        {
+            acts.push(Act::MoveToGroup(vec![v.id.clone()], GroupTarget::None));
+            ui.close();
+        }
+    });
+    tip(to_group.response);
     // Note HF1: any set; its textures go to no set.
     if tip(ui.button("Delete set")).clicked() {
         acts.push(Act::Delete(v.id.clone()));
@@ -2343,6 +2816,13 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
         rename_modal(ctx, model, st);
         return;
     }
+    if matches!(
+        st.pending,
+        Some(Pending::RenameGroup { .. } | Pending::NewGroup { .. })
+    ) {
+        group_name_modal(ctx, model, st);
+        return;
+    }
     if matches!(st.pending, Some(Pending::FillNames { .. })) {
         fill_modal(ctx, model, st);
         return;
@@ -2386,6 +2866,8 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             ("Can't do that".to_string(), Some(why.clone()), footer)
         }
         Pending::Rename { .. }
+        | Pending::RenameGroup { .. }
+        | Pending::NewGroup { .. }
         | Pending::FillNames { .. }
         | Pending::MoveTo { .. }
         | Pending::MapTarget(_) => return,
@@ -2533,6 +3015,63 @@ fn rename_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
         match model.rename_set(id, text) {
             Ok(()) => st.pending = None,
             Err(e) => *error = Some(e),
+        }
+    }
+}
+
+/// Note HF6: the name dialog of Rename on a group's header and of New group… on a set's menu. A taken or empty name
+/// stays open with the reason; nothing is written until a name is accepted.
+fn group_name_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
+    let (title, text, error) = match &mut st.pending {
+        Some(Pending::RenameGroup { name, text, error }) => {
+            (format!("Rename group {name}"), text, error)
+        }
+        Some(Pending::NewGroup { text, error, .. }) => ("New group".to_string(), text, error),
+        _ => return,
+    };
+    use super::dialogs::Role;
+    let mut submit = false;
+    // The field's own Enter accepts, so no button is the Default.
+    let buttons = [("Cancel", Role::Plain, true), ("OK", Role::Plain, true)];
+    // Only Esc cancels: a click outside could lose the typed name (AG11).
+    let (keys, clicked) =
+        super::dialogs::dialog(ctx, "group-name", false, 420.0, &title, &buttons, |ui| {
+            let field = ui.text_edit_singleline(text);
+            // A TextEdit takes no label from its text, so the box gets its name here.
+            field.widget_info(|| egui::WidgetInfo {
+                label: Some("Group name".into()),
+                ..egui::WidgetInfo::text_edit(true, text.as_str(), text.as_str(), "")
+            });
+            if !field.has_focus() && !field.lost_focus() {
+                field.request_focus();
+            }
+            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                submit = true;
+            }
+            if let Some(e) = error.as_ref() {
+                ui.colored_label(RED, e);
+            }
+        });
+    submit |= clicked == Some(1);
+    if keys.cancel || clicked == Some(0) {
+        st.pending = None;
+    } else if submit {
+        let done = match st.pending.clone() {
+            Some(Pending::RenameGroup { name, text, .. }) => model.rename_group(&name, &text),
+            Some(Pending::NewGroup { ids, text, .. }) => {
+                model.move_to_group(&ids, GroupTarget::New(text))
+            }
+            _ => return,
+        };
+        match done {
+            Ok(()) => st.pending = None,
+            Err(e) => {
+                if let Some(Pending::RenameGroup { error, .. } | Pending::NewGroup { error, .. }) =
+                    &mut st.pending
+                {
+                    *error = Some(e);
+                }
+            }
         }
     }
 }

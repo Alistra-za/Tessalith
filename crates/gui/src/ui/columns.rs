@@ -1121,7 +1121,7 @@ pub fn set_label(export_root: &str, key: &str) -> String {
 }
 
 /// F3a D4: a right-click menu drawn from `entries` under its count title; the members-of-kind entries go in a
-/// "Select members of kind" submenu, the slot menu's links in "From another set". The menus are lists so F3b can
+/// "Select members of kind" submenu, the slot menu's links in "From another set", the group choices in "Move to group". The menus are lists so F3b can
 /// append. Returns the clicked action.
 pub(super) fn bulk_menu(
     ui: &mut egui::Ui,
@@ -1138,12 +1138,27 @@ pub(super) fn bulk_menu(
     let (links, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest
         .into_iter()
         .partition(|e| matches!(e.action, MenuAction::SlotLink { .. }));
+    // Note HF6: the group choices go in the "Move to group" submenu, which its header entry draws.
+    let (groups, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest.into_iter().partition(|e| {
+        matches!(
+            e.action,
+            MenuAction::ToGroup(_) | MenuAction::ToNewGroup | MenuAction::ToNoGroup
+        )
+    });
     for e in rest {
-        if e.action == MenuAction::FromAnotherSet {
+        if matches!(
+            e.action,
+            MenuAction::FromAnotherSet | MenuAction::MoveToGroup
+        ) {
+            let items = if e.action == MenuAction::MoveToGroup {
+                &groups
+            } else {
+                &links
+            };
             let r = ui
                 .add_enabled_ui(e.disabled.is_none(), |ui| {
                     ui.menu_button(&e.label, |ui| {
-                        for l in &links {
+                        for l in items {
                             let r =
                                 ui.add_enabled(l.disabled.is_none(), egui::Button::new(&l.label));
                             let r = match &l.disabled {

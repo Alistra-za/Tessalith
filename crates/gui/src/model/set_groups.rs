@@ -139,6 +139,37 @@ impl AppModel {
             .find(|g| g.sets.iter().any(|s| same_id(s, set_id)))
     }
 
+    /// The ids of the selected sets, in the order they were selected (a set with no view has none).
+    pub fn selected_set_ids(&self) -> Vec<String> {
+        let views = set_views(self);
+        self.selected_sets()
+            .iter()
+            .filter_map(|k| views.iter().find(|v| v.key == *k).map(|v| v.id.clone()))
+            .collect()
+    }
+
+    /// Select the sets of group `name` that the Sets column shows (a filter hides some): "Select all sets" on its
+    /// header. With none shown the selection is kept.
+    pub fn select_group(&mut self, name: &str) {
+        let Some(g) = self.groups().into_iter().find(|g| same_id(&g.name, name)) else {
+            return;
+        };
+        let views = set_views(self);
+        let keys: Vec<String> = self
+            .set_order()
+            .into_iter()
+            .filter(|k| {
+                views
+                    .iter()
+                    .any(|v| v.key == *k && g.sets.iter().any(|s| same_id(s, &v.id)))
+            })
+            .collect();
+        let active = keys.first().cloned();
+        if active.is_some() {
+            self.set_selection(keys, active, true);
+        }
+    }
+
     /// The stored group `name` (ignoring case), or why there is none.
     fn stored_group(&self, name: &str) -> Result<SetGroup, String> {
         self.sets_doc
