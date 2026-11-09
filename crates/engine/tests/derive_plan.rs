@@ -723,6 +723,7 @@ fn a_grass_stack_on_an_opaque_albedo_keeps_its_spec_alpha() {
         members: vec![0],
         suffixes: BTreeSet::new(),
         shared_skin: false,
+        shares: vec![],
     };
     let asm = engine::derive::assemble::assemble_derived(&job).unwrap();
     let analysis = analyse(&asm.image, &asm.info);

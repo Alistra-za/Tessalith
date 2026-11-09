@@ -725,6 +725,7 @@ fn kept_member_is_shared_map(key: &str, aliases: &BTreeMap<String, String>) -> b
         members: vec![],
         suffixes: [SKIN_WET, SKIN_DETAIL].map(String::from).into(),
         shared_skin: false,
+        shares: vec![],
     };
     let stem = Path::new(key)
         .file_stem()
@@ -1544,6 +1545,7 @@ pub fn member_tail(stem: &str, tails: Tails) -> &str {
         members: vec![],
         suffixes,
         shared_skin: false,
+        shares: vec![],
     };
     let base = member_split(stem, &set, &BTreeMap::new()).base;
     // The base is a prefix of `stem`, so the cut is on a char boundary.

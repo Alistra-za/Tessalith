@@ -40,6 +40,7 @@ fn fx(target: Target, members: &[(&str, Kind)]) -> Fx {
             members: (0..members.len()).collect(),
             suffixes: Default::default(),
             shared_skin: false,
+            shares: vec![],
         },
     };
     for (name, kind) in members {

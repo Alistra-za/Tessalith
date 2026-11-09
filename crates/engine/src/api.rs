@@ -498,6 +498,9 @@ pub struct Plan {
     /// Note HF1: the files `[project] no_set` names (`sets::no_set_paths`). Their jobs stay in `jobs` (the GUI lists
     /// them), but `run` never writes one, whatever `write_only` says.
     pub no_set: BTreeSet<PathBuf>,
+    /// Note HH4: the sets whose jobs `run` never writes (every member is in `no_set`); a set sharing a no-set helper
+    /// is not one.
+    pub no_set_sets: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -1195,7 +1198,8 @@ pub(crate) fn is_typed(
         }
 }
 
-/// Each typed raw member's role leaves its set's suffixes unless an untyped raw member has it too.
+/// Each typed raw member's role leaves its set's suffixes unless an untyped raw member has it too. A shared file
+/// counts as a member (Note HH1).
 pub(crate) fn drop_typed_roles(
     sets: &mut [TextureSet],
     files: &[InputFile],
@@ -1203,8 +1207,11 @@ pub(crate) fn drop_typed_roles(
 ) {
     for set in sets.iter_mut() {
         let role = |i: usize| pack::plan::raw_role(&files[i]).map(|r| r.id());
-        let (typed_m, raw_m): (Vec<usize>, Vec<usize>) =
-            set.members.iter().partition(|i| typed.contains(i));
+        let (typed_m, raw_m): (Vec<usize>, Vec<usize>) = set
+            .members
+            .iter()
+            .chain(&set.shares)
+            .partition(|i| typed.contains(i));
         for r in typed_m.into_iter().filter_map(role) {
             if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
                 set.suffixes.remove(&r);
@@ -1275,9 +1282,11 @@ pub(crate) fn predict_suffixes(
     typed: &BTreeSet<usize>,
     hand: &[Option<crate::helper::HelperRole>],
 ) {
+    // Note HH1: a shared helper's role is read as a member's.
     let roles: BTreeSet<RawMap> = set
         .members
         .iter()
+        .chain(&set.shares)
         .filter(|i| !typed.contains(i))
         .filter_map(|&i| match hand[i] {
             Some(crate::helper::HelperRole::Raw(r)) => Some(r),
@@ -2258,6 +2267,8 @@ impl Engine {
         for s in &mut sets {
             s.members
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
+            s.shares
+                .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
         }
         // Pass 1 may add a recipe job it fails at once (sources of different sizes); like every job it records the
         // target's origin (`BatchRequest::target`, ruling W1).
@@ -2832,8 +2843,18 @@ impl Engine {
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
         // Note HF9: a no-set file writes nothing, so it neither claims nor loses a path.
         let no_set = crate::sets::no_set_paths(files, file_scopes.root.as_deref(), &req.set_edits);
+        // Note HH4: by set, so another set's recipe whose first source is a shared no-set helper still writes.
+        let no_set_sets: BTreeSet<String> = sets
+            .iter()
+            .filter(|s| {
+                !s.members.is_empty() && s.members.iter().all(|&i| no_set.contains(&files[i].path))
+            })
+            .map(|s| s.key.clone())
+            .collect();
         jobs.retain(|j: &ResolvedJob| {
-            if scope.is_some() || !matches!(j.status, JobStatus::Ready) || no_set.contains(&j.input)
+            if scope.is_some()
+                || !matches!(j.status, JobStatus::Ready)
+                || no_set_sets.contains(&j.set_key)
             {
                 return true;
             }
@@ -2979,6 +3000,7 @@ impl Engine {
             fill_ends,
             helpers,
             no_set,
+            no_set_sets,
         };
         Ok((plan, pbr_sets))
     }
@@ -2994,8 +3016,9 @@ impl Engine {
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
         // Note HF1: a no-set file writes nothing, on every run (BV2 does not stop it: it claims no output path).
-        let no_set = std::mem::take(&mut plan.no_set);
-        plan.jobs.retain(|j| !no_set.contains(&j.input));
+        // Note HH4: dropped by set, so a share's recipe in another set still writes.
+        let no_set = std::mem::take(&mut plan.no_set_sets);
+        plan.jobs.retain(|j| !no_set.contains(&j.set_key));
         // Note HF9: a partial or excluding run covers the listed sets only, from its first event and count; an entry
         // with no set (an input duplicate) is a project-wide fact and stays.
         if let Some(only) = &plan.request.write_only {
@@ -3529,6 +3552,7 @@ pub(crate) fn pre_edit_shaders(
                 members: vec![],
                 suffixes: BTreeSet::new(),
                 shared_skin: false,
+                shares: vec![],
             };
             let (found, _) = explicit_shaders(req, std::slice::from_ref(&renamed));
             if let Some(&shader) = found.get(&renamed.key) {

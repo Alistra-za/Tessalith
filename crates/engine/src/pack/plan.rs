@@ -173,6 +173,37 @@ fn joined_helper_names(
         .collect()
 }
 
+/// Note HH2: the file as set `set` reads it. A recipe's output is built from its first source, so a shared helper
+/// stands in under the set's folder, base and game folder, as `joined_helper_names` does for a hand-set helper in
+/// the same folder. `path` stays the real file's (sizes, `consumed`, job removal).
+fn shared_stand_in(set: &TextureSet, files: &[InputFile], f: &InputFile) -> InputFile {
+    let key_base = set
+        .key
+        .rsplit_once('/')
+        .map_or(set.key.as_str(), |(_, b)| b);
+    let mut members = set.members.iter().map(|&i| &files[i]);
+    let Some(anchor) = members
+        .clone()
+        .find(|m| source_base(&m.rel).to_lowercase() == key_base)
+        .or_else(|| members.clone().find(|m| m.kind == InputKind::Image))
+        .or_else(|| members.next())
+    else {
+        return f.clone();
+    };
+    let stem = anchor.rel.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = f.rel.extension().unwrap_or_default().to_string_lossy();
+    let file = format!("{stem}.{ext}");
+    let lower = file.to_lowercase();
+    let mut g = f.clone();
+    g.rel = anchor.rel.with_file_name(&file);
+    g.output = anchor.output.with_file_name(format!("{stem}.dds"));
+    g.game_path = match anchor.game_path.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/{lower}"),
+        None => lower,
+    };
+    g
+}
+
 /// A recipe that passed pass 1: assembled, analysed and resolved in pass 2.
 pub struct Candidate {
     pub set_key: String,
@@ -810,14 +841,29 @@ pub fn plan_packing(
         .iter()
         .flat_map(|set| joined_helper_names(ctx, set, files))
         .collect();
-    for set in sets {
+    // Note HH2: one stand-in per (set, shared file), indexed like `sets`.
+    let stand_ins: Vec<BTreeMap<PathBuf, InputFile>> = sets
+        .iter()
+        .map(|set| {
+            set.shares
+                .iter()
+                .map(|&i| {
+                    (
+                        files[i].path.clone(),
+                        shared_stand_in(set, files, &files[i]),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    for (set, stand_in) in sets.iter().zip(&stand_ins) {
         // Raw members still waiting for a recipe: a planned packing input, or one that failed to load or was
         // cancelled before its Load. A raw map whose sub-type a rule or `--set` named is an ordinary file
-        // (spec §4.4) and takes no part.
+        // (spec §4.4) and takes no part. A shared file (Note HH1) takes part as a member does.
         let mut raw = vec![];
         let mut members: BTreeMap<PathBuf, &InputFile> = BTreeMap::new();
         let mut sel = BTreeMap::new();
-        for &i in &set.members {
+        for &i in set.members.iter().chain(&set.shares) {
             let f = &files[i];
             // Images only: a re-encoded raw-map DDS keeps its old behaviour (no part in packing). The job's role comes
             // first: a hand-set `helper.role` (Note DY) overrides the name's.
@@ -855,7 +901,8 @@ pub fn plan_packing(
                     path: f.path.clone(),
                     role,
                 });
-                members.insert(f.path.clone(), renamed.get(&f.path).unwrap_or(f));
+                let named = stand_in.get(&f.path).or_else(|| renamed.get(&f.path));
+                members.insert(f.path.clone(), named.unwrap_or(f));
                 // Note DY: its hand-set fills, read and invert.
                 let s = crate::policy::helper_requested(ctx, f);
                 if s != crate::helper::HelperSel::default() {
