@@ -547,8 +547,9 @@ fn a_failed_vanilla_file_still_writes_the_pbr_folders_profile() {
     m.set_also_tick(AlsoTarget::Vanilla, true);
     idle(&mut m);
     let [pbr, van, _] = m.also_folders();
-    std::fs::create_dir_all(&van).unwrap();
-    std::fs::write(van.join("textures"), b"not a folder").unwrap();
+    // Note HQ1: the Vanilla phase's output root is `<folder>\textures`, so the file's folder below it is the file.
+    std::fs::create_dir_all(van.join("textures")).unwrap();
+    std::fs::write(van.join("textures/landscape"), b"not a folder").unwrap();
     export(&mut m);
     let s = m.export.summary.as_ref().expect("the export ended");
     assert!(

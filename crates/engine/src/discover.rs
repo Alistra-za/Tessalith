@@ -4,7 +4,7 @@ use crate::codes::{Code, Warning};
 use crate::presets::ReadAs;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const IMAGE_EXTS: [&str; 14] = [
     "png", "tga", "tif", "tiff", "exr", "hdr", "bmp", "jpg", "jpeg", "webp", "psd", "psb", "kra",
@@ -64,6 +64,56 @@ pub fn game_path(abs: &Path, rel: &Path) -> String {
             .replace('\\', "/")
             .to_ascii_lowercase(),
     }
+}
+
+fn is_textures(c: Component) -> bool {
+    c.as_os_str().eq_ignore_ascii_case("textures")
+}
+
+/// Note HQ1: the folders of the input `root`'s own path that go between the export folder and the outputs, so the
+/// export mirrors game paths: from the last `textures` in it down to `root`, case kept from disk. Empty when the path
+/// has no `textures` (HQ2). When `export` is `root` or an ancestor of it inside those folders, only the part below
+/// `export` (HQ3, HQ5: a DDS lands beside its source). Also empty when `root` holds a `textures` folder itself or in
+/// a sub-folder (a `textures` folder of mod folders, Note BQ8): game paths start there, and `rel` already has it (HQ8).
+// shortcut: a `textures` folder deeper than that is not looked for; upgrade if such a layout shows up.
+pub fn root_prefix(root: &Path, export: &Path) -> PathBuf {
+    let root = crate::overrides::absolute_or_same(root);
+    let out = crate::overrides::absolute_or_same(export);
+    let comps: Vec<Component> = root.components().collect();
+    let Some(i) = comps.iter().rposition(|&c| is_textures(c)) else {
+        return PathBuf::new();
+    };
+    let dirs = |p: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect()
+    };
+    let named = |p: &Path| {
+        p.file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("textures"))
+    };
+    if dirs(&root)
+        .iter()
+        .any(|d| named(d) || dirs(d).iter().any(|g| named(g)))
+    {
+        return PathBuf::new();
+    }
+    let start = if is_under(&root, &out) {
+        out.components().count().max(i)
+    } else {
+        i
+    };
+    comps[start.min(comps.len())..].iter().collect()
+}
+
+/// Note HQ1: the output root a request with input `root` and export folder `export` plans with:
+/// `export/<root_prefix>`. Set ids, `rel` and the manifest are relative to it.
+pub fn effective_output_root(root: &Path, export: &Path) -> PathBuf {
+    export.join(root_prefix(root, export))
 }
 
 /// Component-wise prefix test that ignores case, as NTFS does.

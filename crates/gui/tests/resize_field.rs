@@ -75,7 +75,7 @@ fn job(m: &AppModel, item: &str) -> String {
 
 /// The written DDS of `item`: (width, height).
 fn dims(m: &AppModel, item: &str) -> (u32, u32) {
-    let p = m.export_root().join(job(m, item));
+    let p = m.sets_root().join(job(m, item));
     let b = std::fs::read(&p).unwrap_or_else(|e| panic!("{p:?}: {e}"));
     let u = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     (u(16), u(12))
@@ -170,6 +170,8 @@ fn the_cli_command_reproduces_the_resized_output() {
     let sink = std::sync::Arc::new(VecSink::default());
     let rep = Reporter::new(sink, new_batch_id());
     let e = Engine::new().unwrap();
+    // Note HQ1: job keys are under the request's output root, `cli\textures` for this `textures` root.
+    let cli_root = req.output_root.clone();
     let plan = e.plan(req, &rep, &CancelToken::default()).unwrap();
     let up = plan
         .jobs
@@ -181,8 +183,8 @@ fn the_cli_command_reproduces_the_resized_output() {
     for item in ["up.png", "up2.png"] {
         let k = job(&m, item);
         assert_eq!(
-            std::fs::read(d.path().join("cli").join(&k)).unwrap(),
-            std::fs::read(m.export_root().join(&k)).unwrap(),
+            std::fs::read(cli_root.join(&k)).unwrap(),
+            std::fs::read(m.sets_root().join(&k)).unwrap(),
             "{item}"
         );
     }

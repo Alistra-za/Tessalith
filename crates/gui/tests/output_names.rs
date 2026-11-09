@@ -59,12 +59,12 @@ fn an_output_name_renames_a_plain_set_on_cs() {
             .get(&OutputKey::File(key_of(&m, "leaf.png"))),
         Some(&PathBuf::from("landscape/maple.dds"))
     );
-    assert!(output_of(&m, "leaf.png").ends_with("export/landscape/maple.dds"));
+    assert!(output_of(&m, "leaf.png").ends_with("export/textures/landscape/maple.dds"));
     assert!(d.path().join("textures/landscape/leaf.png").exists());
     // One step back restores the mirrored name.
     m.undo();
     idle(&mut m);
-    assert!(output_of(&m, "leaf.png").ends_with("export/landscape/leaf.dds"));
+    assert!(output_of(&m, "leaf.png").ends_with("export/textures/landscape/leaf.dds"));
 }
 
 #[test]
@@ -76,8 +76,8 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     m.set_output_name("landscape/rock01", Some("boulder"))
         .unwrap();
     idle(&mut m);
-    assert!(output_of(&m, "rock01.png").ends_with("export/landscape/boulder.dds"));
-    assert!(output_of(&m, "rock01_normal.png").ends_with("export/landscape/boulder_n.dds"));
+    assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/boulder.dds"));
+    assert!(output_of(&m, "rock01_normal.png").ends_with("export/textures/landscape/boulder_n.dds"));
     // Planning again changes nothing: the name is applied to its own result idempotently.
     let before = engine_inputs(&m).1;
     m.replan();
@@ -87,7 +87,7 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     m.set_output_name("landscape/rock01", None).unwrap();
     idle(&mut m);
     assert_eq!(entry(&m, "landscape/rock01").output_name, None);
-    assert!(output_of(&m, "rock01.png").ends_with("export/landscape/rock01.dds"));
+    assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/rock01.dds"));
 }
 
 #[test]
@@ -104,14 +104,14 @@ fn a_pbr_set_on_cs_renames_through_pgpatcher_rename() {
     let (_, paths) = engine_inputs(&m);
     assert_eq!(
         paths.get(&OutputKey::File(key_of(&m, "rock01.png"))),
-        Some(&PathBuf::from("textures/pbr/landscape/steel.dds"))
+        Some(&PathBuf::from("pbr/landscape/steel.dds"))
     );
     assert_eq!(
         paths.get(&OutputKey::Packed {
             set: "landscape/rock01".into(),
             suffix: "rmaos".into()
         }),
-        Some(&PathBuf::from("textures/pbr/landscape/steel_rmaos.dds"))
+        Some(&PathBuf::from("pbr/landscape/steel_rmaos.dds"))
     );
     m.set_output_name("landscape/rock01", None).unwrap();
     idle(&mut m);

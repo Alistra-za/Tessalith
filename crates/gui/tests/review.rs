@@ -133,7 +133,10 @@ fn export_from_review_waits_for_a_plan_in_flight() {
         s.skipped > 0,
         "the other undecided textures were skipped (N3)"
     );
-    assert!(d.path().join("export/landscape/rock01.dds").exists());
+    assert!(d
+        .path()
+        .join("export/textures/landscape/rock01.dds")
+        .exists());
 }
 
 #[test]

@@ -69,7 +69,7 @@ use engine::session::{Session, Thumbnail};
 use items::*;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1053,9 +1053,42 @@ impl AppModel {
         }
     }
 
-    /// The export folder the current sets were planned with (their keys are under it), else `export_root`.
+    /// The output root the current sets were planned with (their keys are under it), else `export_root`'s (Note HQ1:
+    /// inside the export folder, below the root's own `textures` folders).
     pub fn sets_root(&self) -> PathBuf {
-        self.sets_root.clone().unwrap_or_else(|| self.export_root())
+        self.sets_root.clone().unwrap_or_else(|| match &self.root {
+            Some(r) => engine::discover::effective_output_root(r, &self.export_root()),
+            None => self.export_root(),
+        })
+    }
+
+    /// Note HQ1: `rel`, a path under the output root the sets were planned with, as a path under the export folder
+    /// (a game path once it starts at `textures`).
+    pub fn export_rel(&self, rel: &Path) -> PathBuf {
+        self.plan_prefix().join(rel)
+    }
+
+    /// The folders between the export folder and the plan's output root (Note HQ1); empty while the export folder
+    /// changes and the new plan has not landed.
+    fn plan_prefix(&self) -> PathBuf {
+        let (out, root) = (self.output_root(), self.sets_root());
+        root.strip_prefix(&out)
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    }
+
+    /// `export_rel` reversed: a path under the export folder as a path under the plan's output root, `None` when it
+    /// lies outside it (ASCII case folded, as game paths are).
+    pub fn plan_rel(&self, export_rel: &Path) -> Option<PathBuf> {
+        let prefix = self.plan_prefix();
+        let mut rest = export_rel.components();
+        for c in prefix.components() {
+            let next = rest.next()?;
+            if !next.as_os_str().eq_ignore_ascii_case(c.as_os_str()) {
+                return None;
+            }
+        }
+        Some(rest.as_path().to_path_buf())
     }
 
     /// The export folder the user chose for this project (Note FB1): with a usable project document (loaded, not
@@ -2619,13 +2652,14 @@ impl AppModel {
         let carried = std::mem::take(&mut *self.views.borrow_mut());
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
-        self.refresh_game_paths();
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
         self.check_state.plans_applied += 1;
         self.invalidate_views();
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
+        // Note HQ6: after the output root lands, since the game paths are read under it.
+        self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;
         self.batch_preset = view.preset_id;
         self.loaded_user_presets = view.user_presets;
@@ -2900,8 +2934,14 @@ impl AppModel {
         let mut paths: Vec<String> = self
             .items
             .iter()
+            .filter(|i| !i.job_key.is_empty())
             .filter_map(|i| {
-                let k = &i.job_key;
+                // Note HQ1: under the export folder, so a root at or inside `textures` keeps that folder.
+                let k = &self
+                    .export_rel(Path::new(&i.job_key))
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .to_ascii_lowercase();
                 let at = if k.starts_with("textures/") {
                     0
                 } else {

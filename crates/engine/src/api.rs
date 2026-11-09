@@ -153,10 +153,11 @@ pub struct PlanProgress {
 }
 
 impl BatchRequest {
-    pub fn new(inputs: Vec<PathBuf>, output_root: PathBuf, target: Target) -> Self {
-        BatchRequest {
+    /// `export` is the export folder; the request plans under `set_export`'s output root inside it (Note HQ1).
+    pub fn new(inputs: Vec<PathBuf>, export: PathBuf, target: Target) -> Self {
+        let mut r = BatchRequest {
             inputs,
-            output_root,
+            output_root: PathBuf::new(),
             target: Some(target),
             preset: None,
             preset_files: vec![],
@@ -188,7 +189,22 @@ impl BatchRequest {
             low_detail: LowDetailMode::Off,
             derive: None,
             skip_root: None,
-        }
+        };
+        r.set_export(export);
+        r
+    }
+
+    /// Note HQ1: plan into export folder `export`. The output root is `export` below the first input folder's own
+    /// `textures` folders (`discover::effective_output_root`), so outputs land at their game paths while `rel`, set ids
+    /// and the manifest stay relative to it; discovery then skips the whole export folder. A first input that is a
+    /// file, or no input, adds nothing.
+    // shortcut: later input folders share the first one's prefix; upgrade if multi-root CLI runs need their own.
+    pub fn set_export(&mut self, export: PathBuf) {
+        self.output_root = match self.inputs.first().filter(|p| p.is_dir()) {
+            Some(root) => crate::discover::effective_output_root(root, &export),
+            None => export.clone(),
+        };
+        self.skip_root = (self.output_root != export).then_some(export);
     }
 
     /// A hash of every field except the `[files]` table of `project_config_inline` and `plan_progress` (live

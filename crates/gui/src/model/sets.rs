@@ -1666,6 +1666,12 @@ pub fn output_candidates(m: &AppModel, views: &[SetView]) -> Vec<(String, Output
         if check_rel_path(&rel.to_string_lossy(), "output path").is_err() {
             continue;
         }
+        // Note HQ1: the prefix names a path under the export folder; the engine joins it under the output root.
+        // shortcut: a prefix outside the opened folder's own `textures` folders is no candidate (its slot blocks
+        // Export as unresolved); upgrade when a root inside `textures` derives its match from the game path.
+        let Some(rel) = m.plan_rel(&rel) else {
+            continue;
+        };
         let key = if item.kind == ItemKind::Packed {
             // The set holding the item (its source set) names a packed output.
             let source = users
@@ -1777,6 +1783,9 @@ pub(crate) mod linear {
             if check_rel_path(&rel.to_string_lossy(), "output path").is_err() {
                 continue;
             }
+            let Some(rel) = m.plan_rel(&rel) else {
+                continue;
+            };
             let key = if item.kind == ItemKind::Packed {
                 let source = users
                     .iter()
@@ -1935,7 +1944,7 @@ pub(crate) fn game_path_in(
         .as_ref()
         .ok_or_else(|| format!("{} writes no output", it.name))?;
     if let Some(p) = item_output_key(views, it).and_then(|k| paths.get(&k)) {
-        return Ok(p.to_string_lossy().replace('/', "\\"));
+        return Ok(m.export_rel(p).to_string_lossy().replace('/', "\\"));
     }
     // `game_path` starts at the last `textures` folder, else it is the path under the opened folder.
     if !job.game_path.starts_with("textures/") {

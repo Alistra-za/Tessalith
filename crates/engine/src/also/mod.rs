@@ -467,6 +467,8 @@ impl EventSink for NoBatchWarnings {
 struct Recorder {
     inner: Arc<dyn EventSink>,
     keys: Arc<Mutex<BTreeSet<String>>>,
+    /// The output root below the folder (Note HQ1), as an output key; empty for none.
+    prefix: String,
 }
 
 impl EventSink for Recorder {
@@ -480,7 +482,11 @@ impl EventSink for Recorder {
                 }
         );
         if let (true, Some(k)) = (done, &ev.job) {
-            crate::api::lock(&self.keys).insert(k.clone());
+            let k = match self.prefix.as_str() {
+                "" => k.clone(),
+                p => format!("{p}/{k}"),
+            };
+            crate::api::lock(&self.keys).insert(k);
         }
         self.inner.emit(ev);
     }
@@ -490,7 +496,7 @@ impl EventSink for Recorder {
 /// never deletes) and reported.
 pub const NOT_WRITTEN: &str = "not written by this export; kept as it is";
 
-/// Every file under `folder` but `_sdc` and leftover `.sdc-*.tmp` files (08d-3).
+/// Every file under `folder` but `_sdc` folders and leftover `.sdc-*.tmp` files (08d-3).
 fn folder_files(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
     let (mut out, mut todo) = (vec![], vec![folder.to_path_buf()]);
     while let Some(d) = todo.pop() {
@@ -498,7 +504,8 @@ fn folder_files(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
             let p = e?.path();
             let name = p.file_name().unwrap_or_default().to_string_lossy();
             if p.is_dir() {
-                if !(d == folder && name.eq_ignore_ascii_case("_sdc")) {
+                // Note HQ1: the manifest sits in the output root, which can be below the folder.
+                if !name.eq_ignore_ascii_case("_sdc") {
                     todo.push(p);
                 }
             } else if !(name.starts_with(".sdc-") && name.ends_with(".tmp")) {
@@ -740,10 +747,19 @@ pub fn start_also(
 ) -> Result<AlsoRun, EngineError> {
     let keys: [Arc<Mutex<BTreeSet<String>>>; 3] = Default::default();
     let dry_run = base.dry_run;
+    // Note HQ1: job keys are under each phase's output root, the walk's under the folder; this is the part between.
+    let prefix = match base.inputs.first().filter(|p| p.is_dir()) {
+        Some(root) => output_key(
+            Path::new(""),
+            &crate::discover::root_prefix(root, &spec.location),
+        ),
+        None => String::new(),
+    };
     let recorder = |i: usize, inner: Arc<dyn EventSink>| -> Arc<dyn EventSink> {
         Arc::new(Recorder {
             inner,
             keys: keys[i].clone(),
+            prefix: prefix.clone(),
         })
     };
     // The PBR phase's reporter; the later phases' batch-level warnings go out under its batch.
@@ -808,12 +824,13 @@ fn run_phases(
 
     // TA14: the same request (preset id included) with target vanilla; each preflighted before anything is written.
     let mut pbr_req = base;
-    pbr_req.output_root = folders[0].clone();
+    pbr_req.set_export(folders[0].clone());
     pbr_req.skip_root = Some(spec.location.clone());
     let phase_req = |i: usize, mode: DeriveMode, sets: &[DeriveSet], drop: &[PathBuf]| {
         let mut r = pbr_req.clone();
         r.target = Some(Target::Vanilla);
-        r.output_root = folders[i].clone();
+        r.set_export(folders[i].clone());
+        r.skip_root = Some(spec.location.clone());
         // P10: the low-detail check runs once, in the PBR phase.
         r.low_detail = LowDetailMode::Off;
         r.derive = Some(DeriveRequest {

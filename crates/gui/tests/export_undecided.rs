@@ -65,7 +65,10 @@ fn accept_all_decides_the_suggestions_and_the_export_proceeds_on_the_settled_pla
     let s = m.export.summary.clone().expect("the export ran");
     assert!(s.converted >= 1);
     // The export used the fresh plan: the landscape diffuse was decided and exported.
-    assert!(d.path().join("export/landscape/rock01.dds").exists());
+    assert!(d
+        .path()
+        .join("export/textures/landscape/rock01.dds")
+        .exists());
     assert_eq!(
         m.item(ROCK)
             .and_then(|i| i.job.as_ref())
@@ -105,7 +108,7 @@ fn review_export_still_skips_what_is_undecided() {
     idle(&mut m);
     assert_eq!(m.undecided(), n);
     assert!(m.export.summary.is_some());
-    assert!(!d.path().join("export/landscape/leaf.dds").exists());
+    assert!(!d.path().join("export/textures/landscape/leaf.dds").exists());
 }
 
 #[test]
@@ -119,7 +122,10 @@ fn review_export_after_a_row_waits_for_the_plan_of_that_decision() {
     assert!(m.export.running.is_none());
     idle(&mut m);
     assert!(m.export.summary.is_some());
-    assert!(d.path().join("export/landscape/rock01.dds").exists());
+    assert!(d
+        .path()
+        .join("export/textures/landscape/rock01.dds")
+        .exists());
 }
 
 #[test]

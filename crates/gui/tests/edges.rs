@@ -97,7 +97,7 @@ fn export_after_a_change_plans_again_and_then_exports() {
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert_eq!(m.export.summary.as_ref().unwrap().failed, 0);
-    let out = std::fs::read(d.path().join("export/landscape/rock01.dds")).unwrap();
+    let out = std::fs::read(d.path().join("export/textures/landscape/rock01.dds")).unwrap();
     let dds = engine::dds::read_dds(&out).unwrap();
     assert_eq!((dds.levels[0].0, dds.levels[0].1), (32, 32));
 }
@@ -111,7 +111,7 @@ fn a_dds_input_changed_on_disk_is_flagged_and_its_preview_read_again() {
     export_through(&mut m);
     assert!(m.wait_idle(Duration::from_secs(120)));
     let root = m.root.clone().unwrap();
-    let dds = d.path().join("export/landscape/rock01.dds");
+    let dds = d.path().join("export/textures/landscape/rock01.dds");
     std::fs::copy(&dds, root.join("landscape/stored.dds")).unwrap();
     m.open_folder(root.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
@@ -132,7 +132,7 @@ fn a_dds_input_changed_on_disk_is_flagged_and_its_preview_read_again() {
     m.expand("landscape/stored.dds");
     assert!(m.wait_idle(Duration::from_secs(60)));
     std::fs::copy(
-        d.path().join("export/landscape/small.dds"),
+        d.path().join("export/textures/landscape/small.dds"),
         root.join("landscape/stored.dds"),
     )
     .unwrap();
