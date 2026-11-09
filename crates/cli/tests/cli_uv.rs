@@ -3,6 +3,13 @@
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 mod common;
+// modscan's test helpers (an uncompressed BSA builder); the rest of the module is unused here.
+#[path = "../../modscan/tests/common/mod.rs"]
+#[allow(dead_code)]
+mod mscommon;
+// The esp crate's plugin builder, for the BSA's plugin.
+#[path = "../../esp/tests/common/mod.rs"]
+mod esphelp;
 
 use builder::scenes::{avobj, lsp, net, texset};
 use builder::Nif;
@@ -196,14 +203,19 @@ fn the_pad_follows_the_longer_side() {
         &nif("textures/wall.dds", 0, &[texels(128, 256, 128, 256)]),
     );
     for (args, pad) in [
-        (["--s", "512", "", ""], 2),
-        (["--s", "4096", "", ""], 16),
-        (["--w", "2048", "--l", "4096"], 16),
+        (&["--s", "512"][..], 2),
+        (&["--s", "4096"], 16),
+        (&["--w", "2048", "--l", "4096"], 16),
     ] {
-        let args: Vec<&str> = args.into_iter().filter(|a| !a.is_empty()).collect();
-        let (code, out, err) = f.uv("wall", &[&args[..], &["--overwrite"]].concat());
+        let (code, out, err) = f.uv("wall", &[args, &["--overwrite"]].concat());
         assert_eq!(code, 0, "{err}");
         assert!(out.contains(&format!("pad {pad},")), "{args:?}: {out}");
+        if args[1] == "4096" {
+            // The island ends at texel 2047 (row 1500): 16 texels on is padding, 17 on is clear.
+            let img = f.png("wall_uvmask.png");
+            let px = |x| img.get_pixel(x, 1500).0[0];
+            assert_eq!((px(2047), px(2063), px(2064)), (255, 127, 0));
+        }
     }
     assert_eq!(f.png("wall_uvmask.png").dimensions(), (2048, 4096));
 }
@@ -419,11 +431,6 @@ fn the_scan_database_is_the_other_source() {
         "{out}"
     );
     // The same picture as reading the folder.
-    put(
-        &f.meshes(),
-        "wall.nif",
-        &nif("textures/wall.dds", 0, &[texels(128, 256, 128, 256)]),
-    );
     let direct = Fx::new();
     put(
         &direct.meshes(),
@@ -448,6 +455,62 @@ fn a_missing_scan_database_names_the_gui_scan_and_meshes() {
         "{err}"
     );
     assert!(!f.out().exists());
+}
+
+#[test]
+fn a_scan_path_that_does_not_exist_is_named() {
+    let f = Fx::new();
+    let mut c = sdc(&f.local());
+    c.args(["uv", "wall", "--s", "512", "--scan"])
+        .arg(f.d.path().join("nope.db"))
+        .arg("--out")
+        .arg(f.out());
+    let (code, _, err) = run(&mut c);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("--scan") && err.contains("no such file"),
+        "{err}"
+    );
+    assert!(!err.contains("Meshes scan"), "{err}");
+}
+
+#[test]
+fn a_winning_copy_inside_a_bsa_is_read() {
+    // An MO2 instance whose mod A has a plugin and the BSA beside it (a BSA loads with its plugin).
+    let f = Fx::new();
+    let inst = mscommon::instance_fixture("+A\n");
+    let r = inst.path();
+    let n = nif("textures/wall.dds", 0, &[texels(128, 256, 128, 256)]);
+    put(
+        r,
+        "mods/A/A.bsa",
+        &mscommon::bsa(&[("meshes\\m", "wall.nif", &n)]),
+    );
+    put(r, "mods/A/A.esp", &esphelp::plugin(0, &[], &[]));
+    put(r, "profiles/Default/plugins.txt", b"*A.esp\n");
+    let db = f.d.path().join("scan.db");
+    let mut s = modscan::store::Store::open(&db).unwrap();
+    modscan::scan::run(
+        &modscan::scan::Source::Mo2(modscan::mo2::Instance::load(r, None).unwrap()),
+        &mut s,
+        &std::sync::atomic::AtomicBool::new(false),
+        &|_| {},
+        &|| vec![],
+    )
+    .unwrap();
+    drop(s);
+    let mut c = sdc(&f.local());
+    c.args(["uv", "wall", "--s", "512", "--scan"])
+        .arg(&db)
+        .arg("--out")
+        .arg(f.out());
+    let (code, out, err) = run(&mut c);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.contains("islands 1, pad 2, too close 0, meshes 1"),
+        "{out}"
+    );
+    assert_eq!(f.png("wall_uvmask.png").get_pixel(200, 200).0[0], 255);
 }
 
 #[test]

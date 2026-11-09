@@ -201,6 +201,12 @@ impl Meshes {
     }
 
     fn scan(db: Option<&Path>) -> Result<Meshes, EngineError> {
+        if let Some(p) = db.filter(|p| !p.is_file()) {
+            return Err(EngineError::Usage(format!(
+                "--scan {}: no such file",
+                p.display()
+            )));
+        }
         let default = modscan::store::default_path();
         let Some(path) = db
             .map(Path::to_path_buf)
@@ -375,6 +381,8 @@ fn overlaps(t: &[[f64; 2]; 3], x: f64, y: f64) -> bool {
 /// Marks every texel of the `w` x `l` mask that a triangle overlaps. A triangle is drawn once per integer tile its
 /// UV box touches, shifted into [0, 1), so UVs outside 0..1 wrap. A triangle with a bad index, a non-finite UV or
 /// no area is skipped; the count of those comes back.
+// shortcut: a per-texel separating-axis test over each triangle's bounding box, so a huge triangle at 16384 is slow;
+// upgrade to a scanline span fill if big atlases make `sdc uv` slow.
 fn draw_mesh(mask: &mut [bool], w: u32, l: u32, uvs: &[[f32; 2]], tris: &[[u16; 3]]) -> usize {
     let (wf, lf) = (w as f64, l as f64);
     let mut skipped = 0;
@@ -600,6 +608,8 @@ pub fn run(a: UvArgs) -> Result<i32, EngineError> {
         }
         let mut mask = vec![false; w as usize * l as usize];
         let (mut nifs, mut drawn) = (0, 0);
+        // shortcut: each texture re-reads and re-parses its NIFs (no parse cache); cache the parsed NIFs if a
+        // `--recursive` run over many textures proves slow.
         for s in meshes.shapes(&tex)? {
             let read = reader.read(&s.source).and_then(|b| {
                 let h = nif::header::Header::parse(&b).map_err(|e| e.to_string())?;

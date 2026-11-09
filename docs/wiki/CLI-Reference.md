@@ -375,10 +375,11 @@ The padding is 1/256 of the longer side, at least 2 texels: 2 at 512, 4 at 1024,
 | Argument | Meaning |
 |---|---|
 | `<PATTERN>` | A texture path as you'd type it: `\` or `/`, `textures\` and `.dds` optional, any case. `*` and `?` match inside one folder or file name. A folder matches the textures directly in it; `--recursive` takes every texture below it. |
+| `--recursive` | With a folder pattern, take every texture below it, not only those directly in it. |
 | `--s N` (`--size`) | The texture is N×N. 1 to 16384. |
 | `--w W --l L` (`--width`, `--length`) | The texture is W wide and L long. Give both; not with `--s`. |
 | `--meshes <folder>` | Read every `.nif` below this folder (subfolders included) instead of the scan. |
-| `--scan <db>` | Read this scan database. Default: the one the GUI's **Meshes** scan writes. |
+| `--scan <db>` | Read this scan database. Default: the one the GUI's **Meshes** scan writes. Not with `--meshes`. |
 | `--out <dir>` | Where the images go. Default: the current folder. |
 | `--overwrite` | Replace an existing image. Otherwise it is kept and reported. |
 
@@ -386,7 +387,7 @@ A mesh uses a texture when the path is in any slot of its lighting shader's text
 
 Without `--meshes`, `sdc uv` reads the scan database and takes only the meshes the game loads (the winning copy of each path, loose or in a BSA). Run the Meshes scan in the GUI first; without a database `sdc uv` stops and says so. With `--meshes`, the folder is read as it is and the scan isn't touched. A mesh it can't read, and a Skyrim LE mesh, is listed on stderr and skipped.
 
-The images mirror the matched path below the part of the pattern before its first `*`. `sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048` writes `fs6_arrow_ir_uvmask.png`; `sdc uv Harry2135 --recursive --s 2048` writes `fantasyseries6\fs6_arrow_ir_uvmask.png`. Each written file prints one line: its path, the island count, the padding, the number of 191 texels and the number of meshes read. A texture whose meshes have no usable triangles writes nothing and says so.
+The images mirror the matched path below the folders of the pattern that come before its first `*` or `?`. `sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048` writes `fs6_arrow_ir_uvmask.png`; `sdc uv Harry2135 --recursive --s 2048` writes `fantasyseries6\fs6_arrow_ir_uvmask.png`. Each written file prints one line: its path, the island count, the padding, the number of 191 texels and the number of meshes read. A texture whose meshes have no usable triangles writes nothing and says so.
 
 ```powershell
 sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048 --out uvmasks
