@@ -222,10 +222,12 @@ pub fn apply_output_paths(
     }
 }
 
-/// The packed-output paths by (set key, recipe suffix), absolute, for `plan_packing`. A path that would leave the
-/// output root is ignored, as in `apply_output_paths`.
+/// The packed-output paths by (set key, recipe suffix), absolute, for `plan_packing`: set keys under `output_root`,
+/// paths under `paths_root` (Note HQ1: the export folder). A path that would leave it is ignored, as in
+/// `apply_output_paths`.
 pub fn packed_outputs(
     output_root: &Path,
+    paths_root: &Path,
     paths: &BTreeMap<OutputKey, PathBuf>,
 ) -> BTreeMap<(String, String), PathBuf> {
     paths
@@ -234,7 +236,7 @@ pub fn packed_outputs(
         .filter_map(|(k, rel)| match k {
             OutputKey::Packed { set, suffix } => Some((
                 (set_key(output_root, set), suffix.to_lowercase()),
-                output_root.join(rel),
+                paths_root.join(rel),
             )),
             OutputKey::File(_) => None,
         })

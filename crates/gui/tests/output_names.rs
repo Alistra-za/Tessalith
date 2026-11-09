@@ -57,7 +57,7 @@ fn an_output_name_renames_a_plain_set_on_cs() {
         engine_inputs(&m)
             .1
             .get(&OutputKey::File(key_of(&m, "leaf.png"))),
-        Some(&PathBuf::from("landscape/maple.dds"))
+        Some(&PathBuf::from("textures/landscape/maple.dds"))
     );
     assert!(output_of(&m, "leaf.png").ends_with("export/textures/landscape/maple.dds"));
     assert!(d.path().join("textures/landscape/leaf.png").exists());
@@ -104,14 +104,14 @@ fn a_pbr_set_on_cs_renames_through_pgpatcher_rename() {
     let (_, paths) = engine_inputs(&m);
     assert_eq!(
         paths.get(&OutputKey::File(key_of(&m, "rock01.png"))),
-        Some(&PathBuf::from("pbr/landscape/steel.dds"))
+        Some(&PathBuf::from("textures/pbr/landscape/steel.dds"))
     );
     assert_eq!(
         paths.get(&OutputKey::Packed {
             set: "landscape/rock01".into(),
             suffix: "rmaos".into()
         }),
-        Some(&PathBuf::from("pbr/landscape/steel_rmaos.dds"))
+        Some(&PathBuf::from("textures/pbr/landscape/steel_rmaos.dds"))
     );
     m.set_output_name("landscape/rock01", None).unwrap();
     idle(&mut m);

@@ -1395,6 +1395,40 @@ fn also_in_sdc_toml_writes_three_folders_under_o() {
     assert_eq!(done, 3);
 }
 
+/// Note HQ1 (fix round 1): the Also folders go beside each other in `-o` itself, not below the output root a
+/// `textures` input moves to, and each folder keeps the `textures` folder.
+#[test]
+fn also_from_a_textures_root_writes_its_folders_in_o() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.write("in/textures/sdc.toml", ALSO_ALL);
+    let o = fx
+        .sdc()
+        .args(["convert", "--json", "--recursive"])
+        .args(HI)
+        .arg("-o")
+        .arg(fx.p("out"))
+        .arg(fx.p("in/textures"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let folders: Vec<String> = std::fs::read_dir(fx.p("out"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    let pbr = folders
+        .iter()
+        .find(|f| f.ends_with(" PBR"))
+        .unwrap_or_else(|| panic!("no PBR folder in {folders:?}"));
+    assert!(fx
+        .dds(&format!("{pbr}/textures/pbr/arm/steel.dds"))
+        .exists());
+    assert!(
+        !text(&o.stderr).contains("not written by this export"),
+        "{}",
+        text(&o.stderr)
+    );
+}
 #[test]
 fn the_cli_and_the_engine_write_the_same_bytes() {
     use engine::also::{run_also, AlsoSpec};

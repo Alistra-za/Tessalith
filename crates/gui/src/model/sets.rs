@@ -1343,7 +1343,8 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             let k = item_output_key_in(&owners, it).unwrap_or(OutputKey::File(it.key.clone()));
             !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
-        .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+        // Note HQ6: explicit paths are under the export folder, job keys under the plan's output root.
+        .map(|it| m.export_key(&it.job_key))
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -1424,7 +1425,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             } else {
                 OutputKey::File(item.key.clone())
             };
-            out.push((k, rel));
+            out.push((k, m.export_rel(&rel)));
         }
     }
     out
@@ -1666,12 +1667,6 @@ pub fn output_candidates(m: &AppModel, views: &[SetView]) -> Vec<(String, Output
         if check_rel_path(&rel.to_string_lossy(), "output path").is_err() {
             continue;
         }
-        // Note HQ1: the prefix names a path under the export folder; the engine joins it under the output root.
-        // shortcut: a prefix outside the opened folder's own `textures` folders is no candidate (its slot blocks
-        // Export as unresolved); upgrade when a root inside `textures` derives its match from the game path.
-        let Some(rel) = m.plan_rel(&rel) else {
-            continue;
-        };
         let key = if item.kind == ItemKind::Packed {
             // The set holding the item (its source set) names a packed output.
             let source = users
@@ -1741,7 +1736,7 @@ pub(crate) mod linear {
                 let k = item_output_key(&views, it).unwrap_or(OutputKey::File(it.key.clone()));
                 !explicit(&k)
             })
-            .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+            .map(|it| m.export_key(&it.job_key))
             .collect();
         let mut seen = BTreeSet::new();
         let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -1783,9 +1778,6 @@ pub(crate) mod linear {
             if check_rel_path(&rel.to_string_lossy(), "output path").is_err() {
                 continue;
             }
-            let Some(rel) = m.plan_rel(&rel) else {
-                continue;
-            };
             let key = if item.kind == ItemKind::Packed {
                 let source = users
                     .iter()
@@ -1944,7 +1936,7 @@ pub(crate) fn game_path_in(
         .as_ref()
         .ok_or_else(|| format!("{} writes no output", it.name))?;
     if let Some(p) = item_output_key(views, it).and_then(|k| paths.get(&k)) {
-        return Ok(m.export_rel(p).to_string_lossy().replace('/', "\\"));
+        return Ok(p.to_string_lossy().replace('/', "\\"));
     }
     // `game_path` starts at the last `textures` folder, else it is the path under the opened folder.
     if !job.game_path.starts_with("textures/") {

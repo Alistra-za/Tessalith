@@ -1065,7 +1065,13 @@ impl AppModel {
     /// Note HQ1: `rel`, a path under the output root the sets were planned with, as a path under the export folder
     /// (a game path once it starts at `textures`).
     pub fn export_rel(&self, rel: &Path) -> PathBuf {
-        self.plan_prefix().join(rel)
+        // `/`-separated, as the explicit paths it joins.
+        PathBuf::from(
+            self.plan_prefix()
+                .join(rel)
+                .to_string_lossy()
+                .replace('\\', "/"),
+        )
     }
 
     /// The folders between the export folder and the plan's output root (Note HQ1); empty while the export folder
@@ -1077,18 +1083,11 @@ impl AppModel {
             .unwrap_or_default()
     }
 
-    /// `export_rel` reversed: a path under the export folder as a path under the plan's output root, `None` when it
-    /// lies outside it (ASCII case folded, as game paths are).
-    pub fn plan_rel(&self, export_rel: &Path) -> Option<PathBuf> {
-        let prefix = self.plan_prefix();
-        let mut rest = export_rel.components();
-        for c in prefix.components() {
-            let next = rest.next()?;
-            if !next.as_os_str().eq_ignore_ascii_case(c.as_os_str()) {
-                return None;
-            }
-        }
-        Some(rest.as_path().to_path_buf())
+    /// A plan path (a `job_key`) as an explicit-path key: under the export folder, `/`, lower case (Note HQ6).
+    pub fn export_key(&self, rel: &str) -> String {
+        self.export_rel(Path::new(rel))
+            .to_string_lossy()
+            .to_lowercase()
     }
 
     /// The export folder the user chose for this project (Note FB1): with a usable project document (loaded, not
@@ -2937,11 +2936,7 @@ impl AppModel {
             .filter(|i| !i.job_key.is_empty())
             .filter_map(|i| {
                 // Note HQ1: under the export folder, so a root at or inside `textures` keeps that folder.
-                let k = &self
-                    .export_rel(Path::new(&i.job_key))
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .to_ascii_lowercase();
+                let k = &self.export_key(&i.job_key);
                 let at = if k.starts_with("textures/") {
                     0
                 } else {
@@ -4406,7 +4401,7 @@ mod tests {
         let inputs = sets::engine_inputs(&m);
         assert_eq!(
             inputs.1.get(&OutputKey::File("landscape/moss.png".into())),
-            Some(&PathBuf::from("landscape/moss_new.dds")),
+            Some(&PathBuf::from("textures/landscape/moss_new.dds")),
             "{inputs:?}"
         );
         assert_eq!(
@@ -4414,7 +4409,7 @@ mod tests {
                 set: "landscape/q".into(),
                 suffix: "rfaos".into()
             }),
-            Some(&PathBuf::from("landscape/z_rfaos.dds")),
+            Some(&PathBuf::from("textures/landscape/z_rfaos.dds")),
             "{inputs:?}"
         );
         assert_eq!(inputs, sets::linear::engine_inputs(&m));

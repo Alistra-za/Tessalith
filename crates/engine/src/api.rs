@@ -131,6 +131,10 @@ pub struct BatchRequest {
     /// Track A (Note CN): the folder discovery skips in place of `output_root` (the Also export location, which
     /// holds the PBR, Vanilla and CM folders). `None` skips `output_root` as before.
     pub skip_root: Option<PathBuf>,
+    /// Note HQ1: the export folder when `output_root` lies below it (`set_export`); `output_paths` are relative to it,
+    /// so an explicit path such as a PGPatcher `textures\pbr\...` prefix can leave the output root. `None`: relative
+    /// to `output_root`.
+    pub export_root: Option<PathBuf>,
 }
 
 /// What a run does with a texture whose mip 0 adds little detail over mip 1 (`CHK-LOW-DETAIL`).
@@ -189,6 +193,7 @@ impl BatchRequest {
             low_detail: LowDetailMode::Off,
             derive: None,
             skip_root: None,
+            export_root: None,
         };
         r.set_export(export);
         r
@@ -196,15 +201,20 @@ impl BatchRequest {
 
     /// Note HQ1: plan into export folder `export`. The output root is `export` below the first input folder's own
     /// `textures` folders (`discover::effective_output_root`), so outputs land at their game paths while `rel`, set ids
-    /// and the manifest stay relative to it; discovery then skips the whole export folder. A first input that is a
-    /// file, or no input, adds nothing.
+    /// and the manifest stay relative to it, while `output_paths` stay relative to `export` (`export_root`).
+    /// Discovery then skips the whole export folder, unless that folder holds the input root (HQ5: it writes beside
+    /// the source). A first input that is a file, or no input, adds nothing.
     // shortcut: later input folders share the first one's prefix; upgrade if multi-root CLI runs need their own.
     pub fn set_export(&mut self, export: PathBuf) {
-        self.output_root = match self.inputs.first().filter(|p| p.is_dir()) {
+        let root = self.inputs.first().filter(|p| p.is_dir());
+        self.output_root = match root {
             Some(root) => crate::discover::effective_output_root(root, &export),
             None => export.clone(),
         };
-        self.skip_root = (self.output_root != export).then_some(export);
+        let moved = self.output_root != export;
+        let holds_root = root.is_some_and(|r| crate::discover::holds(&export, r));
+        self.skip_root = (moved && !holds_root).then(|| export.clone());
+        self.export_root = moved.then_some(export);
     }
 
     /// A hash of every field except the `[files]` table of `project_config_inline` and `plan_progress` (live
@@ -258,8 +268,9 @@ impl BatchRequest {
             low_detail,
             derive,
             skip_root,
+            export_root,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 31] = [
+        let fields: [&dyn std::fmt::Debug; 32] = [
             inputs,
             output_root,
             target,
@@ -291,6 +302,7 @@ impl BatchRequest {
             low_detail,
             derive,
             skip_root,
+            export_root,
         ];
         for f in fields {
             let _ = write!(h, "{f:?};");
@@ -1609,14 +1621,17 @@ impl Engine {
                 ),
             );
         }
+        // Note HQ1: explicit paths are under the export folder, which may hold the output root.
+        let paths_root = req.export_root.as_deref().unwrap_or(&req.output_root);
         crate::sets::apply_output_paths(
             &mut files,
             scope_root.as_deref(),
-            &req.output_root,
+            paths_root,
             &req.output_paths,
         );
         // Read by 3b too (CO102): a DDS at a packed output's explicit path is that output's earlier export.
-        let packed_outputs = crate::sets::packed_outputs(&req.output_root, &req.output_paths);
+        let packed_outputs =
+            crate::sets::packed_outputs(&req.output_root, paths_root, &req.output_paths);
         // 3b, Note CO (the M9 fold): a generated member loses to a real map for its slot before duplicates and
         // pack planning see it, since a generated `_p` and a real `_p` share one output.
         let mut gen_replaced: Vec<SkippedFile> = vec![];

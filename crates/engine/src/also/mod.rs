@@ -751,7 +751,13 @@ pub fn start_also(
     let prefix = match base.inputs.first().filter(|p| p.is_dir()) {
         Some(root) => output_key(
             Path::new(""),
-            &crate::discover::root_prefix(root, &spec.location),
+            // The PBR folder's, which the other two share (they sit beside it).
+            &crate::discover::root_prefix(
+                root,
+                &project_name(&base.inputs)
+                    .map(|n| folders(spec, &n)[0].clone())
+                    .unwrap_or_else(|_| spec.location.clone()),
+            ),
         ),
         None => String::new(),
     };

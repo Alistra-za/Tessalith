@@ -111,7 +111,8 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
             if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
-                out.push((v.id.clone(), k, rel));
+                // Note HQ6: explicit paths are under the export folder.
+                out.push((v.id.clone(), k, m.export_rel(&rel)));
             }
         }
     }

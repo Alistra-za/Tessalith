@@ -58,14 +58,18 @@ fn the_fixture_set_has_its_slots_a_derived_match_and_pbr_output_paths() {
     use engine::sets::OutputKey;
     assert_eq!(
         paths.get(&OutputKey::File(key_of(&m, "rock01.png"))),
-        Some(&std::path::PathBuf::from("pbr/landscape/rock01.dds"))
+        Some(&std::path::PathBuf::from(
+            "textures/pbr/landscape/rock01.dds"
+        ))
     );
     assert_eq!(
         paths.get(&OutputKey::Packed {
             set: "landscape/rock01".into(),
             suffix: "rmaos".into()
         }),
-        Some(&std::path::PathBuf::from("pbr/landscape/rock01_rmaos.dds"))
+        Some(&std::path::PathBuf::from(
+            "textures/pbr/landscape/rock01_rmaos.dds"
+        ))
     );
     // The plan the model holds now writes there.
     let diffuse = m.items.iter().find(|i| i.name == "rock01.png").unwrap();
