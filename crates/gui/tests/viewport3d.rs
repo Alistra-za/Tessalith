@@ -2522,3 +2522,16 @@ fn a_compile_error_is_still_shown() {
     h.get_by_label_contains("shader failed: ps:");
     assert!(h.query_by_label_contains("not found").is_none());
 }
+
+/// A missing archive is tried once per reader, however many NIFs name it (it was pinned beside the UV reads).
+#[test]
+fn a_reader_opens_each_archive_once() {
+    let r = v3::FileReader::default();
+    let bsa = |n: &str| v3::FileSource::Bsa {
+        archive: "Z:/missing/Meshes.bsa".into(),
+        norm: n.into(),
+    };
+    assert!(r.read(&bsa("meshes/a.nif")).is_err());
+    assert!(r.read(&bsa("meshes/b.nif")).is_err());
+    assert_eq!(r.archives(), 1);
+}
