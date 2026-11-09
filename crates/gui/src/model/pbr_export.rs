@@ -87,6 +87,13 @@ fn slots_of(
     m: &AppModel,
 ) -> BTreeMap<u8, String> {
     let mut out = BTreeMap::new();
+    // The output paths are relative to the project root; a root that is itself a `textures` folder leaves that
+    // folder out of them, and the game path has it.
+    let root_is_textures = m
+        .root
+        .as_deref()
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|n| n.eq_ignore_ascii_case("textures"));
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
@@ -97,9 +104,7 @@ fn slots_of(
         // `textures`), else the file's game path.
         let json_only = v.json && !v.pbr;
         let p = match fill_path(item, views, paths, m) {
-            Some(p) if json_only && !path_lower(p).starts_with("textures/") => PathBuf::from(
-                format!("textures/{}", p.to_string_lossy().replace('\\', "/")),
-            ),
+            Some(p) if json_only && root_is_textures => PathBuf::from("textures").join(p),
             Some(p) => p.clone(),
             None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
                 Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
@@ -107,7 +112,6 @@ fn slots_of(
             },
             None => continue,
         };
-        let p = &p;
         // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command. Its slot 3 default
         // is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an explicit slot is
         // never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
@@ -115,7 +119,7 @@ fn slots_of(
             && v.pbr
             && v.prefix
                 .as_deref()
-                .is_some_and(|pre| path_lower(p) == path_lower(&output_rel(pre, kind.suffix())));
+                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(pre, kind.suffix())));
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
@@ -171,16 +175,19 @@ fn slot_filled(v: &SetView, n: u8) -> bool {
 }
 
 /// Note HL5: a JSON set with no albedo and no texture (own or mapped) for slot 2 or 6 locks it, so PGPatcher keeps
-/// the mesh's own; a lock or `slotN` the user set wins.
+/// the mesh's own; a lock or `slotN` the user set wins. A filled slot `slots_of` could not name (a kept DDS with no
+/// job) is locked too, whatever its number: PGPatcher would fill it from `textures\pbr\<match>_<suffix>.dds` and
+/// skip the shape.
 fn lock_empty_slots(v: &SetView, slots: &BTreeMap<u8, String>, s: &mut Settings) {
     if !v.json || v.pbr {
         return;
     }
-    for n in [2, 6] {
+    for n in 1..=8u8 {
         let Some(key) = crate::pgp::prefix::lock_key(n) else {
             continue;
         };
-        if !slot_filled(v, n) && !slots.contains_key(&n) && !s.contains_key(key) {
+        let wanted = slot_filled(v, n) || n == 2 || n == 6;
+        if wanted && !slots.contains_key(&n) && !s.contains_key(key) {
             s.insert(key.into(), Value::Bool(true));
         }
     }
@@ -942,8 +949,29 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
 
 #[cfg(test)]
 mod tests {
-    use super::file_name_problem;
+    use super::*;
     use crate::pgp::prefix::check_file_name;
+
+    /// Final fix 5: a filled slot of a no-albedo JSON set that no path names (a kept DDS, no job) is locked, so
+    /// PGPatcher keeps the mesh's own; a named one and an explicit lock are left alone.
+    #[test]
+    fn a_filled_slot_no_path_names_is_locked() {
+        let mut v = SetView::new("k".into(), "a/b".into(), vec![]);
+        v.json = true;
+        v.slots
+            .insert(SlotKind::Normal, SlotFill::Own { item: "x".into() });
+        v.slots
+            .insert(SlotKind::Emissive, SlotFill::Own { item: "y".into() });
+        let named: BTreeMap<u8, String> = [(3, "named.dds".to_string())].into();
+        let mut s = Settings::new();
+        s.insert("lock_parallax".into(), Value::Bool(false));
+        lock_empty_slots(&v, &named, &mut s);
+        assert_eq!(s.get("lock_normal"), Some(&Value::Bool(true)));
+        assert_eq!(s.get("lock_emissive"), None, "named");
+        assert_eq!(s.get("lock_rmaos"), Some(&Value::Bool(true)), "empty 6");
+        assert_eq!(s.get("lock_parallax"), Some(&Value::Bool(false)), "kept");
+        assert_eq!(s.get("lock_cnr"), None, "an empty slot 7 stays as before");
+    }
 
     /// Backlog L8: the JSON-name check and `check_file_name` refuse the same device names, trailing dots and spaces
     /// and separators, with the same wording.

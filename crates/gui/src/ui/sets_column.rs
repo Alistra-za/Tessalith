@@ -72,6 +72,9 @@ pub enum Pending {
     MapTarget(Box<MapTargetState>),
 }
 
+/// What the rows of Map to target… were built from: the scan, the read target and the stored target path.
+type TargetStamp = (usize, usize, Option<std::path::PathBuf>);
+
 /// What [`Pending::MapTarget`] holds (boxed: it is the largest variant by far).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapTargetState {
@@ -79,7 +82,7 @@ pub struct MapTargetState {
     query: String,
     rows: Vec<TargetPick>,
     hits: Vec<usize>,
-    seen: Option<(String, (usize, usize))>,
+    seen: Option<(String, TargetStamp)>,
     used: HashMap<usize, u32>,
     sel: Option<TargetPick>,
 }
@@ -2829,11 +2832,13 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
     use super::dialogs::Role;
     let first = seen.is_none();
     let known = model.known.clone();
+    // The stored path too: a chosen target has no read until it lands, and its rows are none, not every record.
     let stamp = (
         std::sync::Arc::as_ptr(&known) as usize,
         model
             .target()
             .map_or(0, |t| std::sync::Arc::as_ptr(t) as usize),
+        model.sets_doc.as_ref().and_then(|d| d.target_mod()),
     );
     // Only a changed scan or target rebuilds the rows; a changed query filters them again.
     let stale = seen.as_ref().is_none_or(|(_, s)| *s != stamp);
@@ -2860,7 +2865,14 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
     let target_path = model.sets_doc.as_ref().and_then(|d| d.target_mod());
     let no_records = model
         .target()
-        .is_some_and(|t| !t.plugins.is_empty() && !rows.iter().any(|r| pick_kind(r) == "Record"));
+        .filter(|_| !rows.iter().any(|r| matches!(r, TargetPick::Record(_))))
+        .map(|t| {
+            if t.plugins.is_empty() {
+                crate::model::target_mod::RECORDS_NO_PLUGIN
+            } else {
+                crate::model::target_mod::RECORDS_NOT_IN_SCAN
+            }
+        });
     let title = if mapped {
         "Change mapping…"
     } else {
@@ -2923,8 +2935,8 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
             if let Some(e) = model.target_pick_error {
                 ui.colored_label(RED, e);
             }
-            if no_records {
-                ui.weak(crate::model::target_mod::RECORDS_NOT_IN_SCAN);
+            if let Some(line) = no_records {
+                ui.weak(line);
             }
             // Before the field, so it does not move its cursor with them (as Move to… does). They only move the
             // highlight.
@@ -2962,7 +2974,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
             if first && !field.has_focus() && !field.lost_focus() {
                 field.request_focus();
             }
-            let noun = if rows.iter().all(|r| pick_kind(r) == "Record") {
+            let noun = if rows.iter().all(|r| matches!(r, TargetPick::Record(_))) {
                 "records"
             } else {
                 "rows"

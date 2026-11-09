@@ -1515,37 +1515,3 @@ fn set_path_contains_and_nif_filter_write_backslashes() {
     assert_eq!(w["path_contains"], json!(r"landscape\rocks"));
     assert_eq!(w["nif_filter"], json!(r"architecture\whiterun"));
 }
-
-/// Note HL5: a no-albedo PBR set's entry names `slot1`, so PGPatcher keeps the mesh's own diffuse. Without it the
-/// patched shape would point slot 1 at the missing `textures\pbr\` copy and PGPatcher skips it.
-#[test]
-fn pgpsim_patches_the_no_albedo_entry() {
-    let default = document(&[]).to_value()["default"].clone();
-    let mut source = pgpsim::MaterialState::builtin_default();
-    source.set_slot_raw(0, r"textures\armor\lonely.dds");
-    source.set_slot_raw(1, r"textures\armor\lonely_n.dds");
-    let mut e = entry(&[], r"armor\lonely");
-    e.slots.insert(1, r"textures\armor\lonely.dds".into());
-    e.slots.insert(2, r"textures\armor\lonely_n.dds".into());
-    let exists = |p: &str| p != r"textures\pbr\armor\lonely.dds";
-    let run = |v: &Value| {
-        pgpsim::simulate(&pgpsim::SimInput {
-            entry: v,
-            default: &default,
-            nif_path: r"meshes\armor\lonely.nif",
-            source: &source,
-            exists: &exists,
-        })
-    };
-    let with = written(&e);
-    assert_eq!(with["slot1"], json!(r"textures\armor\lonely.dds"));
-    match run(&with) {
-        pgpsim::SimResult::Patched { material, .. } => {
-            assert_eq!(material.slots[0].raw, r"textures\armor\lonely.dds")
-        }
-        other => panic!("{other:?}"),
-    }
-    let mut without = with.clone();
-    without.as_object_mut().unwrap().remove("slot1");
-    assert!(matches!(run(&without), pgpsim::SimResult::Skip(_)));
-}

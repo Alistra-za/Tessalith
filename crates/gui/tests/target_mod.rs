@@ -691,7 +691,7 @@ use eframe::egui;
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::target_mod::RECORDS_NOT_IN_SCAN;
+use sdc_gui::model::target_mod::{overlaps, RECORDS_NOT_IN_SCAN, RECORDS_NO_PLUGIN};
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
@@ -846,6 +846,48 @@ fn the_picker_says_records_come_from_the_scan() {
         v.txst.as_ref().and_then(|t| t.base.as_deref()),
         Some(BOOTS_BASE)
     );
+}
+
+#[test]
+fn a_folder_with_no_plugin_says_so_instead_of_a_bare_list() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    let t = d.path().join("plain");
+    std::fs::create_dir_all(t.join("textures/x")).unwrap();
+    std::fs::write(t.join("textures/x/w.dds"), b"d").unwrap();
+    assert_eq!(m.set_target_mod(Some(t)), Ok(()));
+    landed(&mut m);
+    scan(&mut m, one_of_each());
+    let h = open_dialog(m, &id, 1280.0);
+    h.get_by_label(RECORDS_NO_PLUGIN);
+    assert!(h.query_by_label(RECORDS_NOT_IN_SCAN).is_none());
+    let rows = row_names(&h);
+    assert!(rows.iter().all(|r| !r.starts_with("Record ")), "{rows:?}");
+}
+
+#[test]
+fn a_chosen_target_lists_no_scan_record_before_its_read_lands() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    scan(&mut m, one_of_each());
+    let target = target_folder(d.path());
+    let mut h = open_dialog(m, &id, 1280.0);
+    assert_eq!(row_names(&h).len(), 1, "no target: every record");
+    // The harness never polls, so the read cannot land.
+    h.state_mut().target_picked(target);
+    h.run();
+    assert!(h.state().target().is_none());
+    let rows = row_names(&h);
+    assert!(rows.is_empty(), "{rows:?}");
+}
+
+#[test]
+fn a_relative_path_that_does_not_exist_overlaps_itself_not_a_doubled_one() {
+    let cwd = std::env::current_dir().unwrap();
+    let rel = Path::new("fs_hl_no_such_dir/inner");
+    assert!(overlaps(rel, &cwd.join(rel).join("deeper")));
+    assert!(overlaps(&cwd.join(rel), rel));
+    assert!(!overlaps(rel, &cwd.join("fs_hl_no_such_dir/other")));
 }
 
 #[test]
@@ -1039,18 +1081,26 @@ use sdc_gui::model::sets::MatchFrom;
 
 /// A CS project whose PBR-picked set `armor/lonely` has `_n` (+ `_rmaos` when `rmaos`) and no albedo.
 fn lonely(dir: &Path, rmaos: bool) -> (AppModel, String) {
-    let r = dir.join("textures/armor");
+    lonely_rooted(dir, rmaos, false)
+}
+
+/// `lonely`, with the project rooted at the mod folder (`mod`, holding `textures/`) when `mod_root`, else at its
+/// `textures` folder.
+fn lonely_rooted(dir: &Path, rmaos: bool, mod_root: bool) -> (AppModel, String) {
+    let (root, rel) = match mod_root {
+        true => (dir.join("mod"), "textures/armor"),
+        false => (dir.join("textures"), "armor"),
+    };
+    let r = root.join(rel);
     std::fs::create_dir_all(&r).unwrap();
     png(&r, "lonely_n.png", [128, 128, 255]);
     if rmaos {
         png(&r, "lonely_rmaos.png", [200, 20, 255]);
     }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
-    m.decide("armor/lonely_n.png", Answer::Subtype(Subtype::PbrNormal));
-    m.decide(
-        "armor/lonely_n.png",
-        Answer::Green(GreenConvention::Directx),
-    );
+    let mut m = opened_as_the_app(root, dir.join("export"));
+    let n = format!("{rel}/lonely_n.png");
+    m.decide(&n, Answer::Subtype(Subtype::PbrNormal));
+    m.decide(&n, Answer::Green(GreenConvention::Directx));
     idle(&mut m);
     let id = sdc_gui::model::sets::views(&m)
         .iter()
@@ -1419,4 +1469,101 @@ fn the_unused_statics_line_is_not_amber() {
     let c = text_colours(&h, &text);
     assert!(!c.is_empty(), "the line is drawn");
     assert!(c.iter().all(|c| *c != sdc_gui::ui::status::AMBER), "{c:?}");
+}
+
+/// Note HL5: a no-albedo set's JSON slot paths are where the export wrote its files: the game path the entry names
+/// is the file's place under the export folder (a project rooted at a `textures` folder leaves that folder out of
+/// the written path, so its export folder stands for the mod's `textures` folder).
+#[test]
+fn the_json_slots_name_where_the_files_were_written() {
+    for (mod_root, mapped) in [(false, false), (true, false), (false, true), (true, true)] {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, id) = lonely_rooted(d.path(), true, mod_root);
+        let (match1, dir, n, rm) = if mapped {
+            (
+                r"fs6\fs6_boots_ir.dds",
+                "fs6",
+                "fs6_boots_ir_n.dds",
+                "fs6_boots_ir_m.dds",
+            )
+        } else {
+            (
+                r"armor\lonely.dds",
+                "armor",
+                "lonely_n.dds",
+                "lonely_rmaos.dds",
+            )
+        };
+        if mapped {
+            m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+                .unwrap();
+            idle(&mut m);
+        }
+        let e = entry_of(&mut m, match1);
+        let case = format!("mod root {mod_root}, mapped {mapped}");
+        for (slot, file) in [("slot2", n), ("slot6", rm)] {
+            let named = e[slot].as_str().unwrap_or_else(|| panic!("no {slot}: {e}"));
+            assert_eq!(named, format!(r"textures\{dir}\{file}"), "{case}");
+            let rel = named.replace('\\', "/");
+            let at = if mod_root {
+                rel.clone()
+            } else {
+                rel.strip_prefix("textures/").unwrap().to_string()
+            };
+            let written = m.export_root().join(&at);
+            assert!(written.is_file(), "{case}: {named} is not at {written:?}");
+        }
+    }
+}
+
+/// Note HL5: PGPatcher run on the entry the export wrote for a no-albedo set keeps the mesh's own diffuse; without
+/// `slot1` it would point the shape at the missing `textures\pbr\` copy and skip it.
+#[test]
+fn pgpsim_patches_the_written_no_albedo_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _) = lonely(d.path(), true);
+    let e = entry_of(&mut m, r"armor\lonely.dds");
+    let json: Value = serde_json::from_slice(&std::fs::read(pgp_json_path(&m)).unwrap()).unwrap();
+    let default = json["default"].clone();
+    let mut source = pgpsim::MaterialState::builtin_default();
+    source.set_slot_raw(0, r"textures\armor\lonely.dds");
+    source.set_slot_raw(1, r"textures\armor\lonely_n.dds");
+    let exists = |p: &str| p != r"textures\pbr\armor\lonely.dds";
+    let run = |v: &Value| {
+        pgpsim::simulate(&pgpsim::SimInput {
+            entry: v,
+            default: &default,
+            nif_path: r"meshes\armor\lonely.nif",
+            source: &source,
+            exists: &exists,
+        })
+    };
+    match run(&e) {
+        pgpsim::SimResult::Patched { material, .. } => {
+            assert_eq!(material.slots[0].raw, r"textures\armor\lonely.dds")
+        }
+        other => panic!("{other:?}"),
+    }
+    let mut without = e.clone();
+    without.as_object_mut().unwrap().remove("slot1");
+    assert!(matches!(run(&without), pgpsim::SimResult::Skip(_)));
+}
+
+/// An empty typed `match1` drops the set's entry, so the "mesh keeps" row has nothing to say.
+#[test]
+fn a_set_with_no_entry_gets_no_no_albedo_row() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = lonely(d.path(), true);
+    let row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .any(|p| p.text.starts_with("No albedo in this set"))
+    };
+    assert!(row(&m));
+    m.set_json_value(&id, "match1", Some(json!("")));
+    idle(&mut m);
+    assert!(sdc_gui::model::pbr_export::json_entries(&m)
+        .iter()
+        .all(|(v, _)| v.id != id));
+    assert!(!row(&m));
 }

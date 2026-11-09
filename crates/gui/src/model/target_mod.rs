@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 /// Shown where records are wanted but the target mod's plugins are not in the MO2 scan.
 pub const RECORDS_NOT_IN_SCAN: &str = "Records come from the MO2 scan; this mod isn't in it";
+/// Shown instead when the target mod holds no plugin at all (a plain texture folder).
+pub const RECORDS_NO_PLUGIN: &str = "Records come from the MO2 scan; this folder has no plugin";
 /// Refused: the target mod and the export folder are one folder, or one holds the other.
 pub const TARGET_IS_EXPORT: &str =
     "The target mod can't be the export folder, sit inside it or hold it";
@@ -172,8 +174,9 @@ pub fn overlaps(a: &Path, b: &Path) -> bool {
 }
 
 fn canon(p: &Path) -> PathBuf {
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut tail = vec![];
-    let mut cur = p;
+    let mut cur = abs.as_path();
     let base = loop {
         if let Ok(c) = cur.canonicalize() {
             break c;
@@ -183,7 +186,7 @@ fn canon(p: &Path) -> PathBuf {
                 tail.push(n);
                 cur = par;
             }
-            _ => break p.to_path_buf(),
+            _ => break cur.to_path_buf(),
         }
     };
     let full: PathBuf = base.iter().chain(tail.into_iter().rev()).collect();
@@ -229,9 +232,11 @@ impl AppModel {
         self.target_mod_gen += 1;
         let gen = self.target_mod_gen;
         let Some(root) = self.sets_doc.as_ref().and_then(|d| d.target_mod()) else {
-            self.target_mod = None;
+            // Nothing to read, and nothing changed unless a target was just cleared.
+            if self.target_mod.take().is_some() {
+                self.evidence_rev += 1;
+            }
             self.target_mod_rev += 1;
-            self.evidence_rev += 1;
             return;
         };
         if self.target_mod.as_ref().is_some_and(|t| t.root != root) {

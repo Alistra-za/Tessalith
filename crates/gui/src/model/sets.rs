@@ -453,6 +453,8 @@ pub const BADGE_PBR_LANDSCAPE: &str = "PBR Landscape → CS JSON";
 pub const BADGE_PBR_LANDSCAPE_PGP: &str = "PBR Landscape → CS + PGPatcher JSON";
 pub const BADGE_PBR_LANDSCAPE_PGP_ONLY: &str = "PBR Landscape → PGPatcher JSON (no CS records yet)";
 pub const BADGE_PBR_LANDSCAPE_NONE: &str = "PBR Landscape (no JSON yet)";
+/// A PBR pick on Community Shaders whose slots are all empty or kept DDS: the target is not the reason.
+pub const BADGE_PBR_NOTHING_TO_WRITE: &str = "PBR set (no texture to write, so no JSON)";
 
 /// The Sets column badge. A PBR Landscape set's says what it writes (Note BM, review I2): CS records when a block
 /// has an EDID, the PGPatcher entry when the set is a PGPatcher JSON set its statics rule keeps.
@@ -471,8 +473,12 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
     } else if is_json_set(v, m.target) {
         "PBR → JSON"
     } else if super::also::is_pbr_set(v) {
-        // Note HL5: the JSON is written on Community Shaders only.
-        "PBR set (no JSON on this target)"
+        // Note HL5: the JSON is written on Community Shaders only, and only for a set with a filled slot.
+        if m.target == Target::Cs {
+            BADGE_PBR_NOTHING_TO_WRITE
+        } else {
+            "PBR set (no JSON on this target)"
+        }
     } else {
         "vanilla set (no JSON)"
     }
@@ -3168,5 +3174,46 @@ mod order_tests {
             let ids_of = |v: &[SetView]| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
             assert_eq!(ids_of(&views), ids_of(&old), "round {round}: {order:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::*;
+    use engine::shader::ShaderOrigin;
+
+    fn pbr_set(json: bool) -> SetView {
+        let mut v = SetView::new("k".into(), "a/b".into(), vec![]);
+        v.json = json;
+        v.shader = Some(ShaderPick {
+            shader: Shader::Pbr,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        });
+        v
+    }
+
+    #[test]
+    fn a_pbr_pick_with_nothing_filled_does_not_blame_the_target() {
+        let mut m = super::super::tests::bare_model();
+        let v = pbr_set(false);
+        m.target = Target::Cs;
+        assert_eq!(badge_text(&m, &v), BADGE_PBR_NOTHING_TO_WRITE);
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+        m.target = Target::Vanilla;
+        assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+    }
+
+    /// A no-albedo PBR set (a JSON set, Note HL5) reads "PBR, no JSON" off Community Shaders and "PBR → JSON" on it.
+    #[test]
+    fn a_no_albedo_pbr_set_reads_no_json_off_cs() {
+        let mut m = super::super::tests::bare_model();
+        let v = pbr_set(true);
+        m.target = Target::Vanilla;
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+        assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
+        m.target = Target::Cs;
+        assert_eq!(kind_text(&m, &v), "PBR → JSON");
     }
 }
