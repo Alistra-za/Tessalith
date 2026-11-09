@@ -1120,9 +1120,41 @@ pub fn set_label(export_root: &str, key: &str) -> String {
     }
 }
 
+/// Note HF6: the "Move to group" entry and its submenu, from `model.group_entries` (the header entry first). One
+/// source for the set card's menu and the bulk menu. Returns the entry's response and the clicked choice.
+pub(super) fn group_submenu(
+    ui: &mut egui::Ui,
+    entries: &[MenuEntry],
+) -> (egui::Response, Option<MenuAction>) {
+    let (head, items) = entries.split_first().expect("the header entry comes first");
+    let mut picked = None;
+    let r = ui
+        .add_enabled_ui(head.disabled.is_none(), |ui| {
+            ui.menu_button(&head.label, |ui| {
+                for l in items {
+                    let r = ui.add_enabled(l.disabled.is_none(), egui::Button::new(&l.label));
+                    let r = match &l.disabled {
+                        Some(why) => r.on_disabled_hover_text(why),
+                        None => r,
+                    };
+                    if r.clicked() {
+                        picked = Some(l.action.clone());
+                        ui.close();
+                    }
+                }
+            })
+        })
+        .response;
+    let r = match &head.disabled {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    (r, picked)
+}
+
 /// F3a D4: a right-click menu drawn from `entries` under its count title; the members-of-kind entries go in a
-/// "Select members of kind" submenu, the slot menu's links in "From another set", the group choices in "Move to group". The menus are lists so F3b can
-/// append. Returns the clicked action.
+/// "Select members of kind" submenu, the slot menu's links in "From another set", the group choices in "Move to
+/// group". The menus are lists so F3b can append. Returns the clicked action.
 pub(super) fn bulk_menu(
     ui: &mut egui::Ui,
     title: &str,
@@ -1146,15 +1178,17 @@ pub(super) fn bulk_menu(
         )
     });
     for e in rest {
-        if matches!(
-            e.action,
-            MenuAction::FromAnotherSet | MenuAction::MoveToGroup
-        ) {
-            let items = if e.action == MenuAction::MoveToGroup {
-                &groups
-            } else {
-                &links
-            };
+        if e.action == MenuAction::MoveToGroup {
+            let all: Vec<MenuEntry> = std::iter::once(e)
+                .chain(groups.iter().copied())
+                .cloned()
+                .collect();
+            let (_, p) = group_submenu(ui, &all);
+            picked = p.or(picked);
+            continue;
+        }
+        if e.action == MenuAction::FromAnotherSet {
+            let items = &links;
             let r = ui
                 .add_enabled_ui(e.disabled.is_none(), |ui| {
                     ui.menu_button(&e.label, |ui| {

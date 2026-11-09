@@ -126,6 +126,8 @@ pub struct DropState {
     pub card_h: HashMap<String, f32>,
     /// Review I1: frames a reveal has re-aimed at a card not yet laid out (capped by `REVEAL_TRIES`).
     pub reveal_tries: u8,
+    /// Note HF6: the set a filter change or a re-flow scrolls to. It scrolls only: it never opens the set's group.
+    pub quiet_reveal: Option<String>,
     /// The Sets scroll offset and view height last frame, for a reveal's jump (review I1).
     pub view: Option<(f32, f32)>,
     /// Note FM32: the column width `card_h` is for. A change re-flows every remembered height (`reflow_heights`).
@@ -1408,7 +1410,7 @@ fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act
     } else {
         "Exclude from export"
     };
-    let hover = "A whole-project export skips this group's sets and leaves the files they wrote before as they are";
+    let hover = "Marks the group's sets as left out of export";
     if edit(ui, flip).on_hover_text(hover).clicked() {
         acts.push(Act::GroupExcluded(h.name.clone(), !h.excluded));
         ui.close();
@@ -1504,6 +1506,7 @@ pub fn draw(
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
     if reflowed && model.nav.reveal_set.is_none() {
         if let [k] = model.selected_sets().as_slice() {
+            st.quiet_reveal = Some(k.clone());
             model.nav.reveal_set = Some(k.clone());
         }
     }
@@ -1529,6 +1532,7 @@ pub fn draw(
     if changed {
         match model.selected_sets().as_slice() {
             [k] if visible.iter().any(|&i| views[i].key == *k) => {
+                st.quiet_reveal = Some(k.clone());
                 model.nav.reveal_set = Some(k.clone());
             }
             _ => to_top = model.nav.reveal_set.is_none(),
@@ -1542,10 +1546,15 @@ pub fn draw(
         &views,
         &visible,
         &mut st.selection,
-        reveal.as_deref(),
+        reveal
+            .as_deref()
+            .filter(|k| st.quiet_reveal.as_deref() != Some(*k)),
     );
     let (rows, heads, grouped) = build_rows(model, &views, &visible, &status_of);
-    let head_h = ui.spacing().interact_size.y + 6.0;
+    let head_h = ui
+        .text_style_height(&egui::TextStyle::Body)
+        .max(ui.spacing().interact_size.y)
+        + 6.0;
     let reveal_at = reveal.as_deref().and_then(|k| {
         rows.iter().position(
             |r| matches!(r, Row::Card(i) if !views[*i].key.is_empty() && views[*i].key == k),
@@ -1724,8 +1733,11 @@ pub fn draw(
         st.reveal_tries += 1;
         model.nav.reveal_set = reveal;
         ctx.request_repaint();
-    } else if reveal.is_some() {
-        st.reveal_tries = 0;
+    } else {
+        if reveal.is_some() {
+            st.reveal_tries = 0;
+        }
+        st.quiet_reveal = None;
     }
     // Note FM32: Tab reached an off-screen card: the next frame scrolls it in and draws it, keeping the focus.
     // A Go to set in the same frame wins: the card keeps its focus, and the Tab does not pull the view off the target.
@@ -2700,36 +2712,18 @@ fn menu(
         }
     });
     tip(remove.response);
-    // Note HF6: join a group, start one, or leave. The choices are read only while the menu is open.
-    let groups = model.groups();
-    let here = groups
-        .iter()
-        .position(|g| g.sets.iter().any(|s| engine::sets::same_id(s, &v.id)));
-    let to_group = ui.menu_button("Move to group", |ui| {
-        for (n, g) in groups.iter().enumerate() {
-            let r = ui.add_enabled(here != Some(n), egui::Button::new(&g.name));
-            if r.clicked() {
-                let to = GroupTarget::Existing(g.name.clone());
-                acts.push(Act::MoveToGroup(vec![v.id.clone()], to));
-                ui.close();
-            }
-        }
-        if !groups.is_empty() {
-            ui.separator();
-        }
-        if ui.button("New group…").clicked() {
-            acts.push(Act::OpenNewGroup(vec![v.id.clone()]));
-            ui.close();
-        }
-        if ui
-            .add_enabled(here.is_some(), egui::Button::new("No group"))
-            .clicked()
-        {
-            acts.push(Act::MoveToGroup(vec![v.id.clone()], GroupTarget::None));
-            ui.close();
-        }
-    });
-    tip(to_group.response);
+    // Note HF6: the same entries as the bulk menu, read only while the menu is open.
+    let ids = [v.id.clone()];
+    let (to_group, picked) = super::columns::group_submenu(ui, &model.group_entries(&ids));
+    if let Some(action) = picked {
+        acts.push(match action {
+            MenuAction::ToGroup(n) => Act::MoveToGroup(ids.to_vec(), GroupTarget::Existing(n)),
+            MenuAction::ToNewGroup => Act::OpenNewGroup(ids.to_vec()),
+            _ => Act::MoveToGroup(ids.to_vec(), GroupTarget::None),
+        });
+        ui.close();
+    }
+    tip(to_group);
     // Note HF1: any set; its textures go to no set.
     if tip(ui.button("Delete set")).clicked() {
         acts.push(Act::Delete(v.id.clone()));
@@ -3608,7 +3602,37 @@ fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use engine::codes::Code;
+
+    /// Note HF6: the header menu's edits are off with the reason while `sdc-project.toml` is read-only, and Select all
+    /// sets still works. A read-only document holds no groups, so no header shows then; the menu is drawn on its own.
+    #[test]
+    fn the_group_menu_edits_are_off_when_read_only() {
+        let head = Head {
+            name: "Armor".into(),
+            total: 2,
+            shown: 2,
+            status: Status::Ready,
+            excluded: false,
+            collapsed: false,
+        };
+        let editing = Editing {
+            on: false,
+            why: "read-only because of the file",
+            reorder: false,
+        };
+        let mut acts = vec![];
+        let mut h = egui_kittest::Harness::new_ui(|ui| group_menu(ui, &head, &editing, &mut acts));
+        h.run();
+        for off in ["Exclude from export", "Rename…", "Ungroup"] {
+            assert!(h.get_by_label(off).accesskit_node().is_disabled(), "{off}");
+        }
+        assert!(!h
+            .get_by_label("Select all sets")
+            .accesskit_node()
+            .is_disabled());
+    }
 
     fn fit_at(id: &str, query: &str, n: usize) -> String {
         fit_title(id, query, |t: &str| t.chars().count() <= n)

@@ -408,6 +408,33 @@ fn a_filter_reads_2_of_7_and_keeps_collapse() {
 }
 
 #[test]
+fn a_filter_change_scrolls_to_the_open_set_but_keeps_its_group_folded() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = sets_named(d.path(), &["ax1", "ax2", "b1", "b2"]);
+    group(&mut m, "Armor", &["g/ax1", "g/ax2", "g/b1"]);
+    m.set_group_collapsed("Armor", true);
+    let k = key_of(&m, "g/ax1");
+    m.select_set(&k);
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        card(&h, "g/ax1").is_none(),
+        "folded, though its set is open"
+    );
+    // The open set still passes: the filter reveals it for the scroll, and the fold stays as it is.
+    h.state_mut().sets_filter.search = "ax".into();
+    for _ in 0..4 {
+        h.run();
+    }
+    assert!(h.state().group_collapsed("Armor"), "still folded");
+    assert!(card(&h, "g/ax1").is_none());
+    assert_eq!(
+        header_label(&h, "Armor"),
+        "Group Armor, 2 of 3 sets, ready, collapsed"
+    );
+}
+
+#[test]
 fn a_header_with_no_passing_member_hides() {
     let d = tempfile::tempdir().unwrap();
     // zz_bump waits for a type: no card (Note GY5).
@@ -718,11 +745,15 @@ fn the_set_menu_has_move_to_group() {
         h.state().group_of("g/c").map(|g| g.name),
         Some("Armor".into())
     );
-    // And out again.
+    // And out again. Its own group is off in the menu (nothing to move).
     right_click_card(&mut h, "g/c");
     h.run();
     h.get_by_label("Move to group ⏵").click();
     h.run();
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Armor")
+        .accesskit_node()
+        .is_disabled());
     h.get_by_label("No group").click();
     h.run();
     assert!(h.state().group_of("g/c").is_none());

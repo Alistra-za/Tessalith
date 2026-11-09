@@ -1258,7 +1258,7 @@ impl AppModel {
             },
         ];
         v.extend(self.rename_entries(true));
-        v.extend(self.group_entries());
+        v.extend(self.group_entries(&self.selected_set_ids()));
         v.extend(kind_chips(self, &sets).into_iter().map(|c| MenuEntry {
             action: MenuAction::SelectMembersOfKind(c.kind),
             label: format!("{} ({})", c.label, c.members.len()),
@@ -1267,27 +1267,31 @@ impl AppModel {
         v
     }
 
-    /// Note HF6: "Move to group" and its choices for the selected sets: each group, a new one, none. A read-only
-    /// `sdc-project.toml` disables the lot with the reason.
-    fn group_entries(&self) -> Vec<MenuEntry> {
+    /// Note HF6: "Move to group" and its choices for the sets `ids`: each group (off when every set is in it), a
+    /// new one, none. A read-only `sdc-project.toml` disables the lot with the reason.
+    pub fn group_entries(&self, ids: &[String]) -> Vec<MenuEntry> {
         let off = self.sets_read_only_reason();
         let entry = |action, label: String, disabled| MenuEntry {
             action,
             label,
             disabled,
         };
-        let ids = self.selected_set_ids();
         let in_any = ids.iter().any(|i| self.group_of(i).is_some());
         let mut v = vec![entry(
             MenuAction::MoveToGroup,
             "Move to group".into(),
             off.clone(),
         )];
-        v.extend(
-            self.groups()
-                .into_iter()
-                .map(|g| entry(MenuAction::ToGroup(g.name.clone()), g.name, off.clone())),
-        );
+        v.extend(self.groups().into_iter().map(|g| {
+            let all_in = !ids.is_empty()
+                && ids
+                    .iter()
+                    .all(|i| g.sets.iter().any(|s| engine::sets::same_id(s, i)));
+            let why = off
+                .clone()
+                .or(all_in.then(|| "already in this group".to_string()));
+            entry(MenuAction::ToGroup(g.name.clone()), g.name, why)
+        }));
         v.push(entry(
             MenuAction::ToNewGroup,
             "New group…".into(),
