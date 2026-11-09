@@ -37,6 +37,21 @@ fn flat(path: &Path) {
         .unwrap();
 }
 
+/// A colour map whose right half is transparent: its alpha needs a decision.
+fn half_alpha(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgba([
+            (x * 4) as u8,
+            (y * 4) as u8,
+            90,
+            if x < 32 { 255 } else { 0 },
+        ])
+    })
+    .save(path)
+    .unwrap();
+}
+
 /// `textures/g`: a ready set `g/<n>` per `ready` (a colour map and a flat `_n`), and a set per `warn` whose colour
 /// map has an alpha that needs a decision. Opened as the app opens a folder, exports under `<dir>/export`.
 fn plain(dir: &Path, ready: &[&str], warn: &[&str]) -> AppModel {
@@ -46,17 +61,7 @@ fn plain(dir: &Path, ready: &[&str], warn: &[&str]) -> AppModel {
         flat(&g.join(format!("{n}_n.png")));
     }
     for n in warn {
-        std::fs::create_dir_all(&g).unwrap();
-        ImageBuffer::from_fn(64, 64, |x, y| {
-            Rgba([
-                (x * 4) as u8,
-                (y * 4) as u8,
-                90,
-                if x < 32 { 255 } else { 0 },
-            ])
-        })
-        .save(g.join(format!("{n}.png")))
-        .unwrap();
+        half_alpha(&g.join(format!("{n}.png")));
         flat(&g.join(format!("{n}_n.png")));
     }
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
@@ -407,12 +412,14 @@ fn lines_of(m: &AppModel, kind: JsonKind) -> usize {
     m.review_json().iter().filter(|l| l.kind == kind).count()
 }
 
-/// CS PBR and XPMF: rock01 (PBR Landscape) has a texture-set block and an XPMF block; leaf is a plain set.
+/// CS PBR and XPMF: rock01 (PBR Landscape) has a texture-set block and an XPMF block; leaf is a plain set whose
+/// undecided alpha keeps Review open, so its JSON lines are read for a scope without and then with rock01.
 #[test]
 fn per_set_files_only_for_the_run_cs_pbr_and_xpmf() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     const ROCK: &str = "landscape/rock01";
+    const LEAF: &str = "landscape/leaf";
     m.add_cs_block(ROCK, Kind::Txst);
     m.set_cs_edids(ROCK, Kind::Txst, &["LandscapeRock01".into()]);
     m.add_cs_block(ROCK, Kind::Mato);
@@ -421,6 +428,27 @@ fn per_set_files_only_for_the_run_cs_pbr_and_xpmf() {
         .as_mut()
         .unwrap()
         .set_xpmf(ROCK, json!({"shelterFade": 40}).as_object().cloned());
+    idle(&mut m);
+    let txst = out(&m, "PBRTextureSets/LandscapeRock01.json");
+    let xpmf = m
+        .output_root()
+        .join("SKSE/Plugins/XPMF/tessalith_rock01.json");
+    let k = keys(&m, &[LEAF]);
+    m.export_sets(k, "Export set landscape/leaf".into());
+    assert!(m.review.is_some(), "leaf's question opens Review");
+    assert_eq!(lines_of(&m, JsonKind::CsPbr), 0);
+    assert_eq!(lines_of(&m, JsonKind::Xpmf), 0);
+    // The scope changes while Review is open: its lines follow at once.
+    let k = keys(&m, &[LEAF, ROCK]);
+    m.export_sets(k, "Export 2 sets".into());
+    assert!(m.review.is_some());
+    assert_eq!(
+        m.export_scope().map(|s| s.label.as_str()),
+        Some("Export 2 sets")
+    );
+    assert!(lines_of(&m, JsonKind::CsPbr) > 0);
+    assert!(lines_of(&m, JsonKind::Xpmf) > 0);
+    m.close_review();
     m.decide(
         "landscape/leaf.png",
         Answer::Subtype(engine::config::Subtype::Diffuse),
@@ -430,27 +458,10 @@ fn per_set_files_only_for_the_run_cs_pbr_and_xpmf() {
         Answer::Alpha(engine::config::AlphaPolicy::Cutout),
     );
     idle(&mut m);
-    let txst = out(&m, "PBRTextureSets/LandscapeRock01.json");
-    let xpmf = m
-        .output_root()
-        .join("SKSE/Plugins/XPMF/tessalith_rock01.json");
-    // Review's lines for a scope without rock01.
-    let k = keys(&m, &["landscape/leaf"]);
-    m.export_sets(k, "Export set landscape/leaf".into());
-    if m.review.is_some() {
-        assert_eq!(lines_of(&m, JsonKind::CsPbr), 0);
-        assert_eq!(lines_of(&m, JsonKind::Xpmf), 0);
-    }
-    finish(&mut m);
+    export_sets(&mut m, &[LEAF], "Export set landscape/leaf");
     assert!(!txst.exists(), "{}", notes(&m));
     assert!(!xpmf.exists(), "{}", notes(&m));
-    let k = keys(&m, &[ROCK]);
-    m.export_sets(k, "Export set landscape/rock01".into());
-    if m.review.is_some() {
-        assert!(lines_of(&m, JsonKind::CsPbr) > 0);
-        assert!(lines_of(&m, JsonKind::Xpmf) > 0);
-    }
-    finish(&mut m);
+    export_sets(&mut m, &[ROCK], "Export set landscape/rock01");
     assert!(txst.is_file(), "{}", notes(&m));
     assert!(xpmf.is_file(), "{}", notes(&m));
 }
@@ -463,6 +474,8 @@ fn per_set_files_only_for_the_run_complex_material() {
     for base in ["iron", "axe"] {
         colour(&r.join(format!("{base}.png")), 90);
     }
+    // w's alpha needs a decision: in the scope, it keeps Review open.
+    half_alpha(&r.join("w.png"));
     for name in ["iron_m.png", "axe_em.png"] {
         ImageBuffer::from_fn(64, 64, |x, y| {
             Rgba([(x * 4) as u8, (y * 4) as u8, 90, (40 + x * 2) as u8])
@@ -488,12 +501,12 @@ fn per_set_files_only_for_the_run_complex_material() {
         m.set_cm_value(id, "glossiness", Some(json!(80)));
     }
     idle(&mut m);
-    let k = keys(&m, &["m/iron"]);
-    m.export_sets(k, "Export set m/iron".into());
-    if m.review.is_some() {
-        assert_eq!(lines_of(&m, JsonKind::ComplexMaterial), 1);
-    }
-    finish(&mut m);
+    let k = keys(&m, &["m/iron", "m/w"]);
+    m.export_sets(k, "Export 2 sets".into());
+    assert!(m.review.is_some(), "w's question opens Review");
+    assert_eq!(lines_of(&m, JsonKind::ComplexMaterial), 1);
+    m.close_review();
+    export_sets(&mut m, &["m/iron"], "Export set m/iron");
     assert!(out(&m, "m/iron_m.json").is_file(), "{}", notes(&m));
     assert!(!out(&m, "m/axe_em.json").exists(), "{}", notes(&m));
 }
@@ -508,27 +521,24 @@ fn per_set_files_only_for_the_run_cs_skin() {
             colour(&r.join(format!("{base}{s}.png")), 90);
         }
     }
+    // w's alpha needs a decision: in the scope, it keeps Review open.
+    half_alpha(&r.join("w.png"));
     let mut m = opened_as_the_app(d.path().to_path_buf(), d.path().join("export"));
-    for id in ["textures/x/a", "textures/x/b"] {
-        let id = set_views(&m)
-            .iter()
-            .find(|v| v.key.ends_with(&id[9..]))
-            .map(|v| v.id.clone())
-            .expect("a skin set");
-        m.set_skin_value(&id, "Roughness", Some(json!(0.6)));
+    let (a, b, w) = (
+        id_ending(&m, "x/a"),
+        id_ending(&m, "x/b"),
+        id_ending(&m, "x/w"),
+    );
+    for id in [&a, &b] {
+        m.set_skin_value(id, "Roughness", Some(json!(0.6)));
     }
     idle(&mut m);
-    let a = set_views(&m)
-        .iter()
-        .find(|v| v.key.ends_with("x/a"))
-        .unwrap()
-        .key
-        .clone();
-    m.export_sets([a].into(), "Export set x/a".into());
-    if m.review.is_some() {
-        assert_eq!(lines_of(&m, JsonKind::CsSkin), 1);
-    }
-    finish(&mut m);
+    let k = keys(&m, &[&a, &w]);
+    m.export_sets(k, "Export 2 sets".into());
+    assert!(m.review.is_some(), "w's question opens Review");
+    assert_eq!(lines_of(&m, JsonKind::CsSkin), 1);
+    m.close_review();
+    export_sets(&mut m, &[&a], "Export set x/a");
     assert!(
         out(&m, "textures/x/a.csskin.json").is_file(),
         "{}",
@@ -658,6 +668,27 @@ fn whole_export_with_also_skips_excluded_sets() {
     assert!(v.join("textures/arm/steel.dds").is_file());
 }
 
+/// Note HF11: an excluded PBR grass set is in `[export] skip` too, so Review's CM text does not promise its
+/// complex-grass stack.
+#[test]
+fn an_excluded_grass_set_gives_also_no_grass() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = also_project(d.path());
+    let steel = id_ending(&m, "arm/steel");
+    m.set_shader(&steel, Some(engine::shader::Shader::PbrGrass));
+    idle(&mut m);
+    assert!(m.also_grass());
+    group(&mut m, "Grass", &[&steel]);
+    m.set_group_excluded("Grass", true).unwrap();
+    assert!(!m.also_grass(), "the excluded grass set writes nothing");
+    assert!(m
+        .also_spec()
+        .cfg
+        .skip
+        .iter()
+        .any(|s| engine::sets::same_id(s, &steel)));
+}
+
 // ---- The scope's life ----
 
 #[test]
@@ -669,6 +700,55 @@ fn closing_review_ends_the_scope() {
     assert!(m.export_scope().is_some());
     m.close_review();
     assert!(m.export_scope().is_none());
+}
+
+/// Note HF10: a queued scoped export that is dropped (a dialog open when the plan lands) takes its scope with it.
+#[test]
+fn a_dropped_queued_export_ends_the_scope() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.replan();
+    let k = keys(&m, &["g/a"]);
+    m.export_sets(k, "Export set g/a".into());
+    assert!(m.export_queued(), "waits for the plan");
+    assert!(m.export_scope().is_some());
+    m.dialog = Some(sdc_gui::model::Dialog::Error("x".into()));
+    idle(&mut m);
+    assert!(
+        m.status_line.starts_with("Export not started"),
+        "{}",
+        m.status_line
+    );
+    assert!(m.export_scope().is_none(), "the dropped export ends it");
+    assert_eq!(m.write_only(), None, "the next export is whole");
+}
+
+/// Note HF10: while an export runs, Export N sets is off with the reason and Export set changes nothing.
+#[test]
+fn export_sets_is_off_while_an_export_runs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "b"], &[]);
+    let (a, b) = (key(&m, "g/a"), key(&m, "g/b"));
+    m.click_set(&a, false, false);
+    m.click_set(&b, true, false);
+    m.export_clicked();
+    assert!(m.export.running.is_some(), "a clean export starts at once");
+    let entry = m
+        .set_menu()
+        .into_iter()
+        .find(|e| e.action == MenuAction::ExportSets)
+        .expect("the Export N sets entry");
+    assert_eq!(
+        entry.disabled.as_deref(),
+        Some("Wait for the export to finish")
+    );
+    m.export_sets(keys(&m, &["g/a"]), "Export set g/a".into());
+    assert!(
+        m.export_scope().is_none(),
+        "no scope under a running export"
+    );
+    idle(&mut m);
+    assert!(out(&m, "textures/g/b.dds").is_file(), "{}", notes(&m));
 }
 
 #[test]

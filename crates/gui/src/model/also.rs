@@ -196,7 +196,7 @@ impl AppModel {
 
     /// Task 13 M3: a PBR grass set is not skipped, so the CM folder gets its complex-grass stack (Review's CM text).
     pub fn also_grass(&self) -> bool {
-        let skip = self.also_config().skip;
+        let skip = self.also_run_config().skip;
         sets::views(self).iter().any(|v| {
             v.shader
                 .as_ref()
@@ -205,11 +205,24 @@ impl AppModel {
         })
     }
 
+    /// `also_config` with the excluded groups' sets added to `skip` (Note HF11): the rebased `write_only` already keeps
+    /// their files out, and the list keeps `also_grass` and any later reader of `skip` right.
+    fn also_run_config(&self) -> ExportConfig {
+        let mut cfg = self.also_config();
+        cfg.skip.extend(
+            self.sets_doc
+                .iter()
+                .flat_map(|d| d.groups())
+                .filter(|g| g.excluded)
+                .flat_map(|g| g.sets),
+        );
+        cfg
+    }
+
     /// What `run_also` needs besides the request: the config, the location and TA13's `scanned`.
     pub fn also_spec(&self) -> AlsoSpec {
-        // Note HF11: an excluded set gets no Vanilla or CM files through the rebased `write_only`, not `[export] skip`.
         AlsoSpec {
-            cfg: self.also_config(),
+            cfg: self.also_run_config(),
             location: self.also_location(),
             scanned: !self.mesh_votes.is_empty(),
         }

@@ -1639,6 +1639,8 @@ impl AppModel {
         if thumbs_landed {
             self.invalidate_views();
         }
+        // Note HF10: a queued scoped export that was dropped or cancelled above takes its scope with it.
+        self.end_idle_scope();
         // Last, so a plan that landed above is checked in this poll (K1).
         changed |= self.refresh_checks();
         changed

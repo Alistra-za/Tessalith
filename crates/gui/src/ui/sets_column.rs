@@ -935,6 +935,8 @@ struct Editing<'a> {
     why: &'a str,
     /// Editable and no filter on: sets can be reordered (R17).
     reorder: bool,
+    /// An export runs: Export set / group are off (Note HF10).
+    exporting: bool,
 }
 
 /// Why the ≡ handle and Move up / Move down are off while the Sets filter is on.
@@ -1400,6 +1402,14 @@ fn group_header(
 
 /// Note HF6: a header's right-click menu. The edits are off while `sdc-project.toml` is read-only, with the reason;
 /// Select all sets only reads.
+/// Note HF10: Export set / Export group, off with the reason while an export runs (a scope set then would change
+/// what the running export's lists count).
+fn export_button(ui: &mut egui::Ui, editing: &Editing, label: &str, hover: &str) -> egui::Response {
+    ui.add_enabled(!editing.exporting, egui::Button::new(label))
+        .on_hover_text(hover)
+        .on_disabled_hover_text(crate::model::also::EXPORT_RUNNING)
+}
+
 fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act>) {
     let edit = |ui: &mut egui::Ui, label: &str| {
         let r = ui.add_enabled(editing.on, egui::Button::new(label));
@@ -1410,12 +1420,13 @@ fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act
         }
     };
     // Note HF9: exports only this group's sets (and the sets they borrow from), even when it is excluded.
-    if ui
-        .button("Export group")
-        .on_hover_text(
-            "Export only this group's sets; the rest of the export folder stays as it is",
-        )
-        .clicked()
+    if export_button(
+        ui,
+        editing,
+        "Export group",
+        "Export only this group's sets; the rest of the export folder stays as it is",
+    )
+    .clicked()
     {
         acts.push(Act::ExportGroup(h.name.clone()));
         ui.close();
@@ -1477,6 +1488,7 @@ pub fn draw(
         on: editable,
         why: &why,
         reorder: editable && !filtering,
+        exporting: model.export.running.is_some(),
     };
     let views = crate::model::sets::views(model);
     let visible = model.visible_sets();
@@ -2700,10 +2712,13 @@ fn menu(
         }
     });
     // Note HF9: an export, not a set edit, so it works while sets are not editable.
-    if ui
-        .button("Export set")
-        .on_hover_text("Export only this set (and any set it borrows from); the rest of the export folder stays as it is")
-        .clicked()
+    if export_button(
+        ui,
+        editing,
+        "Export set",
+        "Export only this set (and any set it borrows from); the rest of the export folder stays as it is",
+    )
+    .clicked()
     {
         acts.push(Act::ExportSet(v.key.clone(), v.id.clone()));
         ui.close();
@@ -3651,6 +3666,7 @@ mod tests {
             on: false,
             why: "read-only because of the file",
             reorder: false,
+            exporting: false,
         };
         let mut acts = vec![];
         let mut h = egui_kittest::Harness::new_ui(|ui| group_menu(ui, &head, &editing, &mut acts));

@@ -172,3 +172,26 @@ fn the_skeleton_signature_ignores_it() {
     assert!(some.write_only.is_some());
     assert_eq!(all.sig_without_files(), some.sig_without_files());
 }
+
+/// Note HF9: a file cancelled while planning is listed only when its set is in the run. The hook cancels just before
+/// `hfcancelhook.png`'s Load, a name no other test here uses.
+#[test]
+fn files_cancelled_while_planning_outside_the_run_are_not_listed() {
+    struct Unset;
+    impl Drop for Unset {
+        fn drop(&mut self) {
+            std::env::remove_var("SDC_TEST_CANCEL_ON");
+        }
+    }
+    let d = fixture();
+    ImageBuffer::from_fn(16, 16, |x, y| Rgb([(x * 9) as u8, (y * 9) as u8, 9]))
+        .save(d.path().join("in").join("hfcancelhook.png"))
+        .unwrap();
+    std::env::set_var("SDC_TEST_CANCEL_ON", "hfcancelhook.png");
+    let _unset = Unset;
+    let hook = |s: &BatchSummary| s.cancelled.iter().any(|p| p.ends_with("hfcancelhook.png"));
+    let (all, _) = run(plan(request(&d, None)));
+    assert!(hook(&all), "the hook cancels it: {all:?}");
+    let (some, _) = run(plan(request(&d, Some(&["rock"]))));
+    assert!(!hook(&some), "outside the run: {some:?}");
+}

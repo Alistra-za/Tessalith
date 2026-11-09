@@ -403,9 +403,19 @@ impl AppModel {
     /// It runs as Export does: at once when clean, else through Review; the scope ends when Review closes or the
     /// export ends.
     pub fn export_sets(&mut self, keys: BTreeSet<String>, label: String) {
+        // Note HF10: the menus are off while an export runs; changing the scope then would recount its lists.
+        if self.export.running.is_some() {
+            return;
+        }
         let keys = self.with_hosts(keys);
         self.set_scope(Some(ExportScope { keys, label }));
         self.export_go();
+        self.end_idle_scope();
+    }
+
+    /// A scope lives while its Review is open, its export runs or waits for a plan; any path that drops all three
+    /// (a refusal, a queued export dropped or cancelled) ends it here. `poll` calls this every frame.
+    pub(super) fn end_idle_scope(&mut self) {
         if self.review.is_none() && self.export.running.is_none() && !self.export_queued() {
             self.set_scope(None);
         }

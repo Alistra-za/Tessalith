@@ -2956,6 +2956,11 @@ impl Engine {
         for f in &mut failed {
             f.set = set_of.get(f.path.as_path()).map(|k| k.to_string());
         }
+        // Note HF9: a file cancelled while planning is listed only when its set is in the run (`run` filters the
+        // rest; a cancelled path keeps no set, so it is done here, where the sets are known).
+        if let Some(only) = &req.write_only {
+            cancelled.retain(|p| set_of.get(p.as_path()).is_none_or(|k| only.contains(*k)));
+        }
         let plan = Plan {
             request: req.clone(),
             registry: registry.clone(),

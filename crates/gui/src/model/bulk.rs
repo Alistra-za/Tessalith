@@ -1264,7 +1264,12 @@ impl AppModel {
         v.push(MenuEntry {
             action: MenuAction::ExportSets,
             label: format!("Export {n} sets"),
-            disabled: None,
+            // Note HF10: a scope set under a running export would change what its lists count.
+            disabled: self
+                .export
+                .running
+                .is_some()
+                .then(|| super::also::EXPORT_RUNNING.to_string()),
         });
         v.extend(kind_chips(self, &sets).into_iter().map(|c| MenuEntry {
             action: MenuAction::SelectMembersOfKind(c.kind),

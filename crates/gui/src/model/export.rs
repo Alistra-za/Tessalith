@@ -265,10 +265,18 @@ impl ExportModel {
         }
     }
 
-    /// Note HF9: drop the rows that never started.
+    /// Note HF9: drop the rows that never started whose texture is outside the run: its own key, or an Also phase's
+    /// `<folder>/<key>`. A queued row of a texture in the run stays, to end as "not run".
     pub(crate) fn drop_unstarted(&mut self) {
         let before = self.rows.len();
-        self.rows.retain(|r| r.state != RowState::Queued);
+        let outside = |k: &str| {
+            let k = k.to_lowercase();
+            self.outside_run.contains(&k)
+                || k.split_once('/')
+                    .is_some_and(|(_, rest)| self.outside_run.contains(rest))
+        };
+        self.rows
+            .retain(|r| r.state != RowState::Queued || !outside(&r.job_key));
         if self.rows.len() != before {
             self.index_stale = true;
             self.revision = REV.fetch_add(1, Ordering::Relaxed);
@@ -529,4 +537,29 @@ pub fn warning_line(w: &Warning) -> String {
         format!("{:?}", w.severity).to_lowercase(),
         w.message
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Note HF9 (review round 1, Minor 2): only queued rows of textures outside the run go; a queued row of one in
+    /// the run stays to end as "not run".
+    #[test]
+    fn drop_unstarted_drops_only_rows_outside_the_run() {
+        let row = |k: &str| Row {
+            job_key: k.into(),
+            path: k.into(),
+            state: RowState::Queued,
+            warnings: vec![],
+        };
+        let mut m = ExportModel {
+            rows: vec![row("g/A"), row("g/b"), row("Mod Vanilla/g/a")],
+            outside_run: ["g/a".to_string()].into(),
+            ..Default::default()
+        };
+        m.drop_unstarted();
+        let left: Vec<&str> = m.rows.iter().map(|r| r.job_key.as_str()).collect();
+        assert_eq!(left, ["g/b"]);
+    }
 }
