@@ -296,6 +296,24 @@ fn reencode_into_its_own_folder_is_a_failed_row() {
     );
 }
 
+/// Note HQ6 (fix round 1): with the export folder above the opened `textures` folder, the output root is the opened
+/// folder (HQ5), so the panel's "into the folder it comes from" check joins the job key there, not to the export
+/// folder.
+#[test]
+fn an_export_folder_above_the_textures_root_is_still_its_source_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    choose_export(&mut m, d.path().to_path_buf());
+    assert_eq!(m.sets_root(), m.root.clone().unwrap());
+    m.select_item("a.dds");
+    let mut h = harness(m);
+    h.run();
+    hover_shows(
+        &mut h,
+        REENCODE,
+        "It cannot be written into the folder it comes from.",
+    );
+}
 /// Note FI2 follow-up: re-encoding the diffuse of an all-DDS PBR set makes it a full PBR set with its JSON entry.
 #[test]
 fn reencoding_a_member_of_an_all_dds_set_makes_it_a_pbr_set() {

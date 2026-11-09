@@ -89,7 +89,7 @@ fn an_input_alias_is_written_read_and_undone_in_one_step() {
     idle(&mut m);
     assert_eq!(m.read_as_of(LEAF).as_deref(), Some("landscape/leaf_n.png"));
     assert!(
-        output_of(&m, LEAF).ends_with("export/landscape/leaf_n.dds"),
+        output_of(&m, LEAF).ends_with("export/textures/landscape/leaf_n.dds"),
         "{}",
         output_of(&m, LEAF)
     );
@@ -97,7 +97,7 @@ fn an_input_alias_is_written_read_and_undone_in_one_step() {
     m.undo();
     idle(&mut m);
     assert_eq!(m.read_as_of(LEAF), None);
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/leaf.dds"));
+    assert!(output_of(&m, LEAF).ends_with("export/textures/landscape/leaf.dds"));
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn outputs_mode_names_a_set_and_blocks_collisions_and_suffixes() {
     assert_eq!(m.history.undo.len(), steps + 1);
     idle(&mut m);
     assert_eq!(m.output_name_of(&leaf).as_deref(), Some("big_leaf"));
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/big_leaf.dds"));
+    assert!(output_of(&m, LEAF).ends_with("export/textures/landscape/big_leaf.dds"));
     assert_eq!(m.last_recipe.prefix, "big_", "the recipe is kept");
 }
 
@@ -475,7 +475,7 @@ fn an_input_rename_onto_another_sets_output_blocks_apply() {
     let leaf = set_id_of(&m, LEAF);
     m.set_output_name(&leaf, Some("steel")).unwrap();
     idle(&mut m);
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/steel.dds"));
+    assert!(output_of(&m, LEAF).ends_with("export/textures/landscape/steel.dds"));
     m.click_item(ROCK, false, false);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m)

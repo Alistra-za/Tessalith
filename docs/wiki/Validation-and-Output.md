@@ -4,7 +4,7 @@ For anyone installing or re-running an export: where each file lands, what Tessa
 
 ## Where the files go
 
-- Each output goes to `<output root>\<path relative to the input folder>` with a `.dds` extension, so the output tree mirrors the input tree.
+- Each output goes to its game path under the output root, with a `.dds` extension: the output tree mirrors the input tree from the `textures` folder the game path starts at. Open `MyMod\textures` or `MyMod\textures\armor` and the files land in `<output root>\textures\armor\`, the path the game loads, with the `_sdc` manifest in `<output root>\textures\armor\_sdc`; folder names keep the case they have on disk. Set names don't change. An input folder with no `textures` folder in its path gets none added. With the output root set to the input folder itself, or to a folder that holds it, each DDS goes beside its source. <!-- D:HQ1 -->
 - Exporter names are normalised: `iron_albedo.png` is written as `iron.dds`, `iron_normalgl.png` as `iron_n.dds`, and raw maps become packed outputs such as `iron_rmaos.dds`.
 
 ```text

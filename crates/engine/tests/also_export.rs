@@ -1294,3 +1294,32 @@ fn curves_generated_reaches_also() {
     };
     assert_ne!(diffuse(false), diffuse(true));
 }
+
+/// Note HQ6 (fix round 1): an Also export of a project opened at its `textures` folder writes under each folder's
+/// `textures\`, and its walk finds every file the phases wrote (job keys get the prefix, `_sdc` below the folder is
+/// skipped), so no file it wrote is noted as not written, on the first run or an up-to-date one.
+#[test]
+fn a_textures_root_notes_none_of_its_own_files() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+    });
+    let root = m.join("textures");
+    for run in 0..2 {
+        let s = also(request(&root, &loc), &spec(&loc, BOTH)).0.unwrap();
+        assert!(
+            !s.notes.iter().any(|n| n.ends_with(NOT_WRITTEN)),
+            "run {run}: {:?}",
+            s.notes
+        );
+    }
+    let all: Vec<String> = std::fs::read_dir(&loc)
+        .unwrap()
+        .flat_map(|e| dds_files(&e.unwrap().path()))
+        .collect();
+    assert!(
+        all.iter().any(|f| f == "textures/pbr/arm/steel.dds"),
+        "{all:?}"
+    );
+    assert!(all.iter().all(|f| f.starts_with("textures/")), "{all:?}");
+}

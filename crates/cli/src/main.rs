@@ -41,7 +41,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         .output
         .clone()
         .unwrap_or_else(|| std::path::PathBuf::from("sdc-out"));
-    let mut req = build_request(&a.batch, out).map_err(EngineError::Usage)?;
+    let mut req = build_request(&a.batch, out.clone()).map_err(EngineError::Usage)?;
     req.jobs = a.jobs;
     req.mem_budget = a
         .mem_budget
@@ -67,7 +67,8 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
     if !cfg.also.is_empty() {
         let spec = AlsoSpec {
             cfg,
-            location: req.output_root.clone(),
+            // The export folder itself, not the request's output root below it (Note HQ1).
+            location: out,
             // The CLI reads no scan (TA13, TA18), so no env `_m` is written.
             scanned: false,
         };

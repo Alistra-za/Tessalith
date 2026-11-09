@@ -99,7 +99,10 @@ fn vanilla_gets_no_output_paths() {
         .output
         .to_string_lossy()
         .replace('\\', "/");
-    assert!(out.ends_with("export/landscape/rock01.dds"), "{out}");
+    assert!(
+        out.ends_with("export/textures/landscape/rock01.dds"),
+        "{out}"
+    );
 }
 
 #[test]

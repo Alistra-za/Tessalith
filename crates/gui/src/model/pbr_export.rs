@@ -87,13 +87,6 @@ fn slots_of(
     m: &AppModel,
 ) -> BTreeMap<u8, String> {
     let mut out = BTreeMap::new();
-    // The output paths are relative to the project root; a root that is itself a `textures` folder leaves that
-    // folder out of them, and the game path has it.
-    let root_is_textures = m
-        .root
-        .as_deref()
-        .and_then(std::path::Path::file_name)
-        .is_some_and(|n| n.eq_ignore_ascii_case("textures"));
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
@@ -104,7 +97,7 @@ fn slots_of(
         // `textures`), else the file's game path.
         let json_only = v.json && !v.pbr;
         let p = match fill_path(item, views, paths, m) {
-            Some(p) if json_only && root_is_textures => PathBuf::from("textures").join(p),
+            // Note HQ6: an explicit path is under the export folder, as the JSON names it.
             Some(p) => p.clone(),
             None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
                 Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
@@ -549,13 +542,14 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
         if item_output_key_in(&owners, it).is_some_and(|k| owned.contains(&k)) {
             continue;
         }
-        if let Some((owner, k)) = seen.get(&it.job_key.replace('\\', "/").to_lowercase()) {
+        let at = m.export_key(&it.job_key);
+        if let Some((owner, k)) = seen.get(&at) {
             out.push(ExportIssue {
                 set_id: owner.clone(),
                 set_key: key_of_set(owner),
                 text: format!(
                     "{owner} writes {} ({}), the same file {} is written to (no path of its own)",
-                    it.job_key,
+                    at,
                     name(k),
                     it.key
                 ),

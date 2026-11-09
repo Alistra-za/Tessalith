@@ -797,19 +797,18 @@ fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
     idle(&mut m);
     share(&mut m, "x/b_rfaos.png", &a);
     export_and_wait(&mut m);
-    let j = read_json(&out(&m, "x/ay.csskin.json"));
+    let j = read_json(&out(&m, "textures/x/ay.csskin.json"));
     assert_eq!(
         j["textures"]["controls"],
         json!("textures/x/bee_rfaos.dds"),
         "{j}"
     );
-    // Every path is a written file, under `textures/` (the export folder holds `x/...` here).
+    // Every path is a written file under the export folder (Note HQ1: it holds `textures/x/...` here).
     for k in ["controls", "wet", "detail"] {
         let g = j["textures"][k]
             .as_str()
             .unwrap_or_else(|| panic!("{k}: {j}"));
-        let rel = g.strip_prefix("textures/").unwrap_or_else(|| panic!("{g}"));
-        assert!(out(&m, rel).is_file(), "{g}");
+        assert!(g.starts_with("textures/") && out(&m, g).is_file(), "{g}");
     }
     // Final review I1: the joined skin members keep their own tails under the new name.
     assert_eq!(j["textures"]["wet"], json!("textures/x/ay_wet.dds"), "{j}");
@@ -818,7 +817,11 @@ fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
         json!("textures/x/ay_detail_n.dds"),
         "{j}"
     );
-    for f in ["x/ay.dds", "x/ay_wet.dds", "x/ay_detail_n.dds"] {
+    for f in [
+        "textures/x/ay.dds",
+        "textures/x/ay_wet.dds",
+        "textures/x/ay_detail_n.dds",
+    ] {
         assert!(out(&m, f).is_file(), "{f}");
     }
 }
@@ -839,14 +842,14 @@ fn input_aliases_to_another_folder_depth_keep_full_game_paths() {
         m.set_input_name(&id, alias).unwrap();
         idle(&mut m);
         export_and_wait(&mut m);
-        let j = read_json(&out(&m, &format!("{folder}/a.csskin.json")));
+        let j = read_json(&out(&m, &format!("textures/{folder}/a.csskin.json")));
         assert_eq!(
             j["textures"]["controls"],
             json!(format!("textures/{folder}/a_rfaos.dds")),
             "{alias}: {j}"
         );
         assert!(
-            out(&m, &format!("{folder}/a_rfaos.dds")).is_file(),
+            out(&m, &format!("textures/{folder}/a_rfaos.dds")).is_file(),
             "{alias}"
         );
     }

@@ -1405,7 +1405,10 @@ fn collisions_stay_amber() {
     let rows = problems(&m);
     let row = rows
         .iter()
-        .find(|p| p.text.contains("both write fs6/fs6_boots_ir_n.dds"))
+        .find(|p| {
+            p.text
+                .contains("both write textures/fs6/fs6_boots_ir_n.dds")
+        })
         .unwrap_or_else(|| panic!("no collision row in {rows:?}"));
     assert!(at_warning_or_above(row), "{row:?}");
 }
@@ -1472,8 +1475,7 @@ fn the_unused_statics_line_is_not_amber() {
 }
 
 /// Note HL5: a no-albedo set's JSON slot paths are where the export wrote its files: the game path the entry names
-/// is the file's place under the export folder (a project rooted at a `textures` folder leaves that folder out of
-/// the written path, so its export folder stands for the mod's `textures` folder).
+/// is the file's place under the export folder (a project rooted at a `textures` folder keeps that folder, Note HQ1).
 #[test]
 fn the_json_slots_name_where_the_files_were_written() {
     for (mod_root, mapped) in [(false, false), (true, false), (false, true), (true, true)] {
@@ -1504,13 +1506,7 @@ fn the_json_slots_name_where_the_files_were_written() {
         for (slot, file) in [("slot2", n), ("slot6", rm)] {
             let named = e[slot].as_str().unwrap_or_else(|| panic!("no {slot}: {e}"));
             assert_eq!(named, format!(r"textures\{dir}\{file}"), "{case}");
-            let rel = named.replace('\\', "/");
-            let at = if mod_root {
-                rel.clone()
-            } else {
-                rel.strip_prefix("textures/").unwrap().to_string()
-            };
-            let written = m.export_root().join(&at);
+            let written = m.export_root().join(named.replace('\\', "/"));
             assert!(written.is_file(), "{case}: {named} is not at {written:?}");
         }
     }

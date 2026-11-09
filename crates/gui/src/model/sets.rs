@@ -1370,7 +1370,8 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             let k = item_output_key_in(&owners, it).unwrap_or(OutputKey::File(it.key.clone()));
             !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
-        .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+        // Note HQ6: explicit paths are under the export folder, job keys under the plan's output root.
+        .map(|it| m.export_key(&it.job_key))
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -1451,7 +1452,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             } else {
                 OutputKey::File(item.key.clone())
             };
-            out.push((k, rel));
+            out.push((k, m.export_rel(&rel)));
         }
     }
     out
@@ -1762,7 +1763,7 @@ pub(crate) mod linear {
                 let k = item_output_key(&views, it).unwrap_or(OutputKey::File(it.key.clone()));
                 !explicit(&k)
             })
-            .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+            .map(|it| m.export_key(&it.job_key))
             .collect();
         let mut seen = BTreeSet::new();
         let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));

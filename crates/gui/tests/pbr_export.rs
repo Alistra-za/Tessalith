@@ -126,7 +126,8 @@ fn an_owned_output_on_a_mirrored_path_blocks() {
     assert_eq!(path_collisions(&m), vec![]);
     let leaf = m.items.iter_mut().find(|i| i.name == "leaf.png").unwrap();
     assert!(leaf.job.is_some(), "the fixture leaf has a planned job");
-    leaf.job_key = "textures/pbr/landscape/rock01.dds".into();
+    // Note HQ1: job keys are under the plan's output root, `<export>\textures`.
+    leaf.job_key = "pbr/landscape/rock01.dds".into();
     m.invalidate_views();
     let b = path_collisions(&m);
     assert!(

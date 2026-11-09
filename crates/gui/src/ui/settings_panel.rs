@@ -1177,7 +1177,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     let into_source = skipped_dds
         && engine::dds::same_file(
             &model.item(key).map(|i| i.input.clone()).unwrap_or_default(),
-            &model.output_root().join(&job_key),
+            &model.sets_root().join(&job_key),
         );
     let reencoding = model.reencode_on(key);
     let mut actions = vec![];
