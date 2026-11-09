@@ -410,14 +410,17 @@ fn out_puts_the_images_in_another_folder() {
 #[test]
 fn a_float_input_is_refused() {
     let d = dir();
-    let p = d.path().join("foo_p.hdr");
-    image::Rgb32FImage::from_pixel(4, 4, image::Rgb([0.5, 0.5, 0.5]))
-        .save(&p)
+    // Radiance HDR content under a TIFF name: the decoder is chosen by content, so this loads as 32-bit float.
+    let p = d.path().join("foo_p.tif");
+    let mut hdr = vec![];
+    image::codecs::hdr::HdrEncoder::new(&mut hdr)
+        .encode(&[image::Rgb([0.5f32; 3]); 16], 4, 4)
         .unwrap();
+    std::fs::write(&p, hdr).unwrap();
     write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x < 2);
     let (code, _, err) = run(&[&s(&p)]);
     assert_eq!(code, 1);
-    assert!(err.contains("float"), "{err}");
+    assert!(err.contains("32-bit float"), "{err}");
     assert!(!d.path().join("dilated").exists());
 }
 
@@ -427,4 +430,74 @@ fn a_pattern_that_names_no_image_is_a_usage_error() {
     let (code, _, err) = run(&[&s(&d.path().join("nope*.png"))]);
     assert_eq!(code, 2);
     assert!(err.contains("no image matches"), "{err}");
+}
+
+#[test]
+fn two_inputs_with_one_output_path_write_the_first_and_refuse_the_rest() {
+    let d = dir();
+    for (sub, v) in [("a", 90u16), ("b", 200)] {
+        write_png(&d.path().join(sub).join("foo_p.png"), 4, 4, 1, 8, &[v; 16]);
+        write_mask(&d.path().join(sub).join("foo_matid.png"), 4, 4, |x, _| {
+            x < 2
+        });
+    }
+    let o = d.path().join("o");
+    let (a, b) = (
+        s(&d.path().join("a").join("foo_p.png")),
+        s(&d.path().join("b").join("foo_p.png")),
+    );
+    // --overwrite does not make the second one replace the first
+    let (code, out, err) = run(&[&a, &b, "--out", &s(&o), "--overwrite"]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert!(err.contains(&a) && err.contains(&b), "{err}");
+    assert_eq!(read_png(&o.join("foo_p.png")).2[0], 90);
+}
+
+#[test]
+fn a_glob_and_a_file_are_filtered_to_images_and_a_missing_file_is_a_usage_error() {
+    let d = dir();
+    write_png(&d.path().join("rock_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("rock_matid.png"), 4, 4, |x, _| x < 2);
+    for n in ["rock_p.json", "rock_n.dds", "rock_p.txt"] {
+        std::fs::write(d.path().join(n), b"x").unwrap();
+    }
+    let (code, out, err) = run(&[&s(&d.path().join("rock*"))]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    for p in ["nope.png", "rock_p.json"] {
+        let (code, _, err) = run(&[&s(&d.path().join(p))]);
+        assert_eq!(code, 2, "{p}: {err}");
+        assert!(err.contains("no image matches"), "{p}: {err}");
+    }
+}
+
+#[test]
+fn a_dilated_folder_above_the_named_path_does_not_skip_it() {
+    let d = dir();
+    let proj = d.path().join("dilated").join("proj");
+    write_png(&proj.join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&proj.join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    // a folder, a file and a glob under it
+    for pat in [
+        s(&proj),
+        s(&proj.join("foo_p.png")),
+        s(&proj.join("foo*.png")),
+    ] {
+        let (code, out, err) = run(&[&pat, "--overwrite"]);
+        assert_eq!(code, 0, "{pat}: {err}");
+        assert_eq!(out.matches("wrote").count(), 1, "{pat}: {out}");
+    }
+    // one below the named folder is still skipped
+    write_png(
+        &proj.join("dilated").join("old_p.png"),
+        4,
+        4,
+        1,
+        8,
+        &[90; 16],
+    );
+    let (code, out, err) = run(&[&s(&proj), "--recursive", "--overwrite"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
 }

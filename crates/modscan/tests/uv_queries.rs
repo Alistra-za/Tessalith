@@ -74,14 +74,33 @@ fn winning_shapes_cover_any_lighting_slot_and_the_effect_source_only() {
     origin(c, 3, 5, false);
     origin(c, 4, 20, true);
     // x.nif: a loser copy (id 10) and the winner (id 11): block 0 lighting, block 1 effect.
-    copy(c, 10, "meshes/x.nif", 1, false, &[(0, 1, 1)]);
-    copy(c, 11, "meshes/x.nif", 2, false, &[(0, 1, 1), (1, 2, 2)]);
+    // Set 3 holds `lose`, used only by the loser copy; set 4 holds `grey`, used only as an effect shape's greyscale.
+    let (lose, grey) = (
+        path_id(c, "textures/lose.dds"),
+        path_id(c, "textures/grey.dds"),
+    );
+    c.execute_batch(&format!(
+        "INSERT INTO texset(id, n, t0) VALUES (3, 1, {lose});
+         INSERT INTO texset(id, n, t1) VALUES (4, 2, {grey});
+         INSERT INTO tex_use(tex_path_id, texset_id, slot) VALUES ({lose}, 3, 0), ({grey}, 4, 1);"
+    ))
+    .unwrap();
+    copy(c, 10, "meshes/x.nif", 1, false, &[(0, 1, 1), (5, 1, 3)]);
+    copy(
+        c,
+        11,
+        "meshes/x.nif",
+        2,
+        false,
+        &[(0, 1, 1), (1, 2, 2), (2, 2, 4)],
+    );
     winner(c, "meshes/x.nif", 11, None);
     // y.nif: a derived winner (id 21) whose source copy (id 20) holds the shape.
     copy(c, 20, "meshes/y.nif", 3, false, &[(4, 1, 1)]);
     copy(c, 21, "meshes/y.nif", 4, true, &[]);
     winner(c, "meshes/y.nif", 21, Some(20));
 
+    // `lose` (a losing copy only) and `grey` (an effect greyscale slot only) are not candidates.
     assert_eq!(
         s.used_texture_paths().unwrap(),
         ["textures/a.dds", "textures/b.dds"]

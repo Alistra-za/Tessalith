@@ -530,3 +530,64 @@ fn the_default_output_folder_is_the_current_one() {
     assert_eq!(code, 0, "{err}");
     assert!(f.out().join("wall_uvmask.png").is_file());
 }
+
+#[test]
+fn a_write_failure_is_exit_3_and_the_other_textures_are_still_written() {
+    let f = Fx::new();
+    for n in ["a", "b"] {
+        put(
+            &f.meshes(),
+            &format!("{n}.nif"),
+            &nif(
+                &format!("textures/{n}.dds"),
+                0,
+                &[texels(128, 256, 128, 256)],
+            ),
+        );
+    }
+    // a_uvmask.png is a folder: the atomic rename onto it fails.
+    std::fs::create_dir_all(f.out().join("a_uvmask.png")).unwrap();
+    let (code, out, err) = f.uv("*", &["--s", "512", "--overwrite"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(out.contains("b_uvmask.png"), "{out}");
+    assert!(f.out().join("b_uvmask.png").is_file());
+}
+
+#[test]
+fn a_texture_only_a_losing_copy_uses_does_not_fail_a_recursive_run() {
+    // Mods A and B both carry meshes/m/x.nif, one naming wall, the other lose. Whichever wins, the other texture is
+    // used by a losing copy only: the run writes the winner's texture and exits 0.
+    let f = Fx::new();
+    let inst = mscommon::instance_fixture("+A\n+B\n");
+    let r = inst.path();
+    for (m, t) in [("A", "wall"), ("B", "lose")] {
+        put(
+            r,
+            &format!("mods/{m}/meshes/m/x.nif"),
+            &nif(
+                &format!("textures/t/{t}.dds"),
+                0,
+                &[texels(128, 256, 128, 256)],
+            ),
+        );
+    }
+    let db = f.d.path().join("scan.db");
+    let mut s = modscan::store::Store::open(&db).unwrap();
+    modscan::scan::run(
+        &modscan::scan::Source::Mo2(modscan::mo2::Instance::load(r, None).unwrap()),
+        &mut s,
+        &std::sync::atomic::AtomicBool::new(false),
+        &|_| {},
+        &|| vec![],
+    )
+    .unwrap();
+    drop(s);
+    let mut c = sdc(&f.local());
+    c.args(["uv", "t", "--recursive", "--s", "512", "--scan"])
+        .arg(&db)
+        .arg("--out")
+        .arg(f.out());
+    let (code, out, err) = run(&mut c);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+}

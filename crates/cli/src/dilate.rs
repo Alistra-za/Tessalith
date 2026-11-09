@@ -27,13 +27,15 @@ enum Kind {
     Data,
 }
 
-/// A mask or input a run never reads as an input: `_matid`/`_uvmask` images, and anything inside a `dilated` folder.
-fn is_skipped(p: &Path) -> bool {
+/// A mask or input a run never reads as an input: `_matid`/`_uvmask` images, and anything inside a `dilated` folder
+/// below `root` (the file, folder or glob base the user named; the folders above it do not count).
+fn is_skipped(p: &Path, root: &Path) -> bool {
     let stem = p
         .file_stem()
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let dir = p.parent().unwrap_or(Path::new(""));
+    let below = p.strip_prefix(root).unwrap_or(p);
+    let dir = below.parent().unwrap_or(Path::new(""));
     stem.ends_with("_matid")
         || stem.ends_with("_uvmask")
         || dir
@@ -69,7 +71,9 @@ fn images_in(dir: &Path, recursive: bool, out: &mut BTreeSet<PathBuf>) {
 /// Walks `rest` (path components, some with `*` or `?`) below `base`.
 fn walk(base: PathBuf, rest: &[std::ffi::OsString], out: &mut Vec<PathBuf>) {
     let Some((first, tail)) = rest.split_first() else {
-        out.push(base);
+        if base.exists() {
+            out.push(base);
+        }
         return;
     };
     let name = first.to_string_lossy().to_ascii_lowercase();
@@ -94,8 +98,9 @@ fn walk(base: PathBuf, rest: &[std::ffi::OsString], out: &mut Vec<PathBuf>) {
 fn expand(pat: &str, recursive: bool, out: &mut BTreeSet<PathBuf>) {
     let path = Path::new(pat);
     let mut hits = vec![];
-    if path.exists() {
+    let root = if path.exists() {
         hits.push(path.to_path_buf());
+        path.to_path_buf()
     } else {
         let comps: Vec<_> = path.components().collect();
         let k = comps
@@ -112,15 +117,18 @@ fn expand(pat: &str, recursive: bool, out: &mut BTreeSet<PathBuf>) {
             .iter()
             .map(|c| c.as_os_str().to_owned())
             .collect();
-        walk(base, &rest, &mut hits);
-    }
+        walk(base.clone(), &rest, &mut hits);
+        base
+    };
+    let mut found = BTreeSet::new();
     for h in hits {
         if h.is_dir() {
-            images_in(&h, recursive, out);
-        } else {
-            out.insert(h);
+            images_in(&h, recursive, &mut found);
+        } else if is_image(&h) {
+            found.insert(h);
         }
     }
+    out.extend(found.into_iter().filter(|p| !is_skipped(p, &root)));
 }
 
 /// The mask beside `src`: `<base>_matid.(png|tga|tif|tiff)`, then `<base>_uvmask.png`, for the stem minus its texture
@@ -221,15 +229,32 @@ fn encode_png(codes: &[u16], w: u32, h: u32, channels: u8, depth: u8) -> Result<
     Ok(out)
 }
 
+/// Where the filled copy of `src` goes: `<stem>.png` in `--out`, or in a `dilated` folder beside the input.
+fn dest_of(src: &Path, a: &DilateArgs) -> PathBuf {
+    let dir = match &a.out {
+        Some(o) => o.clone(),
+        None => src.parent().unwrap_or(Path::new(".")).join("dilated"),
+    };
+    dir.join(format!(
+        "{}.png",
+        src.file_stem().unwrap_or_default().to_string_lossy()
+    ))
+}
+
 /// One input. `Err((code, message))`: 1 nothing written for this input, 3 the write failed.
 fn process(src: &Path, a: &DilateArgs, reg: &PresetRegistry) -> Result<String, (i32, String)> {
     let skip = |m: String| (1, format!("{}: {m}", src.display()));
     let (img, info) = engine::load::load_image(src).map_err(|e| (1, e.to_string()))?;
     if info.is_float || !matches!(info.bit_depth, 8 | 16) {
-        // shortcut: float images (EXR, HDR, 32-bit TIFF) are refused, add them when a float push-pull is wanted.
-        return Err(skip(
-            "float images are refused: dilate reads 8- and 16-bit images".into(),
-        ));
+        // shortcut: float images (a 32-bit TIFF) are refused, add them when a float push-pull is wanted.
+        let what = if info.is_float {
+            format!("a {}-bit float image", info.bit_depth)
+        } else {
+            format!("a {}-bit image", info.bit_depth)
+        };
+        return Err(skip(format!(
+            "{what} is refused: dilate reads 8- and 16-bit images"
+        )));
     }
     let stem = src
         .file_stem()
@@ -261,11 +286,8 @@ fn process(src: &Path, a: &DilateArgs, reg: &PresetRegistry) -> Result<String, (
             .ends_with("_uvmask")
     });
     let valid = valid_of(&mask, uv);
-    let dest_dir = match &a.out {
-        Some(o) => o.clone(),
-        None => src.parent().unwrap_or(Path::new(".")).join("dilated"),
-    };
-    let dest = dest_dir.join(format!("{stem}.png"));
+    let dest = dest_of(src, a);
+    let dest_dir = dest.parent().unwrap_or(Path::new(".")).to_path_buf();
     if dest.exists() && !a.overwrite {
         return Err(skip(format!(
             "{} exists, kept (--overwrite replaces it)",
@@ -358,7 +380,6 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
     for p in &a.patterns {
         expand(p, a.recursive, &mut found);
     }
-    found.retain(|p| !is_skipped(p));
     if found.is_empty() {
         return Err(EngineError::Usage(format!(
             "no image matches {}: give image files, folders or globs; _matid and _uvmask images and the dilated \
@@ -368,7 +389,21 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
     }
     let reg = PresetRegistry::builtin().map_err(|e| EngineError::Fatal(e.to_string()))?;
     let mut code = 0;
+    // The first input to claim an output path keeps it; a later one is refused, `--overwrite` or not.
+    let mut claimed: std::collections::HashMap<String, PathBuf> = Default::default();
     for src in found {
+        let key = dest_of(&src, &a).to_string_lossy().to_ascii_lowercase();
+        if let Some(first) = claimed.get(&key) {
+            err!(
+                "{}: the output {} is also {}'s, kept for that one",
+                src.display(),
+                dest_of(&src, &a).display(),
+                first.display()
+            );
+            code = code.max(1);
+            continue;
+        }
+        claimed.insert(key, src.clone());
         match process(&src, &a, &reg) {
             Ok(line) => out!("{line}"),
             Err((c, m)) => {

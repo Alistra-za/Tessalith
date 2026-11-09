@@ -97,6 +97,22 @@ DELETE FROM pending_derived;
 "#;
 
 /// `origin.kind`. 3 was MO2 separators until schema 9 (Note GJ7); BSAs keep 4.
+/// The FROM and WHERE of the shapes of game-winning NIFs that use a texture (a lighting slot, or an effect source);
+/// both `sdc uv` queries share it so the list never names a texture the lookup cannot find. A derived winner is
+/// read on its source copy.
+const WINNING_SHAPES: &str = "FROM path tp
+     JOIN tex_use tu ON tu.tex_path_id = tp.id
+     JOIN shape s ON s.texset_id = tu.texset_id AND (s.shader_kind = 1 OR tu.slot = 0)
+     JOIN nif_copy c ON c.id = s.copy_id
+     JOIN origin co ON co.id = c.origin_id AND co.enabled = 1
+     JOIN nif_winner w ON w.path_id = c.path_id
+     JOIN nif_copy wc ON wc.id = w.copy_id
+     JOIN origin wo ON wo.id = wc.origin_id AND wo.enabled = 1
+     LEFT JOIN nif_winner_src ws ON ws.path_id = c.path_id
+     JOIN path np ON np.id = c.path_id
+     WHERE c.id = CASE WHEN wc.is_derived = 1 THEN coalesce(ws.copy_id, wc.source_copy_id, wc.id)
+                       ELSE wc.id END";
+
 pub const KIND_DATA: i32 = 0;
 pub const KIND_MOD: i32 = 1;
 pub const KIND_OVERWRITE: i32 = 2;
@@ -1541,12 +1557,13 @@ impl Store {
         Ok(v)
     }
 
-    /// Every texture path (canonical) that a shape's texture set names, across the enabled origins. Not narrowed to
-    /// game winners: `sdc uv` matches its pattern against these, then asks [`Self::winning_shapes_of_texture`].
+    /// Every texture path (canonical) that [`Self::winning_shapes_of_texture`] would find a shape for: the texture
+    /// is in a lighting slot or is an effect source, on a game-winning copy of an enabled origin. `sdc uv` matches
+    /// its pattern against these.
     pub fn used_texture_paths(&self) -> Result<Vec<String>, ScanError> {
-        let mut st = self.conn.prepare(
-            "SELECT DISTINCT tp.p FROM tex_use tu JOIN path tp ON tp.id = tu.tex_path_id ORDER BY tp.p",
-        )?;
+        let mut st = self.conn.prepare(&format!(
+            "SELECT DISTINCT tp.p {WINNING_SHAPES} ORDER BY tp.p"
+        ))?;
         let v = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
         Ok(v)
     }
@@ -1558,22 +1575,9 @@ impl Store {
         &self,
         norm: &str,
     ) -> Result<Vec<(i64, String, u32)>, ScanError> {
-        let mut st = self.conn.prepare(
-            "SELECT DISTINCT c.id, np.p, s.block FROM path tp
-             JOIN tex_use tu ON tu.tex_path_id = tp.id
-             JOIN shape s ON s.texset_id = tu.texset_id AND (s.shader_kind = 1 OR tu.slot = 0)
-             JOIN nif_copy c ON c.id = s.copy_id
-             JOIN origin co ON co.id = c.origin_id AND co.enabled = 1
-             JOIN nif_winner w ON w.path_id = c.path_id
-             JOIN nif_copy wc ON wc.id = w.copy_id
-             JOIN origin wo ON wo.id = wc.origin_id AND wo.enabled = 1
-             LEFT JOIN nif_winner_src ws ON ws.path_id = c.path_id
-             JOIN path np ON np.id = c.path_id
-             WHERE tp.p = ?1
-               AND c.id = CASE WHEN wc.is_derived = 1 THEN coalesce(ws.copy_id, wc.source_copy_id, wc.id)
-                               ELSE wc.id END
-             ORDER BY np.p, s.block",
-        )?;
+        let mut st = self.conn.prepare(&format!(
+            "SELECT DISTINCT c.id, np.p, s.block {WINNING_SHAPES} AND tp.p = ?1 ORDER BY np.p, s.block"
+        ))?;
         let v = st
             .query_map([norm], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u32))

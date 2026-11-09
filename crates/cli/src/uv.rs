@@ -515,6 +515,8 @@ struct Image {
 }
 
 /// Islands 255; a texel off every island within `pad` (Chebyshev) of one island 127, of two or more 191.
+// shortcut: the mask, labels, window min and max and pixels cost about 12 bytes per texel (several GB at 16384 x
+// 16384); upgrade to tiles or u16 labels if the largest sizes are wanted on small machines.
 fn paint(mask: &[bool], w: u32, l: u32, pad: u32) -> Image {
     let (w, l, pad) = (w as usize, l as usize, pad as usize);
     let (labels, islands) = label(mask, w, l);
@@ -647,13 +649,18 @@ pub fn run(a: UvArgs) -> Result<i32, EngineError> {
             continue;
         }
         let img = paint(&mask, w, l, pad);
-        let bytes = png(&img, w, l).map_err(EngineError::Fatal)?;
-        if let Some(dir) = dest.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| EngineError::Fatal(format!("{}: {e}", dir.display())))?;
+        // A write failure is this texture's (exit 3); the rest are still written, as `sdc dilate` does.
+        let written = png(&img, w, l).and_then(|bytes| {
+            if let Some(dir) = dest.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            engine::dds::write_atomic(&dest, &bytes).map_err(|e| e.to_string())
+        });
+        if let Err(e) = written {
+            err!("{}: {e}", dest.display());
+            code = code.max(3);
+            continue;
         }
-        engine::dds::write_atomic(&dest, &bytes)
-            .map_err(|e| EngineError::Fatal(format!("{}: {e}", dest.display())))?;
         out!(
             "wrote {}: islands {}, pad {pad}, too close {}, meshes {nifs}",
             dest.display(),
@@ -812,6 +819,72 @@ mod tests {
         let img = paint(&mask_of(512, 512, &uvs, &tris), 512, 512, 2);
         assert_eq!(at(&img, 512, 8, 104), 127);
         assert_eq!(at(&img, 512, 511, 104), 0);
+    }
+
+    #[test]
+    fn the_window_is_the_min_over_the_neighbourhood() {
+        let src = [5u32, 1, 7, 3, 9, 2, 8, 6, 4];
+        // r past the row length too
+        for r in 0..12 {
+            let mut v = src;
+            window(&mut v, 1, r, u32::MAX, u32::min);
+            for i in 0..src.len() {
+                let want = src[i.saturating_sub(r)..=(i + r).min(src.len() - 1)]
+                    .iter()
+                    .copied()
+                    .min()
+                    .unwrap();
+                assert_eq!(v[i], want, "r {r} i {i}");
+            }
+        }
+        // A column: stride 3 over a 3x3 grid touches only column 0.
+        let mut g = [9u32, 0, 0, 1, 0, 0, 5, 0, 0];
+        window(&mut g, 3, 1, u32::MAX, u32::min);
+        assert_eq!(g, [1, 0, 0, 1, 0, 0, 1, 0, 0]);
+        // The same for the maximum, with a column longer than the radius at stride 2.
+        let mut m = [1u32, 9, 4, 9, 2, 9, 8, 9, 3, 9];
+        window(&mut m, 2, 5, 0, u32::max);
+        assert_eq!(m, [8, 9, 8, 9, 8, 9, 8, 9, 8, 9]);
+    }
+
+    #[test]
+    fn the_axis_wraps_into_the_mask() {
+        assert_eq!(axis(8, 0.9, 1.2, false), vec![0, 1, 7]);
+        assert_eq!(axis(8, 0.0, 0.25, false), vec![0, 1]);
+        // a sliver inside one texel marks it; a span ending on a texel edge does not mark the next
+        assert_eq!(axis(8, 0.1, 0.12, false), vec![0]);
+        assert_eq!(axis(8, 0.25, 0.5, false), vec![2, 3]);
+        assert_eq!(axis(4, 3.0, 3.1, true), vec![0, 1, 2, 3]);
+        assert_eq!(axis(4, 0.0, 1.0, false), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn a_trim_strip_repeating_in_u_marks_only_its_band() {
+        // 4 tiles wide, texel rows 51.2..102.4 of 512: rows 51..=102
+        let uvs = [[0.0, 0.1], [4.0, 0.1], [4.0, 0.2], [0.0, 0.2]];
+        let m = mask_of(512, 512, &uvs, &[[0, 1, 2], [0, 2, 3]]);
+        assert_eq!(m.iter().filter(|&&t| t).count(), 52 * 512);
+        assert!(m[60 * 512 + 100] && !m[200 * 512 + 100]);
+    }
+
+    #[test]
+    fn a_long_trim_strip_past_the_cap_marks_its_band_not_the_whole_mask() {
+        // 301 tiles in u (past TILE_CAP), one in v
+        let uvs = [[0.0, 0.1], [300.0, 0.1], [300.0, 0.2], [0.0, 0.2]];
+        let m = mask_of(512, 512, &uvs, &[[0, 1, 2], [0, 2, 3]]);
+        assert_eq!(m.iter().filter(|&&t| t).count(), 52 * 512);
+        assert!(m[60 * 512 + 100] && !m[200 * 512 + 100]);
+    }
+
+    #[test]
+    fn a_tiling_triangle_past_the_cap_on_both_axes_fills_the_image() {
+        let m = mask_of(
+            512,
+            512,
+            &[[0.0, 0.0], [40.0, 0.0], [0.0, 40.0]],
+            &[[0, 1, 2]],
+        );
+        assert!(m.iter().all(|&t| t));
     }
 
     #[test]

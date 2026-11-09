@@ -90,7 +90,7 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 
 - `sdc --version` prints the Tessalith version and the version of each linked encoder. Paste it into bug reports.
 - `sdc --help` and `sdc <command> --help` print the built-in help.
-- `convert` writes its log to stderr; `inspect`, `validate` and `presets` print their results to stdout. With `--json`, stdout carries only JSON.
+- `convert` writes its log to stderr; `inspect`, `validate` and `presets` print their results to stdout; `uv` and `dilate` print one stdout line per written file and their errors to stderr. With `--json`, stdout carries only JSON.
 
 ## Flags shared by convert and inspect
 
@@ -417,14 +417,14 @@ The mask for `rock_n.png` is `rock_matid.png` (or `.tga`, `.tif`, `.tiff`), then
 
 How the fill treats the map depends on the suffix, as Tessalith reads it. Colour maps are filled in linear light. Normal maps are filled as stored and the filled texels renormalised to unit length. Everything else is filled as stored, and so is a name Tessalith can't place (`rock_x`); the output line says so. Alpha is always filled as data.
 
-Files named `*_matid.*` or `*_uvmask.*`, and any input with a folder named `dilated` in its path, are never inputs. Inputs are 8- and 16-bit PNG, TGA and TIFF. EXR, HDR and 32-bit TIFF are refused. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
+Files named `*_matid.*` or `*_uvmask.*`, and any file in a folder named `dilated` below the file, folder or glob you name, are never inputs; a `dilated` folder above what you name doesn't count. Inputs are 8- and 16-bit PNG, TGA and TIFF files; other files a pattern matches are ignored, and a pattern that matches no image is an error. A 32-bit float TIFF is refused. Two inputs that would write the same output file (`rock.png` and `rock.tga`, or one name from two folders with `--out`) are not both written: the first is, and the later ones are refused by name, even with `--overwrite`. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
 
 ```powershell
 sdc dilate textures\rock_n.png
 sdc dilate textures\armor --recursive --mask uvmasks\armor_uvmask.png --out filled
 ```
 
-Exit codes: 0 every image written; 1 an input wrote nothing (no mask, a mask of another size, a float image, the file exists and `--overwrite` is missing); 2 a usage error: no image matches; 3 a write failed.
+Exit codes: 0 every image written; 1 an input wrote nothing (no mask, a mask of another size, a float image, a second input for the same output, the file exists and `--overwrite` is missing); 2 a usage error: no image matches; 3 a write failed.
 
 ## Cubemaps from the command line
 
