@@ -580,7 +580,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let json = m.review_json();
     let nif_rows = m.nif_review_rows();
     // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
-    let also_on = m.also_on() || m.target == Target::Cs;
+    // Note HF10: none for a scope, which Also never runs on.
+    let also_on = (m.also_on() || m.target == Target::Cs) && m.export_scope().is_none();
     let also_err = if m.also_runs() {
         m.also_gate().err()
     } else {

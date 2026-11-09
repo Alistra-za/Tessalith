@@ -1400,16 +1400,16 @@ fn group_header(
         .map(|p| p.0.clone())
 }
 
-/// Note HF6: a header's right-click menu. The edits are off while `sdc-project.toml` is read-only, with the reason;
-/// Select all sets only reads.
-/// Note HF10: Export set / Export group, off with the reason while an export runs (a scope set then would change
-/// what the running export's lists count).
-fn export_button(ui: &mut egui::Ui, editing: &Editing, label: &str, hover: &str) -> egui::Response {
-    ui.add_enabled(!editing.exporting, egui::Button::new(label))
+/// Note HF10: Export set / Export group, off with the reason `off` (an export runs: a scope set then would change what
+/// the running export's lists count; a set with no files).
+fn export_button(ui: &mut egui::Ui, off: Option<&str>, label: &str, hover: &str) -> egui::Response {
+    ui.add_enabled(off.is_none(), egui::Button::new(label))
         .on_hover_text(hover)
-        .on_disabled_hover_text(crate::model::also::EXPORT_RUNNING)
+        .on_disabled_hover_text(off.unwrap_or_default())
 }
 
+/// Note HF6: a header's right-click menu. The edits are off while `sdc-project.toml` is read-only, with the reason;
+/// Select all sets only reads.
 fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act>) {
     let edit = |ui: &mut egui::Ui, label: &str| {
         let r = ui.add_enabled(editing.on, egui::Button::new(label));
@@ -1422,7 +1422,9 @@ fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act
     // Note HF9: exports only this group's sets (and the sets they borrow from), even when it is excluded.
     if export_button(
         ui,
-        editing,
+        editing
+            .exporting
+            .then_some(crate::model::also::EXPORT_RUNNING),
         "Export group",
         "Export only this group's sets; the rest of the export folder stays as it is",
     )
@@ -2712,9 +2714,17 @@ fn menu(
         }
     });
     // Note HF9: an export, not a set edit, so it works while sets are not editable.
+    // Note HF10: a set whose files are all gone has no key, so nothing to export.
+    let off = if v.key.is_empty() {
+        Some("This set has no files to export")
+    } else {
+        editing
+            .exporting
+            .then_some(crate::model::also::EXPORT_RUNNING)
+    };
     if export_button(
         ui,
-        editing,
+        off,
         "Export set",
         "Export only this set (and any set it borrows from); the rest of the export folder stays as it is",
     )

@@ -83,3 +83,53 @@ fn a_no_set_twin_stops_blocking_its_twin() {
     );
     assert_eq!(dups(&p), ["rock.png", "rock.tga"]);
 }
+
+/// Note HF1 (final review I1): the engine never writes a no-set file, whatever `write_only` says (here `None`): the
+/// twin alone writes `rock.dds`.
+#[test]
+fn a_no_set_file_is_never_written() {
+    let d = fixture();
+    let p = plan(
+        &d,
+        vec![SetEdit::NoSet {
+            file: "rock.png".into(),
+        }],
+    );
+    assert!(p.request.write_only.is_none());
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let s = Engine::new()
+        .unwrap()
+        .run(p, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(s.converted, 1, "{s:?}");
+    let done: Vec<String> = sink
+        .take()
+        .into_iter()
+        .filter(|e| matches!(e.kind, EventKind::FileDone { .. }))
+        .filter_map(|e| e.path)
+        .map(|p| p.rsplit(['/', '\\']).next().unwrap().to_string())
+        .collect();
+    assert_eq!(done, ["rock.tga"]);
+}
+
+/// Note HF1 (final review M2): a no-set key names every file the `[files]` rule names: `rock` is both twins.
+#[test]
+fn a_no_set_key_names_every_file_it_matches() {
+    let d = fixture();
+    let p = plan(
+        &d,
+        vec![SetEdit::NoSet {
+            file: "rock".into(),
+        }],
+    );
+    let names: Vec<String> = p
+        .no_set
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["rock.png", "rock.tga"]);
+    assert!(engine::sets::no_set_names("Rock", "rock.tga"));
+    assert!(engine::sets::no_set_names("rock.png", "rock.png"));
+    assert!(!engine::sets::no_set_names("rock.png", "rock.tga"));
+}

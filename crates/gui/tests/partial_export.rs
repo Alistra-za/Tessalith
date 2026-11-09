@@ -719,8 +719,74 @@ fn a_dropped_queued_export_ends_the_scope() {
         "{}",
         m.status_line
     );
+    // An open dialog may park a scoped export, so the scope waits for its answer.
+    assert!(m.export_scope().is_some(), "kept while the dialog is open");
+    m.dialog = None;
+    idle(&mut m);
     assert!(m.export_scope().is_none(), "the dropped export ends it");
     assert_eq!(m.write_only(), None, "the next export is whole");
+}
+
+/// Note HF10 (final review I4): a scoped export that waits for a plan writes only its own set when the plan lands.
+#[test]
+fn a_queued_scoped_export_writes_only_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.replan();
+    let k = keys(&m, &["g/a"]);
+    m.export_sets(k, "Export set g/a".into());
+    assert!(m.export_queued(), "waits for the plan");
+    idle(&mut m);
+    assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(
+        !out(&m, "textures/g/b.dds").exists(),
+        "b is outside the scope"
+    );
+}
+
+/// Note HF10 (final review I6): Export set is off, with the reason, on a set with no files.
+#[test]
+fn export_set_is_off_for_a_set_with_no_files() {
+    use eframe::egui;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a"], &[]);
+    m.edit_docs("New set", None, true, |_, s| s.create_set("g/ghost"));
+    idle(&mut m);
+    let ghost = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "g/ghost")
+        .expect("the created set has a card");
+    assert!(ghost.key.is_empty(), "no files, so no key");
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(1500.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    h.query_all_by_label_contains("ghost")
+        .next()
+        .expect("the ghost card")
+        .click_secondary();
+    h.run();
+    assert!(h.get_by_label("Export set").accesskit_node().is_disabled());
+}
+
+/// Note HF1 (final review I3): an excluded set's packed output stays in the Textures column, as its raw maps do.
+#[test]
+fn an_excluded_sets_packed_output_stays_listed() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    const RMAOS: &str = "landscape/rock01_rmaos";
+    let listed = |m: &AppModel| {
+        m.visible_items()
+            .into_iter()
+            .chain(m.visible_helpers_shared().iter().copied())
+            .any(|n| m.items[n].key == RMAOS)
+    };
+    assert!(listed(&m), "the packed output is listed");
+    group(&mut m, "Rock", &["landscape/rock01"]);
+    m.set_group_excluded("Rock", true).unwrap();
+    assert!(listed(&m), "still listed when excluded");
 }
 
 /// Note HF10: while an export runs, Export N sets is off with the reason and Export set changes nothing.
@@ -778,6 +844,65 @@ fn the_scope_keys_the_caches() {
     );
     m.close_review();
     assert_eq!(problems(&m).len(), before, "the scope's end restores them");
+}
+
+/// Note HF10 (final review I2): the Textures column's pill counts and lists follow the scope too.
+#[test]
+fn the_scope_keys_the_texture_counts_and_lists() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a"], &["w", "x"]);
+    m.filter.needs_decision = true;
+    let before = (m.filter_counts().needs_decision, m.visible_items().len());
+    // The first ask starts the size reads; once they land the folder total has every estimate.
+    m.folder_size();
+    idle(&mut m);
+    let size = m.folder_size();
+    assert_eq!(size.1, 0, "every estimate is in");
+    assert_eq!(before.0, 2);
+    let w = keys(&m, &["g/w"]);
+    m.export_sets(w, "Export set g/w".into());
+    assert!(m.review.is_some());
+    assert_eq!(m.filter_counts().needs_decision, 1);
+    assert!(
+        m.visible_items().len() < before.1,
+        "x's tile leaves the list"
+    );
+    assert!(
+        m.folder_size().0 < size.0,
+        "the folder size counts the scope"
+    );
+    m.close_review();
+    assert_eq!(
+        (m.filter_counts().needs_decision, m.visible_items().len()),
+        before
+    );
+    assert_eq!(m.folder_size(), size);
+}
+
+/// Note HF10 (final review M5): a scoped Review has no Also column; Also runs on whole exports only.
+#[test]
+fn a_scoped_review_has_no_also_column() {
+    use eframe::egui;
+    use egui_kittest::kittest::Queryable;
+    let also_column = |m: AppModel| {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1500.0, 900.0))
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        let shown = h.query_all_by_label("Also export as").next().is_some();
+        shown
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a"], &["w"]);
+    m.export_clicked();
+    assert!(m.review.is_some());
+    assert!(also_column(m), "a whole export's Review has it (cs mode)");
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a"], &["w"]);
+    m.export_sets(keys(&m, &["g/w"]), "Export set g/w".into());
+    assert!(m.review.is_some());
+    assert!(!also_column(m), "a scoped Review has none");
 }
 
 #[test]

@@ -2000,13 +2000,15 @@ impl AppModel {
     /// Note HF1: the texture `item_key` is in no set (`[project] no_set`): not on a card, written nowhere, its
     /// warnings and questions counted by nothing.
     pub fn is_no_set(&self, item_key: &str) -> bool {
-        self.sets_doc
-            .as_ref()
-            .is_some_and(|d| d.no_set_keys().contains(&fold_id(item_key)))
+        self.sets_doc.as_ref().is_some_and(|d| {
+            d.no_set_keys()
+                .iter()
+                .any(|k| engine::sets::no_set_names(k, item_key))
+        })
     }
 
     /// The plan's set keys whose files are all in no set, per view key.
-    fn no_set_sets(&self) -> Arc<HashSet<String>> {
+    pub(super) fn no_set_sets(&self) -> Arc<HashSet<String>> {
         super::cached(
             self,
             |c| c.no_set_sets.clone(),

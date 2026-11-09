@@ -92,6 +92,7 @@ fn plan(dir: &Path, rough: &Path, normal: &Path, bake: bool, flip_green: bool) -
         derive_own: Default::default(),
         fill_ends: Default::default(),
         helpers: vec![],
+        no_set: Default::default(),
     }
 }
 

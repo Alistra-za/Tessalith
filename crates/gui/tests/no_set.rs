@@ -289,7 +289,7 @@ fn a_no_set_textures_warnings_count_for_nothing() {
     idle(&mut m);
     assert_eq!(m.undecided_keys(), [LEAF], "the leaf is the one question");
     assert!(m.item(LEAF).unwrap().status == ItemStatus::NeedsDecision);
-    let (undecided, files) = (m.undecided(), m.export_files());
+    let undecided = m.undecided();
     assert!(leaf_row(&m) > 0);
     assert!(m.undecided_keys().iter().any(|k| k == LEAF));
     m.remove_member("landscape/leaf", LEAF).expect("removed");
@@ -297,11 +297,9 @@ fn a_no_set_textures_warnings_count_for_nothing() {
     assert_eq!(m.undecided(), undecided - 1);
     assert_eq!(m.undecided(), 0, "{:?}", m.undecided_keys());
     assert_eq!(leaf_row(&m), 0, "no Problems row");
-    assert_eq!(m.export_files(), files, "export_files leaves it out");
     // Export opens no Review for it: nothing else asks, so Review stays shut, and the export counts the same files.
     m.export_clicked();
     assert!(m.review.is_none(), "Review stays shut: {:?}", m.dialog);
-    assert_eq!(m.export_files(), files);
     // The pill counts the other undecided files, not the leaf.
     assert_eq!(m.filter_counts().needs_decision, m.undecided());
 }

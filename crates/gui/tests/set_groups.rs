@@ -221,6 +221,25 @@ fn an_input_rename_carries_membership() {
     }
 }
 
+/// Final review M7: a set a hand edit lists in two groups (or twice in one) is read in the first group only.
+#[test]
+fn a_set_listed_twice_is_in_its_first_group_only() {
+    let d = tempfile::tempdir().unwrap();
+    let mut doc = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    doc.restore(
+        "[[groups]]
+name = \"A\"
+sets = [\"g/a\", \"G/A\", \"g/b\"]
+         [[groups]]
+name = \"B\"
+sets = [\"g/a\", \"g/c\"]
+",
+    );
+    let g = doc.groups();
+    assert_eq!(g[0].sets, s(&["g/a", "g/b"]));
+    assert_eq!(g[1].sets, s(&["g/c"]));
+}
+
 /// `retarget_auto` on the document: no entry, an entry under the automatic id, and a renamed set.
 #[test]
 fn retarget_auto_moves_the_ids_a_group_holds() {
@@ -237,6 +256,19 @@ fn retarget_auto_moves_the_ids_a_group_holds() {
     // A renamed set keeps the user's name, which is what the group holds.
     doc.retarget_auto("g/cc", "g/ccc");
     assert_eq!(doc.groups()[0].sets, s(&["g/aa", "g/bb", "g/c"]));
+    // Final review M4: an entry already at the new id keeps both entries where they are, but the membership follows.
+    doc.restore(
+        "[[sets]]
+id = \"g/d\"
+[[sets]]
+id = \"g/dd\"
+[[groups]]
+name = \"Armor\"
+sets = [\"g/d\"]
+",
+    );
+    doc.retarget_auto("g/d", "g/dd");
+    assert_eq!(doc.groups()[0].sets, s(&["g/dd"]));
 }
 
 #[test]

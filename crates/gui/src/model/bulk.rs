@@ -977,12 +977,12 @@ pub enum MenuAction {
     MoveToGroup,
     /// The selected sets join the group of this name.
     ToGroup(String),
-    /// Note HF9: export the selected sets only ("Export 3 sets").
-    ExportSets,
     /// The UI opens the name dialog; `run_menu` does nothing.
     ToNewGroup,
     /// The selected sets leave their groups.
     ToNoGroup,
+    /// Note HF9: export the selected sets only ("Export 3 sets").
+    ExportSets,
 }
 
 /// The slot menu's PGPatcher lock entry, off and on (Note AN).

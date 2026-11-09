@@ -198,10 +198,19 @@ pub(crate) fn no_set_paths(
     edits
         .iter()
         .filter_map(|e| match e {
-            SetEdit::NoSet { file } => index.hits(file).first().map(|&i| files[i].path.clone()),
+            SetEdit::NoSet { file } => {
+                Some(index.hits(file).iter().map(|&i| files[i].path.clone()))
+            }
             _ => None,
         })
+        .flatten()
         .collect()
+}
+
+/// Note HF1: whether `[project] no_set` key `key` names the file at project-relative path `rel`: the `[files]` rule
+/// (the path, or the path without its last extension, case-insensitively). Every file a key names is in no set.
+pub fn no_set_names(key: &str, rel: &str) -> bool {
+    crate::overrides::KeyForms::of(rel).matches(key)
 }
 
 /// What an explicit output path applies to (DECISIONS P1).

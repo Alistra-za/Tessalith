@@ -13,6 +13,7 @@ pub mod cs_skin_json;
 pub mod cube_cross;
 pub mod encoding_follow;
 pub mod export;
+pub mod export_scope;
 pub mod fields;
 pub mod heatmap;
 pub mod helpers;
@@ -657,7 +658,7 @@ pub struct AppModel {
     /// Final review I2: `Some` while the walk runs: the export's failure, shown when they end.
     also_tail: Option<Option<String>>,
     /// Note HF9: Export set / group / N sets, from the click until Review closes or the export ends.
-    export_scope: Option<set_groups::ExportScope>,
+    export_scope: Option<export_scope::ExportScope>,
     /// Bumped with every scope change; part of the view key, so every count and list cached there follows it.
     scope_rev: u64,
     /// `sdc.toml` was made read-only because the engine rejected it (not because it failed to parse).
@@ -2904,7 +2905,8 @@ impl AppModel {
             _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
                 self.queued_export_dropped()
             }
-            _ if clicked => self.export_checks(),
+            // Note HF10: through `export_go`, as the scan-finished read does; the scope stays.
+            _ if clicked => self.export_go(),
             Some(how) => self.run_continue(how),
             None => {}
         }

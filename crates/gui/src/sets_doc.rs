@@ -655,9 +655,17 @@ impl SetsDoc {
             if out.iter().any(|g| same_id(&g.name, name)) {
                 continue;
             }
+            // Note HF4: a set is in one group: a hand edit listing it again (here or in a later group) is not read.
+            let mut sets: Vec<String> = vec![];
+            for s in strings(t.get("sets")) {
+                let seen = |l: &[String]| l.iter().any(|x| same_id(x, &s));
+                if !seen(&sets) && !out.iter().any(|g| seen(&g.sets)) {
+                    sets.push(s);
+                }
+            }
             out.push(SetGroup {
                 name: name.to_string(),
-                sets: strings(t.get("sets")),
+                sets,
                 excluded: t.get("excluded").and_then(Item::as_bool).unwrap_or(false),
             });
         }
@@ -759,7 +767,7 @@ impl SetsDoc {
     pub fn no_set(&self) -> Vec<String> {
         strings(self.f.doc.get("project").and_then(|p| p.get("no_set")))
     }
-    /// `no_set` folded, parsed once per revision (the model asks per item).
+    /// `no_set`, parsed once per revision (the model asks per item; match with `engine::sets::no_set_names`).
     pub fn no_set_keys(&self) -> Arc<BTreeSet<String>> {
         let rev = self.f.rev;
         if let Some((r, k)) = &*self.no_set_cache.borrow() {
@@ -767,7 +775,7 @@ impl SetsDoc {
                 return k.clone();
             }
         }
-        let k: Arc<BTreeSet<String>> = Arc::new(self.no_set().iter().map(|f| fold_id(f)).collect());
+        let k: Arc<BTreeSet<String>> = Arc::new(self.no_set().into_iter().collect());
         *self.no_set_cache.borrow_mut() = Some((rev, k.clone()));
         k
     }
@@ -778,7 +786,8 @@ impl SetsDoc {
         }
         let mut keys = self.no_set();
         let n = keys.len();
-        keys.retain(|k| !same_id(k, key));
+        // Taken out: every key naming the file goes (the engine's rule), so it is in no set no more.
+        keys.retain(|k| !(same_id(k, key) || (!on && engine::sets::no_set_names(k, key))));
         if on {
             keys.push(key.to_string());
         } else if keys.len() == n {
@@ -1098,9 +1107,10 @@ impl SetsDoc {
             self.f.touch();
         } else if !entries
             .iter()
-            .any(|e| same_id(&e.id, from) || same_id(&e.id, to))
+            .any(|e| (e.created || e.renamed_from.is_some()) && same_id(&e.id, from))
         {
-            // Note HF4: a set that is only in a group has no entry to move; its place in the group follows.
+            // Note HF4: membership follows the automatic set even when no entry moved (none to move, or one already at
+            // `to`), so the set never silently leaves its group.
             self.rename_in_groups(from, to);
         }
     }

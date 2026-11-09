@@ -495,6 +495,9 @@ pub struct Plan {
     pub fill_ends: Vec<(PathBuf, PathBuf, String)>,
     /// Note DY: every helper of the batch (`helper::report::reports`), by set key then file name.
     pub helpers: Vec<crate::helper::report::HelperReport>,
+    /// Note HF1: the files `[project] no_set` names (`sets::no_set_paths`). Their jobs stay in `jobs` (the GUI lists
+    /// them), but `run` never writes one, whatever `write_only` says.
+    pub no_set: BTreeSet<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -2975,6 +2978,7 @@ impl Engine {
             derive_own,
             fill_ends,
             helpers,
+            no_set,
         };
         Ok((plan, pbr_sets))
     }
@@ -2989,6 +2993,9 @@ impl Engine {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
+        // Note HF1: a no-set file writes nothing, on every run (BV2 does not stop it: it claims no output path).
+        let no_set = std::mem::take(&mut plan.no_set);
+        plan.jobs.retain(|j| !no_set.contains(&j.input));
         // Note HF9: a partial or excluding run covers the listed sets only, from its first event and count; an entry
         // with no set (an input duplicate) is a project-wide fact and stays.
         if let Some(only) = &plan.request.write_only {

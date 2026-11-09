@@ -223,16 +223,7 @@ impl PlanView {
             plan.helpers.iter().map(|h| h.path.as_path()).collect();
         let mut helper_warnings: BTreeMap<&Path, Vec<Warning>> = BTreeMap::new();
         // Note HF1 (GY1 guard): a no-set file never waits for a type, so no question, set or count is made of it.
-        // The engine keeps it waiting: its write is Task 4's, and a suggestion there would be recorded into `[files]`.
-        let no_set: std::collections::HashSet<String> = plan
-            .request
-            .set_edits
-            .iter()
-            .filter_map(|e| match e {
-                engine::sets::SetEdit::NoSet { file } => Some(engine::sets::fold_id(file)),
-                _ => None,
-            })
-            .collect();
+        // The engine keeps it waiting (a suggestion there would be recorded into `[files]`) and never writes it.
         for job in &plan.jobs {
             if matches!(job.status, JobStatus::PackingInput { .. })
                 && helper_paths.contains(job.input.as_path())
@@ -289,8 +280,7 @@ impl PlanView {
                 warnings: job.warnings.clone(),
                 thumb: session.thumbnail(job),
                 analysis: session.cache().analysis(job).map(std::sync::Arc::new),
-                waiting: job.waits_for_type()
-                    && !no_set.contains(&engine::sets::fold_id(&key_of(root, &job.input))),
+                waiting: job.waits_for_type() && !plan.no_set.contains(&job.input),
                 job: Some(job.clone()),
                 status,
                 changed_on_disk: false,

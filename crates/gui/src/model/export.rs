@@ -193,10 +193,7 @@ impl ExportModel {
                 }
             }
             EventKind::FileDiscovered { .. }
-                if ev
-                    .job
-                    .as_ref()
-                    .is_some_and(|j| self.outside_run.contains(&j.to_lowercase())) => {}
+                if ev.job.as_ref().is_some_and(|j| self.outside(j)) => {}
             EventKind::FileDiscovered { output } => {
                 self.row(&ev);
                 self.note_output(&ev, output);
@@ -265,18 +262,24 @@ impl ExportModel {
         }
     }
 
-    /// Note HF9: drop the rows that never started whose texture is outside the run: its own key, or an Also phase's
-    /// `<folder>/<key>`. A queued row of a texture in the run stays, to end as "not run".
+    /// Note HF9: job key `k` is a texture outside the run: its own key, or an Also phase's `<folder>/<key>`.
+    fn outside(&self, k: &str) -> bool {
+        let k = k.to_lowercase();
+        self.outside_run.contains(&k)
+            || k.split_once('/')
+                .is_some_and(|(_, rest)| self.outside_run.contains(rest))
+    }
+
+    /// Note HF9: drop the rows that never started whose texture is outside the run. A queued row of a texture in the
+    /// run stays, to end as "not run".
     pub(crate) fn drop_unstarted(&mut self) {
         let before = self.rows.len();
-        let outside = |k: &str| {
-            let k = k.to_lowercase();
-            self.outside_run.contains(&k)
-                || k.split_once('/')
-                    .is_some_and(|(_, rest)| self.outside_run.contains(rest))
-        };
-        self.rows
-            .retain(|r| r.state != RowState::Queued || !outside(&r.job_key));
+        let outside: Vec<bool> = self.rows.iter().map(|r| self.outside(&r.job_key)).collect();
+        let mut i = 0;
+        self.rows.retain(|r| {
+            i += 1;
+            r.state != RowState::Queued || !outside[i - 1]
+        });
         if self.rows.len() != before {
             self.index_stale = true;
             self.revision = REV.fetch_add(1, Ordering::Relaxed);
@@ -558,6 +561,8 @@ mod tests {
             outside_run: ["g/a".to_string()].into(),
             ..Default::default()
         };
+        // The discovered rows use the same rule (final review M6): an Also phase's row gets none either.
+        assert!(m.outside("Mod Vanilla/g/A") && m.outside("g/a") && !m.outside("g/b"));
         m.drop_unstarted();
         let left: Vec<&str> = m.rows.iter().map(|r| r.job_key.as_str()).collect();
         assert_eq!(left, ["g/b"]);
