@@ -2040,16 +2040,15 @@ impl AppModel {
 
     /// The one check from a texture to its set: a no-set texture has none, because its set has no view.
     pub(crate) fn set_of_item(&self, item: &str) -> Option<SetView> {
-        let key = self.set_key_of_item(item)?;
-        views(self).iter().find(|v| v.key == key).cloned()
+        views(self)
+            .iter()
+            .find(|v| v.members.iter().any(|k| k == item))
+            .cloned()
     }
 
     /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
     pub(crate) fn set_key_of_item(&self, item: &str) -> Option<String> {
-        views(self)
-            .iter()
-            .find(|v| v.members.iter().any(|k| k == item))
-            .map(|v| v.key.clone())
+        self.set_of_item(item).map(|v| v.key)
     }
 
     pub(crate) fn sets_editable(&self) -> bool {
