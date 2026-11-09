@@ -1159,3 +1159,198 @@ fn a_no_albedo_set_without_a_normal_locks_the_normal() {
     assert_eq!(e["lock_normal"], true, "{e}");
     assert!(e.get("slot2").is_none(), "{e}");
 }
+
+// ---- Missing links are info, conflicts stay warnings (Note HL6) ----
+
+use sdc_gui::model::cs_pbr::{non_lod_nifs, set_key, Kind, SetFacts, StaticsStatus};
+
+const ROCK: &str = "landscape/rock01";
+
+fn at_warning_or_above(p: &sdc_gui::model::bottom::Problem) -> bool {
+    matches!(p.level, Level::Blocks | Level::Decide | Level::Warning)
+}
+
+/// The fixture's rock set with a texture-set block and `statics` / `txst_edids` as the scan's answer for it.
+fn rock_with_scan(dir: &Path, statics: &[&str], txst_edids: &[&str]) -> AppModel {
+    let mut m = support::pbr_opened_plain(dir);
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.apply_cs_template(ROCK, Kind::Txst, "LandscapeMountainSlab")
+        .unwrap();
+    m.set_cs_edids(ROCK, Kind::Txst, &["LandscapeRock01".into()]);
+    let v = view_of(&m, ROCK);
+    m.cs_pbr.facts.borrow_mut().insert(
+        set_key(&v).unwrap(),
+        Ok(SetFacts {
+            txst_edids: txst_edids.iter().map(|s| s.to_string()).collect(),
+            statics: statics.iter().map(|s| s.to_string()).collect(),
+        }),
+    );
+    idle(&mut m);
+    m
+}
+
+#[test]
+fn a_diffuse_no_mesh_uses_still_writes_the_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_with_scan(d.path(), &[], &[]);
+    let v = view_of(&m, ROCK);
+    assert_eq!(m.statics_status(&v), Some(StaticsStatus::Unused));
+    assert!(m.pgp_entry_wanted(&v));
+    let text = sdc_gui::model::cs_pbr::statics_text(&StaticsStatus::Unused);
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.text == text)
+        .unwrap_or_else(|| panic!("no statics row in {rows:?}"));
+    assert_eq!(row.level, Level::Info);
+    export_through(&mut m);
+    idle(&mut m);
+    let json: Value = serde_json::from_slice(&std::fs::read(pgp_json_path(&m)).unwrap()).unwrap();
+    assert_eq!(json["entries"].as_array().unwrap().len(), 1, "{json}");
+    // BM6: no scan on a non-landscape set still drops the entry; the LOD exclusion is unchanged.
+    let d2 = tempfile::tempdir().unwrap();
+    let mut n = support::pbr_opened_plain(d2.path());
+    n.add_cs_block(ROCK, Kind::Txst);
+    assert!(!n.pgp_entry_wanted(&view_of(&n, ROCK)));
+    let lod = modscan::store::MatchRow {
+        copy_id: 1,
+        nif_path: "meshes/lod/rocks/rock01_lod_0.nif".into(),
+        origin: "A".into(),
+        shape_block: 3,
+        shape_name: None,
+        le_mesh: false,
+        skinned: false,
+        derived: false,
+        load_copy_id: 1,
+    };
+    assert!(non_lod_nifs(&[lod]).is_empty());
+}
+
+/// Colours of the text sections of every painted galley that starts with `start`.
+fn text_colours(h: &Harness<'static, AppModel>, start: &str) -> Vec<egui::Color32> {
+    fn walk(s: &egui::Shape, start: &str, out: &mut Vec<egui::Color32>) {
+        match s {
+            egui::Shape::Text(t) if t.galley.job.text.starts_with(start) => {
+                out.extend(t.galley.job.sections.iter().map(|s| s.format.color));
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, start, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    for s in &h.output().shapes {
+        walk(&s.shape, start, &mut out);
+    }
+    out
+}
+
+fn tall(m: AppModel) -> Harness<'static, AppModel> {
+    let h = Harness::builder()
+        .with_size(egui::vec2(1400.0, 2400.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+#[test]
+fn no_texture_set_uses_this_is_info() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_with_scan(d.path(), &["meshes/a.nif"], &[]);
+    let rows = problems(&m);
+    let mine: Vec<_> = rows
+        .iter()
+        .filter(|p| p.text == sdc_gui::model::cs_pbr::NO_TXST_USES)
+        .collect();
+    assert!(!mine.is_empty(), "{rows:?}");
+    assert!(mine.iter().all(|p| p.level == Level::Info));
+    let key = view_of(&m, ROCK).key;
+    m.select_set(&key);
+    let mut h = tall(m);
+    h.run();
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    h.run();
+    let c = text_colours(&h, sdc_gui::model::cs_pbr::NO_TXST_USES);
+    assert!(!c.is_empty(), "the line is drawn");
+    assert!(c.iter().all(|c| *c != sdc_gui::ui::status::AMBER), "{c:?}");
+}
+
+#[test]
+fn a_typed_match_that_matches_nothing_stays_amber() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_plain(d.path());
+    m.set_json_value(ROCK, "match1", Some(json!("")));
+    idle(&mut m);
+    let v = view_of(&m, ROCK);
+    let w = sdc_gui::pgp::prefix::pitfalls(&v.settings, v.derived_match.as_deref().unwrap_or(""));
+    assert!(
+        w.iter()
+            .any(|x| x.starts_with(sdc_gui::pgp::prefix::NO_MATCH) && x.contains("left out")),
+        "{w:?}"
+    );
+    assert!(sdc_gui::model::pbr_export::json_entries(&m)
+        .iter()
+        .all(|(v, _)| v.id != ROCK));
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(700.0, 900.0))
+        .build_ui_state(
+            |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, ROCK),
+            m,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let c = text_colours(&h, "matches nothing");
+    assert!(!c.is_empty(), "the Matching header says so");
+    assert!(c.iter().all(|c| *c == sdc_gui::ui::status::AMBER), "{c:?}");
+}
+
+#[test]
+fn a_no_albedo_set_gets_the_info_row() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = lonely(d.path(), true);
+    let want = "No albedo in this set; the mesh keeps textures\\armor\\lonely.dds. A vanilla diffuse isn't sRGB, so it can look washed out";
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.text == want)
+        .unwrap_or_else(|| panic!("no row for {id} in {rows:?}"));
+    assert_eq!(row.level, Level::Info);
+    assert!(!sdc_gui::model::bottom::counts_as_ready_problem(row));
+}
+
+#[test]
+fn a_mapping_onto_a_shipped_file_says_it_replaces_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = boots(d.path());
+    m.set_target_mod(Some(target_folder(d.path()))).unwrap();
+    landed(&mut m);
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let want = "Replaces textures/fs6/fs6_boots_ir_n.dds of the target mod in the load order";
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.text == want)
+        .unwrap_or_else(|| panic!("no replaces row in {rows:?}"));
+    assert_eq!(row.level, Level::Info);
+}
+
+/// Anti-goal: a conflict is not a missing link. Two sets mapped onto one file base still warn (pins existing behaviour).
+#[test]
+fn collisions_stay_amber() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skyrim_shaped(d.path());
+    let ids: Vec<String> = sdc_gui::model::sets::views(&m)
+        .iter()
+        .filter(|v| v.key.ends_with("wall") || v.key.ends_with("leaf"))
+        .map(|v| v.id.clone())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    for id in &ids {
+        m.map_target(id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+            .unwrap();
+        idle(&mut m);
+    }
+    let rows = problems(&m);
+    assert!(rows.iter().any(at_warning_or_above), "{rows:?}");
+}

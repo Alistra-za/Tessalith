@@ -777,7 +777,7 @@ pub fn statics_text(s: &StaticsStatus) -> String {
     match s {
         StaticsStatus::Used(p) => format!("Used by {} meshes: PGPatcher entry written", p.len()),
         StaticsStatus::Unused => {
-            "No mesh of the latest scan uses this diffuse (LOD meshes do not count): no PGPatcher entry".into()
+            "No mesh of the latest scan uses this diffuse yet (LOD meshes do not count); the PGPatcher entry is still written".into()
         }
         StaticsStatus::NoScan(e) => {
             format!("{e} No PGPatcher entry is written until a scan finds meshes using this diffuse.")
@@ -831,9 +831,12 @@ impl AppModel {
     /// scan keeps it too, so the card's first edit (which creates the block) never turns the entry off.
     pub fn pgp_entry_wanted(&self, v: &SetView) -> bool {
         match self.statics_status(v) {
-            None | Some(StaticsStatus::Always | StaticsStatus::Used(_)) => true,
+            // Note HL6: a diffuse no mesh uses yet is a missing link (an Info row), not a reason to drop the entry.
+            None | Some(StaticsStatus::Always | StaticsStatus::Used(_) | StaticsStatus::Unused) => {
+                true
+            }
             Some(StaticsStatus::NoScan(_)) => super::sets::is_pbr_landscape(v),
-            Some(StaticsStatus::Never | StaticsStatus::Unused) => false,
+            Some(StaticsStatus::Never) => false,
         }
     }
 

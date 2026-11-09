@@ -1,4 +1,5 @@
 //! The bottom panel's state (layout v2 A1, A9; R7, R8): which tab shows, and whether the panel is open.
+use super::cs_pbr::{set_key, statics_text, Kind, StaticsStatus, NO_TXST_USES};
 use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
 use super::{checks, code_text, counts_toward_badge, pbr_export, sets, AppModel, ItemStatus};
@@ -295,6 +296,8 @@ pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
         m.export.running.is_some(),
         // Note FC3: an `Undo` fix is built only while its step is the top one.
         m.history.pushes,
+        // Note HL6: the statics and texture-set rows read the scan database.
+        m.scan_stamp,
     )
 }
 
@@ -864,9 +867,47 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             ));
         }
     }
+    // Note HL6: missing links are Info rows and still export; conflicts stay Warning.
+    for v in views.iter() {
+        let at = || set_at(&v.key, &v.id);
+        if v.json && !v.pbr {
+            if let Some(d) = &v.derived_match {
+                let path = format!("textures\\{}.dds", d.replace('/', "\\"));
+                out.push(row(
+                    Level::Info,
+                    at(),
+                    NO_ALBEDO_KEEPS.replace("{path}", &path),
+                    None,
+                ));
+            }
+        }
+        if let Some(s @ StaticsStatus::Unused) = m.statics_status(v) {
+            out.push(row(Level::Info, at(), statics_text(&s), None));
+        }
+        if m.cs_block(&v.id, Kind::Txst).is_some()
+            && set_key(v)
+                .and_then(|k| m.scan_facts(&k).ok())
+                .is_some_and(|f| f.txst_edids.is_empty())
+        {
+            out.push(row(Level::Info, at(), NO_TXST_USES.into(), None));
+        }
+        for f in m.target_replaces(v) {
+            out.push(row(
+                Level::Info,
+                at(),
+                REPLACES_TARGET.replace("{file}", &f),
+                None,
+            ));
+        }
+    }
     out.extend(nif_rows(NifLevel::Info, Level::Info));
     out
 }
+
+/// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
+pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
+/// Note HL6: an output the target mod already ships (it wins or loses by load order).
+pub const REPLACES_TARGET: &str = "Replaces {file} of the target mod in the load order";
 
 /// The hover of a `Tag as grass` row (Note FC10).
 pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal map, as complex grass is. No grass record \

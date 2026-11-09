@@ -425,26 +425,18 @@ fn statics_using_the_diffuse_get_the_entry_with_the_blocks_values() {
 }
 
 #[test]
-fn only_lod_users_or_never_write_the_texture_set_only() {
-    for never in [false, true] {
-        let d = tempfile::tempdir().unwrap();
-        let statics: &[&str] = if never {
-            &["meshes/landscape/rocks/rock01.nif"]
-        } else {
-            &[]
-        };
-        let mut m = landscape(d.path(), statics);
-        if never {
-            m.set_cs_statics(ROCK, Statics::Never);
-        }
-        assert!(!m.pgp_entry_wanted(&rock(&m)));
-        export_and_wait(&mut m);
-        assert!(pgp_json(&m).is_none(), "no entry, so no PGPatcher JSON");
-        assert!(m
-            .export_root()
-            .join("PBRTextureSets/LandscapeRock01.json")
-            .is_file());
-    }
+fn statics_never_writes_the_texture_set_only() {
+    // Note HL6: a diffuse no mesh uses yet (statics Unused) writes the entry; only `never` drops it.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = landscape(d.path(), &["meshes/landscape/rocks/rock01.nif"]);
+    m.set_cs_statics(ROCK, Statics::Never);
+    assert!(!m.pgp_entry_wanted(&rock(&m)));
+    export_and_wait(&mut m);
+    assert!(pgp_json(&m).is_none(), "no entry, so no PGPatcher JSON");
+    assert!(m
+        .export_root()
+        .join("PBRTextureSets/LandscapeRock01.json")
+        .is_file());
 }
 
 #[test]

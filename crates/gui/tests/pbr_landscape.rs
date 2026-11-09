@@ -144,7 +144,7 @@ fn the_pgpatcher_box_stores_statics_and_drives_the_badge() {
     h.get_by_label("Back to auto").click();
     h.run();
     assert_eq!(st(&h), Statics::Auto);
-    // A scan that finds no mesh using the diffuse: auto writes no entry.
+    // A scan that finds no mesh using the diffuse yet: auto still writes the entry (Note HL6).
     let key = set_key(&view(h.state())).unwrap();
     h.state().cs_pbr.facts.borrow_mut().insert(
         key,
@@ -154,8 +154,11 @@ fn the_pgpatcher_box_stores_statics_and_drives_the_badge() {
         }),
     );
     h.run();
-    assert!(!box_on(&h));
-    assert_eq!(badge_text(h.state(), &view(h.state())), BADGE_PBR_LANDSCAPE);
+    assert!(box_on(&h));
+    assert_eq!(
+        badge_text(h.state(), &view(h.state())),
+        BADGE_PBR_LANDSCAPE_PGP
+    );
 }
 
 /// Review I2: a PBR Landscape set whose colour map is a landscape diffuse has no PGPatcher entry: the box is off and

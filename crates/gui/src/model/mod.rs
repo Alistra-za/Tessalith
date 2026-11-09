@@ -261,7 +261,7 @@ fn read_only_banner(error: &str) -> String {
 }
 
 /// `(evidence_rev, export.revision, export running)`.
-type ProblemsKey = (u64, u64, bool, u64);
+type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
 
 /// The cached set views, export blocks and delete-section hits, valid for `key` only.
 #[derive(Default)]
