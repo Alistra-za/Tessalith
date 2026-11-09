@@ -1,8 +1,8 @@
 # Presets and targets
 
-A target says which renderer the textures are for. A preset is a named bundle of settings. Every conversion has exactly one of each.
+For anyone choosing which renderer the textures are for and which bundle of settings to use. Every conversion has exactly one target and one preset.
 
-## Targets
+## Which target
 
 | Target | Id | What it allows |
 |---|---|---|
@@ -11,112 +11,62 @@ A target says which renderer the textures are for. A preset is a named bundle of
 
 There is no `cpm` target: a vanilla set with the complex material shader packs the same `_m`. <!-- D:AZ --> `cpm` is an error in `--target`, `sdc.toml`, the user config, `--preset cpm-quality` and `base = "cpm-quality"`. A user preset file with `target = "cpm"` is skipped with a `CFG-PRESET-SKIPPED` warning that names `cpm`.
 
-How the target is chosen, highest first:
+The target is chosen from the first of these that is set:
 
 1. `--target` on the command line.
-2. `target` in the project `sdc.toml` (the GUI's Mode menu writes this).
-3. `target` in the [user config](Project-Config.md).
+2. `target` in the project `sdc.toml` (the GUI's **Mode** row writes this).
+3. `target` in the [user config](Project-Config.md#where-the-files-are).
 4. The selected preset's own `target`.
 5. `cs`.
 
-### Sub-types per target
+What a target changes lives with the thing it changes:
 
-Under `cs` every sub-type is available. Under `vanilla`, some are not:
-
-| Sub-type | `vanilla` | Fallback with `--allow CFG-UNAVAILABLE` |
-|---|---|---|
-| `pbr_albedo` | no | `diffuse` |
-| `pbr_emissive` | no | `glow` |
-| `pbr_normal` | no | `normal` |
-| `pbr_subsurface`, `pbr_fuzz`, `coat_normal`, `rmaos`, `skin_rfaos` | no | none |
-| `skin_albedo`, `skin_sk`, `skin_wet`, `skin_detail` | no | none |
-| `flow`, `hdr_sky` | no | none |
-
-A file whose sub-type is unavailable is blocked with `CFG-UNAVAILABLE`. When a fallback exists, `--allow CFG-UNAVAILABLE` (or the GUI's acknowledge button) converts it as the fallback. When none exists, change the sub-type or the target.
-
-`complex_grass` is accepted under both targets, and a GRAS diffuse is tagged automatically under both. Only Community Shaders or ENB read it in game.
-
-### sRGB tagging
-
-The DDS `_SRGB` flag tells the game to decode colours from sRGB; a wrong tag makes textures look too dark or washed out.
-
-| Rule | Code if broken |
-|---|---|
-| Under `cs`, PBR colour maps (`pbr_albedo`, `pbr_emissive` as BC7, `pbr_subsurface`, `pbr_fuzz`) are tagged `_SRGB`. | `TAG-UNORM-PBR` (blocking) |
-| Under `cs`, every other sub-type is UNORM. This includes ordinary `diffuse` and `skin_albedo`. | `TAG-SRGB-NONPBR` (blocking) |
-| Under `vanilla`, nothing is tagged `_SRGB`. | `TAG-SRGB-VANILLA` (error) |
-| Anything under a `lod` folder is UNORM; LOD shaders reject `_SRGB`. | `TAG-SRGB-LOD` (blocking) |
-| BC6H and RGBA16F have no tag (`n/a`). | |
-
-### HDR formats
-
-BC6H (`bc6h_uf16`) and RGBA16F exist only under `cs`. A `pbr_emissive` becomes BC6H only when its source is a float image (EXR or HDR) that peaks above 1.0; otherwise it is BC7 with the `_SRGB` tag. The info code `FMT-HDR-SOURCE` says which and why. `hdr_sky` is BC6H.
-
-### Packed maps per target
-
-Raw maps (`_roughness`, `_metallic`, `_ao` and so on) are packed differently per target:
-
-| Target | Packed output | Channels |
-|---|---|---|
-| `cs` | `_rmaos` | R roughness (or 1 minus glossiness), G metallic, B AO, A specular |
-| `cs` | `_rfaos` (Advanced skin, when a fuzz source exists or the set's shader is Advanced Skin) | R roughness, G fuzz, B AO, A specular |
-| `cs` | `_p` | height |
-| `vanilla`, set shader complex material | `_m` | R environment, G gloss, B metallic, A height; built from any roughness, glossiness, metallic, height or `_orm` source |
-| `vanilla`, any other set | `_m` (BC4) | environment mask ([when it is built](Texture-Packing.md#vanilla-any-other-set)) |
-
-Under vanilla, pick **Complex Material** as the set's shader (GUI) or pass `--set set:<id>.shader=complex_material` (CLI) to get the complex `_m` from raw maps. A set that already has a complex-material `_m` file picks the shader by itself, and that file is kept unless `packing.prefer = "raw"`.
-
-Details: [Texture packing](Texture-Packing.md#packing-raw-maps).
-
-### Set shaders per target
-
-| Shader | `cs` | `vanilla` |
-|---|---|---|
-| `pbr`, `pbr_grass`, `pbr_landscape`, `advanced_skin` | yes | no |
-| `default`, `envmap`, `complex_material`, `glow`, `parallax`, `skin`, `hair`, `eye`, `multilayer`, `landscape`, `complex_grass` | yes | yes |
-
-A shader the target does not have falls back to `default`, with `SHADER-UNAVAILABLE` ([Set shaders](Set-Shaders.md#set-shaders)).
+- Sub-types and colour tags: [Texture types](Texture-Types.md#sub-types-what-each-file-becomes).
+- Packed maps: [Texture packing](Texture-Packing.md).
+- Shaders: [Set shaders](Set-Shaders.md#which-maps-each-shader-needs).
 
 ## Built-in presets
 
-| Id | Version | Target | Description |
-|---|---|---|---|
-| `cs-quality` | 2.0.0 | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
-| `cs-compact` | 2.0.0 | `cs` | Smaller files. BC1 for opaque colour maps at full size; every other listed sub-type at half size when its larger side is above 512 (256 for height); BC4/BC5 search radius `fast`. |
-| `vanilla-quality` | 2.0.0 | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. `diffuse` and `glow` use perceptual encoding in BC1, BC3 and BC7. <!-- D:FM43 --> |
-| `vanilla-compact` | 2.0.0 | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
-| `fast-preview` | 2.0.0 | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. For checking a mod quickly, not for release. |
+| Id | Target | What it does |
+|---|---|---|
+| `cs-quality` | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
+| `cs-compact` | `cs` | Smaller files: BC1 for opaque colour maps at full size, other maps at half size, BC4/BC5 search radius `fast`. |
+| `vanilla-quality` | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. `diffuse` and `glow` use perceptual encoding in BC1, BC3 and BC7. <!-- D:FM43 --> |
+| `vanilla-compact` | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
+| `fast-preview` | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. |
 
-All of them inherit from `sdc-base` (version 2.0.0), a hidden preset that holds the per-sub-type defaults. It is not listed by `presets list`, and a user preset cannot use its id.
-
-How the preset is chosen, highest first:
+The preset is chosen from the first of these that is set:
 
 1. `--preset` on the command line.
-2. `preset` in the project `sdc.toml`.
+2. `preset` in the project `sdc.toml` (the header's **Preset** menu writes this; it lists the presets of the current Mode).
 3. `preset` in the user config.
 4. The default for the target: `cs-quality` or `vanilla-quality`.
 
-In the GUI, the header's **Preset** menu picks the preset (it writes `preset = "<id>"` to `sdc.toml`; it lists the presets of the current Mode), and **Presets…** opens the preset creator, which makes and edits user presets without writing TOML by hand (see the GUI guide). The Advanced drawer's Preset inspector shows the batch preset and lists the user presets that loaded.
+Every built-in preset has one rule: any file under an `interface` or `sky` folder gets `mips.levels = "none"`.
 
-### What the compact presets do
+## Making your own preset in the GUI
 
-`cs-compact` and `vanilla-compact` differ from their quality presets in three ways:
+**Presets…** (the last entry of the header's **Preset** menu) opens the preset creator as a tab of the centre column. <!-- D:FB7 --> It edits the files in `%APPDATA%\sdc\presets\`, which `sdc` loads too, so you never write TOML by hand unless you want to. **TOML preview** shows exactly what **Save preset** writes.
 
-1. Colour maps that are opaque become BC1 at full size. This applies to `diffuse`, `pbr_albedo`, `glow`, `pbr_subsurface`, `pbr_fuzz`, `subsurface_tint`, `backlight_tint`, `ui_sky` and `skin_albedo` when the source has no alpha channel (or scanned meshes decided to remove the alpha), and to the same list minus `pbr_subsurface` and `pbr_fuzz` when the alpha is constant 255. `landscape_diffuse` is never BC1 (its alpha is the snow mask), and `pbr_emissive` stays BC6H or BC7.
-2. Every other listed sub-type gets `resize = "half"`: both sides halve while the larger side stays at or above 512, or 256 for `height` ([`resize_floor`](Project-Config-Fields.md#format-and-size)). Emissive and HDR sky are not resized. Every map but `diffuse`, `landscape_diffuse`, `pbr_albedo` and `skin_albedo` is measured against the set's slot-1 map ([`resize_relative_to = "slot1"`](Project-Config-Fields.md#format-and-size)).
-3. `encoder.bc45_search_radius = "fast"`.
+![The Presets tab.](../img/gui/Presets-and-Targets/presets-tab.png)
 
-`vanilla-compact` also sets [`encoder.perceptual`](Project-Config-Fields.md#encoder) on those BC1 colour maps.
+- **Built-in presets are read-only.** **Duplicate** makes an editable copy.
+- **One row per sub-type**, in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
+- **A preset that wouldn't load is never written.** The creator loads it through the same loader as the presets folder before saving, edits your file in place (comments kept), and re-reads the folder, so the preset appears in the **Preset** menu without a restart.
+- **A preset that `sdc.toml` names but is gone** blocks the export: Problems shows "Preset <id> is not installed" with **Choose preset…**, and `sdc convert` exits 2.
 
-Compact output never uses BC3, which is the same size as BC7.
+### Suffix branches
 
-### Built-in rules
+Open a suffix under a sub-type to change settings only for files with that suffix:
 
-`sdc-base` has one rule that every preset inherits: any file under an `interface` or `sky` folder gets `mips.levels = "none"`.
+- A branch is saved as one `[[rules]]` entry, and branches apply after your other rules. An alias's branch adds to its canonical suffix's branch.
+- A `[files]` value or `--set` still beats a branch.
+- **Add alias** adds a suffix alias and opens its empty branch; **Remove alias** removes it with its branch. The creator refuses a bad alias with the engine's message as you type.
+- Rules the creator didn't write are listed under **Other rules**, read-only, and kept as they are.
 
-## Writing your own preset
+## Writing a preset by hand
 
-A preset is a TOML file. Put it in `%APPDATA%\sdc\presets\` and both `sdc` and the GUI load it on every run. Or load it for one run with `--preset-file <file>` (load only) or `--preset <file.toml>` (load and select).
+A preset is a TOML file. Put it in `%APPDATA%\sdc\presets\` and `sdc` and the GUI load it on every run, or load it for one run with `--preset-file <file>` (load only) or `--preset <file.toml>` (load and select).
 
 ```toml
 schema_version = 1
@@ -147,43 +97,27 @@ rmaosultrahigh = "rmaos"
 | Key | Required | Meaning |
 |---|---|---|
 | `schema_version` | yes | 1. |
-| `id` | yes | The preset's id. Must not clash with an id that is already loaded, built-in or user. |
+| `id` | yes | The preset's id. Must not clash with one already loaded, built-in or user. |
 | `version` | yes | Your version string. |
-| `base` | in practice | The preset this one inherits from, such as `cs-quality` or `sdc-base`. Every sub-type's profile must resolve completely, so a preset without a `base` must supply every field itself; the load names what is missing. A cycle is an error (`preset inheritance cycle at '<id>'`). |
+| `base` | in practice | The preset this one inherits from, such as `cs-quality`. Every sub-type's profile must resolve completely, so a preset without a `base` must supply every field itself; the load names what is missing. A cycle is an error. |
 | `target` | no | The preset's target, used when nothing else sets one. Leave it out for a target-neutral preset like `fast-preview`. |
 | `hidden` | no | `true` keeps the preset out of `presets list`. |
 | `description` | no | Shown by `presets list`. |
 | `[defaults]` | no | Partial profile for every sub-type. |
 | `[subtypes.<id>]` | no | Partial profile for one sub-type. |
-| `[[rules]]` | no | Same format as in `sdc.toml`. See [Project config](Project-Config.md#rules). |
+| `[[rules]]` | no | Same format as in `sdc.toml`: [rules](Project-Config.md#rules). |
 | `[suffix_aliases]` | no | Extra file-name suffixes, as `alias = "canonical suffix"`. |
 
-The `[defaults]`, `[subtypes]` and `[[rules]]` tables take the same fields as `sdc.toml`; see the [field reference](Project-Config.md#field-reference).
-
-Inheritance and rule order follow [How settings layer](Project-Config.md#how-settings-layer).
+The tables take the same fields as `sdc.toml` ([fields](Project-Config.md#fields)); inheritance and rule order follow [How settings layer](Project-Config.md#how-settings-layer).
 
 ### Suffix aliases
 
-A suffix alias makes Tessalith read another suffix as a canonical one. With `rmaosultrahigh = "rmaos"`, a file named `iron_rmaosultrahigh.png` joins the `iron` set as its `_rmaos`.
+A suffix alias makes Tessalith read another suffix as a canonical one. With `rmaosultrahigh = "rmaos"`, `iron_rmaosultrahigh.png` joins the `iron` set as its `_rmaos`.
 
-- The alias must be lower-case ASCII letters and digits, with no underscore.
-- It must not be a canonical suffix (such as `n` or `rmaos`) or an exporter vocabulary term (such as `albedo` or `roughness`).
-- It must map to a canonical suffix.
-- Two loaded presets cannot declare the same alias.
-- A file named with an alias is resolved with the declaring preset's settings chain, so the alias's preset can carry settings for those files.
-
-A preset that mainly declares aliases, loaded with `--preset-file` or from the user presets folder:
-
-```toml
-schema_version = 1
-id = "my-aliases"
-version = "1.0.0"
-base = "cs-quality"
-
-[suffix_aliases]
-rmaosultrahigh = "rmaos"
-normalmap = "n"
-```
+- The alias is lower-case ASCII letters and digits, no underscore.
+- It can't be a canonical suffix (`n`, `rmaos`) or an exporter term (`albedo`, `roughness`), and it must map to a canonical suffix.
+- Two loaded presets can't declare the same alias.
+- A file named with an alias resolves with the declaring preset's settings chain, so that preset can carry settings for those files.
 
 `sdc presets list` shows each preset's aliases.
 
@@ -194,8 +128,6 @@ normalmap = "n"
 sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse
 ```
 
-A file in the user presets folder that fails to load is skipped with `CFG-PRESET-SKIPPED` (a warning naming the file and the reason), and the run continues. A file given with `--preset-file` that fails to load is an error.
+A file in the user presets folder that fails to load is skipped with `CFG-PRESET-SKIPPED` (a warning naming the file and the reason) and the run continues. A file given with `--preset-file` that fails to load is an error.
 
-### Preset versions and re-encoding
-
-Each output's manifest record stores a hash of the resolved settings. If you change a preset, any texture whose resolved settings changed is re-encoded on the next `if-changed` run; textures whose settings did not change are left alone. See [Validation and output](Validation-and-Output.md#re-runs-and-if-changed).
+After you change a preset, only textures whose resolved settings changed are re-encoded on the next `if-changed` run ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)).

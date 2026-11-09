@@ -100,5 +100,5 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <text x="10.0" y="289.0" class="" text-anchor="start"></text>
 <rect x="540.8" y="278.0" width="83.3" height="14" class="f4"/>
 <text x="535.8" y="291.0" class="" text-anchor="end">−2.40</text>
-<text x="10.0" y="336.0" class="s" text-anchor="start">Bars below zero are worse than bc7e u6 (Compressonator, n = 7, is a tie). Bold = Tessalith default. The full tables are in the wiki (Research).</text>
+<text x="10.0" y="336.0" class="s" text-anchor="start">Bars below zero are worse than bc7e u6 (Compressonator, n = 7, is a tie). Bold = Tessalith default. Tables: docs/research/encoder-benchmark.md.</text>
 </svg>

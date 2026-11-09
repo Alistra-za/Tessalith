@@ -109,6 +109,6 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <rect x="546.5" y="838" width="92.6" height="14" class="f4"/>
 <text x="541.5" y="850.0" class="s" text-anchor="end">−0.76</text>
 <text x="10.0" y="894.0" class="s" text-anchor="start">Tessalith's rgbcx is patched: BC1 endpoints scored on both the NVIDIA and AMD decoders, and a wider BC4 block search.</text>
-<text x="10.0" y="910.0" class="s" text-anchor="start">BC3 to BC5 are decoded rounding to nearest, as GPUs do. The full table is in the wiki (Research).</text>
+<text x="10.0" y="910.0" class="s" text-anchor="start">BC3 to BC5 are decoded rounding to nearest, as GPUs do. The full table is in docs/research/encoder-benchmark.md.</text>
 <text x="10.0" y="926.0" class="s" text-anchor="start">† Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.</text>
 </svg>

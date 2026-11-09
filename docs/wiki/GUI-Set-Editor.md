@@ -1,69 +1,63 @@
-# The set editor
+# Set editor and mapping to a target
 
-What the centre column shows with one set selected: its slot rows, packed channel sources, shader and material tabs. For anyone filling a material set's slots or checking why one is not ready. The set's cards and menus in the Sets column are on [Sets column](GUI-Sets-Column.md).
+For anyone filling a material set's slots, wiring packed channels, or pointing a set at a record, mesh or file of your target mod. Cards, moves and filters are on [Sets column](GUI-Sets-Column.md).
 
 ## The set editor
 
-Select a set to edit it. The heading row has the input name box ([Input name box](GUI-Bulk-and-Rename.md#input-name-box)), the **Match** box on a TruePBR set, and the **2D | 3D** switch ([The 3D preview](GUI-Set-Preview-3D.md#a-set-in-3d)).
+Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a vanilla set) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Skin](Skin.md), [PBR Landscape](PBR-Landscape.md)). **Advanced** has the same sections as the [Advanced drawer](GUI-Texture-Panel.md#advanced-drawer).
 
 ![The set editor.](../img/gui/GUI-Set-Editor/set-editor.png)
 
-In 2D the editor is one column that scrolls as a whole, like a texture's settings:
-
-1. the input name box at the top;
-2. the slot rows at full width;
-3. two tabs: **Material** (**Set** on a vanilla set), which holds the material settings, and **Advanced**, the last tab, with the same sections as the [Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer).
-
-Nothing sits beside the slot rows. A row wider than the centre is cut at the window edge. The window-edge drawer is not drawn while the tabs are shown ([Advanced drawer](GUI-Advanced-Drawer.md#advanced-drawer) says when each is).
-
-What the Material tab holds depends on the set: the [PGPatcher settings](GUI-PGPatcher-JSON.md#whats-on-the-material-tab) on a TruePBR set, or one of the cards on [Set materials](GUI-Set-Materials.md) (Advanced skin, PBR Landscape, CS PBR records, PBR grass).
-
 ## Slot rows
 
-Each PGPatcher slot is one row, in slot order, so there are at most 8: Diffuse, Normal, Emissive _g (or Skin _sk), Height, RMAOS (RFAOS on an Advanced skin set), **Coat normal / Fuzz (slot 7)**, Subsurface. Only the slots the set's shader can use are shown. A filled slot the shader cannot use stays, with an amber outline, and its title says why on hover. The cubemap slot has no row; set it with a slot command.
+One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
 
-- A Landscape or PBR Landscape set also has **Projected noise** and **Detail normal** rows. They are not PGPatcher slots ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)).
-- Slot 7 holds the set's `_cnr` or `_f`, whichever it has. With both, the row shows the conflict in red (PGPatcher has one slot 7), lists both files with a ✕ each to take one out of the set, and export warns "_cnr and _f both use slot 7". Its slot commands, file drop and PGPatcher lock (`lock_cnr`) are slot 7's. The same holds for a set with both a `_g` and an `_sk` on slot 3.
-- A `_coat` map fills the Subsurface row, which then reads **Coat colour + strength**: its alpha is the coat strength and is kept.
-- A complex material `_m` (packed or loose) has no row. Its **Enable parallax** box sits under the rows, with a packed `_m`'s fill rows ([Texture settings panel](GUI-Texture-Panel.md#centre)).
+- Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
+- Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
+- A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
+- A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
+- **Match on this** (Diffuse, Normal) makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). **Opaque** (Diffuse) strips the alpha.
 
-A row has these columns:
+Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
-| Column | Shows |
-|---|---|
-| *Slot* | The title; weak when the slot is empty; a lock when pinned. |
-| Thumbnail | Click selects, double-click expands. The PGPatcher lock padlock and its hover are on it. |
-| *File* | The name cut to fit (the full name and size on hover), and under it the dimensions and file size. |
-| *Format* | The format dropdown (format and tag together, one undo step). An empty slot shows **Assign…** here, which opens the slot menu, headed by the slot's name ("Emissive / Skin (slot 3)"). A packed output's recipe and fills sit under the dropdown. |
-| *Flags* | Small toggles, each with a hover: **Match on this** (Diffuse, Normal: PGPatcher applies the entry to meshes with this exact texture in this slot; see [Matching](GUI-PGPatcher-JSON.md#matching)) and **Opaque** (Diffuse: strips alpha, so the diffuse is fully opaque). |
-| *Status* | A dot: green ready, amber a warning or decision, red blocks. Its hover gives the reason, such as "borrowed from X" or "not used by the shader". |
+## Slot menus
 
-![The menu Assign… opens on an empty slot.](../img/gui/GUI-Set-Editor/assign-menu.png)
+Right-click a slot row, or a member chip on a card.
 
-While a set is selected, the Textures and Sets columns give the centre at least 540 px, down to their own minimums.
+- **Clear**, **From this set** and **Path** are one undo step each. On a borrowed slot, From this set and Clear both drop the borrow. <!-- D:HC7 -->
+- **From another set** links the slot to a map of another set. It needs the same slot kind.
+- **Pin this slot (always use this file)** keeps the slot's file as it is. A pinned slot refuses drags and slot commands, bulk edits skip it (*slot locked*), and automatic re-typing leaves it alone. Pinning the diffuse of an Advanced skin set has a side effect: [Skin](Skin.md). The pin is saved in `sdc-project.toml`, never in the PGPatcher JSON.
+- **Keep the original texture** / **Let PGPatcher replace the texture** toggles the slot's PGPatcher lock (`lock_diffuse`, `lock_normal`, `lock_emissive`, `lock_parallax`, `lock_rmaos`, `lock_cnr`, `lock_subsurface`) on a set that writes a PGPatcher entry. PGPatcher then leaves the mesh's own texture in that slot. The file is still exported, and the card shows a padlock, *kept by PGPatcher*. A `slotN` command on the same slot wins ("slotN overrides the lock"). There is no cubemap lock, because `lock_cubemap` would clear the slot.
+- **Show in Explorer** selects the source file.
 
-**Slot commands…** on a row offers *From this set*, *Path*, *Clear* and *Pin slot N* (the sdc pin), each one undo step. *From this set* is off, with "This set has no file for this slot", when the set has none. Right-click on a row opens the full [slot menu](GUI-Sets-Column.md#slot-menus), which also has *From another set*, the pin and the PGPatcher lock.
+**Slot commands…** on a row is the same list plus *Pin slot N*.
+
+![The menu of the RMAOS row in the set editor.](../img/gui/GUI-Set-Editor/slot-menu.png)
 
 ## Packed channel sources
 
-Under a packed output's format dropdown (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel row is the channel's role (for example *AO*), then a **Source** picker. It reads **Source: <file>** or **Source: value**. The list holds the set's greyscale helpers and **Value**:
+Under a packed output (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel has a **Source** picker: a helper or **Value**. Picking a helper adds the channel to that helper's `helper.fills` and takes it off the others, as one undo step ([Packing PBR maps](Texture-Packing.md#helper-textures)). **Value** uses the channel's `packing.fill.*` with a **Reset**; it is greyed when the channel's file feeds it by name. The engine still decides: a pick that can't fill the channel shows the helper as not used, with the reason.
 
-- Picking a helper makes it this channel's source: the channel is added to that helper's `helper.fills` and taken out of every other helper's list, as one undo step. The [helper panel](GUI-Helpers-and-Cubemaps.md#the-helper-panel)'s Fills list shows the same setting.
-- **Value** takes the channel out of every helper's list, so the channel uses its value fill: the row then shows the value box and its **Reset** after the picker (`packing.fill.*`). **Reset** removes the fill. Value is greyed out when the channel's file is not a helper ("<file> is not a helper; it feeds this channel by its name"), because no helper setting holds it.
-- Picking the source already shown changes nothing. The engine still decides: a pick that cannot fill the channel shows the helper as not used, with the reason, in its row and panel.
+## Mapping to a target
 
-## Drop files from Explorer
+**Map to target…** in a set's menu ties the set to something that already exists, so its files are written where that thing points: a texture set record (`TXST`) of your plugins, or a mesh or a texture file of your target mod. A mapped set's menu has **Change mapping…** and **Remove mapping**, which puts the outputs back on their default names.
 
-A file dropped on a slot row fills that slot, as one undo step, when it is a texture of the open folder and its sub-type belongs in that slot. It behaves like a texture dragged from the Textures column: a filled slot asks **Replace** or **Cancel**, a pinned slot refuses, and nothing is copied.
+- **Greyed when** no [scan](Mod-Scanning.md) with records exists and no target mod is set ("Scan your mods first"), and for a PGPatcher PBR set with an albedo under `cs` with no target mod: those name their outputs in the JSON, so use **Rename outputs**. <!-- D:HG8,HL4 -->
+- **The target mod** is the mod folder you're working on. The dialog's top row shows it, read only, with **Choose…** and **Clear**. A folder that is your export folder, sits inside it or holds it is refused, with the reason in red. Tessalith only reads the target and never writes into it. <!-- D:HL1 -->
+- **Three kinds of row.** With a target mod the list has a kind column: **Record** (a record of the target's plugins), **Mesh** (the texture paths of a mesh's shapes) and **File** (a texture file base such as `textures/…/arch`, its suffixes grouped). With no target mod the list is every winning record of the scan. A mesh or file mapping is stored as `base` in `[sets.txst]`; a slot the source lacks goes to the base's folder, with the file's default name on the base's name. Only loose files are listed: a BSA-packed target gives its records only, and a target that isn't in the scan gives none ("Records come from the MO2 scan; this mod isn't in it", or "...this folder has no plugin" for a plain texture folder). <!-- D:HL3 -->
+- **`used by (N)`** counts the target's records and its distinct mesh paths (meshes sharing a colour path count once) that name the row's colour path, the row's own mesh or record included, so you see what a file replaces. <!-- D:HL2 -->
+- **The picker** lists the scan's winning records by EDID, FormID, plugin and colour path. Typed words must all match. A picked row shows each file's new path or "keeps its own path". **Map** stores it, and so does Enter while no widget has focus (not in the search box, not on a focused button); a click outside doesn't. <!-- D:HG8 -->
+- **The mapping survives load-order changes.** <!-- D:HG8 --> `[sets.txst]` in `sdc-project.toml` copies the record's paths, so a new scan never moves an output by itself. The card shows `Record: …`. The target mod itself is kept as `[project] target_mod` in the same file, and only the GUI reads it.
+A slot file is written at the record's path, ahead of **Rename outputs**. A file with no slot in the record keeps its path. A record path outside `textures/` or not ending in `.dds` is never written, and two sets on one path give the duplicate-output row. A file already there that Tessalith didn't write is kept and reported as `OUT-UNKNOWN-EXISTING` ([Validation and output](Validation-and-Output.md#re-runs-and-if-changed)). <!-- D:HG5,HG6 -->
 
-- A file outside the open folder is refused: the line under the rows says "brick.png is outside the open folder; files are never copied".
-- Drop several files and only the first is used ("only the first file was used").
-- A file dropped anywhere else opens its folder.
+An empty slot of a mapped set reads one of three ways:
 
-## Shader
+| Row | Meaning |
+|---|---|
+| Amber, borrowed | Another set in the project writes the record's path. Nothing is added to `sdc-project.toml`, and one `_n` is written. <!-- D:HG7 --> |
+| Grey **From record: body_s.dds** | No set writes the path. The slot counts as supplied: no missing-map warning. |
+| **empty** | The record names nothing for the slot. |
 
-The set's **Shader** dropdown lists the shaders the current Mode offers. The pick reads "(auto)" when Tessalith chose it, and "(fallback)" when the shader you asked for does not exist under the current Mode and `default` stands in. **Auto** clears your choice. Warnings (a missing or unused map, an unavailable shader) show on the set card's **⚠ n** button. A scanned mod's meshes decide the auto pick unless a PBR or skin member, a complex `_m` or a `_p` does. How each shader is picked and what it changes is in [Set shaders](Set-Shaders.md#set-shaders).
+A file the set has, a borrow and a pin all win over a fill. **Clear** turns a fill off and brings its missing-map warning back; **From {set}** or **Use the record's slot** turns it on again. <!-- D:HG7,HG9 --> After a scan, a mapped set whose paths differ from the record gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from the scan gets an Info row and the mapping stays. <!-- D:HG8 -->
 
-## Path pickers
-
-The ▾ beside the input name box, and the ▾ beside a match path or a mesh path in the [JSON editor](GUI-PGPatcher-JSON.md#the-json-editor), open a list of known paths with a filter box. It closes on a pick, on Esc, or on a click outside.
+`sdc convert` doesn't read mappings or fills: [what the CLI reproduces](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits).
