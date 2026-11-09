@@ -95,7 +95,7 @@ fn collect(m: &AppModel) -> Value {
 }
 
 /// Entries (by `match1`) the later tasks add on purpose; the pin ignores them. Task 4 adds the no-albedo set's.
-const NEW_ENTRIES: &[&str] = &[];
+const NEW_ENTRIES: &[&str] = &["arch\\leaf.dds"];
 
 #[test]
 fn a_skyrim_shaped_project_keeps_its_output() {
@@ -114,6 +114,16 @@ fn a_skyrim_shaped_project_keeps_its_output() {
         std::fs::write(&pin, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
         return;
     }
+    // Note HL5: the no-albedo `leaf` set now has its entry.
+    assert!(
+        got["json"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["match1"] == "arch\\leaf.dds"),
+        "{}",
+        got["json"]
+    );
     if let Some(a) = got["json"]["entries"].as_array_mut() {
         a.retain(|e| !NEW_ENTRIES.contains(&e["match1"].as_str().unwrap_or_default()));
     }
@@ -1021,4 +1031,131 @@ fn render_map_to_target_dialog() {
         img.save(Path::new(&out).join(format!("map-target-{w}.png")))
             .expect("save png");
     }
+}
+
+// ---- PGPatcher JSON for every PBR set (Note HL5) ----
+
+use sdc_gui::model::sets::MatchFrom;
+
+/// A CS project whose PBR-picked set `armor/lonely` has `_n` (+ `_rmaos` when `rmaos`) and no albedo.
+fn lonely(dir: &Path, rmaos: bool) -> (AppModel, String) {
+    let r = dir.join("textures/armor");
+    std::fs::create_dir_all(&r).unwrap();
+    png(&r, "lonely_n.png", [128, 128, 255]);
+    if rmaos {
+        png(&r, "lonely_rmaos.png", [200, 20, 255]);
+    }
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    m.decide("armor/lonely_n.png", Answer::Subtype(Subtype::PbrNormal));
+    m.decide(
+        "armor/lonely_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    idle(&mut m);
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("lonely"))
+        .expect("the lonely set")
+        .id
+        .clone();
+    m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    (m, id)
+}
+
+fn view_of(m: &AppModel, id: &str) -> sdc_gui::model::sets::SetView {
+    // (clone: `views` is cached)
+    sdc_gui::model::sets::views(m)
+        .to_vec()
+        .into_iter()
+        .find(|v| v.id == id)
+        .unwrap()
+}
+
+/// The written PGPatcher entry whose `match1` is `match1`.
+fn entry_of(m: &mut AppModel, match1: &str) -> Value {
+    export_through(m);
+    idle(m);
+    let json: Value = serde_json::from_slice(&std::fs::read(pgp_json_path(m)).unwrap()).unwrap();
+    json["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["match1"] == match1)
+        .unwrap_or_else(|| panic!("no entry {match1} in {json}"))
+        .clone()
+}
+
+#[test]
+fn a_no_albedo_set_without_a_mapping_keys_on_its_base_path() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = lonely(d.path(), true);
+    let v = view_of(&m, &id);
+    assert!(v.json && !v.pbr, "{v:?}");
+    assert_eq!(v.match_from, Some(MatchFrom::BasePath));
+    assert_eq!(v.derived_match.as_deref(), Some(r"armor\lonely"));
+    let e = entry_of(&mut m, r"armor\lonely.dds");
+    assert_eq!(e["slot1"], r"textures\armor\lonely.dds");
+    assert_eq!(e["slot2"], r"textures\armor\lonely_n.dds");
+    assert_eq!(e["slot6"], r"textures\armor\lonely_rmaos.dds");
+}
+
+#[test]
+fn a_mapped_no_albedo_set_keys_on_the_mapping() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = lonely(d.path(), true);
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let v = view_of(&m, &id);
+    assert_eq!(v.match_from, Some(MatchFrom::Mapping));
+    let e = entry_of(&mut m, r"fs6\fs6_boots_ir.dds");
+    assert_eq!(e["slot1"], r"textures\fs6\fs6_boots_ir.dds");
+    assert_eq!(e["slot2"], r"textures\fs6\fs6_boots_ir_n.dds");
+}
+
+#[test]
+fn a_base_mapping_beats_the_albedo_for_the_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skyrim_shaped(d.path());
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("wall"))
+        .unwrap()
+        .id
+        .clone();
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let v = view_of(&m, &id);
+    assert!(v.pbr);
+    assert_eq!(v.match_from, Some(MatchFrom::Mapping));
+    let got = exported(&mut m);
+    for want in [
+        "textures/pbr/fs6/fs6_boots_ir.dds",
+        "textures/pbr/fs6/fs6_boots_ir_n.dds",
+    ] {
+        assert!(got.iter().any(|g| g == want), "{want} in {got:?}");
+    }
+}
+
+#[test]
+fn a_no_albedo_set_without_a_normal_locks_the_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/armor");
+    std::fs::create_dir_all(&r).unwrap();
+    png(&r, "lonely_rmaos.png", [200, 20, 255]);
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    idle(&mut m);
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("lonely"))
+        .expect("the lonely set")
+        .id
+        .clone();
+    m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    let e = entry_of(&mut m, r"armor\lonely.dds");
+    assert_eq!(e["lock_normal"], true, "{e}");
+    assert!(e.get("slot2").is_none(), "{e}");
 }

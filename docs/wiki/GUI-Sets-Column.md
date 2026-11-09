@@ -15,7 +15,7 @@ A card's first row has:
 - the set's **position number**: its place in the full order, 1 to N (a filter never renumbers it);
 - the **≡** reorder handle;
 - the set's name;
-- a status **pill**: a dot plus what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set without a PBR albedo, "PBR Landscape" or "skin"). The dot is red when the set blocks export, amber when it is not ready, green when it is ready. Every set has one, including a set you created that has no key yet;
+- a status **pill**: a dot plus what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set on a target that writes none, "PBR Landscape" or "skin"). The dot is red when the set blocks export, amber when it is not ready, green when it is ready. Every set has one, including a set you created that has no key yet;
 - at the right, "⚠ n" when the set has problems. It opens the set's problems.
 
 Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.

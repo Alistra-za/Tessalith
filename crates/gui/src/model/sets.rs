@@ -314,6 +314,15 @@ impl Missing {
     }
 }
 
+/// Note HL5: where a set's `derived_match` (the entry's `match1`) comes from, in this order: a mapping (a base, or a
+/// record's slot 1), the PBR albedo or diffuse, the set's own base path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchFrom {
+    Albedo,
+    Mapping,
+    BasePath,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetView {
     /// The engine key (`""` for a created set with no members yet).
@@ -325,6 +334,11 @@ pub struct SetView {
     /// A TruePBR JSON set: the diffuse resolves to `pbr_albedo`. Not `skin_albedo` since AG90 (owner: Advanced skin
     /// sets get no PGPatcher JSON); the engine's PBR follow-ons still use [`is_pbr_diffuse`].
     pub pbr: bool,
+    /// Note HL5: the set is written as a PGPatcher JSON entry: `pbr`, or a PBR-picked set with no `pbr_albedo`
+    /// (not a skin or shared set). `pbr` still names the prefix owner.
+    pub json: bool,
+    /// Note HL5: what `derived_match` came from.
+    pub match_from: Option<MatchFrom>,
     /// The diffuse resolves to `skin_albedo`: an Advanced skin set (no JSON, the skin card, AG90).
     pub skin: bool,
     /// A shared skin set (Note HG): marked Advanced skin, holding no diffuse and no Rmaos, only the maps other skin
@@ -372,6 +386,8 @@ impl SetView {
             members,
             slots: BTreeMap::new(),
             pbr: false,
+            json: false,
+            match_from: None,
             skin: false,
             shared: false,
             filled: BTreeMap::new(),
@@ -420,10 +436,10 @@ impl SetView {
     }
 }
 
-/// Whether `v` is written as PGPatcher JSON: a PBR set under Community Shaders (the set card badge). An Advanced
-/// skin set is not (AG90).
+/// Whether `v` is written as PGPatcher JSON: a PBR set under Community Shaders (the set card badge), with or without a
+/// PBR albedo (Note HL5). An Advanced skin set is not (AG90).
 pub fn is_json_set(v: &SetView, target: Target) -> bool {
-    v.pbr && target == Target::Cs
+    v.json && target == Target::Cs
 }
 
 /// The set's pick is `pbr_grass` (PBR grass design §4.3): its PGPatcher settings are the grass view.
@@ -455,8 +471,8 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
     } else if is_json_set(v, m.target) {
         "PBR → JSON"
     } else if super::also::is_pbr_set(v) {
-        // Note HC5: the shader pick reads any PBR map, the JSON needs a `pbr_albedo` diffuse.
-        "PBR set without a PBR albedo (no JSON)"
+        // Note HL5: the JSON is written on Community Shaders only.
+        "PBR set (no JSON on this target)"
     } else {
         "vanilla set (no JSON)"
     }
@@ -935,6 +951,32 @@ fn entry_view(
     }
 }
 
+/// `derive_match_diffuse` of a texture path (`textures/a/b.dds`, any slashes, `.dds` optional).
+fn match_of_path(p: &str) -> String {
+    let p = p.replace('\\', "/");
+    let p = p.strip_suffix(".dds").unwrap_or(&p);
+    let (dir, stem) = p.rsplit_once('/').unwrap_or(("", p));
+    derive_match_diffuse(dir, stem)
+}
+
+/// Note HL5: `derived_match` and where it came from. A JSON set takes the first that exists: its mapping's base, a
+/// record's slot 1 (no albedo owner), the albedo (the diffuse, as before), the set's own base path.
+fn set_match(v: &mut SetView, diffuse: Option<&TextureItem>) {
+    let albedo = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+    let mapped = v.txst.as_ref().and_then(|t| match &t.base {
+        Some(b) => Some(match_of_path(b)),
+        None => t.slots.get(&1).filter(|_| !v.pbr).map(|p| match_of_path(p)),
+    });
+    let (m, from) = match (v.json, mapped, albedo) {
+        (true, Some(m), _) => (Some(m), Some(MatchFrom::Mapping)),
+        (_, _, Some(a)) => (Some(a), Some(MatchFrom::Albedo)),
+        (true, None, None) => (Some(match_of_path(&v.id)), Some(MatchFrom::BasePath)),
+        _ => (None, None),
+    };
+    v.derived_match = m;
+    v.match_from = from;
+}
+
 /// PBR, derived match, prefix.
 fn finish_view(m: &AppModel, v: &mut SetView) {
     let diffuse = match v.slots.get(&SlotKind::Diffuse) {
@@ -948,6 +990,13 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
     v.shared = is_shared(v, &m.suffix_aliases);
+    // Note HL5: a PBR pick with no `pbr_albedo` is a JSON set too (the mesh keeps its own diffuse).
+    // A set with no texture filled (all kept DDS, no job) writes none.
+    v.json = v.pbr
+        || (!v.skin
+            && !v.shared
+            && v.slots.values().any(SlotFill::is_filled)
+            && v.shader.as_ref().is_some_and(|p| p.shader == Shader::Pbr));
     // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
     v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
         Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
@@ -962,7 +1011,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     if is_pbr_grass(v) {
         crate::pgp::settings::grass_view(&mut v.settings);
     }
-    v.derived_match = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+    set_match(v, diffuse);
     match prefix_of(&v.settings, v.derived_match.as_deref().unwrap_or("")) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),

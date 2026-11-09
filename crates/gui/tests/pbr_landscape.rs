@@ -338,12 +338,14 @@ fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
         .find(|v| v.members.iter().any(|k| k.ends_with("lonely_f.png")))
         .expect("the lone _f's set");
     assert!(sdc_gui::model::also::is_pbr_set(&v), "{:?}", v.shader);
-    assert!(!v.pbr, "no albedo, so no JSON");
-    assert_eq!(kind_text(&m, &v), "PBR, no JSON");
-    assert!(badge_text(&m, &v).contains("no JSON"));
+    assert!(!v.pbr, "no albedo, so no prefix owner");
+    assert!(v.json, "Note HL5: a PBR pick writes JSON on CS");
+    assert_eq!(kind_text(&m, &v), "PBR → JSON");
+    assert!(!badge_text(&m, &v).contains("no JSON"));
     // A set the shader pick calls vanilla still says so.
     let mut other = v.clone();
     other.shader = None;
+    other.json = false;
     assert_eq!(kind_text(&m, &other), "vanilla");
 }
 

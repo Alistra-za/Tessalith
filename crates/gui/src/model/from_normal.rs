@@ -1090,7 +1090,7 @@ impl AppModel {
         let dims = normal.as_deref().and_then(|n| self.gen_normal_size(n));
         let shader = shader_of(&v);
         let resolved = crate::model::auto_flags::resolved_for(
-            v.pbr,
+            v.json,
             &v.slots,
             &v.settings,
             &crate::model::auto_flags::hint(self, &v),
@@ -1966,7 +1966,7 @@ impl AppModel {
             .find(|v| i.set_key.as_deref() == Some(v.key.as_str()))?;
         let shader = v.shader_choice.or(v.shader.as_ref().map(|s| s.shader));
         let resolved = super::auto_flags::resolved_for(
-            v.pbr,
+            v.json,
             &v.slots,
             &v.settings,
             &super::auto_flags::hint(self, v),

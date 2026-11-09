@@ -93,13 +93,26 @@ fn slots_of(
             SlotFill::Own { item } => (item, false),
             SlotFill::Empty => continue,
         };
-        let Some(p) = fill_path(item, views, paths, m) else {
-            continue;
+        // Note HL5: a no-albedo set's outputs stay at the mesh's own paths: the mapped output (a rel path under
+        // `textures`), else the file's game path.
+        let json_only = v.json && !v.pbr;
+        let p = match fill_path(item, views, paths, m) {
+            Some(p) if json_only && !path_lower(p).starts_with("textures/") => PathBuf::from(
+                format!("textures/{}", p.to_string_lossy().replace('\\', "/")),
+            ),
+            Some(p) => p.clone(),
+            None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
+                Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
+                None => continue,
+            },
+            None => continue,
         };
+        let p = &p;
         // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command. Its slot 3 default
         // is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an explicit slot is
         // never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
         let at_own_path = *kind != SlotKind::SkinSk
+            && v.pbr
             && v.prefix
                 .as_deref()
                 .is_some_and(|pre| path_lower(p) == path_lower(&output_rel(pre, kind.suffix())));
@@ -108,12 +121,57 @@ fn slots_of(
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
         }
     }
+    if v.json && !v.pbr {
+        // Note HL5: the mesh keeps its own textures; slot 1 and the empty 2 / 6 name the mapping's, else slot 1 is the
+        // set's base path (PGPatcher skips a shape whose slot 1 would point at a missing `textures\pbr` copy).
+        let stored = |n: u8| {
+            v.txst
+                .as_ref()
+                .and_then(|t| t.slots.get(&n))
+                .map(|p| p.replace('/', "\\"))
+        };
+        if !slot_filled(v, 1) {
+            let own = v
+                .derived_match
+                .as_ref()
+                .map(|d| format!("textures\\{d}.dds"));
+            out.extend(stored(1).or(own).map(|p| (1, p)));
+        }
+        for n in [2, 6] {
+            if !slot_filled(v, n) {
+                out.extend(stored(n).map(|p| (n, p)));
+            }
+        }
+    }
     for n in 1..=8u8 {
         if let Some(Value::String(s)) = v.settings.get(&format!("slot{n}")) {
             out.insert(n, s.clone());
         }
     }
     out
+}
+
+/// Whether a texture fills game slot `n` of `v`.
+fn slot_filled(v: &SetView, n: u8) -> bool {
+    v.slots
+        .iter()
+        .any(|(k, f)| k.game_slot() == Some(n) && f.is_filled())
+}
+
+/// Note HL5: a JSON set with no albedo and no texture (own or mapped) for slot 2 or 6 locks it, so PGPatcher keeps
+/// the mesh's own; a lock or `slotN` the user set wins.
+fn lock_empty_slots(v: &SetView, slots: &BTreeMap<u8, String>, s: &mut Settings) {
+    if !v.json || v.pbr {
+        return;
+    }
+    for n in [2, 6] {
+        let Some(key) = crate::pgp::prefix::lock_key(n) else {
+            continue;
+        };
+        if !slot_filled(v, n) && !slots.contains_key(&n) && !s.contains_key(key) {
+            s.insert(key.into(), Value::Bool(true));
+        }
+    }
 }
 
 /// Filled slots whose texture has no output path (its owner was dropped as a duplicate, or its prefix is unusable),
@@ -135,6 +193,10 @@ fn unresolved_slots(
         let Some(n) = kind.game_slot() else {
             continue;
         };
+        // Note HL5: a no-albedo set's own texture with no output path (a kept DDS) stays where the mesh has it.
+        if v.json && !v.pbr && from.is_none() {
+            continue;
+        }
         if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {
             continue;
         }
@@ -174,17 +236,20 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
         .filter(|v| {
-            v.pbr && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+            v.json && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
         })
         .map(|v| {
+            let slots = slots_of(v, &views, &paths, m);
+            let mut settings = crate::model::auto_flags::resolved_for(
+                v.json,
+                &v.slots,
+                &v.settings,
+                &crate::model::auto_flags::hint(m, v),
+            );
+            lock_empty_slots(v, &slots, &mut settings);
             let e = EntryInput {
-                settings: crate::model::auto_flags::resolved_for(
-                    v.pbr,
-                    &v.slots,
-                    &v.settings,
-                    &crate::model::auto_flags::hint(m, v),
-                ),
-                slots: slots_of(v, &views, &paths, m),
+                settings,
+                slots,
                 derived_match: v.derived_match.clone().unwrap_or_default(),
                 section: false,
             };
@@ -313,7 +378,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
         if has(v, SlotKind::Emissive) && has(v, SlotKind::SkinSk) {
             out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
         }
-        if m.target != Target::Cs || !v.pbr {
+        if m.target != Target::Cs || !v.json {
             continue;
         }
         let s = &v.settings;
@@ -375,7 +440,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             if out.is_empty() {
                 let views = set_views(m);
                 let (_, paths) = engine_inputs(m);
-                for v in views.iter().filter(|v| v.pbr && m.pgp_entry_wanted(v)) {
+                for v in views.iter().filter(|v| v.json && m.pgp_entry_wanted(v)) {
                     for (n, from) in unresolved_slots(v, &views, &paths, m) {
                         let text = match from {
                             Some(from) => format!(
@@ -534,7 +599,7 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
     let known = m.known_textures(Some(0));
     set_views(m)
         .iter()
-        .filter(|v| v.pbr)
+        .filter(|v| v.json)
         .flat_map(|v| {
             let derived = v.derived_match.as_deref().unwrap_or("");
             pitfalls(&v.settings, derived)
@@ -844,7 +909,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
                 &mut out.warnings
             };
             to.push((i.set_id, text));
-        } else if i.set_id.is_empty() || views.iter().any(|v| v.pbr && same_id(&v.id, &i.set_id)) {
+        } else if i.set_id.is_empty() || views.iter().any(|v| v.json && same_id(&v.id, &i.set_id)) {
             let to = if error {
                 &mut out.general_errors
             } else {

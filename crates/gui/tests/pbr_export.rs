@@ -1054,11 +1054,15 @@ fn an_explicit_shader_does_not_change_which_sets_get_json() {
     m.set_shader("landscape/leaf", Some(Shader::Pbr));
     idle(&mut m);
     let after: Vec<String> = json_entries(&m).into_iter().map(|(v, _)| v.id).collect();
-    assert_eq!(before, after);
-    assert!(
-        after.contains(&"landscape/rock01".to_string())
-            && !after.contains(&"landscape/leaf".to_string())
-    );
+    // Note HL5: an explicit PBR pick on a set with no albedo adds that set's entry; the Glow pick on the albedo set
+    // changes nothing.
+    let mut want = before.clone();
+    want.push("landscape/leaf".into());
+    want.sort();
+    let mut got = after.clone();
+    got.sort();
+    assert_eq!(want, got);
+    assert!(after.contains(&"landscape/rock01".to_string()));
 }
 
 /// F1 spec §3.2 "No match", DECISIONS V4: the export still runs, asks first, and the entry stays out of the JSON
