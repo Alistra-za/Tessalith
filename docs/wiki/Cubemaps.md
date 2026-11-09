@@ -27,7 +27,7 @@ Skyrim's world has X pointing east, Y north and Z up. Each face is named after t
 | [A cross](#crosses-and-strips) | a T-shaped net, 4:3 or 3:4 | the shape |
 | [A strip](#crosses-and-strips) | six squares in a row, 6:1 or 1:6 | the shape |
 | [A cube DDS](#an-existing-cube-dds) | a `.dds` cube | the file says so |
-| [Nothing: a dynamic marker](#dynamic-marker) | no picture | `sdc cubemap-marker`, or **Make marker cube…** |
+| [Nothing: a dynamic marker](#dynamic-marker) | no picture | **Make marker cube…** |
 
 A file named `_e` (`chrome_e.png`) or under a `cubemaps` folder gets the `cubemap` type suggested with High confidence.
 
@@ -85,15 +85,9 @@ Like any DDS it is skipped (`IN-DDS-SKIPPED`) unless you set `reencode = true` o
 
 Community Shaders and ENB read a 1×1 cube whose +Y is black as "reflect the live scene" instead of a picture (a dynamic cubemap). In Community Shaders the +X pixel then sets the reflection's colour (RGB) and roughness (alpha). For ENB, PGPatcher already applies a dynamic cubemap with every feature ENB supports.
 
-```text
-sdc cubemap-marker --color 200,200,210 --roughness 0.3 -o textures\cubemaps\steel_e.dds
-```
+**Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw 0 to 255 codes on the +X face; +Y stays black, so the file is always a marker. **Roughness** is 0 to 1 and optional (the *Set roughness* tick); leave it out and Community Shaders uses its defaults. **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. A file Tessalith didn't write is kept: the dialog says so and stays open so you can pick another name. Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.
 
-- `--color` is raw 0 to 255 codes on the +X face. +Y stays black, so the file is always a marker.
-- `--roughness` is 0 to 1. Leave it out and Community Shaders uses its defaults.
-- The flags are in the [CLI reference](CLI-Reference.md#sdc-cubemap-marker). Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.
-
-In the GUI, **Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw codes; **Roughness** is optional (the *Set roughness* tick). **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. A file Tessalith didn't write is kept: the dialog says so and stays open so you can pick another name. The bytes equal what `sdc cubemap-marker` writes.
+On the command line: [CLI reference](CLI-Reference.md#cubemaps-from-the-command-line).
 
 ![The marker cube dialog.](../img/gui/Cubemaps/marker-dialog.png)
 
@@ -128,7 +122,7 @@ They work on every layout, six separate files included. Faces exported by a cube
 
 ## Settings
 
-Every `cubemap.*` key (ranges and defaults on [Project config](Project-Config.md#cubemap)) works in `[defaults]`, `[subtypes.cubemap]`, a rule, a `[files]` entry and `--set`.
+Every `cubemap.*` key (ranges and defaults on [Project config](Project-Config.md#cubemap)) works in `[defaults]`, `[subtypes.cubemap]`, a rule and a `[files]` entry.
 
 ### Styles
 
@@ -164,7 +158,7 @@ The default is one source cell rounded to a power of two, at most 4096 ([`cubema
 
 ## The cube panel in the GUI
 
-A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown) gets a **Cubemap** section in its settings panel with the **Source**, **Orientation**, **Colour grade** and **Look** groups. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key, so the GUI and CLI make the same bytes.
+A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown) gets a **Cubemap** section in its settings panel with the **Source**, **Orientation**, **Colour grade** and **Look** groups. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key.
 
 ![The panel of a six-face cubemap.](../img/gui/Cubemaps/cube-panel.png)
 
@@ -177,11 +171,4 @@ Tessalith always writes six faces, every mip down to 1×1 built across faces so 
 
 `CUBE-NO-MIPS` warns when `mips.levels` is `none` or 1: a cube without mips sparkles in game.
 
-`sdc inspect` and `sdc validate` flag broken cube files (as `VAL-HEADER` in `validate`, each failing the file):
-
-- a cube wider than 1 pixel with only one mip (a 1×1 marker is fine);
-- a flat 2D texture named `_e`, or under `textures\cubemaps\`, where a cube is expected: exit 4, because the game reads those files as cubes <!-- D:FM22 -->;
-- a 1×1 cube whose +Y isn't black (Community Shaders shows a nearly black static reflection);
-- a cube in an sRGB format.
-
-`sdc validate` judges a cube file as a `cubemap` unless you pass `--subtype`. A marker passes.
+Checking cube DDS files you already have is a command-line job: [CLI reference](CLI-Reference.md#checking-cube-files).

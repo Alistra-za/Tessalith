@@ -19,18 +19,13 @@ For modders whose sources come as separate maps (Substance or Blender exports): 
 | B | AO | 1 |
 | A | specular | 1 |
 
- rfaos is created when replaces it when a fuzz map exists or the set's shader is Advanced Skin
+`_rfaos` replaces it when a fuzz map exists or the set's shader is Advanced Skin
 
-| Channel | Source | Default when missing |
-|---|---|---|
-| R | roughness, or inverted glossiness | `packing.roughness_default` |
-| G | fuzzmask | 0 |
-| B | AO | 1 |
-| A | specular | 1 |
+The channels are the same as above, except G is the fuzzmask (default 0).
 
 ### Vanilla
 
-A set whose shader is complex material (picked in the GUI, `--set set:<id>.shader=complex_material`, or automatic because the set already has a complex `_m`) builds the complex `_m` from a roughness, glossiness, metallic, height or `_orm` map. An existing `_m` file still wins unless `packing.prefer = "raw"`.
+A set whose shader is complex material (picked in the GUI, or automatic because the set already has a complex `_m`) builds the complex `_m` from a roughness, glossiness, metallic, height or `_orm` map. An existing `_m` file still wins unless `packing.prefer = "raw"`.
 
 | Channel | Source | Default when missing |
 |---|---|---|
@@ -51,7 +46,7 @@ packing.fill.metallic = 255     # fully metallic
 packing.fill.specular = 128
 ```
 
-Use `--set packing.fill.metallic=255` for a whole run, or the packed output's card in the [set editor](GUI-Set-Editor.md#packed-channel-sources).
+Use the packed output's card in the [set editor](GUI-Set-Editor.md#packed-channel-sources).
 
 - **Packed file and raw maps both present:** the packed file (`iron_rmaos.png`) wins and the raw maps are reported (`PACK-CONFLICT`). `packing.prefer = "raw"` builds from the raw maps instead.
 - **Sizes:** sources of one recipe may differ if they share an aspect ratio; each smaller one is enlarged to the largest (`PACK-SOURCE-RESIZED` names it). Different aspect ratios fail the recipe (`PACK-SIZE-MISMATCH`).
@@ -59,7 +54,7 @@ Use `--set packing.fill.metallic=255` for a whole run, or the packed output's ca
 
 ## Helper textures
 
-A **helper** is a source file that fills one channel of another output in its own set and is never written as its own DDS: the raw maps above, an opacity map, and fuzz or subsurface weight maps you mark by hand. The GUI and the CLI read the same `sdc.toml` keys, so both write the same bytes.
+A **helper** is a source file that fills one channel of another output in its own set and is never written as its own DDS: the raw maps above, an opacity map, and fuzz or subsurface weight maps you mark by hand. The GUI writes them as `sdc.toml` keys.
 
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
@@ -99,7 +94,7 @@ Every control writes the helper file's own `[files]` entry in `sdc.toml` as one 
 - **Gloss maps:** give the file the role *Glossiness* and leave **Invert** off. Packing already turns gloss into roughness, so Invert would write gloss into the roughness channel. An alpha fill has no automatic conversion, so there Invert is the only flip.
 - **`_cnr` alpha** (coat roughness) is never suggested; add it yourself if your roughness map is meant for the coat.
 - **A file with a role and no known suffix** (`iron_mask.png`) joins the set `iron`, its name without the last `_part`, when that set exists.
-- **Without the GUI:** `helper.role = "opacity"` on the file's `[files]` entry, or `--set "file:**/<name>.helper.role=opacity"` ([keys](Project-Config.md#files)).
+- **Without the GUI:** `helper.role = "opacity"` on the file's `[files]` entry ([keys](Project-Config.md#files)). On the command line: [CLI reference](CLI-Reference.md#packing-and-helpers-from-the-command-line).
 
 ### In the GUI
 
@@ -107,11 +102,11 @@ Under the tiles, the Textures column has a **Helpers (n)** group, one compact ro
 
 ![The panel of a helper texture.](../img/gui/Texture-Packing/helper-panel.png)
 
-A helper that fills nothing is reported (`PACK-UNUSED-INPUT`, or `IN-PACKING-INPUT` with packing off), never a failure. `--on-existing if-changed` re-encodes an output when its helper, or the helper's read or invert, changes.
+A helper that fills nothing is reported (`PACK-UNUSED-INPUT`, or `IN-PACKING-INPUT` with packing off), never a failure. The next re-run re-encodes an output when its helper, or the helper's read or invert, changes.
 
 ## Variance and gloss bake
 
 In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces don't look too shiny. Mip 0 stays as authored; `mips.bake_clamp` limits the amount. A `_cnr` bakes into its own coat roughness. <!-- D:HD1 -->
 
 - **Both files must be in the batch.** Otherwise the bake is skipped and reported (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). Sizes needn't match: a smaller, larger or differently shaped map bakes from the `_n` at the matching detail. A map with `mips.levels = "none"` isn't baked. A shared `_rmaos` (borrowed by several sets in the GUI) is never baked. <!-- D:HD2,HD5 -->
-- **Complex `_m` gloss bake (opt-in).** Set `mips.normal = "renormalize_bake"` (GUI: *Normal handling: Renormalise and bake*) on the set's `_n`. Every smaller mip of the `_m`'s green channel then gets the detail the normal loses, so distant surfaces shimmer less; mip 0 is unchanged. The conditions above apply, and the CLI writes the same bytes.
+- **Complex `_m` gloss bake (opt-in).** Set `mips.normal = "renormalize_bake"` (GUI: *Normal handling: Renormalise and bake*) on the set's `_n`. Every smaller mip of the `_m`'s green channel then gets the detail the normal loses, so distant surfaces shimmer less; mip 0 is unchanged. The conditions above apply.

@@ -28,7 +28,7 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 
 ## How the shader is picked
 
-Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor), or with `--set set:<id>.shader=<shader>`. Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
+Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor). Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
 
 1. Advanced skin members or an `_rfaos`: `advanced_skin`.
 2. A PBR set or PBR members: `pbr_grass` when a grass record uses the albedo (GUI, after a scan with plugins); under `cs`, `pbr_landscape` for a landscape set (GUI; [what counts](PBR-Landscape.md)); otherwise `pbr`.
@@ -53,7 +53,7 @@ Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor), or with 
 | `multilayer` | Diffuse alpha is `data`. |
 | `envmap` | `_m` is BC4. |
 
-In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)). On the command line your value stays, and the file is blocked or reports an error.
+In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)).
 
 ## Also export as Vanilla and CM
 
@@ -62,7 +62,7 @@ For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is co
 ### Turn it on
 
 - **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, or the **Also export as** column in Review. While a tick is on, Export always opens Review.
-- **Saved as** `[export] also` in the project `sdc.toml`; the CLI reads the same table.
+- **Saved as** `[export] also` in the project `sdc.toml`.
 - **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
 ### What you get
@@ -84,14 +84,14 @@ Three folders side by side, where `<project>` is the opened folder's name:
 
 In Review's **Also export as** column:
 
-- **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder. The CLI writes under `-o`, and **Copy CLI command** passes it.
+- **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder.
 - The three folder names: empty means the default name, shown as the hint.
 - **Keep metal brightness** and its **Strength** (CM only).
 - **Skip these sets**: tick a set to leave it out of Vanilla and CM. The set editor's Material tab has the same switch, **Skip vanilla/CM for this set**. Saved as `[export] skip`.
 
 ### Things that need care
 
-- **The env `_m` needs a Meshes scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the scan. The CLI reads no scan, so it never writes one.
+- **The env `_m` needs a Meshes scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the scan.
 - **`_curves`, `_curvature` and `_cavity` maps** join their PBR set and shade the diffuse: a soft light with the curves map (0.5 = no change), then a multiply with the cavity map, both at [`curves_opacity`](Project-Config.md#export). They are read only here; a plain export reports them as `PACK-UNUSED-INPUT`.
 - **NIF edits follow the PBR folder**, so one mod folder holds the textures and the meshes.
 

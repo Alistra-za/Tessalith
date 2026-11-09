@@ -32,4 +32,4 @@ Drag the **≡** handle, or use **Move up** and **Move down**. They are off whil
 
 ## Where set edits are saved
 
-Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. What `sdc convert` does with this file: [Review and Export](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits).
+Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. On the command line: [CLI reference](CLI-Reference.md#does-the-cli-use-my-gui-edits).

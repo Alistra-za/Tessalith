@@ -1,6 +1,6 @@
 # Main window
 
-For anyone opening a first folder: how it opens, what the header does and how to find a texture in the Textures column. The GUI runs the same engine as `sdc convert` and saves your decisions in the folder's `sdc.toml`.
+For anyone opening a first folder: how it opens, what the header does and how to find a texture in the Textures column. The GUI saves your decisions in the folder's `sdc.toml`.
 
 ## Opening a folder
 

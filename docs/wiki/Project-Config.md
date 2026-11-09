@@ -4,11 +4,11 @@ For anyone writing `sdc.toml` by hand or checking what the GUI saved: every key 
 
 ## Where the files are
 
-- **Project config:** `sdc.toml` in the folder you convert. The CLI reads the one in the first input folder, or `--config <file>`. The GUI reads and writes the one in the folder you open.
-- **GUI-only setting:** the GUI keeps `[project] target_mod` in `sdc-project.toml`: the mod folder you're working on ([Mapping to a target](GUI-Set-Editor.md#mapping-to-a-target)); the CLI doesn't read it.
-- **User config:** `%APPDATA%\sdc\config.toml`, for personal defaults such as a preferred target. Same format, but `[files]`, `[inputs]` and `[export]` belong to one project: each is refused here with `[files] is only valid in a project sdc.toml, not in <path>`.
-- **Errors:** an unknown key, an unknown value or a wrong type stops the CLI with exit 2. The GUI refuses the file too ([When `sdc.toml` is rejected](GUI-Main-Window.md#when-sdctoml-is-rejected)).
-- **Checking a file:** `sdc inspect <folder> --recursive > $null` stops with the error and names the problem. `sdc presets schema config` prints the JSON Schema; the repository has it as `schema/config.schema.json` for editor completion.
+- **Project config:** `sdc.toml` in the folder you open. The GUI reads and writes it. Which file the command line reads: [CLI reference](CLI-Reference.md#flags-shared-by-convert-and-inspect).
+- **GUI-only setting:** the GUI keeps `[project] target_mod` in `sdc-project.toml`: the mod folder you're working on ([Mapping to a target](GUI-Set-Editor.md#mapping-to-a-target)).
+- **User config:** `%APPDATA%\sdc\config.toml`, for personal defaults such as a preferred target. Same format, but `[files]`, `[inputs]` and `[export]` belong to one project: each is refused here.
+- **Errors:** an unknown key, an unknown value or a wrong type gets the file refused. The GUI shows a banner ([When `sdc.toml` is rejected](GUI-Main-Window.md#when-sdctoml-is-rejected)); the command line stops with an error ([CLI reference](CLI-Reference.md#presets-and-config)).
+- **Checking a file:** the repository has the JSON Schema as `schema/config.schema.json`, for editor completion. To check a file without the GUI: [CLI reference](CLI-Reference.md#checking-a-config-file).
 
 ## A complete example
 
@@ -61,7 +61,7 @@ as = "textures/armor/iron/iron_n.png"
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `schema_version` | integer, 1 or more | 1 | Format version of this file. A newer version than the build supports is an error: `<file>: config schema_version N is newer than this sdc supports (1)`. |
+| `schema_version` | integer, 1 or more | 1 | Format version of this file. A newer version than the build supports is an error. |
 | `preset` | string | the target's default | The preset, by id: built-in or a user preset ([Presets and targets](Presets-and-Targets.md)). |
 | `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** row (Presets tab) writes it. |
 | `[defaults]` | partial profile | none | Field values for every texture. |
@@ -83,11 +83,11 @@ A texture's final settings (its profile) are built from layers. Later layers ove
 6. Facts from analysing the image, such as a High-confidence alpha policy (no alpha channel means `remove`).
 7. The set shader's member settings, and alpha from scanned meshes (GUI only).
 8. Facts from the file's suffix.
-9. Accepted suggestions (`--accept-suggestions high`, or always in the GUI). A suggestion only picks the sub-type, never a field value. In that choice it ranks below `--set`, `[files]`, rules and a shader you chose for the set.
+9. Accepted suggestions (always in the GUI; on the command line you opt in, see [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high)). A suggestion only picks the sub-type, never a field value. In that choice it ranks below command-line overrides, `[files]`, rules and a shader you chose for the set.
 10. The file's `[files]` entry.
-11. `--set` on the command line: unscoped first, then `subtype:` scoped, then `file:` scoped.
+11. Command-line overrides: unscoped first, then `subtype:` scoped, then `file:` scoped ([CLI reference](CLI-Reference.md#--set-syntax)).
 
-`sdc presets show`, `sdc inspect --json` and the GUI show each field's provenance, so you can see which layer set it.
+The GUI shows each field's provenance, so you can see which layer set it.
 
 ## [defaults] and [subtypes]
 
@@ -111,7 +111,7 @@ overrides = { ... }           # optional partial profile
 | `subtypes` | The file's sub-type is one of these. A rule with this key never decides a sub-type; it only adds settings once the sub-type is known. |
 
 - All given match keys must match. A rule with no match keys matches everything.
-- `subtype` names the sub-type for matching files. It decides the file's sub-type ahead of suggestions, but below a `--set subtype` or a `[files]` entry. When something else decided the file's sub-type, a rule naming a different `subtype` doesn't apply to it.
+- `subtype` names the sub-type for matching files. It decides the file's sub-type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's sub-type, a rule naming a different `subtype` doesn't apply to it.
 - `overrides` is a partial profile applied to matching files.
 
 ```toml
@@ -140,13 +140,13 @@ An entry takes any [field](#fields), `subtype` included, plus:
 | Key | Meaning |
 |---|---|
 | `allow` | Blocking codes to acknowledge for this file only: `allow = ["DIM-SMALL", "TAG-UNORM-PBR"]`. An unknown code is an error. |
-| `reencode` | `true` converts a DDS input instead of skipping it (`IN-DDS-SKIPPED`). Per file only (`--set reencode=true` or a `file:` scope). Re-encoding a DDS loses quality (`LOSS-REENCODE`). |
+| `reencode` | `true` converts a DDS input instead of skipping it (`IN-DDS-SKIPPED`). Per file only. Re-encoding a DDS loses quality (`LOSS-REENCODE`). |
 | `helper.role` | For an image: what it is as a [helper texture](Texture-Packing.md#helper-textures). `"none"` (not a helper: convert it on its own), `"roughness"`, `"metallic"`, `"ao"`, `"specular"`, `"glossiness"`, `"height"`, `"opacity"`, `"fuzz"` (skin fuzz mask), `"orm"`, `"curves"`, `"cavity"`, `"fuzzweight"` (PBR `_f` weight), `"subsurfaceweight"` (PBR `_s` weight). Overrides the name and any `subtype`. Ignored on a DDS. |
 | `helper.fills` | The channels the helper fills, replacing the suggestion. Alpha: `"diffuse.a"`, `"n.a"`, `"f.a"`, `"s.a"`, `"cnr.a"`. Packed: `"rmaos.r"` to `"rmaos.a"`, `"rfaos.r"` to `"rfaos.a"`, `"m.r"` to `"m.a"`, `"p.r"`. `[]` = not used. |
 | `helper.read` | The helper's channel to read: `"r"`, `"g"`, `"b"`, `"a"` or `"luma"`. Unset reads R (or luminance where the recipe does). |
 | `helper.invert` | `true` flips what the helper feeds (one minus the value), for an inverted mask. It flips on top of the recipe's own reading, so leave it off for a gloss map in a roughness channel: `helper.role = "glossiness"` already inverts it there. |
 
-The `helper.*` keys go on the helper file's own entry, never on the output it fills. `--set` takes them only with a `file:` scope.
+The `helper.*` keys go on the helper file's own entry, never on the output it fills.
 
 ```toml
 # A mask whose name says nothing: it is the diffuse's opacity, stored in green
@@ -199,8 +199,8 @@ Also export needs the `cs` target. A value out of range is an error only when an
 | Key | Default | Meaning |
 |---|---|---|
 | `also` | `[]` | `"vanilla"`, `"cm"` or both. Empty is a plain export. `"cm"` alone writes Vanilla too: CM installs on top of it. |
-| `skip` | `[]` | Set ids (as `--set set:<id>` names them) left out of Vanilla and CM. |
-| `names.pbr`, `names.vanilla`, `names.cm` | `<project> PBR`, `<project> Vanilla`, `<project> CM` | The folder names. `<project>` is the opened folder's name (the CLI: the first input folder's). They must be usable folder names, not a Windows device name, and all three different. |
+| `skip` | `[]` | Set ids left out of Vanilla and CM. |
+| `names.pbr`, `names.vanilla`, `names.cm` | `<project> PBR`, `<project> Vanilla`, `<project> CM` | The folder names. `<project>` is the opened folder's name. They must be usable folder names, not a Windows device name, and all three different. |
 
 `[export.legacy]` is the recipe. All numbers are fractions of the stored value, and gloss is 1 − roughness.
 
@@ -220,13 +220,13 @@ Also export needs the `cs` target. A value out of range is an error only when an
 
 ## Fields
 
-Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides`, a `[files]` entry and `--set`, except `subtype`, `target`, `category` and `resize_reference`: the sub-type is decided per file (a `subtype:` scoped `--set` refuses it), and the planner alone writes the other three. Defaults are the base preset's; a sub-type or preset may change them, as noted.
+Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a `[files]` entry, except `subtype`, `target`, `category` and `resize_reference`: the sub-type is decided per file, and the planner alone writes the other three. Defaults are the base preset's; a sub-type or preset may change them, as noted.
 
 ### Type and colour
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `subtype` | a sub-type id | from the file name | Per file: `[files]`, a rule's `subtype`, or `--set file:…`. |
+| `subtype` | a sub-type id | from the file name | Per file: `[files]` or a rule's `subtype`. |
 | `color.content` | `srgb`, `linear` | `linear`; `srgb` for colour sub-types | What the pixels mean. Affects mip filtering. On a `cubemap` it stays `srgb` but means the game's `pow(c, 1.6)` curve, not the sRGB curve. |
 | `color.tag` | `srgb`, `unorm`, `n/a` | `unorm`; `srgb` for PBR colour under `cs`; `n/a` for HDR | The DDS format's `_SRGB` flag. `n/a` for BC6H and RGBA16F. Which sub-types take which tag: [sRGB or UNORM](Texture-Types.md#srgb-or-unorm). |
 

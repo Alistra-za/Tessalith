@@ -1,16 +1,8 @@
 # Troubleshooting
 
-For anyone whose conversion skipped a file, looks wrong in game, or whose GUI won't cooperate. Problems are listed by what you see. A code from a Problems row or the `sdc` log is on [Diagnostic codes](Diagnostic-Codes.md), `sdc` error messages are on [CLI reference](CLI-Reference.md#error-messages), and scan errors are on [Mod scanning](Mod-Scanning.md#scan-errors).
+For anyone whose conversion skipped a file, looks wrong in game, or whose GUI won't cooperate. Problems are listed by what you see. A code from a Problems row is on [Diagnostic codes](Diagnostic-Codes.md), and scan errors are on [Mod scanning](Mod-Scanning.md#scan-errors). Errors and skipped files on the command line are on the [CLI reference](CLI-Reference.md#troubleshooting-on-the-command-line).
 
 ## Files are skipped or wait for you
-
-### Every file is "unresolved" on the command line
-
-```text
-skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
-```
-
-`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](CLI-Reference.md#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
 
 ### A colour map asks what its alpha means
 
@@ -38,7 +30,7 @@ Raw maps are packed only under the target that reads them. Under `vanilla` only 
 
 ### My opacity map isn't used
 
-The Helpers row says "not used" with the reason, and the `sdc` log gives the same reason as `PACK-UNUSED-INPUT`. Each reason and its fix: [Which data wins](Texture-Packing.md#which-data-wins).
+The Helpers row says "not used" with the reason, with the reason (`PACK-UNUSED-INPUT`). Each reason and its fix: [Which data wins](Texture-Packing.md#which-data-wins).
 
 ## The GUI
 
@@ -75,5 +67,3 @@ Open an issue on [GitHub](https://github.com/Alistra-za/Tessalith/issues/new/cho
 ## Quick Q/A
 
 **Will it re-encode my existing DDS files?** No, not by default: [Which files Tessalith reads](Texture-Types.md#which-files-tessalith-reads).
-
-**Does the CLI use my GUI set edits or the scan?** No: [Does the CLI use my GUI edits?](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits)

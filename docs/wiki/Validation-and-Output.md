@@ -19,17 +19,14 @@ C:\Work\IronPlate\                          C:\Work\IronPlate-out\
                                                 manifest.jsonl
 ```
 
-| Front end | Output root |
-|---|---|
-| `sdc convert` | `.\sdc-out` in the current directory, or `-o <dir>`. |
-| `tessalith.exe` | The folder you choose for the project (Review asks before it exports). The GUI refuses to write into the folder it reads. |
+The GUI writes to the folder you choose for the project (Review asks before it exports) and refuses to write into the folder it reads. The command line has its own default: [CLI reference](CLI-Reference.md#sdc-convert).
 
 - The output root and any `_sdc` folder are never read as input, so an output folder inside the source folder is safe.
 - Two inputs that would write the same output (`rock.png` and `rock.tga`) are both blocked with `IN-DUPLICATE`: rename or remove one.
 
 ### Atomic writes
 
-Every file is written to a temporary `.sdc-*.tmp` file in the target folder, then renamed into place, so an interrupted run never leaves a half-written DDS. A hard abort (a second Ctrl-C, a crash) can leave `.sdc-*.tmp` files behind. Delete them by hand.
+Every file is written to a temporary `.sdc-*.tmp` file in the target folder, then renamed into place, so an interrupted run never leaves a half-written DDS. A hard abort (a crash, a killed process) can leave `.sdc-*.tmp` files behind. Delete them by hand.
 
 ### The DDS header
 
@@ -37,7 +34,7 @@ Tessalith writes its own headers: legacy or DX10, picked from the format and the
 
 ## What is checked
 
-Every converted file is decoded again before it is written, and the decoded result is checked. `sdc validate` runs the checks that need no source on DDS files that already exist: `VAL-HEADER`, `VAL-ALPHA-GUARANTEE`, the `VAL-M-*` checks, `VAL-PGPATCHER-50` and `VAL-GRASS-DETECT`. Mip quality, cutout coverage and the BC6H peak need the encoder input, so `validate` can't run them.
+Every converted file is decoded again before it is written, and the decoded result is checked. Mip quality, cutout coverage and the BC6H peak need the encoder input, so they run only during a conversion. The other checks also work on DDS files you already have, from the command line: [CLI reference](CLI-Reference.md#sdc-validate).
 
 The thresholds are fixed; only `validation.mips` is a setting.
 
@@ -54,16 +51,15 @@ The thresholds are fixed; only `validation.mips` is a setting.
 | BC6H peak | The decoded peak divided by the source peak is at least 0.8. | `VAL-BC6H-PEAK` | warning |
 | Complex grass corner | The encoded bottom-left texel still passes Community Shaders' detection test. | `VAL-GRASS-DETECT` | error |
 
-- A file with a validation error is still written. It is reported as `ok ... [VALIDATION FAILED]`, counted under "failed validation", and makes `sdc convert` exit 4 if nothing worse happened. The next `if-changed` run re-encodes it.
-- Cube checks (no mips, a lit +Y on the marker, an `_SRGB` format, a 2D file where a cube is expected) fail with `VAL-HEADER`; the rules are on [Cubemaps](Cubemaps.md#checks).
+- A file with a validation error is still written and counted under "failed validation". The next `if-changed` run re-encodes it.
 
 ## The manifest
 
-Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the validation summary and the output's size and time. `sdc presets schema manifest` lists every field.
+Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
 
 ## Re-runs and if-changed
 
-`--on-existing if-changed` is the default. For each output that already exists, Tessalith looks up its manifest record. The output is up to date, and left alone, only if all of these match:
+Re-runs default to `if-changed`. For each output that already exists, Tessalith looks up its manifest record. The output is up to date, and left alone, only if all of these match:
 
 - the encoder versions (and the rgbcx patch for BC3/BC4/BC5);
 - the output file's size and modified time;
@@ -75,13 +71,7 @@ Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per fil
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.
 
-An existing output with no manifest record is never overwritten by `if-changed`: it is kept and reported as `OUT-UNKNOWN-EXISTING`, and the run exits 1. Tessalith never overwrites a file it can't show it wrote. `--on-existing overwrite` replaces it.
-
-| `--on-existing` | Current record | Changed record | No record |
-|---|---|---|---|
-| `if-changed` (default) | kept (up to date) | re-encoded | kept, `OUT-UNKNOWN-EXISTING` |
-| `skip` | kept | kept | kept |
-| `overwrite` | re-encoded | re-encoded | re-encoded |
+An existing output with no manifest record is never overwritten by `if-changed`: it is kept and reported as `OUT-UNKNOWN-EXISTING`. Tessalith never overwrites a file it can't show it wrote. The command line can replace it: [CLI reference](CLI-Reference.md#re-runs-and-if-changed).
 
 ## Installing the output
 

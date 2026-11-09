@@ -39,7 +39,7 @@ subtype = "diffuse"
 ```
 
 - **GUI:** a waiting file is Undecided, with a Problems row and a Review row, and no set card until you pick a type. High-confidence suggestions are applied for you; Medium and Low always need you.
-- **CLI:** it is unresolved with `SUG-LOW-CONFIDENCE` and `sdc convert` exits 1. `--allow SUG-LOW-CONFIDENCE` doesn't convert it; the `--set` form and [`--accept-suggestions`](CLI-Reference.md#why-you-usually-want---accept-suggestions-high) are in the CLI reference. <!-- D:GY5 -->
+- **Command line:** [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high).
 
 ## Suffixes
 
@@ -113,7 +113,7 @@ Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Preset
 
 ## Sub-types: what each file becomes
 
-One row per sub-type. **vanilla** says whether the sub-type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and `--allow CFG-UNAVAILABLE` (or the GUI's acknowledge button) converts it as the fallback named there. With no fallback, change the sub-type or the target.
+One row per sub-type. **vanilla** says whether the sub-type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and the GUI's acknowledge button converts it as the fallback named there (on the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes)). With no fallback, change the sub-type or the target.
 
 | Sub-type | Category | Default format | Tag (`cs`) | Default alpha | vanilla | Notes |
 |---|---|---|---|---|---|---|

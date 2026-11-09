@@ -27,7 +27,7 @@ Right-click a texture or a set, or press **F2**. The dialog has two modes.
 
 | Mode | What it does | Saved where |
 |---|---|---|
-| **Inputs** | Reads a misnamed source under a corrected name (a normal map without `_n`, a file in the wrong folder). The tile shows *read as <name>*. The file on disk is never renamed, and it keeps its own settings and set. | `sdc.toml`: `[inputs."<file>"] as = "<new path>"`. `sdc convert` reads it too. **Clear input alias** in the tile menu removes it. |
+| **Inputs** | Reads a misnamed source under a corrected name (a normal map without `_n`, a file in the wrong folder). The tile shows *read as <name>*. The file on disk is never renamed, and it keeps its own settings and set. | `sdc.toml`: `[inputs."<file>"] as = "<new path>"`. **Clear input alias** in the tile menu removes it. |
 | **Outputs** | Gives a set's outputs a new base name. Each keeps its folder and suffix (`steel.dds`, `steel_n.dds`, `steel_rmaos.dds`). Outputs already exported under the old name stay where they are. | A TruePBR set writes PGPatcher **Rename**, so the JSON follows. Any other set uses `sdc-project.toml`. |
 
 ![The rename dialog in Inputs mode.](../img/gui/GUI-Bulk-and-Rename/rename-inputs.png)
