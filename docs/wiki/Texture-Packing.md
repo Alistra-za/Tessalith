@@ -5,31 +5,28 @@ For modders whose sources come as separate maps (Substance or Blender exports): 
 ## Packing loose maps
 
 - **Raw maps are never their own DDS.** They pack into the layout the target reads.
-- **One source per role.** With two roughness maps the first by path wins and the other is reported as `PACK-UNUSED-INPUT`.
 - **A raw map is read from its red channel.** For a map that keeps its value elsewhere, set [`channels.grayscale_source`](Project-Config.md#channels).
-- **`_orm` counts as three maps at once:** AO from R, roughness from G, metallic from B. A separate map for the same slot (`_roughness` next to the `_orm`) wins that slot. An `_rfaos` has no metallic channel, so it leaves the `_orm` metallic unused. Slots an `_orm` doesn't hold (specular, height, fuzz) come from their own maps, the fill, or the default.
+- **Packed maps in a different format, _orm, can be used for the maps they contain.
 
 ### Community Shaders
 
-`_rmaos` is built when the set has a roughness, glossiness, AO or metallic map:
+`_rmaos` or `_rfaos` is built when the set has a roughness, glossiness, AO or metallic map:
 
 | Channel | Source | Default when missing |
 |---|---|---|
-| R | roughness, or 1 minus glossiness | `packing.roughness_default` |
-| G | metallic | 0 |
+| R | roughness, or inverted glossiness | `packing.roughness_default` |
+| G | metallic\fuzzmask | 0 |
 | B | AO | 1 |
 | A | specular | 1 |
 
-`_rfaos` (Advanced skin) replaces it when a fuzz map exists or the set's shader is Advanced Skin (`packing.recipe = "auto"`), or always with `packing.recipe = "rfaos"`:
+ rfaos is created when replaces it when a fuzz map exists or the set's shader is Advanced Skin
 
 | Channel | Source | Default when missing |
 |---|---|---|
-| R | roughness, or 1 minus glossiness | `packing.roughness_default` |
-| G | fuzz | 0 |
+| R | roughness, or inverted glossiness | `packing.roughness_default` |
+| G | fuzzmask | 0 |
 | B | AO | 1 |
 | A | specular | 1 |
-
-`packing.recipe = "rfaos"` on a set with only a metallic map builds an `_rmaos` instead (`PACK-RECIPE-UNBUILDABLE`). `_p` is built from a raw height map.
 
 ### Vanilla
 
@@ -38,7 +35,7 @@ A set whose shader is complex material (picked in the GUI, `--set set:<id>.shade
 | Channel | Source | Default when missing |
 |---|---|---|
 | R | environment: metallic, else specular | 0 |
-| G | glossiness, or 1 minus roughness | 1 minus `roughness_default` |
+| G | glossiness, or inverted roughness | 128 |
 | B | metallic | 0 |
 | A | height | 0 |
 
