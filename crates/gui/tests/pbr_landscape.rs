@@ -317,8 +317,8 @@ fn differing_blocks_load_as_unsynced() {
     assert_eq!(glint(h.state(), Kind::Txst), Some(json!({"enabled": true})));
 }
 
-/// Note HC5 (owner's screenshot): a lone `_f` picks the PBR shader, so its pill must not say vanilla. It writes no
-/// JSON, as it has no albedo, and the pill says that too.
+/// Note HC5 (owner's screenshot): a lone `_f` picks the PBR shader, so its pill must not say vanilla. On Community
+/// Shaders it is a JSON set (HL5), so the pill says "PBR → JSON".
 #[test]
 fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
     use sdc_gui::model::sets::kind_text;

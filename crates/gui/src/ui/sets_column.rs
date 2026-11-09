@@ -2351,7 +2351,7 @@ fn menu(
     }
     // Note HL4: a scan or a target mod gives the dialog something to list. A PGPatcher PBR set's record rows are
     // refused in the dialog; with a target mod its mesh and file rows still map, without one nothing could. The scan
-    // reason comes first (HG8c).
+    // reason comes first (HG8c, HL4).
     let has_target = model
         .sets_doc
         .as_ref()

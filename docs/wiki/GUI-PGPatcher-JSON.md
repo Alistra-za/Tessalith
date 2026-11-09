@@ -63,6 +63,16 @@ Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group reads "off
 
 Pick one mode: Standard writes `subsurface`, Foliage writes `subsurface_foliage`, Off writes neither. Both modes need an `_s`. Export asks first if you pick Foliage for meshes that aren't Tree Anim, or Standard for meshes that are (that check needs a scan).
 
+## A PBR set with no PBR albedo
+
+A set with PBR maps (a lone `_f`, an `_rmaos`) but no `pbr_albedo` diffuse still gets a JSON entry under Community Shaders, as long as it has a filled slot (a set of only released DDS files gets none). Use it when your mesh keeps a vanilla diffuse and only adds PBR maps. <!-- D:HL5 -->
+
+- **The match key** comes from the first of these that exists: the mapping's base, the mapped record's slot 1, the set's diffuse, the set id's own path.
+- **Slot 1 is written**, as the mapping's slot 1 or else `textures\<that path>.dds`, so the mesh keeps its texture: PGPatcher skips a shape whose slot 1 points at a `textures\pbr` copy that doesn't exist.
+- **Every filled slot names its output path.** An empty slot 2 or 6 takes the mapped path, or else `lock_normal` / `lock_rmaos` is written. A `slotN` or lock you set yourself wins.
+- A vanilla diffuse isn't sRGB, so the mesh can look washed out; the set's info row in [Problems](GUI-Problems.md) says so. It works with PGPatcher 2.3.1 and Community Shaders (confirmed by the owner). <!-- D:HL7 -->
+- On another target the set stays "PBR, no JSON", and its badge says "PBR set (no JSON on this target)".
+
 ## Matching
 
 The entry applies when any of its paths matches. The set's diffuse path is on by default.

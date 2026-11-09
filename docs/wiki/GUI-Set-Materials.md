@@ -26,7 +26,7 @@ A set whose diffuse is an **Advanced skin** (`skin_albedo`) gets an **Advanced s
 
 ### Shared-map sets
 
-A skin set with no colour map, holding only `_n`, `_sk`, `_wet` and `_detail_n`, shows only those cards; other skin sets borrow its maps. Mapped to a texture set record whose colour path a skin set in the project writes, it is an Advanced skin set itself, and a shader you chose on it wins. Skin variants then share one `_n` and `_sk` and keep their own diffuse and `_rfaos` each. [Mapping, slot states and existing files](GUI-Sets-Column.md#texture-set-records).
+A skin set with no colour map, holding only `_n`, `_sk`, `_wet` and `_detail_n`, shows only those cards; other skin sets borrow its maps. Mapped to a texture set record whose colour path a skin set in the project writes, it is an Advanced skin set itself, and a shader you chose on it wins. Skin variants then share one `_n` and `_sk` and keep their own diffuse and `_rfaos` each. [Mapping, slot states and existing files](GUI-Sets-Column.md#mapping-to-a-target).
 
 ## PBR Landscape
 
@@ -62,7 +62,7 @@ A set can also write Community Shaders' own runtime files: a **PBR texture set**
 
 - **Template** fills the block's values from the built-in library. PBR landscape template values by Faultier (https://www.nexusmods.com/profile/Faultierfan?gameId=1704), from Faultier's PBR landscape modders resource. A block with no EDIDs takes the template's EDIDs; EDIDs you added are never removed.
 - **EDIDs** are the records the file is for, and the file name is the EDID exactly, case included (Community Shaders matches the exact case). After a plugin scan in the Meshes view, texture-set EDIDs are suggested from the texture sets that use the set's diffuse, and material objects can be picked from the scanned records. A warning says when an EDID is not in the scan, differs only in case (one click fixes it), or names a material object that is not single-pass (Community Shaders then ignores the file). An EDID that cannot be a file name, or that two sets bind, is not written.
-- A texture set also drives the set's PGPatcher entry: roughness, specular, displacement, subsurface and coat values and glint come from the block, so the two files cannot drift. The entry is written only when the latest scan finds meshes (not LOD) that use the set's diffuse; **PGPatcher entry for statics** can force it on or off.
+- A texture set also drives the set's PGPatcher entry: roughness, specular, displacement, subsurface and coat values and glint come from the block, so the two files cannot drift. With no scan the entry is not written. After a scan it is written whether or not a mesh (not LOD) uses the set's diffuse yet; an info row says when none does. **PGPatcher entry for statics** can force it on or off.
 - Every number is written with a decimal point. A file you edited outside Tessalith is never overwritten (the export report says so; delete it to let Tessalith write it again), and a file Tessalith wrote for an EDID no set binds any more is reported, not deleted.
 - If `sdc-project.toml` changed on disk while the export ran, recording the written JSON files asks **Overwrite with my changes** or **Reload from disk**, as a save does. The same holds for the PGPatcher and complex material JSON.
 - In the 3D preview a set with a texture-set block is shown on the plane, with a **Tiling** slider (1× to 3×) that only changes the preview. The tiling is one value for the session and stays when you switch sets.
