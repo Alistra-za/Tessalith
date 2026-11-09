@@ -1,7 +1,7 @@
 //! Note HF4: set groups. Membership lives in `[[groups]]` of `sdc-project.toml` (`SetsDoc`) and is kept there whatever
 //! the cards do; what a group shows reads the views, so a set with no card (Note GY5, or no set) is neither shown nor
 //! counted in it, and a group never keeps a card. The view order pulls a group's members behind its first one
-//! (`pull_groups`). Every change here is one undo step and no re-plan: a group changes no output.
+//! (`pull_groups`, `moved_order`). Every change here is one undo step and no re-plan: a group changes no output.
 use super::input_name::match_key;
 use super::sets::{set_views, SetView};
 use super::AppModel;
@@ -24,13 +24,9 @@ pub enum GroupTarget {
     None,
 }
 
-/// The view order with each group's members pulled behind its first member (the first in `views`). Sets in no group
-/// keep their place; a member with no view cannot decide where the block sits. A set named by two groups belongs to
-/// the first.
-pub(super) fn pull_groups(views: &mut Vec<SetView>, groups: &[SetGroup]) {
-    if groups.is_empty() {
-        return;
-    }
+/// Where each of `ids` goes when a group's members are pulled behind its first member (the first in `ids`), as
+/// indexes into `ids`. Sets in no group keep their place; a set named by two groups belongs to the first.
+fn pull_order(ids: &[&str], groups: &[SetGroup]) -> Vec<usize> {
     let mut of: HashMap<String, usize> = HashMap::new();
     for (g, group) in groups.iter().enumerate() {
         for s in &group.sets {
@@ -38,15 +34,15 @@ pub(super) fn pull_groups(views: &mut Vec<SetView>, groups: &[SetGroup]) {
         }
     }
     let mut blocks: Vec<Vec<usize>> = vec![vec![]; groups.len()];
-    for (i, v) in views.iter().enumerate() {
-        if let Some(&g) = of.get(&fold_id(&v.id)) {
+    for (i, id) in ids.iter().enumerate() {
+        if let Some(&g) = of.get(&fold_id(id)) {
             blocks[g].push(i);
         }
     }
     let mut placed = vec![false; groups.len()];
-    let mut order: Vec<usize> = Vec::with_capacity(views.len());
-    for (i, v) in views.iter().enumerate() {
-        match of.get(&fold_id(&v.id)) {
+    let mut order: Vec<usize> = Vec::with_capacity(ids.len());
+    for (i, id) in ids.iter().enumerate() {
+        match of.get(&fold_id(id)) {
             None => order.push(i),
             Some(&g) if !placed[g] => {
                 placed[g] = true;
@@ -55,8 +51,64 @@ pub(super) fn pull_groups(views: &mut Vec<SetView>, groups: &[SetGroup]) {
             Some(_) => {}
         }
     }
+    order
+}
+
+/// The view order with each group's members pulled behind its first member. A member with no view cannot decide
+/// where the block sits.
+pub(super) fn pull_groups(views: &mut Vec<SetView>, groups: &[SetGroup]) {
+    if groups.is_empty() {
+        return;
+    }
+    let order = pull_order(
+        &views.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+        groups,
+    );
     let mut old: Vec<Option<SetView>> = std::mem::take(views).into_iter().map(Some).collect();
     *views = order.into_iter().filter_map(|i| old[i].take()).collect();
+}
+
+/// The on-screen order after set `id` moves to position `to` (counted in the list without it), or `None` when
+/// nothing would visibly move. The first member of a group takes its block along (`block`, in view order); any other
+/// set moves alone. A set put inside another group's block lands before the block when it came from below (`to` is
+/// above its place) and after it when it came from above.
+pub(super) fn moved_order(
+    before: &[String],
+    groups: &[SetGroup],
+    id: &str,
+    to: usize,
+) -> Option<Vec<String>> {
+    let from = before.iter().position(|i| same_id(i, id))?;
+    let block: Vec<String> = groups
+        .iter()
+        .find(|g| g.sets.first().is_some_and(|f| same_id(f, id)))
+        .map_or_else(|| vec![before[from].clone()], |g| g.sets.clone());
+    let group_of = |s: &str| {
+        groups
+            .iter()
+            .position(|g| g.sets.iter().any(|m| same_id(m, s)))
+    };
+    let mut ids = before.to_vec();
+    ids.retain(|i| !block.iter().any(|b| same_id(b, i)));
+    let mut at = to.min(ids.len());
+    let (own, up) = (group_of(&block[0]), to < from);
+    if let (Some(l), Some(r)) = (ids.get(at.wrapping_sub(1)), ids.get(at)) {
+        let (gl, gr) = (group_of(l), group_of(r));
+        if gl.is_some() && gl == gr && gl != own {
+            let members: Vec<usize> = (0..ids.len())
+                .filter(|&i| group_of(&ids[i]) == gl)
+                .collect();
+            at = if up {
+                members[0]
+            } else {
+                members[members.len() - 1] + 1
+            };
+        }
+    }
+    ids.splice(at..at, block);
+    let order = pull_order(&ids.iter().map(String::as_str).collect::<Vec<_>>(), groups);
+    let after: Vec<String> = order.into_iter().map(|i| ids[i].clone()).collect();
+    (after != before).then_some(after)
 }
 
 impl AppModel {
@@ -104,19 +156,17 @@ impl AppModel {
     /// re-plan. A group whose last set leaves goes.
     pub fn move_to_group(&mut self, ids: &[String], group: GroupTarget) -> Result<(), String> {
         self.group_edit()?;
-        let label = match &group {
-            GroupTarget::Existing(n) => format!("Move to group {}", self.stored_group(n)?.name),
-            GroupTarget::New(n) => {
-                let n = n.trim();
-                self.free_group_name(n)?;
-                format!("New group {n}")
+        let (label, group) = match group {
+            GroupTarget::Existing(n) => {
+                let n = self.stored_group(&n)?.name;
+                (format!("Move to group {n}"), GroupTarget::Existing(n))
             }
-            GroupTarget::None => "Move out of its group".into(),
-        };
-        let group = match group {
-            GroupTarget::Existing(n) => GroupTarget::Existing(self.stored_group(&n)?.name),
-            GroupTarget::New(n) => GroupTarget::New(n.trim().to_string()),
-            GroupTarget::None => GroupTarget::None,
+            GroupTarget::New(n) => {
+                let n = n.trim().to_string();
+                self.free_group_name(&n)?;
+                (format!("New group {n}"), GroupTarget::New(n))
+            }
+            GroupTarget::None => ("Move out of its group".into(), GroupTarget::None),
         };
         // A set is stored under the id its view shows.
         let ids: Vec<String> = ids
@@ -126,6 +176,7 @@ impl AppModel {
         self.edit_docs(&label, None, false, move |_, d| {
             d.move_to_group(&ids, &group)
         });
+        self.prune_collapsed();
         Ok(())
     }
 
@@ -150,9 +201,16 @@ impl AppModel {
         } else if new.is_empty() {
             return Err("a group needs a name".into());
         }
-        self.edit_docs(&format!("Rename group {old}"), None, false, move |_, d| {
-            d.rename_group(&old, &new)
+        // The collapsed state goes with the name.
+        let was_collapsed = self.group_collapsed(&old);
+        self.edit_docs(&format!("Rename group {old}"), None, false, {
+            let (old, new) = (old.clone(), new.clone());
+            move |_, d| d.rename_group(&old, &new)
         });
+        if was_collapsed && self.stored_group(&new).is_ok() {
+            self.set_group_collapsed(&new, true);
+        }
+        self.prune_collapsed();
         Ok(())
     }
 
@@ -163,6 +221,7 @@ impl AppModel {
         self.edit_docs(&format!("Ungroup {name}"), None, false, move |_, d| {
             d.ungroup(&name)
         });
+        self.prune_collapsed();
         Ok(())
     }
 
@@ -179,6 +238,27 @@ impl AppModel {
             d.set_group_excluded(&name, on)
         });
         Ok(())
+    }
+
+    /// Forget the collapsed state of this project's groups that no longer exist (renamed, ungrouped, or gone with
+    /// their last set), so a later group with the old name starts open.
+    pub(super) fn prune_collapsed(&mut self) {
+        let (Some(root), Some(d)) = (self.root.as_ref(), self.sets_doc.as_ref()) else {
+            return;
+        };
+        let live: Vec<String> = d
+            .groups()
+            .iter()
+            .map(|g| match_key(root, &g.name))
+            .collect();
+        let prefix = match_key(root, "");
+        let before = self.settings.group_collapsed.len();
+        self.settings
+            .group_collapsed
+            .retain(|k| !k.starts_with(&prefix) || live.contains(k));
+        if self.settings.group_collapsed.len() != before {
+            self.save_settings();
+        }
     }
 
     /// Whether the user collapsed group `name` in this project (`gui.toml`, by project and name).

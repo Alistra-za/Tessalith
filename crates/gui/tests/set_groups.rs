@@ -6,7 +6,6 @@ use image::{ImageBuffer, Rgb};
 use sdc_gui::model::set_groups::{GroupTarget, SetGroup};
 use sdc_gui::model::sets::set_views;
 use sdc_gui::model::AppModel;
-use sdc_gui::settings::GuiSettings;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -188,19 +187,51 @@ fn a_renamed_set_stays_in_its_group() {
 }
 
 /// Review Focus 2: an input rename moves an automatic set's id (`retarget_auto`); its membership follows, whether the
-/// set has an entry in the file or only a place in a group.
+/// set has an entry in the file or only a place in a group. Driven through the real input-rename path.
 #[test]
 fn an_input_rename_carries_membership() {
+    for with_entry in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = pbr_opened(d.path());
+        if with_entry {
+            m.set_json_value(
+                "landscape/rock01",
+                "specular_level",
+                Some(serde_json::json!(0.5)),
+            );
+        }
+        let other = ids(&m)
+            .into_iter()
+            .find(|i| i != "landscape/rock01")
+            .unwrap();
+        new_group(&mut m, "Rocks", &["landscape/rock01", &other]);
+        m.set_input_name("landscape/rock01", "textures/landscape/rock02")
+            .unwrap();
+        idle(&mut m);
+        assert!(
+            ids(&m).contains(&"landscape/rock02".to_string()),
+            "{with_entry}"
+        );
+        assert_eq!(
+            m.group_of("landscape/rock02").map(|g| g.name),
+            Some("Rocks".into()),
+            "entry: {with_entry}"
+        );
+        assert!(!stored(&m)[0].sets.iter().any(|x| x == "landscape/rock01"));
+    }
+}
+
+/// `retarget_auto` on the document: no entry, an entry under the automatic id, and a renamed set.
+#[test]
+fn retarget_auto_moves_the_ids_a_group_holds() {
     let d = tempfile::tempdir().unwrap();
     let mut doc = sdc_gui::sets_doc::SetsDoc::open(d.path());
     doc.restore(
         "[[sets]]\nid = \"g/b\"\n[[sets]]\nid = \"g/c\"\nrenamed_from = \"g/cc\"\n\
          [[groups]]\nname = \"Armor\"\nsets = [\"g/a\", \"g/b\", \"g/c\"]\n",
     );
-    // No entry at all: the id in the group moves.
     doc.retarget_auto("g/a", "g/aa");
     assert_eq!(doc.groups()[0].sets, s(&["g/aa", "g/b", "g/c"]));
-    // An entry under the automatic id takes the new id (`rename_set`), and the group follows.
     doc.retarget_auto("g/b", "g/bb");
     assert_eq!(doc.groups()[0].sets, s(&["g/aa", "g/bb", "g/c"]));
     // A renamed set keeps the user's name, which is what the group holds.
@@ -265,6 +296,8 @@ fn a_read_only_document_refuses_with_the_reason() {
 fn collapse_is_kept_by_project_and_name_and_is_no_undo_step() {
     let d = tempfile::tempdir().unwrap();
     let mut m = five(d.path());
+    let gui_toml = d.path().join("settings/gui.toml");
+    m.settings_path = Some(gui_toml.clone());
     new_group(&mut m, "Armor", &["g/a"]);
     let (steps, doc) = (m.history.undo.len(), text(&m));
     assert!(!m.group_collapsed("Armor"));
@@ -272,49 +305,82 @@ fn collapse_is_kept_by_project_and_name_and_is_no_undo_step() {
     assert!(m.group_collapsed("armor"), "by name, ignoring case");
     assert!(!m.group_collapsed("Weapons"));
     assert_eq!((m.history.undo.len(), text(&m)), (steps, doc));
+    let written = std::fs::read_to_string(&gui_toml).unwrap();
+    assert!(written.contains("group_collapsed"), "{written}");
     // Another project with the same settings and group name starts open.
     let d2 = tempfile::tempdir().unwrap();
     let mut m2 = five(d2.path());
-    m2.settings = GuiSettings {
-        ..m.settings.clone()
-    };
+    m2.settings = m.settings.clone();
     assert!(!m2.group_collapsed("Armor"));
     m.set_group_collapsed("Armor", false);
     assert!(!m.group_collapsed("Armor"));
     assert!(m.settings.group_collapsed.is_empty(), "open is not stored");
 }
 
+/// A collapsed group's key follows a Rename, and goes with the group (Ungroup, its last set leaving or deleted), so a
+/// later group with the old name starts open.
 #[test]
-fn a_member_without_a_card_is_not_shown_and_a_group_never_keeps_a_card() {
+fn the_collapsed_key_follows_the_group_and_goes_with_it() {
     let d = tempfile::tempdir().unwrap();
     let mut m = five(d.path());
-    new_group(&mut m, "Armor", &["g/a", "g/b", "g/c"]);
-    // g/b loses both its files to no set: it has no card.
-    for k in ["g/b.png", "g/b_n.png"] {
-        let key = m
-            .items
-            .iter()
-            .find(|i| i.key.ends_with(k))
-            .unwrap()
-            .key
-            .clone();
-        m.remove_member("g/b", &key).unwrap();
-        idle(&mut m);
-    }
+    new_group(&mut m, "Armor", &["g/a", "g/b"]);
+    m.set_group_collapsed("Armor", true);
+    m.rename_group("Armor", "Plate").unwrap();
+    assert!(m.group_collapsed("Plate") && !m.group_collapsed("Armor"));
+    assert_eq!(m.settings.group_collapsed.len(), 1);
+    m.ungroup("Plate").unwrap();
+    assert!(m.settings.group_collapsed.is_empty(), "Ungroup");
+    new_group(&mut m, "Plate", &["g/a"]);
     assert!(
-        !ids(&m).contains(&"g/b".to_string()),
-        "membership keeps no card"
+        !m.group_collapsed("Plate"),
+        "a new group of the old name starts open"
     );
-    // The file still names it; the group shows the others.
-    assert_eq!(stored(&m)[0].sets, s(&["g/a", "g/b", "g/c"]));
-    assert_eq!(m.group_of("g/a").unwrap().sets, s(&["g/a", "g/c"]));
-    assert!(m.group_of("g/b").is_none());
-    // A group whose members all lack a card has no header.
-    for set in ["g/a", "g/c"] {
-        m.delete_set(set);
-        idle(&mut m);
-    }
-    assert!(m.groups().is_empty());
+    m.set_group_collapsed("Plate", true);
+    m.move_to_group(&s(&["g/a"]), GroupTarget::None).unwrap();
+    assert!(m.settings.group_collapsed.is_empty(), "its last set left");
+    new_group(&mut m, "Plate", &["g/a"]);
+    m.set_group_collapsed("Plate", true);
+    assert!(m.delete_set("g/a"));
+    idle(&mut m);
+    assert!(
+        m.settings.group_collapsed.is_empty(),
+        "its last set was deleted"
+    );
+}
+
+/// Note GY5: a lone file waiting for a type has no card. Being in a group does not give it one, and it is not shown
+/// or counted in the group until it gets one.
+#[test]
+fn a_waiting_lone_file_in_a_group_has_no_card_until_it_gets_one() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures/g")).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(d.path().join("textures/g/zz_bump.png"))
+        .unwrap();
+    let mut m = five(d.path());
+    assert!(
+        !ids(&m).contains(&"g/zz_bump".to_string()),
+        "waits for a type"
+    );
+    new_group(&mut m, "Armor", &["g/a", "g/zz_bump"]);
+    idle(&mut m);
+    assert!(
+        !ids(&m).contains(&"g/zz_bump".to_string()),
+        "the group gives it no card"
+    );
+    assert_eq!(m.group_of("g/a").unwrap().sets, s(&["g/a"]));
+    assert!(m.group_of("g/zz_bump").is_none());
+    assert_eq!(
+        stored(&m)[0].sets,
+        s(&["g/a", "g/zz_bump"]),
+        "the file keeps it"
+    );
+    m.decide(
+        "g/zz_bump.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    idle(&mut m);
+    assert_eq!(m.group_of("g/a").unwrap().sets, s(&["g/a", "g/zz_bump"]));
 }
 
 // ---- Order ----
@@ -356,10 +422,39 @@ fn moving_a_set_through_a_block_lands_after_it() {
     assert!(m.reorder_set("g/a", 1));
     idle(&mut m);
     assert_eq!(ids(&m), s(&["g/b", "g/c", "g/a", "g/d", "g/e"]));
-    // e goes up into the block from below: before the block's first member it is before the block, inside it after.
-    assert!(m.reorder_set("g/e", 1));
+}
+
+/// A set stepping up from just below a block lands before the whole block.
+#[test]
+fn a_set_stepping_up_from_below_a_block_lands_before_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = five(d.path());
+    new_group(&mut m, "Armor", &["g/b", "g/c"]);
+    assert!(m.reorder_set("g/d", 2));
     idle(&mut m);
-    assert_eq!(ids(&m), s(&["g/b", "g/c", "g/e", "g/a", "g/d"]));
+    assert_eq!(ids(&m), s(&["g/a", "g/d", "g/b", "g/c", "g/e"]));
+    // Stepping down from just above lands after it.
+    assert!(m.reorder_set("g/d", 2));
+    idle(&mut m);
+    assert_eq!(ids(&m), s(&["g/a", "g/b", "g/c", "g/d", "g/e"]));
+}
+
+/// A move that changes nothing on screen is no move: no undo step, no re-plan, the saved order untouched.
+#[test]
+fn a_move_that_changes_nothing_on_screen_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = five(d.path());
+    new_group(&mut m, "Armor", &["g/b", "g/c"]);
+    let (steps, doc) = (m.history.undo.len(), text(&m));
+    // The block's last member down one: the pull puts it straight back.
+    assert!(!m.reorder_set("g/c", 3));
+    // The block's first member to where it is.
+    assert!(!m.reorder_set("g/b", 1));
+    // A plain set to where it is.
+    assert!(!m.reorder_set("g/d", 3));
+    assert!(!m.busy(), "no re-plan");
+    assert_eq!((m.history.undo.len(), text(&m)), (steps, doc));
+    assert_eq!(ids(&m), s(&["g/a", "g/b", "g/c", "g/d", "g/e"]));
 }
 
 #[test]

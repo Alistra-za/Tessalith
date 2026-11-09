@@ -665,7 +665,8 @@ impl SetsDoc {
     }
 
     /// Note HF4: store `groups` as the `[[groups]]` tables (none left: the key goes). An unchanged list is no edit.
-    /// A group with no sets is dropped: a group goes with its last set.
+    /// A group with no sets is dropped: a group goes with its last set. Writing also drops a repeated name (the
+    /// second table), so a hand-edited file with either is tidied by the next group edit.
     fn write_groups(&mut self, groups: &[SetGroup]) {
         let groups: Vec<&SetGroup> = groups.iter().filter(|g| !g.sets.is_empty()).collect();
         let current = self.groups();

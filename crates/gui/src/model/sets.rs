@@ -2546,23 +2546,10 @@ impl AppModel {
             return false;
         }
         let before: Vec<String> = set_views(self).into_iter().map(|v| v.id).collect();
-        let Some(from) = before.iter().position(|i| same_id(i, id)) else {
+        // Note HF4: the column's order after the groups pull their members together; no visible move, no step.
+        let Some(ids) = super::set_groups::moved_order(&before, &self.groups(), id, to) else {
             return false;
         };
-        // Note HF4: the first member of a group moves its whole block, as the column shows it; any other set moves
-        // alone, and one dropped inside another group's block lands after the block (the view order pulls it there).
-        let block = self
-            .groups()
-            .into_iter()
-            .find(|g| g.sets.first().is_some_and(|f| same_id(f, id)))
-            .map_or_else(|| vec![before[from].clone()], |g| g.sets);
-        let mut ids = before.clone();
-        ids.retain(|i| !block.iter().any(|b| same_id(b, i)));
-        let at = to.min(ids.len());
-        ids.splice(at..at, block);
-        if ids == before {
-            return false;
-        }
         self.edit_docs("Reorder sets", None, true, move |_, s| s.set_order(&ids));
         true
     }
@@ -2635,6 +2622,7 @@ impl AppModel {
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
             s.delete_set(&i, &files)
         });
+        self.prune_collapsed();
         Some(n)
     }
 
