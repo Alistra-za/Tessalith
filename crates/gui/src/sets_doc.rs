@@ -82,6 +82,15 @@ pub struct TxstMap {
     pub formid: String,
     pub edid: String,
     pub slots: BTreeMap<u8, String>,
+    /// Note HL: a mesh path or file base of the target mod (`base = "textures/…"`) instead of a record; the
+    /// plugin, FormID and EDID are then empty and not written.
+    pub base: Option<String>,
+}
+
+impl TxstMap {
+    pub fn is_base(&self) -> bool {
+        self.base.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -220,6 +229,7 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             plugin: text("plugin"),
             formid: text("formid"),
             edid: text("edid"),
+            base: Some(text("base")).filter(|s| !s.is_empty()),
             slots: b
                 .iter()
                 .filter_map(|(k, v)| {
@@ -388,6 +398,7 @@ impl SetsDoc {
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
+        let target = self.target_mod();
         let old = self.text();
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
@@ -410,6 +421,10 @@ impl SetsDoc {
         if self.export_folder() != folder {
             let v = folder.map(|p| Value::from(p.to_string_lossy().as_ref()));
             self.set_project("export_folder", v);
+        }
+        // Note HL: nor is the target mod.
+        if self.target_mod() != target {
+            self.set_target_mod(target.as_deref());
         }
         if self.text() == old {
             self.f.doc = doc;
@@ -471,6 +486,17 @@ impl SetsDoc {
         self.set_project(
             "export_folder",
             Some(Value::from(path.to_string_lossy().as_ref())),
+        );
+    }
+
+    /// Note HL: `[project] target_mod`, the mod folder being worked on (an absolute path; GUI-only state).
+    pub fn target_mod(&self) -> Option<std::path::PathBuf> {
+        self.project_str("target_mod").map(std::path::PathBuf::from)
+    }
+    pub fn set_target_mod(&mut self, p: Option<&std::path::Path>) {
+        self.set_project(
+            "target_mod",
+            p.map(|p| Value::from(p.to_string_lossy().as_ref())),
         );
     }
 
@@ -1109,12 +1135,16 @@ impl SetsDoc {
             }
             Some(m) => {
                 let mut b = Table::new();
-                for (k, v) in [
-                    ("plugin", &m.plugin),
-                    ("formid", &m.formid),
-                    ("edid", &m.edid),
-                ] {
-                    b.insert(k, toml_edit::value(v.as_str()));
+                if let Some(base) = &m.base {
+                    b.insert("base", toml_edit::value(base.as_str()));
+                } else {
+                    for (k, v) in [
+                        ("plugin", &m.plugin),
+                        ("formid", &m.formid),
+                        ("edid", &m.edid),
+                    ] {
+                        b.insert(k, toml_edit::value(v.as_str()));
+                    }
                 }
                 for (n, p) in &m.slots {
                     b.insert(&format!("slot{n}"), toml_edit::value(p.as_str()));

@@ -298,7 +298,7 @@ impl AppModel {
         for v in views.iter().filter(|v| !v.key.is_empty()) {
             let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
             let resolved = super::auto_flags::resolved_for(
-                v.pbr,
+                v.json,
                 &v.slots,
                 &v.settings,
                 &super::auto_flags::hint(self, v),

@@ -22,6 +22,8 @@ pub enum PickerPurpose {
     AlsoLocation,
     /// Export to ▾: where the marker cube is saved.
     MakeMarker,
+    /// Map to target…: the project's target mod folder (Note HL4).
+    TargetMod,
 }
 
 /// The hover text of every picker button while one is open.
@@ -246,7 +248,10 @@ impl PickerPurpose {
     fn folder_scoped(self) -> bool {
         matches!(
             self,
-            PickerPurpose::ExportFolder | PickerPurpose::SaveReport | PickerPurpose::AlsoLocation
+            PickerPurpose::ExportFolder
+                | PickerPurpose::SaveReport
+                | PickerPurpose::AlsoLocation
+                | PickerPurpose::TargetMod
         )
     }
 }
@@ -339,6 +344,7 @@ impl AppModel {
             PickerPurpose::AlsoLocation => self.set_also_location(&path),
             PickerPurpose::SaveReport => self.save_report(path),
             PickerPurpose::MakeMarker => self.marker_picked(&path),
+            PickerPurpose::TargetMod => self.target_picked(path),
             // The meshes model handles its own.
             PickerPurpose::ChooseMo2 | PickerPurpose::ScanFolder => {}
         }

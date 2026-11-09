@@ -186,11 +186,11 @@ pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ct
     let ss = v.as_ref().map(|v| hint(model, v)).unwrap_or_default();
     let auto = v
         .as_ref()
-        .map(|v| auto_flags_for(v.pbr, &v.slots, &own, &ss))
+        .map(|v| auto_flags_for(v.json, &v.slots, &own, &ss))
         .unwrap_or_default();
     let eff = v
         .as_ref()
-        .map(|v| resolved_for(v.pbr, &v.slots, &own, &ss))
+        .map(|v| resolved_for(v.json, &v.slots, &own, &ss))
         .unwrap_or_else(|| own.clone());
     let (matches, addable) = v.map(slot_matches).unwrap_or_default();
     Ctx {

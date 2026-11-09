@@ -1,0 +1,27 @@
+{
+  "dds": {
+    "arch/leaf_n.dds": "e8361145a6856a61",
+    "arch/leaf_rmaos.dds": "0ed0816e34349c3c",
+    "arch/rock.dds": "d3b2f4111a43d42d",
+    "arch/rock_n.dds": "e8361145a6856a61",
+    "textures/pbr/arch/wall.dds": "aca4e90f4fa40562",
+    "textures/pbr/arch/wall_n.dds": "e8361145a6856a61",
+    "textures/pbr/arch/wall_rmaos.dds": "0d141f0476bd5340"
+  },
+  "json": {
+    "$schema": "https://raw.githubusercontent.com/hakasapl/PGPatcher/main/schema/pbr.schema.json",
+    "default": {
+      "displacement_scale": 1.0,
+      "emissive": false,
+      "parallax": false,
+      "roughness_scale": 1.0,
+      "specular_level": 0.04,
+      "subsurface": false
+    },
+    "entries": [
+      {
+        "match1": "arch\\wall.dds"
+      }
+    ]
+  }
+}

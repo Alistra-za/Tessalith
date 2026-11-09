@@ -144,7 +144,7 @@ fn the_pgpatcher_box_stores_statics_and_drives_the_badge() {
     h.get_by_label("Back to auto").click();
     h.run();
     assert_eq!(st(&h), Statics::Auto);
-    // A scan that finds no mesh using the diffuse: auto writes no entry.
+    // A scan that finds no mesh using the diffuse yet: auto still writes the entry (Note HL6).
     let key = set_key(&view(h.state())).unwrap();
     h.state().cs_pbr.facts.borrow_mut().insert(
         key,
@@ -154,8 +154,11 @@ fn the_pgpatcher_box_stores_statics_and_drives_the_badge() {
         }),
     );
     h.run();
-    assert!(!box_on(&h));
-    assert_eq!(badge_text(h.state(), &view(h.state())), BADGE_PBR_LANDSCAPE);
+    assert!(box_on(&h));
+    assert_eq!(
+        badge_text(h.state(), &view(h.state())),
+        BADGE_PBR_LANDSCAPE_PGP
+    );
 }
 
 /// Review I2: a PBR Landscape set whose colour map is a landscape diffuse has no PGPatcher entry: the box is off and
@@ -314,8 +317,8 @@ fn differing_blocks_load_as_unsynced() {
     assert_eq!(glint(h.state(), Kind::Txst), Some(json!({"enabled": true})));
 }
 
-/// Note HC5 (owner's screenshot): a lone `_f` picks the PBR shader, so its pill must not say vanilla. It writes no
-/// JSON, as it has no albedo, and the pill says that too.
+/// Note HC5 (owner's screenshot): a lone `_f` picks the PBR shader, so its pill must not say vanilla. On Community
+/// Shaders it is a JSON set (HL5), so the pill says "PBR → JSON".
 #[test]
 fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
     use sdc_gui::model::sets::kind_text;
@@ -338,12 +341,14 @@ fn a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla() {
         .find(|v| v.members.iter().any(|k| k.ends_with("lonely_f.png")))
         .expect("the lone _f's set");
     assert!(sdc_gui::model::also::is_pbr_set(&v), "{:?}", v.shader);
-    assert!(!v.pbr, "no albedo, so no JSON");
-    assert_eq!(kind_text(&m, &v), "PBR, no JSON");
-    assert!(badge_text(&m, &v).contains("no JSON"));
+    assert!(!v.pbr, "no albedo, so no prefix owner");
+    assert!(v.json, "Note HL5: a PBR pick writes JSON on CS");
+    assert_eq!(kind_text(&m, &v), "PBR → JSON");
+    assert!(!badge_text(&m, &v).contains("no JSON"));
     // A set the shader pick calls vanilla still says so.
     let mut other = v.clone();
     other.shader = None;
+    other.json = false;
     assert_eq!(kind_text(&m, &other), "vanilla");
 }
 

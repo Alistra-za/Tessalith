@@ -66,6 +66,10 @@ A row you must act on never just reports; its fix is its button:
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}** ([below](#skipped-presets)). |
 | *Looks like complex grass, but is not tagged as grass* (Info: a diffuse with the 1:2 complex-grass shape and a normal-map bottom half that no grass record of a scan names) | **Tag as grass**, which writes `subtype = "complex_grass"`. <!-- D:FC10 --> |
 | *Colour divided by alpha on load (premultiplied EXR)* (Info: an OpenEXR source with partial alpha) | **Straight alpha**, which writes `alpha.exr_straight = true`. An OpenEXR source's settings have the same **Straight alpha** in the Alpha group. <!-- D:FC10 --> |
+| *No albedo in this set; the mesh keeps {path}…* (Info: a PBR set with no albedo) | No button: the set still exports. |
+| *No mesh of the latest scan uses this diffuse yet…* (Info: the PGPatcher entry is still written; LOD meshes don't count) | No button: the set still exports. |
+| *No texture set of the latest scan uses this texture* (Info, grey) | No button: the set still exports. |
+| *Replaces {file} of the target mod in the load order* (Info: an output the target mod already ships) | No button: the set still exports; rename its outputs to keep the target's file. <!-- D:HL6 --> |
 | *matchN is empty and matches nothing* (Info: a set's stored `matchN = ""`, N from 2) | **Remove match**, which removes the key. |
 | *Preset <id> is not installed* (red) | **Choose preset…**, which opens the header's **Preset** menu ([Presets](GUI-Presets.md#saving)). |
 

@@ -245,7 +245,7 @@ brightness = 0.9
 | `keep_metal_brightness` | `false` | | The CM folder gets its own diffuses without the metal darkening ([CM folder](Set-Shaders.md#also-export-as-vanilla-and-cm)). |
 | `keep_metal_strength` | 1.0 | 0–1 | How much of the metal darkening Keep metal brightness undoes. |
 
-What each folder's files hold is in [Also export as Vanilla and CM](Set-Shaders.md#also-export-as-vanilla-and-cm). The GUI keeps the folders' location in `sdc-project.toml` as `[project] also_location` (by default the export folder); the CLI writes them under `-o`.
+What each folder's files hold is in [Also export as Vanilla and CM](Set-Shaders.md#also-export-as-vanilla-and-cm). The GUI keeps the folders' location in `sdc-project.toml` as `[project] also_location` (by default the export folder); the CLI writes them under `-o`. It also keeps `[project] target_mod`, the mod folder you're working on ([Mapping to a target](GUI-Sets-Column.md#mapping-to-a-target)); the CLI doesn't read it.
 
 ## Field reference
 

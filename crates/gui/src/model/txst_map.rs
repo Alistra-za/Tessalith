@@ -4,8 +4,10 @@
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
 use super::sets::{
-    entry_of, map_slot, recipe_suffix, SetView, SlotFill, SlotKind, LAST_GAME_SLOT, READ_ONLY,
+    entry_of, map_slot, recipe_suffix, renamed_output, DefaultOutputs, SetView, SlotFill, SlotKind,
+    LAST_GAME_SLOT, READ_ONLY,
 };
+use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
 use crate::pgp::prefix::check_rel_path;
 use crate::sets_doc::{SetEntry, TxstMap};
@@ -86,7 +88,14 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         return vec![];
     };
     let mut out = vec![];
-    for e in doc.entries().iter() {
+    let entries = doc.entries();
+    // Once per pass, and only when a base mapping needs the files' default names.
+    let defaults = entries
+        .iter()
+        .any(|e| e.txst.as_ref().is_some_and(TxstMap::is_base))
+        .then(|| DefaultOutputs::new(m))
+        .flatten();
+    for e in entries.iter() {
         let Some(txst) = &e.txst else { continue };
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
             continue;
@@ -94,9 +103,14 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         if m.record_ignored(v) {
             continue;
         }
+        let base = txst.base.as_deref().zip(defaults.as_ref());
+        // `DefaultOutputs::new` is `None` only without a root or export root; then no output is planned at all.
+        if txst.is_base() && base.is_none() {
+            continue;
+        }
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
-            if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots) {
+            if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
                 out.push((v.id.clone(), k, rel));
             }
         }
@@ -108,14 +122,27 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
 /// record's path as stored, and where it goes under the export folder. `None` when the file keeps its own path: the
 /// record names no slot for it, it has no job (a kept DDS), a packing source or a helper, or `record_rel` refuses the
 /// path. `record_entries` (the plan) and `record_preview` (the picker) both call it.
-fn member_write<'a>(
+///
+/// Note HL3: under a base mapping (`base`: the base and the files' default names) a slot the source lacks goes to
+/// the base's folder, named by the file's default name with the base's stem (`renamed_output`).
+fn member_write(
     root: &Path,
     v: &SetView,
     item: &TextureItem,
-    slots: &'a BTreeMap<u8, String>,
-) -> Option<(OutputKey, &'a String, PathBuf)> {
-    let path = slots.get(&record_slot(item)?)?;
-    let rel = record_rel(root, &item.key, path)?;
+    slots: &BTreeMap<u8, String>,
+    base: Option<(&str, &DefaultOutputs)>,
+) -> Option<(OutputKey, String, PathBuf)> {
+    let slot = record_slot(item)?;
+    let path = match (slots.get(&slot), base) {
+        (Some(p), _) => p.clone(),
+        (None, Some((base, defaults))) => {
+            let (dir, stem) = base.rsplit_once('/')?;
+            let named = renamed_output(&defaults.key(item)?, stem, v.tails())?;
+            format!("{dir}/{}", named.file_name()?.to_string_lossy())
+        }
+        (None, None) => return None,
+    };
+    let rel = record_rel(root, &item.key, &path)?;
     let k = if item.kind == ItemKind::Packed {
         OutputKey::Packed {
             set: v.id.clone(),
@@ -415,20 +442,35 @@ pub fn filter_records<'a>(list: &'a [TxstRecord], query: &str) -> Vec<&'a TxstRe
 
 /// [`filter_records`] as indexes into `list`, for a picker that keeps its hits between frames.
 pub fn record_hits(list: &[TxstRecord], query: &str) -> Vec<usize> {
+    hits(list, query, record_hay)
+}
+
+/// [`record_hits`] over the Map to target… rows: a record by the same fields, a mesh path or file base by its base.
+pub fn pick_hits(rows: &[TargetPick], query: &str) -> Vec<usize> {
+    hits(rows, query, |p| match p {
+        TargetPick::Record(r) => record_hay(r),
+        TargetPick::Mesh(m) => m.base.clone(),
+        TargetPick::Files(f) => f.base.clone(),
+    })
+}
+
+fn record_hay(r: &TxstRecord) -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        r.edid,
+        r.plugin,
+        r.winner,
+        r.formid,
+        r.slots.get(&1).map_or("", String::as_str)
+    )
+}
+
+fn hits<T>(list: &[T], query: &str, hay: impl Fn(&T) -> String) -> Vec<usize> {
     let q = query.trim().replace('\\', "/").to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
     (0..list.len())
         .filter(|&i| {
-            let r = &list[i];
-            let hay = format!(
-                "{}\n{}\n{}\n{}\n{}",
-                r.edid,
-                r.plugin,
-                r.winner,
-                r.formid,
-                r.slots.get(&1).map_or("", String::as_str)
-            )
-            .to_lowercase();
+            let hay = hay(&list[i]).to_lowercase();
             words.iter().all(|w| hay.contains(w))
         })
         .collect()
@@ -442,8 +484,17 @@ impl TxstRecord {
             formid: self.formid.clone(),
             edid: self.edid.clone(),
             slots: self.slots.clone(),
+            base: None,
         }
     }
+}
+
+/// What a set can be mapped to (Note HL): a target mod's record, mesh path or file base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetPick {
+    Record(TxstRecord),
+    Mesh(MeshPath),
+    Files(FileBase),
 }
 
 impl AppModel {
@@ -477,9 +528,9 @@ impl AppModel {
                 !matches!(i.status, ItemStatus::PackedInto(_)) && i.kind != ItemKind::Helper
             })
             .map(|i| {
-                let path = member_write(root, &v, i, &r.slots)
+                let path = member_write(root, &v, i, &r.slots, None)
                     .filter(|_| !off)
-                    .map(|(_, p, _)| p.clone());
+                    .map(|(_, p, _)| p);
                 (i.name.clone(), path)
             })
             .collect()
@@ -507,6 +558,58 @@ impl AppModel {
         self.map_record(&id, map)
     }
 
+    /// Map set `id` to a record, mesh path or file base of the target mod; it replaces any other mapping.
+    pub fn map_target(&mut self, id: &str, pick: TargetPick) -> Result<(), String> {
+        let (base, slots) = match pick {
+            TargetPick::Record(r) => return self.map_record(id, r.to_map()),
+            TargetPick::Mesh(p) => (p.base, p.slots),
+            TargetPick::Files(f) => (f.base, f.slots),
+        };
+        let base = Some(base);
+        self.map_record(
+            id,
+            TxstMap {
+                base,
+                slots,
+                ..TxstMap::default()
+            },
+        )
+    }
+
+    /// The written output paths of set `v` (`game_key`: lower case, from `textures`) that the target mod already
+    /// ships as texture files. Empty without a target mod.
+    pub fn target_replaces(&self, v: &SetView) -> Vec<String> {
+        let (Some(t), Some(root)) = (self.target(), self.root.as_deref()) else {
+            return vec![];
+        };
+        let txst = self.stored_txst(&v.id).filter(|_| !self.record_ignored(v));
+        let defaults = txst
+            .as_ref()
+            .is_some_and(TxstMap::is_base)
+            .then(|| DefaultOutputs::new(self))
+            .flatten();
+        let mut out: Vec<String> = v
+            .members
+            .iter()
+            .filter_map(|k| self.item(k))
+            .filter_map(|item| {
+                let mapped = txst.as_ref().and_then(|t| {
+                    let base = t.base.as_deref().zip(defaults.as_ref());
+                    member_write(root, v, item, &t.slots, base).map(|(_, _, rel)| rel)
+                });
+                match mapped {
+                    Some(rel) => Some(game_key(&rel.to_string_lossy())),
+                    None => (item.job.is_some() && !item.job_key.is_empty())
+                        .then(|| game_key(&item.job_key)),
+                }
+            })
+            .filter(|p| t.files.iter().any(|f| f.slots.values().any(|s| s == p)))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Map set `set` to a texture set record. A re-plan follows; inside `batch_edit` it joins the batch.
     pub fn map_record(&mut self, set: &str, map: TxstMap) -> Result<(), String> {
         if !self.sets_editable() {
@@ -515,14 +618,38 @@ impl AppModel {
         let Some(v) = self.view_of(set) else {
             return Err(format!("no set {set}"));
         };
-        let (id, label) = (v.id.clone(), format!("Map {} to {}", v.id, map.edid));
+        let (id, label) = (
+            v.id.clone(),
+            format!("Map {} to {}", v.id, map.base.as_ref().unwrap_or(&map.edid)),
+        );
+        // A base the set already has, in other case, is no new mapping (Note HL3).
+        let stored = self.stored_txst(&id);
+        if let (Some(t), Some(b)) = (&stored, &map.base) {
+            let fold = |a: &BTreeMap<u8, String>, b: &BTreeMap<u8, String>| {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b)
+                        .all(|((n, p), (m, q))| n == m && p.eq_ignore_ascii_case(q))
+            };
+            if t.base.as_ref().is_some_and(|s| s.eq_ignore_ascii_case(b))
+                && fold(&t.slots, &map.slots)
+            {
+                return Ok(());
+            }
+        }
         // Another record starts with every fill on: a slot turned off under one record says nothing about another's.
         // The same key (plugin ASCII-folded + FormID; "Use new paths", Change record to its own) keeps them.
-        let off = self.stored_txst(&id).map_or_else(
+        let off = stored.map_or_else(
             || self.stored_no_fill(&id),
             |t| {
-                let same =
-                    t.plugin.eq_ignore_ascii_case(&map.plugin) && formid_eq(&t.formid, &map.formid);
+                let same = match (&t.base, &map.base) {
+                    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                    (None, None) => {
+                        t.plugin.eq_ignore_ascii_case(&map.plugin)
+                            && formid_eq(&t.formid, &map.formid)
+                    }
+                    _ => false,
+                };
                 if same {
                     vec![]
                 } else {

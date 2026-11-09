@@ -384,7 +384,7 @@ fn edids(
         Kind::Txst => match set_key(v).map(|k| m.scan_facts(&k)) {
             Some(Ok(f)) => {
                 if f.txst_edids.is_empty() {
-                    ui.colored_label(AMBER, NO_TXST_USES);
+                    ui.weak(NO_TXST_USES);
                 }
                 f.txst_edids.into_iter().map(|e| (e.clone(), e)).collect()
             }
@@ -500,8 +500,14 @@ fn statics(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut
         return;
     }
     let st = m.statics_status(v);
-    if let Some(s) = &st {
-        ui.label(statics_text(s));
+    match &st {
+        Some(s @ StaticsStatus::Unused) => {
+            ui.weak(statics_text(s));
+        }
+        Some(s) => {
+            ui.label(statics_text(s));
+        }
+        None => {}
     }
     meshes(ui, v, st.as_ref());
 }

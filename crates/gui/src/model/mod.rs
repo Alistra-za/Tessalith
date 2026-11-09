@@ -45,6 +45,7 @@ pub mod sets;
 pub mod sets_filter;
 pub mod shell;
 pub mod skin;
+pub mod target_mod;
 pub mod texture_view;
 pub mod txst_map;
 pub mod used_by;
@@ -252,8 +253,8 @@ fn read_only_banner(error: &str) -> String {
     )
 }
 
-/// `(evidence_rev, export.revision, export running)`.
-type ProblemsKey = (u64, u64, bool, u64);
+/// `(evidence_rev, export.revision, export running, history.pushes, scan_stamp)`.
+type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
 
 /// The cached set views, export blocks and delete-section hits, valid for `key` only.
 #[derive(Default)]
@@ -262,7 +263,7 @@ pub(crate) struct ViewCache {
     pub views: Option<Arc<Vec<sets::SetView>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
-    /// Keyed by (evidence_rev, export.revision, export running) inside the view_key cell (K9).
+    /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
@@ -328,6 +329,8 @@ pub(crate) struct ViewKey {
     scan: cs_pbr::Stamp,
     /// `AppModel::known_rev`: the scan's `supplies` decide which missing-map warnings a view keeps.
     known_rev: u64,
+    /// Note HL: the target mod's read; the export-overlap block reads the stored path.
+    target_mod_rev: u64,
 }
 
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
@@ -416,6 +419,14 @@ pub struct AppModel {
     /// Bumped by `set_known` when `known` changes; part of `ViewKey`, so a scan landing after the plan updates the
     /// set views (their missing-map warnings read `known.supplies`) without a new plan (Note HE4).
     known_rev: u64,
+    /// Note HL: what the last read of the project's target mod found (`None` until it lands or with no target).
+    pub(crate) target_mod: Option<Arc<target_mod::TargetMod>>,
+    /// Why the last Choose… in the Map to target… dialog was refused; the dialog shows it in red.
+    pub target_pick_error: Option<&'static str>,
+    /// The newest `refresh_target_mod`; a read of an older one is dropped.
+    pub(crate) target_mod_gen: u64,
+    /// Part of `ViewKey`: the export-overlap block follows a new target at once.
+    target_mod_rev: u64,
     /// Item 9: the selected texture's "Used by meshes" read (`used_by_for`).
     pub used_by: used_by::UsedByState,
     /// Note AN: the hover lists of PGPatcher-locked slots.
@@ -759,6 +770,10 @@ impl AppModel {
             gras_all_diffuses: Default::default(),
             known: Default::default(),
             known_rev: 0,
+            target_mod: None,
+            target_mod_gen: 0,
+            target_pick_error: None,
+            target_mod_rev: 0,
             used_by: Default::default(),
             original: Default::default(),
             json_editor_open: false,
@@ -1006,6 +1021,7 @@ impl AppModel {
         }
         self.apply_recovery();
         self.refresh_banner(); // a read-only document's held recovery file
+        self.refresh_target_mod();
         self.replan();
     }
 
@@ -1184,6 +1200,7 @@ impl AppModel {
         if completed {
             self.refresh_mesh_votes(false);
             self.refresh_known_paths();
+            self.refresh_target_mod();
         }
     }
 
@@ -1656,6 +1673,7 @@ impl AppModel {
                 result,
             } => self.original_landed(generation, key, result),
             WorkerMsg::KnownPaths(result) => self.known_paths_landed(result),
+            WorkerMsg::TargetMod { gen, target } => self.target_mod_landed(gen, target),
             WorkerMsg::Panicked { what, message } => {
                 match what {
                     // Audit 08f-9: one error dialog. `export_ended` shows it unless the user was leaving (then the
@@ -3047,6 +3065,7 @@ impl AppModel {
             scan_db: self.scan_db.clone(),
             scan: self.scan_stamp,
             known_rev: self.known_rev,
+            target_mod_rev: self.target_mod_rev,
         }
     }
 

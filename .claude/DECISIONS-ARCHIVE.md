@@ -261,6 +261,18 @@ ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GW, 2026-11-07)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV
 
+ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW
+
+ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW
+
+ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA
+
+ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
@@ -617,6 +629,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GW2, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
 - **HC1 A specular fills the flat alpha of a pre-packed `_rmaos`/`_rfaos` image (owner, 2026-11-05).** Before, the image won under `packing.prefer = prepacked` and the specular read "not used", even with a hand-set `rmaos.a` fill. Now, when the set's only other loose map is a specular (a generated AO the image's empty B takes may join it) and the image's alpha is flat, the image joins the recipe as CO104 does: A from the specular, the other channels from the image. "Flat" is the alpha verdict `plan_fills` reads (`AlphaFacts::empty`), so any constant counts, not only 255. An alpha with content, or another loose map, keeps the M9 result. A pre-packed DDS is never joined (images only, as CO103). No `encode_version` arm moves: the recipe and its bytes for given sources are unchanged, and the new source list re-encodes that set by itself. Tests `generated_files::a_specular_fills_the_flat_alpha_of_a_prepacked_rmaos` and its neighbours.
 
+ARCHIVED (wording before the edit; superseded in part by Note HL5, 2026-11-08)
+- **HC5 A PBR pick without a PBR albedo is not called vanilla (owner's screenshot, 2026-11-05).** The shader pick reads any PBR map (a lone `_f`), while `SetView::pbr` and the JSON need a `pbr_albedo` diffuse, so the card said "PBR (auto)" over a "vanilla" pill. The pill now says "PBR, no JSON". Nothing else changes: the set still writes no JSON. Test `pbr_landscape::a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla`.
+
 ## Note HE — 2.1 leftovers (main team, 2026-11-06)
 
 ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
@@ -670,3 +685,14 @@ ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
 
 ARCHIVED (wording before the edit; superseded in part by Note HP, 2026-11-08)
 - **HP10 Test support.** The `overlap` frame check spares a badge centred on its chip's corner: a pair is not a finding when the smaller rect is at most 24 px a side and its centre is within 1.5 px of a corner of the larger on each axis; a badge centred mid-edge is still flagged. `tests/ui_proof.rs` has `replay_with(fixture, before, lines)` and `replay_mid` (narrows the window between a set's open and the later lines, because narrowing before the click leaves the card unclickable for the driver); `sets_column_pins.rs` has `sets_width(h, w)`, which persists the Sets column's chosen width and settles 3 frames, for pins that need a narrow column now that opening a set at 1055 no longer narrows it.
+
+ARCHIVED (wording before the edit; superseded in part by Note HL6, 2026-11-08)
+- A set with no active match shows a Warning row and is left out of the JSON. [V4]
+
+ARCHIVED (wording before the edit; superseded in part by Note HL6, 2026-11-08)
+- PGPatcher JSON is GUI-only, so GUI and CLI agree for non-PBR sets only. A texture-set block's `statics = "auto"` takes the non-LOD winning meshes of the set's key from the scan (no scan, no entry); a PBR Landscape set uses its card's box. [P14, AD7]
+
+## Note HG — Texture set records in the sets model (main team, 2026-11-06)
+
+ARCHIVED (wording before the edit; superseded in part by Note HL4, 2026-11-08)
+- **HG8 The picker, the record read and the record-change rows (Task 6; the key is the owner's, the rest agent rulings).** (a) **Key, owner (2026-11-06):** "Key is plugin + EDID, not FormID. Should probably have formid somewhere in there, written as 0x (no header, first two digits, no leading 0's)... edid within a plugin itself is not a forced unique." The settled reading is plugin + FormID with the EDID as a label: `0x05000814` shows as `0x814` (`formid_text`). It is computed from `rec.local`, never `rec.formid`, whose load-order digits move (a light plugin's `FE4CD814` would keep `4CD`). (b) **The defining plugin, agent:** the plugin in a record's key is `masters_json[local >> 24]`, or the winning plugin itself when the index is at or past the master count (`clamp_local`), so an override finds the same record when the winner changes; `TxstRecord.winner` is shown beside it when they differ. The read is one query over `rec` / `rec_winner` / `plugin` / `txst_slot` with `owner_ok = 1`, ordered by EDID; a record with no path is not listed; `txst_slot.slot` is converted by `tx_to_slot` there (HG1). Like `supplies` (K1) it sits behind `unwrap_or_default`, so a failing record query empties only the picker. (c) **The picker, agent:** **Map to texture set record…** is greyed with "Scan your mods first" when the scan holds no record, and with "PGPatcher PBR sets name their outputs in the JSON; use Rename outputs" for a PBR set on Community Shaders, the same set `record_entries` ignores (HG5); the scan reason comes first. The dialog writes nothing until **Map**; it has no Enter default, so Enter never maps; a click outside does not close it (it holds the typed words). The list is a `show_rows` list of one fixed row height, filtered again only when the words or the scan change (`record_hits`, kept in `Pending::MapRecord`). **Change record…** opens on the set's current record when the scan has it. (d) **Record changes, agent:** a mapped set whose stored slots differ from `record_of` (plugin + FormID, ASCII-folded, the winner not compared) gets a Warning row "Record {EDID} changed" with **Use new paths**, which copies the record's paths and EDID in as one undo step. A record missing from a non-empty scan gets an Info row (no fix, no Review block), and the mapping and stored paths stay. An empty scan says nothing, so the mapping survives a scan that has not run. A PBR set on Community Shaders gets neither row: its mapping is ignored. (e) **A supplied slot shows where the shader has a row for it, agent:** the set editor writes "From record: {file}" in an empty slot row the record supplies. The Advanced skin editor has no `_s` row, so a supplied slot 8 shows nowhere there; its warning is still dropped. The card's "Record:" line is small, not weak, and its hover lists every slot path, marking each the set does not write itself with "(from the record)". (f) **One rule for what a member writes, agent:** `member_write` says what a member of a mapped set writes: the output key, the record's path and where it goes under the export folder. `record_entries` (the plan) and the picker's preview both call it, so a packed output with a job on a record slot is previewed, and a kept DDS with no job, a refused path, a packing source and a helper say "keeps its own path". Path collisions are not predicted in the preview. (g) **A new record starts with every fill on, agent:** `map_record` to a different key (plugin ASCII-folded + FormID) and `unmap_record` clear the set's `no_fill` in the same edit, so one undo restores it; the same key (**Use new paths**, **Change record** to its own) keeps it. (h) **Arrow keys, agent:** Up and Down in the picker move the highlight (no highlight to the first row on Down) and scroll it into view; they never map, and Enter still does nothing. (i) **`record_ignored`, agent:** `AppModel::record_ignored(&SetView)` is the one test for "a PBR set on Community Shaders, whose mapping is ignored"; the plan, the preview, the menu and the Problems rows all use it.

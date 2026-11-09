@@ -314,6 +314,15 @@ impl Missing {
     }
 }
 
+/// Note HL5: where a set's `derived_match` (the entry's `match1`) comes from, in this order: a mapping (a base, or a
+/// record's slot 1), the PBR albedo or diffuse, the set's own base path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchFrom {
+    Albedo,
+    Mapping,
+    BasePath,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetView {
     /// The engine key (`""` for a created set with no members yet).
@@ -325,6 +334,11 @@ pub struct SetView {
     /// A TruePBR JSON set: the diffuse resolves to `pbr_albedo`. Not `skin_albedo` since AG90 (owner: Advanced skin
     /// sets get no PGPatcher JSON); the engine's PBR follow-ons still use [`is_pbr_diffuse`].
     pub pbr: bool,
+    /// Note HL5: the set is written as a PGPatcher JSON entry: `pbr`, or a PBR-picked set with no `pbr_albedo`
+    /// (not a skin or shared set). `pbr` still names the prefix owner.
+    pub json: bool,
+    /// Note HL5: what `derived_match` came from.
+    pub match_from: Option<MatchFrom>,
     /// The diffuse resolves to `skin_albedo`: an Advanced skin set (no JSON, the skin card, AG90).
     pub skin: bool,
     /// A shared skin set (Note HG): marked Advanced skin, holding no diffuse and no Rmaos, only the maps other skin
@@ -427,6 +441,8 @@ impl SetView {
             members,
             slots: BTreeMap::new(),
             pbr: false,
+            json: false,
+            match_from: None,
             skin: false,
             shared: false,
             filled: BTreeMap::new(),
@@ -475,10 +491,10 @@ impl SetView {
     }
 }
 
-/// Whether `v` is written as PGPatcher JSON: a PBR set under Community Shaders (the set card badge). An Advanced
-/// skin set is not (AG90).
+/// Whether `v` is written as PGPatcher JSON: a PBR set under Community Shaders (the set card badge), with or without a
+/// PBR albedo (Note HL5). An Advanced skin set is not (AG90).
 pub fn is_json_set(v: &SetView, target: Target) -> bool {
-    v.pbr && target == Target::Cs
+    v.json && target == Target::Cs
 }
 
 /// The set's pick is `pbr_grass` (PBR grass design §4.3): its PGPatcher settings are the grass view.
@@ -492,6 +508,8 @@ pub const BADGE_PBR_LANDSCAPE: &str = "PBR Landscape → CS JSON";
 pub const BADGE_PBR_LANDSCAPE_PGP: &str = "PBR Landscape → CS + PGPatcher JSON";
 pub const BADGE_PBR_LANDSCAPE_PGP_ONLY: &str = "PBR Landscape → PGPatcher JSON (no CS records yet)";
 pub const BADGE_PBR_LANDSCAPE_NONE: &str = "PBR Landscape (no JSON yet)";
+/// A PBR pick on Community Shaders whose slots are all empty or kept DDS: the target is not the reason.
+pub const BADGE_PBR_NOTHING_TO_WRITE: &str = "PBR set (no texture to write, so no JSON)";
 
 /// The Sets column badge. A PBR Landscape set's says what it writes (Note BM, review I2): CS records when a block
 /// has an EDID, the PGPatcher entry when the set is a PGPatcher JSON set its statics rule keeps.
@@ -510,8 +528,12 @@ pub fn badge_text(m: &AppModel, v: &SetView) -> &'static str {
     } else if is_json_set(v, m.target) {
         "PBR → JSON"
     } else if super::also::is_pbr_set(v) {
-        // Note HC5: the shader pick reads any PBR map, the JSON needs a `pbr_albedo` diffuse.
-        "PBR set without a PBR albedo (no JSON)"
+        // Note HL5: the JSON is written on Community Shaders only, and only for a set with a filled slot.
+        if m.target == Target::Cs {
+            BADGE_PBR_NOTHING_TO_WRITE
+        } else {
+            "PBR set (no JSON on this target)"
+        }
     } else {
         "vanilla set (no JSON)"
     }
@@ -1033,6 +1055,32 @@ fn entry_view(
     }
 }
 
+/// `derive_match_diffuse` of a texture path (`textures/a/b.dds`, any slashes, `.dds` optional).
+fn match_of_path(p: &str) -> String {
+    let p = p.replace('\\', "/");
+    let p = p.strip_suffix(".dds").unwrap_or(&p);
+    let (dir, stem) = p.rsplit_once('/').unwrap_or(("", p));
+    derive_match_diffuse(dir, stem)
+}
+
+/// Note HL5: `derived_match` and where it came from. A JSON set takes the first that exists: its mapping's base, a
+/// record's slot 1 (no albedo owner), the albedo (the diffuse, as before), the set's own base path.
+fn set_match(v: &mut SetView, diffuse: Option<&TextureItem>) {
+    let albedo = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+    let mapped = v.txst.as_ref().and_then(|t| match &t.base {
+        Some(b) => Some(match_of_path(b)),
+        None => t.slots.get(&1).filter(|_| !v.pbr).map(|p| match_of_path(p)),
+    });
+    let (m, from) = match (v.json, mapped, albedo) {
+        (true, Some(m), _) => (Some(m), Some(MatchFrom::Mapping)),
+        (_, _, Some(a)) => (Some(a), Some(MatchFrom::Albedo)),
+        (true, None, None) => (Some(match_of_path(&v.id)), Some(MatchFrom::BasePath)),
+        _ => (None, None),
+    };
+    v.derived_match = m;
+    v.match_from = from;
+}
+
 /// PBR, derived match, prefix.
 fn finish_view(m: &AppModel, v: &mut SetView) {
     let diffuse = match v.slots.get(&SlotKind::Diffuse) {
@@ -1046,6 +1094,13 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     v.pbr = st == Some(Subtype::PbrAlbedo);
     v.skin = st == Some(Subtype::SkinAlbedo);
     v.shared = is_shared(v, &m.suffix_aliases);
+    // Note HL5: a PBR pick with no `pbr_albedo` is a JSON set too (the mesh keeps its own diffuse).
+    // A set with no texture filled (all kept DDS, no job) writes none.
+    v.json = v.pbr
+        || (!v.skin
+            && !v.shared
+            && v.slots.values().any(SlotFill::is_filled)
+            && v.shader.as_ref().is_some_and(|p| p.shader == Shader::Pbr));
     // Note HE1: the Rmaos slot reads RFAOS when its item is an RFAOS pack; an empty slot follows the shader.
     v.rfaos = match v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
         Some(k) => m.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
@@ -1060,7 +1115,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     if is_pbr_grass(v) {
         crate::pgp::settings::grass_view(&mut v.settings);
     }
-    v.derived_match = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+    set_match(v, diffuse);
     match prefix_of(&v.settings, v.derived_match.as_deref().unwrap_or("")) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
@@ -3114,10 +3169,19 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
         .collect()
 }
 
+/// Whether `item` writes an output of its own: it has a job and is neither a raw packing source nor a helper. A
+/// record-only slot (`_s` backlight, env mask, cubemap) has no `slot_of` but writes a file like any other, so the
+/// output key must not depend on the slot.
+fn writes_own_output(item: &TextureItem) -> bool {
+    item.job.is_some()
+        && !matches!(item.status, ItemStatus::PackedInto(_))
+        && item.kind != ItemKind::Helper
+}
+
 /// The engine key of the output `item` writes: its file, or its set and recipe for a packed output. `None` for an
 /// item that writes no output of its own.
 pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKey> {
-    slot_of(item)?;
+    writes_own_output(item).then_some(())?;
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
@@ -3153,7 +3217,7 @@ pub(crate) fn item_output_key_in(
     owners: &HashMap<&str, &str>,
     item: &TextureItem,
 ) -> Option<OutputKey> {
-    slot_of(item)?;
+    writes_own_output(item).then_some(())?;
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
@@ -3228,5 +3292,46 @@ mod order_tests {
             let ids_of = |v: &[SetView]| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
             assert_eq!(ids_of(&views), ids_of(&old), "round {round}: {order:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::*;
+    use engine::shader::ShaderOrigin;
+
+    fn pbr_set(json: bool) -> SetView {
+        let mut v = SetView::new("k".into(), "a/b".into(), vec![]);
+        v.json = json;
+        v.shader = Some(ShaderPick {
+            shader: Shader::Pbr,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        });
+        v
+    }
+
+    #[test]
+    fn a_pbr_pick_with_nothing_filled_does_not_blame_the_target() {
+        let mut m = super::super::tests::bare_model();
+        let v = pbr_set(false);
+        m.target = Target::Cs;
+        assert_eq!(badge_text(&m, &v), BADGE_PBR_NOTHING_TO_WRITE);
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+        m.target = Target::Vanilla;
+        assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+    }
+
+    /// A no-albedo PBR set (a JSON set, Note HL5) reads "PBR, no JSON" off Community Shaders and "PBR → JSON" on it.
+    #[test]
+    fn a_no_albedo_pbr_set_reads_no_json_off_cs() {
+        let mut m = super::super::tests::bare_model();
+        let v = pbr_set(true);
+        m.target = Target::Vanilla;
+        assert_eq!(kind_text(&m, &v), "PBR, no JSON");
+        assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
+        m.target = Target::Cs;
+        assert_eq!(kind_text(&m, &v), "PBR → JSON");
     }
 }

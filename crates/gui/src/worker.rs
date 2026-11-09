@@ -66,6 +66,11 @@ pub enum WorkerMsg {
     },
     /// The scan's texture and mesh paths were read (`AppModel::refresh_known_paths`).
     KnownPaths(Result<crate::model::known_paths::KnownPaths, String>),
+    /// Note HL: the target mod of request `gen` was read (`AppModel::refresh_target_mod`); a stale `gen` is dropped.
+    TargetMod {
+        gen: u64,
+        target: std::sync::Arc<crate::model::target_mod::TargetMod>,
+    },
     Event(EngineEvent),
     ExportDone(Result<BatchSummary, String>),
     /// Note CN: an Also export's phases' summary; sent just before its `ExportDone`. The worker then waits on the

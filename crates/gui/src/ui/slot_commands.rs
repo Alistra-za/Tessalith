@@ -34,7 +34,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
     let pbr = views(model)
         .iter()
         .find(|v| same_id(&v.id, &set))
-        .is_some_and(|v| v.pbr);
+        .is_some_and(|v| v.json);
     let off = model.sets_read_only_reason();
     let editable = off.is_none();
     let why = off.unwrap_or_default();

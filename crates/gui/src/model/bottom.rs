@@ -1,4 +1,5 @@
 //! The bottom panel's state (layout v2 A1, A9; R7, R8): which tab shows, and whether the panel is open.
+use super::cs_pbr::{set_key, statics_text, Kind, StaticsStatus, NO_TXST_USES};
 use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
 use super::{checks, code_text, counts_toward_badge, pbr_export, sets, AppModel, ItemStatus};
@@ -293,6 +294,8 @@ pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
         m.export.running.is_some(),
         // Note FC3: an `Undo` fix is built only while its step is the top one.
         m.history.pushes,
+        // Note HL6: the statics and texture-set rows read the scan database.
+        m.scan_stamp,
     )
 }
 
@@ -559,7 +562,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
     for v in views.iter().filter(|v| !m.record_ignored(v)) {
-        let Some(map) = &v.txst else { continue };
+        let Some(map) = v.txst.as_ref().filter(|t| !t.is_base()) else {
+            continue;
+        };
         if m.record_of(map).is_some_and(|r| r.slots != map.slots) {
             out.push(Problem {
                 fix: Some(Fix::UseRecordPaths(v.id.clone())),
@@ -822,7 +827,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // empty scan says nothing (a scan that has not run is not a record that went away).
     if !m.known.records.is_empty() {
         for v in views.iter().filter(|v| !m.record_ignored(v)) {
-            let Some(map) = v.txst.as_ref().filter(|t| m.record_of(t).is_none()) else {
+            let Some(map) = v
+                .txst
+                .as_ref()
+                .filter(|t| !t.is_base() && m.record_of(t).is_none())
+            else {
                 continue;
             };
             out.push(row(
@@ -836,9 +845,52 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             ));
         }
     }
+    // Note HL6: missing links are Info rows and still export; conflicts stay Warning.
+    for v in views.iter() {
+        let at = || set_at(&v.key, &v.id);
+        // `v.json` ignores the target (a PBR pick with a filled slot); `pgp_written` is the export's own test.
+        if m.pgp_written(v) {
+            // A typed match that matches nothing drops the set's entry (`json_entries`), so the mesh keeps nothing.
+            let has_entry = !crate::pgp::prefix::matches_nothing(
+                &v.settings,
+                v.derived_match.as_deref().unwrap_or(""),
+            );
+            if let Some(path) = pbr_export::no_albedo_slot1(v).filter(|_| has_entry) {
+                out.push(row(
+                    Level::Info,
+                    at(),
+                    NO_ALBEDO_KEEPS.replace("{path}", &path),
+                    None,
+                ));
+            }
+            if let Some(s @ StaticsStatus::Unused) = m.statics_status(v) {
+                out.push(row(Level::Info, at(), statics_text(&s), None));
+            }
+        }
+        if m.cs_block(&v.id, Kind::Txst).is_some()
+            && set_key(v)
+                .and_then(|k| m.scan_facts(&k).ok())
+                .is_some_and(|f| f.txst_edids.is_empty())
+        {
+            out.push(row(Level::Info, at(), NO_TXST_USES.into(), None));
+        }
+        for f in m.target_replaces(v) {
+            out.push(row(
+                Level::Info,
+                at(),
+                REPLACES_TARGET.replace("{file}", &f),
+                None,
+            ));
+        }
+    }
     out.extend(nif_rows(NifLevel::Info, Level::Info));
     out
 }
+
+/// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
+pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
+/// Note HL6: an output the target mod already ships (it wins or loses by load order).
+pub const REPLACES_TARGET: &str = "Replaces {file} of the target mod in the load order";
 
 /// The hover of a `Tag as grass` row (Note FC10).
 pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal map, as complex grass is. No grass record \

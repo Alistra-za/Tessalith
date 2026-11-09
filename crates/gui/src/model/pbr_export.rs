@@ -87,25 +87,58 @@ fn slots_of(
     m: &AppModel,
 ) -> BTreeMap<u8, String> {
     let mut out = BTreeMap::new();
+    // The output paths are relative to the project root; a root that is itself a `textures` folder leaves that
+    // folder out of them, and the game path has it.
+    let root_is_textures = m
+        .root
+        .as_deref()
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|n| n.eq_ignore_ascii_case("textures"));
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
             SlotFill::Own { item } => (item, false),
             SlotFill::Empty => continue,
         };
-        let Some(p) = fill_path(item, views, paths, m) else {
-            continue;
+        // Note HL5: a no-albedo set's outputs stay at the mesh's own paths: the mapped output (a rel path under
+        // `textures`), else the file's game path.
+        let json_only = v.json && !v.pbr;
+        let p = match fill_path(item, views, paths, m) {
+            Some(p) if json_only && root_is_textures => PathBuf::from("textures").join(p),
+            Some(p) => p.clone(),
+            None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
+                Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
+                None => continue,
+            },
+            None => continue,
         };
         // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command. Its slot 3 default
         // is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an explicit slot is
         // never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
         let at_own_path = *kind != SlotKind::SkinSk
+            && v.pbr
             && v.prefix
                 .as_deref()
-                .is_some_and(|pre| path_lower(p) == path_lower(&output_rel(pre, kind.suffix())));
+                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(pre, kind.suffix())));
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
+        }
+    }
+    if v.json && !v.pbr {
+        // Note HL5: the mesh keeps its own textures; slot 1 and the empty 2 / 6 name the mapping's, else slot 1 is the
+        // set's base path (PGPatcher skips a shape whose slot 1 would point at a missing `textures\pbr` copy).
+        let stored = |n: u8| {
+            v.txst
+                .as_ref()
+                .and_then(|t| t.slots.get(&n))
+                .map(|p| p.replace('/', "\\"))
+        };
+        out.extend(no_albedo_slot1(v).map(|p| (1, p)));
+        for n in [2, 6] {
+            if !slot_filled(v, n) {
+                out.extend(stored(n).map(|p| (n, p)));
+            }
         }
     }
     for n in 1..=8u8 {
@@ -114,6 +147,50 @@ fn slots_of(
         }
     }
     out
+}
+
+/// Note HL5: the diffuse path of a no-albedo JSON set whose slot 1 is empty: the mapping's slot 1, else the set's base
+/// path. `None` for any other set. The Problems row (Note HL6) names the same path.
+pub(super) fn no_albedo_slot1(v: &SetView) -> Option<String> {
+    if !v.json || v.pbr || slot_filled(v, 1) {
+        return None;
+    }
+    let stored = v
+        .txst
+        .as_ref()
+        .and_then(|t| t.slots.get(&1))
+        .map(|p| p.replace('/', "\\"));
+    stored.or_else(|| {
+        v.derived_match
+            .as_ref()
+            .map(|d| format!("textures\\{d}.dds"))
+    })
+}
+
+/// Whether a texture fills game slot `n` of `v`.
+fn slot_filled(v: &SetView, n: u8) -> bool {
+    v.slots
+        .iter()
+        .any(|(k, f)| k.game_slot() == Some(n) && f.is_filled())
+}
+
+/// Note HL5: a JSON set with no albedo and no texture (own or mapped) for slot 2 or 6 locks it, so PGPatcher keeps
+/// the mesh's own; a lock or `slotN` the user set wins. A filled slot `slots_of` could not name (a kept DDS with no
+/// job) is locked too, whatever its number: PGPatcher would fill it from `textures\pbr\<match>_<suffix>.dds` and
+/// skip the shape.
+fn lock_empty_slots(v: &SetView, slots: &BTreeMap<u8, String>, s: &mut Settings) {
+    if !v.json || v.pbr {
+        return;
+    }
+    for n in 1..=8u8 {
+        let Some(key) = crate::pgp::prefix::lock_key(n) else {
+            continue;
+        };
+        let wanted = slot_filled(v, n) || n == 2 || n == 6;
+        if wanted && !slots.contains_key(&n) && !s.contains_key(key) {
+            s.insert(key.into(), Value::Bool(true));
+        }
+    }
 }
 
 /// Filled slots whose texture has no output path (its owner was dropped as a duplicate, or its prefix is unusable),
@@ -135,6 +212,10 @@ fn unresolved_slots(
         let Some(n) = kind.game_slot() else {
             continue;
         };
+        // Note HL5: a no-albedo set's own texture with no output path (a kept DDS) stays where the mesh has it.
+        if v.json && !v.pbr && from.is_none() {
+            continue;
+        }
         if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {
             continue;
         }
@@ -174,17 +255,20 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
         .filter(|v| {
-            v.pbr && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+            v.json && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
         })
         .map(|v| {
+            let slots = slots_of(v, &views, &paths, m);
+            let mut settings = crate::model::auto_flags::resolved_for(
+                v.json,
+                &v.slots,
+                &v.settings,
+                &crate::model::auto_flags::hint(m, v),
+            );
+            lock_empty_slots(v, &slots, &mut settings);
             let e = EntryInput {
-                settings: crate::model::auto_flags::resolved_for(
-                    v.pbr,
-                    &v.slots,
-                    &v.settings,
-                    &crate::model::auto_flags::hint(m, v),
-                ),
-                slots: slots_of(v, &views, &paths, m),
+                settings,
+                slots,
                 derived_match: v.derived_match.clone().unwrap_or_default(),
                 section: false,
             };
@@ -279,6 +363,18 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
     let mut out = vec![];
+    // Note HL: an export folder picked after the target mod, or a hand-edited `target_mod`, still overlaps it.
+    let target = m.sets_doc.as_ref().and_then(|d| d.target_mod());
+    if let Some((t, e)) = target.zip(m.export_folder_chosen()) {
+        if super::target_mod::overlaps(&t, &e) {
+            out.push(ExportIssue {
+                set_id: String::new(),
+                set_key: String::new(),
+                text: super::target_mod::TARGET_IS_EXPORT.into(),
+                fix: None,
+            });
+        }
+    }
     for v in &set_views(m) {
         // A value CS would reject voids the whole `.csskin.json`; it is not a PGPatcher entry, so it comes first.
         if m.target == Target::Cs && v.skin {
@@ -301,7 +397,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
         if has(v, SlotKind::Emissive) && has(v, SlotKind::SkinSk) {
             out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
         }
-        if m.target != Target::Cs || !v.pbr {
+        if m.target != Target::Cs || !v.json {
             continue;
         }
         let s = &v.settings;
@@ -363,7 +459,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             if out.is_empty() {
                 let views = set_views(m);
                 let (_, paths) = engine_inputs(m);
-                for v in views.iter().filter(|v| v.pbr && m.pgp_entry_wanted(v)) {
+                for v in views.iter().filter(|v| v.json && m.pgp_entry_wanted(v)) {
                     for (n, from) in unresolved_slots(v, &views, &paths, m) {
                         let text = match from {
                             Some(from) => format!(
@@ -499,7 +595,7 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
     let known = m.known_textures(Some(0));
     set_views(m)
         .iter()
-        .filter(|v| v.pbr)
+        .filter(|v| v.json)
         .flat_map(|v| {
             let derived = v.derived_match.as_deref().unwrap_or("");
             pitfalls(&v.settings, derived)
@@ -809,7 +905,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
                 &mut out.warnings
             };
             to.push((i.set_id, text));
-        } else if i.set_id.is_empty() || views.iter().any(|v| v.pbr && same_id(&v.id, &i.set_id)) {
+        } else if i.set_id.is_empty() || views.iter().any(|v| v.json && same_id(&v.id, &i.set_id)) {
             let to = if error {
                 &mut out.general_errors
             } else {
@@ -830,8 +926,29 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
 
 #[cfg(test)]
 mod tests {
-    use super::file_name_problem;
+    use super::*;
     use crate::pgp::prefix::check_file_name;
+
+    /// Final fix 5: a filled slot of a no-albedo JSON set that no path names (a kept DDS, no job) is locked, so
+    /// PGPatcher keeps the mesh's own; a named one and an explicit lock are left alone.
+    #[test]
+    fn a_filled_slot_no_path_names_is_locked() {
+        let mut v = SetView::new("k".into(), "a/b".into(), vec![]);
+        v.json = true;
+        v.slots
+            .insert(SlotKind::Normal, SlotFill::Own { item: "x".into() });
+        v.slots
+            .insert(SlotKind::Emissive, SlotFill::Own { item: "y".into() });
+        let named: BTreeMap<u8, String> = [(3, "named.dds".to_string())].into();
+        let mut s = Settings::new();
+        s.insert("lock_parallax".into(), Value::Bool(false));
+        lock_empty_slots(&v, &named, &mut s);
+        assert_eq!(s.get("lock_normal"), Some(&Value::Bool(true)));
+        assert_eq!(s.get("lock_emissive"), None, "named");
+        assert_eq!(s.get("lock_rmaos"), Some(&Value::Bool(true)), "empty 6");
+        assert_eq!(s.get("lock_parallax"), Some(&Value::Bool(false)), "kept");
+        assert_eq!(s.get("lock_cnr"), None, "an empty slot 7 stays as before");
+    }
 
     /// Backlog L8: the JSON-name check and `check_file_name` refuse the same device names, trailing dots and spaces
     /// and separators, with the same wording.

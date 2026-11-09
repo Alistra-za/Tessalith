@@ -425,6 +425,7 @@ fn record(slots: &[(u8, &str)]) -> TxstMap {
         formid: "000800".into(),
         edid: "MyBody".into(),
         slots: slots.iter().map(|(n, p)| (*n, p.to_string())).collect(),
+        base: None,
     }
 }
 
@@ -2197,16 +2198,16 @@ fn menu_of(m: AppModel) -> Harness<'static, AppModel> {
 fn the_menu_offers_mapping() {
     let d = tempfile::tempdir().unwrap();
     let h = menu_of(unmapped(d.path()));
-    h.get_by_label("Map to texture set record…");
-    assert!(h.query_by_label("Change record…").is_none());
-    assert!(h.query_by_label("Remove record mapping").is_none());
+    h.get_by_label("Map to target…");
+    assert!(h.query_by_label("Change mapping…").is_none());
+    assert!(h.query_by_label("Remove mapping").is_none());
     let d = tempfile::tempdir().unwrap();
     let mut m = stored(d.path(), "textures/s/body_n.dds");
     scan(&mut m, vec![arch()]);
     let h = menu_of(m);
-    h.get_by_label("Change record…");
-    h.get_by_label("Remove record mapping");
-    assert!(h.query_by_label("Map to texture set record…").is_none());
+    h.get_by_label("Change mapping…");
+    h.get_by_label("Remove mapping");
+    assert!(h.query_by_label("Map to target…").is_none());
 }
 
 #[test]
@@ -2215,7 +2216,7 @@ fn the_menu_removes_a_mapping() {
     let mut m = stored(d.path(), "textures/s/body_n.dds");
     scan(&mut m, vec![arch()]);
     let mut h = menu_of(m);
-    h.get_by_label("Remove record mapping").click();
+    h.get_by_label("Remove mapping").click();
     h.run();
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
     assert!(entry(h.state(), M).txst.is_none());
@@ -2226,7 +2227,7 @@ fn it_is_greyed_with_no_scan() {
     let d = tempfile::tempdir().unwrap();
     let m = project_toml(d.path(), M_FILES, &skin_set(M, ""));
     let mut h = menu_of(m);
-    let item = h.get_by_label("Map to texture set record…");
+    let item = h.get_by_label("Map to target…");
     assert!(item.accesskit_node().is_disabled());
     item.hover();
     h.run();
@@ -2234,7 +2235,7 @@ fn it_is_greyed_with_no_scan() {
 }
 
 #[test]
-fn it_is_greyed_on_a_pbr_set() {
+fn it_is_greyed_on_a_pbr_set_without_a_target_mod() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::pbr_opened(d.path());
     scan(&mut m, vec![arch()]);
@@ -2243,7 +2244,9 @@ fn it_is_greyed_on_a_pbr_set() {
     h.run();
     pill_of(&h, "landscape/rock01").click_secondary();
     h.run();
-    let item = h.get_by_label("Map to texture set record…");
+    // Every row is a record row and records are ignored: nothing could be mapped. With a target mod the item stays
+    // on for its mesh and file rows (tests/target_mod.rs `record_rows_are_disabled_on_an_albedo_pbr_set`).
+    let item = h.get_by_label("Map to target…");
     assert!(item.accesskit_node().is_disabled());
     item.hover();
     h.run();
@@ -2253,11 +2256,18 @@ fn it_is_greyed_on_a_pbr_set() {
 fn open_picker(h: &mut Harness<'static, AppModel>) {
     pill_of(h, M).click_secondary();
     h.run();
-    h.get_by_label("Map to texture set record…").click();
+    h.get_by_label("Map to target…").click();
     h.run();
 }
 
 const ROW: &str = "Arch_skinbody_elf (0x814, Arch_Resources.esp)";
+
+/// The list row (a button named `Record <ROW> · used by (N)`); its cells are labels with the same text.
+fn row<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+    h.query_all_by_role(Role::Button)
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.contains(ROW)))
+        .expect("the record row")
+}
 
 #[test]
 fn the_picker_maps_a_record() {
@@ -2267,8 +2277,7 @@ fn the_picker_maps_a_record() {
     let mut h = harness(m, 1280.0);
     h.run();
     open_picker(&mut h);
-    h.get_by_label("Search texture set records")
-        .type_text("elf");
+    h.get_by_label("Search targets").type_text("elf");
     h.run();
     h.get_by_label("1 of 2 records");
     assert!(
@@ -2280,17 +2289,15 @@ fn the_picker_maps_a_record() {
     assert!(map.accesskit_node().is_disabled());
     map.hover();
     h.run();
-    h.get_by_label("Pick a record first");
-    h.get_by_label(ROW).click();
+    h.get_by_label("Pick a row first");
+    row(&h).click();
     h.run();
     h.get_by_label("x.png → textures/s/e/femalebody.dds");
     h.get_by_label("x_rfaos.png: keeps its own path");
-    // Enter doesn't map, and nothing is written before Map.
-    h.key_press(eframe::egui::Key::Enter);
-    h.run();
+    // Nothing is written before Map; Enter maps the chosen row once no widget has focus (the click took it).
     assert!(entry(h.state(), M).txst.is_none());
     assert_eq!(h.state().sets_doc.as_ref().unwrap().rev(), rev);
-    h.get_by_role_and_label(Role::Button, "Map").click();
+    h.key_press(eframe::egui::Key::Enter);
     h.run();
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
     let e = entry(h.state(), M).txst.expect("mapped");
@@ -2310,11 +2317,14 @@ fn cancel_leaves_the_doc_unchanged() {
     let mut h = harness(m, 1280.0);
     h.run();
     open_picker(&mut h);
-    h.get_by_label(ROW).click();
+    row(&h).click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Cancel").click();
     h.run();
-    assert!(h.query_by_label(ROW).is_none(), "the picker closed");
+    assert!(
+        h.query_all_by_label_contains(ROW).next().is_none(),
+        "the picker closed"
+    );
     assert!(entry(h.state(), M).txst.is_none());
     assert_eq!(h.state().sets_doc.as_ref().unwrap().rev(), rev);
 }
@@ -2504,6 +2514,7 @@ fn a_new_record_starts_with_every_fill_on() {
         formid: "2".into(),
         edid: "B".into(),
         slots: [(2, BODY_N.to_string())].into(),
+        base: None,
     };
     m.map_record(M, other).unwrap();
     idle(&mut m);
@@ -2523,7 +2534,7 @@ fn a_new_record_starts_with_every_fill_on() {
 }
 
 #[test]
-fn the_arrow_keys_move_the_highlight_and_enter_maps_nothing() {
+fn the_arrow_keys_move_the_highlight_and_enter_in_the_field_maps_nothing() {
     let d = tempfile::tempdir().unwrap();
     let m = unmapped(d.path());
     let mut h = harness(m, 1280.0);
@@ -2541,7 +2552,10 @@ fn the_arrow_keys_move_the_highlight_and_enter_maps_nothing() {
     h.key_press(egui::Key::Enter);
     h.run();
     assert!(entry(h.state(), M).txst.is_none(), "Enter maps nothing");
-    assert!(h.query_all_by_label(ROW).next().is_some(), "still open");
+    assert!(
+        h.query_all_by_label_contains(ROW).next().is_some(),
+        "still open"
+    );
 }
 
 #[test]
