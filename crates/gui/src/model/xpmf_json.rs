@@ -438,6 +438,8 @@ pub struct PendingXpmf {
     /// the same relative paths), written, guarded and reported as the files above. `None` as `prepare` leaves it
     /// without the tick.
     pub vanilla: Option<Box<PendingXpmf>>,
+    /// Note HF9: a run that leaves sets out (a scope or an excluded group) reports no orphans.
+    pub scoped: bool,
 }
 
 impl PendingXpmf {
@@ -515,20 +517,24 @@ fn refusal(
 pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
     let doc = m.sets_doc.as_ref()?;
     let entries = doc.entries();
-    // The first entry with an id decides, as in cm_json.
+    // The first entry with an id decides, as in cm_json. Note HF9: only a set in the run writes its profile.
     let blocks: Vec<&SetEntry> = entries
         .iter()
         .enumerate()
         .filter(|(i, e)| e.xpmf.is_some() && !entries[..*i].iter().any(|o| same_id(&o.id, &e.id)))
         .map(|(_, e)| e)
+        .filter(|e| m.in_run_id(&e.id))
         .collect();
+    let scoped = !m.reports_orphans();
     let mut p = PendingXpmf {
         root: m.output_root(),
+        scoped,
         // Note GI27 (owner ruling): a ticked Vanilla folder of an Also export gets a `pbr = false` copy of each PBR
         // Landscape set's profile, guarded and recorded as the main file is.
         vanilla: (m.also_ticks().0 && m.also_root().is_some()).then(|| {
             Box::new(PendingXpmf {
                 root: m.also_folders()[1].clone(),
+                scoped,
                 ..Default::default()
             })
         }),
@@ -664,7 +670,10 @@ pub fn finish(
         ));
     }
     let this_run = p.files.iter().map(|(r, _)| r).chain(&p.refused);
-    for path in orphans(&out, &p.root, this_run) {
+    for path in orphans(&out, &p.root, this_run)
+        .into_iter()
+        .filter(|_| !p.scoped)
+    {
         notes.push(format!(
             "{}: no set writes this XPMF profile any more; the file was left in place",
             path.display()

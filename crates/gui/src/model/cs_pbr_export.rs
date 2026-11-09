@@ -125,6 +125,8 @@ pub struct PendingCs {
     pub notes: Vec<String>,
     /// #49: paths of refused files (already noted): not orphans, and their record stays.
     pub refused: Vec<String>,
+    /// Note HF9: a run that leaves sets out (a scope or an excluded group) reports no orphans.
+    pub scoped: bool,
 }
 
 /// Design §5: one file per EDID per block (CS only). `Some` on CS even without blocks: the orphan report needs it.
@@ -136,10 +138,12 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
     let refused = refusals(&entries);
     let mut p = PendingCs {
         root: m.output_root(),
+        scoped: !m.reports_orphans(),
         ..Default::default()
     };
     let mut done = BTreeSet::new();
-    for e in entries.iter() {
+    // Note HF9: only the sets in the run write their files; the others' stay as they are.
+    for e in entries.iter().filter(|e| m.in_run_id(&e.id)) {
         for (kind, b) in blocks(e) {
             let mut values = b.values.clone();
             values.retain(|k, v| writable(kind, k, v));
@@ -232,7 +236,10 @@ pub fn finish(
         ));
     }
     let this_run = p.files.iter().map(|(r, _)| r).chain(&p.refused);
-    for path in orphans(&out, &p.root, this_run) {
+    for path in orphans(&out, &p.root, this_run)
+        .into_iter()
+        .filter(|_| !p.scoped)
+    {
         notes.push(format!(
             "{}: no set binds this EDID any more; the file was left in place",
             path.display()

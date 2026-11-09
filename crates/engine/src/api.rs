@@ -135,6 +135,10 @@ pub struct BatchRequest {
     /// so an explicit path such as a PGPatcher `textures\pbr\...` prefix can leave the output root. `None`: relative
     /// to `output_root`.
     pub export_root: Option<PathBuf>,
+    /// GUI (Note HF9): the set keys a partial or excluding export writes. `run` drops every job, skip, failure and
+    /// fill end of a set not listed before its first event, so the summary and events cover only them; an entry with
+    /// no set stays. `None` (the CLI, and a whole-project export with nothing left out) writes everything.
+    pub write_only: Option<BTreeSet<String>>,
 }
 
 /// What a run does with a texture whose mip 0 adds little detail over mip 1 (`CHK-LOW-DETAIL`).
@@ -194,6 +198,7 @@ impl BatchRequest {
             derive: None,
             skip_root: None,
             export_root: None,
+            write_only: None,
         };
         r.set_export(export);
         r
@@ -269,6 +274,8 @@ impl BatchRequest {
             derive,
             skip_root,
             export_root,
+            // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
+            write_only: _,
         } = self;
         let fields: [&dyn std::fmt::Debug; 32] = [
             inputs,
@@ -2820,8 +2827,11 @@ impl Engine {
             false
         });
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
+        // Note HF9: a no-set file writes nothing, so it neither claims nor loses a path.
+        let no_set = crate::sets::no_set_paths(files, file_scopes.root.as_deref(), &req.set_edits);
         jobs.retain(|j: &ResolvedJob| {
-            if scope.is_some() || !matches!(j.status, JobStatus::Ready) {
+            if scope.is_some() || !matches!(j.status, JobStatus::Ready) || no_set.contains(&j.input)
+            {
                 return true;
             }
             let Some(first) = writers.get(&output_key(&req.output_root, &j.output)) else {
@@ -2970,10 +2980,19 @@ impl Engine {
     /// have listed and one that would have been up to date or kept by `--on-existing`.
     pub fn run(
         &self,
-        plan: Plan,
+        mut plan: Plan,
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
+        // Note HF9: a partial or excluding run covers the listed sets only, from its first event and count; an entry
+        // with no set (an input duplicate) is a project-wide fact and stays.
+        if let Some(only) = &plan.request.write_only {
+            let listed = |s: Option<&String>| s.is_none_or(|s| only.contains(s));
+            plan.jobs.retain(|j| only.contains(&j.set_key));
+            plan.skipped.retain(|s| listed(s.set.as_ref()));
+            plan.failed.retain(|f| listed(f.set.as_ref()));
+            plan.fill_ends.retain(|(_, _, set)| only.contains(set));
+        }
         let req = &plan.request;
         let mut summary = BatchSummary {
             failed: plan.failed.len() as u32,

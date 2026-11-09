@@ -20,6 +20,16 @@ Export can't write into the folder it reads. With no export folder chosen, Revie
 
 Discarding edits, a crash or a read-only `sdc-project.toml` never makes the next export ask about Tessalith's own JSON. <!-- D:FC11 -->
 
+## Exporting part of the project
+
+Use these when you're tuning one set and don't want to wait for the whole mod, or when finished sets should stop being rewritten.
+
+- **Export set** (a card's right-click menu), **Export n sets** (the menu of a selection) and **Export group** (a group header's menu) export only those sets. A set that borrows a slot from another set brings that set along whole, so the borrowed file is fresh. <!-- D:HF10 -->
+- It runs like **Export**: at once when those sets are ready, otherwise through Review, whose columns then list only their questions and blockers and whose button reads **Export group Armor** (or **Export set …**). Other sets' problems don't hold it back; a project-wide blocker, like a missing export folder, still does. The scope ends when Review closes or the export ends, so the next **Export** is the whole project again.
+- **Exclude from export** on a group header leaves its sets out of every whole-project **Export** until **Include in export**. **Export group** on an excluded group still exports it, and the group stays excluded. A set borrowing from an excluded set doesn't bring it in: the excluded set's file on disk is used as it is. <!-- D:HF11 -->
+- Files of the sets left out stay exactly as they are in the export folder: Tessalith doesn't touch, rewrite or report them. Their per-set JSON files stay too, and the PGPatcher JSON keeps their entries ([Where the JSON goes](GUI-PGPatcher-JSON.md#where-the-json-goes)). <!-- D:HF12 -->
+- **Also export** runs only on a whole-project export. A partial export writes the PBR folder only, and an excluded group gets no Vanilla or CM files either.
+
 ## Review
 
 Review opens in the bottom panel, not a dialog, for a blocker, an undecided texture, a PGPatcher JSON edited outside Tessalith, or pending NIF edits. It doesn't lock the window: keep editing and its lists update. It never exports by itself, even when you decide the last texture, and Enter does nothing there. Its **Export** is the only way out.

@@ -264,6 +264,8 @@ pub(crate) struct ViewCache {
     pub views: Option<Arc<Vec<sets::SetView>>>,
     /// Note HF1: the set keys whose files are all in no set.
     pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
+    /// Note HF9: the set keys of the excluded groups.
+    pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
     /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
@@ -334,6 +336,8 @@ pub(crate) struct ViewKey {
     known_rev: u64,
     /// Note HL: the target mod's read; the export-overlap block reads the stored path.
     target_mod_rev: u64,
+    /// Note HF9: the export scope (`AppModel::scope_rev`): what `in_run` answers, so every cache here.
+    scope: u64,
 }
 
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
@@ -652,6 +656,10 @@ pub struct AppModel {
     also_cancel: Option<CancelToken>,
     /// Final review I2: `Some` while the walk runs: the export's failure, shown when they end.
     also_tail: Option<Option<String>>,
+    /// Note HF9: Export set / group / N sets, from the click until Review closes or the export ends.
+    export_scope: Option<set_groups::ExportScope>,
+    /// Bumped with every scope change; part of the view key, so every count and list cached there follows it.
+    scope_rev: u64,
     /// `sdc.toml` was made read-only because the engine rejected it (not because it failed to parse).
     ignored_by_plan: bool,
     /// Note FC14: `history.pushes` at the last `replan`, and, when a step was pushed since the one before, that count:
@@ -886,6 +894,8 @@ impl AppModel {
             also_json: Vec::new(),
             also_cancel: None,
             also_tail: None,
+            export_scope: None,
+            scope_rev: 0,
             ignored_by_plan: false,
             replan_pushes: (0, None),
             close_ready: false,
@@ -1313,7 +1323,7 @@ impl AppModel {
                 _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
                     self.queued_export_dropped()
                 }
-                _ if clicked => self.export_clicked(),
+                _ if clicked => self.export_go(),
                 // A plan may still be in flight, or sources changed: the same front half as Review's Export.
                 Some(_) => self.continue_review(),
                 None => {}
@@ -1846,6 +1856,11 @@ impl AppModel {
                 .flatten(),
         };
         let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
+        // Note HF9: on a partial or excluding run that ended cleanly, a row still queued is a texture the run left
+        // out (an Also phase's own rows have keys of their own folder), not a failure.
+        if !cancelled && why.is_none() && !self.export.outside_run.is_empty() {
+            self.export.drop_unstarted();
+        }
         self.export.end_unfinished(cancelled, why.as_deref());
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
@@ -1915,6 +1930,8 @@ impl AppModel {
 
     /// The end of an export: what was asked while it ran (close, or open another folder), else its error as a dialog.
     fn after_export(&mut self, failure: Option<String>) {
+        // Note HF9: an Export set / group ends with its run.
+        self.set_scope(None);
         // Note FC5: the run has fully ended (with Also on, after its walk). Opening another folder below clears it.
         self.nif_export_due |= std::mem::take(&mut self.nif_export_queued);
         // A user who cancelled the export to leave does not need its error as a dialog.
@@ -1974,6 +1991,13 @@ impl AppModel {
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
     /// are flagged and the plan is made again first, so the export starts from fresh plans (M3a spec §7).
     pub fn export_clicked(&mut self) {
+        // Note HF9: a plain Export is the whole project, whatever Review was opened for.
+        self.set_scope(None);
+        self.export_go();
+    }
+
+    /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
+    fn export_go(&mut self) {
         self.status_note = None;
         if self.root.is_none() {
             return;
@@ -2003,7 +2027,7 @@ impl AppModel {
             return true;
         }
         // P14: with a tick on, Review's gate checks the location and the three folders instead (TA19).
-        if let Some(problem) = (!self.also_on())
+        if let Some(problem) = (!self.also_runs())
             .then(|| export::export_folder_problem(&root, &self.export_root()))
             .flatten()
         {
@@ -2033,7 +2057,7 @@ impl AppModel {
         if self.nif_rows_written()
             || self.undecided() > 0
             || self.pgp_json_edited()
-            || self.also_on()
+            || self.also_runs()
             || self.export_folder_chosen().is_none()
         {
             self.open_review();
@@ -2333,7 +2357,8 @@ impl AppModel {
         } else {
             engine::api::LowDetailMode::Off
         };
-        let also = self.also_on();
+        req.write_only = self.write_only();
+        let also = self.also_runs();
         self.also_error = None;
         self.also_phases.clear();
         self.also_written = None;
@@ -2350,8 +2375,19 @@ impl AppModel {
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
         self.review_json_cache.take();
+        // Note HF9: the textures a partial or excluding run leaves out get no Files row.
+        let outside_run = match req.write_only {
+            Some(_) => self
+                .items
+                .iter()
+                .filter(|i| !i.job_key.is_empty() && !self.item_in_run(i))
+                .map(|i| i.job_key.to_lowercase())
+                .collect(),
+            None => Default::default(),
+        };
         self.export = export::ExportModel {
             pace: Some(export::Pace::new(Instant::now())),
+            outside_run,
             ..Default::default()
         };
         self.show_tab(bottom::BottomTab::Files);
@@ -3105,6 +3141,7 @@ impl AppModel {
             scan: self.scan_stamp,
             known_rev: self.known_rev,
             target_mod_rev: self.target_mod_rev,
+            scope: self.scope_rev,
         }
     }
 

@@ -54,6 +54,12 @@ impl AppModel {
         v || c
     }
 
+    /// Note HF9: the ticks run on a whole-project export only (owner: "Also export can be left to a whole project
+    /// export"), so they neither open Review for a scoped one nor gate it.
+    pub fn also_runs(&self) -> bool {
+        self.also_on() && self.export_scope().is_none()
+    }
+
     /// One `[export]` edit, one undo step, planned again (the PBR folder is the plan's output root, TA10).
     fn edit_export(&mut self, label: &str, f: impl FnOnce(&mut ProjectDoc)) {
         // So the plan on screen and the NIF root match the running export (the finishers use roots captured at its
@@ -201,6 +207,7 @@ impl AppModel {
 
     /// What `run_also` needs besides the request: the config, the location and TA13's `scanned`.
     pub fn also_spec(&self) -> AlsoSpec {
+        // Note HF11: an excluded set gets no Vanilla or CM files through the rebased `write_only`, not `[export] skip`.
         AlsoSpec {
             cfg: self.also_config(),
             location: self.also_location(),
@@ -211,7 +218,7 @@ impl AppModel {
     /// `sdc.toml`'s writability as Review's gate reads it, with a tick on: taken when Review opens and again before
     /// its Export runs (P9), never per frame (ui-rules 9.4).
     pub(super) fn also_toml_unwritable(&self) -> Option<String> {
-        if !self.also_on() {
+        if !self.also_runs() {
             return None;
         }
         self.sdc_toml_writable()

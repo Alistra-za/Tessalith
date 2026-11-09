@@ -581,7 +581,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let nif_rows = m.nif_review_rows();
     // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
     let also_on = m.also_on() || m.target == Target::Cs;
-    let also_err = if m.also_on() {
+    let also_err = if m.also_runs() {
         m.also_gate().err()
     } else {
         None
@@ -847,6 +847,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
         _ => also_section(ui, m, also_err.as_deref(), &mut act),
     };
+    // Note HF9: a scoped review says what it exports above the columns.
+    if let Some(s) = m.export_scope() {
+        ui.add(egui::Label::new(egui::RichText::new(&s.label).strong()).truncate());
+    }
     if ui.ctx().content_rect().width() < STACK_BELOW {
         // Note FB10: one scrolling column, the sections one under another.
         ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();

@@ -236,6 +236,10 @@ enum Act {
     MoveToGroup(Vec<String>, GroupTarget),
     /// The set menu's New group…: ask for a name.
     OpenNewGroup(Vec<String>),
+    /// Note HF9: Export group (name).
+    ExportGroup(String),
+    /// Note HF9: Export set (key, id).
+    ExportSet(String, String),
 }
 
 /// The card's heading is one row only when the name keeps this much beside the pill and badges; otherwise the pill
@@ -1405,12 +1409,25 @@ fn group_menu(ui: &mut egui::Ui, h: &Head, editing: &Editing, acts: &mut Vec<Act
             r.on_disabled_hover_text(editing.why)
         }
     };
-    let flip = if h.excluded {
-        "Include in export"
+    // Note HF9: exports only this group's sets (and the sets they borrow from), even when it is excluded.
+    if ui
+        .button("Export group")
+        .on_hover_text(
+            "Export only this group's sets; the rest of the export folder stays as it is",
+        )
+        .clicked()
+    {
+        acts.push(Act::ExportGroup(h.name.clone()));
+        ui.close();
+    }
+    let (flip, hover) = if h.excluded {
+        ("Include in export", "Export writes this group's sets again")
     } else {
-        "Exclude from export"
+        (
+            "Exclude from export",
+            "Export skips this group's sets and leaves their files in the export folder alone",
+        )
     };
-    let hover = "Marks the group's sets as left out of export";
     if edit(ui, flip).on_hover_text(hover).clicked() {
         acts.push(Act::GroupExcluded(h.name.clone(), !h.excluded));
         ui.close();
@@ -1919,6 +1936,10 @@ pub fn draw(
                     text: String::new(),
                     error: None,
                 })
+            }
+            Act::ExportGroup(name) => model.export_group(&name),
+            Act::ExportSet(key, id) => {
+                model.export_sets([key].into(), format!("Export set {id}"));
             }
         }
     }
@@ -2678,6 +2699,15 @@ fn menu(
             }
         }
     });
+    // Note HF9: an export, not a set edit, so it works while sets are not editable.
+    if ui
+        .button("Export set")
+        .on_hover_text("Export only this set (and any set it borrows from); the rest of the export folder stays as it is")
+        .clicked()
+    {
+        acts.push(Act::ExportSet(v.key.clone(), v.id.clone()));
+        ui.close();
+    }
     if !editing.on {
         ui.disable();
     }

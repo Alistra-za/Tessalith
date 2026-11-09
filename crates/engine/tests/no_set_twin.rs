@@ -47,11 +47,8 @@ fn dups(p: &Plan) -> Vec<String> {
     let mut v: Vec<String> = p
         .skipped
         .iter()
-        // The writer dedupe (BV2) is Task 4's to end: a no-set file that resolves still meets its twin there.
-        .filter(|s| {
-            s.code == Some(Code::InDuplicate)
-                && !s.reason.starts_with("two outputs map to one path ")
-        })
+        // The writer dedupe (BV2) included: a no-set job never claims or loses an output path (Note HF9).
+        .filter(|s| s.code == Some(Code::InDuplicate))
         .map(|s| s.path.file_name().unwrap().to_string_lossy().into_owned())
         .collect();
     v.sort();

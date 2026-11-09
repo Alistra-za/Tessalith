@@ -318,6 +318,8 @@ pub struct PendingCm {
     /// Note FC14: a ticked set writes no file this time (its complex `_m` is undecided, or a path is refused), so
     /// the stale JSON rows leave this kind out.
     pub partial: bool,
+    /// Note HF9: a run that leaves sets out (a scope or an excluded group) reports no orphans.
+    pub scoped: bool,
 }
 
 /// Design §6: one file per complex `_m` of every set whose export is ticked, on every target (D2). `Some` even when
@@ -327,11 +329,12 @@ pub fn prepare(m: &AppModel) -> Option<PendingCm> {
     let ts = targets(m);
     let mut p = PendingCm {
         root: m.output_root(),
+        scoped: !m.reports_orphans(),
         ..Default::default()
     };
     for (i, e) in entries.iter().enumerate() {
-        // The first entry with an id decides, as in `exports`.
-        if entries[..i].iter().any(|f| same_id(&f.id, &e.id)) {
+        // The first entry with an id decides, as in `exports`. Note HF9: only a set in the run writes its file.
+        if entries[..i].iter().any(|f| same_id(&f.id, &e.id)) || !m.in_run_id(&e.id) {
             continue;
         }
         let Some(b) = e.cm.as_ref().filter(|b| b.export) else {
@@ -415,7 +418,10 @@ pub fn finish(
             p.root.display()
         ));
     }
-    for path in orphans(&out, &p.root, p.files.iter().map(|(r, _)| r)) {
+    for path in orphans(&out, &p.root, p.files.iter().map(|(r, _)| r))
+        .into_iter()
+        .filter(|_| !p.scoped)
+    {
         notes.push(format!(
             "{}: complex material export is off for its set (or the _m left the set); the file was left in \
              place. Delete it to drop the overrides.",

@@ -977,6 +977,8 @@ pub enum MenuAction {
     MoveToGroup,
     /// The selected sets join the group of this name.
     ToGroup(String),
+    /// Note HF9: export the selected sets only ("Export 3 sets").
+    ExportSets,
     /// The UI opens the name dialog; `run_menu` does nothing.
     ToNewGroup,
     /// The selected sets leave their groups.
@@ -1259,6 +1261,11 @@ impl AppModel {
         ];
         v.extend(self.rename_entries(true));
         v.extend(self.group_entries(&self.selected_set_ids()));
+        v.push(MenuEntry {
+            action: MenuAction::ExportSets,
+            label: format!("Export {n} sets"),
+            disabled: None,
+        });
         v.extend(kind_chips(self, &sets).into_iter().map(|c| MenuEntry {
             action: MenuAction::SelectMembersOfKind(c.kind),
             label: format!("{} ({})", c.label, c.members.len()),
@@ -1539,6 +1546,12 @@ impl AppModel {
                 return self
                     .move_to_group(&self.selected_set_ids(), GroupTarget::None)
                     .err();
+            }
+            MenuAction::ExportSets => {
+                let keys: std::collections::BTreeSet<String> =
+                    self.selected_sets().into_iter().collect();
+                let label = format!("Export {} sets", keys.len());
+                self.export_sets(keys, label);
             }
         }
         None

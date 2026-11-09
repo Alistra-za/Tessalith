@@ -77,6 +77,9 @@ pub struct ExportModel {
     pub(crate) index: HashMap<String, usize>,
     /// Rows were removed since `index` was built: rebuild it at the next lookup (audit item 6).
     pub(crate) index_stale: bool,
+    /// Note HF9: job keys (lower case) of textures outside this run. The plan still discovers them, but they get no
+    /// row: the engine's `write_only` never runs them, so a row would end as "not run".
+    pub(crate) outside_run: std::collections::HashSet<String>,
 }
 
 /// The source of `ExportModel::revision`: unique across models, so a cache never mistakes one for another.
@@ -189,6 +192,11 @@ impl ExportModel {
                     self.drop_queued(p);
                 }
             }
+            EventKind::FileDiscovered { .. }
+                if ev
+                    .job
+                    .as_ref()
+                    .is_some_and(|j| self.outside_run.contains(&j.to_lowercase())) => {}
             EventKind::FileDiscovered { output } => {
                 self.row(&ev);
                 self.note_output(&ev, output);
@@ -254,6 +262,16 @@ impl ExportModel {
     fn finished_at(&mut self, now: Instant) {
         if let Some(p) = self.pace.as_mut() {
             p.finished(now);
+        }
+    }
+
+    /// Note HF9: drop the rows that never started.
+    pub(crate) fn drop_unstarted(&mut self) {
+        let before = self.rows.len();
+        self.rows.retain(|r| r.state != RowState::Queued);
+        if self.rows.len() != before {
+            self.index_stale = true;
+            self.revision = REV.fetch_add(1, Ordering::Relaxed);
         }
     }
 

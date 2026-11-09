@@ -806,6 +806,17 @@ pub fn finish_also(run: AlsoRun, extra: &[PathBuf], cancel: &CancelToken) -> Als
     s
 }
 
+/// Note HF9: set keys hold their output root, so a phase planned under another folder lists the same set ids under
+/// its own root.
+fn rebase_write_only(r: &mut BatchRequest, from: &Path) {
+    if let Some(w) = r.write_only.as_mut() {
+        *w = w
+            .iter()
+            .map(|k| crate::sets::set_key(&r.output_root, &crate::sets::set_id(from, k)))
+            .collect();
+    }
+}
+
 /// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
 #[allow(clippy::too_many_arguments)]
 fn run_phases(
@@ -830,13 +841,16 @@ fn run_phases(
 
     // TA14: the same request (preset id included) with target vanilla; each preflighted before anything is written.
     let mut pbr_req = base;
+    let base_root = pbr_req.output_root.clone();
     pbr_req.set_export(folders[0].clone());
     pbr_req.skip_root = Some(spec.location.clone());
+    rebase_write_only(&mut pbr_req, &base_root);
     let phase_req = |i: usize, mode: DeriveMode, sets: &[DeriveSet], drop: &[PathBuf]| {
         let mut r = pbr_req.clone();
         r.target = Some(Target::Vanilla);
         r.set_export(folders[i].clone());
         r.skip_root = Some(spec.location.clone());
+        rebase_write_only(&mut r, &pbr_req.output_root);
         // P10: the low-detail check runs once, in the PBR phase.
         r.low_detail = LowDetailMode::Off;
         r.derive = Some(DeriveRequest {
@@ -938,6 +952,14 @@ fn run_phases(
     let mut copies = vec![];
     let mut keep = vec![];
     for j in std::mem::take(&mut vplan.jobs) {
+        // Note HF9: a set outside the run is neither copied nor written (`run` drops its jobs too).
+        if vreq
+            .write_only
+            .as_ref()
+            .is_some_and(|w| !w.contains(&j.set_key))
+        {
+            continue;
+        }
         // shortcut: a packed job is never copied (its raw sources' `packed_source` events belong to its encode);
         // upgrade if a pre-packed copy matters for speed.
         let copy = (j.pack.is_none())

@@ -2023,10 +2023,17 @@ impl AppModel {
         )
     }
 
-    /// Note HF1: whether set `set_key` takes part in the run: false for a no-set texture's set. Every gate and count
-    /// that reads a texture's questions or files asks this (Task 4 adds a scope and excluded groups).
+    /// Notes HF1, HF9: whether set `set_key` takes part in the run: false for a no-set texture's set; with an export
+    /// scope, true only for its sets; otherwise false for an excluded group's sets. Every gate and count that reads a
+    /// texture's questions or files asks this.
     pub fn in_run(&self, set_key: &str) -> bool {
-        !self.no_set_sets().contains(set_key)
+        if self.no_set_sets().contains(set_key) {
+            return false;
+        }
+        match self.export_scope() {
+            Some(s) => s.keys.contains(set_key),
+            None => !self.excluded_sets().contains(set_key),
+        }
     }
 
     /// Note HF1: whether `item`'s questions, warnings and file count: it is not in no set and its set is in the run.

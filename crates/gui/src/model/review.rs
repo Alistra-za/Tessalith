@@ -202,6 +202,8 @@ impl AppModel {
     /// Close Review and its answers; the panel collapses when it showed Review (R7: the tab is listed only while open).
     pub fn close_review(&mut self) {
         self.review = None;
+        // Note HF9: closing Review ends an Export set / group; the next Export is the whole project.
+        self.set_scope(None);
         // Note FC5 (GD29): the NIF answers go with Review; each foreign row asks again. Not while a run Review started
         // still owes the NIF export (a Reload mid-export): those answers are its own (rule 7.4).
         self.nif_clear_answers_request |= !self.nif_export_queued;
@@ -316,7 +318,7 @@ impl AppModel {
             return Err(format!("Fix {n} blocker{} first", plural(n)));
         }
         // Note CN: the Also rows, after the blocks and before the overwrite questions (A9); nothing writes (7.1, 7.2).
-        if self.also_on() {
+        if self.also_runs() {
             self.also_gate()?;
         }
         // Note FC5: then every overwrite question (supersedes CA7's "no choice made: asked after the export").
@@ -461,9 +463,13 @@ impl AppModel {
         }
         let files = self.export_files();
         let skipped = self.undecided();
-        let mut t = format!("Export {files} file{}", plural(files));
+        // Note HF9: a scoped export's button says what Review is for (`Export group Armor`).
+        let mut t = match self.export_scope() {
+            Some(s) => s.label.clone(),
+            None => format!("Export {files} file{}", plural(files)),
+        };
         // Re-check A7 (TA30): this project's planned files, written to the PBR folder and copied or derived on.
-        if self.also_on() {
+        if self.also_runs() {
             t.push_str(&format!(" to {} folders", self.also_folder_count()));
         }
         // Note FI7 (rule 7.1): only the NIF edits this Export writes; a blocked one is skipped.

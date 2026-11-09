@@ -12,7 +12,7 @@ A set whose files are all DDS inputs Tessalith doesn't re-encode, such as a rele
 
 ![A set card's right-click menu.](../img/gui/GUI-Sets-Column/set-card-menu.png)
 
-The card's right-click menu holds **Rename**, **Edit match…** ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#matching)), **Remove member**, **Delete set**, **Move to group** ([Groups](#groups)), **Move up**, **Move down**, **Move to…**, and **Map to target…** (**Change mapping…** once mapped; [Set editor](GUI-Set-Editor.md#mapping-to-a-target)). Right-clicking a member that fills a slot opens that slot's menu instead: [Slot menus](GUI-Set-Editor.md#slot-menus). The **Rename** submenu is [Renaming](GUI-Bulk-and-Rename.md#renaming).
+The card's right-click menu holds **Export set** ([Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project); with two or more sets selected it reads **Export n sets**), **Rename**, **Edit match…** ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#matching)), **Remove member**, **Delete set**, **Move to group** ([Groups](#groups)), **Move up**, **Move down**, **Move to…**, and **Map to target…** (**Change mapping…** once mapped; [Set editor](GUI-Set-Editor.md#mapping-to-a-target)). Right-clicking a member that fills a slot opens that slot's menu instead: [Slot menus](GUI-Set-Editor.md#slot-menus). The **Rename** submenu is [Renaming](GUI-Bulk-and-Rename.md#renaming).
 
 ## Finding a set
 
@@ -25,7 +25,7 @@ Fold the sets you've finished into a group, so the column shows only what you're
 - **Make one:** right-click a set, or a selection, then **Move to group** → **New group…** and type a name. Names are unique, upper or lower case alike; a taken name stays in the dialog with the reason. A group is gone when its last set leaves it.
 - **Fold it:** click the header. Whether it's folded is kept per project in `gui.toml` and is not an undo step.
 - **Join one:** **Move to group** → the group, or drag a set by its **≡** handle onto the header. Dragging a texture onto a header does nothing. <!-- D:HF8 -->
-- **Header menu:** **Exclude from export** (**Include in export** takes it back; the header then carries an *Excluded* tag, and [Review and Export](GUI-Review-and-Export.md) says what that does), **Rename…**, **Ungroup** (the sets stay) and **Select all sets**.
+- **Header menu:** **Export group**, **Exclude from export** (**Include in export** takes it back; the header then carries an *Excluded* tag; both are explained in [Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project)), **Rename…**, **Ungroup** (the sets stay) and **Select all sets**.
 - **With a filter on,** a header shows only while a set in it passes, and reads `2 of 7`. A filter never folds or opens a group, and a set with no card isn't counted.
 - **Revealing a set opens its group:** a click on a texture, **Go to set** in Problems and **Move to…** unfold the group the set is in. <!-- D:HF7 -->
 
