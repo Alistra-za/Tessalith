@@ -11,7 +11,7 @@ Rows come blockers first, then undecided textures, then warnings, then checks an
 | Dot | Meaning |
 |---|---|
 | Red | **Blocker**: stops the export. Fix it or remove the texture. |
-| Orange | **Warning** (the export goes ahead) or a decision you owe. |
+| Amber | **Warning** (the export goes ahead) or a decision you owe. |
 | Grey | **Check**, a hint from an artist check ([Texture types](Texture-Types.md#artist-checks)): a map that will probably look wrong in game. It never blocks and never changes "ready". Or an info row. |
 | Green, on a tile or card | Nothing to decide. |
 

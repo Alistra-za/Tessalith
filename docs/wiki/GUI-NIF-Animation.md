@@ -1,6 +1,6 @@
 # NIF animation
 
-For mod authors animating glow, colour or alpha: play a NIF's clips and edit the keys of its shader and alpha controllers. The edit preview plays the controllers of the NIF you are editing; a NIF shown without **Edit** does not animate. Opening a NIF for editing, and the **In game** simulation, are on [Editing a NIF](GUI-NIF-Edit.md). Clips are played here, not created or edited: Tessalith has no New clip, Remove clip or rename.
+For mod authors animating glow, colour or alpha: play a NIF's clips and edit the keys of its shader and alpha controllers. The edit preview plays the controllers of the NIF you are editing; a NIF shown without **Edit** does not animate. Opening a NIF for editing, and the **In game** simulation, are on [Editing a NIF](GUI-NIF-Edit.md). Clips can't be created, removed or renamed; the keys of the clip shown in **Preview** can be edited.
 
 ## Playback
 

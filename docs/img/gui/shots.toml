@@ -30,12 +30,6 @@ scenario = "start_screen"
 used_by = ["GUI-Main-Window.md", "Getting-Started.md"]
 
 [[shot]]
-id = "open-menu"
-page = "GUI-Main-Window"
-scenario = "open_menu"
-used_by = ["GUI-Main-Window.md"]
-
-[[shot]]
 id = "export-to-menu"
 page = "GUI-Main-Window"
 scenario = "export_to_menu"
@@ -191,3 +185,18 @@ reason = "a toast goes after a few seconds on a clock, so no two renders match"
 what = "Editing a NIF (edit panel, shapes, animation)"
 page = "GUI-NIF-Edit"
 reason = "the edit panel opens only on a mesh of a scanned MO2 instance, and its 3D view needs a D3D11 device"
+
+[[exempt]]
+what = "Filter ▾ (Textures column and Sets column)"
+page = "GUI-Main-Window"
+reason = "screen explains itself"
+
+[[exempt]]
+what = "Command palette"
+page = "GUI-Guide"
+reason = "screen explains itself"
+
+[[exempt]]
+what = "Preset menu (header)"
+page = "GUI-Main-Window"
+reason = "screen explains itself"

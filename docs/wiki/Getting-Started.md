@@ -35,7 +35,7 @@ Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or
 
 A tile with an amber border is undecided: Tessalith won't guess what it is. The **Undecided** pill above the tiles shows only those. Click a tile, and the centre column lists its settings and where each value came from. **(auto)** means Tessalith picked it; hover it for why.
 
-Answer what the centre column asks: a sub-type button, the **Alpha type** dropdown, **DirectX** or **OpenGL** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps read "Packed into …": they feed the `_rmaos` and need no answer.
+Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alpha dropdown under "Alpha: … (proposed)", **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
 
 ![The texture settings of a fern texture in the demo project.](../img/gui/GUI-Texture-Panel/texture-panel.png)
 
@@ -48,7 +48,7 @@ Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TrueP
 ### Export
 
 1. Pick **Export to**. Each project remembers its own folder; the rule is on [Main window](GUI-Main-Window.md#export-to).
-2. Set **JSON:**, the name of the PGPatcher JSON. It defaults to the folder name.
+2. Optional: in the JSON editor (**Export to ▾ → PGPatcher JSON editor…**), set **JSON name:**, the name of the PGPatcher JSON. It defaults to the folder name.
 3. Press **Export**. If Review opens first, something is undecided or blocking: fix it or tick it there, then press Review's **Export** ([Review and Export](GUI-Review-and-Export.md)).
 
 ![The Review tab in the demo project.](../img/gui/GUI-Review-and-Export/review-tab.png)
@@ -131,7 +131,7 @@ Point `sdc convert --recursive`, or the GUI, at the folder. Expect questions on 
 
 ## Install it
 
-Copy the output into your mod and leave `_sdc` out. Install the JSON from `PBRNIFPatcher`, then run PGPatcher ([Installing the output](Validation-and-Output.md#installing-the-output)). The CLI writes no PGPatcher JSON; the GUI does.
+Copy the output into your mod and leave `_sdc` out. Install the JSON from `PBRNIFPatcher`, then run PGPatcher ([Installing the output](Validation-and-Output.md#installing-the-output)).
 
 ## Check it in game
 

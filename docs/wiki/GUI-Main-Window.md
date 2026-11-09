@@ -24,8 +24,6 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 - **MO2…** picks the scan source: [Mod scanning](Mod-Scanning.md). **Preset** picks the preset the folder converts with and saves it as `preset` in `sdc.toml`; its last entry, **Presets…**, opens the **Presets** tab where the Mode is set: [Presets and targets](Presets-and-Targets.md).
 - **Save** (**Ctrl+S**) writes `sdc.toml` and `sdc-project.toml`. **Export** is on [Review and Export](GUI-Review-and-Export.md#the-export-button).
 
-![The Open menu.](../img/gui/GUI-Main-Window/open-menu.png)
-
 ### Export to
 
 **Export to ▾** holds the export folder, saved per project in `sdc-project.toml`. With none chosen it reads **Export to: not chosen ▾** and Review blocks the export: a project never takes over the folder you picked for another mod. <!-- D:FB1 -->

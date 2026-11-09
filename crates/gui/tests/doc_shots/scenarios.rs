@@ -26,7 +26,6 @@ pub type Scenario = fn(&Path) -> Frame;
 pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("main_window", main_window),
     ("start_screen", start_screen),
-    ("open_menu", open_menu),
     ("export_to_menu", export_to_menu),
     ("advanced_drawer", advanced_drawer),
     ("problems_tab", problems_tab),
@@ -260,14 +259,6 @@ fn start_screen(_dir: &Path) -> Frame {
         img: h.render().expect("render"),
         crop: None,
     }
-}
-
-/// GUI-Main-Window: the Open menu with two recent folders.
-fn open_menu(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| node(h, "Open").click());
-    let b = node(&h, "Open").rect();
-    shot(&mut h, r.union(b))
 }
 
 /// GUI-Main-Window: the Export to ▾ menu.

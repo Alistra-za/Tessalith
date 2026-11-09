@@ -68,7 +68,7 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | `_e`, or a file under `textures\cubemaps\` | `cubemap`; the face suffixes `_posx` to `_negz` (or `_px` to `_nz`) are cut off first | High |
 
 - **A PBR set** (under `cs`) has a `pbr` folder in its path, or an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or a raw roughness, glossiness, metallic or AO map.
-- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. In the GUI, pinning the set's Diffuse slot turns this off. In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself.
+- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. A pinned Diffuse slot turns it off ([Skin](Skin.md)). In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself.
 - **A name that fits none of the above** is read as a colour map when the set has other files (`rock_nm.png` becomes a diffuse); alone, it [waits for a type](#how-files-form-a-set). Rename it, add an `[inputs]` alias, or set `subtype`.
 
 ### Detail names
@@ -107,7 +107,7 @@ Names that texturing tools commonly export are understood too:
 | `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by [Also export](Set-Shaders.md#also-export-as-vanilla-and-cm) |
 | `_cavity` | Raw cavity | read only by Also export |
 
-**Green direction.** Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doesn't say which way its green points, so Tessalith assumes DirectX, doesn't flip, and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> A map from Substance or Blender is often OpenGL: name it `_normalgl`, or set `channels.green_convention = "opengl"` on the file (the GUI's note has a **Treat as OpenGL** button for it). A file named `_n` is taken as DirectX.
+**Green direction.** Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doesn't say which way its green points, so Tessalith assumes DirectX, doesn't flip, and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> A map from Substance or Blender is often OpenGL: name it `_normalgl`, or set `channels.green_convention = "opengl"` on the file (the GUI's note has a **Treat as OpenGL (flip green)** button for it). A file named `_n` is taken as DirectX.
 
 Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Presets-and-Targets.md#suffix-aliases).
 
@@ -135,7 +135,7 @@ One row per sub-type. **vanilla** says whether the sub-type exists under the Van
 | `detail_normal` | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
 | `msn` | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
 | `coat_normal` | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
-| `skin_wet` | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only BC1, BC3, BC7 and RGBA8 here (`FMT-CS-SKIN-LOADER`; `--allow` can't lift it). <!-- D:HB3,HB4 --> |
+| `skin_wet` | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only some formats here: see `FMT-CS-SKIN-LOADER`. <!-- D:HB3,HB4 --> |
 | `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
 | `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | yes | `_m`. |
 | `height` | Grayscale | BC4 | UNORM | remove | yes | `_p`. |
@@ -185,7 +185,7 @@ Four checks read the numbers Tessalith already measures while it plans, and warn
 | Check | What it flags | Code |
 |---|---|---|
 | **Low detail** | A top mip that adds almost nothing over mip 1 (an upscale, a 2K made from a 1K). | `CHK-LOW-DETAIL` |
-| **Green direction** | A normal that curls like OpenGL when read as DirectX (an Info hint; it never flips by itself, and the **Treat as OpenGL** button is one undo step). A blue channel that points the wrong way. | `CHK-GREEN-GUESS`, `CHK-Z-SIGN` |
+| **Green direction** | A normal that curls like OpenGL when read as DirectX (an Info hint; it never flips by itself, and **Treat as OpenGL (flip green)** is one undo step). A blue channel that points the wrong way. | `CHK-GREEN-GUESS`, `CHK-Z-SIGN` |
 | **Parallax** | A height map or complex `_m` alpha that uses too little range, clips, is mostly white, or is steep enough to tear. Landscape sets whose `displacementScale` differs by more than 2×. | `CHK-PARALLAX`, `CHK-PARALLAX-SCALE` |
 | **UV coverage** | UV islands closer than 8 texels for more than 2 % of the used texels, so colours bleed across them at a distance (mip 3 and up). | `CHK-UV-GUTTER` |
 

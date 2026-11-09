@@ -286,7 +286,7 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 | `--set '<s>': unknown field '<f>'` and `unknown sub-type '<id>'` | A misspelt field or sub-type. [The field list](Project-Config.md#fields). |
 | `--set '<s>': a sub-type scope cannot set the sub-type` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
 | `--set '<s>': a set scope sets only shader` | `set:<id>.` takes `shader` and nothing else. |
-| `--allow <X>: unknown code` | A misspelt code. A code removed in an earlier version gets a message that names the fix instead. [All codes](Diagnostic-Codes.md). |
+| `--allow <X>: unknown code` | A misspelt code. [All codes](Diagnostic-Codes.md). |
 | `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
 
 ### Presets and config
@@ -296,7 +296,7 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 | `unknown preset '<id>'` | A preset id that isn't loaded. `sdc presets list` shows the ids. |
 | `preset inheritance cycle at '<id>'` | Presets whose `base` chain loops. |
 | `<file>: config schema_version N is newer than this sdc supports (1)` | The file was written by a newer version. A preset gives `preset schema_version N is newer …`. |
-| `<file>: <key>: removed in <version>; <fix>` | A key or value Tessalith no longer reads (for example `subtype = "rfaos"`, removed in 2.0: use `skin_rfaos`). The text names the key, the version and what to write; `--set` gives the same text. The GUI stays read-only until the file is fixed. <!-- D:FM10 --> |
+| `<file>: <key>: removed in <version>; <fix>` | A key or value Tessalith doesn't read; the message names the replacement (for example `use skin_rfaos`). The text names the key, the version and what to write; `--set` gives the same text. The GUI stays read-only until the file is fixed. <!-- D:FM10 --> |
 | `[files] is only valid in a project sdc.toml, not in <path>` | `[files]`, `[inputs]` or `[export]` in the user config. |
 
 ### While running

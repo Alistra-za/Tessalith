@@ -44,7 +44,7 @@ A grey completion follows what you type, drawn from the last scan and this proje
 |---|---|
 | **Tab** | Takes the grey completion up to the next `/`. |
 | **Esc**, twice | The first closes the list, the second puts the old name back. |
-| **Ctrl+Up / Ctrl+Down** | List the known names for the segment under the cursor, to replace just that segment. |
+| **Ctrl+Up / Ctrl+Down** | List the known names for the path segment (the part between two `/`) under the cursor, to replace just that segment. |
 
 The **▾** lists the known paths under the folder before the last segment, with a filter box.
 

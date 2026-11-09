@@ -148,7 +148,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `SHADER-UNAVAILABLE` | warning | The shader isn't available under the target; it fell back. | Change the shader or target. |
 | `SHADER-EXTRA-MAP` | warning | A member the shader doesn't use; it still converts ([set shaders](Set-Shaders.md)). | |
 | `SHADER-MISSING-MAP` | warning | A map the shader requires is missing. | Add it. |
-| `SKIN-WET-GREY` | warning | A `skin_wet` source is grey. Community Shaders no longer reads a grey wet map, so that file isn't written; the set's other files are. | Supply a tangent normal with the wet mask in alpha. |
+| `SKIN-WET-GREY` | warning | A `skin_wet` source is grey. Community Shaders ignores a grey wet map, so that file isn't written; the set's other files are. | Supply a tangent normal with the wet mask in alpha. |
 | `GRASS-SHAPE` | error | A `complex_grass` source isn't a power-of-two 1:2 image. | Supply e.g. 2048x4096. |
 | `GRASS-TOP-OPAQUE` | warning | The top half is fully opaque: no cutout. | Check the alpha. |
 | `GRASS-NORMALS` | warning | Under 99% of the bottom half is unit-length normals. | Check the bottom half is a normal map. |
@@ -164,13 +164,13 @@ Raised only by Also export ([GUI or `[export] also`](Set-Shaders.md#also-export-
 | `DERIVE-DDS-SOURCE` | warning | A source the Vanilla or CM folder needs is a DDS, which is never re-encoded, so the set is skipped. | Supply the source image. |
 | `DERIVE-NO-ALBEDO` | warning | The set has no albedo, so it gets no Vanilla diffuse and no CM diffuse. | Add the albedo. |
 | `DERIVE-PATH-CONFLICT` | error | A derived output lands on another job's output. The other job is kept. | Rename or exclude one of the two. |
-| `DERIVE-NOT-CONVERTED` | info | A set member has no role in the Vanilla or CM recipe, so it isn't converted there. | Nothing. |
-| `DERIVE-NIF-SUGGEST` | info | Suggested NIF glossiness, specular strength and environment-map values for the set. | Enter them in the NIF if you want them. |
-| `ALSO-PHASE-FAILED` | error | The Vanilla or CM phase stopped with an engine error. | Read the message; fix and re-run. |
+| `DERIVE-NOT-CONVERTED` | info | A set member has no role in the Vanilla or CM recipe, so it isn't converted there. | Nothing, if the file feeds no map. Otherwise fix the set's own skip or error row (`DERIVE-DDS-SOURCE`, `DERIVE-NO-ALBEDO`, a recipe error) or put the set back in the export. |
+| `DERIVE-NIF-SUGGEST` | info | Suggested NIF glossiness, specular strength and whether to use the Environment Map shader. | Enter them in the NIF if you want them. |
+| `ALSO-PHASE-FAILED` | error | The PBR, Vanilla or CM phase of an Also export stopped with an engine error. The phases after it did not run. | Read the message; fix and re-run. |
 
 ## Artist checks
 
-The GUI raises these ([what each flags](Texture-Types.md#artist-checks)). They only warn, and the CLI raises none except `CHK-LOW-DETAIL`, which the engine measures only when the GUI asks.
+The GUI raises these ([what each flags](Texture-Types.md#artist-checks)). They only warn. The CLI raises none of them; the engine measures `CHK-LOW-DETAIL` only when the GUI asks.
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|

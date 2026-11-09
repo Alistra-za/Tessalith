@@ -62,7 +62,7 @@ as = "textures/armor/iron/iron_n.png"
 |---|---|---|---|
 | `schema_version` | integer, 1 or more | 1 | Format version of this file. A newer version than the build supports is an error: `<file>: config schema_version N is newer than this sdc supports (1)`. |
 | `preset` | string | the target's default | The preset, by id: built-in or a user preset ([Presets and targets](Presets-and-Targets.md)). |
-| `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** menu writes it. |
+| `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** row (Presets tab) writes it. |
 | `[defaults]` | partial profile | none | Field values for every texture. |
 | `[subtypes.<id>]` | partial profile | none | Field values for one sub-type. |
 | `[[rules]]` | array of tables | none | Conditional settings. |
@@ -90,7 +90,7 @@ A texture's final settings (its profile) are built from layers. Later layers ove
 
 ## [defaults] and [subtypes]
 
-Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Sub-type ids are on [Texture types](Texture-Types.md#sub-types-what-each-file-becomes). A `subtype` key in either is accepted but has no effect: the resolved sub-type overwrites it.
+Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Sub-type ids are on [Texture types](Texture-Types.md#sub-types-what-each-file-becomes). `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
 
 ## [[rules]]
 
@@ -305,8 +305,7 @@ Packing fields go on the packed output's key, for example `[files."textures/armo
 
 ### Cubemap
 
-These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. A cube's formats are on [Cubemaps](Cubemaps.md#checks): any other `format`, or an sRGB tag, is `CFG-INVALID`; `mips.levels = "none"` raises `CUBE-NO-MIPS`. The order the cube is built in is under [Settings](Cubemaps.md#settings).
-
+These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. A cube's formats are on [Cubemaps](Cubemaps.md#checks): any other `format`, or an sRGB tag, is `CFG-INVALID`; `mips.levels = "none"` raises `CUBE-NO-MIPS`.
 | Field | Values | Default | Notes |
 |---|---|---|---|
 | `cubemap.style` | `vanilla_metal`, `room`, `eye`, `hd` | unset | Fills the keys below that nothing else set: `vanilla_metal` 32 px, BC1, blur 0.6, saturation 0.8; `room` 128 px, BC1, blur 0.35; `eye` 256 px, BC7, blur 0.35; `hd` 512 px, BC7, blur 0.1. |

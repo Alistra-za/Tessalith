@@ -132,14 +132,14 @@ Every `cubemap.*` key (ranges and defaults on [Project config](Project-Config.md
 
 ### Styles
 
-`cubemap.style` is a starting point for size, format and blur. Any value a style sets can be overridden by its own key.
+`cubemap.style` is a starting point for size, format and blur. The values each style sets are on its [key row](Project-Config.md#cubemap); any of them can be overridden by its own key.
 
-| Style | Use it for | Starts at |
-|---|---|---|
-| `vanilla_metal` | armour, weapons, ore, glass | 32 px, BC1, strong blur, saturation 0.8 |
-| `room` | interior room reflections, caves | 128 px, BC1, medium blur |
-| `eye` | eyes | 256 px, BC7, medium blur |
-| `hd` | close-up shiny surfaces | 512 px, BC7, light blur |
+| Style | Use it for |
+|---|---|
+| `vanilla_metal` | armour, weapons, ore, glass |
+| `room` | interior room reflections, caves |
+| `eye` | eyes |
+| `hd` | close-up shiny surfaces |
 
 ### Blur
 
@@ -170,7 +170,6 @@ A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown)
 
 - A six-file set is one item in the Textures column; its settings are written to all six face entries so the faces keep matching.
 - Colours are raw 0 to 255 codes, not gamma-converted.
-- The cube preview is described on [Previews](Previews.md).
 
 ## Checks
 

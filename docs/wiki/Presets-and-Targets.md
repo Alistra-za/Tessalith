@@ -30,7 +30,7 @@ What a target changes lives with the thing it changes:
 | Id | Target | What it does |
 |---|---|---|
 | `cs-quality` | `cs` | The default. Community Shaders including TruePBR; bc7e at `veryslow`; BC6H for HDR emissive. Adds nothing to the base defaults. |
-| `cs-compact` | `cs` | Smaller files: BC1 for opaque colour maps at full size, other listed sub-types at half size, BC4/BC5 search radius `fast`. |
+| `cs-compact` | `cs` | Smaller files: BC1 for opaque colour maps at full size, other maps at half size, BC4/BC5 search radius `fast`. |
 | `vanilla-quality` | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. `diffuse` and `glow` use perceptual encoding in BC1, BC3 and BC7. <!-- D:FM43 --> |
 | `vanilla-compact` | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
 | `fast-preview` | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, PSNR validation on the smallest mip only. |

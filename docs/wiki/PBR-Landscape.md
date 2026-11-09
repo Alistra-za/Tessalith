@@ -1,4 +1,4 @@
-# PBR Landscape, grass and XPMF
+# PBR Landscape, grass, XPMF and CS PBR records
 
 This page is for terrain, projected-material (snow, ash) and grass authors targeting Community Shaders. It covers what each material writes: PBR Landscape sets, Community Shaders' own PBR record files, XPMF profiles, PBR grass and complex grass. The ordinary TruePBR settings are on [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
 
@@ -38,7 +38,7 @@ Export writes one file per set that has an XPMF block: `SKSE\Plugins\XPMF\tessal
 - `<name>` is the last `/` part of the set id, lower-cased, with every character outside `a-z`, `0-9`, `_` and `-` replaced by `_`.
 - Tessalith never writes `snow.json` or `ash.json`: they are XPMF's own profiles, and in MO2 a file of that name would hide them. Two sets whose ids give one name refuse both.
 - The file is written after a clean export, with the same guard as the CS PBR files: a file Tessalith didn't write is kept and never replaced, and a profile no set writes any more is reported, not deleted. <!-- D:GI8 -->
-- A profile that can't be written (no EDIDs, not a landscape set, a value the schema refuses, a texture of this project that wasn't exported) is skipped, and the card's amber line says why. <!-- D:GI3 -->
+- A profile that can't be written (no EDIDs, not a landscape set, a value the schema refuses, a texture of this project that wasn't exported) is skipped, and the card's amber line says why. <!-- D:GI3,GI8 -->
 - **Also export with Vanilla ticked** writes a PBR Landscape set's Projected noise and Detail normal maps to the Vanilla folder as well, plus a copy of the profile with `pbr` set to false and the Vanilla folder's texture paths. A set left out of Also, or with a DDS file (which Also doesn't re-encode), gets none. <!-- D:GI27 -->
 
 ### Keys
@@ -88,7 +88,7 @@ Community Shaders draws grass with its own shader, which reads only the albedo, 
 
 ## Complex grass
 
-Vanilla and Community Shaders both use it. A complex-grass texture is one image twice as tall as it is wide, with power-of-two sides (for example 1024x2048): diffuse and alpha in the top half, normal and specular in the bottom half. Community Shaders detects it from the bottom-left texel.
+Both targets accept it; only Community Shaders or ENB read it in game. A complex-grass texture is one image twice as tall as it is wide, with power-of-two sides (for example 1024x2048): diffuse and alpha in the top half, normal and specular in the bottom half. Community Shaders detects it from the bottom-left texel.
 
 - Tag it by setting the set's shader to `complex_grass`, by setting `subtype = "complex_grass"` on the file's `[files]` entry, or let the GUI do it after a scan that included plugins: a texture a GRAS record uses, 1:2, with a valid detection corner and a normal-map bottom half gets a High-confidence suggestion. A complex-grass-shaped diffuse nothing tags gets an info row in Problems with **Tag as grass**. The sub-type picker offers **Complex grass** where the set's shader is a grass shader or no `textures` folder is above the file.
 - The CLI never tags it: without `subtype = "complex_grass"` on the `[files]` entry, `sdc convert` treats the file as a diffuse.

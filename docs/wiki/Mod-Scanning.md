@@ -1,4 +1,4 @@
-# Mod scanning and the Meshes view
+# Meshes and mod scanning
 
 This page is for modders who want Tessalith to read their Mod Organizer 2 load order (or one folder) so it can decide alpha, shaders and grass for you, and to see which meshes use a texture. A scan reads meshes (NIFs, loose or in BSAs) and, for an MO2 instance, the active plugins. It is read-only: it never changes your mods, your MO2 instance or your game folder. Scanning is a GUI feature; what `sdc` doesn't read is on [Review and Export](GUI-Review-and-Export.md).
 

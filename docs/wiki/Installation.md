@@ -32,7 +32,7 @@ The exes aren't code-signed, so SmartScreen warns on the first run. Click **More
 | `sdc.toml.recovery`, `sdc-project.toml.recovery` | Unsaved edits after a crash ([how they come back](Troubleshooting.md#after-a-crash)). | Not until you've opened the folder again. |
 | `<output>\_sdc\manifest.jsonl` | The record of every file written. | Keep it with its output: without it a re-run treats the DDS files as unknown and leaves them alone ([why](Validation-and-Output.md#re-runs-and-if-changed)). |
 
-Tessalith never changes your source files. It writes the output folder, the files above, and its own settings. A rename in the GUI writes an alias to `sdc-project.toml`; the file on disk keeps its name.
+Tessalith never changes your source files. It writes the output folder, the files above, and its own settings. An input rename writes an `[inputs]` alias to `sdc.toml`; an output rename writes PGPatcher **Rename** or `sdc-project.toml`. Files on disk keep their names.
 
 ## Back up, move or reset
 

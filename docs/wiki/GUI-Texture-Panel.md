@@ -51,7 +51,7 @@ An **amber border** means the texture still needs an answer: a Medium or Low sub
 | Question | Controls |
 |---|---|
 | What kind of texture is this? | A sub-type dropdown and **Confirm**. |
-| What does the alpha channel mean? | "Alpha: Cutout (proposed) — confirm" and an **Alpha type** dropdown already set to the proposal. Pick the type you want, or pick the shown one to confirm it. <!-- D:FM35 --> |
+| What does the alpha channel mean? | "Alpha: Cutout (proposed) — confirm" and a dropdown under it already set to the proposal. Pick the type you want, or pick the shown one to confirm it. <!-- D:FM35 --> |
 | "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press **Treat as OpenGL (flip green)** if it is an OpenGL map; **Treat as DirectX** undoes it. |
 | A blocking warning | **Acknowledge for this texture**, or **Drop the alpha anyway** when the chosen format discards a varying alpha you've already confirmed: the export writes the texture without its alpha. |
 
@@ -80,7 +80,7 @@ A DDS input is left as it is and not written. **Re-encode this file** writes `re
 
 ## How edits are saved
 
-Each edit becomes a `[files."<path>"]` entry in `sdc.toml`, keyed by the path relative to the folder (packed outputs without the extension, like `landscape/rock01_rmaos`). The GUI writes only `target`, `preset`, `[files.*]` and `[inputs.*]`. Comments, ordering, rules and every other table stay byte for byte as you wrote them ([Project config](Project-Config.md#files)).
+Each edit becomes a `[files."<path>"]` entry in `sdc.toml`, keyed by the path relative to the folder (packed outputs without the extension, like `landscape/rock01_rmaos`). The GUI writes only `target`, `preset`, `[export]`, `[files.*]` and `[inputs.*]`. Comments, ordering, rules and every other table stay byte for byte as you wrote them ([Project config](Project-Config.md#files)).
 
 Unsaved edits put a dot in the window title until you **Save** (**Ctrl+S**); Export saves first. If `sdc.toml` changed on disk while you have unsaved edits, saving asks for **Reload from disk** or **Overwrite with my changes**.
 
@@ -88,7 +88,7 @@ Unsaved edits put a dot in the window title until you **Save** (**Ctrl+S**); Exp
 
 ## Advanced drawer
 
-The drawer at the right edge holds what isn't per texture or is rarely needed: the preset inspector ([Presets and targets](Presets-and-Targets.md)), **Live encode** ([Previews](Previews.md)), a few advanced texture fields, the artist checks ([Texture types](Texture-Types.md#artist-checks)), the Also export recipe ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)) and **Unmatched [files] entries**, with **Remove**, for entries that name no file. It edits one texture at a time, also with several selected. With a set open in 2D it is the set editor's last tab.
+The drawer at the right edge holds what isn't per texture or is rarely needed: the preset inspector ([Presets and targets](Presets-and-Targets.md)), **Live encode**, a few advanced texture fields, the artist checks ([Texture types](Texture-Types.md#artist-checks)), the Also export recipe ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)) and **Unmatched [files] entries**, with **Remove**, for entries that name no file. It edits one texture at a time, also with several selected. With a set open in 2D it is the set editor's last tab.
 
 ![The Advanced drawer with the preset inspector.](../img/gui/GUI-Texture-Panel/advanced-drawer.png)
 

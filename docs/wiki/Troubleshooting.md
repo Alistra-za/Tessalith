@@ -14,7 +14,7 @@ skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidenc
 
 ### A colour map asks what its alpha means
 
-The mesh decides whether a varying alpha is a cutout, a blend or unused, so the image alone can't answer. Set `alpha.policy` on the file, use the **Alpha type** dropdown, or scan your mods so the meshes answer ([Alpha from the meshes](GUI-Texture-Panel.md#alpha-from-the-meshes)).
+The mesh decides whether a varying alpha is a cutout, a blend or unused, so the image alone can't answer. Set `alpha.policy` on the file, use the alpha dropdown, or scan your mods so the meshes answer ([Alpha from the meshes](GUI-Texture-Panel.md#alpha-from-the-meshes)).
 
 ### A normal map waits for a type
 
@@ -66,8 +66,7 @@ The error goes to `%LOCALAPPDATA%\sdc\logs\crash-<date>-<time>.log`, and your un
 
 ### The graphics device was lost
 
-The log has a "wgpu device lost" line. It isn't a crash: a message appears with **Restart**, and Tessalith reopens the same folder with your edits restored. A long session, alt-tab and screen capture are common triggers, but the cause isn't proven.
-
+The log has a "wgpu device lost" line. It isn't a crash: a message appears with **Restart**, and Tessalith reopens the same folder with your edits restored.
 ## Reporting a problem
 
 Open an issue on [GitHub](https://github.com/Alistra-za/Tessalith/issues/new/choose); the bug form lists what to attach.
@@ -77,5 +76,3 @@ Open an issue on [GitHub](https://github.com/Alistra-za/Tessalith/issues/new/cho
 **Will it re-encode my existing DDS files?** No, not by default: [Which files Tessalith reads](Texture-Types.md#which-files-tessalith-reads).
 
 **Does the CLI use my GUI set edits or the scan?** No: [Does the CLI use my GUI edits?](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits)
-
-**Does it write the PGPatcher JSON?** The GUI does, for PBR sets under `cs`: [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
