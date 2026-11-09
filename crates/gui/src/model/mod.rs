@@ -261,6 +261,8 @@ type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
 pub(crate) struct ViewCache {
     pub key: Option<ViewKey>,
     pub views: Option<Arc<Vec<sets::SetView>>>,
+    /// Note HF1: the set keys whose files are all in no set.
+    pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
     /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
@@ -2032,7 +2034,7 @@ impl AppModel {
     pub fn undecided_keys(&self) -> Vec<String> {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::NeedsDecision)
+            .filter(|i| i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
             .map(|i| i.key.clone())
             .collect()
     }
@@ -2611,6 +2613,7 @@ impl AppModel {
             .expanded
             .as_deref()
             .and_then(|k| self.item(k))
+            .filter(|i| !self.is_no_set(&i.key))
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
@@ -3079,7 +3082,7 @@ impl AppModel {
     pub fn undecided(&self) -> usize {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::NeedsDecision)
+            .filter(|i| i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
             .count()
     }
 

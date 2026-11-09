@@ -1012,7 +1012,8 @@ pub fn count_text(n: usize) -> String {
 pub fn followed_set(m: &AppModel) -> Option<String> {
     match &m.selection {
         Selection::Set(k) => Some(k.clone()),
-        Selection::Item(k) => m.item(k).and_then(|i| i.set_key.clone()),
+        // Note HF1: a no-set texture has no set.
+        Selection::Item(k) => m.set_key_of_item(k),
         Selection::None => None,
     }
 }

@@ -237,6 +237,7 @@ impl AppModel {
             .iter()
             .filter(|i| {
                 i.job.is_some()
+                    && self.item_in_run(i)
                     && !matches!(
                         i.status,
                         ItemStatus::NeedsDecision

@@ -124,10 +124,12 @@ pub(super) fn combo(
 
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport) {
     let Some(item) = model.item(key) else { return };
-    let (name, set_key) = (item.name.clone(), item.set_key.clone());
+    let name = item.name.clone();
+    // Note HF1: one check from a texture to its set; a no-set texture has none.
+    let set_key = model.set_key_of_item(key);
     let ro = model.toml_read_only_reason();
     let mut edits = vec![];
-    if let Some(sk) = set_key.filter(|k| model.sets.iter().any(|s| &s.key == k)) {
+    if let Some(sk) = set_key.filter(|k| !k.is_empty()) {
         let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
         if ui.link(format!("← {label}")).clicked() {
             model.select_set(&sk);

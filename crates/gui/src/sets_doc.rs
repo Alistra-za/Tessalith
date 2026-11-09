@@ -135,6 +135,8 @@ pub(crate) fn next_rev() -> u64 {
 pub struct SetsDoc {
     f: TomlFile,
     entries_cache: RefCell<Option<(u64, Arc<Vec<SetEntry>>)>>,
+    /// `no_set_keys`, by revision.
+    no_set_cache: RefCell<Option<(u64, Arc<BTreeSet<String>>)>>,
     /// Note FC11: `<project root>/_sdc/generated.json` as last read or written: the records kept outside the undo
     /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
     /// holds even when the document is never saved; a table it holds wins over the document's.
@@ -285,6 +287,7 @@ impl SetsDoc {
         let mut d = SetsDoc {
             f: TomlFile::open(root.join(FILE_NAME)),
             entries_cache: RefCell::default(),
+            no_set_cache: RefCell::default(),
             side: Default::default(),
         };
         d.load_sidecar();
@@ -632,6 +635,42 @@ impl SetsDoc {
         self.set_project("order", Some(Value::Array(arr)));
     }
 
+    /// Note HF1: the textures in no set (`[project] no_set`, `[files]`-style keys): not on a card, never written.
+    pub fn no_set(&self) -> Vec<String> {
+        strings(self.f.doc.get("project").and_then(|p| p.get("no_set")))
+    }
+    /// `no_set` folded, parsed once per revision (the model asks per item).
+    pub fn no_set_keys(&self) -> Arc<BTreeSet<String>> {
+        let rev = self.f.rev;
+        if let Some((r, k)) = &*self.no_set_cache.borrow() {
+            if *r == rev {
+                return k.clone();
+            }
+        }
+        let k: Arc<BTreeSet<String>> = Arc::new(self.no_set().iter().map(|f| fold_id(f)).collect());
+        *self.no_set_cache.borrow_mut() = Some((rev, k.clone()));
+        k
+    }
+    /// Put `key` in no set (`on`) or take it out; no edit when it already is as asked.
+    pub fn set_no_set(&mut self, key: &str, on: bool) {
+        if self.read_only() {
+            return;
+        }
+        let mut keys = self.no_set();
+        let n = keys.len();
+        keys.retain(|k| !same_id(k, key));
+        if on {
+            keys.push(key.to_string());
+        } else if keys.len() == n {
+            return;
+        }
+        let mut arr = Array::new();
+        for k in &keys {
+            arr.push(k.as_str());
+        }
+        self.set_project("no_set", (!keys.is_empty()).then_some(Value::Array(arr)));
+    }
+
     /// Files whose sub-type was switched to its PBR counterpart because their set's diffuse became `pbr_albedo`
     /// (so a revert finds them). GUI bookkeeping in `[project]`: `sdc.toml` rejects unknown keys.
     pub fn auto_pbr(&self) -> Vec<String> {
@@ -823,26 +862,27 @@ impl SetsDoc {
         self.f.touch();
     }
 
-    /// Drop set `id`'s entry and remove it from the order list (DECISIONS P2: its files return to automatic grouping).
-    pub fn delete_set(&mut self, id: &str) {
+    /// Note HF1: drop set `id`'s entry and remove it from the order list; its `files` go to no set, so an automatic
+    /// set does not come back. An entry with no files just goes.
+    pub fn delete_set(&mut self, id: &str, files: &[String]) {
         if self.read_only() {
             return;
         }
         let lower = fold_id(id);
-        if !self.parse_entries().iter().any(|e| fold_id(&e.id) == lower) {
-            return;
-        }
-        if let Some(tables) = self
-            .f
-            .doc
-            .get_mut("sets")
-            .and_then(Item::as_array_of_tables_mut)
-        {
-            tables.retain(|t| {
-                !t.get("id")
-                    .and_then(Item::as_str)
-                    .is_some_and(|s| fold_id(s) == lower)
-            });
+        if self.parse_entries().iter().any(|e| fold_id(&e.id) == lower) {
+            if let Some(tables) = self
+                .f
+                .doc
+                .get_mut("sets")
+                .and_then(Item::as_array_of_tables_mut)
+            {
+                tables.retain(|t| {
+                    !t.get("id")
+                        .and_then(Item::as_str)
+                        .is_some_and(|s| fold_id(s) == lower)
+                });
+            }
+            self.f.touch();
         }
         let order: Vec<String> = self
             .order()
@@ -852,7 +892,9 @@ impl SetsDoc {
         if !self.order().is_empty() {
             self.set_order(&order);
         }
-        self.f.touch();
+        for f in files {
+            self.set_no_set(f, true);
+        }
     }
 
     /// Rename set `from` to `to`. A created set just changes its id; an automatic set records `renamed_from`. Other
@@ -960,6 +1002,7 @@ impl SetsDoc {
 
     /// `file` moves into set `id` (a `Move` edit); it is taken out of every other entry's `add` and `remove`.
     pub fn add_member(&mut self, id: &str, file: &str) {
+        self.set_no_set(file, false);
         for e in self.parse_entries() {
             if !same_id(&e.id, id) {
                 if e.add.iter().any(|f| self.names_only(f, file)) {
@@ -997,7 +1040,8 @@ impl SetsDoc {
         }
     }
 
-    /// `file` leaves set `id`: it is dropped from `id`'s `add` when it was moved in, else recorded in `remove`.
+    /// Note HF1: `file` leaves set `id` for no set; a line that moved it in goes too. An older `remove` line stays
+    /// as it is (it kept meaning a one-file set).
     pub fn remove_member(&mut self, id: &str, file: &str) {
         let moved_in = self
             .parse_entries()
@@ -1005,9 +1049,14 @@ impl SetsDoc {
             .any(|e| same_id(&e.id, id) && e.add.iter().any(|f| self.names_only(f, file)));
         if moved_in {
             self.list_edit(id, "add", file, false);
-        } else {
-            self.list_edit(id, "remove", file, true);
         }
+        self.set_no_set(file, true);
+    }
+
+    /// Tests: an older project's `remove` line (Note HF1: nothing writes one any more, but they keep their meaning).
+    #[cfg(feature = "test-hooks")]
+    pub fn add_remove_line(&mut self, id: &str, file: &str) {
+        self.list_edit(id, "remove", file, true);
     }
 
     /// Note DU1: drop `key` from set `id`'s `add` and `remove` lists, as written: an entry that names no file, so
@@ -1676,7 +1725,7 @@ mod tests {
                 }),
             ),
             ("retarget_auto", Box::new(|s| s.retarget_auto("a/x", "a/y"))),
-            ("delete_set", Box::new(|s| s.delete_set("c/z"))),
+            ("delete_set", Box::new(|s| s.delete_set("c/z", &[]))),
             ("add_section", Box::new(|s| s.add_section(&Settings::new()))),
             ("set_json_name", Box::new(|s| s.set_json_name(Some("n")))),
             (

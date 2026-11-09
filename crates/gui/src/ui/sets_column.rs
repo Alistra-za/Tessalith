@@ -190,7 +190,7 @@ enum Act {
     /// Note HG: remove a set's mapping.
     UnmapRecord(String),
     OpenRename(String),
-    Delete(String, usize),
+    Delete(String),
     /// Item 18: open Fill from names on a set.
     FillNames(String),
     RemoveMember(String, String),
@@ -1439,7 +1439,7 @@ pub fn draw(
                 })
             }
             // Note FC5: no question; one undo step and a toast with Undo.
-            Act::Delete(id, members) => model.delete_set_with_toast(&id, members),
+            Act::Delete(id) => model.delete_set_with_toast(&id),
             Act::FillNames(set) => {
                 let rows = fill_proposals(model, &set);
                 st.pending = Some(if rows.is_empty() {
@@ -2034,7 +2034,7 @@ fn chip_row<'a>(
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             let (label, act) = match m {
-                Missing::NoFilesLeft => ("Delete set", Act::Delete(v.id.clone(), v.members.len())),
+                Missing::NoFilesLeft => ("Delete set", Act::Delete(v.id.clone())),
                 _ => (
                     "Remove from set",
                     Act::RemoveMissing(v.id.clone(), m.clone()),
@@ -2257,17 +2257,9 @@ fn menu(
         }
     });
     tip(remove.response);
-    let del = ui.add_enabled(
-        v.created || v.key.is_empty(),
-        egui::Button::new("Delete set"),
-    );
-    let del = del.on_disabled_hover_text(if editing.on {
-        "Only sets you created can be deleted; an automatic set comes back from the file names"
-    } else {
-        editing.why
-    });
-    if del.clicked() {
-        acts.push(Act::Delete(v.id.clone(), v.members.len()));
+    // Note HF1: any set; its textures go to no set.
+    if tip(ui.button("Delete set")).clicked() {
+        acts.push(Act::Delete(v.id.clone()));
         ui.close();
     }
     // K19: `index` is among all sets; while a filter is on neither moves.

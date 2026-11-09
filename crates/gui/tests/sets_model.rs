@@ -314,7 +314,7 @@ fn edits_go_creates_and_renames_first_then_moves_then_removes() {
     use engine::sets::SetEdit;
     assert!(matches!(&edits[0], SetEdit::Create { set } if set == "mine/new"));
     assert!(matches!(&edits[1], SetEdit::Move { to, .. } if to == "mine/new"));
-    assert!(matches!(edits.last().unwrap(), SetEdit::Remove { .. }));
+    assert!(matches!(edits.last().unwrap(), SetEdit::NoSet { .. }));
 }
 
 #[test]
@@ -373,25 +373,25 @@ fn clearing_a_match_returns_to_the_derived_prefix() {
 }
 
 #[test]
-fn removing_the_only_member_of_a_set_does_nothing() {
-    // The engine would make it a set of its own named `<stem>~2` (it is already one).
+fn removing_the_only_member_of_a_set_puts_it_in_no_set() {
+    // Note HF1 supersedes the old refusal (DU5): it leaves for no set, with no `remove` line.
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
     let leaf = key_of(&m, "leaf.png");
-    let before = m.sets_doc.as_ref().unwrap().text();
     let steps = m.history.undo.len();
-    assert!(m.remove_member("landscape/leaf", &leaf).is_err());
-    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before);
-    assert_eq!(m.history.undo.len(), steps);
-    // The only member of a set it was moved into goes back to the automatic grouping (no Remove edit).
+    assert!(m.remove_member("landscape/leaf", &leaf).is_ok());
+    assert_eq!(m.history.undo.len(), steps + 1);
+    assert!(m.is_no_set(&leaf));
+    // The only member of a set it was moved into leaves for no set too (its `add` line goes).
     let odd = key_of(&m, "odd.png");
     let id = m.drop_new_set(&odd).unwrap();
     idle(&mut m);
     assert!(m.remove_member(&id, &odd).is_ok());
     idle(&mut m);
     let v = set_views(&m);
-    assert!(view(&v, "landscape/odd").members.contains(&odd));
+    assert!(m.is_no_set(&odd));
+    assert!(v.iter().all(|s| !s.members.contains(&odd)));
     assert!(
         view(&v, &id).members.is_empty(),
         "the created set stays, empty"
@@ -440,11 +440,10 @@ fn rename_refuses_names_in_use_and_bad_names() {
 }
 
 #[test]
-fn delete_set_only_deletes_created_sets() {
+fn delete_set_deletes_a_created_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
-    assert!(!m.delete_set("landscape/rock01"));
     let odd = key_of(&m, "odd.png");
     let id = m.drop_new_set(&odd).unwrap();
     idle(&mut m);

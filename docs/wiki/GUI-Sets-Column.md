@@ -28,7 +28,19 @@ The search box matches a set's id or label, never its key. The pills *Not ready*
 
 Drag the **≡** handle, or use **Move up** and **Move down**. They are off while a Sets filter is on, because a hidden set would shift the numbers. **Move to…** stays on and takes a position or a name; it is also how you make a long move, since a drag only reaches the cards on screen.
 
-**Delete set** asks nothing: it is one undo step, and the toast has an **Undo** button. The textures stay. Only a set you created can be deleted, because an automatic set would regroup from the file names at once.
+**Delete set** works on every set and asks nothing: it is one undo step, and the toast (`Deleted set {name} (3 textures now in no set)`) has an **Undo** button. The textures are not deleted. They go to *no set* and the automatic set does not come back, so a delete sticks after a new plan or a reopen. A set with no files left just goes. <!-- D:HF1 -->
+
+## Textures in no set
+
+**Remove member** puts a texture in no set, whichever way it got into the set: grouped by name, moved in, or the only one in the set. A packed map can't be removed, because it follows its raw maps. <!-- D:HF1 -->
+
+- A no-set texture is on no card and Tessalith writes nothing for it, so a stray `_f`, `_ao` or `_mask` file stops showing up as a set of its own (or as `mouth_ao~2`).
+- It stays in the Textures column, and its row reads **No set** where a type would be. Its warnings and questions count for nothing: no Problems row, no Review row, no number in the status bar, and Export doesn't stop to ask about it.
+- A same-named file in a set (`rock.png` in no set, `rock.tga` in a set) is no longer `IN-DUPLICATE`: the no-set file writes nothing, so it can't clash.
+- To put it back, drag it onto a card, or onto the empty space to start a new set. Right-click it in the Textures column for **Back to its automatic set**: that is the only way to bring back a big automatic set once Undo has gone.
+- If the file is deleted from disk, its entry clears itself and Messages says so.
+
+The list is `no_set` under `[project]` in `sdc-project.toml`. An older `remove` line there still means what it did, a one-file set that exports.
 
 ## Where set edits are saved
 

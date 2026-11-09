@@ -463,7 +463,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status == ItemStatus::NeedsDecision)
+        .filter(|i| i.status == ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         // Note FM35: the alpha question is one line on the type it opens on.
         let alpha = items::alpha_asked(i).map(code_text::alpha_confirm_text);
@@ -521,7 +521,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status != ItemStatus::NeedsDecision)
+        .filter(|i| i.status != ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         for w in i.warnings.iter().filter(|w| counts_toward_badge(w)) {
             let at = At::Texture(i.key.clone());
@@ -667,7 +667,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status != ItemStatus::NeedsDecision)
+        .filter(|i| i.status != ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         for w in m.check_warnings(&i.key).iter().filter(|w| check_row(w)) {
             let at = At::Texture(i.key.clone());

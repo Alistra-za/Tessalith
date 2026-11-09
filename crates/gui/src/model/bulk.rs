@@ -969,6 +969,8 @@ pub enum MenuAction {
     ClearInputAlias,
     /// Task 5: select the source file of texture `key` in Explorer.
     ShowInExplorer(String),
+    /// Note HF1: the selected no-set textures go back to the sets their names make.
+    BackToAutomaticSet,
 }
 
 /// The slot menu's PGPatcher lock entry, off and on (Note AN).
@@ -1148,6 +1150,16 @@ impl AppModel {
         .into_iter()
         .chain(self.rename_entries(false))
         .chain(active.filter(|_| n == 1).map(|k| self.show_entry(k)))
+        .chain(
+            self.selected_items()
+                .iter()
+                .any(|k| self.is_no_set(k))
+                .then(|| MenuEntry {
+                    action: MenuAction::BackToAutomaticSet,
+                    label: "Back to its automatic set".into(),
+                    disabled: self.sets_read_only_reason(),
+                }),
+        )
         .collect()
     }
 
@@ -1463,6 +1475,10 @@ impl AppModel {
                 self.clear_input_alias(&keys);
             }
             MenuAction::ShowInExplorer(key) => return self.reveal_item(&key).err(),
+            MenuAction::BackToAutomaticSet => {
+                let keys = self.selected_items();
+                return self.back_to_automatic_set(&keys).err();
+            }
         }
         None
     }

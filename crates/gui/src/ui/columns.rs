@@ -176,9 +176,24 @@ pub(super) fn border_of(ui: &egui::Ui, status: &ItemStatus) -> egui::Color32 {
     }
 }
 
-/// The hover text of a tile: what the status means, then the warnings.
-fn tile_tooltip(item: &TextureItem) -> String {
+/// A tile's border: Note HF1 (agent ruling): a no-set texture's is never amber, its questions count for nothing.
+fn tile_border(ui: &egui::Ui, status: &ItemStatus, no_set: bool) -> egui::Color32 {
+    if no_set && *status == ItemStatus::NeedsDecision {
+        return ui.visuals().widgets.noninteractive.bg_stroke.color;
+    }
+    border_of(ui, status)
+}
+
+/// The hover text of a tile: what the status means, then the warnings. A no-set texture says `No set` in place of
+/// its question and its warnings (Note HF1).
+fn tile_tooltip(item: &TextureItem, no_set: bool) -> String {
     let mut lines = vec![item.key.clone()];
+    if no_set {
+        lines.push("No set".to_string());
+        if !matches!(item.status, ItemStatus::Failed(_) | ItemStatus::Error(_)) {
+            return lines.join("\n");
+        }
+    }
     match &item.status {
         ItemStatus::Failed(e) => lines.push(format!("Failed: {e}")),
         ItemStatus::Error(codes) => lines.push(format!(
@@ -194,7 +209,9 @@ fn tile_tooltip(item: &TextureItem) -> String {
         ItemStatus::PackedInto(j) => lines.push(format!("Packed into {j}")),
         ItemStatus::Ready => {}
     }
-    lines.extend(item.warnings.iter().map(|w| w.message.clone()));
+    if !no_set {
+        lines.extend(item.warnings.iter().map(|w| w.message.clone()));
+    }
     lines.join("\n")
 }
 
@@ -209,6 +226,7 @@ fn tile(
     let inner_h = tile_height(ui, size) - 2.0 * (TILE_MARGIN + TILE_STROKE);
     let item = &model.items[idx];
     let selected = chosen.contains(&item.key);
+    let no_set = model.is_no_set(&item.key);
     let fill = if selected {
         ui.visuals().selection.bg_fill.linear_multiply(0.4)
     } else {
@@ -227,7 +245,10 @@ fn tile(
         .read_as_of(&key)
         .map(|a| a.rsplit(['/', '\\']).next().unwrap_or_default().to_string());
     let resp = egui::Frame::default()
-        .stroke(egui::Stroke::new(TILE_STROKE, border_of(ui, &item.status)))
+        .stroke(egui::Stroke::new(
+            TILE_STROKE,
+            tile_border(ui, &item.status, no_set),
+        ))
         .fill(fill)
         .inner_margin(TILE_MARGIN)
         .show(ui, |ui| {
@@ -245,7 +266,9 @@ fn tile(
                 }
                 ui.add(egui::Label::new(egui::RichText::new(&item.name).small()).truncate());
                 let mut badges = vec![];
-                if item.warnings.iter().any(super::counts_toward_badge) {
+                if no_set {
+                    badges.push("No set".to_string());
+                } else if item.warnings.iter().any(super::counts_toward_badge) {
                     badges.push("⚠".to_string());
                 }
                 if let ItemStatus::PackedInto(j) = &item.status {
@@ -257,7 +280,7 @@ fn tile(
                 if let Some(a) = &read_as {
                     badges.push(format!("read as {a}"));
                 }
-                let ready = crate::model::bottom::tile_ready(item);
+                let ready = !no_set && crate::model::bottom::tile_ready(item);
                 ui.horizontal(|ui| {
                     if ready {
                         super::status::dot(ui, super::status::Status::Ready);
@@ -271,11 +294,11 @@ fn tile(
         })
         .response
         .interact(egui::Sense::click_and_drag())
-        .on_hover_text(tile_tooltip(item));
+        .on_hover_text(tile_tooltip(item, no_set));
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).
-    let base = border_of(ui, &item.status);
+    let base = tile_border(ui, &item.status, no_set);
     let stroke = interact_stroke(ui, &resp, base);
     if stroke != base && !dim {
         ui.painter().rect_stroke(
@@ -590,6 +613,8 @@ fn helper_row(
         return;
     };
     let key = item.key.clone();
+    // Note HF1: a no-set helper reads `No set` in place of its role and where it goes.
+    let no_set = model.is_no_set(&key);
     let target = crate::model::items::helper_target_text(&h);
     let role = h.role.label();
     // Registered before the cells, so the truncated labels keep their hover (the topmost widget wins the click).
@@ -599,7 +624,11 @@ fn helper_row(
         egui::Sense::click(),
     );
     let by_you = if h.role_hand_set { " (set by you)" } else { "" };
-    let name = format!("Helper {}: {role}{by_you}, {target}", item.name);
+    let name = if no_set {
+        format!("Helper {}: No set", item.name)
+    } else {
+        format!("Helper {}: {role}{by_you}, {target}", item.name)
+    };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     if chosen.contains(&key) {
         ui.painter().rect_filled(
@@ -640,6 +669,10 @@ fn helper_row(
                 |ui| {
                     // The name keeps at least half the row; right to left: the chip, then the target.
                     ui.set_max_width(width * 0.5);
+                    if no_set {
+                        ui.add(egui::Label::new(egui::RichText::new("No set").weak()).truncate());
+                        return;
+                    }
                     role_chip(ui, &role, h.role_hand_set);
                     let shown = if h.fills.is_empty() {
                         "not used".to_string()

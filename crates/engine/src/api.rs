@@ -1666,9 +1666,12 @@ impl Engine {
             );
         }
         let waits = waiting_images(&ctx, target, &sets, &files, &typed, &hand);
+        // Note HF1: a no-set file writes nothing, so it blocks no same-named file.
+        let no_set = crate::sets::no_set_paths(&files, scope_root.as_deref(), &req.set_edits);
         let counts = |f: &InputFile| {
             !losers.contains(&f.path)
                 && !waits.contains(&f.path)
+                && !no_set.contains(&f.path)
                 && (f.kind != InputKind::Dds || reencodes(&ctx, f))
         };
         let mut dups = crate::group::duplicate_outputs_with(&files, counts);

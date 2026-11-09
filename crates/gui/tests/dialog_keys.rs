@@ -441,11 +441,16 @@ fn delete_set_has_no_dialog_and_undoes() {
     );
     assert!(!has_set(h.state(), &id));
     assert_eq!(h.state().history.undo.len(), before + 1);
-    let s = if members == 1 { "" } else { "s" };
+    // Note HF1: the textures go to no set.
+    let text = if members == 1 {
+        format!("Deleted set {id} (1 texture now in no set)")
+    } else {
+        format!("Deleted set {id} ({members} textures now in no set)")
+    };
     for _ in 0..6 {
         h.step();
     }
-    h.get_by_label(&format!("Deleted set {id} ({members} member{s})"));
+    h.get_by_label(&text);
     h.get_by_label("Undo the deleted set").click();
     for _ in 0..3 {
         h.step();

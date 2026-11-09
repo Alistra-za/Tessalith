@@ -895,16 +895,34 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     views
 }
 
+/// Note HF1: the set has a member and every one that is not a packed output is in no set (a packed output follows
+/// its raw maps). Such a set has no card, whatever its entry holds.
+fn all_no_set(m: &AppModel, s: &SetItem) -> bool {
+    let mut any = false;
+    for k in &s.members {
+        if m.item(k).is_some_and(|i| i.kind == ItemKind::Packed) {
+            continue;
+        }
+        if !m.is_no_set(k) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
 /// Note GY5: a set whose only member waits for a type has no card, unless the user created it or set something on it
 /// (its sets-doc entry holds more than its id: a shader back to Auto or the last lock removed leaves only the id).
+/// Note HF1: nor has a set whose files are all in no set.
 fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> bool {
-    matches!(s.members.as_slice(), [k] if m.item(k).is_some_and(|i| i.waiting))
-        && entry_of(entries, &set_id(root, &s.key)).is_none_or(|e| {
-            *e == SetEntry {
-                id: e.id.clone(),
-                ..Default::default()
-            }
-        })
+    all_no_set(m, s)
+        || matches!(s.members.as_slice(), [k] if m.item(k).is_some_and(|i| i.waiting))
+            && entry_of(entries, &set_id(root, &s.key)).is_none_or(|e| {
+                *e == SetEntry {
+                    id: e.id.clone(),
+                    ..Default::default()
+                }
+            })
 }
 
 /// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).
@@ -1304,6 +1322,10 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         for f in &e.remove {
             edits.push(SetEdit::Remove { file: f.clone() });
         }
+    }
+    // Note HF1: the no-set files, last, so each leaves the set the other edits put it in.
+    if let Some(d) = &m.sets_doc {
+        edits.extend(d.no_set().into_iter().map(|file| SetEdit::NoSet { file }));
     }
     let mut paths = BTreeMap::new();
     let views = views(m);
@@ -1969,6 +1991,43 @@ fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Opti
 }
 
 impl AppModel {
+    /// Note HF1: the texture `item_key` is in no set (`[project] no_set`): not on a card, written nowhere, its
+    /// warnings and questions counted by nothing.
+    pub fn is_no_set(&self, item_key: &str) -> bool {
+        self.sets_doc
+            .as_ref()
+            .is_some_and(|d| d.no_set_keys().contains(&fold_id(item_key)))
+    }
+
+    /// The plan's set keys whose files are all in no set, per view key.
+    fn no_set_sets(&self) -> Arc<HashSet<String>> {
+        super::cached(
+            self,
+            |c| c.no_set_sets.clone(),
+            |c, v| c.no_set_sets = Some(v),
+            || {
+                Arc::new(
+                    self.sets
+                        .iter()
+                        .filter(|s| all_no_set(self, s))
+                        .map(|s| s.key.clone())
+                        .collect(),
+                )
+            },
+        )
+    }
+
+    /// Note HF1: whether set `set_key` takes part in the run: false for a no-set texture's set. Every gate and count
+    /// that reads a texture's questions or files asks this (Task 4 adds a scope and excluded groups).
+    pub fn in_run(&self, set_key: &str) -> bool {
+        !self.no_set_sets().contains(set_key)
+    }
+
+    /// Note HF1: whether `item`'s questions, warnings and file count: it is not in no set and its set is in the run.
+    pub fn item_in_run(&self, item: &TextureItem) -> bool {
+        !self.is_no_set(&item.key) && item.set_key.as_deref().is_none_or(|k| self.in_run(k))
+    }
+
     pub(super) fn view_of(&self, id: &str) -> Option<SetView> {
         views(self).iter().find(|v| same_id(&v.id, id)).cloned()
     }
@@ -1979,11 +2038,20 @@ impl AppModel {
         self.set_of_item(item)
     }
 
-    fn set_of_item(&self, item: &str) -> Option<SetView> {
+    /// The one check from a texture to its set: a no-set texture has none, because its set has no view.
+    pub(crate) fn set_of_item(&self, item: &str) -> Option<SetView> {
         views(self)
             .iter()
             .find(|v| v.members.iter().any(|k| k == item))
             .cloned()
+    }
+
+    /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
+    pub(crate) fn set_key_of_item(&self, item: &str) -> Option<String> {
+        views(self)
+            .iter()
+            .find(|v| v.members.iter().any(|k| k == item))
+            .map(|v| v.key.clone())
     }
 
     pub(crate) fn sets_editable(&self) -> bool {
@@ -2521,34 +2589,65 @@ impl AppModel {
         Ok(())
     }
 
-    /// Delete a set the user created, or the entry of a set whose files have all gone (DECISIONS P2–P3: neither
-    /// comes back from the file names); false (nothing done) for a live automatic set.
-    pub fn delete_set(&mut self, id: &str) -> bool {
-        if !self.sets_editable()
-            || !self
-                .view_of(id)
-                .is_some_and(|v| v.created || v.key.is_empty())
-        {
-            return false;
+    /// Note HF1: the no-set textures among `keys` go back to the sets their names make, as one undo step.
+    pub fn back_to_automatic_set(&mut self, keys: &[String]) -> Result<(), String> {
+        if let Some(why) = self.sets_read_only_reason() {
+            return Err(why);
         }
+        let keys: Vec<String> = keys.iter().filter(|k| self.is_no_set(k)).cloned().collect();
+        if keys.is_empty() {
+            return Ok(());
+        }
+        self.edit_docs("Back to its automatic set", None, true, move |_, s| {
+            for k in &keys {
+                s.set_no_set(k, false);
+            }
+        });
+        Ok(())
+    }
+
+    /// Note HF1: delete any set. Its textures (not the packed outputs, which follow their raw maps) go to no set and
+    /// the automatic set does not come back; an entry with no files just goes. Returns how many textures went to no
+    /// set, or `None` (nothing done) when there is no such set or the project file takes no edit.
+    fn delete_counted(&mut self, id: &str) -> Option<usize> {
+        if !self.sets_editable() {
+            return None;
+        }
+        let v = self.view_of(id)?;
+        let files: Vec<String> = v
+            .members
+            .iter()
+            .filter(|k| !self.is_packed(k))
+            .cloned()
+            .collect();
+        let n = files.len();
         let i = id.to_string();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
-            s.delete_set(&i)
+            s.delete_set(&i, &files)
         });
-        true
+        Some(n)
+    }
+
+    /// `delete_counted`, as done or not.
+    pub fn delete_set(&mut self, id: &str) -> bool {
+        self.delete_counted(id).is_some()
     }
 
     /// Note FC5 (supersedes AG13's confirm): the set menu's Delete set: no question, one undo step and a toast
-    /// `Deleted set {id} ({n} members)` with Undo.
-    pub fn delete_set_with_toast(&mut self, id: &str, members: usize) {
-        if !self.delete_set(id) {
+    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1).
+    pub fn delete_set_with_toast(&mut self, id: &str) {
+        let Some(n) = self.delete_counted(id) else {
             return;
-        }
+        };
         let step = (self.history.undo.len(), self.history.pushes);
-        let s = if members == 1 { "" } else { "s" };
+        let text = match n {
+            0 => format!("Deleted set {id}"),
+            1 => format!("Deleted set {id} (1 texture now in no set)"),
+            n => format!("Deleted set {id} ({n} textures now in no set)"),
+        };
         self.messages.notify_with(
             super::messages::Severity::Info,
-            format!("Deleted set {id} ({members} member{s})"),
+            text,
             Some(super::messages::ToastAction::UndoDeleteSet(step.0, step.1)),
         );
     }
@@ -2565,9 +2664,8 @@ impl AppModel {
         }
     }
 
-    /// Take `item` out of set `id` (it becomes a set of its own, or returns to the automatic grouping when it was
-    /// moved in). Refused for a packed map (it follows its raw maps) and for the only member of a set that it is in
-    /// by automatic grouping (it already is a set of its own; the engine would rename it `<stem>~2`).
+    /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
+    /// in, the only member). Refused for a packed map (it follows its raw maps).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -2580,13 +2678,6 @@ impl AppModel {
         };
         if !v.members.iter().any(|k| k == item) {
             return Err(format!("{item} is not in {}", v.id));
-        }
-        let moved_in = self.sets_doc.as_ref().is_some_and(|d| {
-            entry_of(&d.entries(), &v.id)
-                .is_some_and(|e| e.add.iter().any(|f| crate::sets_doc::names_file(f, item)))
-        });
-        if v.members.len() == 1 && !moved_in {
-            return Err(format!("{item} is the only texture in {}", v.id));
         }
         self.leaves_locked(item)?;
         let (i, it) = (v.id.clone(), item.to_string());
@@ -2631,6 +2722,26 @@ impl AppModel {
             self.messages.log(
                 super::messages::Severity::Info,
                 format!("{id}: {f} no longer exists, so it was cleared from the set"),
+            );
+        }
+        // Note HF1: a no-set file gone from disk takes its entry with it.
+        let gone_no_set: Vec<String> = self
+            .sets_doc
+            .as_ref()
+            .map(|d| d.no_set())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|k| !key_on_disk(&root, k))
+            .collect();
+        for k in gone_no_set {
+            let Some(doc) = self.sets_doc.as_mut() else {
+                return;
+            };
+            doc.set_no_set(&k, false);
+            cleared = true;
+            self.messages.log(
+                super::messages::Severity::Info,
+                format!("{k} no longer exists, so it was cleared from the textures in no set"),
             );
         }
         if cleared {

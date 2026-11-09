@@ -21,6 +21,9 @@ pub enum SetEdit {
     Move { file: String, to: String },
     /// The file leaves its set and becomes a set of its own.
     Remove { file: String },
+    /// The file leaves its set and becomes a set of its own that writes nothing (Note HF1). It groups as `Remove`
+    /// does; `prepare` also leaves it out of the `IN-DUPLICATE` comparison.
+    NoSet { file: String },
 }
 
 /// An edit that could not apply: it names a file or set that is not there (it is reported, never fatal).
@@ -131,7 +134,7 @@ pub fn apply_set_edits(
                     Ok(())
                 }
             },
-            SetEdit::Remove { file } => match file_of(file) {
+            SetEdit::Remove { file } | SetEdit::NoSet { file } => match file_of(file) {
                 None => Err(format!("no file '{file}'")),
                 Some(f) => {
                     for s in sets.iter_mut() {
@@ -180,6 +183,25 @@ pub fn apply_set_edits(
     sets.retain(|s| !s.members.is_empty());
     sets.sort_by(|a, b| a.key.cmp(&b.key));
     stale
+}
+
+/// The paths of the files `edits` mark `NoSet` (a key naming no file is the stale edit `apply_set_edits` reports).
+pub(crate) fn no_set_paths(
+    files: &[InputFile],
+    root: Option<&Path>,
+    edits: &[SetEdit],
+) -> BTreeSet<PathBuf> {
+    let Some(root) = root else {
+        return BTreeSet::new();
+    };
+    let index = KeyIndex::new(root, files);
+    edits
+        .iter()
+        .filter_map(|e| match e {
+            SetEdit::NoSet { file } => index.hits(file).first().map(|&i| files[i].path.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// What an explicit output path applies to (DECISIONS P1).
