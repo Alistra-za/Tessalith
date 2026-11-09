@@ -978,6 +978,7 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
             }
         };
         let (_d, mut h) = crate::replay_mid("demo", |_| {}, &first, narrow, &rest);
+        crate::app_harness::quiet(&mut h);
         // the list starts under the filter row
         let list_top = texts(&h)
             .into_iter()
@@ -1052,6 +1053,7 @@ fn a_search_keeps_its_match_in_cut_titles() {
             |h| sets_width(h, 180.0),
             &[r#"{"op":"settle","frames":6}"#],
         );
+        crate::app_harness::quiet(&mut h);
         let mut any_cut = false;
         for (id, leaf) in ids {
             let title = h
@@ -1093,6 +1095,7 @@ fn one_fill_has_one_wording() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
         let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        crate::app_harness::quiet(&mut h);
         let at = format!("at {w}x{h_px}");
         for l in [
             "crate_opacity.png, fills D alpha",
