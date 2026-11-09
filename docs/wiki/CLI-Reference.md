@@ -85,6 +85,7 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 | [`validate`](#sdc-validate) | Check existing DDS files against a target's rules. |
 | [`presets`](#sdc-presets) | List and show presets; print JSON schemas. |
 | [`cubemap-marker`](#sdc-cubemap-marker) | Write the 1×1 dynamic-cubemap marker DDS. |
+| [`uv`](#sdc-uv) | Write an image of the UV islands of the meshes that use a texture. |
 
 - `sdc --version` prints the Tessalith version and the version of each linked encoder. Paste it into bug reports.
 - `sdc --help` and `sdc <command> --help` print the built-in help.
@@ -353,6 +354,46 @@ sdc presets schema all --out schemas
 ```
 
 `sdc presets schema manifest` lists every field of a manifest record ([the manifest](Validation-and-Output.md#the-manifest)).
+
+## sdc uv
+
+```text
+sdc uv <PATTERN> [--recursive] (--s N | --w W --l L) [--meshes <folder>] [--scan <db>] [--out <dir>] [--overwrite]
+```
+
+Draws where the meshes put a texture, so you can lay out and pad a texture before you paint it. It writes one 8-bit grayscale PNG per texture, `<name>_uvmask.png`, at the size you give. Use it as a layer in your image editor, or hand it to a dilation tool.
+
+| Pixel | Meaning |
+|---|---|
+| 255 | An island: a texel a mesh triangle covers, even in part. |
+| 127 | The recommended padding: within the padding distance of one island. |
+| 191 | Too close: within the padding distance of two or more different islands. Their padding overlaps, so mips will bleed one into the other. |
+| 0 | Nothing nearby. |
+
+The padding is 1/256 of the longer side, at least 2 texels: 2 at 512, 4 at 1024, 8 at 2048, 16 at 4096 and at 2048×4096, 32 at 8192. Islands are groups of touching texels (corners count). Touching meshes, or two meshes over the same texels, are one island. UVs outside 0 to 1 wrap. The padding stops at the image edge: it doesn't wrap to the other side of a tiling texture.
+
+| Argument | Meaning |
+|---|---|
+| `<PATTERN>` | A texture path as you'd type it: `\` or `/`, `textures\` and `.dds` optional, any case. `*` and `?` match inside one folder or file name. A folder matches the textures directly in it; `--recursive` takes every texture below it. |
+| `--s N` (`--size`) | The texture is N×N. 1 to 16384. |
+| `--w W --l L` (`--width`, `--length`) | The texture is W wide and L long. Give both; not with `--s`. |
+| `--meshes <folder>` | Read every `.nif` below this folder (subfolders included) instead of the scan. |
+| `--scan <db>` | Read this scan database. Default: the one the GUI's **Meshes** scan writes. |
+| `--out <dir>` | Where the images go. Default: the current folder. |
+| `--overwrite` | Replace an existing image. Otherwise it is kept and reported. |
+
+A mesh uses a texture when the path is in any slot of its lighting shader's texture set, or is the source texture of an effect shader. All maps of one shape share its UVs.
+
+Without `--meshes`, `sdc uv` reads the scan database and takes only the meshes the game loads (the winning copy of each path, loose or in a BSA). Run the Meshes scan in the GUI first; without a database `sdc uv` stops and says so. With `--meshes`, the folder is read as it is and the scan isn't touched. A mesh it can't read, and a Skyrim LE mesh, is listed on stderr and skipped.
+
+The images mirror the matched path below the part of the pattern before its first `*`. `sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048` writes `fs6_arrow_ir_uvmask.png`; `sdc uv Harry2135 --recursive --s 2048` writes `fantasyseries6\fs6_arrow_ir_uvmask.png`. Each written file prints one line: its path, the island count, the padding, the number of 191 texels and the number of meshes read. A texture whose meshes have no usable triangles writes nothing and says so.
+
+```powershell
+sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048 --out uvmasks
+sdc uv armor\* --recursive --w 2048 --l 4096 --meshes .\meshes
+```
+
+Exit codes: 0 every image written; 1 a texture wrote nothing (no UV triangles, or the file exists and `--overwrite` is missing); 2 a usage error: a bad size, a pattern that matches no texture, a missing scan database; 3 a write failed.
 
 ## Cubemaps from the command line
 
