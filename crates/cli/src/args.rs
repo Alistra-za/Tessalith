@@ -50,6 +50,59 @@ pub enum Command {
     Presets(PresetsArgs),
     /// Write the 1x1 CS/ENB dynamic cubemap marker DDS (152 bytes).
     CubemapMarker(MarkerArgs),
+    /// Write a UV-island image for each texture a pattern names: islands 255, padding 127, too close 191.
+    Uv(UvArgs),
+    /// Fill the texels outside a _matid or _uvmask mask by push-pull, keeping the masked texels as they are.
+    Dilate(DilateArgs),
+}
+
+#[derive(Args)]
+pub struct DilateArgs {
+    /// Image files, folders (the images directly in them) or globs on disk (`*` and `?` match within one name).
+    #[arg(required = true)]
+    pub patterns: Vec<String>,
+    /// Take the images below a folder too.
+    #[arg(long)]
+    pub recursive: bool,
+    /// The mask for every input (default: `<base>_matid.*` or `<base>_uvmask.png` beside each input).
+    #[arg(long)]
+    pub mask: Option<PathBuf>,
+    /// Where the images go (default: a `dilated` folder beside each input).
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+    /// Replace an existing image.
+    #[arg(long)]
+    pub overwrite: bool,
+}
+
+#[derive(Args)]
+pub struct UvArgs {
+    /// A texture path, with or without `textures\` and `.dds`, `\` or `/`, any case; `*` and `?` match within one
+    /// folder or file name. A folder names the textures directly in it (all below it with --recursive).
+    pub pattern: String,
+    #[arg(long)]
+    pub recursive: bool,
+    /// Texture size N x N (1..=16384).
+    #[arg(long = "s", visible_alias = "size", value_name = "N", value_parser = clap::value_parser!(u32).range(1..=16384), required_unless_present = "w", conflicts_with_all = ["w", "l"])]
+    pub s: Option<u32>,
+    /// Texture width (with --l).
+    #[arg(long = "w", visible_alias = "width", value_name = "W", value_parser = clap::value_parser!(u32).range(1..=16384), requires = "l")]
+    pub w: Option<u32>,
+    /// Texture length, its height (with --w).
+    #[arg(long = "l", visible_alias = "length", value_name = "L", value_parser = clap::value_parser!(u32).range(1..=16384), requires = "w")]
+    pub l: Option<u32>,
+    /// Read every .nif below this folder instead of the GUI's scan.
+    #[arg(long)]
+    pub meshes: Option<PathBuf>,
+    /// The scan database to read (default: the one the GUI's Meshes scan writes).
+    #[arg(long, conflicts_with = "meshes")]
+    pub scan: Option<PathBuf>,
+    /// Where the images go (default: the current folder).
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+    /// Replace an existing image.
+    #[arg(long)]
+    pub overwrite: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

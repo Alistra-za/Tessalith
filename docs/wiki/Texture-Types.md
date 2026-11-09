@@ -180,24 +180,15 @@ Throwing away varying alpha by accident is blocked (`LOSS-ALPHA-DATA`), unless y
 
 ## Artist checks
 
-Four checks read the numbers Tessalith already measures while it plans, and warn about maps that will probably look wrong in game. They only warn: none blocks an export, asks you anything or changes "ready", and none reaches Review or the Files rows. The Problems tab lists them with a grey **check** dot and a **Checks** pill ([Problems](GUI-Problems.md)). Each has a switch in **Advanced → Checks** (all on, saved in `gui.toml`); a switch hides its results at once, with no re-plan.
+Three checks read the numbers Tessalith already measures while it plans, and warn about maps that will probably look wrong in game. They only warn: none blocks an export, asks you anything or changes "ready", and none reaches Review or the Files rows. The Problems tab lists them with a grey **check** dot and a **Checks** pill ([Problems](GUI-Problems.md)). Each has a switch in **Advanced → Checks** (all on, saved in `gui.toml`); a switch hides its results at once, with no re-plan.
 
 | Check | What it flags | Code |
 |---|---|---|
 | **Low detail** | A top mip that adds almost nothing over mip 1 (an upscale, a 2K made from a 1K). | `CHK-LOW-DETAIL` |
 | **Green direction** | A normal that curls like OpenGL when read as DirectX (an Info hint; it never flips by itself, and **Treat as OpenGL (flip green)** is one undo step). A blue channel that points the wrong way. | `CHK-GREEN-GUESS`, `CHK-Z-SIGN` |
 | **Parallax** | A height map or complex `_m` alpha that uses too little range, clips, is mostly white, or is steep enough to tear. Landscape sets whose `displacementScale` differs by more than 2×. | `CHK-PARALLAX`, `CHK-PARALLAX-SCALE` |
-| **UV coverage** | UV islands closer than 8 texels for more than 2 % of the used texels, so colours bleed across them at a distance (mip 3 and up). | `CHK-UV-GUTTER` |
 
 The green-direction test is weak on straight ridges: look at the map.
-
-### UV coverage
-
-It reads the Meshes scan, so scan your MO2 instance first ([Mod scanning](Mod-Scanning.md)). Switch on the preview's **UV coverage** toggle for one texture ([Previews](Previews.md)), or press **Check all UV coverage** in Advanced → Checks for every colour texture of the folder (a bar shows *done / total*; **Stop checking UV coverage** ends it). The toggle is greyed out, with the reason, when:
-
-- no scan has finished (an empty scan counts as none);
-- a scan is running, or was stopped ("The Meshes scan was stopped: scan again to check UV coverage");
-- the sub-type is anything but diffuse, PBR albedo or skin albedo. Landscape diffuses are left out: terrain doesn't use NIF shapes.
 
 ### Low detail
 

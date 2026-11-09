@@ -152,8 +152,6 @@ codes! {
     ChkParallaxScale = "CHK-PARALLAX-SCALE" => Warning,
     // Check 3 (fake resolution): the one CHK code the engine emits, during a run whose request sets `low_detail`.
     ChkLowDetail = "CHK-LOW-DETAIL" => Warning,
-    // UV coverage (GUI): UV islands of a meshed colour texture sit closer than the mip-bleed distance.
-    ChkUvGutter = "CHK-UV-GUTTER" => Warning,
     // Track A derive step (DECISIONS Note CN): PBR sets converted to vanilla and complex-material maps.
     // Set skipped: a source it needs is DDS (never re-encoded, M9).
     DeriveDdsSource = "DERIVE-DDS-SOURCE" => Warning,
@@ -255,7 +253,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 92);
+        assert_eq!(Code::ALL.len(), 91);
         assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);

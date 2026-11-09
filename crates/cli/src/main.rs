@@ -11,7 +11,9 @@ macro_rules! err {
 
 mod args;
 mod cancel;
+mod dilate;
 mod human;
+mod uv;
 mod verbs;
 
 use args::*;
@@ -102,6 +104,8 @@ fn run(cli: Cli) -> Result<i32, EngineError> {
         Command::Validate(a) => verbs::validate_files(a),
         Command::Presets(c) => verbs::presets(c),
         Command::CubemapMarker(a) => verbs::cubemap_marker(a),
+        Command::Uv(a) => uv::run(a),
+        Command::Dilate(a) => dilate::run(a),
     }
 }
 

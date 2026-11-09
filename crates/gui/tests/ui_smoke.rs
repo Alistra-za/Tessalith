@@ -869,7 +869,7 @@ fn toolbar_node(h: &Harness<'static, AppModel>, label: &str, contains: bool) -> 
 }
 
 /// K9/K10: the toolbar's controls in reading order (row, then x).
-const TOOLBAR_ORDER: [(&str, bool); 20] = [
+const TOOLBAR_ORDER: [(&str, bool); 19] = [
     ("Channels", false),
     ("RGBA", false),
     ("R", false),
@@ -881,8 +881,6 @@ const TOOLBAR_ORDER: [(&str, bool); 20] = [
     ("Heatmap", false),
     ("Lens", false),
     ("Tile 3×3", false),
-    // K7: the UV overlay toggle is drawn for every texture, enabled or not (Task 8).
-    ("UV coverage overlay", false),
     ("Fit", false),
     ("1:1", false),
     ("Encode", false),
@@ -990,47 +988,23 @@ fn the_toolbar_groups_channels_view_and_encode() {
     assert_toolbar_layout(&h, &[]);
 }
 
-/// Task 8 (K7, CE20): the "UV coverage overlay" toggle, enabled (a scan with rows) and disabled (no scan, as in the
-/// other toolbar tests), sits after "Tile 3×3", inside the toolbar and never under
-/// ✕ Close, at 1100, 1280 and 1600 px.
+/// The toolbar sits inside the preview and never under ✕ Close, at 1100, 1280 and 1600 px.
 #[test]
-fn the_toolbar_pin_holds_with_the_uv_toggle() {
-    use egui_kittest::kittest::NodeT;
+fn the_toolbar_pin_holds_at_three_widths() {
     for width in [1100.0, 1280.0, 1600.0] {
-        for scan in [true, false] {
-            let d = tempfile::tempdir().unwrap();
-            let mut model = pbr_wall(d.path(), 20, [128, 10, 200]);
-            if scan {
-                let db = d.path().join("scan.db");
-                let s = modscan::store::Store::open(&db).unwrap();
-                s.conn()
-                    .execute(
-                        "INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (1, 1, 'm', 'm', 1, 1)",
-                        [],
-                    )
-                    .unwrap();
-                drop(s);
-                model.scan_db = Some(db);
-            }
-            model.expand("test/wall.png");
-            assert!(model.wait_idle(std::time::Duration::from_secs(60)));
-            assert_eq!(model.uv_offered("test/wall.png").is_ok(), scan);
-            let mut h = Harness::builder()
-                .with_size(eframe::egui::vec2(width, 800.0))
-                .build_ui_state(
-                    |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
-                    model,
-                );
-            sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-            h.run();
-            assert_eq!(
-                h.get_by_label("UV coverage overlay")
-                    .accesskit_node()
-                    .is_disabled(),
-                !scan
+        let d = tempfile::tempdir().unwrap();
+        let mut model = pbr_wall(d.path(), 20, [128, 10, 200]);
+        model.expand("test/wall.png");
+        assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+        let mut h = Harness::builder()
+            .with_size(eframe::egui::vec2(width, 800.0))
+            .build_ui_state(
+                |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
+                model,
             );
-            assert_toolbar_layout(&h, &[]);
-        }
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        assert_toolbar_layout(&h, &[]);
     }
 }
 

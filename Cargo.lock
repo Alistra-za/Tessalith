@@ -3091,9 +3091,12 @@ dependencies = [
  "encoders-sys",
  "engine",
  "image",
+ "modscan",
+ "nif",
  "sdc-gui",
  "serde_json",
  "tempfile",
+ "vfs",
 ]
 
 [[package]]

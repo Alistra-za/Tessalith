@@ -237,7 +237,7 @@ fn one_edit_settles() {
                 }
                 open = c.map(|c| (c, now));
             }
-            if !m.busy() && !m.v2_jobs_pending() {
+            if !m.busy() {
                 break;
             }
             assert!(s.elapsed() < Duration::from_secs(300), "did not settle");

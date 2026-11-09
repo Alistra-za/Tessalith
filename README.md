@@ -18,7 +18,7 @@ Download the zip from [Releases](https://github.com/Alistra-za/Tessalith/release
 - BC1, BC3, BC4, BC5, BC6H, BC7 and uncompressed output, each with the [best encoder for its format](#uses-the-best-encoder-available). BC1 is scored for NVIDIA and AMD decoders together.
 - [BC7 weighting](docs/wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3) for data maps whose alpha matters.
 - Every encode is decoded and checked against Skyrim's rules. DDS files from other tools can be validated too.
-- [Artist checks](docs/wiki/Texture-Types.md#artist-checks) warn about a flipped normal, missing UV coverage and similar. They never block an export.
+- [Artist checks](docs/wiki/Texture-Types.md#artist-checks) warn about a flipped normal and similar. They never block an export.
 
 **Maps and packing**
 - Inputs: PNG, TGA, TIFF, EXR, HDR, BMP, JPEG, WebP, PSD/PSB.

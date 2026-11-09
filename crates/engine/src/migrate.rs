@@ -303,6 +303,12 @@ pub const REMOVED: &[Removed] = &[
         since: "3.0",
     },
     Removed {
+        key: "allow",
+        value: Some("CHK-UV-GUTTER"),
+        hint: "CHK-UV-GUTTER was removed in 3.0 (the UV check left the GUI; run `sdc uv` instead); delete it from the list",
+        since: "3.0",
+    },
+    Removed {
         key: "resize",
         value: Some("pot-down"),
         hint: "the power of two is automatic; delete the key",

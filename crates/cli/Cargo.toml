@@ -17,6 +17,10 @@ clap.workspace = true
 ctrlc.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+image.workspace = true
+modscan = { path = "../modscan" }
+nif = { path = "../nif" }
+vfs = { path = "../vfs" }
 
 [features]
 # Forwards to the engine's env-driven test hooks. Off by default; `cargo test` enables the engine feature through
@@ -25,5 +29,4 @@ test-hooks = ["engine/test-hooks"]
 
 [dev-dependencies]
 engine = { workspace = true, features = ["test-hooks"] }
-image.workspace = true
 sdc-gui = { path = "../gui" }

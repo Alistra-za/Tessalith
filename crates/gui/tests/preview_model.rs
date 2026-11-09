@@ -504,7 +504,7 @@ fn no_toolbar_control_is_clipped_at_narrow_widths() {
     }
 }
 
-/// Note FM26: the preview offers the side-by-side pair with Heatmap, Lens, Tile 3×3 and UV coverage, and the HDR
+/// Note FM26: the preview offers the side-by-side pair with Heatmap, Lens and Tile 3×3, and the HDR
 /// exposure only for an HDR texture. Pin, Compare, Split and the Range overlay are gone.
 #[test]
 fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
@@ -522,7 +522,6 @@ fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
         "RGBA",
         "Tile 3×3",
         "UNORM",
-        "UV coverage overlay",
         "sRGB",
         "α-mask",
         "✕ Close",

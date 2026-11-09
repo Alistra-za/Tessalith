@@ -27,8 +27,6 @@ enum Action {
     RemoveUnmatched(String),
     Live(bool),
     Checks(ChecksSettings),
-    CheckAllUv,
-    CancelCheckAllUv,
     AlsoRecipe(LegacyParams),
 }
 
@@ -91,8 +89,6 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::Live(on) => model.set_live(on),
             Action::Checks(c) => model.set_checks(c),
-            Action::CheckAllUv => model.check_all_uv(),
-            Action::CancelCheckAllUv => model.cancel_check_all_uv(),
             Action::AlsoRecipe(p) => model.set_also_settings(|c| c.legacy = p),
         }
     }
@@ -348,11 +344,10 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Checks", |ui| {
         let now = model.settings.checks;
         let mut c = now;
-        let boxes: [(&mut bool, &str, &str); 4] = [
+        let boxes: [(&mut bool, &str, &str); 3] = [
             (&mut c.low_detail, "Low detail", "Low detail check"),
             (&mut c.green, "Green direction", "Green direction check"),
             (&mut c.parallax, "Parallax", "Parallax check"),
-            (&mut c.uv, "UV coverage", "UV coverage check"),
         ];
         for (on, text, name) in boxes {
             let r = ui.checkbox(on, text);
@@ -362,7 +357,6 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
         if c != now {
             actions.push(Action::Checks(c));
         }
-        check_all_uv(ui, model, actions);
     });
 }
 
@@ -529,47 +523,6 @@ fn also_recipe(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             actions.push(Action::AlsoRecipe(p));
         }
     });
-}
-
-/// "Check all UV coverage" for the open folder, or while it runs its bar and the button that stops it. Never greyed
-/// by `busy()` (owner answer 8).
-fn check_all_uv(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    if let Some((done, total)) = model.uv.all_progress() {
-        let frac = if total == 0 {
-            0.0
-        } else {
-            done as f32 / total as f32
-        };
-        let bar = ui.add(
-            egui::ProgressBar::new(frac)
-                .text(format!("{done} / {total}"))
-                .animate(false),
-        );
-        // Review M3: the visible "3 / 72" alone names nothing.
-        bar.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::ProgressIndicator,
-                true,
-                format!("Checking UV coverage: {done} of {total}"),
-            )
-        });
-        // After Stop, the reads in flight still finish (a big NIF can take seconds).
-        if model.uv.all_stopping() {
-            ui.add_enabled(false, egui::Button::new("Stopping…"));
-        } else if ui.button("Stop checking UV coverage").clicked() {
-            actions.push(Action::CancelCheckAllUv);
-        }
-        return;
-    }
-    let offered = model.uv_check_all_offered();
-    if ui
-        .add_enabled(offered.is_ok(), egui::Button::new("Check all UV coverage"))
-        .on_hover_text("Read the UV coverage of every colour texture in this folder from the meshes in your scan")
-        .on_disabled_hover_text(offered.err().unwrap_or_default())
-        .clicked()
-    {
-        actions.push(Action::CheckAllUv);
-    }
 }
 
 /// The mip level count (Full chain, None or 2..N levels); the basic panel only has the on/off tick box.

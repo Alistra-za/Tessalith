@@ -1,0 +1,543 @@
+//! `sdc dilate`: push-pull fill outside a mask, masked texels bit-exact (Note IB). Images are generated here.
+mod common;
+
+use image::{ExtendedColorType as E, ImageEncoder};
+use std::path::{Path, PathBuf};
+
+fn run(args: &[&str]) -> (i32, String, String) {
+    let o = common::sdc().arg("dilate").args(args).output().unwrap();
+    (
+        o.status.code().unwrap(),
+        String::from_utf8_lossy(&o.stdout).into_owned(),
+        String::from_utf8_lossy(&o.stderr).into_owned(),
+    )
+}
+
+fn s(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
+/// A PNG from sample codes (`channels` per texel, 8 or 16 bits).
+fn write_png(p: &Path, w: u32, h: u32, channels: u8, depth: u8, codes: &[u16]) {
+    let ct = match (channels, depth) {
+        (1, 8) => E::L8,
+        (2, 8) => E::La8,
+        (3, 8) => E::Rgb8,
+        (4, 8) => E::Rgba8,
+        (1, 16) => E::L16,
+        (2, 16) => E::La16,
+        (3, 16) => E::Rgb16,
+        _ => E::Rgba16,
+    };
+    let bytes: Vec<u8> = if depth == 8 {
+        codes.iter().map(|&c| c as u8).collect()
+    } else {
+        codes.iter().flat_map(|c| c.to_ne_bytes()).collect()
+    };
+    let mut out = vec![];
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&bytes, w, h, ct)
+        .unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, out).unwrap();
+}
+
+/// (channels, depth, codes) of a PNG.
+fn read_png(p: &Path) -> (u8, u8, Vec<u16>) {
+    let img = image::open(p).unwrap();
+    let ct = img.color();
+    let ch = ct.channel_count();
+    let depth = (ct.bits_per_pixel() / u16::from(ch)) as u8;
+    let bytes = img.into_bytes();
+    let codes = if depth == 8 {
+        bytes.iter().map(|&b| u16::from(b)).collect()
+    } else {
+        bytes
+            .chunks(2)
+            .map(|c| u16::from_ne_bytes([c[0], c[1]]))
+            .collect()
+    };
+    (ch, depth, codes)
+}
+
+/// A mask PNG (RGB8): 255 where `on(x, y)`.
+fn write_mask(p: &Path, w: u32, h: u32, on: impl Fn(u32, u32) -> bool) {
+    let mut c = vec![];
+    for y in 0..h {
+        for x in 0..w {
+            c.extend([if on(x, y) { 255 } else { 0 }; 3]);
+        }
+    }
+    write_png(p, w, h, 3, 8, &c);
+}
+
+fn rng(seed: &mut u32) -> u32 {
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 17;
+    *seed ^= *seed << 5;
+    *seed
+}
+
+fn dir() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
+}
+
+#[test]
+fn masked_texels_stay_bit_exact_for_a_data_map() {
+    bit_exact("foo_p.png", &[1, 2, 3, 4]);
+}
+
+#[test]
+fn masked_texels_stay_bit_exact_for_a_colour_map() {
+    // sRGB decode then encode is not the identity at 16 bits, so only a never-touched masked texel passes
+    bit_exact("foo_d.png", &[1, 2, 3, 4]);
+    bit_exact("foo.png", &[3, 4]);
+}
+
+#[test]
+fn masked_texels_stay_bit_exact_for_a_normal_map() {
+    // random codes are not unit vectors, so a renormalised masked texel would change
+    bit_exact("foo_n.png", &[3, 4]);
+}
+
+/// Masked texels equal the input code for code and every other texel is filled, at 8 and 16 bits.
+fn bit_exact(name: &str, chans: &[u8]) {
+    const N: u32 = 16;
+    for depth in [8u8, 16] {
+        for &ch in chans {
+            let d = dir();
+            let max = if depth == 8 { 255u32 } else { 65535 };
+            let on = |x: u32, y: u32| x < 6 && y < 9;
+            let mut seed = 0x1234_5678u32 + u32::from(ch) * 7 + u32::from(depth);
+            let mut codes = vec![];
+            for y in 0..N {
+                for x in 0..N {
+                    for _ in 0..ch {
+                        // a masked texel takes any code but 0 (so 0 means "not filled" outside); the full range
+                        // reaches 1 and the top code
+                        codes.push(if on(x, y) {
+                            (1 + rng(&mut seed) % max) as u16
+                        } else {
+                            0
+                        });
+                    }
+                }
+            }
+            codes[0] = max as u16;
+            let last = codes.len() - 1;
+            codes[last.min(1)] = 1;
+            let src = d.path().join(name);
+            write_png(&src, N, N, ch, depth, &codes);
+            write_mask(&d.path().join("foo_matid.png"), N, N, on);
+            let (code, out, err) = run(&[&s(&src)]);
+            assert_eq!(code, 0, "{name} {ch}ch {depth}bit: {err}");
+            assert!(out.contains("wrote"), "{out}");
+            let (c2, d2, got) = read_png(&d.path().join("dilated").join(name));
+            assert_eq!((c2, d2), (ch, depth));
+            assert_eq!(got.len(), codes.len());
+            for t in 0..(N * N) as usize {
+                let (x, y) = (t as u32 % N, t as u32 / N);
+                let (a, b) = (
+                    &codes[t * ch as usize..][..ch as usize],
+                    &got[t * ch as usize..][..ch as usize],
+                );
+                if on(x, y) {
+                    assert_eq!(a, b, "{ch}ch {depth}bit texel {x},{y} changed");
+                } else {
+                    assert!(
+                        b.iter().all(|&v| v > 0),
+                        "{ch}ch {depth}bit texel {x},{y} not filled: {b:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A TGA (8-bit RGB) and a TIFF (16-bit RGB) go through the same path and come out as PNG of the same depth.
+#[test]
+fn tga_and_tiff_inputs_are_filled_and_masked_texels_kept() {
+    let d = dir();
+    let on = |x: u32, _: u32| x < 3;
+    let mut seed = 99u32;
+    for (name, depth) in [("a_p.tga", 8u8), ("b_p.tif", 16)] {
+        let max = if depth == 8 { 255u32 } else { 65535 };
+        let codes: Vec<u16> = (0..8 * 8 * 3)
+            .map(|i| {
+                if on(i as u32 / 3 % 8, 0) {
+                    (1 + rng(&mut seed) % max) as u16
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let bytes: Vec<u8> = if depth == 8 {
+            codes.iter().map(|&c| c as u8).collect()
+        } else {
+            codes.iter().flat_map(|c| c.to_ne_bytes()).collect()
+        };
+        let ct = if depth == 8 {
+            image::ColorType::Rgb8
+        } else {
+            image::ColorType::Rgb16
+        };
+        image::save_buffer(d.path().join(name), &bytes, 8, 8, ct).unwrap();
+        let stem = &name[..1];
+        write_mask(&d.path().join(format!("{stem}_matid.png")), 8, 8, on);
+        let (code, _, err) = run(&[&s(&d.path().join(name))]);
+        assert_eq!(code, 0, "{name}: {err}");
+        let (ch, dp, got) = read_png(&d.path().join("dilated").join(format!("{stem}_p.png")));
+        assert_eq!((ch, dp), (3, depth), "{name}");
+        for t in 0..64usize {
+            let (a, b) = (&codes[t * 3..][..3], &got[t * 3..][..3]);
+            if on(t as u32 % 8, 0) {
+                assert_eq!(a, b, "{name} texel {t}");
+            } else {
+                assert!(b.iter().all(|&v| v > 0), "{name} texel {t} not filled");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_mask_is_found_by_set_base_then_by_full_stem() {
+    let d = dir();
+    write_png(&d.path().join("foo_n.png"), 4, 4, 3, 8, &[100; 48]);
+    write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x == 0);
+    let (code, out, err) = run(&[&s(&d.path().join("foo_n.png"))]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("foo_matid.png"), "{out}");
+    // a stem the engine cuts no suffix from names its own mask
+    write_png(&d.path().join("rock_x.png"), 4, 4, 3, 8, &[100; 48]);
+    write_mask(&d.path().join("rock_x_matid.png"), 4, 4, |x, _| x == 0);
+    let (code, out, err) = run(&[&s(&d.path().join("rock_x.png"))]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("rock_x_matid.png"), "{out}");
+}
+
+#[test]
+fn a_uvmask_counts_only_where_it_is_255() {
+    let d = dir();
+    let mut codes = vec![0u16; 8 * 8];
+    for y in 0..8 {
+        for x in 0..8 {
+            codes[y * 8 + x] = 200;
+        }
+    }
+    write_png(&d.path().join("foo_p.png"), 8, 8, 1, 8, &codes);
+    // 255 on the left 3 columns, 127 (padding) on the next two, 0 beyond
+    let m: Vec<u16> = (0..64)
+        .map(|i| [255, 255, 255, 127, 127, 0, 0, 0][i % 8])
+        .collect();
+    write_png(&d.path().join("foo_uvmask.png"), 8, 8, 1, 8, &m);
+    let (code, out, err) = run(&[&s(&d.path().join("foo_p.png"))]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("filled 40 of 64"), "{out}");
+}
+
+#[test]
+fn an_explicit_mask_serves_every_input() {
+    let d = dir();
+    write_png(&d.path().join("a_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_png(&d.path().join("b_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("m.png"), 4, 4, |x, _| x < 2);
+    let (code, out, err) = run(&[
+        &s(&d.path().join("*_p.png")),
+        "--mask",
+        &s(&d.path().join("m.png")),
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 2, "{out}");
+    assert!(d.path().join("dilated").join("a_p.png").is_file());
+    assert!(d.path().join("dilated").join("b_p.png").is_file());
+}
+
+#[test]
+fn no_mask_skips_the_input_with_a_message() {
+    let d = dir();
+    write_png(&d.path().join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    let (code, out, err) = run(&[&s(&d.path().join("foo_p.png"))]);
+    assert_eq!(code, 1);
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("no mask"), "{err}");
+    assert!(!d.path().join("dilated").exists());
+}
+
+#[test]
+fn a_mask_of_another_size_is_an_error_for_that_input() {
+    let d = dir();
+    write_png(&d.path().join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("foo_matid.png"), 8, 8, |x, _| x < 2);
+    let (code, _, err) = run(&[&s(&d.path().join("foo_p.png"))]);
+    assert_eq!(code, 1);
+    assert!(err.contains("8x8") && err.contains("4x4"), "{err}");
+    assert!(!d.path().join("dilated").exists());
+}
+
+#[test]
+fn a_colour_map_fills_in_linear_light() {
+    let d = dir();
+    let mut codes = vec![0u16; 8];
+    codes[7] = 255;
+    let put = |name: &str| {
+        write_png(&d.path().join(name), 8, 1, 1, 8, &codes);
+    };
+    put("c.png");
+    put("c_p.png");
+    write_mask(&d.path().join("c_matid.png"), 8, 1, |x, _| x == 0 || x == 7);
+    let (code, _, err) = run(&[&s(&d.path().join("c.png")), &s(&d.path().join("c_p.png"))]);
+    assert_eq!(code, 0, "{err}");
+    let col = read_png(&d.path().join("dilated").join("c.png")).2;
+    let dat = read_png(&d.path().join("dilated").join("c_p.png")).2;
+    assert!(col.iter().zip(&dat).all(|(c, d)| c >= d), "{col:?} {dat:?}");
+    for x in [3usize, 4] {
+        assert!(
+            col[x] > dat[x] + 20,
+            "texel {x}: colour {} data {}",
+            col[x],
+            dat[x]
+        );
+    }
+}
+
+#[test]
+fn the_filled_texels_of_a_normal_map_have_unit_length() {
+    let d = dir();
+    let mut codes = vec![];
+    for y in 0..8u32 {
+        for x in 0..8u32 {
+            // two valid groups with opposite tilts (+-0.6, 0, 0.8); their plain mean has length 0.8
+            codes.extend(match (x, y) {
+                (0, _) => [204, 128, 230],
+                (7, _) => [51, 128, 230],
+                _ => [0, 0, 0],
+            });
+        }
+    }
+    write_png(&d.path().join("foo_n.png"), 8, 8, 3, 8, &codes);
+    write_mask(&d.path().join("foo_matid.png"), 8, 8, |x, _| {
+        x == 0 || x == 7
+    });
+    let (code, out, err) = run(&[&s(&d.path().join("foo_n.png"))]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("normal"), "{out}");
+    let got = read_png(&d.path().join("dilated").join("foo_n.png")).2;
+    for t in 0..64usize {
+        if t % 8 == 0 || t % 8 == 7 {
+            continue;
+        }
+        let n = [0, 1, 2].map(|c| f32::from(got[t * 3 + c]) / 127.5 - 1.0);
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        assert!((len - 1.0).abs() < 0.02, "texel {t}: {n:?} length {len}");
+    }
+}
+
+#[test]
+fn alpha_is_filled_as_data() {
+    let d = dir();
+    let mut codes = vec![];
+    for x in 0..8u32 {
+        codes.extend(if x == 0 {
+            [10, 20, 30, 200]
+        } else {
+            [0, 0, 0, 0]
+        });
+    }
+    write_png(&d.path().join("foo_p.png"), 8, 1, 4, 8, &codes);
+    write_mask(&d.path().join("foo_matid.png"), 8, 1, |x, _| x == 0);
+    assert_eq!(run(&[&s(&d.path().join("foo_p.png"))]).0, 0);
+    let got = read_png(&d.path().join("dilated").join("foo_p.png")).2;
+    assert!((0..8).all(|t| got[t * 4 + 3] == 200), "{got:?}");
+}
+
+#[test]
+fn mask_images_and_the_dilated_folder_are_never_inputs() {
+    let d = dir();
+    write_png(&d.path().join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    write_png(&d.path().join("foo_uvmask.png"), 4, 4, 1, 8, &[255; 16]);
+    write_png(
+        &d.path().join("dilated").join("old_p.png"),
+        4,
+        4,
+        1,
+        8,
+        &[90; 16],
+    );
+    let (code, out, err) = run(&[&s(d.path()), "--recursive"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    let mut names: Vec<_> = std::fs::read_dir(d.path().join("dilated"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["foo_p.png", "old_p.png"]);
+    // nothing but a mask or a dilated file: no input at all
+    let (code, _, err) = run(&[&s(&d.path().join("foo_matid.png"))]);
+    assert_eq!(code, 2, "{err}");
+}
+
+#[test]
+fn an_existing_output_is_kept_without_overwrite() {
+    let d = dir();
+    write_png(&d.path().join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    let dest: PathBuf = d.path().join("dilated").join("foo_p.png");
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::write(&dest, b"mine").unwrap();
+    let src = s(&d.path().join("foo_p.png"));
+    let (code, _, err) = run(&[&src]);
+    assert_eq!(code, 1);
+    assert!(err.contains("--overwrite"), "{err}");
+    assert_eq!(std::fs::read(&dest).unwrap(), b"mine");
+    assert_eq!(run(&[&src, "--overwrite"]).0, 0);
+    assert_eq!(read_png(&dest).0, 1);
+}
+
+#[test]
+fn out_puts_the_images_in_another_folder() {
+    let d = dir();
+    write_png(&d.path().join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    let o = d.path().join("elsewhere");
+    let (code, _, err) = run(&[&s(&d.path().join("foo_p.png")), "--out", &s(&o)]);
+    assert_eq!(code, 0, "{err}");
+    assert!(o.join("foo_p.png").is_file());
+    assert!(!d.path().join("dilated").exists());
+}
+
+#[test]
+fn a_float_input_is_refused() {
+    let d = dir();
+    // Radiance HDR content under a TIFF name: the decoder is chosen by content, so this loads as 32-bit float.
+    let p = d.path().join("foo_p.tif");
+    let mut hdr = vec![];
+    image::codecs::hdr::HdrEncoder::new(&mut hdr)
+        .encode(&[image::Rgb([0.5f32; 3]); 16], 4, 4)
+        .unwrap();
+    std::fs::write(&p, hdr).unwrap();
+    write_mask(&d.path().join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    let (code, _, err) = run(&[&s(&p)]);
+    assert_eq!(code, 1);
+    assert!(err.contains("32-bit float"), "{err}");
+    assert!(!d.path().join("dilated").exists());
+}
+
+#[test]
+fn a_pattern_that_names_no_image_is_a_usage_error() {
+    let d = dir();
+    let (code, _, err) = run(&[&s(&d.path().join("nope*.png"))]);
+    assert_eq!(code, 2);
+    assert!(err.contains("no image matches"), "{err}");
+}
+
+#[test]
+fn two_inputs_with_one_output_path_write_the_first_and_refuse_the_rest() {
+    let d = dir();
+    for (sub, v) in [("a", 90u16), ("b", 200)] {
+        write_png(&d.path().join(sub).join("foo_p.png"), 4, 4, 1, 8, &[v; 16]);
+        write_mask(&d.path().join(sub).join("foo_matid.png"), 4, 4, |x, _| {
+            x < 2
+        });
+    }
+    let o = d.path().join("o");
+    let (a, b) = (
+        s(&d.path().join("a").join("foo_p.png")),
+        s(&d.path().join("b").join("foo_p.png")),
+    );
+    // --overwrite does not make the second one replace the first
+    let (code, out, err) = run(&[&a, &b, "--out", &s(&o), "--overwrite"]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert!(err.contains(&a) && err.contains(&b), "{err}");
+    assert_eq!(read_png(&o.join("foo_p.png")).2[0], 90);
+}
+
+#[test]
+fn a_glob_and_a_file_are_filtered_to_images_and_a_missing_file_is_a_usage_error() {
+    let d = dir();
+    write_png(&d.path().join("rock_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("rock_matid.png"), 4, 4, |x, _| x < 2);
+    for n in ["rock_p.json", "rock_n.dds", "rock_p.txt"] {
+        std::fs::write(d.path().join(n), b"x").unwrap();
+    }
+    let (code, out, err) = run(&[&s(&d.path().join("rock*"))]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    for p in ["nope.png", "rock_p.json"] {
+        let (code, _, err) = run(&[&s(&d.path().join(p))]);
+        assert_eq!(code, 2, "{p}: {err}");
+        assert!(err.contains("no image matches"), "{p}: {err}");
+    }
+}
+
+#[test]
+fn a_dilated_folder_above_the_named_path_does_not_skip_it() {
+    let d = dir();
+    let proj = d.path().join("dilated").join("proj");
+    write_png(&proj.join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&proj.join("foo_matid.png"), 4, 4, |x, _| x < 2);
+    // a folder, a file and a glob under it
+    for pat in [
+        s(&proj),
+        s(&proj.join("foo_p.png")),
+        s(&proj.join("foo*.png")),
+    ] {
+        let (code, out, err) = run(&[&pat, "--overwrite"]);
+        assert_eq!(code, 0, "{pat}: {err}");
+        assert_eq!(out.matches("wrote").count(), 1, "{pat}: {out}");
+    }
+    // one below the named folder is still skipped
+    write_png(
+        &proj.join("dilated").join("old_p.png"),
+        4,
+        4,
+        1,
+        8,
+        &[90; 16],
+    );
+    let (code, out, err) = run(&[&s(&proj), "--recursive", "--overwrite"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+}
+
+#[test]
+fn a_pattern_that_matches_nothing_is_named_beside_ones_that_do() {
+    let d = dir();
+    write_png(&d.path().join("good_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("good_matid.png"), 4, 4, |x, _| x < 2);
+    let typo = s(&d.path().join("typo_p.png"));
+    let (code, out, err) = run(&[&s(&d.path().join("good_p.png")), &typo]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert!(err.contains(&format!("{typo}: no image matches")), "{err}");
+}
+
+#[test]
+fn an_input_that_wrote_nothing_does_not_claim_its_output_path() {
+    let d = dir();
+    // a has no mask, b has one; both want o/foo_p.png
+    write_png(&d.path().join("a").join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_png(
+        &d.path().join("b").join("foo_p.png"),
+        4,
+        4,
+        1,
+        8,
+        &[200; 16],
+    );
+    write_mask(&d.path().join("b").join("foo_matid.png"), 4, 4, |x, _| {
+        x < 2
+    });
+    let o = d.path().join("o");
+    let (code, out, err) = run(&[
+        &s(&d.path().join("a").join("foo_p.png")),
+        &s(&d.path().join("b").join("foo_p.png")),
+        "--out",
+        &s(&o),
+    ]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert_eq!(read_png(&o.join("foo_p.png")).2[0], 200);
+}

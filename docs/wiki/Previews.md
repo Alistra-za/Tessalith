@@ -11,7 +11,7 @@ Double-click a tile (or a set member), or select it and press **Enter** or **Spa
 ![The preview of a normal map.](../img/gui/Previews/preview-normal.png)
 
 - **What you see is what you get.** Each previewed mip is byte-identical to the same mip of the DDS Export writes.
-- **Seams and coverage:** **Tile 3×3** (**T**) repeats the picture to check seams; the **UV coverage** toggle is the artist check on [Texture types](Texture-Types.md#uv-coverage).
+- **Seams:** **Tile 3×3** (**T**) repeats the picture to check seams.
 - **Size limit:** the preview encodes only mips up to 4096 px on the larger side, and lower if your GPU can't hold that; it says so.
 - **A DDS input** previews as stored, with no source side. BC2 and signed BC6H show "cannot be previewed".
 - **No usable GPU:** the preview is off and says so. Deciding, editing and Export still work.

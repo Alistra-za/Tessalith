@@ -85,10 +85,12 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 | [`validate`](#sdc-validate) | Check existing DDS files against a target's rules. |
 | [`presets`](#sdc-presets) | List and show presets; print JSON schemas. |
 | [`cubemap-marker`](#sdc-cubemap-marker) | Write the 1×1 dynamic-cubemap marker DDS. |
+| [`uv`](#sdc-uv) | Write an image of the UV islands of the meshes that use a texture. |
+| [`dilate`](#sdc-dilate) | Fill the texels outside a `_matid` or `_uvmask` mask. |
 
 - `sdc --version` prints the Tessalith version and the version of each linked encoder. Paste it into bug reports.
 - `sdc --help` and `sdc <command> --help` print the built-in help.
-- `convert` writes its log to stderr; `inspect`, `validate` and `presets` print their results to stdout. With `--json`, stdout carries only JSON.
+- `convert` writes its log to stderr; `inspect`, `validate` and `presets` print their results to stdout; `uv` and `dilate` print one stdout line per written file and their errors to stderr. With `--json`, stdout carries only JSON.
 
 ## Flags shared by convert and inspect
 
@@ -353,6 +355,76 @@ sdc presets schema all --out schemas
 ```
 
 `sdc presets schema manifest` lists every field of a manifest record ([the manifest](Validation-and-Output.md#the-manifest)).
+
+## sdc uv
+
+```text
+sdc uv <PATTERN> [--recursive] (--s N | --w W --l L) [--meshes <folder>] [--scan <db>] [--out <dir>] [--overwrite]
+```
+
+Draws where the meshes put a texture, so you can lay out and pad a texture before you paint it. It writes one 8-bit grayscale PNG per texture, `<name>_uvmask.png`, at the size you give. Use it as a layer in your image editor, or hand it to a dilation tool.
+
+| Pixel | Meaning |
+|---|---|
+| 255 | An island: a texel a mesh triangle covers, even in part. |
+| 127 | The recommended padding: within the padding distance of one island. |
+| 191 | Too close: within the padding distance of two or more different islands. Their padding overlaps, so mips will bleed one into the other. |
+| 0 | Nothing nearby. |
+
+The padding is 1/256 of the longer side, at least 2 texels: 2 at 512, 4 at 1024, 8 at 2048, 16 at 4096 and at 2048×4096, 32 at 8192. Islands are groups of touching texels (corners count). Touching meshes, or two meshes over the same texels, are one island. UVs outside 0 to 1 wrap. The padding stops at the image edge: it doesn't wrap to the other side of a tiling texture.
+
+| Argument | Meaning |
+|---|---|
+| `<PATTERN>` | A texture path as you'd type it: `\` or `/`, `textures\` and `.dds` optional, any case. `*` and `?` match inside one folder or file name. A folder matches the textures directly in it; `--recursive` takes every texture below it. |
+| `--recursive` | With a folder pattern, take every texture below it, not only those directly in it. |
+| `--s N` (`--size`) | The texture is N×N. 1 to 16384. |
+| `--w W --l L` (`--width`, `--length`) | The texture is W wide and L long. Give both; not with `--s`. |
+| `--meshes <folder>` | Read every `.nif` below this folder (subfolders included) instead of the scan. |
+| `--scan <db>` | Read this scan database. Default: the one the GUI's **Meshes** scan writes. Not with `--meshes`. |
+| `--out <dir>` | Where the images go. Default: the current folder. |
+| `--overwrite` | Replace an existing image. Otherwise it is kept and reported. |
+
+A mesh uses a texture when the path is in any slot of its lighting shader's texture set, or is the source texture of an effect shader. All maps of one shape share its UVs.
+
+Without `--meshes`, `sdc uv` reads the scan database and takes only the meshes the game loads (the winning copy of each path, loose or in a BSA). Run the Meshes scan in the GUI first; without a database `sdc uv` stops and says so. With `--meshes`, the folder is read as it is and the scan isn't touched. A mesh it can't read, and a Skyrim LE mesh, is listed on stderr and skipped.
+
+The images mirror the matched path below the folders of the pattern that come before its first `*` or `?`. `sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048` writes `fs6_arrow_ir_uvmask.png`; `sdc uv Harry2135 --recursive --s 2048` writes `fantasyseries6\fs6_arrow_ir_uvmask.png`. Each written file prints one line: its path, the island count, the padding, the number of 191 texels and the number of meshes read. A texture whose meshes have no usable triangles writes nothing and says so.
+
+```powershell
+sdc uv Harry2135\FantasySeries6\FS6_Arrow_IR --s 2048 --out uvmasks
+sdc uv armor\* --recursive --w 2048 --l 4096 --meshes .\meshes
+```
+
+Exit codes: 0 every image written; 1 a texture wrote nothing (no UV triangles, or the file exists and `--overwrite` is missing); 2 a usage error: a bad size, a pattern that matches no texture, a missing scan database; 3 a write failed.
+
+## sdc dilate
+
+```text
+sdc dilate <PATTERN>... [--recursive] [--mask <file>] [--out <dir>] [--overwrite]
+```
+
+Fills the texels outside a mask with colour pulled in from the texels inside it, so mips and filtering don't bleed the empty background into your islands. The masked texels are written back exactly as they were. Use it with the `_uvmask.png` that `sdc uv` writes, or with a `_matid` image.
+
+| Argument | Meaning |
+|---|---|
+| `<PATTERN>` | An image file, a folder or a glob on disk (`*` and `?` match inside one name). A folder takes the PNG, TGA and TIFF files directly in it. Give several. |
+| `--recursive` | With a folder, take the images below it too. |
+| `--mask <file>` | Use this mask for every input. Default: the mask beside each input (below). |
+| `--out <dir>` | Where the images go. Default: a `dilated` folder beside each input. |
+| `--overwrite` | Replace an existing image. Otherwise it is kept and reported. |
+
+The mask for `rock_n.png` is `rock_matid.png` (or `.tga`, `.tif`, `.tiff`), then `rock_uvmask.png`, then the same two for the full name `rock_n`. `rock` is the name without its texture suffix, the way Tessalith groups a set. An input with no mask is skipped and says so; a mask of another size than its image is an error for that input. In a `_uvmask` image only 255 counts as inside (127 and 191 are padding, and padding is what gets filled). In any other mask, a texel with red, green or blue above 0 is inside.
+
+How the fill treats the map depends on the suffix, as Tessalith reads it. Colour maps are filled in linear light. Normal maps are filled as stored and the filled texels renormalised to unit length. Everything else is filled as stored, and so is a name Tessalith can't place (`rock_x`); the output line says so. Alpha is always filled as data.
+
+Files named `*_matid.*` or `*_uvmask.*`, and any file in a folder named `dilated` below the file, folder or glob you name, are never inputs; a `dilated` folder above what you name doesn't count. Inputs are 8- and 16-bit PNG, TGA and TIFF files; other files a pattern matches are ignored, and a pattern that matches no image is named on stderr: exit 2 if none of the patterns match, exit 1 (the others still run) if only some do. A 32-bit float TIFF is refused. Two inputs that would write the same output file (`rock.png` and `rock.tga`, or one name from two folders with `--out`) are not both written: the first is, and the later ones are refused by name, even with `--overwrite`. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
+
+```powershell
+sdc dilate textures\rock_n.png
+sdc dilate textures\armor --recursive --mask uvmasks\armor_uvmask.png --out filled
+```
+
+Exit codes: 0 every image written; 1 an input wrote nothing (no mask, a mask of another size, a float image, a second input for the same output, the file exists and `--overwrite` is missing); 2 a usage error: no image matches; 3 a write failed.
 
 ## Cubemaps from the command line
 

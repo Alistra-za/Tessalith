@@ -78,7 +78,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         ChkParallax => "The parallax height looks wrong for this map — check the height map",
         ChkParallaxScale => "The parallax scale looks too strong or too weak for this set — adjust it",
         ChkLowDetail => "This texture has little detail for its size — consider Resize: Half",
-        ChkUvGutter => "UV islands sit too close together for the mip levels — widen the gaps or use fewer mips",
         DeriveDdsSource => "A DDS source can't be converted to vanilla — use the original image",
         DeriveNoAlbedo => "This set has no albedo so it can't be converted — add the albedo",
         DerivePathConflict => "A converted file lands on another file's output — rename one of them",

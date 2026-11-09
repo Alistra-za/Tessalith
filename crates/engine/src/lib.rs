@@ -15,7 +15,7 @@ pub mod cube;
 pub mod dds;
 pub mod decode;
 pub mod derive;
-pub(crate) mod dilate;
+pub mod dilate;
 pub mod discover;
 pub mod encode;
 pub mod events;
