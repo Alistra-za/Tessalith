@@ -170,11 +170,6 @@ fn a_removed_helper_makes_no_set_of_any_kind() {
         let d = tempfile::tempdir().unwrap();
         let mut m = mouth(d.path());
         let before = set_views(&m).len();
-        let packed_before = m
-            .items
-            .iter()
-            .filter(|i| i.kind == ItemKind::Packed)
-            .count();
         for h in helper {
             let key = format!("face/{h}");
             ensure_in(&mut m, "face/mouth", &key);
@@ -197,19 +192,26 @@ fn a_removed_helper_makes_no_set_of_any_kind() {
             "no ~2 shown: {:?}",
             views.iter().map(|v| &v.id).collect::<Vec<_>>()
         );
-        // No packed output of a removed helper's own set is listed in the Textures column.
+        // The owner's report: no `mouth_ao_rfaos` packed output, listed or in the plan.
         let listed: Vec<String> = m
             .visible_items()
             .into_iter()
             .map(|n| m.items[n].key.clone())
             .collect();
+        assert!(
+            listed.iter().all(|k| !k.contains("mouth_ao_rfaos")),
+            "{helper:?}: {listed:?}"
+        );
+        assert!(
+            m.items.iter().all(|i| !i.key.contains("mouth_ao_rfaos")),
+            "{helper:?}"
+        );
+        // Whatever packed output a no-set set still has in the plan is not listed.
         for p in m.items.iter().filter(|i| i.kind == ItemKind::Packed) {
-            let in_no_set_set = p.set_key.as_deref().is_some_and(|k| !m.in_run(k));
-            if in_no_set_set {
+            if p.set_key.as_deref().is_some_and(|k| !m.in_run(k)) {
                 assert!(!listed.contains(&p.key), "{} is listed", p.key);
             }
         }
-        let _ = packed_before;
     }
 }
 
@@ -255,17 +257,37 @@ fn a_no_set_file_is_not_waiting() {
         let tail = m.visible_items().iter().any(|&n| m.items[n].key == key);
         assert!(tail, "still listed in Textures");
         assert!(m.is_no_set(&key));
+        // Its tile reads `No set` in place of a question; the tile's hover text is built from the same flag.
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(eframe::egui::vec2(1500.0, 900.0))
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        use egui_kittest::kittest::Queryable;
+        assert!(
+            h.query_all_by_label_contains("No set").count() >= 1,
+            "{stem}: the tile says No set"
+        );
     }
 }
 
 #[test]
 fn a_no_set_textures_warnings_count_for_nothing() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    // `leaf.png` asks an alpha question (not a wait). Before: undecided, with a Decide row.
+    // `leaf.png` is the one file that asks: the other fixture files are decided or ask nothing.
+    let mut m = pbr_opened(d.path());
     let leaf_row = |m: &AppModel| rows_at(m, LEAF);
+    m.decide(
+        "landscape/odd.png",
+        Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    m.decide(
+        "landscape/odd.png",
+        Answer::Acknowledge(engine::codes::Code::DimSmall),
+    );
     m.decide(LEAF, Answer::Subtype(engine::config::Subtype::Diffuse));
     idle(&mut m);
+    assert_eq!(m.undecided_keys(), [LEAF], "the leaf is the one question");
     assert!(m.item(LEAF).unwrap().status == ItemStatus::NeedsDecision);
     let (undecided, files) = (m.undecided(), m.export_files());
     assert!(leaf_row(&m) > 0);
@@ -273,15 +295,13 @@ fn a_no_set_textures_warnings_count_for_nothing() {
     m.remove_member("landscape/leaf", LEAF).expect("removed");
     idle(&mut m);
     assert_eq!(m.undecided(), undecided - 1);
-    assert!(!m.undecided_keys().iter().any(|k| k == LEAF));
+    assert_eq!(m.undecided(), 0, "{:?}", m.undecided_keys());
     assert_eq!(leaf_row(&m), 0, "no Problems row");
     assert_eq!(m.export_files(), files, "export_files leaves it out");
-    // Export opens Review only for what is still asked.
+    // Export opens no Review for it: nothing else asks, so Review stays shut, and the export counts the same files.
     m.export_clicked();
-    assert!(m
-        .review
-        .as_ref()
-        .is_none_or(|_| !m.undecided_keys().iter().any(|k| k == LEAF)));
+    assert!(m.review.is_none(), "Review stays shut: {:?}", m.dialog);
+    assert_eq!(m.export_files(), files);
     // The pill counts the other undecided files, not the leaf.
     assert_eq!(m.filter_counts().needs_decision, m.undecided());
 }
@@ -521,6 +541,16 @@ fn nothing_opens_the_set_of_a_no_set_texture() {
     // The panel follows no set when the texture is selected.
     m.select_item(NORMAL);
     assert_eq!(sdc_gui::model::set_preview::followed_set(&m), None);
+    // The Review "Go to set" and Problems rows take their set key from a view: every key is a card's.
+    let keys: Vec<String> = set_views(&m).iter().map(|v| v.key.clone()).collect();
+    for b in sdc_gui::model::pbr_export::export_blocks(&m).iter() {
+        assert!(b.set_key.is_empty() || keys.contains(&b.set_key), "{b:?}");
+    }
+    for p in problems(&m).iter() {
+        if let At::Set { key, .. } = &p.at {
+            assert!(keys.contains(key), "{p:?}");
+        }
+    }
 }
 
 #[test]
@@ -598,28 +628,22 @@ fn a_no_set_twin_stops_blocking_its_twin() {
     .unwrap();
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
     idle(&mut m);
-    let blocked = |m: &AppModel| {
-        m.items
-            .iter()
-            .filter(|i| matches!(&i.status, ItemStatus::Skipped(r) if r.contains("IN-DUPLICATE") || r.contains("same output") || r.contains("map to one path")))
+    // The twins clash: both are Skipped, for one output.
+    let skipped = |m: &AppModel| {
+        ["clutter/rock.png", "clutter/rock.tga"]
+            .into_iter()
+            .filter(|k| matches!(m.item(k).unwrap().status, ItemStatus::Skipped(_)))
             .count()
     };
-    let skipped_before: Vec<_> = m.items.iter().map(|i| (&i.key, &i.status)).collect();
-    let _ = skipped_before;
-    let both_before = m
-        .items
-        .iter()
-        .filter(|i| matches!(i.status, ItemStatus::Skipped(_)))
-        .count();
-    assert!(
-        both_before >= 1,
+    assert_eq!(
+        skipped(&m),
+        2,
         "the twins clash: {:?}",
         m.items
             .iter()
             .map(|i| (&i.key, &i.status))
             .collect::<Vec<_>>()
     );
-    let _ = blocked;
     m.remove_member("clutter/rock", "clutter/rock.png").unwrap();
     idle(&mut m);
     let tga = m.item("clutter/rock.tga").expect("listed");
@@ -628,10 +652,7 @@ fn a_no_set_twin_stops_blocking_its_twin() {
     m.back_to_automatic_set(&["clutter/rock.png".to_string()])
         .unwrap();
     idle(&mut m);
-    assert!(m
-        .items
-        .iter()
-        .any(|i| matches!(i.status, ItemStatus::Skipped(_))));
+    assert_eq!(skipped(&m), 2, "the clash is back");
 }
 
 /// Opening helpers for a model on an existing folder.
@@ -688,4 +709,80 @@ fn a_no_set_helper_row_reads_no_set() {
     h.run();
     let found = rows(&h);
     assert_eq!(found, ["Helper mouth_rough.png: No set"], "{found:?}");
+}
+
+/// Note HF3: a no-set texture asks nothing, so its preview carries no "suggested settings" notice.
+#[test]
+fn a_no_set_texture_previews_without_a_suggested_settings_notice() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.expand(LEAF);
+    assert_eq!(
+        m.preview.notice.as_deref(),
+        Some("Preview of the suggested settings"),
+        "in a set it is still asked"
+    );
+    m.remove_member("landscape/leaf", LEAF).expect("removed");
+    idle(&mut m);
+    m.expand(LEAF);
+    assert_ne!(
+        m.preview.notice.as_deref(),
+        Some("Preview of the suggested settings")
+    );
+}
+
+/// The helper panel's "← set" link goes through the one set check: a no-set helper has none.
+#[test]
+fn a_no_set_helper_panel_has_no_set_link() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = mouth(d.path());
+    let key = "face/mouth_rough.png";
+    let draw = |m: AppModel| {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(eframe::egui::vec2(1500.0, 900.0))
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run();
+        h
+    };
+    m.expand(key);
+    let h = draw(m);
+    let with_set = h.query_all_by_label_contains("← ").count();
+    let mut m = h.into_state();
+    m.remove_member("face/mouth", key).unwrap();
+    idle(&mut m);
+    m.expand(key);
+    let h = draw(m);
+    let without = h.query_all_by_label_contains("← ").count();
+    assert!(with_set >= 1, "the link shows while it is in the set");
+    assert_eq!(without, 0, "a no-set helper links to no set");
+}
+
+/// Delete set is disabled, with the reason, while the project file takes no edit.
+#[test]
+fn delete_set_is_disabled_on_a_read_only_project_file() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    assert!(m.sets_doc.as_ref().unwrap().read_only());
+    let id = set_views(&m)[0].id.clone();
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(1500.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    h.query_all_by_label(&id)
+        .next()
+        .expect("the set pill")
+        .click_secondary();
+    h.run();
+    let del = h.get_by_label("Delete set");
+    assert!(del.accesskit_node().is_disabled(), "disabled");
+    assert!(h.state().sets_doc.as_ref().unwrap().read_only());
+    assert!(!h.state_mut().delete_set(&id), "the model refuses too");
 }

@@ -884,12 +884,14 @@ impl SetsDoc {
             }
             self.f.touch();
         }
-        let order: Vec<String> = self
-            .order()
-            .into_iter()
+        let before = self.order();
+        let order: Vec<String> = before
+            .iter()
             .filter(|o| fold_id(o) != lower)
+            .cloned()
             .collect();
-        if !self.order().is_empty() {
+        // Only a changed list is written: an unchanged one must not dirty the document.
+        if order.len() != before.len() {
             self.set_order(&order);
         }
         for f in files {

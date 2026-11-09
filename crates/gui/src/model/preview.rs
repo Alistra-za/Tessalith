@@ -217,8 +217,9 @@ fn classify(item: &TextureItem) -> Previewable {
     }
 }
 
-fn status_notice(item: &TextureItem) -> Option<String> {
-    (item.status == ItemStatus::NeedsDecision).then(|| SUGGESTED.to_string())
+/// Note HF3: a no-set texture asks no question, so it carries no "suggested settings" notice.
+fn status_notice(m: &AppModel, item: &TextureItem) -> Option<String> {
+    (item.status == ItemStatus::NeedsDecision && m.item_in_run(item)).then(|| SUGGESTED.to_string())
 }
 
 /// Profile plus, for a packed output, its recipe and sources (with their stamps), plus the job's bake, derive,
@@ -555,7 +556,7 @@ impl AppModel {
                 self.start_dds(path);
             }
             Previewable::Job(job) => {
-                let notice = status_notice(item);
+                let notice = status_notice(self, item);
                 self.set_base_notice(notice);
                 self.preview.profile_sig = Some(signature(&job));
                 self.start_source();
@@ -592,7 +593,7 @@ impl AppModel {
         let Some(item) = self.item(&key) else {
             return;
         };
-        let notice = status_notice(item);
+        let notice = status_notice(self, item);
         match classify(item) {
             Previewable::Dds => {
                 if item.stamp != self.preview.dds_stamp {
