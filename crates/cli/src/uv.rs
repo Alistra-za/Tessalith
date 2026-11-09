@@ -82,7 +82,7 @@ impl Pattern {
 }
 
 /// `*` (any run of characters) and `?` (one character) on one segment.
-fn glob(pat: &str, s: &str) -> bool {
+pub(crate) fn glob(pat: &str, s: &str) -> bool {
     let (p, s): (Vec<char>, Vec<char>) = (pat.chars().collect(), s.chars().collect());
     let (mut pi, mut si, mut star, mut mark) = (0, 0, None, 0);
     while si < s.len() {

@@ -115,7 +115,6 @@ pub fn dilate_under_zero_alpha(img: &mut Rgba32F) {
 }
 
 /// One pyramid level of `push_pull_fill`: all four channels, `filled[i]` marks meaningful texels.
-#[allow(dead_code)] // Task 4 (`sdc dilate`) makes this module public; drop the three allows then
 struct Level4 {
     w: usize,
     h: usize,
@@ -124,7 +123,6 @@ struct Level4 {
 }
 
 /// Bilinear sample of a fully filled level at fractional texel coordinates, clamped to its edges.
-#[allow(dead_code)]
 fn sample_bilinear(l: &Level4, fx: f32, fy: f32) -> [f32; 4] {
     let (x0f, y0f) = (fx.floor(), fy.floor());
     let (tx, ty) = (fx - x0f, fy - y0f);
@@ -151,7 +149,6 @@ fn sample_bilinear(l: &Level4, fx: f32, fy: f32) -> [f32; 4] {
 ///
 /// Valid texels are never written. Returns false, leaving `img` unchanged, when no texel is valid.
 /// Panics if `valid.len()` differs from the texel count.
-#[allow(dead_code)]
 pub fn push_pull_fill(img: &mut Rgba32F, valid: &[bool]) -> bool {
     assert_eq!(valid.len(), img.px.len(), "valid mask size mismatch");
     if !valid.iter().any(|&v| v) {
@@ -250,6 +247,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn push_pull_blends_all_four_channels_between_two_regions() {
+        let mut img = Rgba32F::new(8, 1, [0.0; 4]);
+        let (a, b) = ([0.1, 0.2, 0.3, 0.4], [0.9, 0.5, 0.6, 0.8]);
+        *img.at_mut(0, 0) = a;
+        *img.at_mut(7, 0) = b;
+        let valid = mask_where(&img, |x, _| x == 0 || x == 7);
+        assert!(push_pull_fill(&mut img, &valid));
+        for c in 0..4 {
+            assert!(
+                img.px[0][c] < img.px[3][c] && img.px[3][c] < img.px[7][c],
+                "ch {c}"
+            );
+            assert!(img.px[3][c] > a[c] && img.px[3][c] < b[c], "ch {c}");
+        }
+        // the channels stay apart: no channel is copied into another
+        let mut mid = img.px[3];
+        mid.sort_by(f32::total_cmp);
+        assert!(mid.windows(2).all(|w| w[1] - w[0] > 0.01), "{mid:?}");
     }
 
     #[test]

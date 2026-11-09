@@ -12,6 +12,7 @@
 - CS hair self-shadow in the 3D preview no longer leaves hair lit by ambient light only. Hair is the only preview shader that reads the scene depth, so nothing else changes.
 - The UV coverage checker is removed from the GUI: the preview's **UV coverage** toggle, **Check all UV coverage** and **Stop checking UV coverage**, the UV switch under Advanced → Checks, and the `CHK-UV-GUTTER` warning. An `allow` list or `--allow` that names `CHK-UV-GUTTER` is refused with "removed in 3.0" and a hint to use `sdc uv`. An old `uv` key under `[checks]` in `gui.toml` is ignored.
 - New `sdc uv <PATTERN> --s N` (or `--w W --l L`) writes an image of the UV islands of the meshes that use a texture: islands 255, the recommended padding 127, and texels within padding of two islands 191 ("too close"). It reads the GUI's scan database or, with `--meshes`, a mesh folder. It replaces the GUI's UV coverage checker, and it draws thin islands the checker missed. See docs/wiki/CLI-Reference.md#sdc-uv.
+- New `sdc dilate <PATTERN>...` fills the texels outside a `_matid` mask or the `_uvmask` image `sdc uv` writes by push-pull, and keeps the masked texels exactly as they were. Colour maps are filled in linear light, normal maps are renormalised, and the result goes to a `dilated` folder under the same name. See docs/wiki/CLI-Reference.md#sdc-dilate.
 
 ## 2.1.0 (Unreleased)
 

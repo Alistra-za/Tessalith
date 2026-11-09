@@ -52,6 +52,27 @@ pub enum Command {
     CubemapMarker(MarkerArgs),
     /// Write a UV-island image for each texture a pattern names: islands 255, padding 127, too close 191.
     Uv(UvArgs),
+    /// Fill the texels outside a _matid or _uvmask mask by push-pull, keeping the masked texels as they are.
+    Dilate(DilateArgs),
+}
+
+#[derive(Args)]
+pub struct DilateArgs {
+    /// Image files, folders (the images directly in them) or globs on disk (`*` and `?` match within one name).
+    #[arg(required = true)]
+    pub patterns: Vec<String>,
+    /// Take the images below a folder too.
+    #[arg(long)]
+    pub recursive: bool,
+    /// The mask for every input (default: `<base>_matid.*` or `<base>_uvmask.png` beside each input).
+    #[arg(long)]
+    pub mask: Option<PathBuf>,
+    /// Where the images go (default: a `dilated` folder beside each input).
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+    /// Replace an existing image.
+    #[arg(long)]
+    pub overwrite: bool,
 }
 
 #[derive(Args)]
