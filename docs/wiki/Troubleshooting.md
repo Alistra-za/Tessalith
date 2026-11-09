@@ -67,6 +67,7 @@ The error goes to `%LOCALAPPDATA%\sdc\logs\crash-<date>-<time>.log`, and your un
 ### The graphics device was lost
 
 The log has a "wgpu device lost" line. It isn't a crash: a message appears with **Restart**, and Tessalith reopens the same folder with your edits restored.
+
 ## Reporting a problem
 
 Open an issue on [GitHub](https://github.com/Alistra-za/Tessalith/issues/new/choose); the bug form lists what to attach.

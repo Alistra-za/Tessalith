@@ -306,6 +306,7 @@ Packing fields go on the packed output's key, for example `[files."textures/armo
 ### Cubemap
 
 These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. A cube's formats are on [Cubemaps](Cubemaps.md#checks): any other `format`, or an sRGB tag, is `CFG-INVALID`; `mips.levels = "none"` raises `CUBE-NO-MIPS`.
+
 | Field | Values | Default | Notes |
 |---|---|---|---|
 | `cubemap.style` | `vanilla_metal`, `room`, `eye`, `hd` | unset | Fills the keys below that nothing else set: `vanilla_metal` 32 px, BC1, blur 0.6, saturation 0.8; `room` 128 px, BC1, blur 0.35; `eye` 256 px, BC7, blur 0.35; `hd` 512 px, BC7, blur 0.1. |
