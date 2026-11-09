@@ -870,9 +870,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note HL6: missing links are Info rows and still export; conflicts stay Warning.
     for v in views.iter() {
         let at = || set_at(&v.key, &v.id);
-        if v.json && !v.pbr {
-            if let Some(d) = &v.derived_match {
-                let path = format!("textures\\{}.dds", d.replace('/', "\\"));
+        // `v.json` ignores the target (a PBR pick with a filled slot); `pgp_written` is the export's own test.
+        if m.pgp_written(v) {
+            if let Some(path) = pbr_export::no_albedo_slot1(v) {
                 out.push(row(
                     Level::Info,
                     at(),
@@ -880,9 +880,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     None,
                 ));
             }
-        }
-        if let Some(s @ StaticsStatus::Unused) = m.statics_status(v) {
-            out.push(row(Level::Info, at(), statics_text(&s), None));
+            if let Some(s @ StaticsStatus::Unused) = m.statics_status(v) {
+                out.push(row(Level::Info, at(), statics_text(&s), None));
+            }
         }
         if m.cs_block(&v.id, Kind::Txst).is_some()
             && set_key(v)

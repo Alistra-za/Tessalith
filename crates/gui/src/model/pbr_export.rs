@@ -130,13 +130,7 @@ fn slots_of(
                 .and_then(|t| t.slots.get(&n))
                 .map(|p| p.replace('/', "\\"))
         };
-        if !slot_filled(v, 1) {
-            let own = v
-                .derived_match
-                .as_ref()
-                .map(|d| format!("textures\\{d}.dds"));
-            out.extend(stored(1).or(own).map(|p| (1, p)));
-        }
+        out.extend(no_albedo_slot1(v).map(|p| (1, p)));
         for n in [2, 6] {
             if !slot_filled(v, n) {
                 out.extend(stored(n).map(|p| (n, p)));
@@ -149,6 +143,24 @@ fn slots_of(
         }
     }
     out
+}
+
+/// Note HL5: the diffuse path of a no-albedo JSON set whose slot 1 is empty: the mapping's slot 1, else the set's base
+/// path. `None` for any other set. The Problems row (Note HL6) names the same path.
+pub(super) fn no_albedo_slot1(v: &SetView) -> Option<String> {
+    if !v.json || v.pbr || slot_filled(v, 1) {
+        return None;
+    }
+    let stored = v
+        .txst
+        .as_ref()
+        .and_then(|t| t.slots.get(&1))
+        .map(|p| p.replace('/', "\\"));
+    stored.or_else(|| {
+        v.derived_match
+            .as_ref()
+            .map(|d| format!("textures\\{d}.dds"))
+    })
 }
 
 /// Whether a texture fills game slot `n` of `v`.

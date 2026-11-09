@@ -1335,14 +1335,15 @@ fn a_mapping_onto_a_shipped_file_says_it_replaces_it() {
     assert_eq!(row.level, Level::Info);
 }
 
-/// Anti-goal: a conflict is not a missing link. Two sets mapped onto one file base still warn (pins existing behaviour).
+/// Anti-goal: a conflict is not a missing link. Two sets mapped onto one file base still collide: the output-path row
+/// stays at Blocks (pins existing behaviour; a mutation downgrading that row to Info fails it).
 #[test]
 fn collisions_stay_amber() {
     let d = tempfile::tempdir().unwrap();
     let mut m = skyrim_shaped(d.path());
     let ids: Vec<String> = sdc_gui::model::sets::views(&m)
         .iter()
-        .filter(|v| v.key.ends_with("wall") || v.key.ends_with("leaf"))
+        .filter(|v| v.key.ends_with("rock") || v.key.ends_with("leaf"))
         .map(|v| v.id.clone())
         .collect();
     assert_eq!(ids.len(), 2);
@@ -1352,5 +1353,70 @@ fn collisions_stay_amber() {
         idle(&mut m);
     }
     let rows = problems(&m);
-    assert!(rows.iter().any(at_warning_or_above), "{rows:?}");
+    let row = rows
+        .iter()
+        .find(|p| p.text.contains("both write fs6/fs6_boots_ir_n.dds"))
+        .unwrap_or_else(|| panic!("no collision row in {rows:?}"));
+    assert!(at_warning_or_above(row), "{row:?}");
+}
+
+#[test]
+fn the_no_albedo_row_names_the_mappings_slot_1() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _) = lonely(d.path(), true);
+    let id = view_of_key(&m, "lonely");
+    m.map_target(&id, TargetPick::Files(files(BOOTS_BASE, &[1, 2, 6])))
+        .unwrap();
+    idle(&mut m);
+    let want = "No albedo in this set; the mesh keeps textures\\fs6\\fs6_boots_ir.dds. A vanilla diffuse isn't sRGB, so it can look washed out";
+    let rows = problems(&m);
+    assert!(rows.iter().any(|p| p.text == want), "{rows:?}");
+}
+
+fn view_of_key(m: &AppModel, tail: &str) -> String {
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.key.ends_with(tail))
+        .unwrap()
+        .id
+        .clone()
+}
+
+#[test]
+fn the_json_info_rows_follow_whether_the_entry_is_written() {
+    // A no-albedo PBR set on a target with no JSON gets no "mesh keeps" row.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _) = lonely(d.path(), true);
+    assert!(problems(&m)
+        .iter()
+        .any(|p| p.text.starts_with("No albedo in this set")));
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert!(problems(&m)
+        .iter()
+        .all(|p| !p.text.starts_with("No albedo in this set")));
+    // A set that writes no entry gets no statics row.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_with_scan(d.path(), &[], &[]);
+    let text = sdc_gui::model::cs_pbr::statics_text(&StaticsStatus::Unused);
+    assert!(problems(&m).iter().any(|p| p.text == text));
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert!(problems(&m).iter().all(|p| p.text != text));
+}
+
+#[test]
+fn the_unused_statics_line_is_not_amber() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_with_scan(d.path(), &[], &["LandscapeRock01"]);
+    let key = view_of(&m, ROCK).key;
+    m.select_set(&key);
+    let mut h = tall(m);
+    h.run();
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    h.run();
+    let text = sdc_gui::model::cs_pbr::statics_text(&StaticsStatus::Unused);
+    let c = text_colours(&h, &text);
+    assert!(!c.is_empty(), "the line is drawn");
+    assert!(c.iter().all(|c| *c != sdc_gui::ui::status::AMBER), "{c:?}");
 }
