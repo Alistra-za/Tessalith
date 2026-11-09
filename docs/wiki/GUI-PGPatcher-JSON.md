@@ -98,7 +98,7 @@ These keys set the shape's alpha blending and testing in the NIF. A key that's o
 
 ## Where the JSON goes
 
-After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name. The GUI writes it; `sdc` on the command line does not.
+After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name.
 
 - Only sets that exported fully go in. Advanced skin sets have no entry ([Skin](Skin.md)).
 - On a partial or excluding run ([Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project)), a set the run left out keeps its entry while its DDS files are in the export folder. One whose files aren't there (never exported, or the folder was emptied) is left out, with a "not exported yet" note in the Files tab. <!-- D:HF12 -->
@@ -120,7 +120,7 @@ If a delete section would hit one of your own sets, that set is struck through a
 
 ## Quick Q/A
 
-**Why is my set missing from the JSON?** It matches nothing, it didn't export fully, it's an Advanced skin set, you exported with `sdc`, or the project isn't in `cs` mode.
+**Why is my set missing from the JSON?** It matches nothing, it didn't export fully, it's an Advanced skin set, or the project isn't in `cs` mode.
 
 **Why does my coat value do nothing?** Multilayer is off. The value is kept ("kept, not used") and goes into the JSON when you turn Multilayer back on.
 

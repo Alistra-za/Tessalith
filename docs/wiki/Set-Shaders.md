@@ -19,17 +19,16 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 | `parallax` | diffuse, `_n`, `_p` | | yes |
 | `skin` | diffuse, `_n`/`_msn` | `_sk`, `_s` (with `_msn`) | yes |
 | `hair` | diffuse, `_n` | `_flow` (`cs` only; vanilla hair doesn't read it) | yes |
-| `eye` | diffuse, `_n` (model-space) | `_sk`, `_m`, `_e` | yes |
+| `eye` | diffuse, `_n` (as msn) | `_sk`, `_m`, `_e` | yes |
 | `multilayer` | diffuse, `_n`, `_i` | `_m`, `_e`, `_b` | yes |
 | `landscape` | diffuse, `_n` | | yes |
 | `complex_grass` | the complex-grass texture ([layout](PBR-Landscape.md#complex-grass)) | | yes |
 
 - **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse.
-- **A shader the target lacks** falls back to `default` (`SHADER-UNAVAILABLE`).
 
 ## How the shader is picked
 
-Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor), or with `--set set:<id>.shader=<shader>`. Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
+Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor). Otherwise the first rule that fits decides, and `SHADER-AUTO` names it:
 
 1. Advanced skin members or an `_rfaos`: `advanced_skin`.
 2. A PBR set or PBR members: `pbr_grass` when a grass record uses the albedo (GUI, after a scan with plugins); under `cs`, `pbr_landscape` for a landscape set (GUI; [what counts](PBR-Landscape.md)); otherwise `pbr`.
@@ -48,25 +47,23 @@ Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor), or with 
 | Shader | Effect on members |
 |---|---|
 | `hair` | Diffuse: `alpha.policy = "cutout_blend"` and `mips.coverage = "on"`. |
-| `eye` | `_n` becomes `msn` (model-space). `_m` is BC4. |
+| `eye` | `_n` is treated as `msn` (no tangent space re-normalization). `_m` is BC4. |
 | `landscape` | Colour becomes `landscape_diffuse` (alpha is the snow mask). |
 | `pbr_landscape` | Nothing: members convert exactly as under `pbr`. |
 | `multilayer` | Diffuse alpha is `data`. |
 | `envmap` | `_m` is BC4. |
-| `parallax` | `_p` is BC4. |
-| `complex_grass` | Colour becomes `complex_grass`. |
 
-In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)). On the command line your value stays, and the file is blocked or reports an error.
+In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)).
 
 ## Also export as Vanilla and CM
 
-For a `cs` mod author shipping one PBR mod in three flavours. Needs the `cs` target. Each PBR set is converted from its albedo, `_n`, `_rmaos` (or raw roughness, metallic and AO maps) and `_p`; every other texture is copied from the PBR folder, or encoded when the copy would differ. Gloss below is 1 − roughness.
+For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is converted from its albedo, `_n`, `_rmaos` (or raw roughness, metallic and AO maps) and `_p`; every other texture is copied from the PBR folder, or encoded when the copy would differ.
 
 ### Turn it on
 
 - **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, or the **Also export as** column in Review. While a tick is on, Export always opens Review.
-- **Saved as** `[export] also` in the project `sdc.toml`; the CLI reads the same table.
-- **Ticking only CM** still writes the Vanilla folder: CM installs on top of it.
+- **Saved as** `[export] also` in the project `sdc.toml`.
+- **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
 ### What you get
 
@@ -77,27 +74,26 @@ Three folders side by side, where `<project>` is the opened folder's name:
 
 | Shader | Vanilla folder | CM folder |
 |---|---|---|
-| PBR | `<name>.dds` diffuse from the albedo, darkened by AO and by metal; `_n` = the normal, alpha from gloss × AO, boosted with metal; env `_m` = metal × gloss when the meshes use the environment-map shader | `_m`: R = gloss × metal, G = gloss (at least 5/255), B = metal, A = `_p` height (5/255–250/255; 0 without a `_p`). With **Keep metal brightness**, also a diffuse without the metal darkening |
+| PBR | `<name>.dds` diffuse from the albedo, darkened by AO and by metal; `_n` = the normal, with specular alpha derived from gloss × AO, boosted with metal; vanilla envmask `_m` = metal × gloss, only exported when the meshes use the environment-map shader | `_m`: R (envmask) = gloss × metal, G (glossiness) = gloss (at least 5/255), B = metal, A = `_p` height (5/255–250/255; 0 without a `_p`). With **Keep metal brightness**, also a diffuse without the metal darkening |
 | PBR Landscape | landscape diffuse with a lighter AO factor and no metal factor, alpha = the `_p`; landscape `_n` with alpha from gloss × AO; the set's `_p` (for Terrain Helper) | `_m` with R = B = 0 |
 | PBR grass | the converted diffuse only | the complex-grass stack (diffuse on top, `_n` below) |
 
-**Install** Vanilla alone, or CM on top of Vanilla. With Keep metal brightness off, the CM folder holds only `_m` files (plus each PBR grass set's complex-grass stack).
+**Install** Vanilla alone, or CM on top of Vanilla. With keep metal brightness off, the CM folder holds only `_m` files (plus each PBR grass set's complex-grass stack).
 
 ### Where the folders go
 
 In Review's **Also export as** column:
 
-- **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder. The CLI writes under `-o`, and **Copy CLI command** passes it.
+- **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder.
 - The three folder names: empty means the default name, shown as the hint.
 - **Keep metal brightness** and its **Strength** (CM only).
 - **Skip these sets**: tick a set to leave it out of Vanilla and CM. The set editor's Material tab has the same switch, **Skip vanilla/CM for this set**. Saved as `[export] skip`.
 
 ### Things that need care
 
-- **The env `_m` needs a Meshes scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the scan. The CLI reads no scan, so it never writes one.
+- **The env `_m` needs a Meshes scan.** It is written only for sets whose meshes use the environment-map shader, which Tessalith learns from the scan.
 - **`_curves`, `_curvature` and `_cavity` maps** join their PBR set and shade the diffuse: a soft light with the curves map (0.5 = no change), then a multiply with the cavity map, both at [`curves_opacity`](Project-Config.md#export). They are read only here; a plain export reports them as `PACK-UNUSED-INPUT`.
 - **NIF edits follow the PBR folder**, so one mod folder holds the textures and the meshes.
-- **A set with a DDS source isn't converted** (`DERIVE-DDS-SOURCE`). A PBR set with a map still undecided, or blocked by a code you haven't acknowledged, isn't exported to the PBR folder, so Vanilla and CM leave it out too ("not derived: N maps undecided in the PBR export").
 
 ### The recipe
 

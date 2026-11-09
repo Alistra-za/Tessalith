@@ -15,7 +15,7 @@ Rows come blockers first, then undecided textures, then warnings, then checks an
 | Grey | **Check**, a hint from an artist check ([Texture types](Texture-Types.md#artist-checks)): a map that will probably look wrong in game. It never blocks and never changes "ready". Or an info row. |
 | Green, on a tile or card | Nothing to decide. |
 
-A row names where it is (a texture, set or file you can click; "Project" when it belongs to no file) and says the action in words. Hover it for the engine's message and code (`LOSS-ALPHA-DATA`), which is what Troubleshooting and `--allow` use.
+A row names where it is (a texture, set or file you can click; "Project" when it belongs to no file) and says the action in words. Hover it for the engine's message and code (`LOSS-ALPHA-DATA`), which is what Troubleshooting uses.
 
 ## Rows and their fixes
 
@@ -56,7 +56,7 @@ An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 When a plan settles, every sub-type taken from a High-confidence suggestion (including one the scanned meshes or a GRAS grass model gave it) and every alpha meaning taken from the meshes is written to `sdc.toml` as a `[files]` entry, as if you had chosen it.
 
 - It is one undo step, `Set {n} types automatically`, and one Info row with **Undo this change**.
-- These types alone don't count as your edits: no title dot, and no unsaved question on close. `sdc convert` sees them only after you **Save**.
+- These types alone don't count as your edits: no title dot, and no unsaved question on close.
 - A file you already decided is never touched, and an Undo stays undone until the folder reopens.
 - It re-types only while the type is still Tessalith's own pick. A type you changed is kept.
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).

@@ -60,4 +60,4 @@ An empty slot of a mapped set reads one of three ways:
 
 A file the set has, a borrow and a pin all win over a fill. **Clear** turns a fill off and brings its missing-map warning back; **From {set}** or **Use the record's slot** turns it on again. <!-- D:HG7,HG9 --> After a scan, a mapped set whose paths differ from the record gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from the scan gets an Info row and the mapping stays. <!-- D:HG8 -->
 
-`sdc convert` doesn't read mappings or fills: [what the CLI reproduces](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits).
+On the command line: [what it reads from your project](CLI-Reference.md#does-the-cli-use-my-gui-edits).

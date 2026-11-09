@@ -79,7 +79,7 @@ With `pbr` on, each listed EDID without a wildcard that no `cs_mato` block of th
 
 ## PBR grass
 
-Community Shaders draws grass with its own shader, which reads only the albedo, `_n`, `_rmaos` and an optional `_s`. A PBR set whose albedo a grass (GRAS) record uses gets the **PBR grass** shader on its own after a scan that included plugins. You can also pick it in the Shader list (`cs` target only). The CLI never picks it by itself; use `--set set:<id>.shader=pbr_grass`.
+Community Shaders draws grass with its own shader, which reads only the albedo, `_n`, `_rmaos` and an optional `_s`. A PBR set whose albedo a grass (GRAS) record uses gets the **PBR grass** shader on its own after a scan that included plugins. You can also pick it in the Shader list (`cs` target only).
 
 - The settings and the JSON editor show only what grass reads: roughness scale, specular level, subsurface (Standard or Foliage, on when the set has an `_s`), matching, vertex colours, locks and slots. Other keys the set already has stay in `sdc-project.toml` and come back if you switch to PBR, but aren't exported.
 - PGPatcher needs to be 2.1.0 or later to patch PBR grass meshes.
@@ -91,5 +91,4 @@ Community Shaders draws grass with its own shader, which reads only the albedo, 
 Both targets accept it; only Community Shaders or ENB read it in game. A complex-grass texture is one image twice as tall as it is wide, with power-of-two sides (for example 1024x2048): diffuse and alpha in the top half, normal and specular in the bottom half. Community Shaders detects it from the bottom-left texel.
 
 - Tag it by setting the set's shader to `complex_grass`, by setting `subtype = "complex_grass"` on the file's `[files]` entry, or let the GUI do it after a scan that included plugins: a texture a GRAS record uses, 1:2, with a valid detection corner and a normal-map bottom half gets a High-confidence suggestion. A complex-grass-shaped diffuse nothing tags gets an info row in Problems with **Tag as grass**. The sub-type picker offers **Complex grass** where the set's shader is a grass shader or no `textures` folder is above the file.
-- The CLI never tags it: without `subtype = "complex_grass"` on the `[files]` entry, `sdc convert` treats the file as a diffuse.
 - The checks and their codes are under [Diagnostic codes](Diagnostic-Codes.md#shaders-skin-and-grass).

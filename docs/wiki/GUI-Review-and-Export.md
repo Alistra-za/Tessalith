@@ -1,6 +1,6 @@
 # Review and Export
 
-For anyone ready to export: what **Export** does, why Review opened instead, what the Files tab shows, and which of your GUI edits `sdc convert` reproduces.
+For anyone ready to export: what **Export** does, why Review opened instead, what the Files tab shows.
 
 ## The Export button
 
@@ -50,17 +50,7 @@ A PGPatcher JSON edited outside Tessalith, or a NIF whose export path holds a fi
 The **Files** tab opens when Export starts, with one row per file and its state. **Failed only** and **Has warnings** narrow it, and **Show in Explorer** on a row selects the written output.
 
 - **Save report…** writes the report as JSON Lines or Markdown.
-- **Copy CLI command** copies the matching `sdc convert` line ([below](#does-the-cli-use-my-gui-edits)).
+- **Copy CLI command** copies the matching command line: [CLI reference](CLI-Reference.md#does-the-cli-use-my-gui-edits).
 - **Notes** lists what the export did besides converting: a JSON written, not written or kept, borrowed-slot copies, files left in place. The Markdown report has the same lines. <!-- D:FN4 -->
 
 When the export ends, one Info line counts the artist-check warnings.
-
-## Does the CLI use my GUI edits?
-
-Partly. **Copy CLI command** gives the `sdc convert` line for this export: the same folder with `--recursive`, the same output and thread count, and `--accept-suggestions high`. Export saved `sdc.toml` first, so the command writes the same manifest records and DDS bytes for everything `sdc.toml` decides. That includes the types and alpha meanings the GUI wrote from scan evidence.
-
-| Stays in the GUI | Why it differs on the CLI |
-|---|---|
-| `sdc-project.toml`: moved files, created sets, borrows, set renames, output names, set shaders, texture set record mappings and fills | The CLI doesn't read it, so those sets come out differently: an `_rfaos` bakes without the shared normal, and a shared set's maps type as `normal` and `backlight_tint`. |
-| The mod scan: mesh and grass evidence | The CLI doesn't read the scan database. A mesh **Remove** and the `_m` that Also export derives from meshes stay GUI-only. |
-| The PGPatcher JSON | Only the GUI writes it, after a complete export. |

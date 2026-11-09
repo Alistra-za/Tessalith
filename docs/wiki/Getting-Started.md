@@ -1,6 +1,6 @@
 # Getting started
 
-For a modder with a folder of source PNGs who wants one TruePBR set finished and working in game. It goes through the GUI first, then the same job with `sdc`, then what to check in game. It assumes you've unzipped the release ([Installation](Installation.md)).
+For a modder with a folder of source PNGs who wants one TruePBR set finished and working in game. It goes through the GUI, then what to check in game. It assumes you've unzipped the release ([Installation](Installation.md)).
 
 ## The example set
 
@@ -55,79 +55,11 @@ Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TrueP
 
 You get the DDS tree, plus `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported completely.
 
-**Copy CLI command** (Files tab) gives the matching `sdc convert` line. Set edits live in `sdc-project.toml`, which the CLI doesn't read ([what carries over](GUI-Review-and-Export.md#does-the-cli-use-my-gui-edits)).
-
-## With sdc
-
-### Look first
-
-`sdc inspect` plans the whole run and prints what would happen. It encodes and writes nothing.
-
-```powershell
-cd C:\Work\IronPlate
-sdc inspect C:\Work\IronPlate --recursive --accept-suggestions high
-```
-
-`--recursive` is there because the images sit several folders down. `--accept-suggestions high` applies High-confidence guesses the way the GUI does; the CLI default is `none`, which leaves every guessed file unresolved. Abridged, the output looks like this:
-
-```text
-set textures/pbr/armor/ironplate/ironplate  shader pbr (auto:pbr)
-  pack textures/pbr/armor/ironplate/ironplate_rmaos.dds (rmaos) run
-    R source:ironplate_roughness.png:R  G source:ironplate_metallic.png:R  B source:ironplate_ao.png:R  A default:1
-C:\Work\IronPlate\textures\pbr\armor\ironplate\ironplate.png
-  suggested pbr_albedo (high confidence: colour member of a PBR set)
-  sub-type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
-  status ready
-...
-```
-
-| Look for | It means |
-|---|---|
-| `status ready` | The file will be converted. `unresolved`, `blocked` or `error` means it won't, and the reasons follow. |
-| `pack … run` | The packed output will be built. `conflict`, `failed` or `disabled` means it won't. |
-| `warning` or `blocking` lines | A diagnostic code: look it up on [Diagnostic codes](Diagnostic-Codes.md). |
-
-What the other line parts mean is on [CLI reference](CLI-Reference.md#sdc-inspect).
-
-### Record decisions in sdc.toml
-
-Anything you'd otherwise type as a `--set` flag every run belongs in `C:\Work\IronPlate\sdc.toml`:
-
-```toml
-schema_version = 1
-target = "cs"
-
-# This set has no specular map. Use 0.5 (128) instead of the default 1.0.
-[files."textures/pbr/armor/ironplate/ironplate_rmaos"]
-packing.fill.specular = 128
-```
-
-Notice: a packed output's key has no extension, and `[files]` keys are relative to the folder holding `sdc.toml`. `sdc` reads `sdc.toml` from the first input folder by itself. [Project config](Project-Config.md) has the cutout, OpenGL normal and `subtype` examples.
-
-### Convert
-
-```powershell
-sdc convert C:\Work\IronPlate --recursive --accept-suggestions high -o C:\Work\IronPlate-out
-```
-
-Progress goes to stderr, one line per file, with forward slashes:
-
-```text
-ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate.dds
-ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate_n.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_n.dds
-ok    ... -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_rmaos.dds
-done: 3 converted, 0 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
-```
-
-The three raw maps get no line: the packed output consumed them. Without `-o`, output goes to `.\sdc-out` ([layout](Validation-and-Output.md#where-the-files-go)). Exit code `0` means every file converted and validated; the others are on [CLI reference](CLI-Reference.md#exit-codes).
-
-### Run it again
-
-Run the same command and every file reads `up to date`. `--on-existing if-changed` is the default: it compares each output with its record in `C:\Work\IronPlate-out\_sdc\manifest.jsonl` and re-encodes only what changed. Edit `ironplate_roughness.png` and only the `_rmaos` rebuilds ([what counts as changed](Validation-and-Output.md#re-runs-and-if-changed)).
+On the command line: [quick start](CLI-Reference.md#quick-start).
 
 ## Converting a whole mod folder
 
-Point `sdc convert --recursive`, or the GUI, at the folder. Expect questions on the first run: a file whose type can't be worked out waits for you instead of being guessed ([why](Texture-Types.md#how-files-form-a-set)). Your answers are saved in `sdc.toml`, so later runs don't ask again.
+Open the folder in the GUI. Expect questions on the first run: a file whose type can't be worked out waits for you instead of being guessed ([why](Texture-Types.md#how-files-form-a-set)). Your answers are saved in `sdc.toml`, so later runs don't ask again.
 
 ## Install it
 

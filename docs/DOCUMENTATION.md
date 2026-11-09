@@ -58,7 +58,8 @@ The docs grew too large, mostly from over-explaining and over-stating limits. Wr
 
 ## 4. Page size and structure
 - **Size budget:** a wiki page holds at most about 15 KB of text, around 2,500 words. Over that, split it. A page under about 2 KB merges into its parent.
-- **Lookup tables:** reference pages that are mostly tables (Texture-Types, Project-Config, CLI-Reference, Diagnostic-Codes) may run to 30 KB. Past that, split by command or section group.
+- **Lookup tables:** reference pages that are mostly tables (Texture-Types, Project-Config, Diagnostic-Codes) may run to 30 KB. Past that, split by command or section group.
+- **The command line has one page:** CLI-Reference holds every `sdc` command, flag, example, exit code and CLI message, with no size cap (owner, 2026-11-08). Other pages carry no CLI material, at most a one-line link to it.
 - **The GUI guide is split by area of the window, not one page per screen.** A page is named after the area as the UI labels it, and a small area folds into its neighbour. The GUI pages are:
   - GUI-Guide: the annotated window, the bottom panel, shortcuts and dialogs;
   - GUI-Main-Window, GUI-Texture-Panel, GUI-Sets-Column, GUI-Set-Editor, GUI-Bulk-and-Rename;

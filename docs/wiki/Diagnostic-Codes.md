@@ -1,14 +1,14 @@
 # Diagnostic codes
 
-For anyone who saw a code in the Problems list or in `sdc`'s output: what it means and what to do, for every code. A symptom with no code is on [Troubleshooting](Troubleshooting.md).
+For anyone who saw a code in the Problems list or a conversion log: what it means and what to do, for every code. A symptom with no code is on [Troubleshooting](Troubleshooting.md).
 
 ## Severities
 
 | Severity | Effect |
 |---|---|
-| info | Recorded. Not shown in the CLI log (except `CFG-FILTER-IGNORED`). |
+| info | Recorded. |
 | warning | Shown; the file is converted. |
-| blocking | The file isn't converted until you acknowledge the code: `--allow <CODE>` for the batch, `allow = ["<CODE>"]` in the file's `[files]` entry, or the acknowledge button in the GUI. |
+| blocking | The file isn't converted until you acknowledge the code: the GUI's acknowledge button, or an `allow` list in the project config. On the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes). |
 | error | The file fails. |
 
 ## Input
@@ -46,7 +46,7 @@ For anyone who saw a code in the Problems list or in `sdc`'s output: what it mea
 |---|---|---|---|
 | `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](Texture-Types.md#sub-types-what-each-file-becomes)). | Use BC7. |
 | `FMT-LANDSCAPE-BC1` | blocking | BC1 on `landscape_diffuse` destroys the snow mask. | Use BC7 or BC3. |
-| `FMT-CS-SKIN-LOADER` | blocking | Community Shaders' loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on a skin map (BC5 on `skin_detail`); any other format loads as nothing. `--allow` can't lift it. | Pick a format the loader reads. |
+| `FMT-CS-SKIN-LOADER` | blocking | Community Shaders' loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on a skin map (BC5 on `skin_detail`); any other format loads as nothing. Acknowledging it doesn't lift it. | Pick a format the loader reads. |
 | `FMT-BC1-ALPHA` | blocking | BC1 with alpha kept, without `encoder.bc1_alpha` or with `data` alpha that isn't empty ([BC1 alpha](Texture-Types.md#alpha)). | Turn on `encoder.bc1_alpha`, use BC7 or BC3, or `remove`. |
 | `FMT-RGB8-ALPHA` | blocking | RGB8 with alpha kept. | Use BC7 or RGBA8, or `remove` the alpha. |
 | `FMT-PERCEPTUAL-DATA` | error | Perceptual encoding on a data map. | Turn `encoder.perceptual` off. |
@@ -69,8 +69,8 @@ For anyone who saw a code in the Problems list or in `sdc`'s output: what it mea
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback with `--allow CFG-UNAVAILABLE`, or change the sub-type or target. |
-| `CFG-INVALID` | error | A value outside its range, or a combination that can't be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope). In a config, preset, rule or `--set` the run stops with exit 2; reached after layering, that file fails. | Fix the value. |
+| `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback, or change the sub-type or target. |
+| `CFG-INVALID` | error | A value outside its range, or a combination that can't be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope). In a config, preset or rule the file is refused outright; reached after layering, that one file fails. | Fix the value. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config.md#mipmaps) this texture can't use; it uses box. | Scope the filter to colour maps, or ignore. |
 | `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file. When another preset already declares its suffix aliases, the Problems row has **Remove aliases from {id}**. |
@@ -101,7 +101,7 @@ For anyone who saw a code in the Problems list or in `sdc`'s output: what it mea
 | `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member, an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
-| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it, or `--accept-suggestions high` for High ones. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). `--allow SUG-LOW-CONFIDENCE` converts nothing that has no suggestion. |
+| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
 | `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the sub-type. |
 
 ## Validation
@@ -110,7 +110,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `VAL-HEADER` | error | The written header fails the header rules. On `sdc validate`, also a cube with no mips, a 1×1 cube with a non-black +Y, a cube in an sRGB format, or a 2D file named `_e` or under `textures\cubemaps\`. | Report it as a bug, or fix the cube. |
+| `VAL-HEADER` | error | The written header fails the header rules. Checking an existing cube DDS raises it too: [CLI reference](CLI-Reference.md#checking-cube-files). | Report it as a bug, or fix the cube. |
 | `VAL-MIP-ERROR` | warning | A mip's PSNR is below 30 dB. | Check the source, raise the effort, or accept. |
 | `VAL-ALPHA-GUARANTEE` | error | Decoded opaque alpha is below the encoder's guarantee. | Report it as a bug. |
 | `VAL-COVERAGE` | warning | Cutout coverage drifted more than 2 points on a mip. | Adjust the threshold. |
@@ -126,7 +126,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format isn't BC7, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
-| `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)). | `--on-existing overwrite`. |
+| `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)). | Replace it from the command line: [CLI reference](CLI-Reference.md#re-runs-and-if-changed). |
 
 ## Packing
 
@@ -170,7 +170,7 @@ Raised only by Also export ([GUI or `[export] also`](Set-Shaders.md#also-export-
 
 ## Artist checks
 
-The GUI raises these ([what each flags](Texture-Types.md#artist-checks)). They only warn. The CLI raises none of them; the engine measures `CHK-LOW-DETAIL` only when the GUI asks.
+The GUI raises these ([what each flags](Texture-Types.md#artist-checks)). They only warn.
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
