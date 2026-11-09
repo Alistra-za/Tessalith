@@ -192,6 +192,16 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
                     .chain(members.into_iter().map(|s| (json!(s), subtype_label(s))))
             })
             .collect(),
+        // Note IA2: named by the baker; the change it makes is in brackets.
+        crate::model::fields::MSN_SOURCE => vec![
+            opt(json!("skyrim"), "Skyrim MSN (no change)"),
+            opt(json!("swap_gb"), "Blender object-space (swap G and B)"),
+            opt(
+                json!("invert_b"),
+                "Marmoset right-handed or Substance (invert B)",
+            ),
+            opt(json!("invert_gb"), "Marmoset left-handed (invert G and B)"),
+        ],
         "color.content" => vec![
             opt(json!("srgb"), "sRGB-encoded colour"),
             opt(json!("linear"), "Linear data"),

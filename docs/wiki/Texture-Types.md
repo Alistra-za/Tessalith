@@ -136,7 +136,7 @@ There are 34 sub-types in five categories.
 | `landscape_normal` | Normal | BC7 | UNORM | data | |
 | `pbr_normal` | Normal | BC7 | UNORM | remove | `cs` only. Vanilla specular in alpha is dropped. |
 | `detail_normal` | Normal | BC7 | UNORM | data | A landscape set's detail normal for an XPMF profile ([XPMF profiles](XPMF-Profiles.md#projected-noise-and-detail-normal)). The detail names pick it in a landscape set ([Detail names](#detail-names)); in other sets no suffix suggests it, so pick it on the file. |
-| `msn` | Normal | BC7 | UNORM | remove | Model-space normal. |
+| `msn` | Normal | BC7 | UNORM | remove | Model-space normal. Pick the baker it came from with [`channels.msn_source`](Project-Config-Fields.md#channels) (*Baked in* in the GUI). |
 | `coat_normal` | Normal | BC7 | UNORM | data | `cs` only. Normal plus coat roughness in alpha; bakes its own detail into that roughness. |
 | `skin_wet` | Normal | BC7 | UNORM | data | `cs` Advanced skin: a normal with a mask in alpha. A grey source is not written (`SKIN-WET-GREY`). The Community Shaders loader reads BC1, BC3, BC7 and RGBA8 only (`FMT-CS-SKIN-LOADER`, which `--allow` cannot lift). <!-- D:HB3,HB4 --> |
 | `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | `cs` Advanced skin, the detail names: a tangent normal with a strength mask in alpha. BC5 is allowed on it, and it is not held to the BC5 normal check. <!-- D:HB4 --> |

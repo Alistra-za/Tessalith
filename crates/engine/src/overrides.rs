@@ -329,6 +329,7 @@ pub const FIELD_PATHS: &[&str] = &[
     "channels.swizzle",
     "channels.flip_green",
     "channels.green_convention",
+    "channels.msn_source",
     "channels.reconstruct_z",
     "channels.grayscale_source",
     "mips.levels",

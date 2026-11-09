@@ -202,6 +202,16 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
                 for c in &mut px[..3] {
                     *c = *c * 2.0 - 1.0;
                 }
+                // Note IA1: inverting a stored channel (1 − v) negates its decoded value.
+                match p.channels.msn_source {
+                    MsnSource::Skyrim => {}
+                    MsnSource::SwapGb => px.swap(1, 2),
+                    MsnSource::InvertB => px[2] = -px[2],
+                    MsnSource::InvertGb => {
+                        px[1] = -px[1];
+                        px[2] = -px[2];
+                    }
+                }
             }
             Domain::SignedRg => {
                 for c in &mut px[..2] {
@@ -383,6 +393,28 @@ mod tests {
             preprocess(Rgba32F::new(1, 1, [0.5; 4]), &profile(Subtype::SkinRfaos))
                 .roughness_r_squared
         );
+    }
+
+    #[test]
+    fn msn_source_reaches_the_skyrim_layout() {
+        // Note IA1: a baker's model-space map, decoded to [-1, 1], then G and B swapped or inverted.
+        let px = [0.25, 0.75, 1.0, 1.0];
+        for (src, want) in [
+            (MsnSource::Skyrim, [-0.5, 0.5, 1.0]),
+            (MsnSource::SwapGb, [-0.5, 1.0, 0.5]),
+            (MsnSource::InvertB, [-0.5, 0.5, -1.0]),
+            (MsnSource::InvertGb, [-0.5, -0.5, -1.0]),
+        ] {
+            let mut p = profile(Subtype::Msn);
+            p.channels.msn_source = src;
+            let w = preprocess(Rgba32F::new(1, 1, px), &p);
+            assert_eq!(&w.img.px[0][..3], &want, "{src:?}");
+        }
+        // Only `msn` reads it: a tangent-space normal decodes as before.
+        let mut p = profile(Subtype::Normal);
+        let plain = preprocess(Rgba32F::new(1, 1, px), &p).img.px[0];
+        p.channels.msn_source = MsnSource::InvertGb;
+        assert_eq!(preprocess(Rgba32F::new(1, 1, px), &p).img.px[0], plain);
     }
 
     #[test]
