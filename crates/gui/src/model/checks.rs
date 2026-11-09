@@ -34,7 +34,6 @@ pub enum Check {
     LowDetail,
     Green,
     Parallax,
-    Uv,
 }
 
 /// Every `CHK-*` code's check; `None` for any other code.
@@ -43,7 +42,6 @@ pub fn check_of(code: Code) -> Option<Check> {
         Code::ChkLowDetail => Check::LowDetail,
         Code::ChkGreenGuess | Code::ChkZSign => Check::Green,
         Code::ChkParallax | Code::ChkParallaxScale => Check::Parallax,
-        Code::ChkUvGutter => Check::Uv,
         _ => return None,
     })
 }
@@ -54,7 +52,6 @@ pub fn switch_on(on: &ChecksSettings, c: Check) -> bool {
         Check::LowDetail => on.low_detail,
         Check::Green => on.green,
         Check::Parallax => on.parallax,
-        Check::Uv => on.uv,
     }
 }
 
@@ -240,8 +237,8 @@ pub fn scale_outliers(scales: &[(String, f64)]) -> Vec<String> {
 pub(crate) struct CheckState {
     items: HashMap<String, Vec<Warning>>,
     sets: HashMap<String, Vec<Warning>>,
-    /// (plans applied, sets document revision, switches, UV cache revision) of the last refresh (K1).
-    key: Option<(u64, u64, ChecksSettings, u64)>,
+    /// (plans applied, sets document revision, switches) of the last refresh (K1).
+    key: Option<(u64, u64, ChecksSettings)>,
     /// Bumped whenever `items` is replaced by a plan or cleared by a new folder.
     pub plans_applied: u64,
 }
@@ -280,12 +277,7 @@ impl AppModel {
             .sets_doc
             .as_ref()
             .map_or(0, crate::sets_doc::SetsDoc::rev);
-        let key = (
-            self.check_state.plans_applied,
-            doc,
-            self.settings.checks,
-            self.uv.revision(),
-        );
+        let key = (self.check_state.plans_applied, doc, self.settings.checks);
         if self.check_state.key == Some(key) {
             return false;
         }
@@ -330,33 +322,6 @@ impl AppModel {
                 items.insert(i.key.clone(), ws);
             }
         }
-        // UV coverage: only what a click read (owner: on click only), from the session cache.
-        let mut any_colour = false;
-        for i in &self.items {
-            if !i
-                .job
-                .as_ref()
-                .is_some_and(|j| super::uv_coverage::colour(j.profile.subtype))
-            {
-                continue;
-            }
-            any_colour = true;
-            let g = self
-                .uv_key(&i.key)
-                .and_then(|(t, size)| self.uv.get(&t, size))
-                .and_then(|c| c.gutter)
-                .filter(|&g| on.uv && g > super::uv_coverage::GUTTER_SHARE);
-            if let Some(g) = g {
-                items.entry(i.key.clone()).or_default().push(Warning::new(
-                    Code::ChkUvGutter,
-                    format!(
-                        "UV islands sit closer than 8 texels for {:.1} % of used texels: colours bleed across them at distance (mip 3+)",
-                        g * 100.0
-                    ),
-                ));
-            }
-        }
-        self.uv.any_colour = any_colour;
         let mut sets: HashMap<String, Vec<Warning>> = HashMap::new();
         if on.parallax {
             for k in scale_outliers(&scales) {

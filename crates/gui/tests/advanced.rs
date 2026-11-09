@@ -469,7 +469,6 @@ fn advanced_has_no_batch_or_preview_size_rows() {
     let want = [
         "Advanced texture fields",
         "Also export recipe",
-        "Check all UV coverage",
         "Checks",
         "Close",
         "Green direction check",
@@ -480,7 +479,6 @@ fn advanced_has_no_batch_or_preview_size_rows() {
         "Preset inspector",
         "Presets…",
         "Preview",
-        "UV coverage check",
         "Unmatched [files] entries",
     ];
     assert_eq!(labels, want);

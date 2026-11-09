@@ -18,10 +18,6 @@ A lone `rock_nm.png` has no suffix Tessalith knows, so it waits instead of becom
 
 Look for `CHK-GREEN-GUESS` on its normal map: the ⓘ badge on the set card, or the texture's settings. A normal map whose green points the wrong way lights from the wrong side. The check reads the map's slopes and says it looks OpenGL; it's a hint, and weak on straight ridges, so look at the map too. If it's right, press **Treat as OpenGL (flip green)** or set `channels.green_convention = "opengl"` on the file. A `CHK-Z-SIGN` row on the same map means its blue channel is flipped as well.
 
-### Dark seams at a distance
-
-Look for `CHK-UV-GUTTER`. UV islands closer than 8 texels let a smaller mip blend one island's colour into its neighbour, which shows as dark or bright seams from far away. Move the islands apart in the mesh, or ignore it for a tightly packed atlas that looks fine in game. The check needs a Meshes scan ([UV coverage](Texture-Types.md#uv-coverage)).
-
 ## Packing and helpers
 
 ### A PBR set isn't packed, or its raw maps are unused

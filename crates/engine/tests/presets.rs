@@ -1355,6 +1355,25 @@ fn gen_stale_in_allow_is_refused() {
     assert!(e.contains("removed in 3.0"), "{e}");
 }
 
+/// Note IB1: CHK-UV-GUTTER left with the GUI's UV checker. An allow list that names it gets the 3.0 removal message,
+/// which points at `sdc uv`, from config, `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn chk_uv_gutter_in_allow_is_refused() {
+    assert!(
+        Code::parse("CHK-UV-GUTTER").is_none(),
+        "CHK-UV-GUTTER is still a code"
+    );
+    let e = ConfigFile::parse("allow = [\"CHK-UV-GUTTER\"]\n", "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("removed in 3.0"), "{e}");
+    let e = Code::parse_allow("CHK-UV-GUTTER").unwrap_err();
+    assert!(
+        e.contains("CHK-UV-GUTTER") && e.contains("removed in 3.0") && e.contains("sdc uv"),
+        "{e}"
+    );
+    let e = engine::overrides::parse_set("allow=[\"CHK-UV-GUTTER\"]").unwrap_err();
+    assert!(e.contains("removed in 3.0"), "{e}");
+}
+
 /// Final review (Important 4): the removed-key walk matches `allow` at every depth, so GEN-STALE is refused under
 /// `[files]`, in a `[[rules]]` entry and in a preset file too. The `Ok` lines are pins (they pass on any code): the
 /// codes that stayed are still accepted.

@@ -28,7 +28,6 @@ pub mod meshes;
 pub mod messages;
 pub mod nav;
 pub mod out_size;
-pub mod overlay;
 pub mod pack_fills;
 pub mod pbr_export;
 mod pbr_follow;
@@ -49,7 +48,6 @@ pub mod target_mod;
 pub mod texture_view;
 pub mod txst_map;
 pub mod used_by;
-pub mod uv_coverage;
 pub mod view;
 pub mod viewport3d;
 pub mod xpmf_json;
@@ -389,8 +387,8 @@ pub struct AppModel {
     pub scan_store_unsettled: bool,
     /// What `scan_store_unsettled` was when the running scan started (Note CW2: an error raised before `begin_scan` restores it).
     unsettled_before_scan: bool,
-    /// Note FC13 (CL32 M6): a Meshes scan is running now, between `scan_started` and `scan_finished`; with
-    /// `scan_store_unsettled` and no run, the last scan was stopped. Read by the UV coverage reasons.
+    /// Note FC13: a Meshes scan is running now, between `scan_started` and `scan_finished`; with
+    /// `scan_store_unsettled` and no run, the last scan was stopped.
     pub scan_running: bool,
     /// `scan_db`'s stamp, taken once per frame in `poll` (REPORT #9: `view_key` does not stat it per call).
     scan_stamp: cs_pbr::Stamp,
@@ -563,10 +561,6 @@ pub struct AppModel {
     pub export: export::ExportModel,
     pub preview: preview::PreviewModel,
     pub view: view::ViewState,
-    /// The preview overlay job and the overlay on show (v2 checks, Note CL).
-    pub overlay: overlay::OverlayState,
-    /// UV coverage: the session cache, its reads, Check all and the scan-has-rows answer (Note CL, Task 8).
-    pub uv: uv_coverage::UvState,
     /// The largest texture side the GPU takes; set from the renderer at start-up (M3a spec §6.5).
     pub gpu_max_dim: u32,
     /// False when eframe found no usable GPU adapter: the preview is off, everything else works (M3a spec §7).
@@ -856,8 +850,6 @@ impl AppModel {
             export: export::ExportModel::default(),
             preview,
             view: view::ViewState::default(),
-            overlay: Default::default(),
-            uv: Default::default(),
             gpu_max_dim: 16384,
             gpu_available: true,
             export_after_plan: false,
@@ -1127,8 +1119,6 @@ impl AppModel {
         if !after_plan {
             // A finished scan (or another database): the "Used by meshes" list reads again.
             self.used_by_scan_changed();
-            // And UV coverage, a session cache read from the scan.
-            self.uv.clear();
         }
         // Note FL6: a post-plan read of the inputs (mesh keys, database, stamp) the last landed read had would return
         // the same evidence, so the kept evidence lands at once and the plan's tail runs now: no read is pending, so
@@ -1542,15 +1532,6 @@ impl AppModel {
         self.plan_wait() || self.non_plan_busy()
     }
 
-    /// A v2 worker job is in flight (owner answer 8): the app's one poll line keeps frames coming and `wait_idle`
-    /// waits for it. Not part of `busy()`, which greys the Advanced fields. The jobs left are the overlay and the UV coverage reads.
-    pub fn v2_jobs_pending(&self) -> bool {
-        self.overlay_pending()
-            || self.uv.read_pending()
-            || self.uv.all_running()
-            || self.uv.probe_pending()
-    }
-
     /// Drain worker messages. True when anything changed (the UI repaints).
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
@@ -1568,7 +1549,6 @@ impl AppModel {
             changed = true;
         }
         self.scan_stamp = cs_pbr::stamp(self.scan_db.as_deref());
-        self.uv_poll();
         self.cs_pbr.new_frame();
         for d in self.picker.take() {
             changed = true;
@@ -1771,20 +1751,6 @@ impl AppModel {
             WorkerMsg::Source { token, result } => self.on_source(token, result),
             WorkerMsg::Encoded { token, result } => self.on_encoded(token, result),
             WorkerMsg::Heatmap { id, image } => self.heatmap_landed(id, image),
-            WorkerMsg::Overlay { generation, image } => self.overlay_landed(generation, image),
-            WorkerMsg::UvCoverage {
-                generation,
-                tex,
-                size,
-                coverage,
-            } => self.uv_landed(generation, (tex, size), coverage),
-            WorkerMsg::UvProgress {
-                run,
-                done,
-                total,
-                finished,
-            } => self.uv_progress(run, done, total, finished),
-            WorkerMsg::ScanHasRows { stamp, rows } => self.uv_rows_landed(stamp, rows),
             WorkerMsg::Dims(dims) => self.dims_landed(dims),
             _ => {}
         }
@@ -2847,7 +2813,7 @@ impl AppModel {
         let end = Instant::now() + timeout;
         loop {
             self.poll();
-            if !self.busy() && !self.v2_jobs_pending() {
+            if !self.busy() {
                 return true;
             }
             if Instant::now() > end {
@@ -3119,7 +3085,6 @@ impl AppModel {
     pub fn collapse(&mut self) {
         self.expanded = None;
         self.preview_close();
-        self.overlay.clear();
     }
 
     fn snapshot_of(
@@ -4252,11 +4217,10 @@ mod tests {
         AppModel::new(GuiSettings::default(), None, session)
     }
 
-    /// Owner answer 8: an idle model has no v2 job in flight, and `wait_idle` returns at once.
+    /// An idle model has nothing in flight, and `wait_idle` returns at once.
     #[test]
-    fn an_idle_model_has_no_v2_jobs_pending() {
+    fn an_idle_model_is_idle() {
         let mut m = bare_model();
-        assert!(!m.v2_jobs_pending());
         assert!(m.wait_idle(Duration::from_secs(1)));
     }
 

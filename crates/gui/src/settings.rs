@@ -46,7 +46,6 @@ pub struct ChecksSettings {
     pub low_detail: bool,
     pub green: bool,
     pub parallax: bool,
-    pub uv: bool,
 }
 
 impl Default for ChecksSettings {
@@ -55,7 +54,6 @@ impl Default for ChecksSettings {
             low_detail: true,
             green: true,
             parallax: true,
-            uv: true,
         }
     }
 }

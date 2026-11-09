@@ -423,7 +423,6 @@
         "CHK-PARALLAX",
         "CHK-PARALLAX-SCALE",
         "CHK-LOW-DETAIL",
-        "CHK-UV-GUTTER",
         "DERIVE-DDS-SOURCE",
         "DERIVE-NO-ALBEDO",
         "DERIVE-PATH-CONFLICT",

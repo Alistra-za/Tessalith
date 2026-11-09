@@ -179,7 +179,6 @@ The GUI raises these ([what each flags](Texture-Types.md#artist-checks)). They o
 | `CHK-PARALLAX` | warning | A height map, judged against the set's neutral height (0.5, or 1.0 with a multilayer coat), uses little range, clips, is mostly white or is too steep. | Check the height map. |
 | `CHK-PARALLAX-SCALE` | warning | A landscape set's displacement scale is more than 2x from the others. | Make the scales match. |
 | `CHK-LOW-DETAIL` | warning | Full size adds little detail. | Set `resize = "half"` on the texture, or ignore. |
-| `CHK-UV-GUTTER` | warning | UV islands closer than 8 texels for more than 2 % of used texels. | Space the islands out. |
 
 ## Generated maps
 
