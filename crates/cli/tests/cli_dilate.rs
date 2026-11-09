@@ -501,3 +501,43 @@ fn a_dilated_folder_above_the_named_path_does_not_skip_it() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(out.matches("wrote").count(), 1, "{out}");
 }
+
+#[test]
+fn a_pattern_that_matches_nothing_is_named_beside_ones_that_do() {
+    let d = dir();
+    write_png(&d.path().join("good_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_mask(&d.path().join("good_matid.png"), 4, 4, |x, _| x < 2);
+    let typo = s(&d.path().join("typo_p.png"));
+    let (code, out, err) = run(&[&s(&d.path().join("good_p.png")), &typo]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert!(err.contains(&format!("{typo}: no image matches")), "{err}");
+}
+
+#[test]
+fn an_input_that_wrote_nothing_does_not_claim_its_output_path() {
+    let d = dir();
+    // a has no mask, b has one; both want o/foo_p.png
+    write_png(&d.path().join("a").join("foo_p.png"), 4, 4, 1, 8, &[90; 16]);
+    write_png(
+        &d.path().join("b").join("foo_p.png"),
+        4,
+        4,
+        1,
+        8,
+        &[200; 16],
+    );
+    write_mask(&d.path().join("b").join("foo_matid.png"), 4, 4, |x, _| {
+        x < 2
+    });
+    let o = d.path().join("o");
+    let (code, out, err) = run(&[
+        &s(&d.path().join("a").join("foo_p.png")),
+        &s(&d.path().join("b").join("foo_p.png")),
+        "--out",
+        &s(&o),
+    ]);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.matches("wrote").count(), 1, "{out}");
+    assert_eq!(read_png(&o.join("foo_p.png")).2[0], 200);
+}

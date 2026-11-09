@@ -95,7 +95,8 @@ fn walk(base: PathBuf, rest: &[std::ffi::OsString], out: &mut Vec<PathBuf>) {
 }
 
 /// The input images a PATTERN names: a file, a folder, or a glob on disk; skipped names removed.
-fn expand(pat: &str, recursive: bool, out: &mut BTreeSet<PathBuf>) {
+/// Returns whether the pattern matched any image.
+fn expand(pat: &str, recursive: bool, out: &mut BTreeSet<PathBuf>) -> bool {
     let path = Path::new(pat);
     let mut hits = vec![];
     let root = if path.exists() {
@@ -128,7 +129,13 @@ fn expand(pat: &str, recursive: bool, out: &mut BTreeSet<PathBuf>) {
             found.insert(h);
         }
     }
-    out.extend(found.into_iter().filter(|p| !is_skipped(p, &root)));
+    let kept: Vec<_> = found
+        .into_iter()
+        .filter(|p| !is_skipped(p, &root))
+        .collect();
+    let any = !kept.is_empty();
+    out.extend(kept);
+    any
 }
 
 /// The mask beside `src`: `<base>_matid.(png|tga|tif|tiff)`, then `<base>_uvmask.png`, for the stem minus its texture
@@ -377,8 +384,12 @@ fn process(src: &Path, a: &DilateArgs, reg: &PresetRegistry) -> Result<String, (
 /// `--overwrite`); 2 a usage error, including patterns that match no image; 3 a write failed.
 pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
     let mut found = BTreeSet::new();
+    let mut missed = false;
     for p in &a.patterns {
-        expand(p, a.recursive, &mut found);
+        if !expand(p, a.recursive, &mut found) {
+            err!("{p}: no image matches");
+            missed = true;
+        }
     }
     if found.is_empty() {
         return Err(EngineError::Usage(format!(
@@ -388,8 +399,8 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
         )));
     }
     let reg = PresetRegistry::builtin().map_err(|e| EngineError::Fatal(e.to_string()))?;
-    let mut code = 0;
-    // The first input to claim an output path keeps it; a later one is refused, `--overwrite` or not.
+    let mut code = i32::from(missed);
+    // The first input written to an output path keeps it; a later one is refused, `--overwrite` or not.
     let mut claimed: std::collections::HashMap<String, PathBuf> = Default::default();
     for src in found {
         let key = dest_of(&src, &a).to_string_lossy().to_ascii_lowercase();
@@ -403,9 +414,11 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
             code = code.max(1);
             continue;
         }
-        claimed.insert(key, src.clone());
         match process(&src, &a, &reg) {
-            Ok(line) => out!("{line}"),
+            Ok(line) => {
+                claimed.insert(key, src.clone());
+                out!("{line}");
+            }
             Err((c, m)) => {
                 err!("{m}");
                 code = code.max(c);

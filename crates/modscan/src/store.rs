@@ -96,7 +96,6 @@ DELETE FROM pending_shape;
 DELETE FROM pending_derived;
 "#;
 
-/// `origin.kind`. 3 was MO2 separators until schema 9 (Note GJ7); BSAs keep 4.
 /// The FROM and WHERE of the shapes of game-winning NIFs that use a texture (a lighting slot, or an effect source);
 /// both `sdc uv` queries share it so the list never names a texture the lookup cannot find. A derived winner is
 /// read on its source copy.
@@ -113,6 +112,7 @@ const WINNING_SHAPES: &str = "FROM path tp
      WHERE c.id = CASE WHEN wc.is_derived = 1 THEN coalesce(ws.copy_id, wc.source_copy_id, wc.id)
                        ELSE wc.id END";
 
+/// `origin.kind`. 3 was MO2 separators until schema 9 (Note GJ7); BSAs keep 4.
 pub const KIND_DATA: i32 = 0;
 pub const KIND_MOD: i32 = 1;
 pub const KIND_OVERWRITE: i32 = 2;
