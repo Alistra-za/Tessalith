@@ -159,18 +159,6 @@ ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
 ARCHIVED (wording before the edit; superseded in part by Note HB, 2026-11-05)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA
 
-ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
-- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG
-
-ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB
-
-ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, HM, HN, HP
-
-ARCHIVED (wording before the edit; superseded in part by Note HL, 2026-11-08)
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, HB, HC, HE
-
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
