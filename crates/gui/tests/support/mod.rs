@@ -106,6 +106,20 @@ pub fn many_sets(dir: &Path, n: usize) -> AppModel {
     m
 }
 
+/// Note HJ2: `set_output_name` refuses a name on a non-PBR set, but an old project can still hold one. This seeds
+/// `output_name` in `sdc-project.toml` as such a project would, and plans again.
+pub fn seed_output_name(m: &mut AppModel, id: &str, name: &str) {
+    let id = id.to_string();
+    let name = name.to_string();
+    m.edit_docs("Seed output name", None, true, move |_, d| {
+        d.set_output_name(&id, Some(&name))
+    });
+    assert!(
+        m.wait_idle(Duration::from_secs(60)),
+        "planning did not finish"
+    );
+}
+
 /// The M3a fixture with rock01 decided as a TruePBR set: `pbr_albedo` diffuse, `pbr_normal` normal (DirectX green).
 /// leaf.png and odd.png stay undecided, as in M3a.
 pub fn pbr_opened(dir: &Path) -> AppModel {

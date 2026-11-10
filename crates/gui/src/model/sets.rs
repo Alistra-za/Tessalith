@@ -1446,7 +1446,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
             continue;
         };
-        if v.pbr && m.target == Target::Cs {
+        if m.renames_outputs(v) {
             continue;
         }
         for key in &v.members {
@@ -3022,8 +3022,9 @@ impl AppModel {
     }
 
     /// F3b D2/D3: rename set `set`'s outputs to base name `name` (`None` restores the names that mirror the sources).
-    /// A PBR set on CS writes its PGPatcher `rename` key (V3: a file name; the outputs and the JSON follow the
-    /// prefix); any other set writes `output_name`. A re-plan follows; inside `batch_edit` it joins the batch.
+    /// Only a PBR set on CS takes a name (Note HJ1): it writes its PGPatcher `rename` key (V3: a file name; the
+    /// outputs and the JSON follow the prefix). Any other set refuses a name; `None` still clears an old
+    /// `output_name` (HJ2). A re-plan follows; inside `batch_edit` it joins the batch.
     pub fn set_output_name(&mut self, set: &str, name: Option<&str>) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -3036,16 +3037,19 @@ impl AppModel {
             check_output_name(n)?;
         }
         let (id, name) = (v.id.clone(), name.map(str::to_string));
-        if v.pbr && self.target == Target::Cs {
+        if self.renames_outputs(&v) {
             let value = name.map(Value::String);
             self.edit_docs("Rename outputs", None, true, move |_, d| {
                 d.set_value(&id, "rename", value);
                 d.set_output_name(&id, None);
             });
-        } else {
+        } else if name.is_none() {
+            // An old `output_name` (HJ2) can still be cleared.
             self.edit_docs("Rename outputs", None, true, move |_, d| {
-                d.set_output_name(&id, name.as_deref())
+                d.set_output_name(&id, None)
             });
+        } else {
+            return Err("output names are for PGPatcher PBR sets".into());
         }
         Ok(())
     }

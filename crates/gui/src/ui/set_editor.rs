@@ -221,7 +221,7 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     let mut clear_name = false;
     if let Some(n) = model.output_name_of(&v.id) {
         ui.horizontal_wrapped(|ui| {
-            if v.pbr && model.target == Target::Cs {
+            if model.renames_outputs(v) {
                 ui.colored_label(
                     AMBER,
                     format!("Output name {n:?} is ignored on a PBR set; use Rename"),

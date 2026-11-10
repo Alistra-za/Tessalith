@@ -791,10 +791,8 @@ fn renamed_outputs_opened_beneath_textures_keep_full_game_paths() {
     }
     let mut m = opened_skin_at(d.path(), &d.path().join("textures"));
     let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
-    m.set_output_name(&a, Some("ay")).unwrap();
-    idle(&mut m);
-    m.set_output_name(&b, Some("bee")).unwrap();
-    idle(&mut m);
+    support::seed_output_name(&mut m, &a, "ay");
+    support::seed_output_name(&mut m, &b, "bee");
     share(&mut m, "x/b_rfaos.png", &a);
     export_and_wait(&mut m);
     let j = read_json(&out(&m, "textures/x/ay.csskin.json"));

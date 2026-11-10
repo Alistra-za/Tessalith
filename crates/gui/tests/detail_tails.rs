@@ -71,8 +71,7 @@ fn assert_rename_keeps_the_plans_tails(m: &mut AppModel, member: &str, base: &st
         .unwrap_or_else(|| panic!("no set with {member}"))
         .id
         .clone();
-    m.set_output_name(&id, Some("yy")).unwrap();
-    idle(m);
+    support::seed_output_name(m, &id, "yy");
     for (f, b) in files.iter().zip(&before) {
         let tail = b
             .strip_prefix(base)

@@ -463,7 +463,9 @@ fn delete_set_has_no_dialog_and_undoes() {
 #[test]
 fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
     let d = tempfile::tempdir().unwrap();
-    let (m, id) = with_a_created_set(d.path());
+    // A PGPatcher PBR set: only it has the Rename outputs entry (Note HJ1).
+    let m = pbr_opened(d.path());
+    let id = "landscape/rock01".to_string();
     let mut h = harness(m);
     h.run();
     pill(&h, &id).click_secondary();
@@ -1114,8 +1116,9 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
 #[test]
 fn the_rename_dialog_has_no_new_column_and_a_whole_path_toggle() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.click_item("landscape/leaf.png", false, false);
+    // A PBR set: Outputs is offered for it only (Note HJ1).
+    let mut m = pbr_opened(d.path());
+    m.click_item("landscape/rock01.png", false, false);
     let mut h = harness(m);
     h.run();
     h.state_mut()

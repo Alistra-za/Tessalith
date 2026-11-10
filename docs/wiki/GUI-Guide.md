@@ -79,7 +79,7 @@ While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act
 | Preview | 6 | Show the α-mask |
 | Preview | PageUp | Larger mip |
 | Preview | PageDown | Smaller mip |
-| Sets | F2 | Rename the outputs of the selected sets, or the inputs of the selected textures |
+| Sets | F2 | Rename the outputs of the selected PGPatcher PBR sets, or the inputs of the selected textures |
 | 3D preview | Home | Recentre the 3D view (as a double-click) |
 | 3D preview | V | Next 3D debug view (Lit, Albedo, Normals, …) |
 | 3D preview | Ctrl+Shift+C | Copy the 3D view as an image |

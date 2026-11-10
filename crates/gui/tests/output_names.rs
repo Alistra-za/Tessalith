@@ -47,8 +47,7 @@ fn entry(m: &AppModel, id: &str) -> sdc_gui::sets_doc::SetEntry {
 fn an_output_name_renames_a_plain_set_on_cs() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_output_name("landscape/leaf", Some("maple")).unwrap();
-    idle(&mut m);
+    seed_output_name(&mut m, "landscape/leaf", "maple");
     assert_eq!(
         entry(&m, "landscape/leaf").output_name.as_deref(),
         Some("maple")
@@ -73,9 +72,7 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     let mut m = opened(d.path());
     m.set_target(Target::Vanilla);
     idle(&mut m);
-    m.set_output_name("landscape/rock01", Some("boulder"))
-        .unwrap();
-    idle(&mut m);
+    seed_output_name(&mut m, "landscape/rock01", "boulder");
     assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/boulder.dds"));
     assert!(output_of(&m, "rock01_normal.png").ends_with("export/textures/landscape/boulder_n.dds"));
     // Planning again changes nothing: the name is applied to its own result idempotently.
@@ -131,6 +128,12 @@ fn output_names_windows_cannot_use_or_that_end_in_a_suffix_are_refused() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     assert!(m.set_output_name("landscape/leaf", Some("leaf_n")).is_err());
+    assert_eq!(entry_or_none(&m, "landscape/leaf"), None);
+    // HJ1: a valid name on a vanilla set is refused too, with the rule's text.
+    assert_eq!(
+        m.set_output_name("landscape/leaf", Some("maple")),
+        Err("output names are for PGPatcher PBR sets".to_string())
+    );
     assert_eq!(entry_or_none(&m, "landscape/leaf"), None);
 }
 

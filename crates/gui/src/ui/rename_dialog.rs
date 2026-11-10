@@ -25,14 +25,17 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut mode, RenameMode::Inputs, "Inputs")
                 .on_hover_text("Read the files under new names (sdc.toml [inputs]); the files on disk are not touched.");
-            ui.selectable_value(&mut mode, RenameMode::Outputs, "Outputs")
-                .on_hover_text("Give each set's outputs a new base name; every output keeps its folder and suffix.");
+            // Note HJ1: absent, not greyed, when no selected set is a PGPatcher PBR set.
+            if d.mode == RenameMode::Outputs || !model.rename_keys(RenameMode::Outputs).is_empty() {
+                ui.selectable_value(&mut mode, RenameMode::Outputs, "Outputs")
+                    .on_hover_text("Give each set's outputs a new base name; every output keeps its folder and suffix.");
+            }
         });
         ui.label(
             egui::RichText::new(match d.mode {
                 RenameMode::Inputs if d.recipe.path => "The folders and the base name change; the map suffix (_n, _normal…) and the extension stay.",
                 RenameMode::Inputs => "Only the base name changes (the part before _n, _normal…). Tick Whole path to change the folders too.",
-                RenameMode::Outputs => "A TruePBR set on Community Shaders renames through its PGPatcher rename.",
+                RenameMode::Outputs => "Each set renames through its PGPatcher rename.",
             })
             .small()
             .weak(),

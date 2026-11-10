@@ -28,11 +28,11 @@ Right-click a texture or a set, or press **F2**. The dialog has two modes.
 | Mode | What it does | Saved where |
 |---|---|---|
 | **Inputs** | Reads a misnamed source under a corrected name (a normal map without `_n`, a file in the wrong folder). The tile shows *read as <name>*. The file on disk is never renamed, and it keeps its own settings and set. | `sdc.toml`: `[inputs."<file>"] as = "<new path>"`. **Clear input alias** in the tile menu removes it. |
-| **Outputs** | Gives a set's outputs a new base name. Each keeps its folder and suffix (`steel.dds`, `steel_n.dds`, `steel_rmaos.dds`). Outputs already exported under the old name stay where they are. | A TruePBR set writes PGPatcher **Rename**, so the JSON follows. Any other set uses `sdc-project.toml`. |
+| **Outputs** | Gives a PGPatcher PBR set's outputs a new base name. Each keeps its folder and suffix (`steel.dds`, `steel_n.dds`, `steel_rmaos.dds`). Outputs already exported under the old name stay where they are. The entry appears only when a selected set is a PGPatcher PBR set on Community Shaders; a mixed selection renames those sets and the label shows their count. A vanilla set renames through **Map to target**. <!-- D:HJ1 --> | The set's PGPatcher **Rename**, so the JSON follows. A set that already has an `output_name` in `sdc-project.toml` keeps writing under it, and the set editor can clear it. <!-- D:HJ2 --> |
 
 ![The rename dialog in Inputs mode.](../img/gui/GUI-Bulk-and-Rename/rename-inputs.png)
 
-The dialog changes only the base name, the part before `_n`, `_normal` and so on. Tick *Regex* for a pattern and use `$1` in *Replace* for a group; in Inputs mode, *Whole path* also runs over the folders. **Apply** stays off while a row is red: two names collide, Windows can't use the name, the extension changed, or an output name ends in a map suffix. Amber rows only warn, for example that scanned meshes still use the old output name.
+The dialog changes only the base name, the part before `_n`, `_normal` and so on. Tick *Regex* for a pattern and use `$1` in *Replace* for a group; in Inputs mode, *Whole path* also runs over the folders. **Apply** stays off while a row is red: two names collide, Windows can't use the name, the extension changed, or an output name ends in a map suffix.
 
 ## Input name box
 

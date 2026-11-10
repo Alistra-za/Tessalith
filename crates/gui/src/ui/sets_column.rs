@@ -2320,7 +2320,7 @@ fn pill(
                         });
                     }
                     if let Some(map) = &v.txst {
-                        record_line(ui, v, map, model.record_ignored(v));
+                        record_line(ui, v, map, model.renames_outputs(v));
                     }
                     // Note HP: the rects a badge's hit area must keep clear of: the combo, then every chip and tile.
                     let mut fixed: Vec<egui::Rect> = vec![];
@@ -2669,24 +2669,26 @@ fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.
-fn rename_entries(set: &str) -> [(String, &'static str, Act); 3] {
-    [
-        (
-            "Rename…".to_string(),
-            "Change the set's name only",
-            Act::OpenRename(set.to_string()),
-        ),
-        (
+/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1).
+fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> {
+    let mut v = vec![(
+        "Rename…".to_string(),
+        "Change the set's name only",
+        Act::OpenRename(set.to_string()),
+    )];
+    if outputs {
+        v.push((
             format!("Rename outputs…  {}", super::actions::keys_text("rename")),
             "Change the names of the files this set writes",
             Act::Bulk(MenuAction::RenameOutputs),
-        ),
-        (
-            "Rename inputs…".to_string(),
-            "Read the source files under other names; the files on disk keep theirs",
-            Act::Bulk(MenuAction::RenameInputs),
-        ),
-    ]
+        ));
+    }
+    v.push((
+        "Rename inputs…".to_string(),
+        "Read the source files under other names; the files on disk keep theirs",
+        Act::Bulk(MenuAction::RenameInputs),
+    ));
+    v
 }
 
 fn menu(
@@ -2745,7 +2747,7 @@ fn menu(
     };
     // Item 23: one "Rename" submenu; each entry says what it renames. F2 stays on Rename outputs.
     let rename = ui.menu_button("Rename", |ui| {
-        for (label, hover, act) in rename_entries(&v.id) {
+        for (label, hover, act) in rename_entries(&v.id, model.renames_outputs(v)) {
             if tip(ui.button(label).on_hover_text(hover)).clicked() {
                 acts.push(act);
                 ui.close();
@@ -2825,7 +2827,7 @@ fn menu(
         .is_some_and(|d| d.target_mod().is_some());
     let why_not = if model.known.records.is_empty() && !has_target {
         Some("Scan your mods first")
-    } else if model.record_ignored(v) && !has_target {
+    } else if model.renames_outputs(v) && !has_target {
         Some("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs")
     } else {
         None
@@ -3398,7 +3400,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
         .iter()
         .find(|v| engine::sets::same_id(&v.id, id))
         .map_or((false, false), |v| {
-            (model.record_ignored(v), v.txst.is_some())
+            (model.renames_outputs(v), v.txst.is_some())
         });
     let off = |p: &TargetPick| ignored && matches!(p, TargetPick::Record(_));
     let can_map = sel.as_ref().is_some_and(|p| !off(p));

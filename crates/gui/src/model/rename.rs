@@ -5,7 +5,6 @@ use super::items::ItemKind;
 use super::sets::{check_output_name, member_tail, renamed_output, slot_of, views, SetView, Tails};
 use super::{AppModel, Dialog};
 use crate::pgp::prefix::check_file_name;
-use engine::config::Target;
 use engine::discover::{canonicalise_outputs, InputFile, InputKind};
 use engine::group::base_of;
 use engine::sets::fold_id;
@@ -467,16 +466,6 @@ fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<Rename
             1 => renamed[0].clone(),
             n => format!("{} (+{} more)", renamed[0], n - 1),
         };
-        let pbr = v.pbr && m.target == Target::Cs;
-        if !pbr && new != old {
-            let meshes: usize = outputs.iter().map(|(k, _)| m.meshes_using(k)).sum();
-            if meshes > 0 {
-                r.warning = Some(format!(
-                    "{meshes} mesh{} still use the old name",
-                    if meshes == 1 { "" } else { "es" }
-                ));
-            }
-        }
         r.new = new;
         out.push(r);
     }
@@ -557,23 +546,9 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
 }
 
 impl AppModel {
-    /// F3b D2: how many scanned mesh shapes use texture `item`'s current output in slot 0 (the scan's mesh evidence,
-    /// by `shader::colour_mesh_key`). 0 for a map meshes do not name there, or with no scan.
-    pub fn meshes_using(&self, item: &str) -> usize {
-        let Some(j) = self.item(item).and_then(|i| i.job.as_ref()) else {
-            return 0;
-        };
-        if j.pack.is_some() {
-            return 0;
-        }
-        engine::shader::colour_mesh_key(&j.game_path, &j.output, Some(j.profile.subtype))
-            .and_then(|k| self.mesh_alpha.get(&k))
-            .map_or(0, Vec::len)
-    }
-
     /// The textures or sets a rename in `mode` covers, from the selection (spec §6): Inputs takes the selected
-    /// textures, or every member of the selected sets; Outputs takes the selected sets, or the sets of the selected
-    /// textures.
+    /// textures, or every member of the selected sets; Outputs takes the selected PGPatcher PBR sets (HJ1; empty
+    /// when none qualify), or the PBR sets of the selected textures.
     pub fn rename_keys(&self, mode: RenameMode) -> Vec<String> {
         let views = views(self);
         // First match wins, as a front-to-back search over `views` did.
@@ -602,7 +577,7 @@ impl AppModel {
             RenameMode::Inputs => sets.iter().flat_map(|v| &v.members).for_each(|k| push(k)),
             RenameMode::Outputs if sets.is_empty() => {
                 let mut set_of: HashMap<&str, &str> = HashMap::new();
-                for v in views.iter() {
+                for v in views.iter().filter(|v| self.renames_outputs(v)) {
                     for k in &v.members {
                         set_of.entry(k).or_insert(&v.id);
                     }
@@ -613,7 +588,10 @@ impl AppModel {
                     }
                 }
             }
-            RenameMode::Outputs => sets.iter().for_each(|v| push(&v.id)),
+            RenameMode::Outputs => sets
+                .iter()
+                .filter(|v| self.renames_outputs(v))
+                .for_each(|v| push(&v.id)),
         }
         out
     }

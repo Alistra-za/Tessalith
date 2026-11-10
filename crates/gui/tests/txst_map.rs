@@ -794,8 +794,7 @@ fn unmapping_a_created_set_after_a_rename_uses_the_new_folder() {
     let mut m = project_toml(d.path(), &["textures/a/x.png"], "");
     let id = m.drop_new_set("textures/a/x.png").unwrap();
     idle(&mut m);
-    m.set_output_name(&id, Some("steel")).unwrap();
-    idle(&mut m);
+    support::seed_output_name(&mut m, &id, "steel");
     m.map_record(&id, record(&[(1, "textures/b/body.dds")]))
         .unwrap();
     idle(&mut m);

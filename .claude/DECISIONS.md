@@ -18,13 +18,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1349,3 +1349,9 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 - **HI16 Unticking a shared helper writes `helper.role = "none"` on its one `[files]` row (agent ruling).** Every set that shares it stops using it, and the `share` lines stay; the tick's hover says "Also used by {n} other sets: they stop using it too." ("1 other set: it stops …" for one). Undo takes it back.
 - **HI17 The 3D settings window is aligned (agent ruling).** It draws the texture panel, so its rows use the same two columns; at its default 460 px they stay inside it.
 - **HI18 The preview's settings strip and the Advanced drawer show no `?` (agent ruling).** The strip's labels are about 90 px and already cut short, and in the drawer at 280 px a `?` pushed every combo about 4 px past its edge; there the label's hover carries the help (with the full label where it is cut short).
+
+## Note HJ — Rename outputs through slots (main team, 2026-11-09)
+
+- **HJ1 Rename outputs is for PGPatcher PBR sets only (owner).** `AppModel::renames_outputs` (`v.pbr` on the Community Shaders target, the old `record_ignored`) decides it. The Outputs entry is absent, not greyed, from the set menu, the texture menu and the palette when no selected set qualifies; a mixed selection lists the qualifying sets with their count in the label. F2 on a selection with no qualifying set opens Inputs mode, and the dialog's mode switch hides Outputs then. `set_output_name` refuses a name on any other set ("output names are for PGPatcher PBR sets"); only `None` clears.
+- **HJ2 An `output_name` already saved keeps working and can be cleared (agent ruling).** Dropping it would silently move an old project's outputs. The set editor's Clear button stays. Cost if wrong: an old project keeps a name the user can no longer set.
+- **HJ8 A no-albedo JSON set gets no Rename outputs (agent ruling).** A set with `json && !pbr` (Note HL5) keeps its outputs at the mesh's own paths and its slot 1 at the mapping's; a vanilla set renames through Map to target (Note HG). Cost if wrong: the owner wanted those sets renamed too; `renames_outputs` would then read `json` and the slot rows would need the HL5 paths.

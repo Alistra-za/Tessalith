@@ -1212,19 +1212,26 @@ impl AppModel {
                 .clone()
                 .or_else(|| (ni == 0).then(|| "nothing to rename".into())),
         };
-        let outputs = MenuEntry {
+        // Note HJ1: absent, not greyed, when no selected set is a PGPatcher PBR set. A mixed selection counts only
+        // the sets that qualify.
+        let outputs = (no > 0).then(|| MenuEntry {
             action: MenuAction::RenameOutputs,
             label: format!(
-                "{}…{}",
+                "{}{}…{}",
                 plural(no, "Rename output", "Rename outputs"),
+                if no < self.selected_sets().len() {
+                    format!(" ({no})")
+                } else {
+                    String::new()
+                },
                 if sets { f2.as_str() } else { "" }
             ),
-            disabled: project.or_else(|| (no == 0).then(|| "no set writes an output".into())),
-        };
+            disabled: project,
+        });
         let mut v = if sets {
-            vec![outputs, inputs]
+            outputs.into_iter().chain([inputs]).collect::<Vec<_>>()
         } else {
-            vec![inputs, outputs]
+            [inputs].into_iter().chain(outputs).collect()
         };
         // As `aliased_selection`, over the Inputs keys already built.
         let aliased = self.project.as_ref().map_or(0, |p| {

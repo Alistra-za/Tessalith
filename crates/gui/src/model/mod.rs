@@ -4338,7 +4338,10 @@ mod tests {
             "landscape/rock01_normal.png",
             Answer::Subtype(Subtype::PbrNormal),
         );
-        m.set_output_name("landscape/leaf", Some("maple")).unwrap();
+        // Note HJ2: `leaf` is vanilla, which `set_output_name` refuses now; an old project holds the name in its file.
+        m.edit_docs("Seed output name", None, true, |_, d| {
+            d.set_output_name("landscape/leaf", Some("maple"))
+        });
         assert!(m.wait_idle(Duration::from_secs(60)));
         assert_eq!(m.target, Target::Cs);
         m

@@ -394,8 +394,8 @@ fn targets_follow_the_resolved_output_name() {
     assert!(r.contains(&ok("iron_m", "m/iron_m.json")), "{r:?}");
     assert!(r.contains(&ok("axe_em", "m/axe_em.json")), "{r:?}");
     let iron = set_id(&m, "m/iron");
-    m.set_output_name(&iron, Some("steel")).unwrap();
-    idle(&mut m);
+    // Note HJ2: a vanilla set holds an `output_name` only from an old project file.
+    support::seed_output_name(&mut m, &iron, "steel");
     let r = rels(&m);
     assert!(r.contains(&ok("steel_m", "m/steel_m.json")), "{r:?}");
 }

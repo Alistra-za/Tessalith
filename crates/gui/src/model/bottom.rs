@@ -561,7 +561,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         }
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
-    for v in views.iter().filter(|v| !m.record_ignored(v)) {
+    for v in views.iter().filter(|v| !m.renames_outputs(v)) {
         let Some(map) = v.txst.as_ref().filter(|t| !t.is_base()) else {
             continue;
         };
@@ -826,7 +826,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note HG: a mapped set whose record is in no winning copy of a non-empty scan; the mapping and paths stay. An
     // empty scan says nothing (a scan that has not run is not a record that went away).
     if !m.known.records.is_empty() {
-        for v in views.iter().filter(|v| !m.record_ignored(v)) {
+        for v in views.iter().filter(|v| !m.renames_outputs(v)) {
             let Some(map) = v
                 .txst
                 .as_ref()
