@@ -3,9 +3,9 @@
 ## 3.0.0 (Unreleased)
 
 - The analysis cache's size prune keeps the entries you use: opening a folder whose entry is more than a day old refreshes that entry's time, so the prune deletes the ones nothing has read for longest.
-- A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Such textures re-encode once.
+- A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Under `if-changed`, every diffuse, PBR albedo, UI/sky and skin albedo output is written again once; only resized cutouts change.
 - The line shown when the toast's Undo comes too late (the restored edits were already undone or edited over) now says: press Ctrl+Z to undo or Ctrl+Y to redo.
-- A file link (symlink) whose target is in the output folder is no longer read as an input when the output folder is inside the input folder; folder links were already skipped.
+- A file link (symlink) whose target is in the output folder is no longer read as an input unless the input lies inside the output folder (an in-place run); folder links were already skipped.
 - The GUI now also records an alpha the scanned meshes drop (`remove` on a colour map whose alpha varies) in `sdc.toml`, like every other mesh verdict, so `sdc convert` plans it the same. See docs/wiki/GUI-Problems.md#what-the-gui-writes-on-its-own.
 - An explicit `alpha.policy = "remove"` (a `[files]` entry or `--set`) on a colour map whose alpha varies is now opaque colour to the preset's rules, as a mesh `remove` is: under cs-compact such a file is BC1, not BC7.
 - The setting rows of the centre panel (one texture, or several in the bulk panel) and the Helper tick have a **?** at the end of the label; hovering it, or the label, says what the row does, also while the row is greyed out. The preview's settings strip and the Advanced drawer show the help on their labels only. Helper role, the Undecided box's rows and the helper panel's other rows have no **?**. See docs/wiki/GUI-Texture-Panel.md#changing-a-setting.

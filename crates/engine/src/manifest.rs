@@ -52,7 +52,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::Gray => "2.0.0",
         // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6). These are the sub-types a
         // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
-        // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under if-changed; move that arm if it is ever reported (Note HR6).
+        // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
+        // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
             ENGINE_VERSION
         }

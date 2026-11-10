@@ -556,7 +556,9 @@ fn a_file_link_into_the_output_folder_is_skipped() {
     assert!(skipped.is_empty(), "{skipped:?}");
 }
 
-/// Note HR3, Review Focus 7: in place skips nothing, a file link included.
+/// Note HR3, Review Focus 7: in place skips nothing, a file link included. A pin of existing behaviour (it passes on
+/// the old code); it does not guard `skip_real`: the link's target is inside the input, and the BQ1 dedup hides the
+/// difference.
 #[test]
 fn an_in_place_run_still_reads_a_file_link() {
     let d = tempfile::tempdir().unwrap();

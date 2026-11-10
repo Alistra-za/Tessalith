@@ -175,6 +175,7 @@ fn a_prepacked_rfaos_joins_a_forced_rfaos_set_without_fuzz() {
         set_of(&p, "x_roughness.png"),
         "one set"
     );
+    assert_eq!(set_of(&p, "x_ao.png"), set_of(&p, "x_rfaos.png"), "ao too");
     let codes = all_codes(&p);
     assert!(codes.contains(&Code::PackConflict), "{codes:?}");
 }

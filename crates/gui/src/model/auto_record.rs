@@ -115,7 +115,7 @@ impl AppModel {
     }
 
     /// Write the settled plan's own decisions for the fields no entry sets yet, as one undo step of its own (`Set
-    /// {n} types automatically`) and one Problems row. Each `(key, field)` is written once per history
+    /// {n} types automatically`, `values` when an alpha is among them) and one Problems row. Each `(key, field)` is written once per history
     /// (`History::auto_written`), so an Undo of the step stays undone. True when it wrote (and re-planned).
     pub(super) fn record_auto_decisions(&mut self) -> bool {
         // Never over a running export, nor over the crash restore its toast can still undo (Note FB5).

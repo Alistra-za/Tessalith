@@ -618,7 +618,7 @@ fn picking_a_type_in_the_row_writes_what_the_old_buttons_wrote() {
 /// once like any mesh verdict (`auto_record`), so the panel's Alpha row is the one dropdown, on `Remove`. (The
 /// `mesh:alpha` hint text is pinned in `fields.rs`.)
 #[test]
-fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
+fn a_mesh_remove_is_recorded_and_not_asked() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.decide(

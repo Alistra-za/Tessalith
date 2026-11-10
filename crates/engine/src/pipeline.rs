@@ -679,7 +679,9 @@ mod tests {
         assert_eq!(pass, 2);
 
         let p = cutout_profile();
-        let work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        let mut work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        // A failing alpha inside the threshold margin (code 126 of 128): a fit of level 0 would push it clear.
+        work.img.at_mut(1, 1)[3] = 126.0 / 255.0;
         let mut chain = build_chain_with(&work, &p, None);
         let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
         assert_eq!(base, Some(0.125));

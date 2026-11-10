@@ -304,6 +304,7 @@ mod tests {
         age(&pu, 3 * DAY);
         age(&pn, 2 * DAY);
         assert!(s.get_file(used, STAMP, h).is_some());
+        // The budget is the used entry's size: the test relies on it fitting alone and not fitting with the other.
         s.prune(std::fs::metadata(&pu).unwrap().len());
         assert!(pu.exists() && !pn.exists());
     }

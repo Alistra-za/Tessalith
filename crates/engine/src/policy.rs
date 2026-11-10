@@ -696,18 +696,19 @@ fn layered_profile_with(
     // sets the policy, matched on the source's real alpha, is explicit and keeps the mesh out (fix round 1).
     // Note HR1: a winning `[files]` or `--set` `remove` on such a file is opaque colour to the rules too.
     let real_alpha = (!ignore_alpha_rules).then_some(f.analysis.alpha);
+    let ranked = ranked_overrides(ctx, f.input, &forms);
     let override_remove = st.alpha_from_mesh()
         && f.analysis.alpha == AlphaContent::Varying
-        && ranked_overrides(ctx, f.input, &forms)
-            .into_iter()
+        && ranked
+            .iter()
             .rev()
             .find(|o| o.field == "alpha.policy" && override_applies(ctx, o, Some(st), f, &forms))
             .is_some_and(|o| o.value == "remove");
     let mesh_remove = f.analysis.alpha == AlphaContent::Varying
         && matches!(mesh, Some((AlphaPolicy::Remove, _)))
         && !alpha_policy_explicit(ctx, &prov)
-        && !ranked_overrides(ctx, f.input, &forms)
-            .into_iter()
+        && !ranked
+            .iter()
             .any(|o| o.field == "alpha.policy" && override_applies(ctx, o, Some(st), f, &forms))
         && !rule_sources(ctx, &chain).into_iter().any(|(_, rules)| {
             matching(rules, f, Some(st), real_alpha)
