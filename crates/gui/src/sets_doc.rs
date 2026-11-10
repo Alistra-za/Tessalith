@@ -1217,9 +1217,18 @@ impl SetsDoc {
         self.list_edit(id, "share", file, true);
     }
 
-    /// Note HH: set `id` stops reading `file`; an emptied list goes.
+    /// Note HH: set `id` stops reading `file`; an emptied list goes. A line goes when it names the file the way the set
+    /// view matches it (`path_key_matches`: any case, or without the extension), so the row's ✕ always takes it.
     pub fn remove_share(&mut self, id: &str, file: &str) {
-        self.list_edit(id, "share", file, false);
+        if self.read_only() {
+            return;
+        }
+        let mut items = strings(self.table_mut(id).get("share"));
+        let n = items.len();
+        items.retain(|f| !engine::overrides::path_key_matches(f, file));
+        if items.len() != n {
+            self.set_list(id, "share", &items);
+        }
     }
 
     /// Note DU1: drop `key` from set `id`'s `add`, `remove` and `share` lists, as written: an entry that names no

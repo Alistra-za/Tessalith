@@ -40,7 +40,7 @@ Under a packed output (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel has a **Sou
 
 ## Shared helpers
 
-Under the slot rows, each helper the set shares ([Sets column](GUI-Sets-Column.md#moving-textures-between-sets)) has a row with its name, outlined amber like a borrowed slot. Click the name to open the helper; its panel lists every set that shares it under **Also used by**. A shared helper is offered in the **Source** pickers above. **✕** (**Stop sharing**) takes it out of this set only; the file stays where it is. If the file is deleted from disk, the share clears itself and Messages says so. <!-- D:HH7 -->
+Under the slot rows, each helper the set shares ([Sets column](GUI-Sets-Column.md#moving-textures-between-sets)) has a row with its name, outlined amber like a borrowed slot. Click the row to open the helper; its panel lists every set that shares it under **Shared with**. A shared helper is offered in the **Source** pickers above. **✕** (**Stop sharing**) takes it out of this set only; the file stays where it is. If the file is deleted from disk, the share clears itself and Messages says so. <!-- D:HH7 -->
 
 ## Mapping to a target
 

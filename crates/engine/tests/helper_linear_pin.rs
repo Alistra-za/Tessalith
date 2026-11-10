@@ -232,6 +232,7 @@ fn fills_and_reports_pin_first_match_order() {
         invert: false,
         outputs: vec![PathBuf::from(outputs)],
         shared_with: vec![],
+        used_by: vec![],
     };
     assert_eq!(
         rep,

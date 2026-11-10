@@ -1060,6 +1060,8 @@ fn entry_view(
         .iter()
         .filter_map(|f| m.items.iter().find(|i| path_key_matches(f, &i.key)))
         .map(|i| i.key.clone())
+        // The engine ignores a share of a member (Note HH1).
+        .filter(|k| !v.members.contains(k))
         .collect();
     for (slot, from) in &e.borrow {
         let borrow = |empty| Missing::Borrow {
@@ -2371,7 +2373,19 @@ impl AppModel {
 
     /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
     fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
-        if self.set_of_item(item).is_some_and(|f| f.id == target.id) {
+        // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
+        // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
+        // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
+        let stem = Path::new(item)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let automatic = format!("{}/{}", dir_of(item), base_of(&stem));
+        let own = match self.set_of_item(item) {
+            Some(f) => f.id == target.id,
+            None => self.is_no_set(item) && same_id(&automatic, &target.id),
+        };
+        if own {
             return Ok(());
         }
         // The engine has nothing to read it into (a share into a memberless set is stale).
@@ -2397,9 +2411,12 @@ impl AppModel {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
-        let id = self.view_of(set).ok_or_else(|| format!("no set {set}"))?.id;
+        let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
         let name = self.item(file).map_or(file.to_string(), |i| i.name.clone());
-        let file = file.to_string();
+        if !v.shared_helpers.iter().any(|k| k == file) {
+            return Err(format!("{} does not share {name}", v.id));
+        }
+        let (id, file) = (v.id, file.to_string());
         self.edit_docs(&format!("Stop sharing {name}"), None, true, move |_, d| {
             d.remove_share(&id, &file)
         });

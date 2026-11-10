@@ -326,7 +326,11 @@ fn unused_everywhere_is_still_flagged() {
     );
     assert!(unused(&p, "rock_ao.tga"));
     assert!(channel(packed(&p, "stone_rmaos.dds"), 2).ends_with("stone_ao.png"));
-    assert!(report(&p, "rock_ao.tga").not_used.is_some());
+    let h = report(&p, "rock_ao.tga");
+    assert!(h.not_used.is_some());
+    // Shared with b, used by no set (Note HH7).
+    assert_eq!(h.shared_with, [key(&p, "textures/b/stone")]);
+    assert!(h.used_by.is_empty(), "{:?}", h.used_by);
 }
 
 #[test]
@@ -430,6 +434,7 @@ fn the_report_lists_where_it_went() {
     let p = plan(&d, vec![s()]);
     let h = report(&p, "rock_ao.png");
     assert_eq!(h.shared_with, [key(&p, "textures/b/stone")]);
+    assert_eq!(h.used_by, h.shared_with);
     let own = packed(&p, "rock_rmaos.dds").output.clone();
     let shared = packed(&p, "stone_rmaos.dds").output.clone();
     // Own outputs first.

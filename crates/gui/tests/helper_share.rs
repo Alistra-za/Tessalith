@@ -10,7 +10,7 @@ use engine::pack::ChannelSource;
 use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::items::{helper_target_text, ItemStatus};
 use sdc_gui::model::pack_fills::channel_helpers;
-use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome, SetView};
+use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome, SetView, SlotKind};
 use sdc_gui::model::{AppModel, Selection};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -283,9 +283,118 @@ fn a_finished_texture_still_borrows() {
         DropOutcome::Joined
     );
     idle(&mut m);
-    let text = sets_text(&m);
-    assert!(text.contains("slot"), "a borrow line: {text}");
-    assert!(!text.contains("share"), "{text}");
+    let e = m.sets_doc.as_ref().unwrap().entries();
+    let slab = e.iter().find(|e| e.id == "c/slab").expect("c's entry");
+    let n = SlotKind::Rmaos.slot_number().unwrap();
+    assert_eq!(
+        slab.borrow,
+        [(n, A.to_string())].into(),
+        "borrow.slot{n} = a/rock"
+    );
+    assert!(slab.share.is_empty());
+}
+
+#[test]
+fn a_share_on_its_own_set_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    let before = sets_text(&m);
+    assert_eq!(m.drop_choice(AO, A, DropChoice::Share), DropOutcome::Joined);
+    assert_eq!(sets_text(&m), before);
+    // A no-set helper on the set its name puts it in (where Back to its automatic set returns it) writes nothing.
+    let mut m = no_set_ao(d.path().join("n").as_path());
+    let before = sets_text(&m);
+    assert_eq!(m.drop_choice(AO, A, DropChoice::Share), DropOutcome::Joined);
+    assert_eq!(sets_text(&m), before);
+}
+
+#[test]
+fn a_share_line_naming_a_member_draws_no_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    m.edit_docs("t", None, true, |_, s| s.add_share(A, AO));
+    idle(&mut m);
+    assert_eq!(share_line(&m, A), [AO], "the hand-written line");
+    assert!(view(&m, A).shared_helpers.is_empty());
+}
+
+#[test]
+fn stop_sharing_what_is_not_shared_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    let steps = m.history.undo.len();
+    assert_eq!(
+        m.stop_sharing(B, AO),
+        Err("b/stone does not share rock_ao.png".into())
+    );
+    assert_eq!(m.history.undo.len(), steps, "no undo step");
+}
+
+#[test]
+fn stop_sharing_takes_a_line_in_another_case() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    m.edit_docs("t", None, true, |_, s| s.add_share(B, "A/Rock_AO.png"));
+    idle(&mut m);
+    assert_eq!(view(&m, B).shared_helpers, [AO]);
+    m.stop_sharing(B, AO).expect("stopped");
+    idle(&mut m);
+    assert!(share_line(&m, B).is_empty(), "{}", sets_text(&m));
+    assert!(view(&m, B).shared_helpers.is_empty());
+}
+
+#[test]
+fn a_non_helper_still_cannot_be_shared() {
+    // Pins of `choice_allowed`: a file with no slot that is no helper, and a no-set texture.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(
+        d.path(),
+        &[
+            "a/rock.png",
+            "a/rock_n.png",
+            AO,
+            "b/stone.png",
+            "b/iron_ore.png",
+        ],
+        "",
+    );
+    assert!(!m.item("b/iron_ore.png").unwrap().helper.is_some());
+    assert!(matches!(
+        m.drop_choice("b/iron_ore.png", A, DropChoice::Share),
+        DropOutcome::Refused(r) if r.starts_with("only a finished texture can be shared")
+    ));
+    m.remove_member(A, "a/rock_n.png").unwrap();
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice("a/rock_n.png", B, DropChoice::Share),
+        DropOutcome::Refused("the texture is in no set".into())
+    );
+}
+
+#[test]
+fn a_helper_no_set_uses_reads_not_used() {
+    // b's own `stone_ao.png` sorts before `z/rock_ao.tga` and takes the channel; `z`'s `rock_ao.png` takes its own.
+    let d = tempfile::tempdir().unwrap();
+    let tga = "z/rock_ao.tga";
+    let mut m = fixture(
+        d.path(),
+        &[
+            "z/rock.png",
+            "z/rock_ao.png",
+            tga,
+            "b/stone.png",
+            "b/stone_roughness.png",
+            "b/stone_ao.png",
+        ],
+        "",
+    );
+    m.edit_docs("t", None, true, |_, s| s.add_share(B, tga));
+    idle(&mut m);
+    let h = m.item(tga).unwrap().helper.clone().expect("a helper");
+    assert_eq!(h.shared_with.len(), 1, "shared with b");
+    assert!(sdc_gui::model::items::used_by(&h).is_none());
+    let text = helper_target_text(&h);
+    assert!(text.starts_with("not used"), "{text}");
 }
 
 #[test]
@@ -336,23 +445,31 @@ fn a_read_only_doc_refuses() {
 
 #[test]
 fn a_deleted_shared_file_clears_with_info() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = no_set_ao(d.path());
-    share(&mut m);
-    // The no-set entry goes too (HF1), so delete the file the share names.
-    std::fs::remove_file(m.root.clone().unwrap().join(AO)).unwrap();
-    m.reload_changed();
-    idle(&mut m);
-    idle(&mut m);
-    assert!(share_line(&m, B).is_empty(), "{}", sets_text(&m));
-    assert!(m
-        .messages
-        .entries()
-        .any(|e| e.severity == sdc_gui::model::messages::Severity::Info
-            && e.text.contains("rock_ao.png")
-            && e.text.contains(B)));
-    assert!(view(&m, B).missing.is_empty(), "no red row");
-    assert!(m.item(RMAOS).is_some(), "the plan succeeded");
+    // In no set (its no-set entry goes too, HF1) and in a real set.
+    for no_set in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = if no_set {
+            no_set_ao(d.path())
+        } else {
+            ab(d.path())
+        };
+        share(&mut m);
+        std::fs::remove_file(m.root.clone().unwrap().join(AO)).unwrap();
+        m.reload_changed();
+        idle(&mut m);
+        idle(&mut m);
+        assert!(share_line(&m, B).is_empty(), "{no_set}: {}", sets_text(&m));
+        assert!(
+            m.messages
+                .entries()
+                .any(|e| e.severity == sdc_gui::model::messages::Severity::Info
+                    && e.text.contains("rock_ao.png")
+                    && e.text.contains(B)),
+            "{no_set}"
+        );
+        assert!(view(&m, B).missing.is_empty(), "{no_set}: no red row");
+        assert!(m.item(RMAOS).is_some(), "{no_set}: the plan succeeded");
+    }
 }
 
 #[test]
@@ -423,9 +540,11 @@ fn export_set_does_not_pull_in_the_helpers_set() {
     m.export_sets([b.clone()].into(), "Export set b/stone".into());
     let keys = m.export_scope().expect("a scope").keys.clone();
     assert_eq!(keys, [b].into());
-    if m.review.is_some() {
-        m.export_from_review();
-    }
+    assert!(
+        m.review.is_none(),
+        "b asks nothing, so no Review: {:?}",
+        m.dialog
+    );
     idle(&mut m);
     // A shared AO next to a roughness makes `b` a PBR set, so it writes under `textures/pbr/`.
     let written = files_under(&m.export_root());
@@ -515,6 +634,48 @@ fn the_target_lists_the_shared_helper_with_stop() {
 }
 
 #[test]
+fn a_click_on_the_row_selects_the_helper() {
+    let d = tempfile::tempdir().unwrap();
+    let m = editing_b(d.path(), AO);
+    let mut h = harness(m, 1100.0);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre");
+    let stop = h.get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png");
+    stop.scroll_to_me();
+    h.run();
+    h.run();
+    let stop = h
+        .get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
+        .rect();
+    let name = h
+        .query_all_by_label("rock_ao.png (shared)")
+        .map(|n| n.rect())
+        .find(|r| centre.contains(r.center()))
+        .expect("the row's name");
+    // The blank between the name and the ✕: neither widget, only the row.
+    let at = egui::pos2((name.max.x + stop.min.x) / 2.0, stop.center().y);
+    assert!(name.max.x + 4.0 < stop.min.x, "a gap to click");
+    h.hover_at(at);
+    h.run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+    }
+    // The set editor waits out a double click before it selects.
+    for _ in 0..60 {
+        h.run_steps(1);
+        if h.state().selection == Selection::Item(AO.into()) {
+            break;
+        }
+    }
+    assert_eq!(h.state().selection, Selection::Item(AO.into()));
+    assert_eq!(share_line(h.state(), B), [AO], "a row click edits nothing");
+}
+
+#[test]
 fn the_helper_panel_lists_where_it_goes() {
     let d = tempfile::tempdir().unwrap();
     let mut m = ab(d.path());
@@ -522,7 +683,7 @@ fn the_helper_panel_lists_where_it_goes() {
     let b = view(&m, B).key;
     m.select_item(AO);
     let mut h = harness(m, 1100.0);
-    h.get_by_label("Also used by");
+    h.get_by_label("Shared with");
     // egui names a link by its text (role Label); the set card's own label is "Set b/stone, …".
     let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre");
     h.query_all_by_label(B)
@@ -603,10 +764,36 @@ fn a_helper_row_drags_onto_a_card() {
     h.event(press(to, false));
     h.run_steps(3);
     h.get_by_label("rock_ao.png is in no set");
-    h.get_by_role_and_label(Role::Button, "Share (use this file here too, no copy)");
     assert!(h
         .query_by_label("Duplicate the source for this set")
         .is_none());
+    // The dialog's Share goes through `drop_choice`: the line is written.
+    h.get_by_role_and_label(Role::Button, "Share (use this file here too, no copy)")
+        .click();
+    h.run();
+    let m = h.state_mut();
+    idle(m);
+    assert_eq!(share_line(m, B), [AO]);
+    assert!(m.is_no_set(AO));
+}
+
+/// A click on a Textures-column helper row still selects it, now that the row also drags.
+#[test]
+fn a_click_on_a_helper_row_still_selects() {
+    let d = tempfile::tempdir().unwrap();
+    let m = ab(d.path());
+    let mut h = harness(m, 1500.0);
+    h.query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Helper rock_ao.png:"))
+        })
+        .expect("the helper row")
+        .click();
+    h.run();
+    h.run();
+    assert_eq!(h.state().selection, Selection::Item(AO.into()));
 }
 
 /// Review pictures of the set editor with a shared helper at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a

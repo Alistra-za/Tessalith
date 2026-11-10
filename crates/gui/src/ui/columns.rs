@@ -676,10 +676,10 @@ fn helper_row(
                         return;
                     }
                     role_chip(ui, &role, h.role_hand_set);
-                    let shown = if h.fills.is_empty() && h.shared_with.is_empty() {
-                        "not used".to_string()
+                    let shown = if let Some(sets) = crate::model::items::used_by(&h) {
+                        format!("used by {sets}")
                     } else if h.fills.is_empty() {
-                        target.clone()
+                        "not used".to_string()
                     } else {
                         format!("→ {}", target.trim_start_matches("fills "))
                     };

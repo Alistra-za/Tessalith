@@ -31,6 +31,8 @@ pub struct HelperReport {
     pub outputs: Vec<PathBuf>,
     /// Note HH1: the keys of the sets that share the file, sorted.
     pub shared_with: Vec<String>,
+    /// Note HH7: the keys of the sets in `shared_with` whose jobs it lands in (a packed channel or an alpha fill).
+    pub used_by: Vec<String>,
 }
 
 /// The texts that say why a helper's own job converts nothing.
@@ -176,6 +178,11 @@ pub fn reports(
                     })
                 });
             let options: Vec<FillTarget> = alpha.map(FillTarget::Alpha).chain(packed).collect();
+            let used_by: Vec<String> = sharing
+                .iter()
+                .filter(|s| !went_in(&index.in_set(&s.key).collect::<Vec<_>>(), f).is_empty())
+                .map(|s| s.key.clone())
+                .collect();
             let mut outputs: Vec<PathBuf> = vec![];
             for (_, o) in went.iter().chain(&went_in(&shared_jobs, f)) {
                 if !outputs.contains(o) {
@@ -212,6 +219,7 @@ pub fn reports(
                 invert: sel.invert,
                 outputs,
                 shared_with: sharing.iter().map(|s| s.key.clone()).collect(),
+                used_by,
             });
         }
     }

@@ -1236,8 +1236,8 @@ fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut
 }
 
 /// Note HH7: one row per helper the set shares (it belongs to another set, or to no set): its thumbnail and name,
-/// outlined amber as a borrowed slot is, and a `✕` that stops sharing it. A click on the name selects the helper.
-/// `why` is the read-only reason (empty when the project takes edits).
+/// outlined amber as a borrowed slot is, and a `✕` that stops sharing it. A click on the row selects the helper.
+/// `why` is the read-only reason (empty when the project takes edits), which turns off only the ✕.
 fn shared_rows(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1249,10 +1249,10 @@ fn shared_rows(
     for i in v.shared_helpers.iter().filter_map(|k| model.item(k)) {
         ui.add_space(4.0);
         // Keyed by the file, so the ✕'s id does not depend on what the rows above drew.
-        let mut row = egui::UiBuilder::new().id_salt(("shared-helper", &i.key));
-        if !why.is_empty() {
-            row = row.disabled();
-        }
+        // A click anywhere on the row selects the helper; the ✕ (registered later) keeps its own clicks.
+        let row = egui::UiBuilder::new()
+            .id_salt(("shared-helper", &i.key))
+            .sense(egui::Sense::click());
         let row = ui.scope_builder(row, |ui| {
             // The editor's scroll bar floats over the right edge: keep the ✕ clear of it.
             let s = &ui.spacing().scroll;
@@ -1264,36 +1264,38 @@ fn shared_rows(
                     if let Some(t) = thumbs.get(ui.ctx(), i) {
                         ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(20.0, 20.0)));
                     }
-                    // truncate() shows the full name on hover.
-                    let r = ui.add(
+                    // truncate() shows the full name on hover; not selectable, so a click reaches the row.
+                    ui.add(
                         egui::Label::new(format!("{} (shared)", i.name))
                             .truncate()
-                            .sense(egui::Sense::click()),
+                            .selectable(false),
                     );
-                    r.clicked().then(|| Act::Select(i.key.clone()))
                 },
                 |ui| {
+                    // Only the edit is off on a read-only project; selecting the helper is not an edit.
                     let x = ui
-                        .small_button("✕")
-                        .on_hover_text("Stop sharing: this set no longer reads the file");
+                        .add_enabled(why.is_empty(), egui::Button::new("✕").small())
+                        .on_hover_text("Stop sharing: this set no longer reads the file")
+                        .on_disabled_hover_text(why);
                     let label = format!("Stop sharing {}", i.name);
                     ui.ctx()
                         .accesskit_node_builder(x.id, |b| b.set_label(label));
                     x.clicked()
-                        .then(|| Act::StopSharing(v.id.clone(), i.key.clone()))
                 },
             )
         });
-        let (l, r) = row.inner;
-        acts.extend(l.or(r));
-        let row = row.response;
+        let (_, stop) = row.inner;
+        if stop {
+            acts.push(Act::StopSharing(v.id.clone(), i.key.clone()));
+        } else if row.response.clicked() {
+            acts.push(Act::Select(i.key.clone()));
+        }
         ui.painter().rect_stroke(
-            row.rect.expand(2.0),
+            row.response.rect.expand(2.0),
             2.0,
             egui::Stroke::new(1.0, AMBER),
             egui::StrokeKind::Inside,
         );
-        row.on_disabled_hover_text(why);
     }
 }
 
