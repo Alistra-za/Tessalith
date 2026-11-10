@@ -621,8 +621,10 @@ fn helper_row(
     let resp = ui.interact(
         rect,
         ui.id().with(("helper-row", &key)),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
+    // Note HH5: dropped on a set card, as a tile is (a no-set helper is on no card, so this is its one way there).
+    resp.dnd_set_drag_payload(crate::ui::sets_column::DragItem(key.clone()));
     let by_you = if h.role_hand_set { " (set by you)" } else { "" };
     let name = if no_set {
         format!("Helper {}: No set", item.name)
@@ -674,8 +676,10 @@ fn helper_row(
                         return;
                     }
                     role_chip(ui, &role, h.role_hand_set);
-                    let shown = if h.fills.is_empty() {
+                    let shown = if h.fills.is_empty() && h.shared_with.is_empty() {
                         "not used".to_string()
+                    } else if h.fills.is_empty() {
+                        target.clone()
                     } else {
                         format!("→ {}", target.trim_start_matches("fills "))
                     };

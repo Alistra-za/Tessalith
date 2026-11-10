@@ -197,6 +197,15 @@ fn target_line(
     word: &str,
     one: impl Fn(&HelperReport, FillTarget) -> String,
 ) -> String {
+    // Note HH7: a helper that fills nothing in its own set but is shared says where it goes.
+    if h.fills.is_empty() && !h.shared_with.is_empty() {
+        let bases: Vec<&str> = h
+            .shared_with
+            .iter()
+            .map(|k| k.rsplit(['/', '\\']).next().unwrap_or(k))
+            .collect();
+        return format!("used by {}", bases.join(", "));
+    }
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
             Some(r) => format!("{word}: {r}"),

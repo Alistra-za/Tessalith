@@ -38,6 +38,10 @@ Right-click a slot row, or a member chip on a card.
 
 Under a packed output (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel has a **Source** picker: a helper or **Value**. Picking a helper adds the channel to that helper's `helper.fills` and takes it off the others, as one undo step ([Packing PBR maps](Texture-Packing.md#helper-textures)). **Value** uses the channel's `packing.fill.*` with a **Reset**; it is greyed when the channel's file feeds it by name. The engine still decides: a pick that can't fill the channel shows the helper as not used, with the reason.
 
+## Shared helpers
+
+Under the slot rows, each helper the set shares ([Sets column](GUI-Sets-Column.md#moving-textures-between-sets)) has a row with its name, outlined amber like a borrowed slot. Click the name to open the helper; its panel lists every set that shares it under **Also used by**. A shared helper is offered in the **Source** pickers above. **✕** (**Stop sharing**) takes it out of this set only; the file stays where it is. If the file is deleted from disk, the share clears itself and Messages says so. <!-- D:HH7 -->
+
 ## Mapping to a target
 
 **Map to target…** in a set's menu ties the set to something that already exists, so its files are written where that thing points: a texture set record (`TXST`) of your plugins, or a mesh or a texture file of your target mod. A mapped set's menu has **Change mapping…** and **Remove mapping**, which puts the outputs back on their default names.

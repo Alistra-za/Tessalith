@@ -355,8 +355,10 @@ pub struct SetView {
     /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
     pub rfaos: bool,
     pub created: bool,
-    /// `add`/`remove` entries of `sdc-project.toml` that match no file (Review focus 1).
+    /// `add`/`remove`/`share` entries of `sdc-project.toml` that match no file (Review focus 1).
     pub missing: Vec<Missing>,
+    /// Note HH7: item keys of the helpers of other sets (or of no set) this set shares (`SetEntry::share`).
+    pub shared_helpers: Vec<String>,
     /// Slots whose finished output this set owns while another set borrows it.
     pub owns: Vec<SlotKind>,
     pub derived_match: Option<String>,
@@ -451,6 +453,7 @@ impl SetView {
             rfaos: false,
             created: false,
             missing: vec![],
+            shared_helpers: vec![],
             owns: vec![],
             derived_match: None,
             prefix: None,
@@ -1047,11 +1050,17 @@ fn entry_view(
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
-    for f in e.add.iter().chain(&e.remove) {
+    for f in e.add.iter().chain(&e.remove).chain(&e.share) {
         if !m.items.iter().any(|i| path_key_matches(f, &i.key)) {
             v.missing.push(Missing::File(f.clone()));
         }
     }
+    v.shared_helpers = e
+        .share
+        .iter()
+        .filter_map(|f| m.items.iter().find(|i| path_key_matches(f, &i.key)))
+        .map(|i| i.key.clone())
+        .collect();
     for (slot, from) in &e.borrow {
         let borrow = |empty| Missing::Borrow {
             slot: *slot,
@@ -1332,6 +1341,15 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     // Note HF1: the no-set files, last, so each leaves the set the other edits put it in.
     if let Some(d) = &m.sets_doc {
         edits.extend(d.no_set().into_iter().map(|file| SetEdit::NoSet { file }));
+    }
+    // Note HH: shares after that, so each names its set in its final shape.
+    for e in entries.iter() {
+        for f in &e.share {
+            edits.push(SetEdit::Share {
+                file: f.clone(),
+                to: e.id.clone(),
+            });
+        }
     }
     let mut paths = BTreeMap::new();
     let views = views(m);
@@ -2256,6 +2274,12 @@ impl AppModel {
         if let Err(why) = lock_refusal(&target, incoming) {
             return DropOutcome::Refused(why);
         }
+        // Note HH5: a no-set helper can be shared, so it asks too; every other no-set texture moves.
+        if from.is_none() && self.is_no_set(item) && self.is_shareable_helper(item) {
+            return DropOutcome::AskChoice {
+                from: "no set".into(),
+            };
+        }
         // A texture that belongs to a real set (more than itself, or one the user touched) asks what to do. An entry
         // holding only its id (left by a rename back) is no edit.
         if let Some(f) = &from {
@@ -2284,6 +2308,12 @@ impl AppModel {
             Ok(t) => t,
             Err(e) => return DropOutcome::Refused(e),
         };
+        if choice == DropChoice::Share && self.is_shareable_helper(item) {
+            return match self.share_helper(item, &target) {
+                Ok(()) => DropOutcome::Joined,
+                Err(e) => DropOutcome::Refused(e),
+            };
+        }
         let slot = self.item(item).and_then(slot_of);
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
@@ -2327,6 +2357,53 @@ impl AppModel {
             .flatten();
         let existing = self.occupant(&target, slot, share_from)?;
         self.apply_choice(item, &target, slot, choice, existing)
+    }
+
+    /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
+    pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
+        self.item(item).is_some_and(|i| {
+            i.kind == ItemKind::Helper
+                && i.helper
+                    .as_ref()
+                    .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
+        })
+    }
+
+    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
+    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+        if self.set_of_item(item).is_some_and(|f| f.id == target.id) {
+            return Ok(());
+        }
+        // The engine has nothing to read it into (a share into a memberless set is stale).
+        if target.members.is_empty() {
+            return Err(format!(
+                "{} has no texture of its own; move one in first",
+                target.id
+            ));
+        }
+        let name = self.item(item).map_or(item.to_string(), |i| i.name.clone());
+        let (id, file) = (target.id.clone(), item.to_string());
+        self.edit_docs(
+            &format!("Share {name} with {id}"),
+            None,
+            true,
+            move |_, d| d.add_share(&id, &file),
+        );
+        Ok(())
+    }
+
+    /// Note HH: set `set` stops sharing helper `file`, as one step.
+    pub fn stop_sharing(&mut self, set: &str, file: &str) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let id = self.view_of(set).ok_or_else(|| format!("no set {set}"))?.id;
+        let name = self.item(file).map_or(file.to_string(), |i| i.name.clone());
+        let file = file.to_string();
+        self.edit_docs(&format!("Stop sharing {name}"), None, true, move |_, d| {
+            d.remove_share(&id, &file)
+        });
+        Ok(())
     }
 
     /// Why `choice` cannot bring `item` into `target`, if it cannot (whatever the slot holds).

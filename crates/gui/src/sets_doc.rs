@@ -56,12 +56,13 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
-const RESERVED: [&str; 16] = [
+const RESERVED: [&str; 17] = [
     "id",
     "created",
     "renamed_from",
     "add",
     "remove",
+    "share",
     "borrow",
     "shader",
     "lock",
@@ -102,6 +103,8 @@ pub struct SetEntry {
     pub renamed_from: Option<String>,
     pub add: Vec<String>,
     pub remove: Vec<String>,
+    /// Note HH: helper files of other sets (or of no set) this set reads as its own (`share = ["a/rock_ao.png"]`).
+    pub share: Vec<String>,
     /// Slot number (1–8) → the id of the set whose finished output this set uses.
     pub borrow: BTreeMap<u8, String>,
     /// M6: the explicit shader choice (`shader = "<id>"`); an unknown id reads as `None` and stays in the file.
@@ -252,6 +255,7 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             .map(str::to_string),
         add: strings(t.get("add")),
         remove: strings(t.get("remove")),
+        share: strings(t.get("share")),
         borrow,
         shader: t
             .get("shader")
@@ -1144,6 +1148,14 @@ impl SetsDoc {
     /// `file` moves into set `id` (a `Move` edit); it is taken out of every other entry's `add` and `remove`.
     pub fn add_member(&mut self, id: &str, file: &str) {
         self.set_no_set(file, false);
+        // Note HH6: a member of the set is not shared with it too.
+        if self
+            .parse_entries()
+            .iter()
+            .any(|e| same_id(&e.id, id) && e.share.iter().any(|f| self.names_only(f, file)))
+        {
+            self.list_edit(id, "share", file, false);
+        }
         for e in self.parse_entries() {
             if !same_id(&e.id, id) {
                 if e.add.iter().any(|f| self.names_only(f, file)) {
@@ -1200,13 +1212,23 @@ impl SetsDoc {
         self.list_edit(id, "remove", file, true);
     }
 
-    /// Note DU1: drop `key` from set `id`'s `add` and `remove` lists, as written: an entry that names no file, so
-    /// there is nothing to move.
+    /// Note HH: set `id` reads helper `file` as its own (a `share` line); the file stays where it is.
+    pub fn add_share(&mut self, id: &str, file: &str) {
+        self.list_edit(id, "share", file, true);
+    }
+
+    /// Note HH: set `id` stops reading `file`; an emptied list goes.
+    pub fn remove_share(&mut self, id: &str, file: &str) {
+        self.list_edit(id, "share", file, false);
+    }
+
+    /// Note DU1: drop `key` from set `id`'s `add`, `remove` and `share` lists, as written: an entry that names no
+    /// file, so there is nothing to move.
     pub fn drop_entry(&mut self, id: &str, key: &str) {
         if self.read_only() {
             return;
         }
-        for list in ["add", "remove"] {
+        for list in ["add", "remove", "share"] {
             let mut items = strings(self.table_mut(id).get(list));
             let n = items.len();
             items.retain(|f| !same_id(f, key));
