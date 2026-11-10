@@ -205,13 +205,16 @@ fn duplicating_a_raw_source_copies_it_and_undo_deletes_it_only_when_unchanged() 
             from: "landscape/rock01".into()
         }
     );
-    assert!(
-        matches!(
-            m.drop_choice(&rough, &id, DropChoice::Share),
-            DropOutcome::Refused(_)
-        ),
-        "raw maps are not shareable"
+    // Note HH5: a raw helper is shared as the file (a `share` line); undone here, the test is about Duplicate.
+    assert_eq!(
+        m.drop_choice(&rough, &id, DropChoice::Share),
+        DropOutcome::Joined
     );
+    idle(&mut m);
+    assert!(m.sets_doc.as_ref().unwrap().text().contains("share"));
+    m.undo();
+    idle(&mut m);
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("share"));
     assert_eq!(
         m.drop_choice(&rough, &id, DropChoice::Duplicate),
         DropOutcome::Joined

@@ -237,6 +237,9 @@ pub struct TextureSet {
     pub suffixes: BTreeSet<String>,
     /// Note HG: maps other skin sets use; no colour member. Set by `mark_shared_skin`.
     pub shared_skin: bool,
+    /// Note HH1: other sets' files this set reads as its own helpers (`SetEdit::Share`); they stay members of their
+    /// own set. Never a member of this one.
+    pub shares: Vec<usize>,
 }
 
 /// A path compared case-insensitively: '/'-separated and lower-cased.
@@ -284,6 +287,7 @@ pub fn group_sets_with(
             members: vec![],
             suffixes: BTreeSet::new(),
             shared_skin: false,
+            shares: vec![],
         });
         set.members.push(i);
         if let Some(s) = suffix {
@@ -306,6 +310,7 @@ pub fn group_sets_with(
             members: vec![],
             suffixes: BTreeSet::new(),
             shared_skin: false,
+            shares: vec![],
         });
         set.members.push(i);
         set.members.sort_unstable();

@@ -2928,12 +2928,22 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             if let Some(line) = &line {
                 ui.label(line);
             }
-            if matches!(p, Pending::Choice { .. }) {
-                for (label, c) in [
+            if let Pending::Choice { item, .. } = &p {
+                // Note HH5: a helper is shared as the file itself; a no-set one has no set to duplicate it from.
+                let helper = model.is_shareable_helper(item);
+                let share = if helper {
+                    "Share (use this file here too, no copy)"
+                } else {
+                    "Share (borrow its finished output)"
+                };
+                let mut choices = vec![
                     ("Move it here", DropChoice::Move),
-                    ("Share (borrow its finished output)", DropChoice::Share),
-                    ("Duplicate the source for this set", DropChoice::Duplicate),
-                ] {
+                    (share, DropChoice::Share),
+                ];
+                if !(helper && model.is_no_set(item)) {
+                    choices.push(("Duplicate the source for this set", DropChoice::Duplicate));
+                }
+                for (label, c) in choices {
                     if ui.button(label).clicked() {
                         answer = Some(ModalAnswer::Choice(c));
                     }

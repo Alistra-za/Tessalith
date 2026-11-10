@@ -33,6 +33,7 @@ Fold the sets you've finished into a group, so the column shows only what you're
 
 - Drag a texture from the Textures column onto a card to move it there, or onto empty space to start a new set. A filled slot asks **Replace** or **Cancel**.
 - A texture dragged from another set asks **Move it here**, **Share (borrow its finished output)** or **Duplicate the source for this set**. A shared `_rmaos` is never variance-baked: [Packing PBR maps](Texture-Packing.md#variance-and-gloss-bake).
+- A helper (an AO, a roughness, an opacity map) dragged onto another set asks the same, but **Share (use this file here too, no copy)** writes no file: that set packs or fills from the helper as if it were its own. A pick or setting on the helper (what it fills, read from, invert) applies everywhere it is used. A helper in no set can be shared too: drag its row from the Textures column. It then feeds only the sets that share it, and the question has no Duplicate. A set with no texture of its own can't take a share. The shared rows and **Stop sharing** are on [Set editor](GUI-Set-Editor.md#shared-helpers). <!-- D:HH5 -->
 - **Fill from names…** finds files in the set's folder named like its diffuse plus a suffix the engine knows (`_n`, `_p`, `_rmaos`, exporter tails like `_normal`). A dialog lists each with the slot it fills, all ticked; **Fill** moves the ticked ones in as one undo step.
 
 ## Reordering and deleting sets
@@ -55,7 +56,7 @@ The list is `no_set` under `[project]` in `sdc-project.toml`. An older `remove` 
 
 ## Where set edits are saved
 
-Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. On the command line: [CLI reference](CLI-Reference.md#does-the-cli-use-my-gui-edits).
+Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, helper shares, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. On the command line: [CLI reference](CLI-Reference.md#does-the-cli-use-my-gui-edits).
 
 Set groups are one `[[groups]]` table each. `sets` holds set ids, like `[project] order`, and `excluded` is only there while it's `true`:
 

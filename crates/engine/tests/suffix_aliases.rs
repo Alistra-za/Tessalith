@@ -124,6 +124,7 @@ fn resolve_img(
         members: vec![0],
         suffixes: split.suffix.iter().cloned().collect(),
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(img, info);
     resolve_file(
@@ -504,6 +505,7 @@ fn accepted_fallback_keeps_the_alias_preset() {
         members: vec![0],
         suffixes: ["n".to_string()].into(),
         shared_skin: false,
+        shares: vec![],
     };
     let img = Rgba32F::new(64, 64, [0.5, 0.5, 1.0, 1.0]);
     let a = analyse(&img, &RGB8);

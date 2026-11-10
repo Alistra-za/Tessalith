@@ -119,9 +119,10 @@ pub fn plan_fills(
     }
     let jobs_of = |p: &Path| by_input.get(p).into_iter().flatten().copied();
     for set in sets {
+        // The targets are members only; a shared file (Note HH1) is a helper here as a member is.
         let members: Vec<&InputFile> = set.members.iter().map(|&i| &files[i]).collect();
         let mut helpers = vec![];
-        for &f in &members {
+        for f in set.members.iter().chain(&set.shares).map(|&i| &files[i]) {
             // Ruling 12: images only.
             if f.kind != InputKind::Image {
                 continue;
@@ -266,10 +267,14 @@ pub fn plan_fills(
                 winner.insert(id, h.f.path.clone());
                 landed = true;
             }
+            // Note HH1: a shared helper is planned once per set; the set it lands in wins over one it didn't.
             if landed {
                 out.used.insert(h.f.path.clone());
+                out.not_used.remove(&h.f.path);
             } else if let Some(r) = why.into_iter().next() {
-                out.not_used.insert(h.f.path.clone(), r);
+                if !out.used.contains(&h.f.path) {
+                    out.not_used.insert(h.f.path.clone(), r);
+                }
             }
         }
     }

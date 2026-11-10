@@ -363,9 +363,15 @@ impl Skeleton {
         }
         // The suffixes of the sets whose `typed` members changed: every raw role back, then `prepare`'s drop.
         let n = &mut next.prepared;
-        let flipped: BTreeSet<u32> = typed
-            .symmetric_difference(&n.typed)
+        let changed: Vec<usize> = typed.symmetric_difference(&n.typed).copied().collect();
+        // Note HH1: and the sets that share a changed file.
+        let sharing = (0..n.sets.len())
+            .filter(|&s| n.sets[s].shares.iter().any(|i| changed.contains(i)))
+            .map(|s| s as u32);
+        let flipped: BTreeSet<u32> = changed
+            .iter()
             .map(|&i| self.set_of[i])
+            .chain(sharing)
             .filter(|&s| s != u32::MAX)
             .collect();
         n.typed = typed;
@@ -418,6 +424,7 @@ fn refresh_suffixes(set: &mut TextureSet, files: &[InputFile], typed: &BTreeSet<
     let roles: Vec<String> = set
         .members
         .iter()
+        .chain(&set.shares)
         .filter_map(|&i| raw_role(&files[i]).map(|r| r.id()))
         .collect();
     set.suffixes.extend(roles);
@@ -470,6 +477,17 @@ fn partner_groups(p: &Prepared) -> Vec<BTreeSet<String>> {
         .collect();
     if !shared.is_empty() {
         groups.push(shared);
+    }
+    // Note HH1: a set that shares helpers and the own set of each.
+    for set in p.sets.iter().filter(|s| !s.shares.is_empty()) {
+        let mut g = BTreeSet::from([set.key.clone()]);
+        g.extend(
+            p.sets
+                .iter()
+                .filter(|o| o.members.iter().any(|m| set.shares.contains(m)))
+                .map(|o| o.key.clone()),
+        );
+        groups.push(g);
     }
     groups
 }
@@ -946,5 +964,40 @@ mod tests {
             s.writer_clash(&scope(a), &plan),
             "b's output, b out of scope"
         );
+    }
+
+    /// Note HH: the fixture with `n_ao` (a member of set `n`) shared into set `d`.
+    fn with_share(req: &BatchRequest) -> BatchRequest {
+        let mut r = req.clone();
+        r.set_edits.push(crate::sets::SetEdit::Share {
+            file: "dir/n_ao.png".into(),
+            to: "dir/d".into(),
+        });
+        r
+    }
+
+    #[test]
+    fn a_shared_helper_makes_its_sets_partners() {
+        let fx = fast_fixture();
+        let key = |id: &str| crate::sets::set_key(&fx.req.output_root, id);
+        let hit = BTreeSet::from([key("dir/n")]);
+        assert!(!skeleton(&fx.req).scope(&hit).contains(&key("dir/d")));
+        assert!(skeleton(&with_share(&fx.req))
+            .scope(&hit)
+            .contains(&key("dir/d")));
+    }
+
+    #[test]
+    fn a_patch_on_a_shared_helper_matches_fresh_prepare() {
+        let fx = fast_fixture();
+        let req = with_share(&fx.req);
+        let s = skeleton(&req);
+        let t = table("helper.invert = true");
+        let (next, hit) = s
+            .patch(&[("dir/n_ao.png".into(), Some(t.clone()))])
+            .unwrap();
+        assert_eq!(set_ids(&s, &hit), vec!["dir/n".to_string()]);
+        let edited = with_entry(&req, "dir/n_ao.png", Some(&t));
+        assert_eq!(layer(&next.prepared), layer(&prepare(&edited)));
     }
 }

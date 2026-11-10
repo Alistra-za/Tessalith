@@ -27,8 +27,12 @@ pub struct HelperReport {
     pub not_used: Option<String>,
     pub read: Option<HelperRead>,
     pub invert: bool,
-    /// The outputs it fills.
+    /// The outputs it fills: its own set's first, then those of the sets that share it (Note HH1).
     pub outputs: Vec<PathBuf>,
+    /// Note HH1: the keys of the sets that share the file, sorted.
+    pub shared_with: Vec<String>,
+    /// Note HH7: the keys of the sets in `shared_with` whose jobs it lands in (a packed channel or an alpha fill).
+    pub used_by: Vec<String>,
 }
 
 /// The texts that say why a helper's own job converts nothing.
@@ -83,22 +87,56 @@ pub fn reports(
     let mut out = vec![];
     let mut sets: Vec<&TextureSet> = sets.iter().collect();
     sets.sort_by(|a, b| a.key.cmp(&b.key));
-    for set in sets {
+    // Where `f` went among `jobs`: packed channels and alpha fills.
+    let went_in = |jobs: &[&ResolvedJob], f: &InputFile| {
+        let mut went: Vec<(FillTarget, PathBuf)> = vec![];
+        for j in jobs {
+            if let Some(pk) = &j.pack {
+                for (c, ch) in pk.channels.iter().enumerate() {
+                    if matches!(ch, ChannelSource::Source { path, .. } if *path == f.path) {
+                        let t = FillTarget::Packed {
+                            suffix: pk.kind.suffix(),
+                            channel: c as u8,
+                        };
+                        went.push((t, j.output.clone()));
+                    }
+                }
+            }
+            if j.fill.as_ref().is_some_and(|x| x.source.path == f.path) {
+                if let Some(a) = AlphaTarget::ALL
+                    .into_iter()
+                    .find(|&a| accepts(a, j.profile.subtype))
+                {
+                    went.push((FillTarget::Alpha(a), j.output.clone()));
+                }
+            }
+        }
+        went
+    };
+    for &set in &sets {
         let in_set: Vec<&ResolvedJob> = index.in_set(&set.key).collect();
-        let mut members: Vec<&InputFile> = set
+        let mut members: Vec<(usize, &InputFile)> = set
             .members
             .iter()
-            .map(|&i| &files[i])
-            .filter(|f| f.kind == InputKind::Image)
+            .map(|&i| (i, &files[i]))
+            .filter(|(_, f)| f.kind == InputKind::Image)
             .collect();
-        members.sort_by_key(|f| file_name(&f.path));
-        for f in members {
+        members.sort_by_key(|(_, f)| file_name(&f.path));
+        for (i, f) in members {
             let sel = helper_requested(ctx, f);
+            // Note HH1: the sets that share it (sorted, as `sets` is) and their jobs.
+            let sharing: Vec<&TextureSet> = sets
+                .iter()
+                .copied()
+                .filter(|s| s.shares.contains(&i))
+                .collect();
+            let shared_jobs: Vec<&ResolvedJob> =
+                sharing.iter().flat_map(|s| index.in_set(&s.key)).collect();
             // A recipe's job has its first source as `input` (Note M8); it is not that source's own job.
             let own = index
                 .by_input(&f.path)
                 .find(|j| j.pack.is_none() && j.derive.is_none());
-            let packed_role = in_set.iter().find_map(|j| {
+            let packed_role = in_set.iter().chain(&shared_jobs).find_map(|j| {
                 let pack = j
                     .pack
                     .iter()
@@ -121,28 +159,7 @@ pub fn reports(
                     None => continue,
                 },
             };
-            let mut went: Vec<(FillTarget, PathBuf)> = vec![];
-            for j in &in_set {
-                if let Some(pk) = &j.pack {
-                    for (c, ch) in pk.channels.iter().enumerate() {
-                        if matches!(ch, ChannelSource::Source { path, .. } if *path == f.path) {
-                            let t = FillTarget::Packed {
-                                suffix: pk.kind.suffix(),
-                                channel: c as u8,
-                            };
-                            went.push((t, j.output.clone()));
-                        }
-                    }
-                }
-                if j.fill.as_ref().is_some_and(|x| x.source.path == f.path) {
-                    if let Some(a) = AlphaTarget::ALL
-                        .into_iter()
-                        .find(|&a| accepts(a, j.profile.subtype))
-                    {
-                        went.push((FillTarget::Alpha(a), j.output.clone()));
-                    }
-                }
-            }
+            let went = went_in(&in_set, f);
             let alpha = AlphaTarget::ALL.into_iter().filter(|&a| {
                 in_set
                     .iter()
@@ -161,7 +178,18 @@ pub fn reports(
                     })
                 });
             let options: Vec<FillTarget> = alpha.map(FillTarget::Alpha).chain(packed).collect();
-            let not_used = if !went.is_empty() {
+            let used_by: Vec<String> = sharing
+                .iter()
+                .filter(|s| !went_in(&index.in_set(&s.key).collect::<Vec<_>>(), f).is_empty())
+                .map(|s| s.key.clone())
+                .collect();
+            let mut outputs: Vec<PathBuf> = vec![];
+            for (_, o) in went.iter().chain(&went_in(&shared_jobs, f)) {
+                if !outputs.contains(o) {
+                    outputs.push(o.clone());
+                }
+            }
+            let not_used = if !outputs.is_empty() {
                 None
             } else if sel.fills.as_ref().is_some_and(|v| v.is_empty()) {
                 Some("no targets chosen".to_string())
@@ -173,12 +201,6 @@ pub fn reports(
                     .map(|w| w.message.clone())
                     .or_else(|| fills.not_used.get(&f.path).cloned())
             };
-            let mut outputs: Vec<PathBuf> = vec![];
-            for (_, o) in &went {
-                if !outputs.contains(o) {
-                    outputs.push(o.clone());
-                }
-            }
             out.push(HelperReport {
                 path: f.path.clone(),
                 set_key: set.key.clone(),
@@ -196,6 +218,8 @@ pub fn reports(
                 read: sel.read,
                 invert: sel.invert,
                 outputs,
+                shared_with: sharing.iter().map(|s| s.key.clone()).collect(),
+                used_by,
             });
         }
     }

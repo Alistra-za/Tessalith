@@ -138,6 +138,18 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     ui.heading(&name);
     let tails = model.helper_tails(h);
     ui.label(fills_job(h, tails, ui.style()));
+    // Note HH7: every set that shares the file, used or not, each a link to its set.
+    if !h.shared_with.is_empty() {
+        let prefix = super::columns::export_prefix(model);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Shared with");
+            for sk in &h.shared_with {
+                if ui.link(super::columns::set_label(&prefix, sk)).clicked() {
+                    model.select_set(sk);
+                }
+            }
+        });
+    }
     ui.add_space(4.0);
     ui.add_enabled_ui(ro.is_none(), |ui| {
         egui::Grid::new(("helper-panel", key))

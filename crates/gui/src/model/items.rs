@@ -191,12 +191,26 @@ pub fn helper_target_files(h: &HelperReport, tails: super::sets::Tails) -> Strin
     })
 }
 
+/// Note HH7: for a helper its own set leaves out but a sharing set uses, the base names of the sets it lands in
+/// ("stone, slab"); `None` otherwise, also when a set shares it but none uses it (that one is "not used").
+pub fn used_by(h: &HelperReport) -> Option<String> {
+    let bases: Vec<&str> = h
+        .used_by
+        .iter()
+        .map(|k| k.rsplit(['/', '\\']).next().unwrap_or(k))
+        .collect();
+    (h.fills.is_empty() && !bases.is_empty()).then(|| bases.join(", "))
+}
+
 /// `word` is how a helper that fills nothing is called ("not used", or "unused" where a tag paints that).
 fn target_line(
     h: &HelperReport,
     word: &str,
     one: impl Fn(&HelperReport, FillTarget) -> String,
 ) -> String {
+    if let Some(sets) = used_by(h) {
+        return format!("used by {sets}");
+    }
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
             Some(r) => format!("{word}: {r}"),

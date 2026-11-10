@@ -74,6 +74,8 @@ enum Act {
     FileDrop(String, SlotKind),
     /// Note AO7: take a member out of the set (set id, item), from a clashing slot card.
     RemoveMember(String, String),
+    /// Note HH: the set stops sharing a helper (set id, item).
+    StopSharing(String, String),
 }
 
 /// How the set editor shares the view with the 3D preview panel.
@@ -137,6 +139,7 @@ pub fn draw(
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
         slot_note(ui, drops, &v.id);
         unslotted_packed(ui, model, v, &mut acts);
+        shared_rows(ui, model, v, thumbs, &why, &mut acts);
         ui.add_space(6.0);
         // A2: a normal button, not stretched across the justified column.
         ui.horizontal(|ui| {
@@ -170,6 +173,15 @@ pub fn draw(
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::FileDrop(set, slot) => file_drop(model, drops, &set, slot),
+            Act::StopSharing(set, item) => {
+                if let Err(why) = model.stop_sharing(&set, &item) {
+                    drops.slot_note = Some(SlotNote {
+                        set,
+                        text: why,
+                        error: true,
+                    });
+                }
+            }
             Act::RemoveMember(set, item) => {
                 if let Err(why) = model.remove_member(&set, &item) {
                     drops.slot_note = Some(SlotNote {
@@ -1220,6 +1232,70 @@ fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut
         })
         .response
         .on_disabled_hover_text(why.clone().unwrap_or_default());
+    }
+}
+
+/// Note HH7: one row per helper the set shares (it belongs to another set, or to no set): its thumbnail and name,
+/// outlined amber as a borrowed slot is, and a `✕` that stops sharing it. A click on the row selects the helper.
+/// `why` is the read-only reason (empty when the project takes edits), which turns off only the ✕.
+fn shared_rows(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    v: &SetView,
+    thumbs: &mut ThumbCache,
+    why: &str,
+    acts: &mut Vec<Act>,
+) {
+    for i in v.shared_helpers.iter().filter_map(|k| model.item(k)) {
+        ui.add_space(4.0);
+        // Keyed by the file, so the ✕'s id does not depend on what the rows above drew.
+        // A click anywhere on the row selects the helper; the ✕ (registered later) keeps its own clicks.
+        let row = egui::UiBuilder::new()
+            .id_salt(("shared-helper", &i.key))
+            .sense(egui::Sense::click());
+        let row = ui.scope_builder(row, |ui| {
+            // The editor's scroll bar floats over the right edge: keep the ✕ clear of it.
+            let s = &ui.spacing().scroll;
+            let gutter = s.bar_width + s.bar_outer_margin + ui.spacing().item_spacing.x;
+            ui.set_max_width(ui.available_width() - gutter);
+            egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| {
+                    if let Some(t) = thumbs.get(ui.ctx(), i) {
+                        ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(20.0, 20.0)));
+                    }
+                    // truncate() shows the full name on hover; not selectable, so a click reaches the row.
+                    ui.add(
+                        egui::Label::new(format!("{} (shared)", i.name))
+                            .truncate()
+                            .selectable(false),
+                    );
+                },
+                |ui| {
+                    // Only the edit is off on a read-only project; selecting the helper is not an edit.
+                    let x = ui
+                        .add_enabled(why.is_empty(), egui::Button::new("✕").small())
+                        .on_hover_text("Stop sharing: this set no longer reads the file")
+                        .on_disabled_hover_text(why);
+                    let label = format!("Stop sharing {}", i.name);
+                    ui.ctx()
+                        .accesskit_node_builder(x.id, |b| b.set_label(label));
+                    x.clicked()
+                },
+            )
+        });
+        let (_, stop) = row.inner;
+        if stop {
+            acts.push(Act::StopSharing(v.id.clone(), i.key.clone()));
+        } else if row.response.clicked() {
+            acts.push(Act::Select(i.key.clone()));
+        }
+        ui.painter().rect_stroke(
+            row.response.rect.expand(2.0),
+            2.0,
+            egui::Stroke::new(1.0, AMBER),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 

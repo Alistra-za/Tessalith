@@ -83,6 +83,7 @@ fn resolve_img(
         members: vec![0],
         suffixes,
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(img, info);
     resolve_file(
