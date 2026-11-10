@@ -694,6 +694,45 @@ fn the_helper_panel_lists_where_it_goes() {
     assert_eq!(h.state().selection, Selection::Set(b));
 }
 
+/// Note HI16: the tick's hover says which other sets use the file; unticked, none of them does.
+#[test]
+fn a_shared_helpers_tick_names_the_sets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    share(&mut m);
+    let packed_with_ao = |m: &AppModel| -> Vec<String> {
+        m.items
+            .iter()
+            .filter(|i| i.job.as_ref().is_some_and(|j| j.pack.is_some()))
+            .filter(|i| holds(m, &i.key, "rock_ao.png"))
+            .map(|i| i.key.clone())
+            .collect()
+    };
+    assert!(holds(&m, RMAOS, AO));
+    assert!(
+        packed_with_ao(&m).len() >= 2,
+        "a and b both use it: {:?}",
+        packed_with_ao(&m)
+    );
+    m.select_item(AO);
+    let mut h = harness(m, 1100.0);
+    h.get_by_role_and_label(Role::CheckBox, "Helper").hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains("Also used by 1 other set")
+        .is_some());
+    h.get_by_role_and_label(Role::CheckBox, "Helper").click();
+    h.run();
+    let m = h.state_mut();
+    idle(m);
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(AO, "helper.role"),
+        Some(serde_json::json!("none"))
+    );
+    assert!(packed_with_ao(m).is_empty(), "{:?}", packed_with_ao(m));
+    assert_eq!(share_line(m, B), [AO], "the share line stays");
+}
+
 #[test]
 fn the_row_stays_inside_the_column() {
     let d = tempfile::tempdir().unwrap();

@@ -18,6 +18,7 @@ use engine::config::{
     AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
     Profile, Subtype, Target, ALPHA_THRESHOLD,
 };
+use engine::helper::HelperRole;
 use engine::policy::{offered, Provenance, ResolvedJob};
 use serde_json::{json, Value};
 
@@ -28,6 +29,15 @@ enum Action {
     Decide(Answer),
     Select(String),
     Reencode(bool),
+    /// Note HI4: a role picked under the ticked Helper box, or `None` (Reset) for the role guessed from the name.
+    HelperRole(Option<HelperRole>),
+}
+
+/// Note HI4: an image's Helper row. `on` is the ticked box before a role is picked, held only in egui temp data (HI5);
+/// `none` is a file the user unticked (`helper.role = "none"`).
+struct HelperTick {
+    on: bool,
+    none: bool,
 }
 
 /// The groups the compact strip keeps (Task 17's preview).
@@ -962,7 +972,85 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     ui.end_row();
 }
 
-fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Action>) {
+/// "Helper role [Pick a role…]" in the Sub-type row's place while the Helper box is ticked (Note HI4, HI5).
+fn helper_role_row(
+    ui: &mut egui::Ui,
+    key: &str,
+    edit_off: &Option<String>,
+    actions: &mut Vec<Action>,
+) {
+    field_label(ui, true, "Helper role");
+    let w = column_widths(ui).1;
+    if let Some(role) = super::helper_panel::role_combo(ui, key, None, false, edit_off, w) {
+        actions.push(Action::HelperRole(Some(role)));
+    }
+    hint_label(ui, "pick a role to make this a helper");
+    ui.end_row();
+}
+
+/// The Helper row under Sub-type (Note HI4): the tick only swaps the row above, nothing is written (HI5). A file the
+/// user unticked says so, with the way back to the guessed role.
+fn helper_tick_row(
+    ui: &mut egui::Ui,
+    key: &str,
+    t: &HelperTick,
+    edit_off: &Option<String>,
+    actions: &mut Vec<Action>,
+) {
+    field_label(ui, true, "Helper");
+    let w = column_widths(ui).1;
+    let r = control_slot(ui, w, |ui| {
+        super::helper_panel::helper_tick(ui, t.on, 0, edit_off)
+    });
+    if r.changed() {
+        let id = super::helper_panel::tick_id(key);
+        ui.data_mut(|d| {
+            if t.on {
+                d.remove_temp::<bool>(id);
+            } else {
+                d.insert_temp(id, true);
+            }
+        });
+    }
+    let none = t.none && !t.on;
+    let hint = |ui: &mut egui::Ui| match none {
+        true => hint_label(ui, "set by you"),
+        false => {
+            ui.label("");
+        }
+    };
+    let reset = egui::Sides::new()
+        .shrink_left()
+        .truncate()
+        .show(ui, hint, |ui| {
+            if !none {
+                return false;
+            }
+            let r = ui.small_button("↺");
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), "Reset role")
+            });
+            let r = r.on_hover_text("Use the role guessed from the name");
+            match edit_off {
+                Some(why) => r.on_disabled_hover_text(why),
+                None => r,
+            }
+            .clicked()
+        })
+        .1;
+    if reset {
+        actions.push(Action::HelperRole(None));
+    }
+    ui.end_row();
+}
+
+fn group(
+    ui: &mut egui::Ui,
+    name: &'static str,
+    cx: &Ctx,
+    tick: Option<&HelperTick>,
+    actions: &mut Vec<Action>,
+) {
     egui::CollapsingHeader::new(name)
         .default_open(true)
         .show(ui, |ui| {
@@ -989,10 +1077,19 @@ fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Acti
                         .filter(|f| !(cx.compact && f.field.starts_with("color.")))
                         .chain(exr)
                     {
-                        match field_row(ui, cx, &f) {
-                            Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
-                            Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
-                            None => {}
+                        // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
+                        let t = tick.filter(|_| f.field == "subtype");
+                        if t.is_some_and(|t| t.on) {
+                            helper_role_row(ui, cx.key, &cx.edit_off, actions);
+                        } else {
+                            match field_row(ui, cx, &f) {
+                                Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
+                                Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
+                                None => {}
+                            }
+                        }
+                        if let Some(t) = t {
+                            helper_tick_row(ui, cx.key, t, &cx.edit_off, actions);
                         }
                     }
                 });
@@ -1306,55 +1403,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 actions.push(Action::Reencode(false));
             }
         }
-        // Note DY17: a file the user made "Not a helper" (`helper.role = "none"`) says so, with the way back.
-        let not_helper = model
+        ui.add_space(4.0);
+    }
+    // Note HI4 (DY17): any image can be made a helper from its Helper tick, one with no helper suffix too (HI15: one in
+    // no set as well). A file the user unticked (`helper.role = "none"`) reads unticked, "set by you".
+    let tick = (kind == ItemKind::Image && !compact).then(|| HelperTick {
+        on: ui
+            .data(|d| d.get_temp::<bool>(super::helper_panel::tick_id(key)))
+            .unwrap_or(false),
+        none: model
             .project
             .as_ref()
             .and_then(|p| p.file_value(key, engine::helper::ROLE_FIELD))
-            .is_some_and(|v| v == json!("none"));
-        if not_helper {
-            let mut reset = false;
-            ui.horizontal(|ui| {
-                ui.label("Not a helper (set by you)");
-                let r = ui.add_enabled(edit_off.is_none(), egui::Button::new("Reset").small());
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), "Reset role")
-                });
-                let r = r.on_hover_text("Use the role guessed from the name");
-                let r = match &edit_off {
-                    Some(why) => r.on_disabled_hover_text(why),
-                    None => r,
-                };
-                reset = r.clicked();
-            });
-            if reset {
-                model.set_helper_role(key, None);
-            }
-        }
-        // Note DY17 (docs review): any image can be made a helper here, e.g. one whose name has no helper suffix.
-        if kind == ItemKind::Image {
-            let picked = ui
-                .add_enabled_ui(edit_off.is_none(), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Helper role");
-                        super::helper_panel::role_combo(
-                            ui,
-                            key,
-                            engine::helper::HelperRole::NotHelper,
-                            not_helper,
-                            &edit_off,
-                            CONTROL_W,
-                        )
-                    })
-                    .inner
-                })
-                .inner;
-            if let Some(role) = picked {
-                model.set_helper_role(key, Some(role));
-            }
-        }
-        ui.add_space(4.0);
-    }
+            .is_some_and(|v| v == json!("none")),
+    });
     // Note FK3: with a job, each edit control waits on `edit_off` itself, so the headers stay usable read-only.
     ui.add_enabled_ui(!read_only || job.is_some(), |ui| match &job {
         None => {
@@ -1389,6 +1451,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 if ui.button("Show packed output").clicked() {
                     actions.push(Action::Select(out));
                 }
+            }
+            // Note HI4: no Type group, so the Helper row stands alone and stays reachable (with the roles once ticked).
+            if let Some(t) = &tick {
+                egui::Grid::new(("helper-jobless", key))
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        if edit_off.is_some() {
+                            ui.disable();
+                        }
+                        if t.on {
+                            helper_role_row(ui, key, &edit_off, &mut actions);
+                        }
+                        helper_tick_row(ui, key, t, &edit_off, &mut actions);
+                    });
             }
         }
         Some(job) => {
@@ -1459,7 +1535,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             }
             let shown: &[&str] = if compact { &COMPACT_GROUPS } else { &GROUPS };
             for g in shown {
-                group(ui, g, &cx, &mut actions);
+                group(ui, g, &cx, tick.as_ref(), &mut actions);
             }
             if !compact {
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
@@ -1487,6 +1563,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             Action::Decide(a) => model.decide(key, a),
             Action::Select(k) => model.select_item(&k),
             Action::Reencode(on) => model.set_reencode(&[key.to_string()], on),
+            Action::HelperRole(r) => {
+                ui.data_mut(|d| d.remove_temp::<bool>(super::helper_panel::tick_id(key)));
+                model.set_helper_role(key, r);
+            }
         }
     }
 }

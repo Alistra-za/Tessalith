@@ -15,6 +15,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | Row | Key |
 |---|---|
 | Sub-type | `subtype` |
+| Helper (images only) | `helper.role`: [Texture packing](Texture-Packing.md#helper-settings) |
 | Alpha, Threshold, Comparison | `alpha.policy`, `alpha.threshold`, `alpha.compare` |
 | Enable parallax (complex `_m` only) | `alpha.parallax`: ticked keeps the `_m` alpha as parallax height, unticked writes alpha 0 |
 | Coverage, 1-bit alpha, Exact opaque alpha | `mips.coverage`, `encoder.bc1_alpha`, `alpha.exact_opaque` |

@@ -8,7 +8,7 @@ use egui::text::LayoutJob;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
 // Note HI1: the texture panel's columns, so the helper rows line up with the texture rows.
-use super::settings_panel::{column_widths_beside, field_label};
+use super::settings_panel::{column_widths_beside, control_slot, field_label};
 
 const READS: [(Option<HelperRead>, &str); 6] = [
     (None, "Auto (R)"),
@@ -170,7 +170,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     }
     for e in edits {
         match e {
-            Edit::Role(r) => model.set_helper_role(key, r),
+            Edit::Role(r) => {
+                // A tick left from before the file became a helper must not come back with the panel (Note HI5).
+                ui.data_mut(|d| d.remove_temp::<bool>(tick_id(key)));
+                model.set_helper_role(key, r);
+            }
             Edit::Fills(f) => model.set_helper_fills(key, f),
             Edit::Read(r) => model.set_helper_read(key, r),
             Edit::Invert(on) => model.set_helper_invert(key, on),
@@ -245,7 +249,7 @@ fn role_row(
     field_label(ui, true, "Role");
     let w = control_w(ui);
     ui.horizontal(|ui| {
-        if let Some(role) = role_combo(ui, key, h.role, h.role_hand_set, ro, w) {
+        if let Some(role) = role_combo(ui, key, Some(h.role), h.role_hand_set, ro, w) {
             edits.push(Edit::Role(Some(role)));
         }
         if h.role_hand_set && reset(ui, "Reset role", "Use the role guessed from the name", ro) {
@@ -261,35 +265,74 @@ fn role_row(
         },
     );
     ui.end_row();
+    // Note HI4, HI16: unticked, the file is an ordinary texture again (`helper.role = "none"`), in every set.
+    field_label(ui, true, "Helper");
+    let r = control_slot(ui, w, |ui| helper_tick(ui, true, h.shared_with.len(), ro));
+    if r.changed() {
+        edits.push(Edit::Role(Some(HelperRole::NotHelper)));
+    }
+    ui.label("");
+    ui.end_row();
 }
 
-/// The "Helper role" combo (`w` wide): "Not a helper" then every role. Returns the role picked, if it is to be
-/// written: a different role, or the current one while it is not hand-set (an assigned role beats a suggestion).
+/// The "Helper role" combo (`w` wide): every role but "Not a helper" (the unticked Helper box, Note HI6); `None` shows
+/// "Pick a role…". Returns the role picked, if it is to be written: a different role, or the current one while it is
+/// not hand-set (an assigned role beats a suggestion).
 pub(crate) fn role_combo(
     ui: &mut egui::Ui,
     key: &str,
-    current: HelperRole,
+    current: Option<HelperRole>,
     hand_set: bool,
     ro: &Option<String>,
     w: f32,
 ) -> Option<HelperRole> {
     let mut picked = None;
-    let shown = current.label();
+    let shown = current.map_or_else(|| "Pick a role…".to_string(), |r| r.label());
     let r = combo(ui, (key, "helper-role"), &shown, w, |ui| {
-        // "Not a helper" first (`all()`'s order), so it is in view without scrolling the long list.
-        for role in HelperRole::all() {
-            let new = role != current || !hand_set;
-            if ui.selectable_label(role == current, role.label()).clicked() && new {
+        for role in HelperRole::all()
+            .into_iter()
+            .filter(|r| *r != HelperRole::NotHelper)
+        {
+            let new = Some(role) != current || !hand_set;
+            if ui
+                .selectable_label(Some(role) == current, role.label())
+                .clicked()
+                && new
+            {
                 picked = Some(role);
-            }
-            if role == HelperRole::NotHelper {
-                ui.separator();
             }
         }
     });
     named(&r, egui::WidgetType::ComboBox, "Helper role", Some(&shown));
     why(r, ro);
     picked
+}
+
+/// The id of a texture's ticked Helper box while it has no role yet (Note HI5): egui temp data, never written.
+pub(crate) fn tick_id(key: &str) -> egui::Id {
+    egui::Id::new(("helper-tick", key))
+}
+
+/// The Helper tick (Note HI4), named "Helper". `shared_with` other sets stop using the file when it is unticked (HI16).
+pub(crate) fn helper_tick(
+    ui: &mut egui::Ui,
+    on: bool,
+    shared_with: usize,
+    ro: &Option<String>,
+) -> egui::Response {
+    let mut v = on;
+    let r = ui.add_enabled(ro.is_none(), egui::Checkbox::new(&mut v, ""));
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, "Helper")
+    });
+    let r = match shared_with {
+        0 => r,
+        1 => r.on_hover_text("Also used by 1 other set: it stops using it too."),
+        n => r.on_hover_text(format!(
+            "Also used by {n} other sets: they stop using it too."
+        )),
+    };
+    why(r, ro)
 }
 
 /// One Grid row per line (`Fills | name ✕ | hint`, then `Add ▾ Reset`), so nothing is centred on a tall cell and the

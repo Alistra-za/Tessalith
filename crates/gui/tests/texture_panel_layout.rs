@@ -95,6 +95,29 @@ fn every_control_starts_at_the_same_x() {
     }
 }
 
+/// Note HI4: the Helper tick is the row under Sub-type, in the control column.
+#[test]
+fn the_helper_tick_sits_under_sub_type() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(model(d.path()), 1280.0);
+    let c = centre(&h);
+    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let tick = control(&h, Role::CheckBox, "Helper", c);
+    assert!(
+        (tick.min.x - sub.min.x).abs() <= 1.0,
+        "tick {tick:?}, Sub-type {sub:?}"
+    );
+    assert!(
+        tick.min.y >= sub.max.y,
+        "tick {tick:?} below Sub-type {sub:?}"
+    );
+    // The next row: nothing else of the Type group between them.
+    assert!(
+        tick.min.y - sub.max.y < 2.0 * sub.height(),
+        "tick {tick:?} right under Sub-type {sub:?}"
+    );
+}
+
 #[test]
 fn every_dropdown_has_the_same_width() {
     let d = tempfile::tempdir().unwrap();
@@ -230,6 +253,58 @@ fn render_texture_panel_shots() {
         .unwrap();
     let ppp = h.ctx.pixels_per_point();
     save(h.render().expect("render"), ppp, win, "window-460.png");
+}
+
+/// Screens of the Helper row's states (Note HI4) at 1100 and 1600 px, cropped to the centre, written to
+/// `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
+#[test]
+fn render_helper_tick_shots() {
+    let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&out).unwrap();
+    type Setup = fn(&mut AppModel) -> bool;
+    let states: [(&str, Setup); 5] = [
+        ("unticked", |_| false),
+        ("ticked", |_| true),
+        ("helper", |m| {
+            m.select_item("landscape/rock01_roughness.png");
+            false
+        }),
+        ("none", |m| {
+            m.set_helper_role(KEY, Some(engine::helper::HelperRole::NotHelper));
+            assert!(m.wait_idle(Duration::from_secs(60)));
+            false
+        }),
+        ("jobless", |m| {
+            let i = m.items.iter().position(|i| i.key == KEY).unwrap();
+            m.items[i].status = sdc_gui::model::items::ItemStatus::Failed("no good".into());
+            m.items[i].job = None;
+            false
+        }),
+    ];
+    for w in [1100.0, 1600.0] {
+        for (name, setup) in states {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = model(d.path());
+            let tick = setup(&mut m);
+            let mut h = harness(m, w);
+            if tick {
+                h.get_by_role_and_label(Role::CheckBox, "Helper").click();
+                h.run();
+            }
+            let c = centre(&h);
+            let ppp = h.ctx.pixels_per_point();
+            let img = h.render().expect("render");
+            let (x, y) = ((c.min.x * ppp) as u32, (c.min.y * ppp) as u32);
+            let cw = ((c.width() * ppp) as u32).min(img.width() - x);
+            let ch = ((c.height() * ppp) as u32).min(img.height() - y);
+            image::imageops::crop_imm(&img, x, y, cw, ch)
+                .to_image()
+                .save(out.join(format!("helper-{name}-{w}.png")))
+                .unwrap();
+        }
+    }
 }
 
 /// The helper panel shares the columns: with the drawer open at 1100 px it stays inside the centre too.
