@@ -681,4 +681,5 @@ fn a_new_preset_is_not_saved_over_a_file_that_did_not_load() {
     let e = pm.save().unwrap_err();
     assert!(e.contains("already exists"), "{e}");
     assert_eq!(std::fs::read(&broken).unwrap(), b"not a preset [");
+    assert_eq!(files(dir.path()), ["x.toml"], "nothing else was written");
 }

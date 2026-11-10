@@ -207,7 +207,7 @@ mod tests {
         };
         let hi = ((linear_to_game_gamma(0.5) - 0.5) * 1.5 + 0.5).sqrt();
         let y = (0.2126 + 0.7152) * hi;
-        let got = graded([0.5, 0.5, 0.02], &s);
+        let got = graded([0.5, 0.5, 0.0], &s);
         assert!((got[0] - (y + (hi - y) * 0.5)).abs() < 1e-5, "{got:?}");
         assert!((got[2] - y * 0.5).abs() < 1e-5, "{got:?}");
     }
