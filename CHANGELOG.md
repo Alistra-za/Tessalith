@@ -2,6 +2,7 @@
 
 ## 3.0.0 (Unreleased)
 
+- The analysis cache's size prune keeps the entries you use: opening a folder whose entry is more than a day old refreshes that entry's time, so the prune deletes the ones nothing has read for longest.
 - A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Such textures re-encode once.
 - The line shown when the toast's Undo comes too late (the restored edits were already undone or edited over) now says: press Ctrl+Z to undo or Ctrl+Y to redo.
 - A file link (symlink) whose target is in the output folder is no longer read as an input when the output folder is inside the input folder; folder links were already skipped.
