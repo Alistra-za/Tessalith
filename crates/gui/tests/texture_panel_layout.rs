@@ -7,13 +7,11 @@ use egui_kittest::Harness;
 use engine::config::{ColorTag, Format, Subtype, Target};
 use sdc_gui::model::fields::format_name;
 use sdc_gui::model::{Answer, AppModel, Selection};
+use sdc_gui::ui::settings_panel::{COMPACT_CONTROL_W, CONTROL_W};
 use std::time::Duration;
 use support::*;
 
 const KEY: &str = "landscape/rock01.png";
-/// `settings_panel::CONTROL_W` and `COMPACT_CONTROL_W` (crate-private).
-const CONTROL_W: f32 = 200.0;
-const COMPACT_CONTROL_W: f32 = 140.0;
 
 const COMBOS: [&str; 12] = [
     "Sub-type",
@@ -176,6 +174,16 @@ fn rows_stay_inside_the_column_at_1100() {
                 r.max.x <= edge,
                 "drawer {drawer}: {n} ends at {}, the centre at {edge}",
                 r.max.x
+            );
+        }
+        // Scaled down or not, the column keeps one width.
+        let all = combos(&h, c);
+        for (n, r) in &all {
+            assert!(
+                (r.width() - all[0].1.width()).abs() <= 1.0,
+                "drawer {drawer}: {n} is {} wide, Sub-type {}",
+                r.width(),
+                all[0].1.width()
             );
         }
     }

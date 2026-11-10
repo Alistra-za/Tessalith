@@ -1727,7 +1727,7 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     let mut h = short_harness(m);
     h.run();
     // The bulk panel's first group header (Note HI2: the Colour group is gone).
-    let colour = |h: &Harness<'static, AppModel>| {
+    let type_header_y = |h: &Harness<'static, AppModel>| {
         h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Type")
             .rect()
             .min
@@ -1744,7 +1744,7 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     h.run();
     h.state_mut().select_all_visible();
     h.run();
-    let top = colour(&h);
+    let top = type_header_y(&h);
     rock_selected(h.state_mut());
     h.run();
     let at = eframe::egui::pos2(x, diffuse_top(&h) + 30.0);
@@ -1752,8 +1752,8 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     h.state_mut().select_all_visible();
     h.run();
     assert!(
-        (colour(&h) - top).abs() < 1.0,
+        (type_header_y(&h) - top).abs() < 1.0,
         "the bulk panel is at its top: {} vs {top}",
-        colour(&h)
+        type_header_y(&h)
     );
 }

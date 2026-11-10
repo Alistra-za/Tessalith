@@ -36,9 +36,9 @@ pub(super) const GROUPS: [&str; 4] = ["Type", "Alpha", "Mipmaps", "Compression"]
 /// Note HI1: the label column's width, on the texture, helper and cubemap rows.
 pub(super) const LABEL_W: f32 = 150.0;
 /// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
-pub(super) const CONTROL_W: f32 = 200.0;
+pub const CONTROL_W: f32 = 200.0;
 /// Note HI3: the controls' width in the preview's 280 px strip.
-const COMPACT_CONTROL_W: f32 = 140.0;
+pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
 const MAX_LEVELS: u32 = 13;
 
@@ -846,8 +846,8 @@ fn hint_and_reset(ui: &mut egui::Ui, edited: bool, hint: impl FnOnce(&mut egui::
 fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, egui::Response) {
     let current = serde_json::from_value::<Subtype>(f.value.clone()).ok();
     let shown = current.map_or_else(|| display_value(&f.value), subtype_label);
-    // It fills its cell, as the combos do (Note HI1).
-    let fill = egui::vec2(ui.available_width(), 0.0);
+    // It fills its cell, as the combos do (Note HI1); capped at CONTROL_W in case a cell is ever unbounded.
+    let fill = egui::vec2(ui.available_width().min(CONTROL_W), 0.0);
     let r = ui.add(egui::Button::new(format!("{shown} \u{25BE}")).min_size(fill));
     r.widget_info(|| {
         let mut i = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), f.label);
