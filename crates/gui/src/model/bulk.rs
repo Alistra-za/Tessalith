@@ -1219,7 +1219,7 @@ impl AppModel {
             label: format!(
                 "{}{}…{}",
                 plural(no, "Rename output", "Rename outputs"),
-                if no < self.selected_sets().len() {
+                if no < self.selected_set_total() {
                     format!(" ({no})")
                 } else {
                     String::new()

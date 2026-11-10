@@ -116,8 +116,8 @@ fn the_tile_menu_is_a_list_with_counts_and_reasons() {
             (MenuAction::ResetAll, "Reset all settings for 2 selected…"),
             // F3b D5: the rename entries are appended.
             (MenuAction::RenameInputs, "Rename inputs…  F2"),
-            // One PBR set qualifies, so the label is singular (Note HJ1).
-            (MenuAction::RenameOutputs, "Rename output…"),
+            // One of the two sets qualifies, so the label is singular and carries the count (Note HJ1).
+            (MenuAction::RenameOutputs, "Rename output (1)…"),
         ]
     );
     assert_eq!(

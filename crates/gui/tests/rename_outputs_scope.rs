@@ -50,9 +50,13 @@ fn rename_outputs_is_absent_on_a_vanilla_set() {
 fn rename_outputs_is_absent_on_a_skin_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
+    m.decide(LEAF, Answer::Subtype(Subtype::SkinAlbedo));
+    idle(&mut m);
     let leaf = set_id_of(&m, LEAF);
     m.set_shader(&leaf, Some(engine::shader::Shader::AdvancedSkin));
     idle(&mut m);
+    let v = views(&m).iter().find(|v| v.id == leaf).unwrap().clone();
+    assert!(!v.pbr, "a skin set is not a PBR set");
     m.click_item(LEAF, false, false);
     assert!(!has_outputs_entry(m.item_menu()));
     assert!(m.rename_keys(RenameMode::Outputs).is_empty());
@@ -158,6 +162,25 @@ fn a_mixed_selection_renames_only_the_pbr_sets() {
         .find(|e| matches!(e.action, MenuAction::RenameOutputs))
         .expect("the entry");
     assert!(e.label.starts_with("Rename output (1)…"), "{}", e.label);
+}
+
+#[test]
+fn a_mixed_texture_selection_counts_the_pbr_sets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    let label = |m: &AppModel| {
+        m.item_menu()
+            .into_iter()
+            .find(|e| matches!(e.action, MenuAction::RenameOutputs))
+            .map(|e| e.label)
+    };
+    assert_eq!(label(&m).as_deref(), Some("Rename output (1)…"));
+    // Two textures of the one PBR set: nothing is left out, so no count.
+    m.click_item(ROCK, false, false);
+    m.click_item("landscape/rock01_normal.png", true, false);
+    assert_eq!(label(&m).as_deref(), Some("Rename output…"));
 }
 
 #[test]

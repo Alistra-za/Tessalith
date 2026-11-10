@@ -483,6 +483,43 @@ fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
     h.get_by_label_contains("Read the source files under other names");
 }
 
+/// Note HJ1: a vanilla set's Rename submenu has no Rename outputs.
+#[test]
+fn a_vanilla_sets_rename_submenu_has_no_rename_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()));
+    h.run();
+    pill(&h, "landscape/leaf").click_secondary();
+    h.run();
+    h.get_by_label_contains("Rename").click();
+    h.run();
+    h.get_by_label("Rename…");
+    h.get_by_label("Rename inputs…");
+    assert!(h.query_by_label("Rename outputs…  F2").is_none());
+    assert!(h.query_by_label_contains("Rename outputs").is_none());
+}
+
+/// Note HJ1: the dialog's mode switch hides Outputs when no selected set is a PGPatcher PBR set.
+#[test]
+fn the_rename_dialog_has_an_outputs_tab_only_for_pbr_sets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.click_item("landscape/leaf.png", false, false);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut()
+        .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
+    h.run();
+    h.get_by_label("Inputs");
+    assert!(h.query_by_label("Outputs").is_none(), "vanilla leaf");
+    h.state_mut()
+        .click_item("landscape/rock01.png", false, false);
+    h.state_mut()
+        .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
+    h.run();
+    h.get_by_label("Outputs");
+}
+
 #[test]
 fn the_unlabelled_controls_have_hover_text() {
     let d = tempfile::tempdir().unwrap();

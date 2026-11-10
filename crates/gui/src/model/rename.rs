@@ -546,6 +546,24 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
 }
 
 impl AppModel {
+    /// How many sets the selection covers: the selected sets, or the distinct sets of the selected textures (the
+    /// total the Outputs entry's count is compared with).
+    pub fn selected_set_total(&self) -> usize {
+        let sets = self.selected_sets().len();
+        if sets > 0 {
+            return sets;
+        }
+        let items = self.selected_items();
+        let views = views(self);
+        let mut ids: HashSet<&str> = HashSet::new();
+        for k in &items {
+            if let Some(v) = views.iter().find(|v| v.members.iter().any(|m| m == k)) {
+                ids.insert(&v.id);
+            }
+        }
+        ids.len()
+    }
+
     /// The textures or sets a rename in `mode` covers, from the selection (spec §6): Inputs takes the selected
     /// textures, or every member of the selected sets; Outputs takes the selected PGPatcher PBR sets (HJ1; empty
     /// when none qualify), or the PBR sets of the selected textures.
