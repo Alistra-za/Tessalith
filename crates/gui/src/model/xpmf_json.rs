@@ -1,6 +1,6 @@
 //! XPMF profiles (Note GI, design X2-X9): `SKSE/Plugins/XPMF/tessalith_<set>.json`, one per set with a `[sets.xpmf]`
 //! block, written after a clean export with the CS PBR export's guard. No egui types.
-use super::history::{orphans, record_key, recorded, records_at, remove_own_case_twin, sha256_of};
+use super::history::{orphans, records_at};
 use super::pbr_export::file_name_problem;
 use super::sets::{is_pbr_landscape, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
@@ -644,22 +644,8 @@ pub fn finish(
             ));
             continue;
         }
-        let key = record_key(&path);
-        let last = out.get(&key).cloned();
-        let last = last.as_deref();
-        remove_own_case_twin(&path, last);
-        if let Err(k) = engine::dds::may_replace(&path, text.as_bytes(), recorded(last)) {
-            notes.push(k.note(&path));
-            continue;
-        }
-        match engine::dds::write_atomic(&path, text.as_bytes()) {
-            Ok(()) => {
-                written += 1;
-                if let Some(s) = sha256_of(&path) {
-                    out.insert(key, s);
-                }
-            }
-            Err(e) => notes.push(format!("{} not written: {e}", path.display())),
+        if super::json_finish::guarded_write(&path, text, &mut out, notes) {
+            written += 1;
         }
     }
     if written > 0 {
