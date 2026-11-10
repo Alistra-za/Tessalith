@@ -554,7 +554,13 @@ fn one_line_replaces_the_three_alpha_lines() {
         assert_eq!(h.query_all_by_label(l).count(), 0, "{l}");
     }
     // The row says it (the panel's box asks it as an Alpha row, Note HI13); the row's hover keeps the code.
-    assert!(h.query_all_by_label_contains(LEAF_LINE).count() >= 1);
+    // Exactly one line says it; the row itself is also named "landscape/leaf.png: Alpha: …".
+    let lines: Vec<_> = h
+        .query_all_by_label_contains(LEAF_LINE)
+        .filter(|n| n.accesskit_node().role() == egui::accesskit::Role::Label)
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(lines.len(), 1, "{lines:?}");
     // Final review (GUI M5): one dropdown each, with distinct names.
     assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 1);
     assert_eq!(

@@ -195,12 +195,10 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
         0
     );
     h.get_by_label("Undecided");
-    // Note HI9: "Input content" also names its `?` ("Help: Input content").
-    for label in [unstated.as_str(), "Input content", "DDS tag", "Compression"] {
-        assert!(
-            h.query_all_by_label_contains(label).next().is_some(),
-            "{label}"
-        );
+    h.get_by_label_contains(unstated.as_str());
+    // Exact labels: "Input content" and "DDS tag" also name their `?` ("Help: Input content", Note HI9).
+    for label in ["Input content", "DDS tag", "Compression"] {
+        h.get_by_label(label);
     }
     // One frame with a Kaiser profile selected: the live Filter combo and the Edge row draw.
     let d = tempfile::tempdir().unwrap();

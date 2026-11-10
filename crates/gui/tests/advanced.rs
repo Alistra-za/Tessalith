@@ -564,3 +564,47 @@ fn drawer_resize_pick_waits_for_the_plan_then_writes() {
         .file_value("landscape/leaf.png", "resize");
     assert_eq!(own, Some(serde_json::json!("none")));
 }
+
+/// Note HI18: the drawer's rows have no `?`, so the label shows the row's help on hover.
+#[test]
+fn a_drawer_label_shows_the_rows_help() {
+    let d = tempfile::tempdir().unwrap();
+    let model = leaf_model(d.path());
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(380.0, 1400.0))
+        .build_ui_state(
+            |ui, model: &mut AppModel| {
+                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
+                ui.allocate_ui(eframe::egui::vec2(380.0, 1400.0), |ui| {
+                    sdc_gui::ui::advanced::body(ui, model, &mut state);
+                });
+            },
+            model,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let text = sdc_gui::model::fields::field_help("resize_floor").unwrap();
+    assert!(h.query_all_by_label_contains(text).next().is_none());
+    let rects: Vec<_> = h
+        .query_all_by_label("Size floor")
+        .filter(|n| n.accesskit_node().role() == Role::Label)
+        .map(|n| n.rect())
+        .collect();
+    assert!(!rects.is_empty(), "the drawer has a Size floor row");
+    let shown = rects.iter().any(|r| {
+        h.query_all_by_label("Size floor")
+            .find(|n| n.rect() == *r)
+            .unwrap()
+            .hover();
+        h.run();
+        h.query_all_by_label_contains(text).next().is_some()
+    });
+    assert!(shown, "no Size floor label shows its help");
+    assert!(
+        !h.query_all_by_role(Role::Label).any(|n| n
+            .accesskit_node()
+            .value()
+            .is_some_and(|v| v.starts_with("Help: "))),
+        "a ? in the drawer"
+    );
+}

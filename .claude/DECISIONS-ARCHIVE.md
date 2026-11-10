@@ -44,6 +44,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
   - **One line.** An undecided texture that asks its alpha shows `Alpha: <Type> (proposed) — confirm` (`code_text::alpha_confirm_text`; the type names are the five that the old buttons used). It replaces three lines: the Undecided sentence, the "carries data the format would drop" line with the engine's "non-constant alpha would be discarded", and the Acknowledge button. A row that asks only its alpha has no `Undecided:` prefix; a row that also asks something else keeps the prefix and joins the parts. Only "(proposed)" exists: a texture whose meshes decide its alpha is Ready and never asked, so there is no "(from mesh)" text.
 
+ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
+  - **One dropdown.** `settings_panel::alpha_dropdown` is the control in the Problems row, Review's inline row and the settings box. It opens on the proposal (`items::alpha_asked`: `suggest_alpha` over the cached analysis, else the profile's own policy). Picking an entry, the shown one too, records the answer with the old buttons' write (`alpha.policy` in the texture's own entry through `decide` or `answer_undecided_row`, nothing in `allow`). Enter or Space on a focused Problems row that asks only its alpha confirms the shown type (a row that also asks a sub-type ignores the key, so it never answers just one of the two); Accept all suggestions stays type-only. The `Decide…` menu and the five buttons are gone. The dropdown's accessible name is `Alpha type: <shown>`.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)

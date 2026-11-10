@@ -688,6 +688,16 @@ fn read_only_disables_the_helper_role_row() {
     n.hover();
     h.run();
     assert!(h.query_by_label_contains("sdc.toml is read-only").is_some());
+    // The role combo is off too, with the same reason. The tick can't be clicked here, so set the ticked state the
+    // tick keeps in egui temp data (`helper_panel::tick_id`, Note HI5).
+    h.ctx
+        .data_mut(|d| d.insert_temp(egui::Id::new(("helper-tick", "x_mask.png")), true));
+    h.run();
+    let role = h.get_by_role_and_label(Role::ComboBox, "Helper role");
+    assert!(role.accesskit_node().is_disabled());
+    role.hover();
+    h.run();
+    assert!(h.query_by_label_contains("sdc.toml is read-only").is_some());
 }
 
 /// Note HI4: the tick swaps Sub-type for the role list; nothing is written until a role is picked (HI5).

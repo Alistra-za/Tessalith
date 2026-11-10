@@ -234,7 +234,8 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).small().weak()).truncate());
 }
 
-fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
+/// A small Reset button named `name` with `hover`, off with `ro`'s reason; the texture panel's Helper row uses it too.
+pub(crate) fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
     let r = ui.small_button("Reset");
     named(&r, egui::WidgetType::Button, name, None);
     why(r.on_hover_text(hover), ro).clicked()

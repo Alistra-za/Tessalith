@@ -320,3 +320,20 @@ fn a_bulk_row_that_applies_to_nothing_reads_not_set_never_null() {
     assert_eq!(shown(&h, "null"), 0, "the word null is never drawn");
     assert!(shown(&h, "— not set") >= 1, "an unset combo says so");
 }
+
+/// Note HI9: the bulk panel's rows have a `?` after the label, with the row's help on hover.
+#[test]
+fn a_bulk_row_has_a_question_mark() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("2 textures selected");
+    let text = sdc_gui::model::fields::field_help("encoder.effort").unwrap();
+    assert!(h.query_all_by_label_contains(text).next().is_none());
+    h.get_by_label("Help: Effort").hover();
+    h.run();
+    assert!(h.query_all_by_label_contains(text).next().is_some());
+}

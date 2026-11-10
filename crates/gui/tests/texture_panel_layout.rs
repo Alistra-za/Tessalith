@@ -215,6 +215,7 @@ fn rows_stay_inside_the_column_at_1100() {
 /// Screens for a layout review (Note HI): the panel at 1100, 1280 and 1600 px, the strip and the 3D settings window,
 /// cropped to each, written to `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
 #[test]
+// Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_texture_panel_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
         return;
@@ -258,6 +259,7 @@ fn render_texture_panel_shots() {
 /// Screens of the Helper row's states (Note HI4) at 1100 and 1600 px, cropped to the centre, written to
 /// `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
 #[test]
+// Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_helper_tick_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
         return;
@@ -505,6 +507,7 @@ fn a_no_set_image_confirms_its_alpha() {
 /// Screens of the alpha question (Note HI7, HI13) at 1100 and 1600 px: the panel, and the Review and Problems rows,
 /// written to `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
 #[test]
+// Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_alpha_question_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
         return;
@@ -885,4 +888,107 @@ fn the_strip_has_help_on_its_labels() {
         .hover();
     h.run();
     assert!(h.query_all_by_label_contains(text).next().is_some());
+}
+
+/// Note HI13: at 1100 px the Undecided box's dropdown still starts at the Alpha row's x, and Confirm is never cut short
+/// (the dropdown gives up the room).
+#[test]
+fn alpha_question_at_1100_keeps_its_x_and_an_uncut_confirm() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(leaf(d.path()), 1100.0);
+    let c = centre(&h);
+    let asked = control(&h, Role::ComboBox, "Alpha type: Cutout", c);
+    let row = control(&h, Role::ComboBox, "Alpha", c);
+    assert!(
+        (asked.min.x - row.min.x).abs() <= 1.0,
+        "the question's dropdown {asked:?}, the Alpha row's {row:?}"
+    );
+    let confirm = h.get_by_label("Confirm alpha").rect();
+    let font = egui::TextStyle::Button.resolve(&h.ctx.global_style());
+    let text = h.ctx.fonts_mut(|f| {
+        f.layout_no_wrap("Confirm".into(), font, egui::Color32::WHITE)
+            .size()
+            .x
+    });
+    assert!(
+        confirm.width() >= text,
+        "Confirm {confirm:?} is narrower than its text ({text})"
+    );
+    assert!(
+        confirm.max.x <= c.max.x,
+        "Confirm {confirm:?} past the centre {c:?}"
+    );
+}
+
+/// Note HI13: the sub-type question's combo is as wide as the Alpha row's.
+#[test]
+fn the_sub_type_question_has_the_rows_width() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.select_item(KEY);
+    let h = harness(m, 1280.0);
+    let c = centre(&h);
+    let q = h.get_by_label("What kind of texture is this?").rect();
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| n.rect())
+        .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
+        .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
+        .expect("the sub-type question's combo");
+    let row = control(&h, Role::ComboBox, "Alpha", c);
+    assert!(
+        (combo.width() - row.width()).abs() <= 1.0,
+        "the question's combo {combo:?}, the Alpha row's {row:?}"
+    );
+}
+
+/// Note HI15: a texture in no set keeps its Helper tick under Sub-type.
+#[test]
+fn a_no_set_image_has_the_helper_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = leaf(d.path());
+    m.remove_member("landscape/leaf", LEAF).expect("removed");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.is_no_set(LEAF));
+    m.select_item(LEAF);
+    let mut h = harness(m, 1280.0);
+    let c = centre(&h);
+    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let tick = control(&h, Role::CheckBox, "Helper", c);
+    assert!(
+        (tick.min.x - sub.min.x).abs() <= 1.0,
+        "tick {tick:?}, Sub-type {sub:?}"
+    );
+    h.get_by_role_and_label(Role::CheckBox, "Helper").click();
+    h.run();
+    control(&h, Role::ComboBox, "Helper role", c);
+}
+
+/// Note HI1, HI4: at 1100 px with the Advanced drawer open the Helper tick stays in the control column, inside the
+/// centre.
+#[test]
+fn the_helper_tick_at_1100_with_the_drawer_open() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(d.path());
+    m.settings.advanced_open = true;
+    let h = harness(m, 1100.0);
+    let c = centre(&h);
+    let drawer = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
+        .expect("the drawer is drawn")
+        .outer_rect;
+    assert!(
+        c.max.x <= drawer.min.x + 0.5,
+        "the centre {c:?} runs under the drawer {drawer:?}"
+    );
+    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let tick = control(&h, Role::CheckBox, "Helper", c);
+    assert!(
+        (tick.min.x - sub.min.x).abs() <= 1.0,
+        "tick {tick:?}, Sub-type {sub:?}"
+    );
+    assert!(
+        tick.min.y >= sub.max.y,
+        "tick {tick:?} below Sub-type {sub:?}"
+    );
+    assert!(tick.max.x <= c.max.x, "tick {tick:?} past the centre {c:?}");
 }

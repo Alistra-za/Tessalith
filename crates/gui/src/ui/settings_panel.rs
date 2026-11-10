@@ -1136,19 +1136,12 @@ fn helper_tick_row(
         .shrink_left()
         .truncate()
         .show(ui, hint, |ui| {
-            if !none {
-                return false;
-            }
-            let r = ui.small_button("↺");
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), "Reset role")
-            });
-            let r = r.on_hover_text("Use the role guessed from the name");
-            match edit_off {
-                Some(why) => r.on_disabled_hover_text(why),
-                None => r,
-            }
-            .clicked()
+            none && super::helper_panel::reset(
+                ui,
+                "Reset role",
+                "Use the role guessed from the name",
+                edit_off,
+            )
         })
         .1;
     if reset {

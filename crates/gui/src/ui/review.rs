@@ -107,8 +107,7 @@ fn split_button(ui: &mut egui::Ui, text: &str) -> (egui::Response, egui::Respons
 
 /// A Problems row's fix buttons (A1), one set per open question of the texture `key`: the suggestion's one-click
 /// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown and Confirm (Note FM35, HI8),
-/// Acknowledge. All
-/// disabled with `off` as hover.
+/// Acknowledge. All disabled with `off` as hover.
 pub fn fix_buttons(
     ui: &mut egui::Ui,
     model: &AppModel,

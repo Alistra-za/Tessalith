@@ -1,0 +1,2 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+FM¶- **One dropdown.**	FM		back	HI		partial	2026-11-09		goes: settings_panel::alpha_dropdown as the shared control (HI7: alpha_question, Confirm) and "picking the shown entry records the answer" in the texture panel's Alpha row (HI14: it writes nothing); stays: the rest
