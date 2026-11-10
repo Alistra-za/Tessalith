@@ -21,10 +21,13 @@ pub const RELEASED_ENGINE_VERSION: &str = "2.0.0";
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
-/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0. No `_` arm: a new
+/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0, and with Note HR6 every
+/// other arm but `complex_grass` and `cubemap`. No `_` arm: a new
 /// `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
+        Subtype::ComplexGrass | Subtype::Cubemap => "2.0.0",
+        // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6).
         Subtype::Diffuse
         | Subtype::LandscapeDiffuse
         | Subtype::PbrAlbedo
@@ -41,8 +44,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::Msn
         | Subtype::CoatNormal
         | Subtype::GenericData
-        | Subtype::ComplexGrass
-        | Subtype::Cubemap
         | Subtype::PbrEmissive
         | Subtype::HdrSky
         | Subtype::Envmask
@@ -53,7 +54,7 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::SkinSk
         | Subtype::ProjectedNoise
         | Subtype::DetailNormal
-        | Subtype::Gray => "2.0.0",
+        | Subtype::Gray => ENGINE_VERSION,
         // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
         // A new sub-type in 2.1.0.
         Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
@@ -557,23 +558,15 @@ mod tests {
         }
     }
 
-    /// Note FM9: every sub-type has the one encode version, 2.0.0, except the five that changed in 2.1.0 (comment below).
+    /// Note FM9: every sub-type started on 2.0.0; all but complex grass and cubemaps have moved since (Note HD1, HR6).
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
-            // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`;
-            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1).
-            let want = if matches!(
-                st,
-                Subtype::SkinWet
-                    | Subtype::SkinDetail
-                    | Subtype::Rmaos
-                    | Subtype::SkinRfaos
-                    | Subtype::ComplexMaterial
-            ) {
-                "2.1.0"
-            } else {
+            // Note HR6 moved every type a resized cutout can reach; complex grass and cubes keep their coverage path.
+            let want = if matches!(st, Subtype::ComplexGrass | Subtype::Cubemap) {
                 "2.0.0"
+            } else {
+                ENGINE_VERSION
             };
             assert_eq!(encode_version(st), want, "{st:?}");
         }

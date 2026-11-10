@@ -37,6 +37,8 @@ pub struct Work {
     /// Source samples (any channel) that were NaN or infinite and were replaced before processing.
     /// Task 37 surfaces a non-zero count as a warning.
     pub nonfinite_samples: u64,
+    /// Note HR6: the alpha-test coverage just before a resize, the reference for a resized cutout; else `None`.
+    pub source_coverage: Option<f64>,
 }
 
 pub fn domain_for(p: &Profile) -> Domain {
@@ -242,19 +244,25 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
             }
         }
     }
+    let resized = crate::resize::target_dims((img.width, img.height), p) != (img.width, img.height);
+    let source_coverage = (resized && alpha_present && p.coverage_enabled()).then(|| {
+        let alpha = img.px.iter().map(|q| q[3]);
+        crate::coverage::coverage_fraction(alpha, p.alpha.threshold, p.alpha.compare)
+    });
     let mut work = Work {
         img,
         alpha_present,
         domain,
         roughness_r_squared: p.subtype.is_roughness_member(),
         nonfinite_samples,
+        source_coverage,
     };
     crate::resize::resize_work(&mut work, p); // (6)
     work
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::presets::PresetRegistry;
 
@@ -464,6 +472,46 @@ mod tests {
         // `remove` drops alpha first, so nothing is invisible.
         p.alpha.policy = AlphaPolicy::Remove;
         assert_eq!(preprocess(src(), &p).img.px[1], [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    /// Note HR6: an 8x8 cutout with 8 of 64 texels passing `ge 128`.
+    pub(crate) fn sparse_cutout() -> Rgba32F {
+        let mut img = Rgba32F::new(8, 8, [0.5, 0.5, 0.5, 0.0]);
+        for y in (0..8).step_by(2) {
+            for x in (0..8).step_by(4) {
+                img.at_mut(x, y)[3] = 1.0;
+            }
+        }
+        img
+    }
+
+    /// Note HR6: `cutout` at threshold 128 (`ge`), no resize, floor 1 so a `resize` mode applies to small images.
+    pub(crate) fn cutout_profile() -> Profile {
+        let mut p = profile(Subtype::Diffuse);
+        p.alpha.policy = AlphaPolicy::Cutout;
+        p.alpha.threshold = 128;
+        p.alpha.compare = AlphaCompare::Ge;
+        p.resize = ResizeMode::None;
+        p.resize_floor = 1;
+        p
+    }
+
+    /// Note HR6: the coverage is recorded just before a resize, and only when one happens and coverage applies.
+    #[test]
+    fn a_resize_records_the_source_coverage() {
+        let mut p = cutout_profile();
+        p.resize = ResizeMode::Half;
+        let w = preprocess(sparse_cutout(), &p);
+        assert_eq!((w.img.width, w.img.height), (4, 4));
+        assert_eq!(w.source_coverage, Some(0.125));
+        p.alpha.policy = AlphaPolicy::Blend;
+        assert_eq!(preprocess(sparse_cutout(), &p).source_coverage, None);
+        let p = cutout_profile();
+        assert_eq!(preprocess(sparse_cutout(), &p).source_coverage, None);
+        // The automatic power-of-two step is a resize too.
+        let w = preprocess(Rgba32F::new(6, 6, [0.5, 0.5, 0.5, 1.0]), &p);
+        assert_ne!((w.img.width, w.img.height), (6, 6));
+        assert_eq!(w.source_coverage, Some(1.0));
     }
 
     #[test]

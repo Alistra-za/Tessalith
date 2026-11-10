@@ -9,7 +9,7 @@
 use crate::api::{BatchRequest, CancelToken, LowDetailMode};
 use crate::bake::NormalVariance;
 use crate::config::{Format, Profile, Subtype};
-use crate::coverage::{coverage_fraction, preserve_coverage};
+use crate::coverage::{coverage_fraction, preserve_coverage, preserve_coverage_to};
 use crate::dds::{dds_bytes, dds_bytes_cube, resolve_header, write_atomic, DdsDesc};
 use crate::encode::{encode_level, EncodeCtx};
 use crate::events::{EventKind, Reporter, Stage};
@@ -65,17 +65,33 @@ fn fail(stage: Stage) -> impl Fn(String) -> FileError {
     move |e| FileError::Failed(stage, e)
 }
 
-/// Coverage of `level` under the profile's alpha test, when coverage preservation applies (spec §5.5): a stored
-/// alpha channel and `mips.coverage` on (by default for `cutout` and `cutout_blend`). The same predicate gates the
-/// coverage check in `validate`, so a `remove`d channel (decoding to all-255) is never compared.
-fn base_coverage(level: &Rgba32F, p: &Profile, alpha_present: bool) -> Option<f64> {
-    (alpha_present && p.coverage_enabled()).then(|| {
-        coverage_fraction(
-            level.px.iter().map(|q| q[3]),
-            p.alpha.threshold,
-            p.alpha.compare,
-        )
-    })
+/// The coverage step (spec §5.5), when coverage preservation applies: a stored alpha channel and `mips.coverage` on
+/// (by default for `cutout` and `cutout_blend`). Returns the reference coverage, `Prepared::base_coverage`. A resized
+/// texture is fitted, mip 0 included, to `source_coverage`, its coverage before the resize (Note HR6); otherwise
+/// mip 0 is the reference and is left alone. The same predicate gates the coverage check in `validate`, so a
+/// `remove`d channel (decoding to all-255) is never compared.
+fn apply_coverage(
+    chain: &mut [Rgba32F],
+    p: &Profile,
+    alpha_present: bool,
+    source_coverage: Option<f64>,
+) -> Option<f64> {
+    if !(alpha_present && p.coverage_enabled()) {
+        return None;
+    }
+    let (threshold, compare) = (p.alpha.threshold, p.alpha.compare);
+    match source_coverage {
+        Some(src) => {
+            preserve_coverage_to(chain, src, threshold, compare);
+            Some(src)
+        }
+        None => {
+            let base =
+                coverage_fraction(chain.first()?.px.iter().map(|q| q[3]), threshold, compare);
+            preserve_coverage(chain, threshold, compare);
+            Some(base)
+        }
+    }
 }
 
 /// Peak Rec. 709 luminance of the HDR base level as the encoder sees it (channels clamped to `[0, 65504]`,
@@ -335,11 +351,8 @@ fn prepare_then<T>(
     let base_coverage = if grass {
         None
     } else {
-        base_coverage(&chain[0], p, alpha_present)
+        apply_coverage(&mut chain, p, alpha_present, work.source_coverage)
     };
-    if base_coverage.is_some() {
-        preserve_coverage(&mut chain, p.alpha.threshold, p.alpha.compare);
-    }
     // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the power-of-two size.
     let detail_ratio = (detail
         && crate::checks::low_detail_eligible(p, (chain[0].width, chain[0].height)))
@@ -353,7 +366,8 @@ fn prepare_then<T>(
         }
     };
     // The BC6H peak check compares the first decoded level with this peak, so it is measured on the first level kept
-    // (mip 0 for an export). `base_coverage` stays mip 0's: coverage is compared with the base on every level.
+    // (mip 0 for an export). `base_coverage` stays the reference (mip 0's, or the source's after a resize, Note HR6):
+    // coverage is compared with it on every level.
     let source_peak = source_peak(&chain[first_level], p);
     // Quantise clamps mip 0 (Task 31). These exact levels are encoded and handed to Validate (Task 35).
     let inputs: Vec<EncoderInput> = match keep {
@@ -637,4 +651,38 @@ pub fn process_file(
         output: job.output.clone(),
         report,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AlphaCompare, ResizeMode};
+    use crate::coverage::passes;
+    use crate::ops::tests::{cutout_profile, sparse_cutout};
+
+    /// Note HR6: a resized cutout's chain, mip 0 included, is fitted to the source's coverage; without a resize mip 0
+    /// is untouched.
+    #[test]
+    fn a_resized_cutout_keeps_its_source_coverage() {
+        let mut p = cutout_profile();
+        p.resize = ResizeMode::Half;
+        let work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        let mut chain = build_chain_with(&work, &p, None);
+        let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
+        assert_eq!(base, Some(0.125));
+        assert_eq!(chain[0].px.len(), 16);
+        let pass = chain[0]
+            .px
+            .iter()
+            .filter(|q| passes(crate::analyse::code8(q[3]), 128, AlphaCompare::Ge))
+            .count();
+        assert_eq!(pass, 2);
+
+        let p = cutout_profile();
+        let work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        let mut chain = build_chain_with(&work, &p, None);
+        let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
+        assert_eq!(base, Some(0.125));
+        assert_eq!(chain[0], work.img);
+    }
 }

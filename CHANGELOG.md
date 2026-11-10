@@ -2,6 +2,7 @@
 
 ## 3.0.0 (Unreleased)
 
+- A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Such textures re-encode once.
 - The line shown when the toast's Undo comes too late (the restored edits were already undone or edited over) now says: press Ctrl+Z to undo or Ctrl+Y to redo.
 - A file link (symlink) whose target is in the output folder is no longer read as an input when the output folder is inside the input folder; folder links were already skipped.
 - The GUI now also records an alpha the scanned meshes drop (`remove` on a colour map whose alpha varies) in `sdc.toml`, like every other mesh verdict, so `sdc convert` plans it the same. See docs/wiki/GUI-Problems.md#what-the-gui-writes-on-its-own.

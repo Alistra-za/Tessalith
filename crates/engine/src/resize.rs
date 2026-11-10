@@ -291,6 +291,7 @@ mod tests {
             domain,
             roughness_r_squared: false,
             nonfinite_samples: 0,
+            source_coverage: None,
         }
     }
     fn close(a: f32, b: f64) -> bool {

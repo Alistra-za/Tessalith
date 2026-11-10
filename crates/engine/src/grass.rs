@@ -123,6 +123,7 @@ pub(crate) fn build(
         domain: Domain::Stored,
         roughness_r_squared: false,
         nonfinite_samples: tw.nonfinite_samples + bw.nonfinite_samples,
+        source_coverage: None,
     };
     Ok((work, chain))
 }
