@@ -62,7 +62,7 @@ Build folders fill the drive fast: one worktree's `target/` reaches 50–170 GB.
 - **Path case folding:** game-path keys (meshes, scan, BSA) fold ASCII only, while set ids and `[files]` keys fold Unicode (Note BF).
 
 ## Mistakes log
-- Before you start, read `.claude/mistakes/<section>.md` for the area you work in, and `.claude/mistakes/general.md`. The sections are the section table of `.claude/workflows/trace-debug.js` (E1–E6, G1–G7, S1, S2, R1–R4), as lower-case file names.
+- Before you start, read `.claude/mistakes/<section>.md` for the area you work in, and `.claude/mistakes/general.md`. The sections are the section table of `.claude/workflows/trace-debug.js` (E1–E6, G1–G8, S1, S2, R1–R4), as lower-case file names.
 - When something goes wrong that the next agent would repeat, append one line: `- YYYY-MM-DD <what went wrong> → <what to do instead> (<where: file or command>)`. `.claude/mistakes/README.md` has the rules.
 
 ## Where things are
