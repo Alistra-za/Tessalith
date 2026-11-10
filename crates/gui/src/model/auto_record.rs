@@ -1,14 +1,14 @@
 //! Note FC1 (amends U3/U5): what the settled plan decided on its own is written into `sdc.toml`, so Save keeps it and
 //! `sdc convert` plans the same. An accepted High suggestion (mesh-vote and GRAS sub-types are High suggestions too)
-//! writes `subtype`; a mesh-alpha verdict writes `alpha.policy` and its threshold. A written value is a plain project
-//! value, as if the user had accepted it: later evidence never rewrites it.
+//! writes `subtype`; a mesh-alpha verdict (`remove` too, Note HR2) writes `alpha.policy` and its threshold. A written
+//! value is a plain project value, as if the user had accepted it: later evidence never rewrites it.
 //!
 //! R5 (amends R1): a user action that re-types (a set-shader pick, PBR follow, a preset alias change) treats an
 //! untouched recorded sub-type, one equal to what auto-accept picks from the plan, as not set, as before FC1. Scan
 //! evidence still never rewrites one.
 use super::items::{ItemKind, ItemStatus};
 use super::{fields, AppModel};
-use engine::config::{AlphaPolicy, Subtype};
+use engine::config::Subtype;
 use engine::policy::{AcceptSuggestions, Provenance};
 use engine::shader::{member_subtype, Shader};
 use engine::suggest::Confidence;
@@ -157,10 +157,8 @@ impl AppModel {
                 continue;
             };
             let st = fields::auto_subtype_reason(j).map(|_| json!(j.profile.subtype));
-            // shortcut: a mesh `remove` stays GUI-only. Written as an explicit policy it would stop cs-compact's
-            // opaque-colour rules (owner O1) and change the format; record it once the engine treats both alike.
             let mesh = |f: &str| j.provenance.get(f) == Some(&Provenance::MeshAlpha);
-            let mesh_policy = mesh("alpha.policy") && j.profile.alpha.policy != AlphaPolicy::Remove;
+            let mesh_policy = mesh("alpha.policy");
             let alpha = mesh_policy.then(|| json!(j.profile.alpha.policy));
             let threshold =
                 (mesh_policy && mesh("alpha.threshold")).then(|| json!(j.profile.alpha.threshold));

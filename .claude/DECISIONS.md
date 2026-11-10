@@ -9,8 +9,8 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB
-- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR
+- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH
@@ -20,7 +20,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HR
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB
@@ -373,7 +373,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 ### GUI: Files and Inspector
 
 - The GUI writes the same bytes as the CLI: export saves `sdc.toml` first, so `sdc convert <folder>` reproduces the last export; the GUI re-resolves unsaved edits in memory. [N4]
-- The GUI's automatic decisions (High accepts, evidence-driven sub-type and alpha) are recorded in the project. [FC1]
+- The GUI's automatic decisions (High accepts, evidence-driven sub-type and alpha, a mesh `remove` included) are recorded in the project. [FC1, HR2]
 - Anything the user must act on is a Problems row with its action; hand remedies are row buttons; a feature clash offers to turn off either feature. [FC3, FC10, FN5]
 - No codes in the UI: rows and banners say what to do; the code is on hover and in the Messages log. A row about a missing or unused map says which. [FB8, HC2]
 - One word per concept (Words section in `docs/gui.md`), one accent colour. [FC9]
@@ -463,7 +463,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Exe icon and version resource. [AY1, AY2]
 - A path that is not Unicode does not stop `gui.toml` saving; an unreadable `gui.toml` is kept. [CV21, BR8]
 - Test seams other tests rely on: `sync_layout_at(ctx, now)` with a temp `gui.toml`; `PickerBackend` fakes; `MeshesModel::procs` with `meshes::no_procs` so the host's PGPatcher cannot pause scans; `rename::plan_calls()`. [AG20, AG44, AG111, FA8]
-- OPEN: a mesh `remove` on a varying-alpha colour map is not recorded in `sdc.toml` ("owner decides"). [FC]
 - OPEN: defer the full plan's `request()` by one poll. [FL]
 - OPEN: surface a mesh-vote database error in the planner (parked as minor). [U]
 - OPEN: the restore toast carries Undo for 20 s, but Ctrl+Z only says "use Undo or Redo". [FB14]
@@ -1349,3 +1348,8 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 - **HI16 Unticking a shared helper writes `helper.role = "none"` on its one `[files]` row (agent ruling).** Every set that shares it stops using it, and the `share` lines stay; the tick's hover says "Also used by {n} other sets: they stop using it too." ("1 other set: it stops …" for one). Undo takes it back.
 - **HI17 The 3D settings window is aligned (agent ruling).** It draws the texture panel, so its rows use the same two columns; at its default 460 px they stay inside it.
 - **HI18 The preview's settings strip and the Advanced drawer show no `?` (agent ruling).** The strip's labels are about 90 px and already cut short, and in the drawer at 280 px a `?` pushed every combo about 4 px past its edge; there the label's hover carries the help (with the full label where it is cut short).
+
+## Note HR — seven OPEN items closed (main team, 2026-11-09)
+
+- **HR1 A `remove` written by an override is opaque colour to the rules (agent ruling, owner confirmed 2026-11-09).** On a sub-type whose alpha the mesh decides (`Subtype::alpha_from_mesh`), when the source alpha varies and the winning `alpha.policy` override (`[files]` or `--set`, the last that applies) is `remove`, `layered_profile_with` matches the rules on alpha `none`, as for the mesh's own `remove` (owner O1), so cs-compact gives BC1. A `remove` from a preset or config table is unchanged: the rules still see the real alpha. Tests `mesh_alpha::an_explicit_remove_on_varying_alpha_matches_the_mesh_remove`, `a_recorded_remove_in_the_project_file_is_bc1_under_compact`, `a_later_override_over_a_remove_keeps_compact_off_bc1`.
+- **HR2 The GUI records a mesh `remove` (owner).** `record_auto_decisions` writes every mesh-alpha verdict, `remove` included, as `alpha.policy` in `sdc.toml` (amends FC1; closes OPEN [FC]); the threshold is still written only when the mesh set it, and an Undo stays undone. With HR1 the CLI plans the same format from the text. Test `auto_accept::a_mesh_remove_is_recorded_and_stays_undone`.

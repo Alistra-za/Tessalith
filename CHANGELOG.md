@@ -2,6 +2,8 @@
 
 ## 3.0.0 (Unreleased)
 
+- The GUI now also records an alpha the scanned meshes drop (`remove` on a colour map whose alpha varies) in `sdc.toml`, like every other mesh verdict, so `sdc convert` plans it the same. See docs/wiki/GUI-Problems.md#what-the-gui-writes-on-its-own.
+- An explicit `alpha.policy = "remove"` (a `[files]` entry or `--set`) on a colour map whose alpha varies is now opaque colour to the preset's rules, as a mesh `remove` is: under cs-compact such a file is BC1, not BC7.
 - The setting rows of the centre panel (one texture, or several in the bulk panel) and the Helper tick have a **?** at the end of the label; hovering it, or the label, says what the row does, also while the row is greyed out. The preview's settings strip and the Advanced drawer show the help on their labels only. Helper role, the Undecided box's rows and the helper panel's other rows have no **?**. See docs/wiki/GUI-Texture-Panel.md#changing-a-setting.
 - The alpha question has a **Confirm** button beside its dropdown, in the texture panel, Problems and Review; it keeps the proposed type. In the texture panel the question is an **Alpha** row lined up with the Alpha row below, and while it is open the rows below show the proposal (nothing is written until you answer). See docs/wiki/GUI-Texture-Panel.md#deciding.
 - In the texture panel, **Helper** is a tick under Sub-type. Ticking it swaps Sub-type for the role list ("Pick a role…") and writes nothing until a role is picked; unticking a helper writes `helper.role = "none"`, as **Not a helper** did, which leaves the role list. A file you unticked reads "set by you" with a reset. A failed or skipped image keeps the tick. See docs/wiki/Texture-Packing.md#helper-settings.

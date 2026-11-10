@@ -614,9 +614,9 @@ fn picking_a_type_in_the_row_writes_what_the_old_buttons_wrote() {
         .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
 }
 
-/// Note FM35: a texture a mesh decided is Ready, not asked. A mesh `remove` is the case that keeps `mesh:alpha` (a
-/// non-remove mesh type is written into the project at once, `auto_record`), so the panel's Alpha row is the one
-/// dropdown, on `Remove`, with the source beside it.
+/// Note FM35: a texture a mesh decided is Ready, not asked. Note HR2: a mesh `remove` is written into the project at
+/// once like any mesh verdict (`auto_record`), so the panel's Alpha row is the one dropdown, on `Remove`. (The
+/// `mesh:alpha` hint text is pinned in `fields.rs`.)
 #[test]
 fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
     let d = tempfile::tempdir().unwrap();
@@ -649,7 +649,7 @@ fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
         ),
         (
             engine::config::AlphaPolicy::Remove,
-            "mesh:alpha".to_string()
+            "project_file".to_string()
         )
     );
     assert!(item.decisions.is_empty(), "{:?}", item.decisions);
@@ -660,9 +660,8 @@ fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
     assert!(!problems(h.state())
         .iter()
         .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
-    // The Alpha row's dropdown is on the mesh's type and its hint says where it came from.
+    // The Alpha row's dropdown is on the mesh's type.
     assert!(h
         .query_all_by_role(egui::accesskit::Role::ComboBox)
         .any(|n| n.accesskit_node().value().as_deref() == Some("Remove")));
-    h.get_by_label("from the meshes that use this texture");
 }

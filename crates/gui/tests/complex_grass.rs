@@ -310,15 +310,20 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
     assert_eq!(p.file_value("plants/g.png", "format"), None);
     let n = m.history.undo.len();
     // Note FC1: the re-type is then recorded in the project as its own automatic step.
-    // (Every file of the folder: this is the first plan that accepts High suggestions.)
+    // (Every file of the folder: this is the first plan that accepts High suggestions.) Note HR2: the GRAS shape has
+    // no alpha property, so the mesh's `remove` is recorded too and the step counts values.
     let label = &m.history.undo[n - 1].label;
     assert!(
-        label.starts_with("Set ") && label.ends_with(" types automatically"),
+        label.starts_with("Set ") && label.ends_with(" values automatically"),
         "{label}"
     );
     assert_eq!(
         p.file_value("plants/g.png", "subtype"),
         Some(serde_json::json!("complex_grass"))
+    );
+    assert_eq!(
+        p.file_value("plants/g.png", "alpha.policy"),
+        Some(serde_json::json!("remove"))
     );
     assert_eq!(m.history.undo[n - 2].label, "Encoding follows type");
     assert_eq!(
