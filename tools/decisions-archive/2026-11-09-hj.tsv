@@ -1,0 +1,2 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- One match key per entry; a renamed set gets no extra match but carries `match_diffuse`. [AN1, AN2, AA8]	Digest		back	HJ		partial	2026-11-09		goes: a renamed set gets no extra match (HJ3: a second match row or path_contains writes slot commands); stays: one match key and match_diffuse on a plain rename

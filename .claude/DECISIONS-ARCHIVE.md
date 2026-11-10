@@ -614,6 +614,9 @@ ARCHIVED (wording before the edit; superseded in part by Note GW4, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 - Sets: only created sets can be deleted; a set whose files are all gone still shows, as missing; delete and order are GUI-only. [P2, P3, P18]
 
+ARCHIVED (wording before the edit; superseded in part by Note HJ, 2026-11-09)
+- One match key per entry; a renamed set gets no extra match but carries `match_diffuse`. [AN1, AN2, AA8]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)

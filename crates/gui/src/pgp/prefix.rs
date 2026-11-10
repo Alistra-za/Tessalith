@@ -264,17 +264,9 @@ pub const NO_MATCH: &str = "this entry matches nothing";
 /// The warning under a + row with no path yet (`matchN = ""`, owner 2026-10-12). It is not written to the JSON.
 pub const EMPTY_ROW: &str = "this row matches nothing until a path is entered";
 
-/// What the matching UI says on a renamed set (DECISIONS AN1).
+/// What the matching UI says on a set renamed in `Key` form (DECISIONS AN1, HJ3).
 pub const RENAMED_MATCH_NOTE: &str =
     "renamed: matches by diffuse (PGPatcher rename needs match_diffuse)";
-/// Why a renamed set takes no extra match (DECISIONS AN2).
-pub const RENAMED_ONE_MATCH: &str =
-    "renamed: matches by diffuse (PGPatcher rename needs match_diffuse); a renamed set takes no extra match";
-
-/// The marker under a renamed set's extra match row and its `path_contains` (AN2).
-pub const NOT_WRITTEN: &str = "not written: a renamed set matches by its diffuse only";
-pub const PATH_CONTAINS_NOT_WRITTEN: &str =
-    "path_contains not written: a renamed set matches by its diffuse only";
 
 /// The match rows of a set: its active matches plus the empty + rows (`matchN = ""`, N ≥ 2).
 fn match_rows(s: &Settings, derived: &str) -> usize {
@@ -284,35 +276,40 @@ fn match_rows(s: &Settings, derived: &str) -> usize {
     active_matches(s, derived).len() + empty
 }
 
-/// DECISIONS AN2: the refusal of an edit of `key` to `v` that would give a renamed set a second match row or a
-/// `path_contains`. Editing or removing what it has, and any edit of a set without a rename, is fine.
-pub fn extra_match_refusal(
-    s: &Settings,
-    derived: &str,
-    key: &str,
-    v: Option<&Value>,
-) -> Option<&'static str> {
-    // A renamed entry matches by `match_diffuse` alone, so `path_contains` is never written next to it (AN1).
-    if key == "path_contains" {
-        let adds = v
-            .and_then(Value::as_str)
-            .is_some_and(|t| !t.trim().is_empty())
-            && text(s, key).is_none();
-        return (adds && text(s, "rename").is_some()).then_some(RENAMED_ONE_MATCH);
+/// How a set's `rename` reaches PGPatcher (DECISIONS HJ3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenameForm {
+    /// No rename.
+    None,
+    /// A file name on a set with at most one match row and no `path_contains`: `match_diffuse` + `rename` (AN1).
+    Key,
+    /// Any other rename: the entry keeps its matches and names every filled slot at the renamed files.
+    Slots,
+}
+
+/// The form of set `s`'s rename (DECISIONS HJ3).
+pub fn rename_form(s: &Settings, derived: &str) -> RenameForm {
+    match text(s, "rename") {
+        None => RenameForm::None,
+        Some(r)
+            if !r.contains(['\\', '/'])
+                && match_rows(s, derived) <= 1
+                && text(s, "path_contains").is_none() =>
+        {
+            RenameForm::Key
+        }
+        Some(_) => RenameForm::Slots,
     }
-    let is_match = key
-        .strip_prefix("match")
-        .is_some_and(|n| n.len() == 1 && (b'1'..=b'8').contains(&n.as_bytes()[0]));
-    if !is_match || text(s, "rename").is_none() {
-        return None;
+}
+
+/// The prefix PGPatcher fills the set's slots from when the entry names none: the renamed one in `Key` form, else the
+/// matched one (DECISIONS HJ3). `None` on a bad path.
+pub fn default_prefix(s: &Settings, derived: &str) -> Option<String> {
+    match rename_form(s, derived) {
+        RenameForm::Key => prefix_of(s, derived),
+        _ => matched_prefix(s, derived),
     }
-    let mut after = s.clone();
-    match v {
-        Some(v) => after.insert(key.to_string(), v.clone()),
-        None => after.remove(key),
-    };
-    let n = match_rows(&after, derived);
-    (n > 1 && n > match_rows(s, derived)).then_some(RENAMED_ONE_MATCH)
+    .ok()
 }
 
 /// The PGPatcher lock key of slot `n` (DECISIONS AN5). Slot 5 has none: `lock_cubemap` clears the cubemap.
@@ -385,9 +382,11 @@ fn matched_prefix(s: &Settings, derived: &str) -> Result<String, PrefixError> {
 /// `match_diffuse` it keeps `textures\pbr` in front of the match and appends the rename. Without it, it substitutes
 /// `\` + rename for the whole path and finds no file, so the entry patches nothing (PGPatcher 1.2.0 log). A hit
 /// lands on the renamed files only when its texture is that `match_diffuse` (PGPatcher cuts the matched path by its
-/// length); `pitfalls` warns otherwise. `None` without a rename or with a bad one.
+/// length); AF8 warns otherwise. `None` without a rename, with a bad one, or in `Slots` form (HJ3).
 pub fn json_rename(s: &Settings, derived: &str) -> Option<(String, String)> {
-    text(s, "rename")?;
+    if rename_form(s, derived) != RenameForm::Key {
+        return None;
+    }
     let full = prefix_of(s, derived).ok()?;
     let base = matched_prefix(s, derived).ok()?;
     let rel = |p: &str| strip_ci(p, "textures\\pbr\\").to_string();
@@ -403,31 +402,19 @@ fn match_prefix(n: u8, v: &str) -> String {
 /// Warnings that are never "corrected" (owner, 2026-10-09; F1 DECISIONS V4).
 pub fn pitfalls(s: &Settings, derived: &str) -> Vec<String> {
     let mut out = vec![];
-    // PGPatcher takes the prefix from whichever match hits; without a rename, matches that disagree split the outputs.
+    // PGPatcher takes the prefix from whichever match hits, so matches that disagree split the outputs. A `Slots`-form
+    // rename names the set's own files, but a slot it leaves empty still comes from that prefix (HJ3).
     let mut prefixes: Vec<String> = active_matches(s, derived)
         .iter()
         .map(|(n, v)| match_prefix(*n, v).to_ascii_lowercase())
         .collect();
     prefixes.dedup();
-    let renamed = text(s, "rename").is_some();
-    if prefixes.len() > 1 && !renamed {
+    if prefixes.len() > 1 {
         out.push(
             "match slots point at different textures; the entry applies to whichever hits first; edit the match \
              paths so they point at the same texture"
                 .into(),
         );
-    }
-    // A renamed entry matches by `match_diffuse` only (DECISIONS AN1-AN2): extra match rows are kept, not written.
-    if renamed && match_rows(s, derived) > 1 {
-        out.push(format!(
-            "{RENAMED_MATCH_NOTE}; the extra match slots are not written; remove them"
-        ));
-    }
-    // PGPatcher cuts a `path_contains` hit by `match_diffuse`'s length, a mangled path: not written (AN1).
-    if renamed && text(s, "path_contains").is_some() {
-        out.push(format!(
-            "{RENAMED_MATCH_NOTE}; path_contains is not written; remove it"
-        ));
     }
     // DECISIONS AN6: PGPatcher applies slotN after the locks, so a slot command undoes the lock.
     for n in (1..=8u8).filter(|n| pgp_locked(s, *n) && s.contains_key(&format!("slot{n}"))) {

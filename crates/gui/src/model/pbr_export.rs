@@ -9,8 +9,8 @@ use super::sets::{
 use super::txst_map::record_entries;
 use super::AppModel;
 use crate::pgp::prefix::{
-    check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
-    subsurface_pitfalls,
+    check_file_name, check_json_path, default_prefix, matches_nothing, output_rel, pitfalls,
+    rename_hits_elsewhere, subsurface_pitfalls,
 };
 use crate::pgp::settings::{blocked_by, feature_key, feature_on, Feature, Settings, FEATURE_KEYS};
 use crate::pgp::validate::validate;
@@ -105,14 +105,14 @@ fn slots_of(
             },
             None => continue,
         };
-        // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command. Its slot 3 default
-        // is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an explicit slot is
-        // never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
+        // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command, `prefix` being the
+        // one it fills from by default: a `Slots`-form rename moves the files away from it, so each is named (HJ3).
+        // Its slot 3 default is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an
+        // explicit slot is never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
         let at_own_path = *kind != SlotKind::SkinSk
             && v.pbr
-            && v.prefix
-                .as_deref()
-                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(pre, kind.suffix())));
+            && default_prefix(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(&pre, kind.suffix())));
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
@@ -169,8 +169,8 @@ fn slot_filled(v: &SetView, n: u8) -> bool {
 
 /// Note HL5: a JSON set with no albedo and no texture (own or mapped) for slot 2 or 6 locks it, so PGPatcher keeps
 /// the mesh's own; a lock or `slotN` the user set wins. A filled slot `slots_of` could not name (a kept DDS with no
-/// job) is locked too, whatever its number: PGPatcher would fill it from `textures\pbr\<match>_<suffix>.dds` and
-/// skip the shape.
+/// job) is locked too, whatever its number: PGPatcher would fill it from its default `<prefix>_<suffix>.dds`
+/// (`default_prefix`, under `textures\pbr\`) and skip the shape.
 fn lock_empty_slots(v: &SetView, slots: &BTreeMap<u8, String>, s: &mut Settings) {
     if !v.json || v.pbr {
         return;

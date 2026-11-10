@@ -82,9 +82,12 @@ The entry applies when any of its paths matches. The set's diffuse path is on by
 
 ## Rename
 
-**Rename** (Advanced TruePBR settings) takes a new file name, no folders. Your outputs keep the matched texture's folder under `textures\pbr\` and take the new name. Tessalith writes it as `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. So a renamed set has exactly one match: **+** and **Match on this** are greyed until you clear Rename, and older extra rows say "not written".
+**Rename** (Advanced TruePBR settings) takes a new file name, no folders. Your outputs keep the matched texture's folder under `textures\pbr\` and take the new name.
 
-If your matches point at different textures and Rename is empty, you get a warning: the output name depends on which match hits first. Point them at the same texture.
+- **One match:** Tessalith writes `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. <!-- D:HJ4 -->
+- **More matches or a path contains:** PGPatcher's `rename` would land on a wrong path, so the entry keeps its matches and names each renamed file in a slot command (`slot1`, `slot2`, `slot6` …). A slot you set yourself wins, and a locked slot stays unnamed. <!-- D:HJ3 -->
+
+If your matches point at different textures, you get a warning: PGPatcher looks up every slot without a slot command next to whichever match hits first. Point them at the same texture.
 
 ## NiAlphaProperty
 

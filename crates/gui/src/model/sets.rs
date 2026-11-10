@@ -5,8 +5,8 @@ use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
 use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
-    active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
-    is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
+    active_matches, check_file_name, check_rel_path, derive_match_diffuse, is_path_key, output_rel,
+    prefix_of, slot_match_path, slot_suffixes, strip_lead,
 };
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
@@ -3120,13 +3120,6 @@ impl AppModel {
             Some(Value::String(t)) if is_path_key(key) => Some(Value::from(strip_lead(&t))),
             v => v,
         };
-        // DECISIONS AN2: a renamed set takes no extra match; the controls show the reason.
-        if self.view_of(set).is_some_and(|view| {
-            let derived = view.derived_match.as_deref().unwrap_or("");
-            extra_match_refusal(&view.settings, derived, key, v.as_ref()).is_some()
-        }) {
-            return;
-        }
         let (s_id, k) = (set.to_string(), key.to_string());
         let merge = Some(format!("{set}:{key}"));
         self.edit_docs(&format!("Change {key}"), merge, replan, move |_, d| {

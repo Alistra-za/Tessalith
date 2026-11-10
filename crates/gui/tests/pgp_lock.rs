@@ -1,5 +1,5 @@
-//! Note AN (owner, 2026-10-15): a PGPatcher entry carries one match key (a renamed set matches by `match_diffuse`
-//! only), and the slot menu's "Keep original texture" toggles the slot's PGPatcher `lock_<slot>` key.
+//! Note AN (owner, 2026-10-15): a PGPatcher entry carries one match key (a `Key`-form renamed set matches by
+//! `match_diffuse` only; any other rename writes slot commands, Note HJ3), and the slot menu's "Keep original texture" toggles the slot's PGPatcher `lock_<slot>` key.
 mod support;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
@@ -7,9 +7,7 @@ use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::sets::{set_views, SlotKind};
 use sdc_gui::model::AppModel;
-use sdc_gui::pgp::prefix::{
-    extra_match_refusal, lock_key, pitfalls, RENAMED_MATCH_NOTE, RENAMED_ONE_MATCH,
-};
+use sdc_gui::pgp::prefix::{default_prefix, lock_key, pitfalls, rename_form, RenameForm};
 use sdc_gui::pgp::settings::Settings;
 use sdc_gui::pgp::writer::{document, EntryInput};
 use serde_json::{json, Value};
@@ -59,9 +57,10 @@ fn an_entry_without_a_rename_writes_only_match1() {
     );
 }
 
-/// An old project stored `match1` and an extra `match2` next to the rename: it still exports one match key.
+/// Note HJ3: an old project stored `match1` and an extra `match2` next to the rename: both are written now, with no
+/// `rename` (the slots name the renamed files), and nothing is reported as not written.
 #[test]
-fn an_old_renamed_project_with_stored_matches_exports_one_match_key() {
+fn an_old_renamed_project_with_stored_matches_writes_its_matches() {
     let pairs = [
         ("match1", json!(r"landscape\rock01")),
         ("match2", json!(r"landscape\rock01_n")),
@@ -70,47 +69,58 @@ fn an_old_renamed_project_with_stored_matches_exports_one_match_key() {
     let v = written(&pairs, &[]);
     assert_eq!(
         v,
-        json!({ "match_diffuse": r"landscape\rock01", "rename": r"landscape\boulder" })
+        json!({ "match1": r"landscape\rock01.dds", "match2": r"landscape\rock01_n.dds" })
     );
-    // The extra match is reported as not written.
     let w = pitfalls(&s(&pairs), r"landscape\rock01");
-    assert!(
-        w.iter()
-            .any(|m| m.contains("not written") && m.contains("match_diffuse")),
-        "{w:?}"
-    );
+    assert!(!w.iter().any(|m| m.contains("not written")), "{w:?}");
 }
 
+/// Note HJ3: `Key` form is a file-name rename with at most one match row and no `path_contains`; any other rename is
+/// `Slots` form.
 #[test]
-fn a_renamed_set_refuses_an_extra_match() {
+fn the_rename_form_follows_the_match_rows() {
     let d = r"landscape\rock01";
-    let renamed = s(&[("rename", json!("boulder"))]);
-    let refuse =
-        |st: &Settings, k: &str, v: Option<Value>| extra_match_refusal(st, d, k, v.as_ref());
+    let form = |pairs: &[(&str, Value)]| rename_form(&s(pairs), d);
+    let r = ("rename", json!("boulder"));
+    assert_eq!(form(&[]), RenameForm::None);
+    assert_eq!(form(&[("match2", json!("x_n"))]), RenameForm::None);
+    assert_eq!(form(std::slice::from_ref(&r)), RenameForm::Key);
     assert_eq!(
-        refuse(&renamed, "match2", Some(json!(r"landscape\rock01_n"))),
-        Some(RENAMED_ONE_MATCH)
+        form(&[r.clone(), ("match1", json!(r"landscape\other"))]),
+        RenameForm::Key
     );
-    // A new empty + row is an extra match too.
+    // match1 off and match2 on: still one row.
     assert_eq!(
-        refuse(&renamed, "match3", Some(json!(""))),
-        Some(RENAMED_ONE_MATCH)
+        form(&[r.clone(), ("match1", json!("")), ("match2", json!("x_n"))]),
+        RenameForm::Key
     );
-    // match1 back on (key removed) next to an active match2.
-    let off = s(&[
-        ("match1", json!("")),
-        ("match2", json!(r"landscape\rock01_n")),
-        ("rename", json!("boulder")),
-    ]);
-    assert_eq!(refuse(&off, "match1", None), Some(RENAMED_ONE_MATCH));
-    // Editing the one match, removing it, or any match without a rename is fine.
     assert_eq!(
-        refuse(&renamed, "match1", Some(json!(r"landscape\other"))),
-        None
+        form(&[r.clone(), ("match2", json!("x_n"))]),
+        RenameForm::Slots
     );
-    assert_eq!(refuse(&renamed, "match1", Some(json!(""))), None);
-    assert_eq!(refuse(&s(&[]), "match2", Some(json!("x_n"))), None);
-    assert!(RENAMED_ONE_MATCH.starts_with(RENAMED_MATCH_NOTE));
+    // A new empty + row is a match row too.
+    assert_eq!(form(&[r.clone(), ("match3", json!(""))]), RenameForm::Slots);
+    assert_eq!(
+        form(&[r.clone(), ("path_contains", json!("rock"))]),
+        RenameForm::Slots
+    );
+    assert_eq!(
+        form(&[
+            r.clone(),
+            ("match1", json!("")),
+            ("path_contains", json!("rock"))
+        ]),
+        RenameForm::Slots
+    );
+    // The default prefix follows: the renamed one in Key form, the matched one in Slots form.
+    assert_eq!(
+        default_prefix(&s(std::slice::from_ref(&r)), d).as_deref(),
+        Some(r"textures\pbr\landscape\boulder")
+    );
+    assert_eq!(
+        default_prefix(&s(&[r, ("match2", json!(r"landscape\rock01_n"))]), d).as_deref(),
+        Some(r"textures\pbr\landscape\rock01")
+    );
 }
 
 fn settings_of(m: &AppModel) -> Settings {
@@ -122,18 +132,18 @@ fn settings_of(m: &AppModel) -> Settings {
 }
 
 #[test]
-fn the_model_refuses_an_extra_match_on_a_renamed_set_and_exports_one_key() {
+fn the_model_takes_an_extra_match_on_a_renamed_set_and_exports_its_matches() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     m.set_json_value(SET, "rename", Some(json!("boulder")));
     m.set_json_value(SET, "match2", Some(json!(r"landscape\rock01_n")));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    assert!(!settings_of(&m).contains_key("match2"), "refused");
+    assert!(settings_of(&m).contains_key("match2"), "taken (HJ3)");
     let entries = json_entries(&m);
     let (_, e) = entries.iter().find(|(v, _)| v.id == SET).unwrap();
     let v = document(std::slice::from_ref(e)).to_value()["entries"][0].clone();
     assert!(
-        v.get("match1").is_none() && v.get("match_diffuse").is_some(),
+        v.get("match1").is_some() && v.get("match2").is_some() && v.get("match_diffuse").is_none(),
         "{v}"
     );
 }
@@ -384,10 +394,10 @@ fn the_original_textures_are_read_off_the_ui_thread_and_again_after_a_scan() {
     assert_eq!(m.original_textures(SET, 2), Some(None));
 }
 
-/// Coordinator ruling: `path_contains` on a renamed set is not written (PGPatcher would mangle its hits' paths) and
-/// cannot be added; one already there stays editable.
+/// Note HJ3: `path_contains` on a renamed set is written with its matches and no `rename` (PGPatcher would mangle a
+/// renamed hit's path, so the slots name the renamed files instead); nothing is reported as not written.
 #[test]
-fn a_renamed_set_writes_no_path_contains_and_refuses_a_new_one() {
+fn a_renamed_set_with_path_contains_writes_it_without_the_rename() {
     let d = r"landscape\rock01";
     let pairs = [
         ("path_contains", json!("rock")),
@@ -395,29 +405,12 @@ fn a_renamed_set_writes_no_path_contains_and_refuses_a_new_one() {
     ];
     assert_eq!(
         written(&pairs, &[]),
-        json!({ "match_diffuse": r"landscape\rock01", "rename": r"landscape\boulder" })
+        json!({ "match1": r"landscape\rock01.dds", "path_contains": "rock" })
     );
     let w = pitfalls(&s(&pairs), d);
-    assert!(
-        w.iter().any(|m| m.contains("path_contains is not written")),
-        "{w:?}"
-    );
-    let renamed = s(&[("rename", json!("boulder"))]);
-    assert_eq!(
-        extra_match_refusal(&renamed, d, "path_contains", Some(&json!("rock"))),
-        Some(RENAMED_ONE_MATCH)
-    );
-    assert_eq!(
-        extra_match_refusal(&s(&pairs), d, "path_contains", Some(&json!("rocks"))),
-        None,
-        "editing the one already there"
-    );
-    assert_eq!(
-        extra_match_refusal(&s(&[]), d, "path_contains", Some(&json!("rock"))),
-        None
-    );
-    // Not renamed: written as before.
-    assert_eq!(written(&pairs[..1], &[])["path_contains"], json!("rock"));
+    assert!(!w.iter().any(|m| m.contains("not written")), "{w:?}");
+    // Not renamed: written the same way.
+    assert_eq!(written(&pairs[..1], &[]), written(&pairs, &[]));
 }
 
 #[test]

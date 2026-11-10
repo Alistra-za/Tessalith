@@ -147,7 +147,8 @@ fn fixed_default_block() -> Vec<(String, Node)> {
 /// The entry for one set: only the set's own settings, under the per-kind rules, in schema order.
 fn object(own: &Settings, derived: &str, slots: &BTreeMap<u8, String>) -> Vec<(String, Node)> {
     let mut out = vec![];
-    // One match key per entry (DECISIONS AN1): a renamed entry matches by its `match_diffuse` only.
+    // One match key per entry (DECISIONS AN1): a `Key`-form rename matches by its `match_diffuse` only; a `Slots`-form
+    // one has no `json_rename` and keeps its matches, its slots naming the renamed files (HJ3).
     let renamed = json_rename(own, derived);
     let matches = if renamed.is_some() {
         vec![]
@@ -194,12 +195,12 @@ fn object(own: &Settings, derived: &str, slots: &BTreeMap<u8, String>) -> Vec<(S
                     .find(|(m, _)| *m == n)
                     .map(|(_, v)| Node::Scalar(json!(match_value(v)))),
                 // The typed file name becomes the renamed path, with the `match_diffuse` PGPatcher renames from
-                // (owner, 2026-10-14; DECISIONS V3, AA8); it replaces the match slots (AN1).
+                // (owner, 2026-10-14; DECISIONS V3, AA8); it replaces the match slots (AN1). `Key` form only (HJ3).
                 None if k.key == "rename" => renamed.clone().map(|(diffuse, r)| {
                     out.push(("match_diffuse".to_string(), Node::Scalar(json!(diffuse))));
                     Node::Scalar(json!(r))
                 }),
-                // A renamed entry writes no `path_contains` (AN1).
+                // A `Key`-form entry has no `path_contains` to write (AN1, HJ3).
                 None if k.key == "path_contains" && renamed.is_some() => None,
                 // Wave 2 #9: PGPatcher never converts `/`, so these path texts are written with `\` (as in a section).
                 None if matches!(k.key, "path_contains" | "nif_filter") => v

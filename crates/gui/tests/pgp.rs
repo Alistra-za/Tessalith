@@ -510,16 +510,13 @@ fn forward_slashes_in_json_paths_block() {
 fn pitfalls_are_reported_not_fixed() {
     let w = pitfalls(&s(&[("match8", json!(r"x\leaf_s.dds"))]), "x");
     assert!(w.iter().any(|m| m.contains("match8")), "{w:?}");
-    // A rename is a file name now, so there is no "full path" pitfall (owner, 2026-10-12). Its extra match2 is not
-    // written (AN2), and that is the only warning.
+    // A rename is a file name now, so there is no "full path" pitfall (owner, 2026-10-12). Its extra match2 is written
+    // with slot commands (HJ3): no warning.
     let w = pitfalls(
         &s(&[("match2", json!(r"a\b_n.dds")), ("rename", json!("d"))]),
         r"a\b",
     );
-    assert!(
-        w.len() == 1 && w[0].contains("extra match slots are not written"),
-        "{w:?}"
-    );
+    assert!(w.is_empty(), "{w:?}");
     assert!(pitfalls(&s(&[]), r"landscape\rock01").is_empty());
     let w = pitfalls(&s(&[("match1", json!(""))]), "x");
     assert!(
@@ -1135,10 +1132,10 @@ fn slot_matches_hit_the_unpatched_mesh_and_land_on_the_sdc_prefix() {
 }
 
 /// Task 3 review fix: PGPatcher takes the prefix from whichever match hits, not the lowest active one. When the active
-/// matches derive different prefixes the set warns (advising to edit the match paths). With a rename only
-/// `match_diffuse` is written (AN1), and the extra match is reported as not written.
+/// matches derive different prefixes the set warns (advising to edit the match paths), with a rename too: its extra
+/// match is written in Slots form (HJ3).
 #[test]
-fn divergent_matches_warn_and_a_rename_pins_the_prefix() {
+fn divergent_matches_warn_with_or_without_a_rename() {
     let default = document(&[]).to_value()["default"].clone();
     let mut mesh = pgpsim::MaterialState::builtin_default();
     mesh.set_slot_raw(0, r"textures\c\other.dds");
@@ -1165,21 +1162,25 @@ fn divergent_matches_warn_and_a_rename_pins_the_prefix() {
                 && !m.contains("Rename")),
         "{w:?}"
     );
-    // With a rename the extra match is not written (AN1-AN2), so a mesh with only the other texture is not hit.
+    // With a rename the extra match is written too (Slots form, HJ3): a mesh with only the other texture is hit, at
+    // that texture's prefix, and the warning stays (a slot the set leaves empty comes from there).
     let pairs = [("match2", json!(r"b\other_n")), ("rename", json!("one"))];
     let e = entry(&pairs, r"a\one");
     let w = pitfalls(&e.settings, r"a\one");
     assert!(
         w.iter()
-            .any(|m| m.contains("extra match slots are not written")),
+            .any(|m| m.contains("match slots point at different textures")),
         "{w:?}"
     );
     let mut other = pgpsim::MaterialState::builtin_default();
     other.set_slot_raw(0, r"textures\c\x.dds");
     other.set_slot_raw(1, r"textures\b\other_n.dds");
     let prepared = pgpsim::prepare(&written(&e), &default);
-    assert_eq!(pgpsim::matched_path(&prepared, &other.slots), None);
-    // A hit through the first matched texture lands on sdc's prefix exactly.
+    assert_eq!(
+        pgpsim::matched_path(&prepared, &other.slots),
+        Some(r"textures\pbr\b\other".into())
+    );
+    // A hit through the first matched texture lands on the matched prefix.
     let mut first = pgpsim::MaterialState::builtin_default();
     first.set_slot_raw(0, r"textures\a\one.dds");
     assert_eq!(
@@ -1248,17 +1249,19 @@ fn a_rename_is_a_file_name_in_the_matched_folder() {
         .is_none());
 }
 
-/// The renamed entry lands where sdc writes the files, through pgpsim, with no leading `\` (DECISIONS AA8). Without
+/// The renamed entry lands on `default_prefix`, through pgpsim, with no leading `\` (DECISIONS AA8, HJ3). Without
 /// `match_diffuse`, PGPatcher swaps `\` + rename in for the whole path: real PGPatcher 1.2.0 then patched nothing (owner's
 /// robesf2 test, 2026-10-14).
 #[test]
-fn a_renamed_entry_lands_on_the_sdc_prefix_for_slot_matches_and_path_contains() {
+fn a_renamed_entry_lands_on_its_default_prefix_for_slot_matches_and_path_contains() {
     let default = document(&[]).to_value()["default"].clone();
     let mut mesh = pgpsim::MaterialState::builtin_default();
     mesh.set_slot_raw(0, r"textures\landscape\rock01.dds");
     mesh.set_slot_raw(1, r"textures\landscape\rock01_n.dds");
     let nif = r"meshes\landscape\rock01.nif";
     let derived = r"landscape\rock01";
+    // Key form lands on the renamed prefix; the path_contains cases are Slots form (HJ3): PGPatcher's prefix is the
+    // matched one, and the slot commands name the renamed files.
     let cases: [(&str, Vec<(&str, Value)>); 3] = [
         ("slot match", vec![("rename", json!("boulder"))]),
         (
@@ -1285,8 +1288,13 @@ fn a_renamed_entry_lands_on_the_sdc_prefix_for_slot_matches_and_path_contains() 
             pgpsim::shape_matches(&prepared, nif, &mesh.slots),
             "{label}"
         );
-        let want = prefix_of(&e.settings, derived).unwrap();
-        assert_eq!(want, r"textures\pbr\landscape\boulder", "{label}");
+        let want = default_prefix(&e.settings, derived).unwrap();
+        let name = if label == "slot match" {
+            "boulder"
+        } else {
+            "rock01"
+        };
+        assert_eq!(want, format!(r"textures\pbr\landscape\{name}"), "{label}");
         assert_eq!(
             pgpsim::matched_path(&prepared, &mesh.slots),
             Some(want.to_ascii_lowercase()),

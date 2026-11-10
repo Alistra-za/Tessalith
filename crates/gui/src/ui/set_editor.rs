@@ -19,9 +19,7 @@ use crate::model::sets::{
     views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
-use crate::pgp::prefix::{
-    active_matches, extra_match_refusal, lock_key, match_toggle, pgp_locked, slot_match_path,
-};
+use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
 use eframe::egui;
 use engine::config::{ColorTag, Format, PackRecipe, RawMap, Target};
 use engine::events::RecipeReport;
@@ -740,15 +738,8 @@ fn row(
                     .iter()
                     .any(|(m, _)| *m == n);
                 let path = slot_match_path(derived, slot.suffix());
-                // AN2: a renamed set takes no second match.
-                let (k, val) = match_toggle(n, true, &path);
-                // Audit lead 17: a read-only sdc-project.toml is the reason first.
-                let refused = model.sets_read_only_reason().or_else(|| {
-                    (!on)
-                        .then(|| extra_match_refusal(&v.settings, derived, &k, val.as_ref()))
-                        .flatten()
-                        .map(str::to_string)
-                });
+                // Audit lead 17: a read-only sdc-project.toml is the reason.
+                let refused = model.sets_read_only_reason();
                 if flag(
                     ui,
                     refused.is_none(),
