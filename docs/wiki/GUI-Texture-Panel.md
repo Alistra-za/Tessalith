@@ -4,18 +4,18 @@ For anyone with one texture selected who wants to change how it encodes, or to a
 
 ## Reading the panel
 
-The centre column groups a texture's settings as Type, Colour, Alpha, Mipmaps and Compression. Each value says where it came from, for example "from sdc.toml", "suggested" or "from the meshes that use this texture". A line at the top gives the output format, size, mip count and VRAM; greyed options carry their reason on hover.
+The centre column groups a texture's settings as Type, Alpha, Mipmaps and Compression. Each value says where it came from, for example "from sdc.toml", "suggested" or "from the meshes that use this texture". A line at the top gives the output format, size, mip count and VRAM; greyed options carry their reason on hover.
 
 ![The settings of a fern texture.](../img/gui/GUI-Texture-Panel/texture-panel.png)
 
 ## Changing a setting
 
-Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields).
+Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields). Hover the **?** beside a row, or its label, for what the row does; it still works while the row is greyed out.
 
 | Row | Key |
 |---|---|
 | Sub-type | `subtype` |
-| Content, DDS tag | `color.content`, `color.tag` |
+| Helper (images only) | `helper.role`: [Texture packing](Texture-Packing.md#helper-settings) |
 | Alpha, Threshold, Comparison | `alpha.policy`, `alpha.threshold`, `alpha.compare` |
 | Enable parallax (complex `_m` only) | `alpha.parallax`: ticked keeps the `_m` alpha as parallax height, unticked writes alpha 0 |
 | Coverage, 1-bit alpha, Exact opaque alpha | `mips.coverage`, `encoder.bc1_alpha`, `alpha.exact_opaque` |
@@ -23,6 +23,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | Baked in (`msn` only) | `channels.msn_source`: [Skin](Skin.md#model-space-normals-msn) |
 | Mipmaps: Levels, Filter, Edge | `mips.levels`, `mips.filter`, `mips.edge` |
 | Format, Effort | `format`, `encoder.effort` |
+| Input content, DDS tag (under Compression) | `color.content`, `color.tag` |
 | BC7 weighting, Perceptual | `encoder.bc7_weights`, `encoder.perceptual` |
 
 - **Normal base level** stores mip 0 at unit length. Pick *Keep as authored* only when the short normals are deliberate.
@@ -51,7 +52,7 @@ An **amber border** means the texture still needs an answer: a Medium or Low sub
 | Question | Controls |
 |---|---|
 | What kind of texture is this? | A sub-type dropdown and **Confirm**. |
-| What does the alpha channel mean? | "Alpha: Cutout (proposed) — confirm" and a dropdown under it already set to the proposal. Pick the type you want, or pick the shown one to confirm it. <!-- D:FM35 --> |
+| What does the alpha channel mean? | An **Alpha** row, the dropdown set to the proposal, and **Confirm**. Pick another type, or press Confirm to keep the proposal. The rows below already read as the proposal. <!-- D:FM35 --> |
 | "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press **Treat as OpenGL (flip green)** if it is an OpenGL map; **Treat as DirectX** undoes it. |
 | A blocking warning | **Acknowledge for this texture**, or **Drop the alpha anyway** when the chosen format discards a varying alpha you've already confirmed: the export writes the texture without its alpha. |
 

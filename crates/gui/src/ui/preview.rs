@@ -163,8 +163,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
             .show(ui, |ui| {
                 // I2: both axes, so settings wider than the panel scroll inside it instead of moving its left edge
                 // under the toolbar (egui cuts an over-wide right panel from the left). Thin bars show without hover.
-                // shortcut: an over-wide combo (Normals) makes the panel scroll sideways (CE20); give each combo an
-                // exact-width slot (ui-rules 3.5) when the settings panel's rows are next reworked (Note FC8).
+                // Its combos have one exact width (Note HI3).
                 ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])

@@ -195,14 +195,10 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
         0
     );
     h.get_by_label("Undecided");
-    for label in [
-        unstated.as_str(),
-        "Colour",
-        "Content",
-        "DDS tag",
-        "Compression",
-    ] {
-        h.get_by_label_contains(label);
+    h.get_by_label_contains(unstated.as_str());
+    // Exact labels: "Input content" and "DDS tag" also name their `?` ("Help: Input content", Note HI9).
+    for label in ["Input content", "DDS tag", "Compression"] {
+        h.get_by_label(label);
     }
     // One frame with a Kaiser profile selected: the live Filter combo and the Edge row draw.
     let d = tempfile::tempdir().unwrap();
@@ -328,9 +324,9 @@ fn the_alpha_dropdown_writes_the_policy_and_the_reset_button_takes_it_back() {
     let mut h = harness(model);
     h.run();
     h.get_by_label("Undecided");
-    // Note FM35: one line and one dropdown, open on the proposed type; the five buttons are gone.
-    h.get_by_label("Alpha: Cutout (proposed) — confirm");
+    // Note FM35, HI7: one dropdown, open on the proposed type, and Confirm; the five buttons are gone.
     h.get_by_label("Alpha type: Cutout");
+    h.get_by_label("Confirm alpha");
     assert_eq!(h.query_all_by_label("Blend").count(), 0);
     pick_alpha(&mut h, "", "Cutout", "Cutout");
     settle(&mut h);
@@ -839,7 +835,10 @@ fn the_settings_strip_is_compact() {
     for group in ["Alpha", "Mipmaps", "Compression"] {
         assert!(h.query_all_by_label_contains(group).count() > 0, "{group}");
     }
-    assert!(h.query_by_label_contains("Colour").is_none());
+    // Note HI2: the colour rows moved into Compression, and the strip still leaves them out.
+    for row in ["Colour", "Input content", "DDS tag"] {
+        assert!(h.query_by_label_contains(row).is_none(), "{row}");
+    }
     assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
 }
 

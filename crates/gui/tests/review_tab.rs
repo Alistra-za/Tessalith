@@ -287,6 +287,48 @@ fn accept_all_explains_an_alpha_proposal() {
     h.get_by_label("Review alpha type: Cutout");
 }
 
+/// Note HI8: Problems and Review each ask the alpha with their own Confirm, and each answers its row. They are tabs
+/// of one bottom panel, so each is checked beside the texture panel, which asks it too.
+#[test]
+fn problems_and_review_have_their_own_confirm() {
+    for surface in ["Problems", "Review"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        m.decide(
+            "landscape/leaf.png",
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        m.select_item("landscape/leaf.png");
+        match surface {
+            "Problems" => m.open_problems(None),
+            _ => m.open_review(),
+        }
+        let mut h = harness(m);
+        h.run();
+        for name in [
+            "Confirm alpha".to_string(),
+            format!("{surface} confirm alpha"),
+        ] {
+            assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}");
+        }
+        press(&mut h, &format!("{surface} confirm alpha"));
+        settle(&mut h);
+        let doc = h.state().project.as_ref().unwrap();
+        assert_eq!(
+            doc.file_value("landscape/leaf.png", "alpha.policy"),
+            Some(serde_json::json!("cutout")),
+            "{surface}"
+        );
+        for name in [
+            "Confirm alpha".to_string(),
+            format!("{surface} confirm alpha"),
+        ] {
+            assert!(h.query_by_label(&name).is_none(), "{name}");
+        }
+    }
+}
+
 /// Review Focus 3.
 #[test]
 fn review_export_is_disabled_with_the_reason_while_read_only() {

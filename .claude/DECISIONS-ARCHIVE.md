@@ -41,6 +41,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GW2, 2026-11-07)
 ARCHIVED (wording before the edit; superseded in part by Note GW3, 2026-11-07)
   - **Planning.** `resize::plan_references` runs in `plan_sets` after the derive step, before shaders, RNM, bakes and `FilePlanned`. Sizes are pass 1's (`cube_facts`, else `input_dims`). A packed or derived map's own size, and its size as a reference, is its sources' common size (`api::job_dims_by`, the FM30 size before `target_dims`); a cube's is its source cell (`cube::layout::source_cell`). The pass recomputes `DIM-RESIZED` only for jobs with a reference (`policy::resized_warning`); a `self` job's warnings stay exactly as `check_profile` made them (unit test `resize::a_self_jobs_dim_resized_is_left_alone`). `DIM-SMALL` stays from `check_profile`, which saw the size without the reference; only a `resize_floor` below 4 could make it stale, since the relative size never falls below the floor.
 
+ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
+  - **One line.** An undecided texture that asks its alpha shows `Alpha: <Type> (proposed) — confirm` (`code_text::alpha_confirm_text`; the type names are the five that the old buttons used). It replaces three lines: the Undecided sentence, the "carries data the format would drop" line with the engine's "non-constant alpha would be discarded", and the Acknowledge button. A row that asks only its alpha has no `Undecided:` prefix; a row that also asks something else keeps the prefix and joins the parts. Only "(proposed)" exists: a texture whose meshes decide its alpha is Ready and never asked, so there is no "(from mesh)" text.
+
+ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
+  - **One dropdown.** `settings_panel::alpha_dropdown` is the control in the Problems row, Review's inline row and the settings box. It opens on the proposal (`items::alpha_asked`: `suggest_alpha` over the cached analysis, else the profile's own policy). Picking an entry, the shown one too, records the answer with the old buttons' write (`alpha.policy` in the texture's own entry through `decide` or `answer_undecided_row`, nothing in `allow`). Enter or Space on a focused Problems row that asks only its alpha confirms the shown type (a row that also asks a sub-type ignores the key, so it never answers just one of the two); Accept all suggestions stays type-only. The `Decide…` menu and the five buttons are gone. The dropdown's accessible name is `Alpha type: <shown>`.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -290,6 +296,9 @@ ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 
 ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL
+
+ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH
 
 ## Digest
 

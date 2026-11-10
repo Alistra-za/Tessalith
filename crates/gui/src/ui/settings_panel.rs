@@ -6,9 +6,9 @@ use super::type_picker::TypeKind;
 use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, not_a_cube, shown_for};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
-    filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
-    weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
-    WEIGHTING, WEIGHTING_OPTIONS,
+    filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_count, mips_on,
+    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, EXR_STRAIGHT_HOVER,
+    HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -18,6 +18,7 @@ use engine::config::{
     AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
     Profile, Subtype, Target, ALPHA_THRESHOLD,
 };
+use engine::helper::HelperRole;
 use engine::policy::{offered, Provenance, ResolvedJob};
 use serde_json::{json, Value};
 
@@ -28,11 +29,26 @@ enum Action {
     Decide(Answer),
     Select(String),
     Reencode(bool),
+    /// Note HI4: a role picked under the ticked Helper box, or `None` (Reset) for the role guessed from the name.
+    HelperRole(Option<HelperRole>),
+}
+
+/// Note HI4: an image's Helper row. `on` is the ticked box before a role is picked, held only in egui temp data (HI5);
+/// `none` is a file the user unticked (`helper.role = "none"`).
+struct HelperTick {
+    on: bool,
+    none: bool,
 }
 
 /// The groups the compact strip keeps (Task 17's preview).
 const COMPACT_GROUPS: [&str; 3] = ["Alpha", "Mipmaps", "Compression"];
-pub(super) const GROUPS: [&str; 5] = ["Type", "Colour", "Alpha", "Mipmaps", "Compression"];
+pub(super) const GROUPS: [&str; 4] = ["Type", "Alpha", "Mipmaps", "Compression"];
+/// Note HI1: the label column's width, on the texture, helper and cubemap rows.
+pub(super) const LABEL_W: f32 = 150.0;
+/// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
+pub const CONTROL_W: f32 = 200.0;
+/// Note HI3: the controls' width in the preview's 280 px strip.
+pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
 const MAX_LEVELS: u32 = 13;
 
@@ -130,7 +146,7 @@ pub fn alpha_options() -> Options {
 /// too, is the answer; each entry's hover says what it does. `None` while nothing is picked. `why` is the hover while
 /// the dropdown is off. `place` starts the AccessKit name ("Problems alpha type: Cutout"), so the dropdowns of the
 /// texture panel (`""`), Problems and Review, which can be on screen together, have distinct names (rule 8.4).
-pub fn alpha_dropdown(
+fn alpha_dropdown(
     ui: &mut egui::Ui,
     id: egui::Id,
     shown: AlphaPolicy,
@@ -158,6 +174,42 @@ pub fn alpha_dropdown(
         r.on_disabled_hover_text(why);
     }
     picked
+}
+
+/// Note HI7: the alpha question, [`alpha_dropdown`] and a Confirm button on one line, in reading order in either
+/// layout direction (a Problems row is right to left). Confirm answers with the shown type, as picking it does. Its
+/// accessible name is "Confirm alpha" after `place` ("Problems confirm alpha"), so the sub-type's "Confirm" stays unique.
+pub fn alpha_question(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    shown: AlphaPolicy,
+    why: &str,
+    place: &str,
+) -> Option<AlphaPolicy> {
+    let confirm = |ui: &mut egui::Ui| {
+        let r = ui.button("Confirm");
+        let name = match place {
+            "" => "Confirm alpha".to_string(),
+            p => format!("{p} confirm alpha"),
+        };
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), &name));
+        let r = r.on_hover_text(format!(
+            "Use {} and close this question",
+            alpha_label(shown)
+        ));
+        let r = match why {
+            "" => r,
+            w => r.on_disabled_hover_text(w),
+        };
+        r.clicked().then_some(shown)
+    };
+    if ui.layout().prefer_right_to_left() {
+        let ok = confirm(ui);
+        alpha_dropdown(ui, id, shown, why, place).or(ok)
+    } else {
+        let picked = alpha_dropdown(ui, id, shown, why, place);
+        picked.or(confirm(ui))
+    }
 }
 
 /// One line on what an alpha meaning does (Note FB8, review C12): the hover of each entry of the alpha dropdown.
@@ -284,7 +336,8 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             opt(json!("off"), "Off"),
         ],
         // A (format, tag) pair, so a pick never leaves a tag the format cannot take; applied with `set_format`.
-        "format" => encoding_options(target, p)
+        // Note HI11: the name alone; the tag is the DDS tag row's.
+        "format" => format_choices(target, p)
             .into_iter()
             .map(|(e, label)| (json!(e), label))
             .collect(),
@@ -580,9 +633,7 @@ fn checkbox_hover(field: &str) -> Option<Option<&'static str>> {
         "alpha.parallax" => Some(PARALLAX_HOVER),
         "encoder.bc1_alpha" => Some(BC1_ALPHA_HOVER),
         "encoder.perceptual" => Some(PERCEPTUAL_HOVER),
-        "alpha.exr_straight" => Some(
-            "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour",
-        ),
+        "alpha.exr_straight" => Some(EXR_STRAIGHT_HOVER),
         "alpha.exact_opaque" => None,
         _ => return None,
     })
@@ -645,6 +696,11 @@ pub struct Ctx<'a> {
     pub target: Target,
     pub busy: bool,
     pub compact: bool,
+    /// Note HI1, HI17: the rows stand in a `LABEL_W` label column and a `CONTROL_W` control column (the texture panel
+    /// in the centre and in the 3D settings window); off in the Advanced drawer and the strip.
+    pub aligned: bool,
+    /// Note HI14: the alpha question is open, so `job` holds the proposal (display only) and the Alpha row says so.
+    pub alpha_asked: bool,
     /// Why the rows' edits are off, shown on their disabled hover: `sdc.toml` is read-only, or (the texture panel,
     /// `AppModel::fix_off`, Note FK) a plan is in flight.
     pub edit_off: Option<String>,
@@ -659,13 +715,167 @@ pub enum RowEdit {
     Clear,
 }
 
+/// A row's label cell (Note HI1): with `aligned`, exactly the label column's width (`LABEL_W` where the row fits) and
+/// cut short with the whole text on hover (rule 3.4); otherwise a plain label. With `help` (Note HI9), a `?` ends the
+/// cell and the label shows the same help on hover.
+pub(super) fn field_label(
+    ui: &mut egui::Ui,
+    aligned: bool,
+    label: &str,
+    help: Option<&str>,
+) -> egui::Response {
+    if !aligned {
+        let Some(t) = help else {
+            return ui.label(label);
+        };
+        return ui
+            .horizontal(|ui| {
+                let l = ui.label(label);
+                help_mark(ui, label, t);
+                help_hover(l, t)
+            })
+            .inner;
+    }
+    let w = column_widths(ui).0;
+    label_slot(ui, w, label, help)
+}
+
+/// An exactly `w` wide label cell, cut short; with `help`, a `?` right-aligned at its end (Note HI9).
+fn label_slot(ui: &mut egui::Ui, w: f32, label: &str, help: Option<&str>) -> egui::Response {
+    control_slot(ui, w, |ui| match help {
+        None => ui.add(egui::Label::new(label).truncate()),
+        Some(t) => {
+            let (l, _) = egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| ui.add(egui::Label::new(label).truncate()),
+                |ui| help_mark(ui, label, t),
+            );
+            help_hover(l, t)
+        }
+    })
+}
+
+/// `t` on hover, also while the row is off (`edit_off`, a lock): a disabled widget shows only its disabled hover.
+fn help_hover(r: egui::Response, t: &str) -> egui::Response {
+    r.on_hover_text(t).on_disabled_hover_text(t)
+}
+
+/// A weak `?` in a small ring that shows `text` on hover (Note HI9), named "Help: {name}" for a screen reader.
+pub(super) fn help_mark(ui: &mut egui::Ui, name: &str, text: &str) -> egui::Response {
+    const D: f32 = 14.0;
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(D, D), egui::Sense::hover());
+    let color = ui.visuals().weak_text_color();
+    let p = ui.painter();
+    p.circle_stroke(rect.center(), D / 2.0 - 0.5, egui::Stroke::new(1.0, color));
+    p.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "?",
+        egui::FontId::proportional(10.0),
+        color,
+    );
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            r.enabled(),
+            format!("Help: {name}"),
+        )
+    });
+    help_hover(r, text)
+}
+
+/// The label and control columns' widths: `LABEL_W` and `CONTROL_W`, both scaled down alike where a row would run
+/// past the visible edge (the centre at 1100 px with the Advanced drawer open; rules 3.1, 3.8). The rest of the row
+/// keeps three gaps, ↺, an elided hint and a margin (rule 3.7): a row as wide as the centre widens it, under the drawer.
+/// Measured from the grid's left edge, so every row of a grid gets the same two widths.
+pub(super) fn column_widths(ui: &egui::Ui) -> (f32, f32) {
+    column_widths_beside(ui, 0.0)
+}
+
+/// `column_widths` for a grid whose control cells also hold a `trail` wide button (the helper panel's ✕ and Reset):
+/// the label column is the same, the control gives up what the button needs where the row would not fit.
+pub(super) fn column_widths_beside(ui: &egui::Ui, trail: f32) -> (f32, f32) {
+    column_widths_at(ui, ui.max_rect().left(), trail)
+}
+
+/// `column_widths_beside` for a grid whose left edge is `left` (the Undecided box lines up with the groups below it).
+fn column_widths_at(ui: &egui::Ui, left: f32, trail: f32) -> (f32, f32) {
+    let s = ui.spacing();
+    let room = ui.clip_rect().right() - left - 4.0 * s.item_spacing.x - 2.0 * s.interact_size.y;
+    let k = (room / (LABEL_W + CONTROL_W)).clamp(0.0, 1.0);
+    let min = s.interact_size.x;
+    let label = (LABEL_W * k).max(min);
+    let control = (CONTROL_W * k).min(room - label - trail);
+    (label, control.max(min))
+}
+
+/// An exactly `w` wide cell (rule 3.5): text in it is cut short, and a combo in it is `w` wide. A slider's rail leaves
+/// room for its value box.
+pub(super) fn control_slot<R>(
+    ui: &mut egui::Ui,
+    w: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let h = ui.spacing().interact_size.y;
+    let layout = egui::Layout::left_to_right(egui::Align::Center);
+    ui.allocate_ui_with_layout(egui::vec2(w, h), layout, |ui| {
+        ui.set_min_size(egui::vec2(w, h));
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        let s = ui.spacing_mut();
+        s.combo_width = w;
+        s.slider_width = w - s.interact_size.x - s.item_spacing.x;
+        add(ui)
+    })
+    .inner
+}
+
+/// A row's label and control cells (Note HI1, HI3). Aligned, the control is `CONTROL_W` wide; in the strip,
+/// `COMPACT_CONTROL_W`; in the Advanced drawer it sizes to its content, as before. A control with no name of its own
+/// (a combo's text is its value) is named after the row's label.
+fn control_cell(
+    ui: &mut egui::Ui,
+    cx: &Ctx,
+    label: &str,
+    help: Option<&str>,
+    add: impl FnOnce(&mut egui::Ui) -> (Option<Value>, egui::Response),
+) -> (Option<Value>, egui::Response) {
+    let l = if !cx.compact && cx.aligned {
+        field_label(ui, true, label, help)
+    } else {
+        let l = if cx.compact {
+            // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut
+            // short with the whole text on hover, so a 140 px control fits the 280 px strip.
+            let s = ui.spacing();
+            let room = ui.clip_rect().right() - ui.cursor().min.x;
+            let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
+                .max(s.interact_size.x);
+            label_slot(ui, w, label, None)
+        } else {
+            ui.label(label)
+        };
+        // Note HI18: the strip and the Advanced drawer are narrow, so no `?` (it cut the strip's labels and pushed the
+        // drawer's combos past its edge at 280 px); the label carries the help.
+        match help {
+            Some(t) => help_hover(l, t),
+            None => l,
+        }
+    };
+    let w = match (cx.aligned, cx.compact) {
+        (true, _) => column_widths(ui).1,
+        (false, true) => COMPACT_CONTROL_W,
+        (false, false) => return add(ui),
+    };
+    let (v, r) = control_slot(ui, w, add);
+    (v, r.labelled_by(l.id))
+}
+
 /// One grid row of a field: its label, its editor (disabled with the reason when locked), where the value came from
 /// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank.
 pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> {
     let mut edit = None;
-    ui.label(f.label);
-    let (set, r) = ui
-        .scope(|ui| {
+    let help = crate::model::fields::field_help(f.field);
+    let (set, r) = control_cell(ui, cx, f.label, help, |ui| {
+        ui.scope(|ui| {
             if f.lock.is_some() {
                 ui.disable();
             }
@@ -674,7 +884,8 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
             }
             editor(ui, cx.key, cx.target, cx.job, cx.busy, f, false)
         })
-        .inner;
+        .inner
+    });
     // Note CL40: on a `normal` in a complex material set, renormalize_bake is the opt-in gloss bake.
     let r = if f.field == "mips.normal"
         && cx.job.profile.subtype == Subtype::Normal
@@ -705,6 +916,8 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
             crate::model::fields::no_effect_reason(&cx.job.profile, f.field)
         {
             hint_label(ui, reason);
+        } else if cx.alpha_asked && f.field == "alpha.policy" {
+            hint_label(ui, "proposed: confirm above");
         } else if let Some(why) = (f.field == "subtype")
             .then(|| auto_subtype_reason(cx.job))
             .flatten()
@@ -754,7 +967,9 @@ fn hint_and_reset(ui: &mut egui::Ui, edited: bool, hint: impl FnOnce(&mut egui::
 fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, egui::Response) {
     let current = serde_json::from_value::<Subtype>(f.value.clone()).ok();
     let shown = current.map_or_else(|| display_value(&f.value), subtype_label);
-    let r = ui.button(format!("{shown} \u{25BE}"));
+    // It fills its cell, as the combos do (Note HI1); capped at CONTROL_W in case a cell is ever unbounded.
+    let fill = egui::vec2(ui.available_width().min(CONTROL_W), 0.0);
+    let r = ui.add(egui::Button::new(format!("{shown} \u{25BE}")).min_size(fill));
     r.widget_info(|| {
         let mut i = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), f.label);
         i.current_text_value = Some(shown.clone());
@@ -772,10 +987,16 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
 fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = levels_view(cx.target, cx.job);
     let mut on = mips_on(&f.value);
-    let ticked = ui.add_enabled(
-        cx.edit_off.is_none(),
-        egui::Checkbox::new(&mut on, "Mipmaps"),
-    );
+    // Note HI1: "Mipmaps" in the label column, the tick in the control column, named for the tests and a screen reader.
+    let help = Some(crate::model::fields::MIPMAPS_HELP);
+    let (_, ticked) = control_cell(ui, cx, "Mipmaps", help, |ui| {
+        let r = ui.add_enabled(cx.edit_off.is_none(), egui::Checkbox::new(&mut on, ""));
+        let on = on;
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), on, "Mipmaps")
+        });
+        (None, r)
+    });
     let ticked = match &cx.edit_off {
         Some(why) => ticked.on_disabled_hover_text(why),
         None => ticked,
@@ -786,18 +1007,14 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
             json!(if on { "full" } else { "none" }),
         ));
     }
-    // The hint sits in the editor column, so the third cell holds only ↺.
-    // Kept whole, as before: the count is short and this is not the last cell.
-    match mips_count(&f.value) {
-        Some(n) if !cx.compact => ui.label(format!("({n} levels — see Advanced)")),
-        _ if cx.compact => ui.label(""),
-        _ => ui.label(
-            egui::RichText::new(provenance_text(&f.provenance))
-                .small()
-                .weak(),
-        ),
+    let hint = |ui: &mut egui::Ui| match mips_count(&f.value) {
+        _ if cx.compact => {
+            ui.label("");
+        }
+        Some(n) => hint_label(ui, &format!("({n} levels — see Advanced)")),
+        None => hint_label(ui, &provenance_text(&f.provenance)),
     };
-    if hint_and_reset(ui, f.edited, |_| {}) {
+    if hint_and_reset(ui, f.edited, hint) {
         actions.push(Action::Clear(f.field));
     }
     ui.end_row();
@@ -816,26 +1033,29 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = filter_view(cx.target, cx.job);
     let current = cx.job.profile.mips.filter;
     let locks = OPTIONS.map(|(m, _)| filter_option_lock(&cx.job.profile, m));
-    ui.label(f.label);
     let mut picked = None;
-    let r = egui::ComboBox::from_id_salt((cx.key, f.field))
-        .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
-        .show_ui(ui, |ui| {
-            for ((m, label), lock) in OPTIONS.into_iter().zip(locks) {
-                let r = ui.add_enabled(
-                    lock.is_none(),
-                    egui::Button::selectable(m == current, label),
-                );
-                match lock {
-                    Some(why) => {
-                        r.on_disabled_hover_text(why);
+    let help = crate::model::fields::field_help(f.field);
+    let (_, r) = control_cell(ui, cx, f.label, help, |ui| {
+        let r = egui::ComboBox::from_id_salt((cx.key, f.field))
+            .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
+            .show_ui(ui, |ui| {
+                for ((m, label), lock) in OPTIONS.into_iter().zip(locks) {
+                    let r = ui.add_enabled(
+                        lock.is_none(),
+                        egui::Button::selectable(m == current, label),
+                    );
+                    match lock {
+                        Some(why) => {
+                            r.on_disabled_hover_text(why);
+                        }
+                        None if r.clicked() && m != current => picked = Some(m),
+                        None => {}
                     }
-                    None if r.clicked() && m != current => picked = Some(m),
-                    None => {}
                 }
-            }
-        })
-        .response;
+            })
+            .response;
+        (None, r)
+    });
     // Only Box is open: say why on the combo itself.
     let r = match locks[1..]
         .iter()
@@ -865,7 +1085,78 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     ui.end_row();
 }
 
-fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Action>) {
+/// "Helper role [Pick a role…]" in the Sub-type row's place while the Helper box is ticked (Note HI4, HI5).
+fn helper_role_row(
+    ui: &mut egui::Ui,
+    key: &str,
+    edit_off: &Option<String>,
+    actions: &mut Vec<Action>,
+) {
+    field_label(ui, true, "Helper role", None);
+    let w = column_widths(ui).1;
+    if let Some(role) = super::helper_panel::role_combo(ui, key, None, false, edit_off, w) {
+        actions.push(Action::HelperRole(Some(role)));
+    }
+    hint_label(ui, "pick a role to make this a helper");
+    ui.end_row();
+}
+
+/// The Helper row under Sub-type (Note HI4): the tick only swaps the row above, nothing is written (HI5). A file the
+/// user unticked says so, with the way back to the guessed role.
+fn helper_tick_row(
+    ui: &mut egui::Ui,
+    key: &str,
+    t: &HelperTick,
+    edit_off: &Option<String>,
+    actions: &mut Vec<Action>,
+) {
+    field_label(ui, true, "Helper", Some(HELPER_HELP));
+    let w = column_widths(ui).1;
+    let r = control_slot(ui, w, |ui| {
+        super::helper_panel::helper_tick(ui, t.on, 0, edit_off)
+    });
+    if r.changed() {
+        let id = super::helper_panel::tick_id(key);
+        ui.data_mut(|d| {
+            if t.on {
+                d.remove_temp::<bool>(id);
+            } else {
+                d.insert_temp(id, true);
+            }
+        });
+    }
+    let none = t.none && !t.on;
+    let hint = |ui: &mut egui::Ui| match none {
+        true => hint_label(ui, "set by you"),
+        false => {
+            ui.label("");
+        }
+    };
+    let reset = egui::Sides::new()
+        .shrink_left()
+        .truncate()
+        .show(ui, hint, |ui| {
+            none && super::helper_panel::reset(
+                ui,
+                "Reset role",
+                "Use the role guessed from the name",
+                edit_off,
+            )
+        })
+        .1;
+    if reset {
+        actions.push(Action::HelperRole(None));
+    }
+    ui.end_row();
+}
+
+fn group(
+    ui: &mut egui::Ui,
+    name: &'static str,
+    cx: &Ctx,
+    tick: Option<&HelperTick>,
+    actions: &mut Vec<Action>,
+) {
     egui::CollapsingHeader::new(name)
         .default_open(true)
         .show(ui, |ui| {
@@ -888,12 +1179,23 @@ fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Acti
                         .filter(|f| {
                             group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
                         })
+                        // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds.
+                        .filter(|f| !(cx.compact && f.field.starts_with("color.")))
                         .chain(exr)
                     {
-                        match field_row(ui, cx, &f) {
-                            Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
-                            Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
-                            None => {}
+                        // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
+                        let t = tick.filter(|_| f.field == "subtype");
+                        if t.is_some_and(|t| t.on) {
+                            helper_role_row(ui, cx.key, &cx.edit_off, actions);
+                        } else {
+                            match field_row(ui, cx, &f) {
+                                Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
+                                Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
+                                None => {}
+                            }
+                        }
+                        if let Some(t) = t {
+                            helper_tick_row(ui, cx.key, t, &cx.edit_off, actions);
                         }
                     }
                 });
@@ -930,6 +1232,10 @@ fn decision_box(
     alpha: Option<AlphaPolicy>,
     actions: &mut Vec<Action>,
 ) {
+    // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
+    let left = cx
+        .aligned
+        .then(|| ui.max_rect().left() + ui.spacing().indent);
     let frame = egui::Frame::new()
         .stroke(egui::Stroke::new(2.0, AMBER))
         .corner_radius(4.0)
@@ -944,17 +1250,30 @@ fn decision_box(
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
-                        subtype_decision(ui, cx, *suggested, actions)
+                        subtype_decision(ui, cx, left, *suggested, actions)
                     }
-                    // Note FM35: one line and one dropdown on the resolved type; the engine's reason is the line's hover.
+                    // Note HI7, HI13: the dropdown on the resolved type and Confirm, in the Alpha row's columns (the
+                    // strip keeps FM35's line); the engine's reason is the label's hover.
                     Decision::AlphaMeaning => {
                         if let Some(shown) = alpha {
-                            let line = ui.label(alpha_confirm_text(shown));
-                            if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
-                                line.on_hover_text(m);
-                            }
                             let id = egui::Id::new(("alpha-decision", cx.key));
-                            if let Some(p) = alpha_dropdown(ui, id, shown, "", "") {
+                            let mut picked = None;
+                            let label = match left {
+                                Some(left) => decision_row(ui, left, "Alpha", |ui, _| {
+                                    picked = alpha_question(ui, id, shown, "", "");
+                                }),
+                                None => {
+                                    let line = ui.label(alpha_confirm_text(shown));
+                                    ui.horizontal(|ui| {
+                                        picked = alpha_question(ui, id, shown, "", "");
+                                    });
+                                    line
+                                }
+                            };
+                            if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
+                                label.on_hover_text(m);
+                            }
+                            if let Some(p) = picked {
                                 actions.push(Action::Decide(Answer::Alpha(p)));
                             }
                         }
@@ -994,10 +1313,42 @@ fn decision_box(
     ui.add_space(6.0);
 }
 
-/// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button.
+/// Note HI13: a row of the Undecided box in the groups' two columns: `label` in the label column (`left` is the groups'
+/// left edge, so the box's frame inset cancels out), then the controls; `add` gets the control column's width, which
+/// is also the row's `combo_width`. Where the box is too narrow for that width and a Confirm button (1100 px), the
+/// dropdown gives up the difference, so Confirm is never cut short (rule 3.1). Returns the label.
+fn decision_row(
+    ui: &mut egui::Ui,
+    left: f32,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui, f32),
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        let (lw, cw) = column_widths_at(ui, left, 0.0);
+        let s = ui.spacing();
+        let confirm = egui::WidgetText::from("Confirm")
+            .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button)
+            .size()
+            .x
+            + 2.0 * s.button_padding.x;
+        let room = ui.max_rect().right() - (left + lw) - 2.0 * s.item_spacing.x - confirm;
+        let cw = cw.min(room).max(s.interact_size.x);
+        let w = (left + lw - ui.cursor().min.x).max(0.0);
+        let l = control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()));
+        ui.spacing_mut().combo_width = cw;
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        add(ui, cw);
+        l
+    })
+    .inner
+}
+
+/// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button. Aligned,
+/// they stand in the control column under the sentence (Note HI13).
 fn subtype_decision(
     ui: &mut egui::Ui,
     cx: &Ctx,
+    left: Option<f32>,
     suggested: Option<Subtype>,
     actions: &mut Vec<Action>,
 ) {
@@ -1006,7 +1357,7 @@ fn subtype_decision(
     let mut chosen: Subtype = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
-    ui.horizontal(|ui| {
+    let mut controls = |ui: &mut egui::Ui| {
         egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
             .show_ui(ui, |ui| {
@@ -1019,10 +1370,27 @@ fn subtype_decision(
                     }
                 }
             });
-        if ui.button("Confirm").clicked() {
-            actions.push(Action::Decide(Answer::Subtype(chosen)));
+    };
+    let confirm = match left {
+        Some(left) => {
+            let mut ok = false;
+            decision_row(ui, left, "", |ui, w| {
+                control_slot(ui, w, &mut controls);
+                ok = ui.button("Confirm").clicked();
+            });
+            ok
         }
-    });
+        None => {
+            ui.horizontal(|ui| {
+                controls(ui);
+                ui.button("Confirm").clicked()
+            })
+            .inner
+        }
+    };
+    if confirm {
+        actions.push(Action::Decide(Answer::Subtype(chosen)));
+    }
     ui.data_mut(|d| d.insert_temp(id, chosen));
 }
 
@@ -1148,12 +1516,16 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         item.status.clone(),
     );
     // The texture's own list shows its check results, Info included (preflight K5, X3).
-    let (decisions, warnings, job) = (
+    let (decisions, warnings, mut job) = (
         item.decisions.clone(),
         model.item_messages(key),
         item.job.clone(),
     );
     let alpha = crate::model::items::alpha_asked(item);
+    // Note HI14: while the alpha is asked, every row reads as Confirm would leave it. This clone is display only.
+    if let (Some(j), Some(p)) = (job.as_mut(), alpha) {
+        j.profile.alpha.policy = p;
+    }
     let packed_output = match &status {
         ItemStatus::PackedInto(j) => model
             .items
@@ -1207,54 +1579,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 actions.push(Action::Reencode(false));
             }
         }
-        // Note DY17: a file the user made "Not a helper" (`helper.role = "none"`) says so, with the way back.
-        let not_helper = model
+        ui.add_space(4.0);
+    }
+    // Note HI4 (DY17): any image can be made a helper from its Helper tick, one with no helper suffix too (HI15: one in
+    // no set as well). A file the user unticked (`helper.role = "none"`) reads unticked, "set by you".
+    let tick = (kind == ItemKind::Image && !compact).then(|| HelperTick {
+        on: ui
+            .data(|d| d.get_temp::<bool>(super::helper_panel::tick_id(key)))
+            .unwrap_or(false),
+        none: model
             .project
             .as_ref()
             .and_then(|p| p.file_value(key, engine::helper::ROLE_FIELD))
-            .is_some_and(|v| v == json!("none"));
-        if not_helper {
-            let mut reset = false;
-            ui.horizontal(|ui| {
-                ui.label("Not a helper (set by you)");
-                let r = ui.add_enabled(edit_off.is_none(), egui::Button::new("Reset").small());
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), "Reset role")
-                });
-                let r = r.on_hover_text("Use the role guessed from the name");
-                let r = match &edit_off {
-                    Some(why) => r.on_disabled_hover_text(why),
-                    None => r,
-                };
-                reset = r.clicked();
-            });
-            if reset {
-                model.set_helper_role(key, None);
-            }
-        }
-        // Note DY17 (docs review): any image can be made a helper here, e.g. one whose name has no helper suffix.
-        if kind == ItemKind::Image {
-            let picked = ui
-                .add_enabled_ui(edit_off.is_none(), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Helper role");
-                        super::helper_panel::role_combo(
-                            ui,
-                            key,
-                            engine::helper::HelperRole::NotHelper,
-                            not_helper,
-                            &edit_off,
-                        )
-                    })
-                    .inner
-                })
-                .inner;
-            if let Some(role) = picked {
-                model.set_helper_role(key, Some(role));
-            }
-        }
-        ui.add_space(4.0);
-    }
+            .is_some_and(|v| v == json!("none")),
+    });
     // Note FK3: with a job, each edit control waits on `edit_off` itself, so the headers stay usable read-only.
     ui.add_enabled_ui(!read_only || job.is_some(), |ui| match &job {
         None => {
@@ -1290,6 +1628,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                     actions.push(Action::Select(out));
                 }
             }
+            // Note HI4: no Type group, so the Helper row stands alone and stays reachable (with the roles once ticked).
+            if let Some(t) = &tick {
+                egui::Grid::new(("helper-jobless", key))
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        if edit_off.is_some() {
+                            ui.disable();
+                        }
+                        if t.on {
+                            helper_role_row(ui, key, &edit_off, &mut actions);
+                        }
+                        helper_tick_row(ui, key, t, &edit_off, &mut actions);
+                    });
+            }
         }
         Some(job) => {
             let cx = Ctx {
@@ -1298,6 +1650,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 target,
                 busy,
                 compact,
+                aligned: !compact,
+                alpha_asked: alpha.is_some(),
                 edit_off: edit_off.clone(),
                 warnings: &warnings,
             };
@@ -1358,7 +1712,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             }
             let shown: &[&str] = if compact { &COMPACT_GROUPS } else { &GROUPS };
             for g in shown {
-                group(ui, g, &cx, &mut actions);
+                group(ui, g, &cx, tick.as_ref(), &mut actions);
             }
             if !compact {
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
@@ -1386,6 +1740,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             Action::Decide(a) => model.decide(key, a),
             Action::Select(k) => model.select_item(&k),
             Action::Reencode(on) => model.set_reencode(&[key.to_string()], on),
+            Action::HelperRole(r) => {
+                ui.data_mut(|d| d.remove_temp::<bool>(super::helper_panel::tick_id(key)));
+                model.set_helper_role(key, r);
+            }
         }
     }
 }

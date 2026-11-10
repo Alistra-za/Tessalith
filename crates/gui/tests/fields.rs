@@ -74,10 +74,87 @@ fn field_views_mark_edited_fields() {
     assert!(!views.iter().find(|v| v.field == "format").unwrap().edited);
     let mut groups: Vec<&str> = views.iter().map(|v| group_of(v.field)).collect();
     groups.dedup();
-    assert_eq!(
-        groups,
-        vec!["Type", "Colour", "Alpha", "Mipmaps", "Compression"]
+    assert_eq!(groups, vec!["Type", "Alpha", "Mipmaps", "Compression"]);
+    assert_eq!(group_of("color.content"), "Compression");
+    assert_eq!(group_of("color.tag"), "Compression");
+}
+
+#[test]
+fn format_choices_show_no_tag() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+    let c = format_choices(Target::Cs, &p);
+    assert!(!c.is_empty());
+    for (_, label) in &c {
+        assert!(!label.contains('·'), "{label}");
+    }
+    let mut formats: Vec<Format> = c.iter().map(|((f, _), _)| *f).collect();
+    let n = formats.len();
+    formats.dedup();
+    assert_eq!(formats.len(), n, "each format once: {c:?}");
+}
+
+/// A CS sub-type whose list has two formats with an sRGB form and one without (most lists have one tag throughout).
+fn mixed_tags() -> (Subtype, Vec<(Format, ColorTag)>) {
+    Subtype::ALL
+        .into_iter()
+        .map(|st| {
+            (
+                st,
+                engine::policy::allowed_encodings_for(st, Target::Cs, false),
+            )
+        })
+        .find(|(_, a)| {
+            a.iter().filter(|(_, t)| *t == ColorTag::Srgb).count() >= 2
+                && a.iter().any(|(f, _)| !a.contains(&(*f, ColorTag::Srgb)))
+        })
+        .expect("a sub-type with and without sRGB forms")
+}
+
+#[test]
+fn format_choices_keep_the_current_tag() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let (st, allowed) = mixed_tags();
+    let srgb: Vec<Format> = allowed
+        .iter()
+        .filter(|(_, t)| *t == ColorTag::Srgb)
+        .map(|(f, _)| *f)
+        .collect();
+    let mut p = reg.base_profile(Target::Cs, st);
+    (p.format, p.color.tag) = (srgb[0], ColorTag::Srgb);
+    let c = format_choices(Target::Cs, &p);
+    let value = |f: Format| c.iter().find(|((x, _), _)| *x == f).unwrap().0;
+    assert_eq!(value(srgb[1]), (srgb[1], ColorTag::Srgb), "{st:?}: {c:?}");
+    // A format without the sRGB form gets its first allowed pair.
+    let (f, first) = allowed
+        .iter()
+        .copied()
+        .find(|(f, _)| !srgb.contains(f))
+        .unwrap();
+    assert_eq!(value(f), (f, first), "{st:?}: {c:?}");
+}
+
+#[test]
+fn format_choices_keep_a_stray_pair_marked() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+    // A CS diffuse is linear only, so BC7 _SRGB is a stray pair beside the allowed BC7 UNORM.
+    (p.format, p.color.tag) = (Format::Bc7, ColorTag::Srgb);
+    let allowed = engine::policy::allowed_encodings_for(p.subtype, Target::Cs, false);
+    assert!(
+        !allowed.contains(&(Format::Bc7, ColorTag::Srgb)),
+        "a stray pair"
     );
+    assert!(allowed.contains(&(Format::Bc7, ColorTag::Unorm)));
+    let c = format_choices(Target::Cs, &p);
+    let bc7: Vec<_> = c.iter().filter(|((f, _), _)| *f == Format::Bc7).collect();
+    assert_eq!(bc7.len(), 1, "{c:?}");
+    assert_eq!(
+        bc7[0].0,
+        (Format::Bc7, ColorTag::Srgb),
+        "the combo still shows it"
+    );
+    assert_eq!(bc7[0].1, format!("BC7{NOT_VALID}"));
 }
 
 #[test]
@@ -594,4 +671,23 @@ fn value_of_agrees_with_the_field_views() {
         );
     }
     assert!(unserialised > 0, "no key exercised unset_default");
+}
+
+/// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.
+#[test]
+fn every_field_row_has_help() {
+    let rows = FIELDS
+        .iter()
+        .chain(ADVANCED_FIELDS.iter())
+        .chain([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD, EXR_STRAIGHT_FIELD].iter());
+    for (f, label) in rows {
+        assert!(field_help(f).is_some(), "{f} ({label}) has no help");
+    }
+}
+
+/// Note HI9: the two colour rows say which is the source and which the output.
+#[test]
+fn input_content_and_dds_tag_name_each_other() {
+    assert!(field_help("color.content").unwrap().contains("DDS tag"));
+    assert!(field_help("color.tag").unwrap().contains("Input content"));
 }

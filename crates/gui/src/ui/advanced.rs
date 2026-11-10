@@ -545,6 +545,8 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
                         target: model.target,
                         busy: model.edit_busy(),
                         compact: false,
+                        aligned: false,
+                        alpha_asked: false,
                         edit_off: why.clone(),
                         warnings: &[],
                     };
@@ -580,6 +582,8 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
                         target: model.target,
                         busy,
                         compact: false,
+                        aligned: false,
+                        alpha_asked: false,
                         edit_off: why.clone(),
                         warnings: &[],
                     };

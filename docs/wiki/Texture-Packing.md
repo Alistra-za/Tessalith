@@ -86,7 +86,7 @@ Every control writes the helper file's own `[files]` entry in `sdc.toml` as one 
 
 | GUI control | Key | Effect |
 |---|---|---|
-| **Role** | `helper.role` | What the file is. **Not a helper** (`"none"`) makes it an ordinary texture again. Any other role makes it a helper even when its name says otherwise. Picking the guessed role also writes it, so it counts as set by hand. **Reset** goes back to the name's guess. |
+| **Role** | `helper.role` | What the file is. Unticking **Helper** (`"none"`) makes it an ordinary texture again. Any other role makes it a helper even when its name says otherwise. Picking the guessed role also writes it, so it counts as set by hand. **Reset** goes back to the name's guess. |
 | **Fills** and **Add target** | `helper.fills` | One line per channel the helper fills, each with a **✕**. **Add target** lists what the engine would accept in this set. Once you edit the list it is yours; removing the last target reads "not used: no targets chosen". **Reset** returns to the suggestion. |
 | **Read from** | `helper.read` | `r`, `g`, `b`, `a` or `luma` (Rec. 709). **Auto (R)** removes the key. For a mask stored in another channel. |
 | **Invert** | `helper.invert` | One minus the value. In a packed channel it flips on top of the recipe's own conversion. |
@@ -98,7 +98,7 @@ Every control writes the helper file's own `[files]` entry in `sdc.toml` as one 
 
 ### In the GUI
 
-Under the tiles, the Textures column has a **Helpers (n)** group, one compact row per helper. <!-- D:FB12 --> A row shows **→ targets** or **not used**; hover for the reason. A role you set shows as an amber **✎** chip. The **Helper role** combo in any tile's settings turns that texture into a helper. The set card's channel rows edit the same `helper.fills` ([Set editor](GUI-Set-Editor.md#packed-channel-sources)).
+Under the tiles, the Textures column has a **Helpers (n)** group, one compact row per helper. <!-- D:FB12 --> A row shows **→ targets** or **not used**; hover for the reason. A role you set shows as an amber **✎** chip. Tick **Helper** under any tile's Sub-type and pick a role to turn that texture into a helper. The set card's channel rows edit the same `helper.fills` ([Set editor](GUI-Set-Editor.md#packed-channel-sources)).
 
 ![The panel of a helper texture.](../img/gui/Texture-Packing/helper-panel.png)
 

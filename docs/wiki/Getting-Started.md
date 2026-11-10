@@ -35,7 +35,7 @@ Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or
 
 A tile with an amber border is undecided: Tessalith won't guess what it is. The **Undecided** pill above the tiles shows only those. Click a tile, and the centre column lists its settings and where each value came from. **(auto)** means Tessalith picked it; hover it for why.
 
-Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alpha dropdown under "Alpha: … (proposed)", **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
+Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alpha dropdown and **Confirm**, **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
 
 ![The texture settings of a fern texture in the demo project.](../img/gui/GUI-Texture-Panel/texture-panel.png)
 

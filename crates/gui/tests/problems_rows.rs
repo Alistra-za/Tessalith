@@ -519,7 +519,7 @@ fn the_problems_row_names_the_type() {
 }
 
 /// Note FM35: the three lines the alpha question used to take (the Undecided sentence, the "carries data the format
-/// would drop" acknowledgement and its button) are the one row, and the texture panel has one line and one dropdown.
+/// would drop" acknowledgement and its button) are the one row, and the texture panel has one dropdown (Note HI13).
 #[test]
 fn one_line_replaces_the_three_alpha_lines() {
     let d = tempfile::tempdir().unwrap();
@@ -553,8 +553,14 @@ fn one_line_replaces_the_three_alpha_lines() {
     ] {
         assert_eq!(h.query_all_by_label(l).count(), 0, "{l}");
     }
-    // The row and the panel's box each say it once; the row's hover keeps the code.
-    assert!(h.query_all_by_label_contains(LEAF_LINE).count() >= 2);
+    // The row says it (the panel's box asks it as an Alpha row, Note HI13); the row's hover keeps the code.
+    // Exactly one line says it; the row itself is also named "landscape/leaf.png: Alpha: …".
+    let lines: Vec<_> = h
+        .query_all_by_label_contains(LEAF_LINE)
+        .filter(|n| n.accesskit_node().role() == egui::accesskit::Role::Label)
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(lines.len(), 1, "{lines:?}");
     // Final review (GUI M5): one dropdown each, with distinct names.
     assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 1);
     assert_eq!(
@@ -567,6 +573,24 @@ fn one_line_replaces_the_three_alpha_lines() {
         .cloned()
         .unwrap();
     assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
+}
+
+/// Note HI7: a Problems row lays out right to left; its Confirm still reads after the dropdown.
+#[test]
+fn problems_confirm_reads_after_its_dropdown() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(leaf_asks_its_alpha(d.path()));
+    h.run();
+    let dropdown = h.get_by_label("Problems alpha type: Cutout").rect();
+    let confirm = h.get_by_label("Problems confirm alpha").rect();
+    assert!(
+        confirm.min.x > dropdown.max.x,
+        "Confirm {confirm:?} before the dropdown {dropdown:?}"
+    );
+    assert!(
+        (confirm.center().y - dropdown.center().y).abs() < 4.0,
+        "one line"
+    );
 }
 
 /// Note FM35: a type picked in the dropdown is the write the five buttons made (`alpha.policy` in the texture's own
