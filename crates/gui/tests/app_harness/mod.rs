@@ -229,6 +229,20 @@ pub fn settle(h: &mut H, frames: usize) {
     h.run_steps(3);
 }
 
+/// Frames, with real time between them, until the app stops asking for repaints: every worker `app.rs` polls has
+/// landed, the background ones (dims, used_by, DDS thumbnails) too, which `settle` does not wait for. Call it before
+/// looking up a rect to hover, so the hover's `h.run()` cannot exceed max_steps on a worker poll.
+pub fn quiet(h: &mut H) {
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    while let Err(e) = h.try_run() {
+        assert!(
+            std::time::Instant::now() < end,
+            "still repainting after 60 s: {e}"
+        );
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
 /// The first widget whose accessible label equals `label` (leftmost, then topmost).
 pub fn rect_of(h: &H, label: &str) -> Rect {
     h.query_all_by_label(label)
