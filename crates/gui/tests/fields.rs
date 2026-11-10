@@ -672,3 +672,22 @@ fn value_of_agrees_with_the_field_views() {
     }
     assert!(unserialised > 0, "no key exercised unset_default");
 }
+
+/// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.
+#[test]
+fn every_field_row_has_help() {
+    let rows = FIELDS
+        .iter()
+        .chain(ADVANCED_FIELDS.iter())
+        .chain([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD, EXR_STRAIGHT_FIELD].iter());
+    for (f, label) in rows {
+        assert!(field_help(f).is_some(), "{f} ({label}) has no help");
+    }
+}
+
+/// Note HI9: the two colour rows say which is the source and which the output.
+#[test]
+fn input_content_and_dds_tag_name_each_other() {
+    assert!(field_help("color.content").unwrap().contains("DDS tag"));
+    assert!(field_help("color.tag").unwrap().contains("Input content"));
+}

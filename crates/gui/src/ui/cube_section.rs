@@ -169,7 +169,7 @@ impl Cx<'_> {
         body: impl FnOnce(&mut egui::Ui) -> (Edit, egui::Response),
     ) -> Edit {
         // Note HI1: the texture panel's label and control columns.
-        super::settings_panel::field_label(ui, true, f.label);
+        super::settings_panel::field_label(ui, true, f.label, None);
         let off = f.lock.is_some() || self.ro.is_some();
         let w = super::settings_panel::column_widths(ui).1;
         let scope = super::settings_panel::control_slot(ui, w, |ui| {

@@ -1,5 +1,6 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
+use crate::model::fields::HELPER_HELP;
 use crate::model::helpers::{fill_text, target_file};
 use crate::model::sets::Tails;
 use crate::model::AppModel;
@@ -246,7 +247,7 @@ fn role_row(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    field_label(ui, true, "Role");
+    field_label(ui, true, "Role", None);
     let w = control_w(ui);
     ui.horizontal(|ui| {
         if let Some(role) = role_combo(ui, key, Some(h.role), h.role_hand_set, ro, w) {
@@ -266,7 +267,7 @@ fn role_row(
     );
     ui.end_row();
     // Note HI4, HI16: unticked, the file is an ordinary texture again (`helper.role = "none"`), in every set.
-    field_label(ui, true, "Helper");
+    field_label(ui, true, "Helper", Some(HELPER_HELP));
     let r = control_slot(ui, w, |ui| helper_tick(ui, true, h.shared_with.len(), ro));
     if r.changed() {
         edits.push(Edit::Role(Some(HelperRole::NotHelper)));
@@ -356,7 +357,7 @@ fn fills_rows(
     };
     let mut first = true;
     let lead = |ui: &mut egui::Ui, first: &mut bool| {
-        field_label(ui, true, if *first { "Fills" } else { "" });
+        field_label(ui, true, if *first { "Fills" } else { "" }, None);
         *first = false;
     };
     for t in &now {
@@ -439,7 +440,7 @@ fn read_rows(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    field_label(ui, true, "Read from");
+    field_label(ui, true, "Read from", None);
     let w = control_w(ui);
     let shown = READS.iter().find(|r| r.0 == h.read).map_or("", |r| r.1);
     let r = combo(ui, (key, "helper-read"), shown, w, |ui| {
@@ -453,7 +454,7 @@ fn read_rows(
     why(r, ro);
     hint(ui, "the helper's channel used");
     ui.end_row();
-    field_label(ui, true, "");
+    field_label(ui, true, "", None);
     let mut on = h.invert;
     let r = ui.checkbox(&mut on, "Invert");
     if why(r, ro).changed() {

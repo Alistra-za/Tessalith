@@ -7,8 +7,8 @@ use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, not_a_
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
     filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_count, mips_on,
-    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER,
-    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, EXR_STRAIGHT_HOVER,
+    HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -633,9 +633,7 @@ fn checkbox_hover(field: &str) -> Option<Option<&'static str>> {
         "alpha.parallax" => Some(PARALLAX_HOVER),
         "encoder.bc1_alpha" => Some(BC1_ALPHA_HOVER),
         "encoder.perceptual" => Some(PERCEPTUAL_HOVER),
-        "alpha.exr_straight" => Some(
-            "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour",
-        ),
+        "alpha.exr_straight" => Some(EXR_STRAIGHT_HOVER),
         "alpha.exact_opaque" => None,
         _ => return None,
     })
@@ -718,13 +716,72 @@ pub enum RowEdit {
 }
 
 /// A row's label cell (Note HI1): with `aligned`, exactly the label column's width (`LABEL_W` where the row fits) and
-/// cut short with the whole text on hover (rule 3.4); otherwise a plain label.
-pub(super) fn field_label(ui: &mut egui::Ui, aligned: bool, label: &str) -> egui::Response {
+/// cut short with the whole text on hover (rule 3.4); otherwise a plain label. With `help` (Note HI9), a `?` ends the
+/// cell and the label shows the same help on hover.
+pub(super) fn field_label(
+    ui: &mut egui::Ui,
+    aligned: bool,
+    label: &str,
+    help: Option<&str>,
+) -> egui::Response {
     if !aligned {
-        return ui.label(label);
+        let Some(t) = help else {
+            return ui.label(label);
+        };
+        return ui
+            .horizontal(|ui| {
+                let l = ui.label(label);
+                help_mark(ui, label, t);
+                help_hover(l, t)
+            })
+            .inner;
     }
     let w = column_widths(ui).0;
-    control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()))
+    label_slot(ui, w, label, help)
+}
+
+/// An exactly `w` wide label cell, cut short; with `help`, a `?` right-aligned at its end (Note HI9).
+fn label_slot(ui: &mut egui::Ui, w: f32, label: &str, help: Option<&str>) -> egui::Response {
+    control_slot(ui, w, |ui| match help {
+        None => ui.add(egui::Label::new(label).truncate()),
+        Some(t) => {
+            let (l, _) = egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| ui.add(egui::Label::new(label).truncate()),
+                |ui| help_mark(ui, label, t),
+            );
+            help_hover(l, t)
+        }
+    })
+}
+
+/// `t` on hover, also while the row is off (`edit_off`, a lock): a disabled widget shows only its disabled hover.
+fn help_hover(r: egui::Response, t: &str) -> egui::Response {
+    r.on_hover_text(t).on_disabled_hover_text(t)
+}
+
+/// A weak `?` in a small ring that shows `text` on hover (Note HI9), named "Help: {name}" for a screen reader.
+pub(super) fn help_mark(ui: &mut egui::Ui, name: &str, text: &str) -> egui::Response {
+    const D: f32 = 14.0;
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(D, D), egui::Sense::hover());
+    let color = ui.visuals().weak_text_color();
+    let p = ui.painter();
+    p.circle_stroke(rect.center(), D / 2.0 - 0.5, egui::Stroke::new(1.0, color));
+    p.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "?",
+        egui::FontId::proportional(10.0),
+        color,
+    );
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            r.enabled(),
+            format!("Help: {name}"),
+        )
+    });
+    help_hover(r, text)
 }
 
 /// The label and control columns' widths: `LABEL_W` and `CONTROL_W`, both scaled down alike where a row would run
@@ -779,18 +836,29 @@ fn control_cell(
     ui: &mut egui::Ui,
     cx: &Ctx,
     label: &str,
+    help: Option<&str>,
     add: impl FnOnce(&mut egui::Ui) -> (Option<Value>, egui::Response),
 ) -> (Option<Value>, egui::Response) {
-    let l = if cx.compact {
-        // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut short
-        // with the whole text on hover, so a 140 px control fits the 280 px strip.
-        let s = ui.spacing();
-        let room = ui.clip_rect().right() - ui.cursor().min.x;
-        let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
-            .max(s.interact_size.x);
-        control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()))
+    let l = if !cx.compact && cx.aligned {
+        field_label(ui, true, label, help)
     } else {
-        field_label(ui, cx.aligned, label)
+        let l = if cx.compact {
+            // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut
+            // short with the whole text on hover, so a 140 px control fits the 280 px strip.
+            let s = ui.spacing();
+            let room = ui.clip_rect().right() - ui.cursor().min.x;
+            let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
+                .max(s.interact_size.x);
+            label_slot(ui, w, label, None)
+        } else {
+            ui.label(label)
+        };
+        // Note HI18: the strip and the Advanced drawer are narrow, so no `?` (it cut the strip's labels and pushed the
+        // drawer's combos past its edge at 280 px); the label carries the help.
+        match help {
+            Some(t) => help_hover(l, t),
+            None => l,
+        }
     };
     let w = match (cx.aligned, cx.compact) {
         (true, _) => column_widths(ui).1,
@@ -805,7 +873,8 @@ fn control_cell(
 /// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank.
 pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> {
     let mut edit = None;
-    let (set, r) = control_cell(ui, cx, f.label, |ui| {
+    let help = crate::model::fields::field_help(f.field);
+    let (set, r) = control_cell(ui, cx, f.label, help, |ui| {
         ui.scope(|ui| {
             if f.lock.is_some() {
                 ui.disable();
@@ -919,7 +988,8 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = levels_view(cx.target, cx.job);
     let mut on = mips_on(&f.value);
     // Note HI1: "Mipmaps" in the label column, the tick in the control column, named for the tests and a screen reader.
-    let (_, ticked) = control_cell(ui, cx, "Mipmaps", |ui| {
+    let help = Some(crate::model::fields::MIPMAPS_HELP);
+    let (_, ticked) = control_cell(ui, cx, "Mipmaps", help, |ui| {
         let r = ui.add_enabled(cx.edit_off.is_none(), egui::Checkbox::new(&mut on, ""));
         let on = on;
         r.widget_info(|| {
@@ -964,7 +1034,8 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let current = cx.job.profile.mips.filter;
     let locks = OPTIONS.map(|(m, _)| filter_option_lock(&cx.job.profile, m));
     let mut picked = None;
-    let (_, r) = control_cell(ui, cx, f.label, |ui| {
+    let help = crate::model::fields::field_help(f.field);
+    let (_, r) = control_cell(ui, cx, f.label, help, |ui| {
         let r = egui::ComboBox::from_id_salt((cx.key, f.field))
             .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
             .show_ui(ui, |ui| {
@@ -1021,7 +1092,7 @@ fn helper_role_row(
     edit_off: &Option<String>,
     actions: &mut Vec<Action>,
 ) {
-    field_label(ui, true, "Helper role");
+    field_label(ui, true, "Helper role", None);
     let w = column_widths(ui).1;
     if let Some(role) = super::helper_panel::role_combo(ui, key, None, false, edit_off, w) {
         actions.push(Action::HelperRole(Some(role)));
@@ -1039,7 +1110,7 @@ fn helper_tick_row(
     edit_off: &Option<String>,
     actions: &mut Vec<Action>,
 ) {
-    field_label(ui, true, "Helper");
+    field_label(ui, true, "Helper", Some(HELPER_HELP));
     let w = column_widths(ui).1;
     let r = control_slot(ui, w, |ui| {
         super::helper_panel::helper_tick(ui, t.on, 0, edit_off)

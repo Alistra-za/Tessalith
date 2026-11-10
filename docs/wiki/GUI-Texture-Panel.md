@@ -10,7 +10,7 @@ The centre column groups a texture's settings as Type, Alpha, Mipmaps and Compre
 
 ## Changing a setting
 
-Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields).
+Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields). Hover the **?** beside a row, or its label, for what the row does; it still works while the row is greyed out.
 
 | Row | Key |
 |---|---|

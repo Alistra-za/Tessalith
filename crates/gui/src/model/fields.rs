@@ -401,6 +401,49 @@ pub fn filter_view(target: Target, job: &ResolvedJob) -> FieldView {
 /// it applies to), so it is not in `FIELDS` (bulk edits and the other panels never list it).
 pub const EXR_STRAIGHT_FIELD: (&str, &str) = ("alpha.exr_straight", "Straight alpha");
 
+/// Hover text of the EXR "Straight alpha" tick box, and its row's help.
+pub const EXR_STRAIGHT_HOVER: &str =
+    "On: the colour is read as stored. Off: it is divided by alpha, as OpenEXR stores premultiplied colour";
+
+/// Help of the Helper tick row (Note HI9), which has no field of its own.
+pub const HELPER_HELP: &str = "A helper fills a channel of another texture, such as an AO map packed into an RMAOS or a mask into a diffuse's alpha. Tick it, then pick a role.";
+
+/// Help of the basic Mipmaps tick row (Note HI9); the Advanced drawer's Levels row reads `field_help("mips.levels")`.
+pub const MIPMAPS_HELP: &str = "Mipmaps are the smaller copies the game shows at a distance. Off writes only the full-size level. The level count is in the Advanced drawer.";
+
+/// The help a field's row shows on its `?` and its label (Note HI9); `None` for a row with no `?` (the cube section).
+pub fn field_help(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "subtype" => "What this texture is. It sets the defaults for everything below: format, tag, alpha and mipmaps.",
+        MSN_SOURCE => "Which program baked this model-space normal map. Tessalith turns it into Skyrim's MSN when it encodes; each entry says the change it makes.",
+        "color.content" => "What the colour values in the source file are. sRGB-encoded colour is decoded to linear light before mipmaps are filtered, so they keep their brightness. Linear data is filtered as stored: masks, roughness and other data. This is about the source. DDS tag is about the output.",
+        "color.tag" => "The _SRGB flag in the output DDS, which tells the game how to read the stored values. With _SRGB the GPU decodes them to linear when it samples the texture. With UNORM it reads them as they are. This is about the output. Input content is about the source.",
+        "alpha.policy" => "What the source's alpha channel means. Each entry in the list says what it does.",
+        "alpha.threshold" => "The alpha-test threshold the mesh uses. Mipmaps are built to keep the same coverage at this value.",
+        "alpha.compare" => "How the mesh tests alpha against the threshold: greater than, or greater than or equal.",
+        "mips.coverage" => "Keeps a cutout from thinning out in smaller mipmaps. Applies to Cutout, Cutout + Blend, and Blend with BC1 1-bit alpha; Auto and On both turn it on there.",
+        "alpha.exact_opaque" => "On: fully opaque alpha decodes as exactly 255 in BC7, not a value just under it.",
+        "mips.levels" => "How many mipmaps to write: the smaller copies the game shows at a distance.",
+        "mips.filter" => "How each smaller mipmap is averaged. Box is the default. Tent, Mitchell and Kaiser are for sRGB colour. With see-through alpha the only other choice is Tent.",
+        "mips.edge" => "How Tent, Mitchell and Kaiser read past the texture's edge: Wrap for a tiling texture, Clamp for one that doesn't tile. Box ignores it.",
+        "mips.normal" => "How normal-map mipmaps are built. Renormalise and bake also bakes the detail each mipmap loses into the roughness stored in the same texture.",
+        "mips.normal_base" => "The full-size level of a normal map: stored at unit length, or as authored. Keep as authored suits a map whose short normals are deliberate.",
+        "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
+        "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
+        WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
+        "encoder.bc45_search_radius" => "How widely the BC4 and BC5 encoder searches for endpoints. Maximum searches a radius of 10, Fast a radius of 4.",
+        "header" => "The form of the DDS header. Auto writes a legacy header for BC1, BC3 and RGBA8 without the _SRGB tag, and the DX10 header for everything else.",
+        "resize" => "Halves both sides once, twice or three times, while the longer side stays at or above the size floor.",
+        "resize_relative_to" => "What Resize is measured from: this texture's own size, or the size of the set's map in a texture-set slot.",
+        "resize_floor" => "The longer side Resize never halves below.",
+        "encoder.bc1_alpha" => BC1_ALPHA_HOVER,
+        "encoder.perceptual" => PERCEPTUAL_HOVER,
+        "alpha.parallax" => PARALLAX_HOVER,
+        "alpha.exr_straight" => EXR_STRAIGHT_HOVER,
+        _ => return None,
+    })
+}
+
 /// [`EXR_STRAIGHT_FIELD`]'s view for an `.exr` input, else `None`.
 pub fn exr_straight_view(target: Target, job: &ResolvedJob) -> Option<FieldView> {
     job.input

@@ -730,3 +730,159 @@ fn picking_a_format_keeps_the_tag() {
     let p = &h.state().item(KEY).unwrap().job.as_ref().unwrap().profile;
     assert_eq!((p.format, p.color.tag), (srgb[1], ColorTag::Srgb), "{st:?}");
 }
+
+/// Note HI9: hover `name` (exactly one such node in the centre) and say whether a tooltip holding `text` shows.
+fn hover_shows(h: &mut Harness<'static, AppModel>, role: Role, name: &str, text: &str) -> bool {
+    let c = centre(h);
+    let at = control(h, role, name, c);
+    h.query_all(by().role(role).label(name))
+        .find(|n| n.rect() == at)
+        .unwrap()
+        .hover();
+    h.run();
+    h.query_all_by_label_contains(text).next().is_some()
+}
+
+#[test]
+fn a_row_has_a_question_mark() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(model(d.path()), 1280.0);
+    let text = sdc_gui::model::fields::field_help("color.content").unwrap();
+    assert!(h.query_all_by_label_contains(text).next().is_none());
+    assert!(hover_shows(
+        &mut h,
+        Role::Label,
+        "Help: Input content",
+        text
+    ));
+}
+
+/// A row off for a pending plan (`fix_off`, Note FK) still shows its help.
+#[test]
+fn help_shows_on_a_disabled_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(d.path());
+    // Another texture's answer starts a plan; `ui::draw` alone never lands it.
+    m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.fix_off().is_some());
+    let mut h = harness(m, 1280.0);
+    let c = centre(&h);
+    assert!(h
+        .query_all(by().role(Role::ComboBox).label("DDS tag"))
+        .find(|n| c.contains(n.rect().center()))
+        .unwrap()
+        .accesskit_node()
+        .is_disabled());
+    let text = sdc_gui::model::fields::field_help("color.tag").unwrap();
+    assert!(hover_shows(&mut h, Role::Label, "Help: DDS tag", text));
+}
+
+#[test]
+fn question_marks_line_up() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(model(d.path()), 1280.0);
+    let c = centre(&h);
+    let marks: Vec<(String, Rect)> = h
+        .query_all(by().role(Role::Label))
+        .filter_map(|n| {
+            let v = n.accesskit_node().value().or(n.accesskit_node().label())?;
+            v.starts_with("Help: ").then(|| (v.to_string(), n.rect()))
+        })
+        .filter(|(_, r)| c.contains(r.center()))
+        .collect();
+    assert!(marks.len() >= 15, "{marks:?}");
+    let x = marks[0].1.max.x;
+    for (n, r) in &marks {
+        assert!(
+            (r.max.x - x).abs() <= 1.0,
+            "{n} ends at {}, {} at {x}",
+            r.max.x,
+            marks[0].0
+        );
+    }
+    // At the end of the label column: left of every control.
+    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    assert!(
+        x <= sub.min.x,
+        "the marks end at {x}, past Sub-type at {}",
+        sub.min.x
+    );
+}
+
+#[test]
+fn hovering_the_label_shows_the_same_help() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(model(d.path()), 1280.0);
+    let text = sdc_gui::model::fields::field_help("color.tag").unwrap();
+    assert!(hover_shows(&mut h, Role::Label, "DDS tag", text));
+}
+
+/// Note HI9: the Helper tick's help says what a helper is, with no normal-map detail layers (RNM is gone on 3.0).
+#[test]
+fn the_helper_tick_has_help() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(model(d.path()), 1280.0);
+    let text = sdc_gui::model::fields::HELPER_HELP;
+    assert!(!text.to_lowercase().contains("normal map"), "{text}");
+    assert!(hover_shows(&mut h, Role::Label, "Help: Helper", text));
+}
+
+/// Screens of the help (Note HI9) at 1100, 1280 and 1600 px: a `?`'s tooltip, and a disabled row's (a pending plan),
+/// written whole to `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
+#[test]
+fn render_help_shots() {
+    let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&out).unwrap();
+    for w in [1100.0, 1280.0, 1600.0] {
+        for (name, off) in [("help", false), ("help-disabled", true)] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = model(d.path());
+            if off {
+                m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+            }
+            let mut h = harness(m, w);
+            let (role, mark) = (
+                Role::Label,
+                if off {
+                    "Help: DDS tag"
+                } else {
+                    "Help: Input content"
+                },
+            );
+            let text = if off { "_SRGB flag" } else { "colour values" };
+            assert!(hover_shows(&mut h, role, mark, text));
+            h.render()
+                .expect("render")
+                .save(out.join(format!("{name}-{w}.png")))
+                .unwrap();
+        }
+    }
+}
+
+/// Note HI18: the strip keeps its label room (no `?`); the label still shows the row's help.
+#[test]
+fn the_strip_has_help_on_its_labels() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, strip) = strip_harness(d.path());
+    let marks = h
+        .query_all(by().role(Role::Label))
+        .filter(|n| strip.contains(n.rect().center()))
+        .filter(|n| {
+            let a = n.accesskit_node();
+            a.value()
+                .or(a.label())
+                .is_some_and(|v| v.starts_with("Help: "))
+        })
+        .count();
+    assert_eq!(marks, 0, "a ? in the strip");
+    let text = sdc_gui::model::fields::field_help("format").unwrap();
+    let at = control(&h, Role::Label, "Format", strip);
+    h.query_all(by().role(Role::Label).label("Format"))
+        .find(|n| n.rect() == at)
+        .unwrap()
+        .hover();
+    h.run();
+    assert!(h.query_all_by_label_contains(text).next().is_some());
+}
