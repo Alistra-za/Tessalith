@@ -3526,7 +3526,7 @@ impl AppModel {
         if !self.crash_restore_on_top() {
             self.messages.notify(
                 messages::Severity::Info,
-                "The restored edits were already undone or edited since: use Undo or Redo",
+                "The restored edits were already undone or edited since: press Ctrl+Z to undo or Ctrl+Y to redo",
             );
             return;
         }

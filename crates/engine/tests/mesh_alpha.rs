@@ -272,6 +272,77 @@ fn an_explicit_policy_over_a_mesh_remove_keeps_compact_off_bc1() {
     assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
 }
 
+/// Note HR1: a `remove` written for the file is opaque colour to the rules, as the mesh's own `remove` is.
+#[test]
+fn an_explicit_remove_on_varying_alpha_matches_the_mesh_remove() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    for preset in [None, Some("cs-compact")] {
+        let by_hand = plan(
+            d.path(),
+            preset,
+            &["file:**/wall.png.alpha.policy=remove"],
+            &[],
+        );
+        let by_mesh = plan(d.path(), preset, &[], &[(WALL, vec![NO_ALPHA])]);
+        let (h, m) = (job(&by_hand, "wall.dds"), job(&by_mesh, "wall.dds"));
+        assert_eq!(h.profile.alpha.policy, AlphaPolicy::Remove, "{preset:?}");
+        assert_eq!(h.profile.format, m.profile.format, "{preset:?}");
+        assert!(!codes(h).contains(&Code::LossAlphaData), "{:?}", h.warnings);
+        assert_eq!(h.status, JobStatus::Ready, "{:?}", h.warnings);
+    }
+    let compact = plan(
+        d.path(),
+        Some("cs-compact"),
+        &["file:**/wall.png.alpha.policy=remove"],
+        &[],
+    );
+    assert_eq!(job(&compact, "wall.dds").profile.format, Format::Bc1);
+}
+
+/// Note HR1: the last override wins, so a `blend` over a `remove` keeps the rules on the real alpha.
+#[test]
+fn a_later_override_over_a_remove_keeps_compact_off_bc1() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    let sets = ["alpha.policy=remove", "file:**/wall.png.alpha.policy=blend"];
+    let p = plan(d.path(), Some("cs-compact"), &sets, &[]);
+    let j = job(&p, "wall.dds");
+    assert_eq!(
+        (j.profile.alpha.policy, j.profile.format),
+        (AlphaPolicy::Blend, Format::Bc7)
+    );
+}
+
+/// Note HR1: the GUI's recorded `remove` (a `[files]` entry in `sdc.toml`) plans as the mesh's own under cs-compact.
+#[test]
+fn a_recorded_remove_in_the_project_file_is_bc1_under_compact() {
+    let d = tempfile::tempdir().unwrap();
+    varying(d.path(), "textures/a/wall.png");
+    let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    req.recursive = true;
+    req.accept = AcceptSuggestions::High;
+    req.preset = Some("cs-compact".to_string());
+    req.project_config_inline = Some(
+        engine::presets::ConfigFile::parse(
+            "[files.\"textures/a/wall.png\".alpha]\npolicy = \"remove\"\n",
+            "sdc.toml",
+        )
+        .unwrap(),
+    );
+    let rep = Reporter::new(Arc::new(NullSink), "mesh-alpha");
+    let p = Engine::new()
+        .unwrap()
+        .plan(req, &rep, &CancelToken::default())
+        .unwrap();
+    let j = job(&p, "wall.dds");
+    assert_eq!(
+        (j.profile.alpha.policy, j.profile.format),
+        (AlphaPolicy::Remove, Format::Bc1)
+    );
+    assert_eq!(prov(j, "alpha.policy"), Provenance::ProjectFile.to_string());
+}
+
 /// Spec Review Focus 4: a colour member renamed by the vocabulary (`wall_albedo.png` → `wall.dds`) is keyed by its
 /// output stem, the name the meshes reference.
 #[test]

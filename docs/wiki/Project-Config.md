@@ -262,7 +262,7 @@ Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a
 | `mips.normal` | `renormalize`, `renormalize_bake` | `renormalize`; `renormalize_bake` for `coat_normal` | How normal-map mips are built. `renormalize_bake` also bakes the normal detail lost in each mip into the roughness stored in the same texture (the coat roughness of a `_cnr`). |
 | `mips.normal_base` | `renormalize`, `keep` | `renormalize` | Mip 0 of a normal map: stored at unit length, or as authored. |
 | `mips.bake_clamp` | greater than 0, up to 1 | 0.25 | Limits how much roughness the variance bake can add (at most the square of this value). |
-| `mips.coverage` | `auto`, `on`, `off` | `auto` | Alpha-coverage preservation. Applies to `cutout`, `cutout_blend`, and `blend` with `encoder.bc1_alpha`; there `auto` and `on` both enable it. |
+| `mips.coverage` | `auto`, `on`, `off` | `auto` | Alpha-coverage preservation. Applies to `cutout`, `cutout_blend`, and `blend` with `encoder.bc1_alpha`; there `auto` and `on` both enable it. A resized texture is matched to its source's coverage, the largest mip included. |
 
 ### Format and size
 

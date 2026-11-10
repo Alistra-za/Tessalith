@@ -211,8 +211,7 @@ pub fn discover_reporting(
             // Note BC (audit #3): only an output root strictly inside this folder is skipped; in place skips nothing.
             let in_abs = std::path::absolute(input)?;
             let skip_out = is_under(&out_abs, &in_abs) && !is_under(&in_abs, &out_abs);
-            // A followed link into the output folder must be skipped too: compare resolved paths (Note CV6).
-            // shortcut: only folder links are resolved; a file link into the output folder is still read.
+            // A followed folder or file link into the output folder must be skipped too: compare resolved paths (Note CV6, HR3).
             let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             let (in_real, out_real) = (real(&in_abs), real(&out_abs));
             let skip_real = !is_under(&in_real, &out_real);
@@ -267,6 +266,7 @@ pub fn discover_reporting(
                 let p = e.path();
                 if !e.file_type().is_file()
                     || (skip_out && is_under(&std::path::absolute(p)?, &out_abs))
+                    || (skip_real && e.path_is_symlink() && is_under(&real(p), &out_real))
                 {
                     continue;
                 }

@@ -409,6 +409,49 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
     );
 }
 
+/// Note HR2: a mesh `remove` on a varying alpha is recorded like any mesh verdict; an Undo stays undone; the CLI
+/// plans the same from the text with no evidence.
+#[test]
+fn a_mesh_remove_is_recorded_and_stays_undone() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    varying(&root, "a/wall.png");
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    assert_eq!(value(&m, "a/wall.png", "alpha.policy"), None);
+    let none = MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    m.mesh_alpha = [("textures/a/wall".to_string(), vec![none])].into();
+    m.scan_store_unsettled = true;
+    m.replan();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        value(&m, "a/wall.png", "alpha.policy"),
+        Some(json!("remove"))
+    );
+    assert_eq!(value(&m, "a/wall.png", "alpha.threshold"), None);
+    assert_eq!(
+        auto_row(&m).expect("the row").detail.as_deref(),
+        Some("wall.png: remove")
+    );
+    let w = m.item("a/wall.png").unwrap().job.clone().unwrap();
+    let p = cli_plan(&root, &text(&m));
+    let cw = cli_job(&p, "wall.png");
+    assert_eq!(
+        (cw.profile.alpha.policy, cw.profile.format),
+        (AlphaPolicy::Remove, w.profile.format)
+    );
+    m.undo();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        value(&m, "a/wall.png", "alpha.policy"),
+        None,
+        "the Undo stays undone"
+    );
+}
+
 /// AM14: one rule for both tools. The GUI still plans (on the fallback) but the export is blocked by a row.
 #[test]
 fn a_missing_preset_blocks_export_with_a_row() {

@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+/// A hit on an entry older than this moves its modification time to now (Note HR7).
+const TOUCH_AFTER: Duration = Duration::from_secs(24 * 3600);
 
 /// Bump whenever decoding (`load_image_meta`), `analyse_with`, `make_thumbnail`, pack assembly or any `Analysis` field
 /// changes what it produces: entries written under another value are ignored. The pin test (analysis_version.rs)
@@ -71,7 +75,12 @@ impl AnalysisStore {
 
     /// The entry stored under `id`; a missing, unreadable, corrupt or mismatched file is `None`.
     fn get(&self, id: &str) -> Option<(Head, Option<Arc<Thumbnail>>)> {
-        let bytes = std::fs::read(self.path_of(id)).ok()?;
+        let path = self.path_of(id);
+        let mut file = std::fs::File::open(&path).ok()?;
+        let modified = file.metadata().and_then(|m| m.modified()).ok();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut bytes).ok()?;
+        drop(file);
         let nl = bytes.iter().position(|&b| b == b'\n')?;
         let head: Head = serde_json::from_slice(&bytes[..nl]).ok()?;
         if head.id != id {
@@ -94,6 +103,13 @@ impl AnalysisStore {
             None if rgba.is_empty() => None,
             _ => return None,
         };
+        if modified.is_some_and(|m| m.elapsed().is_ok_and(|age| age > TOUCH_AFTER)) {
+            // A failed touch (read-only entry, share lock) is still a hit.
+            let _ = std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|f| f.set_modified(SystemTime::now()));
+        }
         Some((head, thumb))
     }
     /// Store an entry; errors are ignored.
@@ -163,8 +179,7 @@ impl AnalysisStore {
 
     /// Delete the oldest entries (by modification time) until the folder holds at most `max_bytes`, and any temp file
     /// a crashed write left behind more than a day ago.
-    // shortcut: an entry's mtime is when it was written, not last used, so a busy old entry goes first; touch
-    // entries on a hit if that ever costs reloads.
+    // An entry's time is when it was written or, once a day, last read (Note HR7).
     pub fn prune(&self, max_bytes: u64) {
         let Ok(dir) = std::fs::read_dir(&self.dir) else {
             return;
@@ -264,6 +279,75 @@ mod tests {
         AnalysisStore::new(dir.path().into()).prune(250);
         assert!(!dir.path().join("a.ent").exists());
         assert!(dir.path().join("b.ent").exists() && dir.path().join("c.ent").exists());
+    }
+
+    fn age(path: &Path, by: Duration) {
+        let f = std::fs::File::options().write(true).open(path).unwrap();
+        f.set_modified(SystemTime::now() - by).unwrap();
+    }
+    const DAY: Duration = Duration::from_secs(24 * 3600);
+
+    /// Note HR7: a hit on an entry older than a day makes it the newest, so the prune takes the unused one.
+    #[test]
+    fn a_hit_on_an_old_entry_survives_the_prune() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let h = AnalyseHints::default();
+        let s = AnalysisStore::new(dir.path().into());
+        let (used, unused) = (Path::new("used.png"), Path::new("unused.png"));
+        s.put_file(used, STAMP, h, &a, info, None);
+        s.put_file(unused, STAMP, h, &a, info, None);
+        let (pu, pn) = (
+            s.path_of(&s.file_id(used, STAMP, h)),
+            s.path_of(&s.file_id(unused, STAMP, h)),
+        );
+        age(&pu, 3 * DAY);
+        age(&pn, 2 * DAY);
+        assert!(s.get_file(used, STAMP, h).is_some());
+        // The budget is the used entry's size: the test relies on it fitting alone and not fitting with the other.
+        s.prune(std::fs::metadata(&pu).unwrap().len());
+        assert!(pu.exists() && !pn.exists());
+    }
+
+    /// Note HR7: a hit within the day writes nothing (guard: pins the day threshold).
+    #[test]
+    fn a_recent_hit_leaves_the_time_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let h = AnalyseHints::default();
+        let s = AnalysisStore::new(dir.path().into());
+        let p = Path::new("a.png");
+        s.put_file(p, STAMP, h, &a, info, None);
+        let path = s.path_of(&s.file_id(p, STAMP, h));
+        age(&path, DAY / 24);
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(s.get_file(p, STAMP, h).is_some());
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before
+        );
+    }
+
+    /// Note HR7: an entry that cannot be written is still a hit (guard: pins existing behaviour).
+    #[test]
+    fn a_read_only_old_entry_is_still_a_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let h = AnalyseHints::default();
+        let s = AnalysisStore::new(dir.path().into());
+        let p = Path::new("a.png");
+        s.put_file(p, STAMP, h, &a, info, None);
+        let path = s.path_of(&s.file_id(p, STAMP, h));
+        age(&path, 3 * DAY);
+        let set_ro = |ro: bool| {
+            let mut perm = std::fs::metadata(&path).unwrap().permissions();
+            perm.set_readonly(ro);
+            std::fs::set_permissions(&path, perm).unwrap();
+        };
+        set_ro(true);
+        let hit = s.get_file(p, STAMP, h).is_some();
+        set_ro(false);
+        assert!(hit);
     }
 
     #[test]

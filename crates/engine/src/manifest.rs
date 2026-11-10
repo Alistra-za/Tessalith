@@ -21,18 +21,14 @@ pub const RELEASED_ENGINE_VERSION: &str = "2.0.0";
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
-/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0. No `_` arm: a new
-/// `Subtype` fails to compile until it gets one.
+/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0, and with Note HR6
+/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`. No `_` arm: a new `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
-        Subtype::Diffuse
-        | Subtype::LandscapeDiffuse
-        | Subtype::PbrAlbedo
+        Subtype::LandscapeDiffuse
         | Subtype::Glow
         | Subtype::SubsurfaceTint
         | Subtype::BacklightTint
-        | Subtype::UiSky
-        | Subtype::SkinAlbedo
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
         | Subtype::Normal
@@ -41,8 +37,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::Msn
         | Subtype::CoatNormal
         | Subtype::GenericData
-        | Subtype::ComplexGrass
-        | Subtype::Cubemap
         | Subtype::PbrEmissive
         | Subtype::HdrSky
         | Subtype::Envmask
@@ -53,7 +47,16 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::SkinSk
         | Subtype::ProjectedNoise
         | Subtype::DetailNormal
+        | Subtype::ComplexGrass
+        | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
+        // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6). These are the sub-types a
+        // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
+        // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
+        // if-changed; move that arm if it is ever reported (Note HR6).
+        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
+            ENGINE_VERSION
+        }
         // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
         // A new sub-type in 2.1.0.
         Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
@@ -557,12 +560,13 @@ mod tests {
         }
     }
 
-    /// Note FM9: every sub-type has the one encode version, 2.0.0, except the five that changed in 2.1.0 (comment below).
+    /// Note FM9: every sub-type has the one encode version, 2.0.0, except those that changed since (comment below).
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
             // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`;
-            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1).
+            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1); a resized cutout keeps
+            // its source's coverage on the colour types a built-in layer makes a cutout (Note HR6).
             let want = if matches!(
                 st,
                 Subtype::SkinWet
@@ -570,8 +574,12 @@ mod tests {
                     | Subtype::Rmaos
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial
+                    | Subtype::Diffuse
+                    | Subtype::PbrAlbedo
+                    | Subtype::UiSky
+                    | Subtype::SkinAlbedo
             ) {
-                "2.1.0"
+                ENGINE_VERSION
             } else {
                 "2.0.0"
             };

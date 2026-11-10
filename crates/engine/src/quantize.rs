@@ -135,6 +135,7 @@ mod tests {
             domain,
             roughness_r_squared: false,
             nonfinite_samples: 0,
+            source_coverage: None,
         }
     }
 
