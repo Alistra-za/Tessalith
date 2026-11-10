@@ -244,8 +244,7 @@ fn a_borrower_names_the_moved_file() {
 #[test]
 fn adding_a_match_to_a_renamed_set_is_allowed() {
     let d = tempfile::tempdir().unwrap();
-    let m = renamed(d.path(), &[]);
-    let mut m = m;
+    let mut m = renamed(d.path(), &[]);
     m.set_json_value(SET, "match2", Some(json!(r"landscape\rock01_n")));
     idle(&mut m);
     assert_eq!(entry(&m, SET)["match2"], json!(r"landscape\rock01_n.dds"));
@@ -530,6 +529,112 @@ fn a_path_ending_in_a_suffix_is_refused() {
             "{bad}"
         );
     }
+    // Through the model and the dialog too.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    for bad in [r"armor\plate_n", r"armor\plate_detail"] {
+        assert!(m.set_output_name(SET, Some(bad)).is_err(), "{bad}");
+        open_outputs(&mut m, &[SET]);
+        dlg(&mut m).typed.insert(SET.into(), bad.into());
+        let p = plan(&m);
+        assert!(row_of(&p, SET).problem.is_some(), "{bad}: {:?}", p.rows);
+        assert!(!p.can_apply(), "{bad}");
+        m.dialog = None;
+    }
+}
+
+/// An empty folder name in a whole path is refused (final review 6).
+#[test]
+fn an_empty_folder_in_a_path_is_refused() {
+    for bad in [r"a\\b", "a//b", r"armor\\steel\plate"] {
+        let mut s = sdc_gui::pgp::settings::Settings::new();
+        s.insert("rename".into(), json!(bad));
+        assert!(
+            sdc_gui::pgp::prefix::prefix_of(&s, r"landscape\rock01").is_err(),
+            "{bad}"
+        );
+    }
+}
+
+/// HJ4 over a Case change: Whole path + UPPER CASE with the folder unchanged keeps the `Key` form (final review 3).
+#[test]
+fn a_case_change_over_the_whole_path_keeps_the_key_form() {
+    use sdc_gui::model::rename::Case;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    open_outputs(&mut m, &[SET]);
+    let r = dlg(&mut m);
+    r.recipe.path = true;
+    r.recipe.case = Case::Upper;
+    assert!(row_of(&plan(&m), SET).writes());
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(settings(&m).get("rename"), Some(&json!("ROCK01")));
+    let e = entry(&m, SET);
+    assert!(
+        e.get("match_diffuse").is_some() && e.get("slot1").is_none(),
+        "{e}"
+    );
+}
+
+/// A set whose stored `rename` is refused now shows why, and a new name repairs it (final review 4).
+#[test]
+fn a_refused_rename_can_be_repaired_in_the_dialog() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_json_value(SET, "rename", Some(json!(r"..\x")));
+    idle(&mut m);
+    assert!(set_views(&m)
+        .iter()
+        .any(|v| v.id == SET && v.prefix.is_none()));
+    open_outputs(&mut m, &[SET]);
+    let r = row_of(&plan(&m), SET);
+    assert_eq!(r.skipped, None, "{r:?}");
+    assert_eq!(r.old, "../x");
+    assert!(
+        r.warning.as_deref().is_some_and(|w| w.contains("refused")),
+        "{r:?}"
+    );
+    dlg(&mut m).typed.insert(SET.into(), "steel".into());
+    let r = row_of(&plan(&m), SET);
+    assert_eq!(r.problem, None, "{r:?}");
+    assert!(
+        r.output.starts_with("textures/pbr/landscape/steel.dds"),
+        "{r:?}"
+    );
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(settings(&m).get("rename"), Some(&json!("steel")));
+}
+
+/// A typed path that resolves to the set's own prefix is no change (final review 5).
+#[test]
+fn a_path_to_the_same_prefix_is_no_change() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    open_outputs(&mut m, &[SET]);
+    for same in ["pbr/landscape/rock01", r"textures\pbr\landscape\rock01"] {
+        dlg(&mut m).typed.insert(SET.into(), same.into());
+        let r = row_of(&plan(&m), SET);
+        assert_eq!(r.new, "textures/pbr/landscape/rock01", "{same}");
+        assert!(!r.writes(), "{same}: {r:?}");
+    }
+}
+
+/// HJ3: in `Slots` form the entry names its files, so the AF8 "rename hits elsewhere" warning is silent.
+#[test]
+fn rename_hits_elsewhere_is_silent_in_slot_form() {
+    use sdc_gui::pgp::prefix::rename_hits_elsewhere;
+    let derived = r"landscape\rock01";
+    let known = [r"textures\other\landscape\rock01.dds".to_string()];
+    let mut s = sdc_gui::pgp::settings::Settings::new();
+    s.insert("rename".into(), json!("steel"));
+    assert!(
+        rename_hits_elsewhere(&s, derived, &known).is_some(),
+        "Key form warns"
+    );
+    s.insert("match2".into(), json!(r"landscape\rock01_n"));
+    assert_eq!(rename_hits_elsewhere(&s, derived, &known), None);
 }
 
 /// `textures/armor/wall` (colour and `_n`) as a PBR set: its prefix is `textures\pbr\armor\wall`.
@@ -589,7 +694,7 @@ fn whole_path_tick_works_in_outputs_mode() {
             .get("rename")
             .cloned()
     };
-    assert_eq!(rename(&m), Some(json!(r"armor\steel\wall")));
+    assert_eq!(rename(&m), Some(json!(r"textures\armor\steel\wall")));
     m.undo();
     idle(&mut m);
     assert_eq!(rename(&m), None);
@@ -655,6 +760,42 @@ fn a_whole_path_collision_blocks() {
     assert!(!plan(&m).can_apply());
 }
 
+/// A mapped vanilla set's record path is taken too (the `record_entries` source; final review 8).
+#[test]
+fn a_record_path_collision_blocks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = arm(d.path());
+    let g = set_views(&m)
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k == "g/a.png"))
+        .expect("g/a's set")
+        .id;
+    m.map_record(
+        &g,
+        sdc_gui::sets_doc::TxstMap {
+            plugin: "Skyrim.esm".into(),
+            formid: "000800".into(),
+            edid: "E".into(),
+            slots: [(1, "textures/rec/body.dds".to_string())]
+                .into_iter()
+                .collect(),
+            base: None,
+        },
+    )
+    .unwrap();
+    idle(&mut m);
+    open_outputs(&mut m, &[STEEL_SET]);
+    dlg(&mut m)
+        .typed
+        .insert(STEEL_SET.into(), r"rec\body".into());
+    let r = row_of(&plan(&m), STEEL_SET);
+    assert_eq!(
+        r.problem,
+        Some(format!("{g} already writes textures/rec/body.dds")),
+        "{r:?}"
+    );
+}
+
 #[test]
 fn exporting_another_set_keeps_a_moved_sets_entry() {
     let d = tempfile::tempdir().unwrap();
@@ -715,6 +856,13 @@ fn the_outputs_leave_the_pbr_folder_safely() {
     );
     let notes = m.export.notes.join("\n").to_lowercase();
     assert!(!notes.contains("textures/textures") && !notes.contains(r"textures\textures"));
+    // The old outputs stay where they were, and no note names them as written (no export reports a moved DDS as an
+    // orphan; the JSON names the new path, above).
+    assert!(root.join("textures/pbr/arm/steel.dds").is_file());
+    assert!(
+        !notes.contains("pbr/arm/steel") && !notes.contains(r"pbr\arm\steel"),
+        "{notes}"
+    );
     let v = set_views(&m)
         .into_iter()
         .find(|v| v.id == STEEL_SET)
@@ -790,6 +938,14 @@ fn a_shared_helpers_recipe_follows_the_sharing_set() {
     idle(&mut m);
     let paths = engine_paths(&m);
     assert!(
+        set_views(&m).iter().any(|v| v.id == "a/rock" && v.pbr),
+        "a/rock is a PBR set"
+    );
+    assert!(
+        paths.contains(&"textures/y/rock2.dds".to_string()),
+        "a's outputs move: {paths:?}"
+    );
+    assert!(
         paths
             .iter()
             .any(|p| p.ends_with("/stone_rmaos.dds") && !p.contains("textures/y/")),
@@ -827,6 +983,55 @@ fn shots() {
         h.run_steps(10);
         let img = h.render().expect("render");
         img.save(std::path::Path::new(&out).join(format!("rename-outputs-{w}.png")))
+            .expect("save png");
+    }
+}
+
+/// The JSON editor and the set editor at 1280 px on a renamed set with two matches (final review 13). Needs a GPU and
+/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test rename_slots -- --ignored matching_shots`.
+#[test]
+#[ignore]
+fn matching_shots() {
+    let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
+        return;
+    };
+    for json in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = renamed(d.path(), &[("match2", json!(r"landscape\rock01_n"))]);
+        if json {
+            m.open_json_editor();
+        } else {
+            let key = m
+                .sets
+                .iter()
+                .find(|s| s.key.ends_with(SET))
+                .unwrap()
+                .key
+                .clone();
+            m.select_set(&key);
+        }
+        let mut h = Harness::builder()
+            .with_size(eframe::egui::vec2(1280.0, 1200.0))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui_state(
+                |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
+                (m, sdc_gui::ui::State::default()),
+            );
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(10);
+        if !json {
+            if let Some(n) = h
+                .query_all_by_label_contains("The entry applies when any of these matches")
+                .next()
+            {
+                n.scroll_to_me();
+            }
+            h.run_steps(5);
+        }
+        let img = h.render().expect("render");
+        let name = if json { "json-editor" } else { "set-editor" };
+        img.save(std::path::Path::new(&out).join(format!("{name}-1280.png")))
             .expect("save png");
     }
 }
@@ -869,4 +1074,61 @@ fn the_json_editor_adds_a_match_to_a_renamed_set() {
     h.run();
     h.run();
     assert_eq!(pills(&h), before + 1, "no pending pill for slot 2");
+}
+
+/// At 1280 px the JSON editor's match2 pill stays inside the window (it wraps to a new row), and the set editor's
+/// Matching path field is wide enough to read (final review 13).
+#[test]
+fn the_match_fields_fit_at_1280() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT as _;
+    for json in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = renamed(d.path(), &[("match2", json!(r"landscape\rock01_n"))]);
+        if json {
+            m.open_json_editor();
+        } else {
+            let key = m
+                .sets
+                .iter()
+                .find(|s| s.key.ends_with(SET))
+                .unwrap()
+                .key
+                .clone();
+            m.select_set(&key);
+        }
+        let mut h = Harness::builder()
+            .with_size(eframe::egui::vec2(1280.0, 1200.0))
+            .build_ui_state(
+                |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
+                (m, sdc_gui::ui::State::default()),
+            );
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(5);
+        if !json {
+            if let Some(n) = h
+                .query_all_by_label_contains("The entry applies when any of these matches")
+                .next()
+            {
+                n.scroll_to_me();
+            }
+            h.run_steps(5);
+        }
+        let fields: Vec<eframe::egui::Rect> = h
+            .query_all_by_role(Role::TextInput)
+            .filter(|n| {
+                n.accesskit_node()
+                    .value()
+                    .is_some_and(|v| v.contains("rock01_n"))
+            })
+            .map(|n| n.rect())
+            .collect();
+        assert!(!fields.is_empty(), "json {json}: no match2 field");
+        for r in fields {
+            assert!(r.max.x <= 1280.0, "json {json}: {r:?} past the edge");
+            if !json {
+                assert!(r.width() >= 120.0, "set editor field {r:?} too narrow");
+            }
+        }
+    }
 }

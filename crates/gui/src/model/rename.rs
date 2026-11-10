@@ -8,7 +8,7 @@ use super::sets::{
 };
 use super::txst_map::record_entries;
 use super::{AppModel, Dialog};
-use crate::pgp::prefix::check_file_name;
+use crate::pgp::prefix::{check_file_name, prefix_of};
 use engine::discover::{canonicalise_outputs, InputFile, InputKind};
 use engine::sets::{fold_id, OutputKey};
 use regex::Regex;
@@ -227,17 +227,27 @@ pub fn plan_rename(m: &AppModel, d: &RenameDialog) -> RenamePlan {
             }
         }
     };
-    let (mut rows, paths) = match d.mode {
-        RenameMode::Inputs => (input_rows(m, d, re.as_ref()), vec![]),
-        RenameMode::Outputs => output_rows(m, d, re.as_ref()),
+    let include = |rows: &mut Vec<RenameRow>| {
+        for r in rows {
+            r.included = !d.exclude.contains(&r.key);
+        }
     };
-    for r in &mut rows {
-        r.included = !d.exclude.contains(&r.key);
-    }
-    match d.mode {
-        RenameMode::Inputs => input_collisions(m, &mut rows),
-        RenameMode::Outputs => output_collisions(m, &mut rows, &paths),
-    }
+    let rows = match d.mode {
+        RenameMode::Inputs => {
+            let mut rows = input_rows(m, d, re.as_ref());
+            include(&mut rows);
+            input_collisions(m, &mut rows);
+            rows
+        }
+        RenameMode::Outputs => {
+            let views = views(m);
+            let owned = output_candidates(m, &views);
+            let (mut rows, paths) = output_rows(m, d, re.as_ref(), &views, &owned);
+            include(&mut rows);
+            output_collisions(m, &mut rows, &paths, &views, &owned);
+            rows
+        }
+    };
     RenamePlan { rows, error: None }
 }
 
@@ -431,29 +441,73 @@ fn input_collisions(m: &AppModel, rows: &mut [RenameRow]) {
 
 /// Outputs mode (Note HJ5, HJ9): every row in the export folder's frame. The old value is the set's prefix with `/`;
 /// the new one is the recipe over its last component, or over the whole path with Whole path ticked; its outputs are
-/// that prefix with each suffix the set writes. Also returns each row's new output paths, for `output_collisions`.
+/// that prefix with each suffix the set writes; `new` is the prefix it resolves to, so a no-op path writes nothing. A
+/// set whose own `rename` is refused shows it with the refusal, and is planned from its unrenamed prefix so a new
+/// name repairs it. Also returns each row's new output paths, for `output_collisions`.
 fn output_rows(
     m: &AppModel,
     d: &RenameDialog,
     re: Option<&Regex>,
+    views: &[SetView],
+    owned: &[(String, OutputKey, PathBuf)],
 ) -> (Vec<RenameRow>, Vec<Vec<String>>) {
-    let views = views(m);
-    let index = first_by_id(&views);
-    let tails = output_tails(m, &views);
+    let index = first_by_id(views);
+    // The rows' sets whose `rename` is refused, planned without it (a set with no prefix has no outputs).
+    let refused: Vec<usize> = d
+        .keys
+        .iter()
+        .filter_map(|id| index.get(&fold_id(id)).copied())
+        .filter(|&i| views[i].prefix.is_none() && views[i].pbr)
+        .collect();
+    let unrenamed = (!refused.is_empty()).then(|| {
+        let u: Vec<SetView> = views
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let mut v = v.clone();
+                if refused.contains(&i) && v.settings.remove("rename").is_some() {
+                    let derived = v.derived_match.clone().unwrap_or_default();
+                    v.prefix = prefix_of(&v.settings, &derived).ok();
+                }
+                v
+            })
+            .collect();
+        let o = output_candidates(m, &u);
+        (u, o)
+    });
+    let (tv, to) = match &unrenamed {
+        Some((u, o)) => (u.as_slice(), o.as_slice()),
+        None => (views, owned),
+    };
+    let tails = output_tails(tv, to);
     let (mut out, mut paths) = (vec![], vec![]);
     for id in &d.keys {
-        let Some(v) = index.get(&fold_id(id)).map(|&i| &views[i]) else {
+        let Some(&at) = index.get(&fold_id(id)) else {
             continue;
         };
-        let (Some(prefix), Some(tails)) = (&v.prefix, tails.get(v.id.as_str())) else {
+        let v = &views[at];
+        let (Some(prefix), Some(tails)) = (&tv[at].prefix, tails.get(v.id.as_str())) else {
             let mut r = row(&v.id, String::new());
-            r.skipped = Some("skipped (the set writes no output)".into());
+            r.skipped = Some(match &v.prefix_error {
+                Some(e) => format!("skipped ({e})"),
+                None => "skipped (the set writes no output)".into(),
+            });
             out.push(r);
             paths.push(vec![]);
             continue;
         };
         let old = prefix.replace('\\', "/");
         let mut r = row(&v.id, old.clone());
+        if let (None, Some(e)) = (&v.prefix, &v.prefix_error) {
+            // Shown as stored, so Apply writes even an unchanged name over it.
+            r.old = v
+                .settings
+                .get("rename")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default()
+                .replace('\\', "/");
+            r.warning = Some(format!("its rename is refused now: {e}"));
+        }
         let (dir, base) = split_path(&old);
         let new = match d.typed.get(&v.id) {
             Some(t) => {
@@ -478,11 +532,12 @@ fn output_rows(
         };
         let renamed: Vec<String> = match renamed_prefix(v, &new) {
             Ok(p) => {
-                let p = p.replace('\\', "/");
-                tails.iter().map(|t| format!("{p}{t}")).collect()
+                r.new = p.replace('\\', "/");
+                tails.iter().map(|t| format!("{}{t}", r.new)).collect()
             }
             Err(e) => {
                 r.problem = Some(e);
+                r.new = new;
                 vec![]
             }
         };
@@ -491,7 +546,6 @@ fn output_rows(
             1 => renamed[0].clone(),
             n => format!("{} (+{} more)", renamed[0], n - 1),
         };
-        r.new = new;
         out.push(r);
         paths.push(renamed);
     }
@@ -500,20 +554,26 @@ fn output_rows(
 
 /// Per set id, what follows the prefix in each output `output_candidates` gives it (`.dds`, `_n.dds`…), the diffuse
 /// first. A shared helper's recipe output is the sharing set's (HJ10).
-fn output_tails<'a>(m: &AppModel, views: &'a [SetView]) -> HashMap<&'a str, Vec<String>> {
+fn output_tails<'a>(
+    views: &'a [SetView],
+    owned: &[(String, OutputKey, PathBuf)],
+) -> HashMap<&'a str, Vec<String>> {
     let prefixes: HashMap<&str, String> = views
         .iter()
         .filter_map(|v| Some((v.id.as_str(), v.prefix.as_ref()?.replace('\\', "/"))))
         .collect();
     let mut out: HashMap<&str, Vec<String>> = HashMap::new();
-    for (owner, _, rel) in output_candidates(m, views) {
+    for (owner, _, rel) in owned {
+        // A candidate's owner always has a prefix (`output_candidates` skips the others).
         let Some((&id, p)) = prefixes.get_key_value(owner.as_str()) else {
             continue;
         };
         let rel = rel.to_string_lossy().replace('\\', "/");
-        if let Some(t) = rel.get(p.len()..).filter(|_| rel.starts_with(p.as_str())) {
-            out.entry(id).or_default().push(t.to_string());
-        }
+        // `output_rel(prefix, suffix)` starts with the prefix by construction.
+        debug_assert!(rel.starts_with(p.as_str()), "{rel} under {p}");
+        out.entry(id)
+            .or_default()
+            .push(rel.get(p.len()..).unwrap_or_default().to_string());
     }
     for t in out.values_mut() {
         t.sort_by_key(|t| t != ".dds");
@@ -523,15 +583,19 @@ fn output_tails<'a>(m: &AppModel, views: &'a [SetView]) -> HashMap<&'a str, Vec<
 
 /// A renamed output another set writes (an owned, record or mirrored path, as `pbr_export::path_collisions` compares
 /// them), or two sets renamed onto one path, block.
-fn output_collisions(m: &AppModel, rows: &mut [RenameRow], paths: &[Vec<String>]) {
-    let views = views(m);
+fn output_collisions(
+    m: &AppModel,
+    rows: &mut [RenameRow],
+    paths: &[Vec<String>],
+    views: &[SetView],
+    owned: &[(String, OutputKey, PathBuf)],
+) {
     let changing: HashSet<String> = rows
         .iter()
         .filter(|r| r.writes())
         .map(|r| fold_id(&r.key))
         .collect();
-    let owned = output_candidates(m, &views);
-    let record = record_entries(m, &views);
+    let record = record_entries(m, views);
     let explicit: HashSet<&OutputKey> = owned.iter().chain(&record).map(|(_, k, _)| k).collect();
     let mut taken: HashMap<String, String> = HashMap::new();
     for (owner, _, p) in owned.iter().chain(&record) {
@@ -541,7 +605,7 @@ fn output_collisions(m: &AppModel, rows: &mut [RenameRow], paths: &[Vec<String>]
                 .or_insert_with(|| owner.clone());
         }
     }
-    let owners = packed_owners(&views);
+    let owners = packed_owners(views);
     for it in m
         .items
         .iter()

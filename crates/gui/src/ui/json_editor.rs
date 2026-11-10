@@ -306,7 +306,17 @@ fn entry_frame(ui: &egui::Ui, stroke: egui::Color32) -> egui::Frame {
 
 /// One key as a small rounded pill.
 fn pill<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::new()
+    // A frame never wraps in `horizontal_wrapped` (it is placed at the cursor and drawn past the edge): start a new
+    // row when this pill's width last frame no longer fits what is left of this one.
+    let width_id = ui.next_auto_id().with("pill-width");
+    let row_start = ui.cursor().min.x <= ui.max_rect().min.x + 0.5;
+    let last = ui.data(|d| d.get_temp::<f32>(width_id));
+    // Not `available_width`: in a wrapping layout it is the next row's width once the cursor is past the edge.
+    let left = ui.max_rect().right() - ui.cursor().min.x;
+    if ui.layout().main_wrap && !row_start && last.is_some_and(|w| w > left) {
+        ui.end_row();
+    }
+    let r = egui::Frame::new()
         .corner_radius(PILL_RADIUS)
         .fill(ui.visuals().faint_bg_color)
         .stroke(egui::Stroke::new(
@@ -314,8 +324,9 @@ fn pill<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
         .inner_margin(egui::Margin::symmetric(8, 3))
-        .show(ui, |ui| ui.horizontal(add).inner)
-        .inner
+        .show(ui, |ui| ui.horizontal(add).inner);
+    ui.data_mut(|d| d.insert_temp(width_id, r.response.rect.width()));
+    r.inner
 }
 
 fn remove_button(ui: &mut egui::Ui) -> bool {

@@ -348,6 +348,9 @@ pub fn prefix_of(s: &Settings, derived: &str) -> Result<String, PrefixError> {
             .map(|r| if has_dds(r) { &r[..r.len() - 4] } else { r });
     if let Some(r) = rename {
         check_rel_path(r, "rename")?;
+        if r.split(['\\', '/']).any(str::is_empty) {
+            return Err(PrefixError(format!("rename: an empty folder name ({r:?})")));
+        }
         let last = r.rsplit(['\\', '/']).next().unwrap_or(r);
         crate::model::sets::check_named(last, "rename").map_err(PrefixError)?;
     }

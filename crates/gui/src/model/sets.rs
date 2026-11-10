@@ -1595,15 +1595,19 @@ pub fn renamed_prefix(v: &SetView, rename: &str) -> Result<String, String> {
 }
 
 /// The `rename` PBR set `v` stores for `typed` (Note HJ5, HJ6): its last component alone when that gives the same
-/// prefix, so a set whose folder stays keeps the `Key` form (HJ4); else the whole path, with `\`.
+/// prefix, so a set whose folder stays keeps the `Key` form (HJ4); else the whole path, with `\`. The folder is
+/// compared ignoring ASCII case, as Windows and PGPatcher do (a Case change over a whole path keeps it).
 pub fn rename_value(v: &SetView, typed: &str) -> Result<String, String> {
     let full = renamed_prefix(v, typed)?;
     let last = typed.rsplit(['\\', '/']).next().unwrap_or(typed);
-    Ok(if renamed_prefix(v, last).is_ok_and(|p| p == full) {
-        last.to_string()
-    } else {
-        typed.replace('/', "\\")
-    })
+    // `last` ends both prefixes, so ignoring case here ignores it in the folder only.
+    Ok(
+        if renamed_prefix(v, last).is_ok_and(|p| p.eq_ignore_ascii_case(&full)) {
+            last.to_string()
+        } else {
+            typed.replace('/', "\\")
+        },
+    )
 }
 
 /// F3b: whether `name` can be an output base name. A name ending in a map suffix (`wall_n`) is refused: the

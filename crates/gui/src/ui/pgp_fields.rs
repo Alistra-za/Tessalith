@@ -521,6 +521,9 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
             .on_hover_text(format!("Written as match_diffuse = {d}"));
     }
     let r = ui.add_enabled_ui(c.read_only.is_none(), |ui| {
+        // An exact width: a TextEdit in a Grid takes the column's width from the last frame, so `desired_width`
+        // alone stayed at the narrow first-frame column (final review 13). Room is left for the label and ×.
+        let field_w = (ui.available_width() - 150.0).clamp(120.0, 360.0);
         egui::Grid::new(("pgp-matching", &c.set))
             .num_columns(3)
             .show(ui, |ui| {
@@ -530,7 +533,10 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                     let mut text = ui
                         .data(|d| d.get_temp::<String>(id))
                         .unwrap_or_else(|| m.path.clone());
-                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(220.0));
+                    let r = ui.add_sized(
+                        [field_w, ui.spacing().interact_size.y],
+                        egui::TextEdit::singleline(&mut text),
+                    );
                     take_focus(ui, &r, &c.set, &format!("match{}", m.n));
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(id, text.clone()));

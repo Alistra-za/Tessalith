@@ -60,10 +60,10 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
                 // Note HJ5: in Outputs mode the path is the output's, under the export folder.
                 ui.checkbox(&mut d.recipe.path, "Whole path").on_hover_text(match d.mode {
                     RenameMode::Inputs => {
-                        "Find, Replace, Prefix and Suffix work on the folders and the base name"
+                        "Find, Replace, Prefix, Suffix and Case work on the folders and the base name"
                     }
                     RenameMode::Outputs => {
-                        "Find, Replace, Prefix and Suffix work on the output's folders under the export folder and its base name"
+                        "Find, Replace, Prefix, Suffix and Case work on the output's folders under the export folder and its base name"
                     }
                 });
                 egui::ComboBox::from_id_salt("rename-case")

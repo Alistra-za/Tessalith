@@ -200,12 +200,11 @@ fn object(own: &Settings, derived: &str, slots: &BTreeMap<u8, String>) -> Vec<(S
                     out.push(("match_diffuse".to_string(), Node::Scalar(json!(diffuse))));
                     Node::Scalar(json!(r))
                 }),
-                // A `Key`-form entry has no `path_contains` to write (AN1, HJ3).
-                None if k.key == "path_contains" && renamed.is_some() => None,
                 // Wave 2 #9: PGPatcher never converts `/`, so these path texts are written with `\` (as in a section).
+                // A blank one is none, as `rename_form` reads it, so a `Key`-form entry never writes one (HJ3).
                 None if matches!(k.key, "path_contains" | "nif_filter") => v
                     .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
+                    .filter(|s| !s.trim().is_empty())
                     .map(|s| Node::Scalar(json!(s.replace('/', "\\")))),
                 None => v
                     .and_then(Value::as_str)
