@@ -525,6 +525,63 @@ fn make_dir_link(link: &Path, target: &Path) -> bool {
     }
 }
 
+/// A file link `link` -> `target`. `false` when none can be made here.
+fn link_file(target: &Path, link: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+}
+
+/// Note HR3: a file link whose target lies in the output folder is not an input.
+#[test]
+fn a_file_link_into_the_output_folder_is_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let (input, out) = (d.path().join("in"), d.path().join("in/out"));
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(input.join("a.png"), b"x").unwrap();
+    std::fs::write(out.join("b.dds"), b"x").unwrap();
+    if !link_file(&out.join("b.dds"), &input.join("link.dds")) {
+        eprintln!("skipped: cannot create a file symlink here (Windows without Developer Mode)");
+        return;
+    }
+    let (files, skipped) =
+        discover_reporting(std::slice::from_ref(&input), &out, true, None).unwrap();
+    let rels: Vec<_> = files.iter().map(|f| f.rel.clone()).collect();
+    assert_eq!(rels, [std::path::PathBuf::from("a.png")]);
+    assert!(skipped.is_empty(), "{skipped:?}");
+}
+
+/// Note HR3, Review Focus 7: in place skips nothing, a file link included.
+#[test]
+fn an_in_place_run_still_reads_a_file_link() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("in");
+    std::fs::create_dir_all(input.join("sub")).unwrap();
+    std::fs::write(input.join("a.png"), b"x").unwrap();
+    std::fs::write(input.join("sub/b.dds"), b"x").unwrap();
+    if !link_file(&input.join("sub/b.dds"), &input.join("link.dds")) {
+        eprintln!("skipped: cannot create a file symlink here (Windows without Developer Mode)");
+        return;
+    }
+    // The link and its target are one file (BQ1 keeps the first seen).
+    let (files, _) = discover_reporting(std::slice::from_ref(&input), &input, true, None).unwrap();
+    let rels: Vec<_> = files
+        .iter()
+        .map(|f| f.rel.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert_eq!(files.len(), 2, "{rels:?}");
+    assert!(rels.contains(&"a.png".to_string()), "{rels:?}");
+    assert!(
+        rels.iter().any(|r| r == "link.dds" || r == "sub/b.dds"),
+        "{rels:?}"
+    );
+}
+
 /// Trace-debug #27 (Note CV): recursive discovery follows directory links, and a link loop is reported, not dropped.
 #[test]
 fn recursive_discovery_follows_links_and_reports_a_loop() {

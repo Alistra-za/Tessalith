@@ -466,7 +466,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - OPEN: defer the full plan's `request()` by one poll. [FL]
 - OPEN: surface a mesh-vote database error in the planner (parked as minor). [U]
 - OPEN: the restore toast carries Undo for 20 s, but Ctrl+Z only says "use Undo or Redo". [FB14]
-- OPEN: a file link into the output folder is still read (only folder links are resolved, `discover.rs`). [CV6]
 - OPEN: the analysis-cache prune order uses write time, not last use. [DZ8]
 
 ### GUI: Settings panel
@@ -1353,3 +1352,4 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 
 - **HR1 A `remove` written by an override is opaque colour to the rules (agent ruling, owner confirmed 2026-11-09).** On a sub-type whose alpha the mesh decides (`Subtype::alpha_from_mesh`), when the source alpha varies and the winning `alpha.policy` override (`[files]` or `--set`, the last that applies) is `remove`, `layered_profile_with` matches the rules on alpha `none`, as for the mesh's own `remove` (owner O1), so cs-compact gives BC1. A `remove` from a preset or config table is unchanged: the rules still see the real alpha. Tests `mesh_alpha::an_explicit_remove_on_varying_alpha_matches_the_mesh_remove`, `a_recorded_remove_in_the_project_file_is_bc1_under_compact`, `a_later_override_over_a_remove_keeps_compact_off_bc1`.
 - **HR2 The GUI records a mesh `remove` (owner).** `record_auto_decisions` writes every mesh-alpha verdict, `remove` included, as `alpha.policy` in `sdc.toml` (amends FC1; closes OPEN [FC]); the threshold is still written only when the mesh set it, and an Undo stays undone. With HR1 the CLI plans the same format from the text. Test `auto_accept::a_mesh_remove_is_recorded_and_stays_undone`.
+- **HR3 A file link into the output folder is skipped (agent ruling).** Discovery resolves a file link as it does a folder link (Note CV6): when the output root lies inside the input folder and the link's target is under it, the link is not an input and nothing is reported. A hard link is not a link and is still read; an in-place run skips nothing. Closes OPEN [CV6]. Tests `discover_group::a_file_link_into_the_output_folder_is_skipped`, `an_in_place_run_still_reads_a_file_link` (both print `skipped:` where file links cannot be made).

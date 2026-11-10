@@ -2,6 +2,7 @@
 
 ## 3.0.0 (Unreleased)
 
+- A file link (symlink) whose target is in the output folder is no longer read as an input when the output folder is inside the input folder; folder links were already skipped.
 - The GUI now also records an alpha the scanned meshes drop (`remove` on a colour map whose alpha varies) in `sdc.toml`, like every other mesh verdict, so `sdc convert` plans it the same. See docs/wiki/GUI-Problems.md#what-the-gui-writes-on-its-own.
 - An explicit `alpha.policy = "remove"` (a `[files]` entry or `--set`) on a colour map whose alpha varies is now opaque colour to the preset's rules, as a mesh `remove` is: under cs-compact such a file is BC1, not BC7.
 - The setting rows of the centre panel (one texture, or several in the bulk panel) and the Helper tick have a **?** at the end of the label; hovering it, or the label, says what the row does, also while the row is greyed out. The preview's settings strip and the Advanced drawer show the help on their labels only. Helper role, the Undecided box's rows and the helper panel's other rows have no **?**. See docs/wiki/GUI-Texture-Panel.md#changing-a-setting.
