@@ -338,7 +338,8 @@ pub fn matches_nothing(s: &Settings, derived: &str) -> bool {
 
 /// The output prefix (backslashes, no extension) of a set with settings `s` and derived diffuse path `derived`
 /// (DECISIONS V3): the lowest active `matchN`, as PGPatcher's first hit gives it, else the derived path. A `rename`
-/// is a new file name (owner, 2026-10-12): it replaces the last component, so the folder stays the matched one.
+/// file name replaces the last component, so the folder stays the matched one (owner, 2026-10-12); a `rename` path
+/// is the whole prefix, relative to `Data` (`textures\` added when missing), wherever it points (HJ5, HJ7).
 pub fn prefix_of(s: &Settings, derived: &str) -> Result<String, PrefixError> {
     // One `.dds` is cut, like a match path.
     let rename =
@@ -346,15 +347,20 @@ pub fn prefix_of(s: &Settings, derived: &str) -> Result<String, PrefixError> {
             .map(str::trim)
             .map(|r| if has_dds(r) { &r[..r.len() - 4] } else { r });
     if let Some(r) = rename {
-        if r.contains(['\\', '/']) {
-            return Err(PrefixError(format!(
-                "rename: a file name only, no folders ({r:?})"
-            )));
-        }
-        crate::model::sets::check_named(r, "rename").map_err(PrefixError)?;
+        check_rel_path(r, "rename")?;
+        let last = r.rsplit(['\\', '/']).next().unwrap_or(r);
+        crate::model::sets::check_named(last, "rename").map_err(PrefixError)?;
     }
     let base = matched_prefix(s, derived)?;
     Ok(match rename {
+        Some(r) if r.contains(['\\', '/']) => {
+            let r = backslash(r);
+            if strip_ci(&r, "textures\\").len() < r.len() {
+                r
+            } else {
+                format!("textures\\{r}")
+            }
+        }
         // `base` always starts with `textures\pbr\`, so it has a folder.
         Some(r) => format!("{}\\{r}", base.rsplit_once('\\').map_or("", |(d, _)| d)),
         None => base,

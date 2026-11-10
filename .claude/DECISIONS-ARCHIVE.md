@@ -617,6 +617,9 @@ ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 ARCHIVED (wording before the edit; superseded in part by Note HJ, 2026-11-09)
 - One match key per entry; a renamed set gets no extra match but carries `match_diffuse`. [AN1, AN2, AA8]
 
+ARCHIVED (wording before the edit; superseded in part by Note HJ, 2026-11-09)
+- `rename` is a file name (a `\` or `/` blocks export, one `.dds` cut); the prefix comes from the lowest active `matchN` under `textures\pbr\`. The TruePBR box: visual settings, Matching, then collapsed Advanced TruePBR settings (`path_contains`, `nif_filter`, `rename`, UV, vertex, locks, inner UV scale, coat colour). [V3, V7]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)

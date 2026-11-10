@@ -1,13 +1,16 @@
 //! M6 Track F3b (spec §4, §5, §7): the rename dialog's model. Inputs mode gives files an `[inputs]` alias in
-//! `sdc.toml` (the file on disk is never touched); Outputs mode gives sets an output base name (`output_name`, or
-//! the PGPatcher `rename` on a CS PBR set). One pure plan, `plan_rename`, feeds both the preview and Apply.
+//! `sdc.toml` (the file on disk is never touched); Outputs mode gives CS PBR sets a new output base name or path
+//! (their PGPatcher `rename`, Note HJ). One pure plan, `plan_rename`, feeds both the preview and Apply.
 use super::items::ItemKind;
-use super::sets::{check_output_name, member_tail, renamed_output, slot_of, views, SetView, Tails};
+use super::sets::{
+    item_output_key_in, member_tail, output_candidates, packed_owners, renamed_prefix, slot_of,
+    views, SetView, Tails,
+};
+use super::txst_map::record_entries;
 use super::{AppModel, Dialog};
 use crate::pgp::prefix::check_file_name;
 use engine::discover::{canonicalise_outputs, InputFile, InputKind};
-use engine::group::base_of;
-use engine::sets::fold_id;
+use engine::sets::{fold_id, OutputKey};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
@@ -40,8 +43,8 @@ pub struct Recipe {
     pub prefix: String,
     pub suffix: String,
     pub case: Case,
-    /// Inputs: the recipe runs over the folders and the base name, not the base name alone (the map suffix and the
-    /// extension still stay).
+    /// The recipe runs over the folders and the base name, not the base name alone (the map suffix and the extension
+    /// still stay). Outputs: over the set's output base path, which a PGPatcher `rename` path moves (HJ5).
     pub path: bool,
 }
 
@@ -87,7 +90,7 @@ pub struct RenameDialog {
     pub recipe: Recipe,
     /// Rows left out of Apply.
     pub exclude: BTreeSet<String>,
-    /// Rows typed by hand: a whole project-relative path (Inputs) or a whole base name (Outputs).
+    /// Rows typed by hand: a whole project-relative path (Inputs) or a base name or base path (Outputs).
     pub typed: BTreeMap<String, String>,
 }
 
@@ -95,7 +98,8 @@ pub struct RenameDialog {
 pub struct RenameRow {
     /// The item key (Inputs) or the set id (Outputs).
     pub key: String,
-    /// Inputs: the path the file is read as now. Outputs: the base name the set's outputs have now.
+    /// Inputs: the path the file is read as now. Outputs: the set's output base path now, under the export folder
+    /// (`textures/pbr/armor/wall`, HJ9).
     pub old: String,
     pub new: String,
     /// Inputs: the name's map suffix before and after ("colour" for none), so a newly read `_n` shows.
@@ -223,8 +227,8 @@ pub fn plan_rename(m: &AppModel, d: &RenameDialog) -> RenamePlan {
             }
         }
     };
-    let mut rows = match d.mode {
-        RenameMode::Inputs => input_rows(m, d, re.as_ref()),
+    let (mut rows, paths) = match d.mode {
+        RenameMode::Inputs => (input_rows(m, d, re.as_ref()), vec![]),
         RenameMode::Outputs => output_rows(m, d, re.as_ref()),
     };
     for r in &mut rows {
@@ -232,7 +236,7 @@ pub fn plan_rename(m: &AppModel, d: &RenameDialog) -> RenamePlan {
     }
     match d.mode {
         RenameMode::Inputs => input_collisions(m, &mut rows),
-        RenameMode::Outputs => output_collisions(m, &mut rows),
+        RenameMode::Outputs => output_collisions(m, &mut rows, &paths),
     }
     RenamePlan { rows, error: None }
 }
@@ -425,42 +429,63 @@ fn input_collisions(m: &AppModel, rows: &mut [RenameRow]) {
     }
 }
 
-fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameRow> {
+/// Outputs mode (Note HJ5, HJ9): every row in the export folder's frame. The old value is the set's prefix with `/`;
+/// the new one is the recipe over its last component, or over the whole path with Whole path ticked; its outputs are
+/// that prefix with each suffix the set writes. Also returns each row's new output paths, for `output_collisions`.
+fn output_rows(
+    m: &AppModel,
+    d: &RenameDialog,
+    re: Option<&Regex>,
+) -> (Vec<RenameRow>, Vec<Vec<String>>) {
     let views = views(m);
     let index = first_by_id(&views);
-    let mut out = vec![];
+    let tails = output_tails(m, &views);
+    let (mut out, mut paths) = (vec![], vec![]);
     for id in &d.keys {
         let Some(v) = index.get(&fold_id(id)).map(|&i| &views[i]) else {
             continue;
         };
-        let outputs = set_outputs(m, v);
-        let first = outputs.first().map(|(_, jk)| jk.clone());
-        let Some(first) = first else {
+        let (Some(prefix), Some(tails)) = (&v.prefix, tails.get(v.id.as_str())) else {
             let mut r = row(&v.id, String::new());
             r.skipped = Some("skipped (the set writes no output)".into());
             out.push(r);
+            paths.push(vec![]);
             continue;
         };
-        let stem = split_ext(split_path(&first).1).0.to_string();
-        let old = base_of(&stem);
+        let old = prefix.replace('\\', "/");
         let mut r = row(&v.id, old.clone());
+        let (dir, base) = split_path(&old);
         let new = match d.typed.get(&v.id) {
             Some(t) => {
                 r.matched = true;
-                t.trim().to_string()
+                let t = t.trim().replace('\\', "/");
+                if t.contains('/') {
+                    t
+                } else {
+                    format!("{dir}{t}")
+                }
             }
-            None => {
+            None if d.recipe.path => {
                 let (n, matched) = d.recipe.apply(re, &old);
                 r.matched = matched;
                 n
             }
+            None => {
+                let (n, matched) = d.recipe.apply(re, base);
+                r.matched = matched;
+                format!("{dir}{n}")
+            }
         };
-        r.problem = check_output_name(&new).err();
-        let renamed: Vec<String> = outputs
-            .iter()
-            .filter_map(|(_, jk)| renamed_output(jk, &new, v.tails()))
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .collect();
+        let renamed: Vec<String> = match renamed_prefix(v, &new) {
+            Ok(p) => {
+                let p = p.replace('\\', "/");
+                tails.iter().map(|t| format!("{p}{t}")).collect()
+            }
+            Err(e) => {
+                r.problem = Some(e);
+                vec![]
+            }
+        };
         r.output = match renamed.len() {
             0 => String::new(),
             1 => renamed[0].clone(),
@@ -468,79 +493,83 @@ fn output_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<Rename
         };
         r.new = new;
         out.push(r);
+        paths.push(renamed);
+    }
+    (out, paths)
+}
+
+/// Per set id, what follows the prefix in each output `output_candidates` gives it (`.dds`, `_n.dds`…), the diffuse
+/// first. A shared helper's recipe output is the sharing set's (HJ10).
+fn output_tails<'a>(m: &AppModel, views: &'a [SetView]) -> HashMap<&'a str, Vec<String>> {
+    let prefixes: HashMap<&str, String> = views
+        .iter()
+        .filter_map(|v| Some((v.id.as_str(), v.prefix.as_ref()?.replace('\\', "/"))))
+        .collect();
+    let mut out: HashMap<&str, Vec<String>> = HashMap::new();
+    for (owner, _, rel) in output_candidates(m, views) {
+        let Some((&id, p)) = prefixes.get_key_value(owner.as_str()) else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if let Some(t) = rel.get(p.len()..).filter(|_| rel.starts_with(p.as_str())) {
+            out.entry(id).or_default().push(t.to_string());
+        }
+    }
+    for t in out.values_mut() {
+        t.sort_by_key(|t| t != ".dds");
     }
     out
 }
 
-/// (item key, job key) of every output set `v` writes, diffuse first.
-fn set_outputs(m: &AppModel, v: &SetView) -> Vec<(String, String)> {
-    let mut outs: Vec<(String, String)> = v
-        .members
-        .iter()
-        .filter_map(|k| m.item(k))
-        .filter(|i| i.job.is_some() && !i.job_key.is_empty())
-        .map(|i| (i.key.clone(), i.job_key.replace('\\', "/")))
-        .collect();
-    outs.sort_by_key(|(k, _)| {
-        m.item(k)
-            .and_then(slot_of)
-            .is_none_or(|s| s != super::sets::SlotKind::Diffuse)
-    });
-    outs
-}
-
-/// An output another texture writes, two sets renamed onto one output, or two outputs of one set renamed onto one path,
-/// block.
-fn output_collisions(m: &AppModel, rows: &mut [RenameRow]) {
+/// A renamed output another set writes (an owned, record or mirrored path, as `pbr_export::path_collisions` compares
+/// them), or two sets renamed onto one path, block.
+fn output_collisions(m: &AppModel, rows: &mut [RenameRow], paths: &[Vec<String>]) {
     let views = views(m);
-    let index = first_by_id(&views);
-    // Each set's outputs, once (the two loops below both read them).
-    let outs: Vec<Vec<(String, String)>> = views.iter().map(|v| set_outputs(m, v)).collect();
     let changing: HashSet<String> = rows
         .iter()
         .filter(|r| r.writes())
         .map(|r| fold_id(&r.key))
         .collect();
-    let mut taken: BTreeMap<String, String> = BTreeMap::new();
-    for (v, outs) in views.iter().zip(&outs) {
-        if changing.contains(&fold_id(&v.id)) {
-            continue;
-        }
-        for (_, jk) in outs {
-            taken.insert(lower(jk), v.id.clone());
+    let owned = output_candidates(m, &views);
+    let record = record_entries(m, &views);
+    let explicit: HashSet<&OutputKey> = owned.iter().chain(&record).map(|(_, k, _)| k).collect();
+    let mut taken: HashMap<String, String> = HashMap::new();
+    for (owner, _, p) in owned.iter().chain(&record) {
+        if !changing.contains(&fold_id(owner)) {
+            taken
+                .entry(lower(&p.to_string_lossy()))
+                .or_insert_with(|| owner.clone());
         }
     }
-    // Renamed path → (set id, its current output).
-    let mut seen: BTreeMap<String, (String, String)> = BTreeMap::new();
-    for r in rows.iter_mut().filter(|r| r.writes()) {
-        let Some(&at) = index.get(&fold_id(&r.key)) else {
+    let owners = packed_owners(&views);
+    for it in m
+        .items
+        .iter()
+        .filter(|i| i.job.is_some() && !i.job_key.is_empty())
+    {
+        if !item_output_key_in(&owners, it).is_some_and(|k| explicit.contains(&k)) {
+            taken
+                .entry(m.export_key(&it.job_key))
+                .or_insert_with(|| it.key.clone());
+        }
+    }
+    // Renamed path → the set renamed onto it.
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for (r, paths) in rows.iter_mut().zip(paths) {
+        if !r.writes() {
             continue;
-        };
-        for (_, jk) in &outs[at] {
-            let Some(p) = renamed_output(jk, &r.new, views[at].tails()) else {
-                continue;
-            };
-            let l = lower(&p.to_string_lossy());
+        }
+        for p in paths {
+            let l = lower(p);
             if let Some(other) = taken.get(&l) {
-                r.problem = Some(format!("{other} already writes {}", p.display()));
+                r.problem = Some(format!("{other} already writes {p}"));
                 break;
             }
-            match seen.get(&l) {
-                // Final review I1: two outputs of this set on one path (one output listed twice is no clash).
-                Some((id, old)) if *id == r.key && lower(old) != lower(jk) => {
-                    r.problem = Some(format!(
-                        "{old} and {jk} are both renamed onto {}",
-                        p.display()
-                    ));
-                    break;
-                }
-                Some((id, _)) if *id != r.key => {
-                    r.problem = Some(format!("{id} is renamed onto {} too", p.display()));
-                    break;
-                }
-                _ => {}
+            if let Some(id) = seen.get(&l).filter(|id| **id != r.key) {
+                r.problem = Some(format!("{id} is renamed onto {p} too"));
+                break;
             }
-            seen.insert(l, (r.key.clone(), jk.clone()));
+            seen.insert(l, r.key.clone());
         }
     }
 }

@@ -1148,8 +1148,8 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
     h.get_by_label_contains(&format!("s already has {existing} in"));
 }
 
-/// Owner 2026-10-19: the rename table has no New column (Output shows the result), and Inputs has a Whole path
-/// toggle that makes Find see the folders.
+/// Owner 2026-10-19: the rename table has no New column (Output shows the result), and a Whole path toggle makes
+/// Find see the folders, in both modes (Note HJ5).
 #[test]
 fn the_rename_dialog_has_no_new_column_and_a_whole_path_toggle() {
     let d = tempfile::tempdir().unwrap();
@@ -1172,8 +1172,7 @@ fn the_rename_dialog_has_no_new_column_and_a_whole_path_toggle() {
     h.state_mut()
         .set_rename_mode(sdc_gui::model::rename::RenameMode::Outputs);
     h.run();
-    assert!(
-        h.query_by_label("Whole path").is_none(),
-        "Outputs renames base names only"
-    );
+    // Note HJ5: Outputs moves whole paths too, through slot commands.
+    h.get_by_label("Whole path");
+    h.get_by_label_contains("A new folder is written as PGPatcher slot commands.");
 }

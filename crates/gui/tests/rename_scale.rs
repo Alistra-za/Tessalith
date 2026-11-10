@@ -29,6 +29,10 @@ fn synthetic(dir: &std::path::Path, n: usize) -> AppModel {
             let mut it = item.clone();
             it.key = format!("{DIR}/s{i:05}.png");
             it.job_key = format!("{DIR}/s{i:05}.dds");
+            // Outputs mode is for PGPatcher PBR sets (Note HJ1).
+            if let Some(j) = it.job.as_mut() {
+                j.profile.subtype = engine::config::Subtype::PbrAlbedo;
+            }
             it
         })
         .collect();
@@ -89,9 +93,10 @@ fn assert_rows(m: &AppModel, d: &RenameDialog) {
                 assert_eq!(r.output, format!("{DIR}/x_s{i:05}.dds"));
             }
             RenameMode::Outputs => {
-                assert_eq!(r.old, format!("s{i:05}"));
-                assert_eq!(r.new, format!("x_s{i:05}"));
-                assert_eq!(r.output, format!("{DIR}/x_s{i:05}.dds"));
+                // Note HJ9: the export folder's frame.
+                assert_eq!(r.old, format!("textures/pbr/{DIR}/s{i:05}"));
+                assert_eq!(r.new, format!("textures/pbr/{DIR}/x_s{i:05}"));
+                assert_eq!(r.output, format!("textures/pbr/{DIR}/x_s{i:05}.dds"));
             }
         }
     }

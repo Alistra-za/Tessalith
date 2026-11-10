@@ -82,10 +82,10 @@ The entry applies when any of its paths matches. The set's diffuse path is on by
 
 ## Rename
 
-**Rename** (Advanced TruePBR settings) takes a new file name, no folders. Your outputs keep the matched texture's folder under `textures\pbr\` and take the new name.
+**Rename** (Advanced TruePBR settings) takes a new file name or a whole path. A file name keeps the matched texture's folder under `textures\pbr\`. A path such as `armor\steel\plate` is relative to `Data` (`textures\` is added when it's missing), so the outputs land at `textures\armor\steel\plate.dds`, `plate_n.dds` and so on, wherever your source folder is. The path can't leave `Data` (`..`, a drive) or end in a map suffix. <!-- D:HJ5 -->
 
-- **One match:** Tessalith writes `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. <!-- D:HJ4 -->
-- **More matches or a path contains:** PGPatcher's `rename` would land on a wrong path, so the entry keeps its matches and names each renamed file in a slot command (`slot1`, `slot2`, `slot6` …). A slot you set yourself wins, and a locked slot stays unnamed. <!-- D:HJ3 -->
+- **One match and a file name:** Tessalith writes `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. <!-- D:HJ4 -->
+- **A path, more matches or a path contains:** PGPatcher's `rename` would land on a wrong path, so the entry keeps its matches and names each renamed file in a slot command (`slot1`, `slot2`, `slot6` …). A slot you set yourself wins, and a locked slot stays unnamed. <!-- D:HJ3 -->
 
 If your matches point at different textures, you get a warning: PGPatcher looks up every slot without a slot command next to whichever match hits first. Point them at the same texture.
 

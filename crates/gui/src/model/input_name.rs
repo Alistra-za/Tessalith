@@ -82,6 +82,8 @@ impl AppModel {
     /// those under `textures\pbr\`, which are PGPatcher's outputs, not input names (AO8).
     pub fn input_name_candidates(&self) -> Vec<String> {
         let mut list = self.known_textures(Some(0));
+        // shortcut: a set moved out of `textures\pbr\` by a `rename` path (HJ5) writes outputs this filter keeps, so a
+        // scan of a folder holding them offers them; filter every path the project exports if that shows up.
         list.retain(|p| {
             !p.replace('\\', "/")
                 .get(..13)

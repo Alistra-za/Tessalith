@@ -892,7 +892,8 @@ fn input_name_keeps_the_wet_and_detail_tails() {
     ));
 }
 
-/// Final review I1/I2: the Rename dialog reads the skin `_wet` and `_detail_n` as tails in both modes.
+/// Final review I1/I2: the Rename dialog reads the skin `_wet` and `_detail_n` as tails (Inputs; a skin set has no
+/// Outputs mode, Note HJ1).
 #[test]
 fn rename_dialog_keeps_the_skin_tails() {
     use sdc_gui::model::rename::{plan_rename, RenameDialog, RenameMode};
@@ -924,15 +925,6 @@ fn rename_dialog_keeps_the_skin_tails() {
         assert_eq!((&r.problem, &r.warning), (&None, &None));
     }
     assert!(p.can_apply(), "{:?}", p.rows);
-    let mut dlg = RenameDialog {
-        mode: RenameMode::Outputs,
-        keys: vec![v.id.clone()],
-        ..RenameDialog::default()
-    };
-    dlg.typed.insert(v.id.clone(), "ay".into());
-    let p = plan_rename(&m, &dlg);
-    assert_eq!(p.rows[0].problem, None, "{:?}", p.rows);
-    assert!(p.can_apply());
 }
 
 /// Fix round 1 #1: a texture with no `textures/...dds` game path is never written; the JSON leaves it out, with a note.

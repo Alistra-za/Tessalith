@@ -413,7 +413,7 @@ fn a_path_blocker_offers_fix_path() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_ready(d.path());
     let (id, key) = rock_id(&m);
-    m.set_json_value(&id, "rename", Some(serde_json::json!("sub\\name")));
+    m.set_json_value(&id, "rename", Some(serde_json::json!("..\\name")));
     assert!(m.wait_idle(Duration::from_secs(60)));
     let row = problems(&m)
         .iter()
@@ -437,7 +437,7 @@ fn a_path_blocker_offers_fix_path() {
         .expect("a focused text field");
     assert_eq!(
         focused.accesskit_node().value().as_deref(),
-        Some("sub\\name")
+        Some("..\\name")
     );
     // Fix round 1: the request is one-shot, so the group it opened can be collapsed again and stays collapsed.
     h.get_by_label("Advanced TruePBR settings").click();
@@ -446,7 +446,7 @@ fn a_path_blocker_offers_fix_path() {
     }
     assert!(
         !h.query_all_by_role(egui::accesskit::Role::TextInput)
-            .any(|n| n.accesskit_node().value().as_deref() == Some("sub\\name")),
+            .any(|n| n.accesskit_node().value().as_deref() == Some("..\\name")),
         "the Advanced group collapsed"
     );
 }

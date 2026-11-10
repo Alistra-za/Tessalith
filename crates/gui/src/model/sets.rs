@@ -1587,13 +1587,32 @@ pub fn renamed_output(job_key: &str, name: &str, tails: Tails) -> Option<PathBuf
     })
 }
 
+/// The prefix PBR set `v` gets with `rename` in place of its own (Note HJ5): a file name or a whole path.
+pub fn renamed_prefix(v: &SetView, rename: &str) -> Result<String, String> {
+    let mut s = v.settings.clone();
+    s.insert("rename".into(), Value::String(rename.to_string()));
+    prefix_of(&s, v.derived_match.as_deref().unwrap_or("")).map_err(|e| e.0)
+}
+
+/// The `rename` PBR set `v` stores for `typed` (Note HJ5, HJ6): its last component alone when that gives the same
+/// prefix, so a set whose folder stays keeps the `Key` form (HJ4); else the whole path, with `\`.
+pub fn rename_value(v: &SetView, typed: &str) -> Result<String, String> {
+    let full = renamed_prefix(v, typed)?;
+    let last = typed.rsplit(['\\', '/']).next().unwrap_or(typed);
+    Ok(if renamed_prefix(v, last).is_ok_and(|p| p == full) {
+        last.to_string()
+    } else {
+        typed.replace('/', "\\")
+    })
+}
+
 /// F3b: whether `name` can be an output base name. A name ending in a map suffix (`wall_n`) is refused: the
 /// suffix belongs to each output, and the name would be read back as a base plus that suffix.
 pub fn check_output_name(name: &str) -> Result<(), String> {
     check_named(name, "output name")
 }
 
-/// `check_output_name` for a named field (the PGPatcher `rename` box shares it).
+/// `check_output_name` for a named field (a PGPatcher `rename`'s last component shares it).
 pub fn check_named(name: &str, field: &str) -> Result<(), String> {
     check_file_name(name, field).map_err(|e| e.0)?;
     let base = base_of(name);
@@ -3021,10 +3040,10 @@ impl AppModel {
         (own == Some(serde_json::json!(Subtype::SkinAlbedo))).then(|| (item.clone(), was, false))
     }
 
-    /// F3b D2/D3: rename set `set`'s outputs to base name `name` (`None` restores the names that mirror the sources).
-    /// Only a PBR set on CS takes a name (Note HJ1): it writes its PGPatcher `rename` key (V3: a file name; the
-    /// outputs and the JSON follow the prefix). Any other set refuses a name; `None` still clears an old
-    /// `output_name` (HJ2). A re-plan follows; inside `batch_edit` it joins the batch.
+    /// F3b D2/D3: rename set `set`'s outputs to `name` (`None` restores the names that mirror the sources). Only a
+    /// PBR set on CS takes a name (Note HJ1): it writes its PGPatcher `rename` key, a file name or a whole path
+    /// (HJ5; `rename_value`); the outputs and the JSON follow the prefix. Any other set refuses a name; `None` still
+    /// clears an old `output_name` (HJ2). A re-plan follows; inside `batch_edit` it joins the batch.
     pub fn set_output_name(&mut self, set: &str, name: Option<&str>) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -3033,12 +3052,11 @@ impl AppModel {
             return Err(format!("no set {set}"));
         };
         let name = name.map(strip_lead).filter(|n| !n.is_empty());
-        if let Some(n) = name {
-            check_output_name(n)?;
-        }
-        let (id, name) = (v.id.clone(), name.map(str::to_string));
+        let id = v.id.clone();
         if self.renames_outputs(&v) {
-            let value = name.map(Value::String);
+            let value = name
+                .map(|n| rename_value(&v, n).map(Value::String))
+                .transpose()?;
             self.edit_docs("Rename outputs", None, true, move |_, d| {
                 d.set_value(&id, "rename", value);
                 d.set_output_name(&id, None);

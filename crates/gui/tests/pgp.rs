@@ -487,11 +487,10 @@ fn forward_slashes_in_json_paths_block() {
         let e = prefix_of(&s(&[(key, json!("landscape/rock01"))]), "x").unwrap_err();
         assert!(e.0.contains(key) && e.0.contains(r"use \ not /"), "{e:?}");
     }
-    // rename is a file name: a '/' is a folder, refused as such (owner, 2026-10-12).
-    let e = prefix_of(&s(&[("rename", json!("landscape/rock01"))]), "x").unwrap_err();
-    assert!(
-        e.0.contains("rename") && e.0.contains("a file name only"),
-        "{e:?}"
+    // A rename with '/' is a whole path (Note HJ5): never written as typed, so it is backslashed, not refused.
+    assert_eq!(
+        prefix_of(&s(&[("rename", json!("landscape/rock01"))]), "x").unwrap(),
+        r"textures\landscape\rock01"
     );
     assert!(check_json_path("landscape/white.dds", "slot3").is_err());
     assert!(check_json_path(r"landscape\white.dds", "slot3").is_ok());
@@ -1192,8 +1191,9 @@ fn divergent_matches_warn_with_or_without_a_rename() {
     assert!(pitfalls(&same, r"landscape\rock01_d").is_empty());
 }
 
-/// Owner, 2026-10-12 (final fix wave): Rename is a new file name. sdc puts it in the folder of the matched path and
-/// writes the full prefix, the form PGPatcher's whole-match substitution needs, for every match mode.
+/// Owner, 2026-10-12 (final fix wave): Rename as a file name. sdc puts it in the folder of the matched path and
+/// writes the full prefix, the form PGPatcher's whole-match substitution needs, for every match mode. A path is the
+/// whole prefix (Note HJ5).
 #[test]
 fn a_rename_is_a_file_name_in_the_matched_folder() {
     let p = |pairs: &[(&str, Value)], derived: &str| prefix_of(&s(pairs), derived).unwrap();
@@ -1230,12 +1230,18 @@ fn a_rename_is_a_file_name_in_the_matched_folder() {
         r"textures\pbr\landscape\snow01",
         "path_contains: the folder of the derived path"
     );
-    for bad in [r"landscape\boulder", "landscape/boulder", r"textures\pbr\x"] {
+    // Note HJ5: a path is the whole prefix, relative to Data (`textures\` added when missing).
+    for (path, want) in [
+        (r"landscape\boulder", r"textures\landscape\boulder"),
+        ("landscape/boulder", r"textures\landscape\boulder"),
+        (r"textures\pbr\x", r"textures\pbr\x"),
+        (r"TEXTURES\armor\plate.dds", r"TEXTURES\armor\plate"),
+    ] {
+        assert_eq!(p(&[("rename", json!(path))], r"landscape\rock01"), want);
+    }
+    for bad in [r"..\x", r"C:\x", r"\x", r"a\b_n", r"a\"] {
         let e = prefix_of(&s(&[("rename", json!(bad))]), r"landscape\rock01").unwrap_err();
-        assert!(
-            e.0.contains("rename") && e.0.contains("a file name only"),
-            "{bad:?}: {e:?}"
-        );
+        assert!(e.0.contains("rename"), "{bad:?}: {e:?}");
     }
     assert!(prefix_of(&s(&[("rename", json!(".dds"))]), r"landscape\rock01").is_err());
     // The JSON carries the matched texture and the renamed path, both under textures\pbr\ (DECISIONS AA8).

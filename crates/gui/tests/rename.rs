@@ -296,10 +296,10 @@ fn outputs_mode_names_a_set_and_blocks_collisions_and_suffixes() {
     dialog(&mut m).typed.clear();
     dialog(&mut m).recipe.prefix = "big_".into();
     let p = plan(&m);
-    assert_eq!(row(&p, &leaf).old, "leaf");
-    assert_eq!(row(&p, &leaf).new, "big_leaf");
-    // A PBR set's outputs sit under `pbr/` (it renames through PGPatcher's `rename`, not `output_name`).
-    assert_eq!(row(&p, &leaf).output, "pbr/landscape/big_leaf.dds");
+    // Note HJ9: the export folder's frame (a game path).
+    assert_eq!(row(&p, &leaf).old, "textures/pbr/landscape/leaf");
+    assert_eq!(row(&p, &leaf).new, "textures/pbr/landscape/big_leaf");
+    assert_eq!(row(&p, &leaf).output, "textures/pbr/landscape/big_leaf.dds");
     let steps = m.history.undo.len();
     assert!(m.apply_rename());
     assert_eq!(m.history.undo.len(), steps + 1);
@@ -745,15 +745,14 @@ fn aliased_selection_keeps_the_selection_order() {
     assert_eq!(m.aliased_selection(), Vec::<String>::new());
 }
 
-/// The Outputs plan over `ids`, whatever kind of set they are: `open_rename` offers PGPatcher PBR sets only (Note
-/// HJ1), and these pins are about the rows and the collision messages, which are the same for any set.
-fn open_outputs(m: &mut AppModel, ids: &[&str]) {
-    m.dialog = Some(Dialog::Rename(RenameDialog {
-        mode: RenameMode::Outputs,
-        keys: strs(ids),
-        recipe: m.last_recipe.clone(),
-        ..RenameDialog::default()
-    }));
+/// The Outputs dialog as the user opens it: the sets of `items` selected, then Rename outputs (Note HJ1).
+fn open_outputs(m: &mut AppModel, items: &[&str]) {
+    let keys: Vec<String> = items.iter().map(|i| set_key_of(m, i)).collect();
+    for (n, k) in keys.iter().enumerate() {
+        m.click_set(k, n > 0, false);
+    }
+    m.open_rename(RenameMode::Outputs);
+    assert_eq!(dialog(m).keys.len(), items.len());
 }
 
 #[test]
@@ -773,44 +772,48 @@ fn the_plan_rows_and_collision_messages_are_pinned() {
             "landscape/rock01_rmaos|landscape/rock01_rmaos|landscape/rock01_rmaos|None||true|false|None|None|Some(\"skipped (a packed output has no file of its own)\")",
         ])
     );
-    open_outputs(
-        &mut m,
-        &["landscape/leaf", "landscape/odd", "landscape/rock01"],
-    );
-    dialog(&mut m).recipe.prefix = "x_".into();
+    // Outputs (PGPatcher PBR sets only, Note HJ1): rows in the export folder's frame (HJ9).
+    let pd = tempfile::tempdir().unwrap();
+    let mut pm = pbr_leaf(pd.path());
+    open_outputs(&mut pm, &[LEAF, ROCK]);
+    dialog(&mut pm).recipe.prefix = "x_".into();
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/leaf|leaf|x_leaf|None|landscape/x_leaf.dds|true|true|None|None|None",
-            "landscape/odd|odd|x_odd|None|landscape/x_odd.dds|true|true|None|None|None",
-            "landscape/rock01|rock01|x_rock01|None|landscape/x_rock01.dds (+2 more)|true|true|None|None|None",
+            "landscape/leaf|textures/pbr/landscape/leaf|textures/pbr/landscape/x_leaf|None|textures/pbr/landscape/x_leaf.dds|true|true|None|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/x_rock01|None|textures/pbr/landscape/x_rock01.dds (+2 more)|true|true|None|None|None",
         ])
     );
-    // Outputs: two sets onto one name (the second is refused), and a set onto a name a selected set gives up.
-    let (leaf, odd) = (set_id_of(&m, LEAF), set_id_of(&m, "landscape/odd.png"));
-    let rock = set_id_of(&m, ROCK);
-    dialog(&mut m).recipe.prefix.clear();
-    let d2 = dialog(&mut m);
+    // Outputs: two sets onto one name (the second is refused).
+    let (leaf, rock) = (set_id_of(&pm, LEAF), set_id_of(&pm, ROCK));
+    dialog(&mut pm).recipe.prefix.clear();
+    let d2 = dialog(&mut pm);
     d2.typed.insert(leaf.clone(), "same".into());
-    d2.typed.insert(odd.clone(), "same".into());
-    d2.typed.insert(rock.clone(), "leaf".into());
+    d2.typed.insert(rock.clone(), "same".into());
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/leaf|leaf|same|None|landscape/same.dds|true|true|None|None|None",
-            "landscape/odd|odd|same|None|landscape/same.dds|true|true|Some(\"landscape/leaf is renamed onto landscape/same.dds too\")|None|None",
-            "landscape/rock01|rock01|leaf|None|landscape/leaf.dds (+2 more)|true|true|None|None|None",
+            "landscape/leaf|textures/pbr/landscape/leaf|textures/pbr/landscape/same|None|textures/pbr/landscape/same.dds|true|true|None|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/same|None|textures/pbr/landscape/same.dds (+2 more)|true|true|Some(\"landscape/leaf is renamed onto textures/pbr/landscape/same.dds too\")|None|None",
         ])
+    );
+    // Outputs: a set onto a name a selected set gives up.
+    dialog(&mut pm).typed.insert(rock.clone(), "leaf".into());
+    assert_eq!(
+        project(&plan(&pm))[1],
+        "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/leaf|None|textures/pbr/landscape/leaf.dds (+2 more)|true|true|None|None|None"
     );
     // Outputs: a set onto the output of a set that is not renamed.
-    open_outputs(&mut m, &["landscape/rock01"]);
-    dialog(&mut m).typed.insert(rock.clone(), "LEAF".into());
+    pm.dialog = None;
+    open_outputs(&mut pm, &[ROCK]);
+    dialog(&mut pm).typed.insert(rock.clone(), "LEAF".into());
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/rock01|rock01|LEAF|None|landscape/LEAF.dds (+2 more)|true|true|Some(\"landscape/leaf already writes landscape/LEAF.dds\")|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/LEAF|None|textures/pbr/landscape/LEAF.dds (+2 more)|true|true|Some(\"landscape/leaf already writes textures/pbr/landscape/LEAF.dds\")|None|None",
         ])
     );
+    let rock = set_id_of(&m, ROCK);
     // Inputs: onto a name another file has, two files onto one name, one onto a name another file gives up.
     m.select_all_visible();
     m.open_rename(RenameMode::Inputs);

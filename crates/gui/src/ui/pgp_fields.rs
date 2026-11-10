@@ -761,9 +761,9 @@ pub(crate) fn control(
                     .and_then(|v| v.as_str().map(str::to_string))
                     .unwrap_or_default()
             });
-            // sdc puts the name in the matched folder and writes the full prefix (DECISIONS V3).
+            // A file name stays in the matched folder (V3); a path moves the outputs anywhere under Data (HJ5).
             let hint = if k.key == "rename" {
-                "new file name"
+                r"new file name or folder\name"
             } else {
                 ""
             };

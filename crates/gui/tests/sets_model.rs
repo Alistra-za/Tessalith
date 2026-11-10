@@ -1734,7 +1734,7 @@ fn a_grass_diffuse_card_is_titled_complex_grass() {
 fn a_bad_prefix_on_a_non_json_set_is_no_export_block() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_json_value("landscape/rock01", "rename", Some(json!("a/b")));
+    m.set_json_value("landscape/rock01", "rename", Some(json!("../b")));
     idle(&mut m);
     let v = view(&set_views(&m), "landscape/rock01").clone();
     assert!(!v.pbr && v.prefix_error.is_some(), "{v:?}");

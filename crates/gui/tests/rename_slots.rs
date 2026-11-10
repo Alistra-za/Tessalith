@@ -4,8 +4,9 @@ mod support;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use sdc_gui::model::pbr_export::json_entries;
+use sdc_gui::model::rename::{plan_rename, RenameDialog, RenameMode, RenamePlan, RenameRow};
 use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome, SlotFill, SlotKind};
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, Dialog};
 use sdc_gui::pgp::writer::{document, entry_node, to_text, EntryInput};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -289,6 +290,545 @@ fn the_set_editor_adds_a_match_to_a_renamed_set() {
         settings(h.state()).get("match2"),
         Some(&json!(r"landscape\rock01_n"))
     );
+}
+
+// ---- Note HJ5: whole path renames ----
+
+const PLATE: &str = r"armor\steel\plate";
+
+/// `pbr_opened` with rock01's `rename` set to `rename`.
+fn moved(dir: &std::path::Path, rename: &str) -> AppModel {
+    let mut m = pbr_opened(dir);
+    m.set_json_value(SET, "rename", Some(json!(rename)));
+    idle(&mut m);
+    m
+}
+
+/// The explicit output paths the engine gets, `/`, lower case.
+fn engine_paths(m: &AppModel) -> Vec<String> {
+    sdc_gui::model::sets::engine_inputs(m)
+        .1
+        .values()
+        .map(|p| p.to_string_lossy().replace('\\', "/").to_lowercase())
+        .collect()
+}
+
+/// Every job's output, `/`, lower case.
+fn job_outputs(m: &AppModel) -> Vec<String> {
+    m.items
+        .iter()
+        .filter_map(|i| i.job.as_ref())
+        .map(|j| j.output.to_string_lossy().replace('\\', "/").to_lowercase())
+        .collect()
+}
+
+#[test]
+fn whole_path_moves_the_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let m = moved(d.path(), PLATE);
+    let paths = engine_paths(&m);
+    let export = d
+        .path()
+        .join("export")
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase();
+    for f in ["plate.dds", "plate_n.dds", "plate_rmaos.dds"] {
+        let rel = format!("textures/armor/steel/{f}");
+        assert!(paths.contains(&rel), "{rel} not in {paths:?}");
+        let full = format!("{export}/{rel}");
+        assert!(
+            job_outputs(&m).contains(&full),
+            "{full} not in {:?}",
+            job_outputs(&m)
+        );
+    }
+}
+
+#[test]
+fn whole_path_writes_slots() {
+    let d = tempfile::tempdir().unwrap();
+    let m = moved(d.path(), PLATE);
+    let e = entry(&m, SET);
+    assert_eq!(e["match1"], json!(r"landscape\rock01.dds"), "{e}");
+    assert!(
+        e.get("rename").is_none() && e.get("match_diffuse").is_none(),
+        "{e}"
+    );
+    assert_eq!(e["slot1"], json!(r"textures\armor\steel\plate.dds"), "{e}");
+    assert_eq!(
+        e["slot2"],
+        json!(r"textures\armor\steel\plate_n.dds"),
+        "{e}"
+    );
+    assert_eq!(
+        e["slot6"],
+        json!(r"textures\armor\steel\plate_rmaos.dds"),
+        "{e}"
+    );
+}
+
+#[test]
+fn pgpatcher_lands_on_a_moved_file() {
+    let d = tempfile::tempdir().unwrap();
+    let m = moved(d.path(), PLATE);
+    let e = entry(&m, SET);
+    let mut source = pgpsim::MaterialState::builtin_default();
+    source.set_slot_raw(0, r"textures\landscape\rock01.dds");
+    source.set_slot_raw(1, r"textures\landscape\rock01_n.dds");
+    let ours = [
+        r"textures\armor\steel\plate.dds",
+        r"textures\armor\steel\plate_n.dds",
+        r"textures\armor\steel\plate_rmaos.dds",
+    ];
+    let exists = |p: &str| ours.iter().any(|o| o.eq_ignore_ascii_case(p));
+    match simulate(&e, &source, &exists) {
+        pgpsim::SimResult::Patched { material, .. } => {
+            assert_eq!(material.slots[0].raw.to_lowercase(), ours[0]);
+            assert_eq!(material.slots[1].raw.to_lowercase(), ours[1]);
+            assert_eq!(material.slots[5].raw.to_lowercase(), ours[2]);
+        }
+        other => panic!("{other:?}: {e}"),
+    }
+}
+
+#[test]
+fn textures_prefix_is_not_doubled() {
+    let d = tempfile::tempdir().unwrap();
+    let m = moved(d.path(), r"textures\armor\plate");
+    let paths = engine_paths(&m);
+    assert!(
+        paths.contains(&"textures/armor/plate.dds".to_string()),
+        "{paths:?}"
+    );
+    assert!(!paths.iter().any(|p| p.contains("textures/textures")));
+}
+
+/// The Outputs dialog over `ids`, opened as the user opens it (the sets selected, Rename outputs).
+fn open_outputs(m: &mut AppModel, ids: &[&str]) {
+    let keys: Vec<String> = set_views(m)
+        .iter()
+        .filter(|v| ids.contains(&v.id.as_str()))
+        .map(|v| v.key.clone())
+        .collect();
+    for (i, k) in keys.iter().enumerate() {
+        m.click_set(k, i > 0, false);
+    }
+    m.open_rename(RenameMode::Outputs);
+    assert!(
+        matches!(&m.dialog, Some(Dialog::Rename(d)) if d.keys.len() == ids.len()),
+        "{:?}",
+        m.dialog
+    );
+}
+
+fn dlg(m: &mut AppModel) -> &mut RenameDialog {
+    match m.dialog.as_mut() {
+        Some(Dialog::Rename(d)) => d,
+        other => panic!("no rename dialog: {other:?}"),
+    }
+}
+
+fn plan(m: &AppModel) -> RenamePlan {
+    match &m.dialog {
+        Some(Dialog::Rename(d)) => plan_rename(m, d),
+        _ => panic!("no rename dialog"),
+    }
+}
+
+fn row_of(p: &RenamePlan, id: &str) -> RenameRow {
+    p.rows
+        .iter()
+        .find(|r| r.key == id)
+        .cloned()
+        .unwrap_or_else(|| panic!("no row {id}: {:?}", p.rows))
+}
+
+#[test]
+fn a_whole_path_under_an_inner_root_lands_in_the_export_folder() {
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("Mod/textures/clutter");
+    std::fs::create_dir_all(&root).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("cup.png"))
+    .unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(root.join("cup_n.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(root, d.path().join("export"));
+    m.decide(
+        "cup.png",
+        Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    idle(&mut m);
+    let id = set_views(&m)
+        .iter()
+        .find(|v| v.members.iter().any(|k| k == "cup.png"))
+        .expect("cup's set")
+        .id
+        .clone();
+    open_outputs(&mut m, &[&id]);
+    dlg(&mut m).typed.insert(id.clone(), r"armor\plate".into());
+    let r = row_of(&plan(&m), &id);
+    assert_eq!(r.problem, None);
+    assert!(r.output.starts_with("textures/armor/plate.dds"), "{r:?}");
+    assert!(m.apply_rename());
+    idle(&mut m);
+    let export = d.path().join("export");
+    let want = export
+        .join("textures/armor/plate.dds")
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase();
+    assert!(job_outputs(&m).contains(&want), "{:?}", job_outputs(&m));
+    support::export_through(&mut m);
+    idle(&mut m);
+    assert!(export.join("textures/armor/plate.dds").is_file());
+    let inner = export.join("textures/clutter");
+    let under: Vec<_> = std::fs::read_dir(&inner)
+        .map(|r| r.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    assert!(
+        !under.iter().any(|p| p.to_string_lossy().contains("plate")),
+        "{under:?}"
+    );
+}
+
+#[test]
+fn a_path_outside_data_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let derived = r"landscape\rock01";
+    for bad in [r"..\x", r"C:\x"] {
+        let mut s = sdc_gui::pgp::settings::Settings::new();
+        s.insert("rename".into(), json!(bad));
+        assert!(
+            sdc_gui::pgp::prefix::prefix_of(&s, derived).is_err(),
+            "{bad}"
+        );
+        open_outputs(&mut m, &[SET]);
+        dlg(&mut m).typed.insert(SET.into(), bad.into());
+        let p = plan(&m);
+        assert!(row_of(&p, SET).problem.is_some(), "{bad}: {:?}", p.rows);
+        assert!(!p.can_apply(), "{bad}");
+        assert!(m.set_output_name(SET, Some(bad)).is_err(), "{bad}");
+        m.dialog = None;
+    }
+}
+
+#[test]
+fn a_path_ending_in_a_suffix_is_refused() {
+    let derived = r"landscape\rock01";
+    for bad in [r"armor\plate_n", r"armor\plate_detail"] {
+        let mut s = sdc_gui::pgp::settings::Settings::new();
+        s.insert("rename".into(), json!(bad));
+        assert!(
+            sdc_gui::pgp::prefix::prefix_of(&s, derived).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+/// `textures/armor/wall` (colour and `_n`) as a PBR set: its prefix is `textures\pbr\armor\wall`.
+fn armor_wall(dir: &std::path::Path) -> (AppModel, String) {
+    use sdc_gui::model::Answer;
+    let r = dir.join("textures/armor");
+    std::fs::create_dir_all(&r).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(r.join("wall.png"))
+    .unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(r.join("wall_n.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    m.decide(
+        "armor/wall.png",
+        Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    idle(&mut m);
+    let v = set_views(&m)
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k == "armor/wall.png"))
+        .expect("wall's set");
+    assert_eq!(v.prefix.as_deref(), Some(r"textures\pbr\armor\wall"));
+    (m, v.id)
+}
+
+#[test]
+fn whole_path_tick_works_in_outputs_mode() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = armor_wall(d.path());
+    open_outputs(&mut m, &[&id]);
+    let r = dlg(&mut m);
+    r.recipe.path = true;
+    r.recipe.regex = true;
+    r.recipe.find = "^textures/pbr/armor/".into();
+    r.recipe.replace = "armor/steel/".into();
+    let row = row_of(&plan(&m), &id);
+    assert_eq!(row.old, "textures/pbr/armor/wall");
+    assert!(
+        row.output.starts_with("textures/armor/steel/wall.dds"),
+        "{row:?}"
+    );
+    assert_eq!(row.problem, None);
+    let steps = m.history.undo.len();
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(m.history.undo.len(), steps + 1);
+    let rename = |m: &AppModel| {
+        set_views(m)
+            .into_iter()
+            .find(|v| v.id == id)
+            .unwrap()
+            .settings
+            .get("rename")
+            .cloned()
+    };
+    assert_eq!(rename(&m), Some(json!(r"armor\steel\wall")));
+    m.undo();
+    idle(&mut m);
+    assert_eq!(rename(&m), None);
+}
+
+/// Note FI2-style fixture: PBR sets `pbr/arm/steel` and `pbr/arm/iron` (colour, `_n`, `_rmaos`) and a plain colour map
+/// `g/a` (mirrored, no path of its own).
+fn arm(dir: &std::path::Path) -> AppModel {
+    let t = dir.join("textures/pbr/arm");
+    std::fs::create_dir_all(&t).unwrap();
+    for (n, tint) in [("steel", 200u8), ("iron", 120)] {
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, tint])
+        })
+        .save(t.join(format!("{n}.png")))
+        .unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+            .save(t.join(format!("{n}_n.png")))
+            .unwrap();
+        image::ImageBuffer::from_fn(64, 64, |x, _| image::Rgb([(x * 4) as u8, 30, 30]))
+            .save(t.join(format!("{n}_rmaos.png")))
+            .unwrap();
+    }
+    let g = dir.join("textures/g");
+    std::fs::create_dir_all(&g).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 9u8])
+    })
+    .save(g.join("a.png"))
+    .unwrap();
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    idle(&mut m);
+    m
+}
+
+const STEEL_SET: &str = "pbr/arm/steel";
+const IRON_SET: &str = "pbr/arm/iron";
+
+#[test]
+fn a_whole_path_collision_blocks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = arm(d.path());
+    open_outputs(&mut m, &[STEEL_SET]);
+    // Onto another set's output.
+    dlg(&mut m)
+        .typed
+        .insert(STEEL_SET.into(), r"pbr\arm\iron".into());
+    let r = row_of(&plan(&m), STEEL_SET);
+    assert_eq!(
+        r.problem.as_deref(),
+        Some("pbr/arm/iron already writes textures/pbr/arm/iron.dds"),
+        "{r:?}"
+    );
+    // Onto the mirrored output of a texture with no path of its own.
+    dlg(&mut m).typed.insert(STEEL_SET.into(), r"g\a".into());
+    let r = row_of(&plan(&m), STEEL_SET);
+    assert!(
+        r.problem
+            .as_deref()
+            .is_some_and(|p| p.contains("already writes textures/g/a.dds")),
+        "{r:?}"
+    );
+    assert!(!plan(&m).can_apply());
+}
+
+#[test]
+fn exporting_another_set_keeps_a_moved_sets_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = arm(d.path());
+    let key = |m: &AppModel| {
+        set_views(m)
+            .into_iter()
+            .find(|v| v.id == STEEL_SET)
+            .unwrap()
+            .key
+    };
+    let before = key(&m);
+    m.set_json_value(STEEL_SET, "rename", Some(json!(r"armor\plate")));
+    idle(&mut m);
+    assert_eq!(key(&m), before, "a rename never changes a set key");
+    support::export_through(&mut m);
+    idle(&mut m);
+    assert!(m.export_root().join("textures/armor/plate.dds").is_file());
+    let iron = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == IRON_SET)
+        .unwrap()
+        .key;
+    m.export_sets([iron].into(), "Export set pbr/arm/iron".into());
+    if m.review.is_some() {
+        m.export_from_review();
+    }
+    idle(&mut m);
+    let j = std::fs::read_to_string(pgp_json_path(&m)).unwrap();
+    assert!(
+        j.contains(r#""slot1": "textures\\armor\\plate.dds""#),
+        "{j}\n{}",
+        m.export.notes.join("\n")
+    );
+    assert!(j.contains("iron"), "{j}");
+}
+
+#[test]
+fn the_outputs_leave_the_pbr_folder_safely() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = arm(d.path());
+    support::export_through(&mut m);
+    idle(&mut m);
+    m.set_json_value(STEEL_SET, "rename", Some(json!(r"armor\plate")));
+    idle(&mut m);
+    support::export_through(&mut m);
+    idle(&mut m);
+    let root = m.export_root();
+    for f in ["plate.dds", "plate_n.dds", "plate_rmaos.dds"] {
+        assert!(root.join("textures/armor").join(f).is_file(), "{f}");
+    }
+    assert!(!root.join("textures/textures").exists());
+    assert!(!root.join("textures/pbr/textures").exists());
+    let j = std::fs::read_to_string(pgp_json_path(&m)).unwrap();
+    assert!(
+        j.contains(r#""slot1": "textures\\armor\\plate.dds""#),
+        "{j}"
+    );
+    let notes = m.export.notes.join("\n").to_lowercase();
+    assert!(!notes.contains("textures/textures") && !notes.contains(r"textures\textures"));
+    let v = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == STEEL_SET)
+        .unwrap();
+    let slots = sdc_gui::model::set_preview::member_slots(&m, &v, Some(&input(&m, STEEL_SET)));
+    assert!(
+        slots.iter().any(|s| s
+            .paths
+            .iter()
+            .any(|p| p.replace('/', "\\").to_lowercase() == r"textures\armor\plate.dds")),
+        "{:?}",
+        slots.iter().map(|s| &s.paths).collect::<Vec<_>>()
+    );
+}
+
+/// HJ10: set `b/stone` shares `a/rock`'s AO helper; the `_rmaos` that helper feeds is b's.
+fn shared_ao(dir: &std::path::Path) -> AppModel {
+    let root = dir.join("textures");
+    for f in [
+        "a/rock.png",
+        "a/rock_ao.png",
+        "b/stone.png",
+        "b/stone_roughness.png",
+    ] {
+        let p = root.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        if f.contains('_') {
+            image::ImageBuffer::from_fn(64, 64, |x, y| image::Luma([(x * 3 + y) as u8]))
+                .save(p)
+                .unwrap();
+        } else {
+            image::ImageBuffer::from_fn(64, 64, |x, y| {
+                image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+            })
+            .save(p)
+            .unwrap();
+        }
+    }
+    let mut m = opened_as_the_app(root, dir.join("export"));
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice("a/rock_ao.png", "b/stone", DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    m
+}
+
+#[test]
+fn a_shared_helpers_recipe_follows_the_sharing_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_ao(d.path());
+    let a_before: Vec<String> = engine_paths(&m)
+        .into_iter()
+        .filter(|p| p.contains("/rock"))
+        .collect();
+    m.set_json_value("b/stone", "rename", Some(json!(r"x\stone2")));
+    idle(&mut m);
+    let paths = engine_paths(&m);
+    assert!(
+        paths.contains(&"textures/x/stone2_rmaos.dds".to_string()),
+        "{paths:?}"
+    );
+    assert_eq!(
+        entry(&m, "b/stone")["slot6"],
+        json!(r"textures\x\stone2_rmaos.dds")
+    );
+    let a_after: Vec<String> = paths.into_iter().filter(|p| p.contains("/rock")).collect();
+    assert_eq!(a_after, a_before, "a's outputs stay");
+    // Renaming a moves none of b's outputs.
+    m.set_json_value("b/stone", "rename", None);
+    m.set_json_value("a/rock", "rename", Some(json!(r"y\rock2")));
+    idle(&mut m);
+    let paths = engine_paths(&m);
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.ends_with("/stone_rmaos.dds") && !p.contains("textures/y/")),
+        "{paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.contains("textures/y/stone")),
+        "{paths:?}"
+    );
+}
+
+/// Review pictures of the Outputs dialog with Whole path ticked at 1100, 1280 and 1600 px (egui-ui-rules step 5).
+/// Needs a GPU and `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test rename_slots -- --ignored shots`.
+#[test]
+#[ignore]
+fn shots() {
+    let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
+        return;
+    };
+    for (w, hgt) in [(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = arm(d.path());
+        open_outputs(&mut m, &[STEEL_SET, IRON_SET]);
+        let r = dlg(&mut m);
+        r.recipe.path = true;
+        r.recipe.find = "pbr/arm".into();
+        r.recipe.replace = "armor/plate".into();
+        dlg(&mut m).typed.insert(IRON_SET.into(), r"..\x".into());
+        let mut h = Harness::builder()
+            .with_size(eframe::egui::vec2(w, hgt))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(10);
+        let img = h.render().expect("render");
+        img.save(std::path::Path::new(&out).join(format!("rename-outputs-{w}.png")))
+            .expect("save png");
+    }
 }
 
 /// The JSON editor's + key › Match offers slot 2 on a renamed set; it opens a pending pill.
