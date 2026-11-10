@@ -879,3 +879,42 @@ fn bc1_alpha_blend_keeps_coverage_across_mips() {
         "{codes:?}"
     );
 }
+
+/// Note HR6: a resized cutout is fitted to its source's coverage, mip 0 included. The 64x64 source has one opaque
+/// texel in eight (alpha 255 at x % 4 == 0, y even); halved to 32x32, every box footprint holds at most one, so a box
+/// mip 0 has alpha 64 and passes nothing (0% against the source's 12.5%).
+#[test]
+fn a_resized_cutout_export_keeps_the_source_coverage() {
+    let a = |x: u32, y: u32| {
+        if x.is_multiple_of(4) && y.is_multiple_of(2) {
+            255
+        } else {
+            0
+        }
+    };
+    let (summary, codes, levels) = convert_one(
+        rgba64(a),
+        &[
+            "subtype=diffuse",
+            "format=bc1",
+            "alpha.policy=cutout",
+            "encoder.bc1_alpha=true",
+            "resize=half",
+            "resize_floor=16",
+        ],
+    );
+    assert_eq!((summary.converted, summary.failed), (1, 0), "{codes:?}");
+    assert!(
+        !codes.contains(&engine::codes::Code::ValCoverage),
+        "{codes:?}"
+    );
+    let (w, h, px) = &levels[0];
+    assert_eq!((*w, *h), (32, 32));
+    let src = rgba64(a).to_rgba8();
+    let src_cov = src.pixels().filter(|p| p.0[3] > 127).count() as f64 / (64.0 * 64.0);
+    let cov = px.iter().filter(|p| p[3] > 127).count() as f64 / px.len() as f64;
+    assert!(
+        (cov - src_cov).abs() * 100.0 <= 2.0,
+        "mip 0 coverage {cov:.3} vs source {src_cov:.3}"
+    );
+}
