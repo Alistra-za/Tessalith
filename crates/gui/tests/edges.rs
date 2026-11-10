@@ -648,3 +648,31 @@ fn a_scan_database_error_after_a_good_read_is_logged_again() {
         .count();
     assert_eq!(n, 2);
 }
+
+/// Note U (closed by HR4): a mesh-evidence read error is a Messages warning, and the evidence is kept.
+/// Pin of existing behaviour.
+#[test]
+fn a_mesh_evidence_read_error_warns_and_keeps_the_evidence() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    std::fs::write(&db, b"not a database").unwrap();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.mesh_votes = [(
+        "textures/a/wall".to_string(),
+        vec![engine::shader::Shader::PbrGrass],
+    )]
+    .into();
+    m.scan_db = Some(db);
+    m.refresh_mesh_votes(false);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.mesh_votes.len(), 1, "kept");
+    let n = m
+        .messages
+        .entries()
+        .filter(|e| {
+            e.text.starts_with("Scan database:")
+                && e.text.contains("keeping the previous mesh evidence")
+        })
+        .count();
+    assert_eq!(n, 1);
+}

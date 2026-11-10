@@ -13,7 +13,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR
 - Mips and resize: E, R, S, W, X, Y, CL, FM
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
-- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
@@ -24,7 +24,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HR
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -206,7 +206,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Unset `helper.read` is R (luma where the recipe says; never A automatically); on an `_orm` it overrides each slot's channel. `helper.invert` flips on top of the recipe. `packing.fill.*` applies only when no helper targets the channel. A hand-built recipe keeps the set's suggested sources elsewhere and honours `packing.recipe`; a hand `rfaos.*` fill builds `_rfaos` on an Advanced Skin set. [DY5, DY5a, DY17g, DY12, DY4a, DY4c, DY23]
 - Fill step order: pass 1, alpha facts, `plan_cubes`, `plan_fills`, `plan_packing`, pass 2, fills, derive. Each target loads with `load_image_as` and is re-analysed; a load failure removes its job; pass-1 DDS-format flags are kept; a consumed helper whose target is gone ends with that target's output. [DY10, DY10b, DY10c, DY10d]
 - `Plan.helpers` holds one `HelperReport` per helper (by set key, then file name) and the GUI renders and edits only it. `FuzzWeight` and `SubsurfaceWeight` come only from a hand-set role. [DY13, DY3]
-- OPEN: `predicted_suffixes` still assumes `auto`, so a pre-packed `_rfaos` next to a forced-`rfaos` set without fuzz is not grouped. [R-fills-1]
 
 ### Bake
 
@@ -464,8 +463,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - A path that is not Unicode does not stop `gui.toml` saving; an unreadable `gui.toml` is kept. [CV21, BR8]
 - Test seams other tests rely on: `sync_layout_at(ctx, now)` with a temp `gui.toml`; `PickerBackend` fakes; `MeshesModel::procs` with `meshes::no_procs` so the host's PGPatcher cannot pause scans; `rename::plan_calls()`. [AG20, AG44, AG111, FA8]
 - OPEN: defer the full plan's `request()` by one poll. [FL]
-- OPEN: surface a mesh-vote database error in the planner (parked as minor). [U]
-- OPEN: the restore toast carries Undo for 20 s, but Ctrl+Z only says "use Undo or Redo". [FB14]
 - OPEN: the analysis-cache prune order uses write time, not last use. [DZ8]
 
 ### GUI: Settings panel
@@ -1353,3 +1350,5 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 - **HR1 A `remove` written by an override is opaque colour to the rules (agent ruling, owner confirmed 2026-11-09).** On a sub-type whose alpha the mesh decides (`Subtype::alpha_from_mesh`), when the source alpha varies and the winning `alpha.policy` override (`[files]` or `--set`, the last that applies) is `remove`, `layered_profile_with` matches the rules on alpha `none`, as for the mesh's own `remove` (owner O1), so cs-compact gives BC1. A `remove` from a preset or config table is unchanged: the rules still see the real alpha. Tests `mesh_alpha::an_explicit_remove_on_varying_alpha_matches_the_mesh_remove`, `a_recorded_remove_in_the_project_file_is_bc1_under_compact`, `a_later_override_over_a_remove_keeps_compact_off_bc1`.
 - **HR2 The GUI records a mesh `remove` (owner).** `record_auto_decisions` writes every mesh-alpha verdict, `remove` included, as `alpha.policy` in `sdc.toml` (amends FC1; closes OPEN [FC]); the threshold is still written only when the mesh set it, and an Undo stays undone. With HR1 the CLI plans the same format from the text. Test `auto_accept::a_mesh_remove_is_recorded_and_stays_undone`.
 - **HR3 A file link into the output folder is skipped (agent ruling).** Discovery resolves a file link as it does a folder link (Note CV6): when the output root lies inside the input folder and the link's target is under it, the link is not an input and nothing is reported. A hard link is not a link and is still read; an in-place run skips nothing. Closes OPEN [CV6]. Tests `discover_group::a_file_link_into_the_output_folder_is_skipped`, `an_in_place_run_still_reads_a_file_link` (both print `skipped:` where file links cannot be made).
+- **HR4 OPEN [R-fills-1] and OPEN [U] are closed by a pin test each (agent ruling).** `rfaos` is in `group::SUFFIXES`, so a pre-packed `_rfaos` joins its set without a prediction, and `Code::PackConflict` is raised for it; a mesh-evidence read error is already a Messages warning ("Scan database: ... keeping the previous mesh evidence") and the evidence is kept. Neither needed code. Tests `skin_subtypes::a_prepacked_rfaos_joins_a_forced_rfaos_set_without_fuzz`, `edges::a_mesh_evidence_read_error_warns_and_keeps_the_evidence`.
+- **HR5 The late restore-Undo line names the keys (agent ruling).** After the restored edits were undone or edited over, the toast's Undo says "The restored edits were already undone or edited since: press Ctrl+Z to undo or Ctrl+Y to redo". It supersedes FB14's wording; closes OPEN [FB14]. Test `recovery::toast_undo_after_another_edit_leaves_everything`.
