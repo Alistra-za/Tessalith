@@ -52,7 +52,7 @@ An **amber border** means the texture still needs an answer: a Medium or Low sub
 | Question | Controls |
 |---|---|
 | What kind of texture is this? | A sub-type dropdown and **Confirm**. |
-| What does the alpha channel mean? | "Alpha: Cutout (proposed) — confirm" and a dropdown under it already set to the proposal. Pick the type you want, or pick the shown one to confirm it. <!-- D:FM35 --> |
+| What does the alpha channel mean? | An **Alpha** row, the dropdown set to the proposal, and **Confirm**. Pick another type, or press Confirm to keep the proposal. The rows below already read as the proposal. <!-- D:FM35 --> |
 | "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press **Treat as OpenGL (flip green)** if it is an OpenGL map; **Treat as DirectX** undoes it. |
 | A blocking warning | **Acknowledge for this texture**, or **Drop the alpha anyway** when the chosen format discards a varying alpha you've already confirmed: the export writes the texture without its alpha. |
 

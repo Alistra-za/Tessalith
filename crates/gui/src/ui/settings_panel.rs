@@ -146,7 +146,7 @@ pub fn alpha_options() -> Options {
 /// too, is the answer; each entry's hover says what it does. `None` while nothing is picked. `why` is the hover while
 /// the dropdown is off. `place` starts the AccessKit name ("Problems alpha type: Cutout"), so the dropdowns of the
 /// texture panel (`""`), Problems and Review, which can be on screen together, have distinct names (rule 8.4).
-pub fn alpha_dropdown(
+fn alpha_dropdown(
     ui: &mut egui::Ui,
     id: egui::Id,
     shown: AlphaPolicy,
@@ -174,6 +174,42 @@ pub fn alpha_dropdown(
         r.on_disabled_hover_text(why);
     }
     picked
+}
+
+/// Note HI7: the alpha question, [`alpha_dropdown`] and a Confirm button on one line, in reading order in either
+/// layout direction (a Problems row is right to left). Confirm answers with the shown type, as picking it does. Its
+/// accessible name is "Confirm alpha" after `place` ("Problems confirm alpha"), so the sub-type's "Confirm" stays unique.
+pub fn alpha_question(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    shown: AlphaPolicy,
+    why: &str,
+    place: &str,
+) -> Option<AlphaPolicy> {
+    let confirm = |ui: &mut egui::Ui| {
+        let r = ui.button("Confirm");
+        let name = match place {
+            "" => "Confirm alpha".to_string(),
+            p => format!("{p} confirm alpha"),
+        };
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), &name));
+        let r = r.on_hover_text(format!(
+            "Use {} and close this question",
+            alpha_label(shown)
+        ));
+        let r = match why {
+            "" => r,
+            w => r.on_disabled_hover_text(w),
+        };
+        r.clicked().then_some(shown)
+    };
+    if ui.layout().prefer_right_to_left() {
+        let ok = confirm(ui);
+        alpha_dropdown(ui, id, shown, why, place).or(ok)
+    } else {
+        let picked = alpha_dropdown(ui, id, shown, why, place);
+        picked.or(confirm(ui))
+    }
 }
 
 /// One line on what an alpha meaning does (Note FB8, review C12): the hover of each entry of the alpha dropdown.
@@ -665,6 +701,8 @@ pub struct Ctx<'a> {
     /// Note HI1, HI17: the rows stand in a `LABEL_W` label column and a `CONTROL_W` control column (the texture panel
     /// in the centre and in the 3D settings window); off in the Advanced drawer and the strip.
     pub aligned: bool,
+    /// Note HI14: the alpha question is open, so `job` holds the proposal (display only) and the Alpha row says so.
+    pub alpha_asked: bool,
     /// Why the rows' edits are off, shown on their disabled hover: `sdc.toml` is read-only, or (the texture panel,
     /// `AppModel::fix_off`, Note FK) a plan is in flight.
     pub edit_off: Option<String>,
@@ -700,11 +738,13 @@ pub(super) fn column_widths(ui: &egui::Ui) -> (f32, f32) {
 /// `column_widths` for a grid whose control cells also hold a `trail` wide button (the helper panel's ✕ and Reset):
 /// the label column is the same, the control gives up what the button needs where the row would not fit.
 pub(super) fn column_widths_beside(ui: &egui::Ui, trail: f32) -> (f32, f32) {
+    column_widths_at(ui, ui.max_rect().left(), trail)
+}
+
+/// `column_widths_beside` for a grid whose left edge is `left` (the Undecided box lines up with the groups below it).
+fn column_widths_at(ui: &egui::Ui, left: f32, trail: f32) -> (f32, f32) {
     let s = ui.spacing();
-    let room = ui.clip_rect().right()
-        - ui.max_rect().left()
-        - 4.0 * s.item_spacing.x
-        - 2.0 * s.interact_size.y;
+    let room = ui.clip_rect().right() - left - 4.0 * s.item_spacing.x - 2.0 * s.interact_size.y;
     let k = (room / (LABEL_W + CONTROL_W)).clamp(0.0, 1.0);
     let min = s.interact_size.x;
     let label = (LABEL_W * k).max(min);
@@ -807,6 +847,8 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
             crate::model::fields::no_effect_reason(&cx.job.profile, f.field)
         {
             hint_label(ui, reason);
+        } else if cx.alpha_asked && f.field == "alpha.policy" {
+            hint_label(ui, "proposed: confirm above");
         } else if let Some(why) = (f.field == "subtype")
             .then(|| auto_subtype_reason(cx.job))
             .flatten()
@@ -1126,6 +1168,10 @@ fn decision_box(
     alpha: Option<AlphaPolicy>,
     actions: &mut Vec<Action>,
 ) {
+    // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
+    let left = cx
+        .aligned
+        .then(|| ui.max_rect().left() + ui.spacing().indent);
     let frame = egui::Frame::new()
         .stroke(egui::Stroke::new(2.0, AMBER))
         .corner_radius(4.0)
@@ -1140,17 +1186,30 @@ fn decision_box(
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
-                        subtype_decision(ui, cx, *suggested, actions)
+                        subtype_decision(ui, cx, left, *suggested, actions)
                     }
-                    // Note FM35: one line and one dropdown on the resolved type; the engine's reason is the line's hover.
+                    // Note HI7, HI13: the dropdown on the resolved type and Confirm, in the Alpha row's columns (the
+                    // strip keeps FM35's line); the engine's reason is the label's hover.
                     Decision::AlphaMeaning => {
                         if let Some(shown) = alpha {
-                            let line = ui.label(alpha_confirm_text(shown));
-                            if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
-                                line.on_hover_text(m);
-                            }
                             let id = egui::Id::new(("alpha-decision", cx.key));
-                            if let Some(p) = alpha_dropdown(ui, id, shown, "", "") {
+                            let mut picked = None;
+                            let label = match left {
+                                Some(left) => decision_row(ui, left, "Alpha", |ui, _| {
+                                    picked = alpha_question(ui, id, shown, "", "");
+                                }),
+                                None => {
+                                    let line = ui.label(alpha_confirm_text(shown));
+                                    ui.horizontal(|ui| {
+                                        picked = alpha_question(ui, id, shown, "", "");
+                                    });
+                                    line
+                                }
+                            };
+                            if let Some(m) = message_of(warnings, Code::SugLowConfidence) {
+                                label.on_hover_text(m);
+                            }
+                            if let Some(p) = picked {
                                 actions.push(Action::Decide(Answer::Alpha(p)));
                             }
                         }
@@ -1190,10 +1249,42 @@ fn decision_box(
     ui.add_space(6.0);
 }
 
-/// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button.
+/// Note HI13: a row of the Undecided box in the groups' two columns: `label` in the label column (`left` is the groups'
+/// left edge, so the box's frame inset cancels out), then the controls; `add` gets the control column's width, which
+/// is also the row's `combo_width`. Where the box is too narrow for that width and a Confirm button (1100 px), the
+/// dropdown gives up the difference, so Confirm is never cut short (rule 3.1). Returns the label.
+fn decision_row(
+    ui: &mut egui::Ui,
+    left: f32,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui, f32),
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        let (lw, cw) = column_widths_at(ui, left, 0.0);
+        let s = ui.spacing();
+        let confirm = egui::WidgetText::from("Confirm")
+            .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button)
+            .size()
+            .x
+            + 2.0 * s.button_padding.x;
+        let room = ui.max_rect().right() - (left + lw) - 2.0 * s.item_spacing.x - confirm;
+        let cw = cw.min(room).max(s.interact_size.x);
+        let w = (left + lw - ui.cursor().min.x).max(0.0);
+        let l = control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()));
+        ui.spacing_mut().combo_width = cw;
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        add(ui, cw);
+        l
+    })
+    .inner
+}
+
+/// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button. Aligned,
+/// they stand in the control column under the sentence (Note HI13).
 fn subtype_decision(
     ui: &mut egui::Ui,
     cx: &Ctx,
+    left: Option<f32>,
     suggested: Option<Subtype>,
     actions: &mut Vec<Action>,
 ) {
@@ -1202,7 +1293,7 @@ fn subtype_decision(
     let mut chosen: Subtype = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
-    ui.horizontal(|ui| {
+    let mut controls = |ui: &mut egui::Ui| {
         egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
             .show_ui(ui, |ui| {
@@ -1215,10 +1306,27 @@ fn subtype_decision(
                     }
                 }
             });
-        if ui.button("Confirm").clicked() {
-            actions.push(Action::Decide(Answer::Subtype(chosen)));
+    };
+    let confirm = match left {
+        Some(left) => {
+            let mut ok = false;
+            decision_row(ui, left, "", |ui, w| {
+                control_slot(ui, w, &mut controls);
+                ok = ui.button("Confirm").clicked();
+            });
+            ok
         }
-    });
+        None => {
+            ui.horizontal(|ui| {
+                controls(ui);
+                ui.button("Confirm").clicked()
+            })
+            .inner
+        }
+    };
+    if confirm {
+        actions.push(Action::Decide(Answer::Subtype(chosen)));
+    }
     ui.data_mut(|d| d.insert_temp(id, chosen));
 }
 
@@ -1344,12 +1452,16 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         item.status.clone(),
     );
     // The texture's own list shows its check results, Info included (preflight K5, X3).
-    let (decisions, warnings, job) = (
+    let (decisions, warnings, mut job) = (
         item.decisions.clone(),
         model.item_messages(key),
         item.job.clone(),
     );
     let alpha = crate::model::items::alpha_asked(item);
+    // Note HI14: while the alpha is asked, every row reads as Confirm would leave it. This clone is display only.
+    if let (Some(j), Some(p)) = (job.as_mut(), alpha) {
+        j.profile.alpha.policy = p;
+    }
     let packed_output = match &status {
         ItemStatus::PackedInto(j) => model
             .items
@@ -1475,6 +1587,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 busy,
                 compact,
                 aligned: !compact,
+                alpha_asked: alpha.is_some(),
                 edit_off: edit_off.clone(),
                 warnings: &warnings,
             };

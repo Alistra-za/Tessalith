@@ -2,6 +2,7 @@
 
 ## 3.0.0 (Unreleased)
 
+- The alpha question has a **Confirm** button beside its dropdown, in the texture panel, Problems and Review; it keeps the proposed type. In the texture panel the question is an **Alpha** row lined up with the Alpha row below, and while it is open the rows below show the proposal (nothing is written until you answer). See docs/wiki/GUI-Texture-Panel.md#deciding.
 - In the texture panel, **Helper** is a tick under Sub-type. Ticking it swaps Sub-type for the role list ("Pick a role…") and writes nothing until a role is picked; unticking a helper writes `helper.role = "none"`, as **Not a helper** did, which leaves the role list. A file you unticked reads "set by you" with a reset. A failed or skipped image keeps the tick. See docs/wiki/Texture-Packing.md#helper-settings.
 - The texture panel's rows line up: every label sits in one column and every control in one, all controls the same width, in the centre, the 3D settings window and the preview's settings strip. The Mipmaps tick moves to the control side. The Colour group is gone: **Input content** (was Content) and **DDS tag** are in Compression, after Format. The panel's Format dropdown names the format alone (BC7), and picking another format keeps the DDS tag when that format allows it. See docs/wiki/GUI-Texture-Panel.md.
 - NIF Edit no longer edits clips (add, remove, rename, timing, Convert to clips). Existing clips still play, and the keys of a clip-driven controller stay editable. A saved edit drops its clip edits when it opens.

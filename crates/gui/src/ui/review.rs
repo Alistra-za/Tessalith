@@ -1,6 +1,6 @@
 //! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
 //! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
-use super::settings_panel::{alpha_dropdown, subtype_label};
+use super::settings_panel::{alpha_question, subtype_label};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
 use crate::model::code_text::{
@@ -106,7 +106,8 @@ fn split_button(ui: &mut egui::Ui, text: &str) -> (egui::Response, egui::Respons
 }
 
 /// A Problems row's fix buttons (A1), one set per open question of the texture `key`: the suggestion's one-click
-/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown (Note FM35), Acknowledge. All
+/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown and Confirm (Note FM35, HI8),
+/// Acknowledge. All
 /// disabled with `off` as hover.
 pub fn fix_buttons(
     ui: &mut egui::Ui,
@@ -176,11 +177,11 @@ fn fix_buttons_on(
                     }
                 }
                 // Note FM35 (supersedes FI11's Decide… menu): the row's line names the type, and this dropdown opens
-                // on it; Enter on the row confirms it.
+                // on it; Enter on the row confirms it, as Confirm does (Note HI8).
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
                         let id = egui::Id::new(("problems-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why, surface) {
+                        if let Some(p) = alpha_question(ui, id, shown, why, surface) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
                     }

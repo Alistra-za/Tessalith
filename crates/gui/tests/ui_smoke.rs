@@ -322,9 +322,9 @@ fn the_alpha_dropdown_writes_the_policy_and_the_reset_button_takes_it_back() {
     let mut h = harness(model);
     h.run();
     h.get_by_label("Undecided");
-    // Note FM35: one line and one dropdown, open on the proposed type; the five buttons are gone.
-    h.get_by_label("Alpha: Cutout (proposed) — confirm");
+    // Note FM35, HI7: one dropdown, open on the proposed type, and Confirm; the five buttons are gone.
     h.get_by_label("Alpha type: Cutout");
+    h.get_by_label("Confirm alpha");
     assert_eq!(h.query_all_by_label("Blend").count(), 0);
     pick_alpha(&mut h, "", "Cutout", "Cutout");
     settle(&mut h);

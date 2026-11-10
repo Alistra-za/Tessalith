@@ -27,7 +27,7 @@ A row you must act on has its fix as a button.
 | *Failed: …* | None: the texture failed to plan. |
 | *Undecided: …* | The type buttons and **Acknowledge** ([below](#deciding-from-the-list)). |
 | *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
-| *Alpha: … — confirm* | The **Alpha type** dropdown: [Deciding](GUI-Texture-Panel.md#deciding). |
+| *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
 | Warnings on a set | **Go to set**. They never hold back Export or open Review. |
 | A file's export warnings, after an export | Click the file. |
 | Info rows (things Tessalith changed for you) | **Undo this change** while that step is still the last one. <!-- D:FC3 --> |

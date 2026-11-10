@@ -2,7 +2,7 @@
 //! (the centre, the 3D settings window, the preview's 280 px strip).
 mod support;
 use eframe::egui::{self, accesskit::Role, Rect};
-use egui_kittest::kittest::{by, Queryable};
+use egui_kittest::kittest::{by, NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::{ColorTag, Format, Subtype, Target};
 use sdc_gui::model::fields::format_name;
@@ -324,6 +324,232 @@ fn helper_rows_stay_inside_at_1100() {
         c.max.x <= drawer.min.x + 0.5,
         "the centre {c:?} runs under the drawer {drawer:?}"
     );
+}
+
+const LEAF: &str = "landscape/leaf.png";
+
+/// The fixture's leaf.png decided as a diffuse, so its alpha is asked (proposed Cutout), and selected.
+fn leaf(dir: &std::path::Path) -> AppModel {
+    let mut m = opened(dir);
+    m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .item(LEAF)
+        .unwrap()
+        .decisions
+        .contains(&sdc_gui::model::items::Decision::AlphaMeaning));
+    m.select_item(LEAF);
+    m
+}
+
+fn idle(h: &mut Harness<'static, AppModel>) {
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+}
+
+fn leaf_policy(h: &Harness<'static, AppModel>) -> Option<serde_json::Value> {
+    h.state()
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(LEAF, "alpha.policy")
+}
+
+/// Note HI13: the Undecided box's alpha question stands in the Alpha row's columns.
+#[test]
+fn alpha_row_and_undecided_line_up() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(leaf(d.path()), 1280.0);
+    let c = centre(&h);
+    let asked = control(&h, Role::ComboBox, "Alpha type: Cutout", c);
+    let row = control(&h, Role::ComboBox, "Alpha", c);
+    assert!(
+        (asked.min.x - row.min.x).abs() <= 1.0,
+        "the question's dropdown {asked:?}, the Alpha row's {row:?}"
+    );
+    assert!(
+        (asked.width() - row.width()).abs() <= 1.0,
+        "the question's dropdown {asked:?}, the Alpha row's {row:?}"
+    );
+    let labels: Vec<Rect> = h
+        .query_all(by().role(Role::Label).label("Alpha"))
+        .map(|n| n.rect())
+        .filter(|r| c.contains(r.center()))
+        .collect();
+    assert!(
+        labels.len() >= 2,
+        "the box's and the row's labels: {labels:?}"
+    );
+    for l in labels {
+        assert!(l.max.x <= row.min.x, "label {l:?} runs into {row:?}");
+    }
+}
+
+/// Note HI14: while the alpha is asked, the rows read the proposal.
+#[test]
+fn alpha_row_shows_the_proposal() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(leaf(d.path()), 1280.0);
+    let c = centre(&h);
+    let row = h
+        .query_all(by().role(Role::ComboBox).label("Alpha"))
+        .find(|n| c.contains(n.rect().center()))
+        .expect("the Alpha row");
+    assert_eq!(row.value().as_deref(), Some("Cutout"));
+    h.get_by_label("proposed: confirm above");
+    let slider = h.get_by_role_and_label(Role::Slider, "Alpha threshold");
+    assert!(
+        !slider.accesskit_node().is_disabled(),
+        "the threshold is off"
+    );
+}
+
+/// Note HI14: the proposal is display only.
+#[test]
+fn the_proposal_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let m = leaf(d.path());
+    let dirty = m.is_dirty();
+    let mut h = harness(m, 1280.0);
+    h.run();
+    assert_eq!(leaf_policy(&h), None);
+    assert_eq!(h.state().is_dirty(), dirty, "the document changed");
+    assert!(!h.state().busy(), "a plan started");
+    assert!(h.state().undecided_keys().iter().any(|k| k == LEAF));
+}
+
+/// Note HI14: a pick on the Alpha row is an answer.
+#[test]
+fn picking_in_the_row_answers_the_question() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(leaf(d.path()), 1280.0);
+    let c = centre(&h);
+    h.query_all(by().role(Role::ComboBox).label("Alpha"))
+        .find(|n| c.contains(n.rect().center()))
+        .expect("the Alpha row")
+        .click();
+    h.run();
+    h.get_by_label("Blend").click();
+    h.run();
+    idle(&mut h);
+    assert_eq!(leaf_policy(&h), Some(serde_json::json!("blend")));
+    assert!(h.query_by_label("Undecided").is_none());
+}
+
+/// Note HI13: the sub-type question's combo stands in the control column too.
+#[test]
+fn the_sub_type_question_lines_up_too() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.select_item(KEY);
+    let h = harness(m, 1280.0);
+    let c = centre(&h);
+    let q = h.get_by_label("What kind of texture is this?").rect();
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| n.rect())
+        .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
+        .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
+        .expect("the sub-type question's combo");
+    let row = control(&h, Role::ComboBox, "Alpha", c);
+    assert!(
+        (combo.min.x - row.min.x).abs() <= 1.0,
+        "the question's combo {combo:?}, the Alpha row's {row:?}"
+    );
+}
+
+/// Note HI7: Confirm answers with the shown type.
+#[test]
+fn confirm_answers_the_alpha_question() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(leaf(d.path()), 1280.0);
+    h.get_by_label("Confirm alpha").click();
+    h.run();
+    idle(&mut h);
+    assert_eq!(leaf_policy(&h), Some(serde_json::json!("cutout")));
+    assert!(h.query_by_label("Undecided").is_none());
+}
+
+/// Note FK: Confirm waits for the plan, as the dropdown does.
+#[test]
+fn confirm_is_off_while_a_plan_is_pending() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = leaf(d.path());
+    // Another texture's answer starts a plan; `ui::draw` alone never lands it.
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.fix_off().is_some());
+    let h = harness(m, 1280.0);
+    assert!(h
+        .get_by_label("Confirm alpha")
+        .accesskit_node()
+        .is_disabled());
+}
+
+/// Note HI15: a texture in no set (no Problems or Review row) answers its alpha in the panel.
+#[test]
+fn a_no_set_image_confirms_its_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = leaf(d.path());
+    m.remove_member("landscape/leaf", LEAF).expect("removed");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.is_no_set(LEAF));
+    m.select_item(LEAF);
+    let mut h = harness(m, 1280.0);
+    h.get_by_label("Confirm alpha").click();
+    h.run();
+    idle(&mut h);
+    assert_eq!(leaf_policy(&h), Some(serde_json::json!("cutout")));
+    assert!(h.query_by_label("Undecided").is_none());
+}
+
+/// Screens of the alpha question (Note HI7, HI13) at 1100 and 1600 px: the panel, and the Review and Problems rows,
+/// written to `SDC_PANEL_SHOTS`. GPU (`render_`): skipped unless that variable names a folder.
+#[test]
+fn render_alpha_question_shots() {
+    let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&out).unwrap();
+    for w in [1100.0, 1600.0] {
+        for view in ["panel", "review", "problems"] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = leaf(d.path());
+            match view {
+                "review" => m.open_review(),
+                "problems" => m.open_problems(None),
+                _ => {}
+            }
+            let mut h = harness(m, w);
+            h.run();
+            let area = match view {
+                "panel" => centre(&h),
+                _ => {
+                    let n = if view == "review" {
+                        "Review"
+                    } else {
+                        "Problems"
+                    };
+                    let r = h.get_by_label(&format!("{n} confirm alpha")).rect();
+                    Rect::from_min_max(
+                        egui::pos2(0.0, r.min.y - 60.0),
+                        egui::pos2(w, r.max.y + 60.0),
+                    )
+                }
+            };
+            let ppp = h.ctx.pixels_per_point();
+            let img = h.render().expect("render");
+            let (x, y) = (
+                (area.min.x * ppp) as u32,
+                (area.min.y.max(0.0) * ppp) as u32,
+            );
+            let cw = ((area.width() * ppp) as u32).min(img.width() - x);
+            let ch = ((area.height() * ppp) as u32).min(img.height() - y);
+            image::imageops::crop_imm(&img, x, y, cw, ch)
+                .to_image()
+                .save(out.join(format!("alpha-{view}-{w}.png")))
+                .unwrap();
+        }
+    }
 }
 
 type H3 = Harness<'static, (AppModel, sdc_gui::ui::State)>;
