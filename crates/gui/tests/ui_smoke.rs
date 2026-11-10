@@ -195,13 +195,7 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
         0
     );
     h.get_by_label("Undecided");
-    for label in [
-        unstated.as_str(),
-        "Colour",
-        "Content",
-        "DDS tag",
-        "Compression",
-    ] {
+    for label in [unstated.as_str(), "Input content", "DDS tag", "Compression"] {
         h.get_by_label_contains(label);
     }
     // One frame with a Kaiser profile selected: the live Filter combo and the Edge row draw.
@@ -839,7 +833,10 @@ fn the_settings_strip_is_compact() {
     for group in ["Alpha", "Mipmaps", "Compression"] {
         assert!(h.query_all_by_label_contains(group).count() > 0, "{group}");
     }
-    assert!(h.query_by_label_contains("Colour").is_none());
+    // Note HI2: the colour rows moved into Compression, and the strip still leaves them out.
+    for row in ["Colour", "Input content", "DDS tag"] {
+        assert!(h.query_by_label_contains(row).is_none(), "{row}");
+    }
     assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
 }
 

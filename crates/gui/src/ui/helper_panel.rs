@@ -7,9 +7,8 @@ use eframe::egui;
 use egui::text::LayoutJob;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
-
-/// The fixed width of the panel's combos (egui-ui-rules 3.5: `ComboBox::width` is only a minimum).
-const COMBO_W: f32 = 200.0;
+// Note HI1: the texture panel's columns, so the helper rows line up with the texture rows.
+use super::settings_panel::{column_widths_beside, field_label};
 
 const READS: [(Option<HelperRead>, &str); 6] = [
     (None, "Auto (R)"),
@@ -210,6 +209,22 @@ fn output_items(
     v
 }
 
+/// The helper rows' control width: the texture rows' one, less the Reset (the widest button beside a control) where
+/// the row would not fit, so the centre is not widened under the Advanced drawer (Note HI1, rule 3.1).
+fn control_w(ui: &egui::Ui) -> f32 {
+    let reset = egui::WidgetText::from("Reset")
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Small,
+        )
+        .size()
+        .x;
+    let s = ui.spacing();
+    column_widths_beside(ui, reset + 2.0 * s.button_padding.x + s.item_spacing.x).1
+}
+
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).small().weak()).truncate());
 }
@@ -227,9 +242,10 @@ fn role_row(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    ui.label("Role");
+    field_label(ui, true, "Role");
+    let w = control_w(ui);
     ui.horizontal(|ui| {
-        if let Some(role) = role_combo(ui, key, h.role, h.role_hand_set, ro) {
+        if let Some(role) = role_combo(ui, key, h.role, h.role_hand_set, ro, w) {
             edits.push(Edit::Role(Some(role)));
         }
         if h.role_hand_set && reset(ui, "Reset role", "Use the role guessed from the name", ro) {
@@ -247,7 +263,7 @@ fn role_row(
     ui.end_row();
 }
 
-/// The "Helper role" combo (fixed width): "Not a helper" then every role. Returns the role picked, if it is to be
+/// The "Helper role" combo (`w` wide): "Not a helper" then every role. Returns the role picked, if it is to be
 /// written: a different role, or the current one while it is not hand-set (an assigned role beats a suggestion).
 pub(crate) fn role_combo(
     ui: &mut egui::Ui,
@@ -255,10 +271,11 @@ pub(crate) fn role_combo(
     current: HelperRole,
     hand_set: bool,
     ro: &Option<String>,
+    w: f32,
 ) -> Option<HelperRole> {
     let mut picked = None;
     let shown = current.label();
-    let r = combo(ui, (key, "helper-role"), &shown, COMBO_W, |ui| {
+    let r = combo(ui, (key, "helper-role"), &shown, w, |ui| {
         // "Not a helper" first (`all()`'s order), so it is in view without scrolling the long list.
         for role in HelperRole::all() {
             let new = role != current || !hand_set;
@@ -288,6 +305,7 @@ fn fills_rows(
     edits: &mut Vec<Edit>,
 ) {
     let (row_h, pad) = (ui.spacing().interact_size.y, ui.spacing().button_padding.x);
+    let w = control_w(ui);
     let hint_text = if h.fills_hand_set {
         "set by you"
     } else {
@@ -295,7 +313,7 @@ fn fills_rows(
     };
     let mut first = true;
     let lead = |ui: &mut egui::Ui, first: &mut bool| {
-        ui.label(if *first { "Fills" } else { "" });
+        field_label(ui, true, if *first { "Fills" } else { "" });
         *first = false;
     };
     for t in &now {
@@ -303,10 +321,10 @@ fn fills_rows(
         lead(ui, &mut first);
         ui.horizontal(|ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(COMBO_W, row_h),
+                egui::vec2(w, row_h),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    ui.set_min_size(egui::vec2(COMBO_W, row_h));
+                    ui.set_min_size(egui::vec2(w, row_h));
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(pad);
                     ui.add(egui::Label::new(target_job(h, *t, tails, ui.style())).truncate());
@@ -339,9 +357,9 @@ fn fills_rows(
     lead(ui, &mut first);
     ui.horizontal(|ui| {
         if more.is_empty() {
-            ui.allocate_space(egui::vec2(COMBO_W, row_h));
+            ui.allocate_space(egui::vec2(w, row_h));
         } else {
-            let r = combo(ui, (key, "helper-add-fill"), "Add target", COMBO_W, |ui| {
+            let r = combo(ui, (key, "helper-add-fill"), "Add target", w, |ui| {
                 for o in &more {
                     if ui
                         .selectable_label(false, target_job(h, *o, tails, ui.style()))
@@ -378,9 +396,10 @@ fn read_rows(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    ui.label("Read from");
+    field_label(ui, true, "Read from");
+    let w = control_w(ui);
     let shown = READS.iter().find(|r| r.0 == h.read).map_or("", |r| r.1);
-    let r = combo(ui, (key, "helper-read"), shown, COMBO_W, |ui| {
+    let r = combo(ui, (key, "helper-read"), shown, w, |ui| {
         for (v, label) in READS {
             if ui.selectable_label(v == h.read, label).clicked() && v != h.read {
                 edits.push(Edit::Read(v));
@@ -391,7 +410,7 @@ fn read_rows(
     why(r, ro);
     hint(ui, "the helper's channel used");
     ui.end_row();
-    ui.label("");
+    field_label(ui, true, "");
     let mut on = h.invert;
     let r = ui.checkbox(&mut on, "Invert");
     if why(r, ro).changed() {

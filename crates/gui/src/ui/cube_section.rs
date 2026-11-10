@@ -168,13 +168,17 @@ impl Cx<'_> {
         f: &FieldView,
         body: impl FnOnce(&mut egui::Ui) -> (Edit, egui::Response),
     ) -> Edit {
-        ui.label(f.label);
+        // Note HI1: the texture panel's label and control columns.
+        super::settings_panel::field_label(ui, true, f.label);
         let off = f.lock.is_some() || self.ro.is_some();
-        let scope = ui.scope(|ui| {
-            if off {
-                ui.disable();
-            }
-            body(ui)
+        let w = super::settings_panel::column_widths(ui).1;
+        let scope = super::settings_panel::control_slot(ui, w, |ui| {
+            ui.scope(|ui| {
+                if off {
+                    ui.disable();
+                }
+                body(ui)
+            })
         });
         let (mut edit, _) = scope.inner;
         if let Some(why) = f.lock.map(str::to_string).or(self.ro.clone()) {

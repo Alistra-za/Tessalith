@@ -6,9 +6,9 @@ use super::type_picker::TypeKind;
 use crate::model::code_text::{alpha_confirm_text, alpha_label, code_line, not_a_cube, shown_for};
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
-    filter_option_lock, filter_view, group_of, levels_view, mips_count, mips_on, provenance_text,
-    weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
-    WEIGHTING, WEIGHTING_OPTIONS,
+    filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_count, mips_on,
+    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, NOT_VALID, PARALLAX_HOVER,
+    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -32,7 +32,13 @@ enum Action {
 
 /// The groups the compact strip keeps (Task 17's preview).
 const COMPACT_GROUPS: [&str; 3] = ["Alpha", "Mipmaps", "Compression"];
-pub(super) const GROUPS: [&str; 5] = ["Type", "Colour", "Alpha", "Mipmaps", "Compression"];
+pub(super) const GROUPS: [&str; 4] = ["Type", "Alpha", "Mipmaps", "Compression"];
+/// Note HI1: the label column's width, on the texture, helper and cubemap rows.
+pub(super) const LABEL_W: f32 = 150.0;
+/// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
+pub(super) const CONTROL_W: f32 = 200.0;
+/// Note HI3: the controls' width in the preview's 280 px strip.
+const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
 const MAX_LEVELS: u32 = 13;
 
@@ -284,7 +290,8 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             opt(json!("off"), "Off"),
         ],
         // A (format, tag) pair, so a pick never leaves a tag the format cannot take; applied with `set_format`.
-        "format" => encoding_options(target, p)
+        // Note HI11: the name alone; the tag is the DDS tag row's.
+        "format" => format_choices(target, p)
             .into_iter()
             .map(|(e, label)| (json!(e), label))
             .collect(),
@@ -645,6 +652,9 @@ pub struct Ctx<'a> {
     pub target: Target,
     pub busy: bool,
     pub compact: bool,
+    /// Note HI1, HI17: the rows stand in a `LABEL_W` label column and a `CONTROL_W` control column (the texture panel
+    /// in the centre and in the 3D settings window); off in the Advanced drawer and the strip.
+    pub aligned: bool,
     /// Why the rows' edits are off, shown on their disabled hover: `sdc.toml` is read-only, or (the texture panel,
     /// `AppModel::fix_off`, Note FK) a plan is in flight.
     pub edit_off: Option<String>,
@@ -659,13 +669,94 @@ pub enum RowEdit {
     Clear,
 }
 
+/// A row's label cell (Note HI1): with `aligned`, exactly the label column's width (`LABEL_W` where the row fits) and
+/// cut short with the whole text on hover (rule 3.4); otherwise a plain label.
+pub(super) fn field_label(ui: &mut egui::Ui, aligned: bool, label: &str) -> egui::Response {
+    if !aligned {
+        return ui.label(label);
+    }
+    let w = column_widths(ui).0;
+    control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()))
+}
+
+/// The label and control columns' widths: `LABEL_W` and `CONTROL_W`, both scaled down alike where a row would run
+/// past the visible edge (the centre at 1100 px with the Advanced drawer open; rules 3.1, 3.8). The rest of the row
+/// keeps three gaps, ↺, an elided hint and a margin (rule 3.7): a row as wide as the centre widens it, under the drawer.
+/// Measured from the grid's left edge, so every row of a grid gets the same two widths.
+pub(super) fn column_widths(ui: &egui::Ui) -> (f32, f32) {
+    column_widths_beside(ui, 0.0)
+}
+
+/// `column_widths` for a grid whose control cells also hold a `trail` wide button (the helper panel's ✕ and Reset):
+/// the label column is the same, the control gives up what the button needs where the row would not fit.
+pub(super) fn column_widths_beside(ui: &egui::Ui, trail: f32) -> (f32, f32) {
+    let s = ui.spacing();
+    let room = ui.clip_rect().right()
+        - ui.max_rect().left()
+        - 4.0 * s.item_spacing.x
+        - 2.0 * s.interact_size.y;
+    let k = (room / (LABEL_W + CONTROL_W)).clamp(0.0, 1.0);
+    let min = s.interact_size.x;
+    let label = (LABEL_W * k).max(min);
+    let control = (CONTROL_W * k).min(room - label - trail);
+    (label, control.max(min))
+}
+
+/// An exactly `w` wide cell (rule 3.5): text in it is cut short, and a combo in it is `w` wide. A slider's rail leaves
+/// room for its value box.
+pub(super) fn control_slot<R>(
+    ui: &mut egui::Ui,
+    w: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let h = ui.spacing().interact_size.y;
+    let layout = egui::Layout::left_to_right(egui::Align::Center);
+    ui.allocate_ui_with_layout(egui::vec2(w, h), layout, |ui| {
+        ui.set_min_size(egui::vec2(w, h));
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        let s = ui.spacing_mut();
+        s.combo_width = w;
+        s.slider_width = w - s.interact_size.x - s.item_spacing.x;
+        add(ui)
+    })
+    .inner
+}
+
+/// A row's label and control cells (Note HI1, HI3). Aligned, the control is `CONTROL_W` wide; in the strip,
+/// `COMPACT_CONTROL_W`; in the Advanced drawer it sizes to its content, as before. A control with no name of its own
+/// (a combo's text is its value) is named after the row's label.
+fn control_cell(
+    ui: &mut egui::Ui,
+    cx: &Ctx,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui) -> (Option<Value>, egui::Response),
+) -> (Option<Value>, egui::Response) {
+    let l = if cx.compact {
+        // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut short
+        // with the whole text on hover, so a 140 px control fits the 280 px strip.
+        let s = ui.spacing();
+        let room = ui.clip_rect().right() - ui.cursor().min.x;
+        let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
+            .max(s.interact_size.x);
+        control_slot(ui, w, |ui| ui.add(egui::Label::new(label).truncate()))
+    } else {
+        field_label(ui, cx.aligned, label)
+    };
+    let w = match (cx.aligned, cx.compact) {
+        (true, _) => column_widths(ui).1,
+        (false, true) => COMPACT_CONTROL_W,
+        (false, false) => return add(ui),
+    };
+    let (v, r) = control_slot(ui, w, add);
+    (v, r.labelled_by(l.id))
+}
+
 /// One grid row of a field: its label, its editor (disabled with the reason when locked), where the value came from
 /// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank.
 pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> {
     let mut edit = None;
-    ui.label(f.label);
-    let (set, r) = ui
-        .scope(|ui| {
+    let (set, r) = control_cell(ui, cx, f.label, |ui| {
+        ui.scope(|ui| {
             if f.lock.is_some() {
                 ui.disable();
             }
@@ -674,7 +765,8 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
             }
             editor(ui, cx.key, cx.target, cx.job, cx.busy, f, false)
         })
-        .inner;
+        .inner
+    });
     // Note CL40: on a `normal` in a complex material set, renormalize_bake is the opt-in gloss bake.
     let r = if f.field == "mips.normal"
         && cx.job.profile.subtype == Subtype::Normal
@@ -754,7 +846,9 @@ fn hint_and_reset(ui: &mut egui::Ui, edited: bool, hint: impl FnOnce(&mut egui::
 fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, egui::Response) {
     let current = serde_json::from_value::<Subtype>(f.value.clone()).ok();
     let shown = current.map_or_else(|| display_value(&f.value), subtype_label);
-    let r = ui.button(format!("{shown} \u{25BE}"));
+    // It fills its cell, as the combos do (Note HI1).
+    let fill = egui::vec2(ui.available_width(), 0.0);
+    let r = ui.add(egui::Button::new(format!("{shown} \u{25BE}")).min_size(fill));
     r.widget_info(|| {
         let mut i = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), f.label);
         i.current_text_value = Some(shown.clone());
@@ -772,10 +866,15 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
 fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = levels_view(cx.target, cx.job);
     let mut on = mips_on(&f.value);
-    let ticked = ui.add_enabled(
-        cx.edit_off.is_none(),
-        egui::Checkbox::new(&mut on, "Mipmaps"),
-    );
+    // Note HI1: "Mipmaps" in the label column, the tick in the control column, named for the tests and a screen reader.
+    let (_, ticked) = control_cell(ui, cx, "Mipmaps", |ui| {
+        let r = ui.add_enabled(cx.edit_off.is_none(), egui::Checkbox::new(&mut on, ""));
+        let on = on;
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), on, "Mipmaps")
+        });
+        (None, r)
+    });
     let ticked = match &cx.edit_off {
         Some(why) => ticked.on_disabled_hover_text(why),
         None => ticked,
@@ -786,18 +885,14 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
             json!(if on { "full" } else { "none" }),
         ));
     }
-    // The hint sits in the editor column, so the third cell holds only ↺.
-    // Kept whole, as before: the count is short and this is not the last cell.
-    match mips_count(&f.value) {
-        Some(n) if !cx.compact => ui.label(format!("({n} levels — see Advanced)")),
-        _ if cx.compact => ui.label(""),
-        _ => ui.label(
-            egui::RichText::new(provenance_text(&f.provenance))
-                .small()
-                .weak(),
-        ),
+    let hint = |ui: &mut egui::Ui| match mips_count(&f.value) {
+        _ if cx.compact => {
+            ui.label("");
+        }
+        Some(n) => hint_label(ui, &format!("({n} levels — see Advanced)")),
+        None => hint_label(ui, &provenance_text(&f.provenance)),
     };
-    if hint_and_reset(ui, f.edited, |_| {}) {
+    if hint_and_reset(ui, f.edited, hint) {
         actions.push(Action::Clear(f.field));
     }
     ui.end_row();
@@ -816,26 +911,28 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = filter_view(cx.target, cx.job);
     let current = cx.job.profile.mips.filter;
     let locks = OPTIONS.map(|(m, _)| filter_option_lock(&cx.job.profile, m));
-    ui.label(f.label);
     let mut picked = None;
-    let r = egui::ComboBox::from_id_salt((cx.key, f.field))
-        .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
-        .show_ui(ui, |ui| {
-            for ((m, label), lock) in OPTIONS.into_iter().zip(locks) {
-                let r = ui.add_enabled(
-                    lock.is_none(),
-                    egui::Button::selectable(m == current, label),
-                );
-                match lock {
-                    Some(why) => {
-                        r.on_disabled_hover_text(why);
+    let (_, r) = control_cell(ui, cx, f.label, |ui| {
+        let r = egui::ComboBox::from_id_salt((cx.key, f.field))
+            .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
+            .show_ui(ui, |ui| {
+                for ((m, label), lock) in OPTIONS.into_iter().zip(locks) {
+                    let r = ui.add_enabled(
+                        lock.is_none(),
+                        egui::Button::selectable(m == current, label),
+                    );
+                    match lock {
+                        Some(why) => {
+                            r.on_disabled_hover_text(why);
+                        }
+                        None if r.clicked() && m != current => picked = Some(m),
+                        None => {}
                     }
-                    None if r.clicked() && m != current => picked = Some(m),
-                    None => {}
                 }
-            }
-        })
-        .response;
+            })
+            .response;
+        (None, r)
+    });
     // Only Box is open: say why on the combo itself.
     let r = match locks[1..]
         .iter()
@@ -888,6 +985,8 @@ fn group(ui: &mut egui::Ui, name: &'static str, cx: &Ctx, actions: &mut Vec<Acti
                         .filter(|f| {
                             group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
                         })
+                        // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds.
+                        .filter(|f| !(cx.compact && f.field.starts_with("color.")))
                         .chain(exr)
                     {
                         match field_row(ui, cx, &f) {
@@ -1244,6 +1343,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                             engine::helper::HelperRole::NotHelper,
                             not_helper,
                             &edit_off,
+                            CONTROL_W,
                         )
                     })
                     .inner
@@ -1298,6 +1398,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 target,
                 busy,
                 compact,
+                aligned: !compact,
                 edit_off: edit_off.clone(),
                 warnings: &warnings,
             };

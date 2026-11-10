@@ -9,8 +9,6 @@ pub const FIELDS: [(&str, &str); 17] = [
     ("subtype", "Sub-type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
     (MSN_SOURCE, "Baked in"),
-    ("color.content", "Content"),
-    ("color.tag", "DDS tag"),
     ("alpha.policy", "Alpha"),
     ("alpha.threshold", "Threshold"),
     ("alpha.compare", "Comparison"),
@@ -22,6 +20,9 @@ pub const FIELDS: [(&str, &str); 17] = [
     ("mips.normal", "Normal handling"),
     ("mips.normal_base", "Normal base level"),
     ("format", "Format"),
+    // Note HI2: the colour rows sit in Compression, after Format.
+    ("color.tag", "DDS tag"),
+    ("color.content", "Input content"),
     ("encoder.effort", "Effort"),
     (WEIGHTING, "BC7 weighting"),
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
@@ -169,7 +170,6 @@ pub fn group_of(field: &str) -> &'static str {
     }
     match field.split('.').next().unwrap_or("") {
         "subtype" => "Type",
-        "color" => "Colour",
         "alpha" => "Alpha",
         "mips" => "Mipmaps",
         _ => "Compression",
@@ -236,6 +236,32 @@ pub fn encoding_options(target: Target, p: &Profile) -> Vec<((Format, ColorTag),
         .map(|(f, t)| ((f, t), format_label(f, t)))
         .chain(stray)
         .collect()
+}
+
+/// The texture panel's Format choices (Note HI11, HI12): one per format in `encoding_options`' order, labelled by its
+/// name alone. Its value keeps the current tag when the format allows it, else takes the format's first allowed pair;
+/// the current format's value is the current pair, marked `NOT_VALID` when it is a stray, so the combo still shows it.
+pub fn format_choices(target: Target, p: &Profile) -> Vec<((Format, ColorTag), String)> {
+    let cur = (p.format, p.color.tag);
+    let all = encoding_options(target, p);
+    let stray = all.iter().any(|(e, l)| *e == cur && l.ends_with(NOT_VALID));
+    let mut out: Vec<((Format, ColorTag), String)> = vec![];
+    for &(first, _) in &all {
+        let f = first.0;
+        if out.iter().any(|((x, _), _)| *x == f) {
+            continue;
+        }
+        let value = if f == cur.0 {
+            cur
+        } else if all.iter().any(|(e, _)| *e == (f, cur.1)) {
+            (f, cur.1)
+        } else {
+            first
+        };
+        let mark = if f == cur.0 && stray { NOT_VALID } else { "" };
+        out.push((value, format!("{}{mark}", format_name(f))));
+    }
+    out
 }
 
 /// True when the alpha is tested: `cutout`, `cutout_blend`, and `blend` stored as BC1 1-bit alpha (Note FM20).
