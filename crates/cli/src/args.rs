@@ -70,7 +70,7 @@ pub struct DilateArgs {
     /// Where the images go (default: a `dilated` folder beside each input).
     #[arg(long)]
     pub out: Option<PathBuf>,
-    /// Replace an existing image.
+    /// Replace an existing image (never an input of this run or the --mask file).
     #[arg(long)]
     pub overwrite: bool,
 }

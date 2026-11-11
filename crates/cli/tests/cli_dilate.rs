@@ -566,6 +566,7 @@ fn an_output_that_would_replace_another_input_of_the_run_is_refused() {
         err.contains("rock.png") && err.contains("rock.tga"),
         "{err}"
     );
+    assert!(err.contains("would replace an input of this run"), "{err}");
 
     let b = d.path().join("b");
     write_png(&b.join("rock.png"), 4, 4, 3, 8, &[10, 20, 30].repeat(16));

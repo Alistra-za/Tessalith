@@ -411,20 +411,20 @@ Fills the texels outside a mask with colour pulled in from the texels inside it,
 | `--recursive` | With a folder, take the images below it too. |
 | `--mask <file>` | Use this mask for every input. Default: the mask beside each input (below). |
 | `--out <dir>` | Where the images go. Default: a `dilated` folder beside each input. |
-| `--overwrite` | Replace an existing image. Otherwise it is kept and reported. |
+| `--overwrite` | Replace an existing image, but never an input of the run or the `--mask` file. Otherwise it is kept and reported. |
 
 The mask for `rock_n.png` is `rock_matid.png` (or `.tga`, `.tif`, `.tiff`), then `rock_uvmask.png`, then the same two for the full name `rock_n`. `rock` is the name without its texture suffix, the way Tessalith groups a set. An input with no mask is skipped and says so; a mask of another size than its image is an error for that input. In a `_uvmask` image only 255 counts as inside (127 and 191 are padding, and padding is what gets filled). In any other mask, a texel with red, green or blue above 0 is inside.
 
 How the fill treats the map depends on the suffix, as Tessalith reads it. Colour maps are filled in linear light. Normal maps are filled as stored and the filled texels renormalised to unit length. Everything else is filled as stored, and so is a name Tessalith can't place (`rock_x`); the output line says so. Alpha is always filled as data.
 
-Files named `*_matid.*` or `*_uvmask.*`, and any file in a folder named `dilated` below the file, folder or glob you name, are never inputs; a `dilated` folder above what you name doesn't count. Inputs are 8- and 16-bit PNG, TGA and TIFF files; other files a pattern matches are ignored, and a pattern that matches no image is named on stderr: exit 2 if none of the patterns match, exit 1 (the others still run) if only some do. A 32-bit float TIFF is refused. Two inputs that would write the same output file (`rock.png` and `rock.tga`, or one name from two folders with `--out`) are not both written: the first is, and the later ones are refused by name, even with `--overwrite`. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
+Files named `*_matid.*` or `*_uvmask.*`, and any file in a folder named `dilated` below the file, folder or glob you name, are never inputs; a `dilated` folder above what you name doesn't count. Inputs are 8- and 16-bit PNG, TGA and TIFF files; other files a pattern matches are ignored, and a pattern that matches no image is named on stderr: exit 2 if none of the patterns match, exit 1 (the others still run) if only some do. A 32-bit float TIFF is refused. Two inputs that would write the same output file (`rock.png` and `rock.tga`, or one name from two folders with `--out`) are not both written: the first is, and the later ones are refused by name, even with `--overwrite`. An output that would replace any input of the run, or the `--mask` file, is refused the same way. The output is a PNG with the same name, bit depth and channels (grey, grey and alpha, RGB, RGBA), so `rock_n.png` stays `rock_n.png` and Tessalith still reads its suffix. Each written file prints one line: its path, the kind, the mask and the number of texels filled.
 
 ```powershell
 sdc dilate textures\rock_n.png
 sdc dilate textures\armor --recursive --mask uvmasks\armor_uvmask.png --out filled
 ```
 
-Exit codes: 0 every image written; 1 an input wrote nothing (no mask, a mask of another size, a float image, a second input for the same output, the file exists and `--overwrite` is missing); 2 a usage error: no image matches; 3 a write failed.
+Exit codes: 0 every image written; 1 an input wrote nothing (no mask, a mask of another size, a float image, a second input for the same output, an output that would replace an input, the file exists and `--overwrite` is missing); 2 a usage error: no image matches; 3 a write failed.
 
 ## Cubemaps from the command line
 

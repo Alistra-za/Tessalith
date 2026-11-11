@@ -182,7 +182,8 @@ fn cli_validate_flags_a_mipless_cube() {
 fn validate_passes_the_markers_cubemap_marker_writes() {
     let dir = scratch("marker-validate");
     for (i, extra) in [vec![], vec!["--roughness", "1"]].into_iter().enumerate() {
-        let p = dir.join(format!("dyn_e{i}.dds"));
+        let p = dir.join(i.to_string()).join("dyn_e.dds");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         let o = sdc()
             .arg("cubemap-marker")
             .args(&extra)

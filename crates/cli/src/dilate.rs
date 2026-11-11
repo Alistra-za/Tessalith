@@ -389,8 +389,9 @@ fn process(
     ))
 }
 
-/// Exit codes: 0 every input written; 1 some input wrote nothing (no mask, size mismatch, float, exists without
-/// `--overwrite`); 2 a usage error, including patterns that match no image; 3 a write failed.
+/// Exit codes: 0 every input written; 1 some input wrote nothing (no mask, size mismatch, float, an output that
+/// would replace an input, exists without `--overwrite`); 2 a usage error, including patterns that match no image;
+/// 3 a write failed.
 pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
     let mut found = BTreeSet::new();
     let mut missed = false;
