@@ -4260,6 +4260,143 @@ fn a_path_typed_without_enter_is_committed_by_the_review_click() {
     assert!(!e.doc.pending(), "the export includes the typed edit");
 }
 
+/// Types `path` into slot 1 of the open edit, without Enter: the field keeps the focus.
+fn type_path(h: &mut Harness<'static, MeshesModel>, path: &str) {
+    let field = "Diffuse path (slot 1)";
+    h.get_by_role_and_label(AkRole::TextInput, field).focus();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.get_by_role_and_label(AkRole::TextInput, field)
+        .type_text(path);
+    h.run_steps(1);
+    assert!(
+        !ops(h.state())
+            .iter()
+            .any(|o| matches!(o, Op::SetTexturePath { path: p, .. } if p == path)),
+        "the path is not committed before the click"
+    );
+}
+
+fn has_path(m: &MeshesModel, path: &str) -> bool {
+    ops(m)
+        .iter()
+        .any(|o| matches!(o, Op::SetTexturePath { path: p, .. } if p == path))
+}
+
+/// Note HS15: a tab click ends the typing too; the old tab is drawn once more, so its field commits.
+#[test]
+fn a_path_typed_without_enter_survives_a_tab_click() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let (shape, _) = lit_shape(m.edit.as_ref().unwrap());
+    m.select_edit(Selection::Shape(shape));
+    gloss(&mut m, 12.5);
+    let mut h = view(m);
+    h.run_steps(3);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get_by_label("Alpha tab").click();
+    h.run_steps(4);
+    assert!(
+        has_path(h.state(), "textures\\typed.dds"),
+        "{:?}",
+        ops(h.state())
+    );
+}
+
+/// Note HS15: a later control's click (here a flag's Fix) keeps the typed path as well as its own edit.
+#[test]
+fn a_path_typed_without_enter_survives_a_click_on_a_later_control() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let (shape, shader) = lit_shape(m.edit.as_ref().unwrap());
+    m.select_edit(Selection::Shape(shape));
+    gloss(&mut m, 12.5);
+    let e = m.edit.as_ref().unwrap();
+    let lt = &e.model.lighting[&shader].lighting;
+    assert_ne!(
+        lt.shader_type, 5,
+        "precondition: bit 21 is an error off Skin Tint"
+    );
+    let f1 = lt.slsf1;
+    assert_eq!(f1 & (1 << 21), 0, "precondition: the skin tint flag is off");
+    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
+    m.edit_push(
+        vec![Op::SetBits {
+            at,
+            field: Field::Slsf1,
+            mask: 1 << 21,
+            value: 1 << 21,
+            base: f1,
+        }],
+        None,
+    );
+    let mut h = view(m);
+    h.run_steps(3);
+    let clear = format!("Clear the flag: {SKIN_TINT} (SLSF1 flags)");
+    h.get_by_role_and_label(AkRole::Button, &clear)
+        .scroll_to_me();
+    h.run_steps(3);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get_by_role_and_label(AkRole::Button, &clear).click();
+    h.run_steps(4);
+    let m = h.state();
+    assert!(has_path(m, "textures\\typed.dds"), "{:?}", ops(m));
+    assert!(
+        ops(m).iter().any(|o| matches!(
+            o,
+            Op::SetBits { field: Field::Slsf1, mask, value: 0, .. } if *mask & (1 << 21) != 0
+        )),
+        "the flag's Fix is kept too: {:?}",
+        ops(m)
+    );
+}
+
+/// Note HS15: the same slot's Fix clicked while a path is typed is dropped (the typed path wins), never a Conflict.
+#[test]
+fn a_same_slot_fix_while_a_path_is_typed_is_dropped() {
+    let mut m = direct(scenes::shared_alpha_and_set());
+    let a = select(&mut m, "A");
+    let e = m.edit.as_ref().unwrap();
+    let set = e.model.lighting[&e.model.shape(a).unwrap().shader.unwrap()]
+        .texture_set
+        .unwrap();
+    let base = String::from_utf8_lossy(&e.model.texsets[&set].raw.slots[0]).into_owned();
+    let at = nif::edit::anchor_shape(&e.model, a);
+    m.edit_push(
+        vec![Op::SetTexturePath {
+            at,
+            slot: 0,
+            path: r"C:\Game\Data\textures\a.dds".into(),
+            base,
+        }],
+        None,
+    );
+    let mut h = view(m);
+    h.run_steps(2);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get(
+        egui_kittest::kittest::By::new()
+            .role(AkRole::Button)
+            .label_contains("Fix slot 1: "),
+    )
+    .click();
+    h.run_steps(4);
+    let m = h.state();
+    assert!(has_path(m, "textures\\typed.dds"), "{:?}", ops(m));
+    let slot0 = ops(m)
+        .iter()
+        .filter(|o| matches!(o, Op::SetTexturePath { slot: 0, .. }))
+        .count();
+    assert_eq!(
+        slot0,
+        2,
+        "the setup edit and the typed path only: {:?}",
+        ops(m)
+    );
+    assert!(!m.edit.as_ref().unwrap().doc.has_conflicts());
+}
+
 // ---- v2 A20: the shared Undo / Redo act on the NIF history while an edit is open in the Meshes view ----
 
 /// One app-data redirect for every `SdcApp` test of this binary (as meshes_header.rs): the variables are process-wide,
