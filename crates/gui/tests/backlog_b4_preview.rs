@@ -139,6 +139,20 @@ fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
     }
 }
 
+/// DT22: a cube DDS whose smallest face is above a quarter of the cap is refused, and the reason names the user's own
+/// limit, not the quarter.
+#[test]
+fn a_cube_dds_with_no_face_within_a_quarter_of_the_cap_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let Err(err) = dds_preview(&cube_file(d.path(), 8, 1), 16) else {
+        panic!("refused");
+    };
+    assert_eq!(
+        err,
+        "8x8 (the smallest mip) is above the preview limit of 16 (each cube face must fit a quarter of it)"
+    );
+}
+
 /// T16: a cut-off cube is an error, never a panic.
 #[test]
 fn a_truncated_cube_dds_is_an_error() {
