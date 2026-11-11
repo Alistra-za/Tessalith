@@ -1654,3 +1654,40 @@ fn an_undecided_detail_file_leaves_a_pbr_set_out_of_also() {
         notes.iter().map(|n| &n.why).collect::<Vec<_>>()
     );
 }
+
+/// Note HS6: a set with a failed recipe (here PACK-SIZE-MISMATCH: the metal map has another aspect ratio) is not
+/// derived: its packed `_rmaos` does not exist, so Also would derive from maps the export did not convert.
+#[test]
+fn a_failed_rmaos_recipe_leaves_a_pbr_set_out_of_also() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    let arm = inputs.join("textures/pbr/arm");
+    png(&arm.join("x.png"), 16, 16, [200, 200, 200, 255]);
+    png(&arm.join("x_n.png"), 16, 16, [128, 128, 255, 255]);
+    png(&arm.join("x_roughness.png"), 16, 16, [220, 220, 220, 255]);
+    png(&arm.join("x_metallic.png"), 16, 8, [90, 90, 90, 255]);
+    let (cs, _) = plan(request(&inputs, &d.path().join("pbr"), Target::Cs));
+    let failed = cs
+        .jobs
+        .iter()
+        .find(|j| j.output.to_string_lossy().ends_with("x_rmaos.dds"))
+        .expect("the _rmaos job");
+    assert!(
+        matches!(&failed.status, JobStatus::Error { codes } if codes == &vec![Code::PackSizeMismatch]),
+        "{:?}",
+        failed.status
+    );
+    assert!(cs.shaders.values().any(|p| p.shader.is_pbr_family()));
+    let (sets, drop, notes) = engine::also::derive_sets(&cs, &BTreeSet::new());
+    assert!(sets.is_empty(), "{sets:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.why == "not derived: 1 map failed in the PBR export"),
+        "{:?}",
+        notes.iter().map(|n| &n.why).collect::<Vec<_>>()
+    );
+    for f in ["x_metallic.png", "x_roughness.png"] {
+        assert!(drop.iter().any(|p| p.ends_with(f)), "{f}: {drop:?}");
+    }
+}

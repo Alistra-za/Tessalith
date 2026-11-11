@@ -282,6 +282,15 @@ pub fn derive_sets(
             }
             // Note DY: a helper filling this job's alpha is a member too (derived jobs never take a fill).
             members.extend(j.fill.iter().map(|f| f.source.path.clone()));
+            // Note HS6: a size-mismatched job lists the sources it could not join; they are members too.
+            for w in j
+                .warnings
+                .iter()
+                .filter(|w| w.code == Code::PackSizeMismatch)
+            {
+                let found = w.data["sources"].as_array().into_iter().flatten();
+                members.extend(found.filter_map(|s| s["path"].as_str()).map(PathBuf::from));
+            }
         }
         members.extend(
             pbr.skipped
@@ -300,7 +309,13 @@ pub fn derive_sets(
             });
             continue;
         }
-        if let Some(&n) = failed_in.get(key.as_str()) {
+        // Note HS6: a job with an Error status (a failed recipe) is a failed map as well.
+        let n = failed_in.get(key.as_str()).copied().unwrap_or(0)
+            + jobs
+                .iter()
+                .filter(|j| matches!(j.status, JobStatus::Error { .. }))
+                .count();
+        if n > 0 {
             drop.extend(members);
             notes.push(SetNote {
                 id,
