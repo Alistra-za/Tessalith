@@ -158,3 +158,25 @@ fn an_alias_target_under_a_textures_root_moves_with_it() {
     let got = outputs(r);
     assert_eq!(got, vec![out.join("textures/armor/iron_n.dds")]);
 }
+
+/// Note HS4: an export folder inside the input root is not source layout. After one run its own `textures` folder
+/// exists; `root_prefix` must not read it as HQ8's nested `textures` and flip the output root back to the export.
+#[test]
+fn an_export_folder_inside_the_root_does_not_flip_the_output_root() {
+    let d = tempfile::tempdir().unwrap();
+    png(&d.path().join("Mod/textures/armor/x.png"));
+    let tex = d.path().join("Mod/textures");
+    let out = tex.join("out");
+    let want = vec![out.join("textures/armor/x.dds")];
+    assert_eq!(outputs(request(&tex, &out)), want);
+    std::fs::create_dir_all(out.join("textures/armor")).unwrap();
+    let r = request(&tex, &out);
+    assert_eq!(r.output_root, out.join("textures"));
+    assert_eq!(r.skip_root.as_deref(), Some(out.as_path()));
+    assert_eq!(outputs(r), want);
+    // The first export folder is source layout to the second one.
+    std::fs::remove_dir_all(&out).unwrap();
+    let out2 = tex.join("armor2/textures");
+    std::fs::create_dir_all(&out2).unwrap();
+    assert_eq!(request(&tex, &out2).output_root, out2.join("textures"));
+}

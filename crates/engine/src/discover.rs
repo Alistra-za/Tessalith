@@ -75,8 +75,12 @@ fn is_textures(c: Component) -> bool {
 /// it (case from disk). Empty when the path has no `textures` (HQ2). When `export` holds `root`, only the part below
 /// `export` (HQ3, HQ5: a DDS lands beside its source). Also empty when `root` holds a `textures` folder itself or in
 /// a sub-folder (a `textures` folder of mod folders, Note BQ8): game paths start there, and `rel` already has it (HQ8).
+/// Note HS4: an `export` strictly inside `root` is ignored in that check, with every folder in it, so its own `textures`
+/// folder (made by the first run) does not flip the output root.
 // shortcut: HQ8 is all or nothing (files beside such a nested folder export without `textures`) and looks two levels
 // down only; upgrade to a per-file prefix if such a layout shows up.
+// shortcut: HS4 compares the export folder as written, so one reached through a junction or `..` is not recognised;
+// upgrade to canonical paths if that shows up.
 pub fn root_prefix(root: &Path, export: &Path) -> PathBuf {
     let root = crate::overrides::absolute_or_same(root);
     let comps: Vec<Component> = root.components().collect();
@@ -96,9 +100,13 @@ pub fn root_prefix(root: &Path, export: &Path) -> PathBuf {
         p.file_name()
             .is_some_and(|n| n.eq_ignore_ascii_case("textures"))
     };
+    // Note HS4: the export folder and what is in it are ours, not source layout.
+    let out = crate::overrides::absolute_or_same(export);
+    let ours = |p: &Path| !is_under(&root, &out) && is_under(p, &out);
     if dirs(&root)
         .iter()
-        .any(|d| named(d) || dirs(d).iter().any(|g| named(g)))
+        .filter(|d| !ours(d))
+        .any(|d| named(d) || dirs(d).iter().any(|g| !ours(g) && named(g)))
     {
         return PathBuf::new();
     }
