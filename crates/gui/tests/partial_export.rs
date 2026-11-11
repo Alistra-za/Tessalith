@@ -11,6 +11,7 @@ use sdc_gui::model::review::JsonKind;
 use sdc_gui::model::set_groups::GroupTarget;
 use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome};
 use sdc_gui::model::{Answer, AppModel};
+use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -928,4 +929,82 @@ fn review_says_export_group_armor() {
             .any(|n| n.accesskit_node().role() == egui::accesskit::Role::Button),
         "the button"
     );
+}
+
+// ---- Note HS1: the scope follows a new export folder ----
+
+#[test]
+fn export_set_survives_choosing_the_folder_from_review() {
+    let d = tempfile::tempdir().unwrap();
+    for n in ["a", "b"] {
+        colour(&d.path().join(format!("textures/g/{n}.png")), 90);
+        flat(&d.path().join(format!("textures/g/{n}_n.png")));
+    }
+    let mut m = AppModel::new(GuiSettings::default(), None, session());
+    m.open_folder(d.path().join("textures"));
+    idle(&mut m);
+    assert!(m.export_folder_chosen().is_none());
+    let k = keys(&m, &["g/a"]);
+    m.export_sets(k, "Export set g/a".into());
+    assert!(m.review.is_some() && m.export_scope().is_some());
+    let export = d.path().join("export");
+    m.set_export_folder(export.clone());
+    idle(&mut m);
+    assert_eq!(
+        m.export_scope().map(|s| s.keys.clone()),
+        Some(keys(&m, &["g/a"]))
+    );
+    assert_eq!(m.export_files(), 2);
+    m.export_from_review();
+    idle(&mut m);
+    assert!(export.join("textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(export.join("textures/g/a_n.dds").is_file());
+    assert!(!export.join("textures/g/b.dds").exists());
+    assert!(m.export_scope().is_none());
+}
+
+#[test]
+fn export_set_survives_a_folder_change_while_review_is_open() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a"], &["w"]);
+    let k = keys(&m, &["g/w"]);
+    m.export_sets(k, "Export set g/w".into());
+    assert!(m.review.is_some());
+    let export2 = d.path().join("export2");
+    m.set_export_folder(export2.clone());
+    idle(&mut m);
+    m.decide(
+        "g/w.png",
+        Answer::Alpha(engine::config::AlphaPolicy::Cutout),
+    );
+    idle(&mut m);
+    m.export_from_review();
+    idle(&mut m);
+    assert!(export2.join("textures/g/w.dds").is_file(), "{}", notes(&m));
+    assert!(!export2.join("textures/g/a.dds").exists());
+}
+
+#[test]
+fn a_scoped_set_gone_after_the_folder_change_does_not_stop_the_others() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["x"], &["w", "v"]);
+    let k = keys(&m, &["g/w", "g/v"]);
+    m.export_sets(k, "Export 2 sets".into());
+    assert!(m.review.is_some());
+    for f in ["v.png", "v_n.png"] {
+        std::fs::remove_file(d.path().join("textures/g").join(f)).unwrap();
+    }
+    let export2 = d.path().join("export2");
+    m.set_export_folder(export2.clone());
+    idle(&mut m);
+    m.decide(
+        "g/w.png",
+        Answer::Alpha(engine::config::AlphaPolicy::Cutout),
+    );
+    idle(&mut m);
+    m.export_from_review();
+    idle(&mut m);
+    assert!(export2.join("textures/g/w.dds").is_file(), "{}", notes(&m));
+    assert!(!export2.join("textures/g/x.dds").exists());
+    assert!(m.dialog.is_none(), "{:?}", m.dialog);
 }

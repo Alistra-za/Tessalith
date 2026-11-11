@@ -2663,6 +2663,7 @@ impl AppModel {
         self.invalidate_views();
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
+        self.rekey_scope(old_root.as_deref());
         // Note HQ6: after the output root lands, since the game paths are read under it.
         self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;

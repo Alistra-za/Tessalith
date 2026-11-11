@@ -2,8 +2,9 @@
 //! `write_only`, the untouched-root check, orphan reports, and the scope's life.
 use super::sets::{set_views, SlotFill};
 use super::AppModel;
-use engine::sets::same_id;
+use engine::sets::{same_id, set_id, set_key};
 use std::collections::BTreeSet;
+use std::path::Path;
 
 /// Note HF9: what Export set, Export group or Export N sets runs: set keys, and the heading Review and its button
 /// show (`Export group Armor`).
@@ -29,6 +30,24 @@ impl AppModel {
             self.export_scope = scope;
             self.scope_rev += 1;
         }
+    }
+
+    /// Note HS1: a plan under a new output root moves the scope's keys to it (a key holds its root, HF9).
+    pub(super) fn rekey_scope(&mut self, old_root: Option<&Path>) {
+        let new = self.sets_root();
+        let (Some(old), Some(scope)) = (old_root, &self.export_scope) else {
+            return;
+        };
+        if old == new.as_path() {
+            return;
+        }
+        let keys = scope
+            .keys
+            .iter()
+            .map(|k| set_key(&new, &set_id(old, k)))
+            .collect();
+        let label = scope.label.clone();
+        self.set_scope(Some(ExportScope { keys, label }));
     }
 
     /// Note HF9: this run leaves sets out: a scope, an excluded group, or a texture in no set.
