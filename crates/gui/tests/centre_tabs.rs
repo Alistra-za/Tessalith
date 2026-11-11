@@ -351,3 +351,29 @@ fn a_clipped_hint_keeps_its_text_on_hover() {
         "one tooltip, not two"
     );
 }
+
+/// Note FC8, HS9 (I14): a tab click ends the typing in a focused field before the switch hides its view.
+#[test]
+fn a_tab_click_commits_the_focused_field_before_switching() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.open_json_editor();
+    let mut h = harness(m);
+    assert_eq!(h.state().centre_front(), CentreTab::Json);
+    let steps = h.state().history.undo.len();
+    let label = h.get_by_label(NAME_LABEL).rect();
+    h.query_all_by_role(Role::TextInput)
+        .filter(|n| (n.rect().center().y - label.center().y).abs() < 6.0)
+        .min_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .expect("the JSON name field")
+        .click();
+    h.run();
+    h.event(egui::Event::Text("My Pack".into()));
+    h.run();
+    h.get_by_label("Selection tab").click();
+    h.run_steps(3);
+    assert_eq!(h.state().centre_front(), CentreTab::Selection);
+    let name = h.state().sets_doc.as_ref().unwrap().json_name();
+    assert_eq!(name.as_deref(), Some("My Pack"));
+    assert_eq!(h.state().history.undo.len(), steps + 1);
+}
