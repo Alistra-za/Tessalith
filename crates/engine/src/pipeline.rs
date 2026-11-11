@@ -37,6 +37,16 @@ pub enum FileError {
     Failed(Stage, String),
 }
 
+/// The message alone, as the export's Problems row words a `FileFailed`, so a preview names a failure the same way.
+impl std::fmt::Display for FileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileError::Cancelled => f.write_str("cancelled"),
+            FileError::Failed(_, e) => f.write_str(e),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FileOutcome {
     pub output: PathBuf,
@@ -607,6 +617,16 @@ mod tests {
     use crate::config::{AlphaCompare, ResizeMode};
     use crate::coverage::passes;
     use crate::ops::tests::{cutout_profile, sparse_cutout};
+
+    /// QA2: a failure reads as its message alone, as the export's Problems row shows `FileFailed`.
+    #[test]
+    fn file_error_reads_as_text() {
+        assert_eq!(
+            FileError::Failed(Stage::Load, r"C:\mods\a.png: bad".into()).to_string(),
+            r"C:\mods\a.png: bad"
+        );
+        assert_eq!(FileError::Cancelled.to_string(), "cancelled");
+    }
 
     /// Note HR6: a resized cutout's chain, mip 0 included, is fitted to the source's coverage; without a resize mip 0
     /// is untouched.
