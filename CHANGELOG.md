@@ -24,7 +24,7 @@
 - `sdc validate` reads the alpha of all six faces of a cube DDS, so a marker written by `sdc cubemap-marker` no longer fails `VAL-ALPHA-GUARANTEE`.
 - In NIF Edit, a texture path typed without Enter is no longer lost when you click a tab or another control (such as a flag's **Fix**); the click's own edit is kept too. A **Fix** on that same slot is dropped, so the typed path wins.
 - NIF Edit no longer takes, for an edited NIF, an export folder that holds the mesh it edits, so an export can't overwrite its source: the NIF's row is blocked with the reason until you choose another folder.
-- A failed preview shows the reason as plain text (the file and the error) instead of Rust debug output.
+- A failed preview shows the error as plain text instead of Rust debug output.
 - The analysis cache's size prune keeps the entries you use: opening a folder whose entry is more than a day old refreshes that entry's time, so the prune deletes the ones nothing has read for longest.
 - A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Under `if-changed`, every diffuse, PBR albedo, UI/sky and skin albedo output is written again once; only resized cutouts change.
 - The line shown when the toast's Undo comes too late (the restored edits were already undone or edited over) now says: press Ctrl+Z to undo or Ctrl+Y to redo.

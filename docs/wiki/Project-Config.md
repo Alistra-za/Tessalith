@@ -128,7 +128,7 @@ overrides = { encoder = { effort = "slowest" } }
 
 ## [files]
 
-Each key is a path relative to the folder that holds `sdc.toml`, with forward slashes. Matching ignores case and works with or without the file extension. A packed output has no source file of its own, so it's keyed by its output path without an extension:
+Each key is a path relative to the folder that holds `sdc.toml`, with forward slashes. Matching ignores case and works with or without the file extension. A packed output has no source file of its own, so it's keyed by its first source's folder and its own name, without an extension. An output path or a new output name doesn't change the key. A helper shared into another set keys that set's output in the helper's folder: `a/slab_rmaos` for set `c/slab`. <!-- D:HS2 -->
 
 ```toml
 [files."landscape/rock01_rmaos"]
