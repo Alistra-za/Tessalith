@@ -1185,3 +1185,27 @@ fn a_failed_cm_phase_skips_the_cm_json_and_names_cm() {
         notes(&m)
     );
 }
+
+/// Note FW1: an Also export with no CM phase gates the `_m.json` on the PBR phase, whose folder the file sits in.
+#[test]
+fn without_a_cm_phase_the_cm_json_follows_the_pbr_phase() {
+    use engine::also::Phase::*;
+    for (pbr, vanilla, written) in [(1, 0, false), (0, 1, true)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = fixture(d.path(), Target::Cs);
+        export_and_wait(&mut m);
+        let iron = set_id(&m, "m/iron");
+        m.set_cm_export(&iron, true);
+        let p = prepare(&m).unwrap();
+        also_phases(&mut m, &[(Pbr, pbr), (Vanilla, vanilla)]);
+        m.export.summary.as_mut().unwrap().failed = 1;
+        m.finish_cm_json(Some(p));
+        let n = notes(&m);
+        assert_eq!(out(&m, "m/iron_m.json").is_file(), written, "{n}");
+        assert_eq!(
+            n.contains("Complex material JSON not written: the PBR phase failed"),
+            !written,
+            "{n}"
+        );
+    }
+}

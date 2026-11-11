@@ -15,10 +15,11 @@ A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim
 
 ## Gates
 During a plan: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy --workspace -- -D warnings`, and tests of the changed crates only (owner, 2026-10-29). Once at plan end, after the final review's fixes, and before a merge into `main`, run `tools\gate.ps1 -Out <log folder>`. It adds the whole test suite, `render_` alone and the doc checks, and prints PASS or FAIL per step.
+- **A per-crate test run adds `-p sdc`** (owner, 2026-11-10; Note HS2), as in the two commands below. With `sdc` selected, features resolve as in the workspace run, so the gate reuses the build; `-p engine` alone rebuilds 15 packages under other features. Without `--test`, the CLI's test binaries are built and run too.
 - **`.githooks/pre-commit`** checks fmt, control bytes and duplicate note headings. Turn it on in a clone with `git config core.hooksPath .githooks`.
 - **GPU tests (`render_*`) run alone.** They can hang for 30+ minutes when the GPU is busy.
-- **`cargo test -p engine --test golden`** is a quick pre-check; the workspace run already includes it.
-- **`cargo test -p engine --test encode_versions`** pins encoder inputs and built-in profile hashes; a change it accepts rewrites `crates/engine/tests/encode_versions/*.json`. Commit that diff with the change.
+- **`cargo test -p engine -p sdc --test golden`** is a quick pre-check; the workspace run already includes it.
+- **`cargo test -p engine -p sdc --test encode_versions`** pins encoder inputs and built-in profile hashes; a change it accepts rewrites `crates/engine/tests/encode_versions/*.json`. Commit that diff with the change.
 - **Capture test output to a file** and read the `test result:` lines. Never pipe it through `head`: truncated output has been mistaken for a pass.
 - **On Windows, set `CARGO_BUILD_JOBS=4`** when several builds run at once. Otherwise linking fails with os error 1450 ("insufficient system resources"). That error is not a code failure.
 - **Release exes land in `target\x86_64-pc-windows-msvc\release\`**, because `.cargo/config` sets the target triple, not in `target\release\`. An `sdc-gui.exe` there is stale; the GUI is `tessalith.exe`.

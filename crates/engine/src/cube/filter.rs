@@ -163,4 +163,67 @@ mod tests {
         assert!((linear_to_game_gamma(p[1]) - d * 128.0 / 255.0).abs() < 1e-5);
         assert!((linear_to_game_gamma(p[0]) - d).abs() < 1e-5);
     }
+
+    /// The first texel of a flat cube after `s`, in display space.
+    fn graded(rgb: [f32; 3], s: &CubemapSpec) -> [f32; 3] {
+        let mut c = flat(rgb);
+        colour(&mut c, s);
+        let p = c.faces[0].px[0];
+        [p[0], p[1], p[2]].map(linear_to_game_gamma)
+    }
+
+    #[test]
+    fn brightness_is_added_before_the_contrast_pivot() {
+        let d = linear_to_game_gamma(0.2);
+        let s = CubemapSpec {
+            brightness: 0.1,
+            contrast: 0.5,
+            ..Default::default()
+        };
+        // Brightness after the pivot would give 0.05 less.
+        let want = (d + 0.1 - 0.5) * 1.5 + 0.5;
+        assert!((graded([0.2; 3], &s)[0] - want).abs() < 1e-5);
+    }
+
+    #[test]
+    fn midtones_is_the_inverse_exponent() {
+        let d = linear_to_game_gamma(0.2);
+        let s = CubemapSpec {
+            midtones: 2.0,
+            ..Default::default()
+        };
+        assert!((graded([0.2; 3], &s)[0] - d.sqrt()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_channel_pushed_below_zero_is_zero_under_midtones_not_nan() {
+        // Contrast takes blue below zero. A negative base under powf is NaN, and saturation's luma would spread it
+        // to every channel (the cube would go black).
+        let s = CubemapSpec {
+            contrast: 0.5,
+            midtones: 2.0,
+            saturation: 0.5,
+            ..Default::default()
+        };
+        let hi = ((linear_to_game_gamma(0.5) - 0.5) * 1.5 + 0.5).sqrt();
+        let y = (0.2126 + 0.7152) * hi;
+        let got = graded([0.5, 0.5, 0.0], &s);
+        assert!((got[0] - (y + (hi - y) * 0.5)).abs() < 1e-5, "{got:?}");
+        assert!((got[2] - y * 0.5).abs() < 1e-5, "{got:?}");
+    }
+
+    #[test]
+    fn midtones_runs_before_saturation() {
+        let s = CubemapSpec {
+            midtones: 2.0,
+            saturation: 0.5,
+            ..Default::default()
+        };
+        let m = [0.8f32, 0.2, 0.1].map(|v| linear_to_game_gamma(v).sqrt());
+        let y = 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+        let got = graded([0.8, 0.2, 0.1], &s);
+        for i in 0..3 {
+            assert!((got[i] - (y + (m[i] - y) * 0.5)).abs() < 1e-5, "{i}");
+        }
+    }
 }

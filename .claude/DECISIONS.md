@@ -18,7 +18,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR
-- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ
+- Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HS
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HS
 
 ## Digest
 
@@ -1365,3 +1365,8 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 - **HR5 The late restore-Undo line names the keys (agent ruling).** After the restored edits were undone or edited over, the toast's Undo says "The restored edits were already undone or edited since: press Ctrl+Z to undo or Ctrl+Y to redo". It supersedes FB14's wording; closes OPEN [FB14]. Test `recovery::toast_undo_after_another_edit_leaves_everything`.
 - **HR6 A resized cutout texture keeps its source's coverage (agent ruling, owner confirmed 2026-11-09).** When `resize::target_dims` changes the size (a `resize` mode or the power-of-two step) and coverage preservation applies, `preprocess_with` records the alpha-test coverage just before the resize (`Work::source_coverage`), and the pipeline fits every level, mip 0 included, to it (`coverage::preserve_coverage_to`); that is also the base the coverage check compares with. Under `if-changed` every output of those sub-types is written again once; only resized cutouts change. A texture that is not resized is unchanged byte for byte, and complex grass and cubemaps keep their path. Supersedes S-mips-8 (closes its OPEN line). The `encode_version` arms of `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo` moved to the engine version: the sub-types a built-in layer can make a cutout (the mesh layer and alpha suggestion, `Subtype::alpha_from_mesh`, and the hair shader's diffuse); `complex_grass` is the other mesh sub-type and keeps its own path. A hand-written cutout on any other sub-type that is also resized keeps its old bytes under `if-changed` until that arm moves. No golden, `encode_inputs.json` or `identity.json` entry changed. Tests `coverage::preserve_coverage_to_fits_level_0`, `preserve_coverage_to_at_the_ends`, `ops::a_resize_records_the_source_coverage`, `pipeline::a_resized_cutout_keeps_its_source_coverage`, `encode::a_resized_cutout_export_keeps_the_source_coverage`.
 - **HR7 A cache hit keeps its entry from the prune (agent ruling).** A `get` on an analysis-cache entry whose modification time is more than a day old (`TOUCH_AFTER`) sets it to now, so the prune, which still deletes oldest first, keeps what is used. At most one small write per entry per day; a failed touch (read-only entry) is still a hit. Amends DZ8 (closes its OPEN line). Tests `analysis_store::a_hit_on_an_old_entry_survives_the_prune`, `a_recent_hit_leaves_the_time_alone`, `a_read_only_old_entry_is_still_a_hit`.
+
+## Note HS — audit 2026-11-10: one guarded write, per-crate test runs (main team, 2026-11-10)
+
+- **HS1 Every JSON finisher writes through `json_finish::guarded_write` (agent ruling).** CS PBR and XPMF call it as complex material and CS skin do, so the never-overwrite order (drop the own case twin, `may_replace`, atomic write, record the hash) has one copy; notes and files are unchanged (extends FW2). Two pins came with it: `presets_creator::a_new_preset_is_not_saved_over_a_file_that_did_not_load` (AM8) and `cm_json::without_a_cm_phase_the_cm_json_follows_the_pbr_phase` (the fall-back of FW1).
+- **HS2 A per-crate test run adds `-p sdc` (owner, 2026-11-10).** `cargo test -p <crate> -p sdc ...` resolves features as `--workspace` does, so the gate reuses its build. Measured with `cargo tree`: `-p engine` alone builds 15 packages under other features and `-p sdc-gui` alone 3; with `-p sdc` added, none. For this the CLI's dev-dependency on `sdc-gui` turns on `test-hooks` (no CLI test reads a GUI hook). It amends the Gates rule of 2026-10-29 in CLAUDE.md.

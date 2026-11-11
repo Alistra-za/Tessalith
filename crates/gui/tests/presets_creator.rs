@@ -668,3 +668,18 @@ fn a_built_in_preset_is_never_saved() {
         "nothing reaches the presets folder"
     );
 }
+
+/// AM8: a new preset is never written over a file already in the folder, here one that did not load.
+#[test]
+fn a_new_preset_is_not_saved_over_a_file_that_did_not_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let broken = dir.path().join("x.toml");
+    std::fs::write(&broken, "not a preset [").unwrap();
+    let mut pm = PresetsModel::new(Some(dir.path().to_path_buf()), Target::Cs);
+    pm.new_preset(Target::Cs);
+    pm.set_id("x");
+    let e = pm.save().unwrap_err();
+    assert!(e.contains("already exists"), "{e}");
+    assert_eq!(std::fs::read(&broken).unwrap(), b"not a preset [");
+    assert_eq!(files(dir.path()), ["x.toml"], "nothing else was written");
+}
