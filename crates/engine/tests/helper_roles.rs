@@ -378,17 +378,25 @@ fn a_files_key_on_a_joined_helpers_output_is_not_reported_unmatched() {
     let toml = format!(
         "{}{}",
         files("x_mask", "helper.role = \"roughness\""),
-        "[files.\"x_rmaos\"]\npacking.fill.ao = 200\n"
+        "[files.\"x_rmaos\"]\npacking.fill.metallic = 200\n"
     );
     let d = fixture(&["x.png", "x_ao.png", "x_mask.png"], &toml);
     let sink = Arc::new(VecSink::default());
     let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
     r.recursive = true;
     let rep = Reporter::new(sink.clone(), "helper-roles");
-    Engine::new()
+    let p = Engine::new()
         .unwrap()
         .plan(r, &rep, &CancelToken::default())
         .unwrap();
+    // Precondition: policy reads the key (the set has no metallic map, so the fill lands).
+    assert_eq!(
+        packed(&p, "x_rmaos.dds").pack.as_ref().unwrap().channels[1],
+        ChannelSource::Fill {
+            role: RawMap::Metallic,
+            code: 200
+        }
+    );
     let unmatched: Vec<_> = sink
         .take()
         .into_iter()

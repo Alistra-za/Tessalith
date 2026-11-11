@@ -87,6 +87,50 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/rock01.dds"));
 }
 
+/// Note HS2 pin (final review Issue 1): a PBR set's packed output keeps its item key and `[files]` key whatever
+/// output path it has: the explicit `textures/pbr/…` path the prefix gives, and that path under a new name. A fill
+/// set on the item reaches the job, and the key is not reported unmatched.
+#[test]
+fn a_fill_on_a_renamed_pbr_sets_packed_output_reaches_the_engine() {
+    use engine::config::RawMap;
+    use engine::pack::ChannelSource;
+    const PACKED: &str = "landscape/rock01_rmaos";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.set_pack_fill(PACKED, RawMap::Metallic, Some(200));
+    idle(&mut m);
+    for (rename, out) in [
+        (None, "export/textures/pbr/landscape/rock01_rmaos.dds"),
+        (
+            Some("steel"),
+            "export/textures/pbr/landscape/steel_rmaos.dds",
+        ),
+    ] {
+        if let Some(n) = rename {
+            m.set_output_name("landscape/rock01", Some(n)).unwrap();
+            idle(&mut m);
+        }
+        let job = m
+            .item(PACKED)
+            .unwrap_or_else(|| panic!("no item {PACKED}"))
+            .job
+            .clone()
+            .unwrap();
+        let written = job.output.to_string_lossy().replace('\\', "/");
+        assert!(written.ends_with(out), "{written}");
+        assert_eq!(
+            job.pack.as_ref().unwrap().channels[1],
+            ChannelSource::Fill {
+                role: RawMap::Metallic,
+                code: 200
+            },
+            "{out}"
+        );
+        assert!(m.unmatched_keys.is_empty(), "{:?}", m.unmatched_keys);
+    }
+}
+
 #[test]
 fn a_pbr_set_on_cs_renames_through_pgpatcher_rename() {
     let d = tempfile::tempdir().unwrap();

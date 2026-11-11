@@ -572,3 +572,66 @@ fn a_files_key_on_a_shared_output_is_not_reported_unmatched() {
         .collect();
     assert!(unmatched.is_empty(), "{unmatched:#?}");
 }
+
+/// Note HS2 pin (final review Issue 1): an output path never moves a packed output's `[files]` key. A renamed set
+/// (the GUI's output name: every output under a new base name) and a packed output sent to another folder both keep
+/// `a/rock_rmaos`, so its fill reaches the job and the key is not reported unmatched.
+#[test]
+fn an_output_path_keeps_the_packed_files_key() {
+    use engine::sets::OutputKey;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+    let renamed = [
+        ("textures/a/rock.png", "textures/a/steel.dds"),
+        (
+            "textures/a/rock_roughness.png",
+            "textures/a/steel_roughness.dds",
+        ),
+    ];
+    for (packed_to, files) in [
+        ("textures/a/steel_rmaos.dds", &renamed[..]),
+        ("textures/elsewhere/other_rmaos.dds", &[][..]),
+    ] {
+        let d = fixture(&["textures/a/rock.png", "textures/a/rock_roughness.png"]);
+        std::fs::write(
+            d.path().join("in/sdc.toml"),
+            "[files.\"textures/a/rock_rmaos\"]\npacking.fill.metallic = 200\n",
+        )
+        .unwrap();
+        let mut r = request(&d, vec![], &[]);
+        r.output_paths = files
+            .iter()
+            .map(|(k, p)| (OutputKey::File(k.to_string()), PathBuf::from(p)))
+            .chain([(
+                OutputKey::Packed {
+                    set: "textures/a/rock".into(),
+                    suffix: "rmaos".into(),
+                },
+                PathBuf::from(packed_to),
+            )])
+            .collect::<BTreeMap<_, _>>();
+        let (p, ev) = plan_req(r);
+        let name = Path::new(packed_to).file_name().unwrap().to_str().unwrap();
+        let job = packed(&p, name);
+        assert!(
+            job.output.ends_with(packed_to),
+            "{packed_to}: {:?}",
+            job.output
+        );
+        assert_eq!(
+            job.pack.as_ref().unwrap().channels[1],
+            ChannelSource::Fill {
+                role: engine::config::RawMap::Metallic,
+                code: 200
+            },
+            "{packed_to}"
+        );
+        let unmatched: Vec<_> = ev
+            .iter()
+            .filter(
+                |e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::CfgFileUnmatched),
+            )
+            .collect();
+        assert!(unmatched.is_empty(), "{packed_to}: {unmatched:#?}");
+    }
+}
