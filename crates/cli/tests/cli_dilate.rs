@@ -541,3 +541,76 @@ fn an_input_that_wrote_nothing_does_not_claim_its_output_path() {
     assert_eq!(out.matches("wrote").count(), 1, "{out}");
     assert_eq!(read_png(&o.join("foo_p.png")).2[0], 200);
 }
+
+/// Note HS10: an output that is any input of the run is refused, `--overwrite` or not.
+#[test]
+fn an_output_that_would_replace_another_input_of_the_run_is_refused() {
+    let d = dir();
+    let a = d.path().join("a");
+    write_png(&a.join("rock.png"), 4, 4, 3, 8, &[10, 20, 30].repeat(16));
+    image::save_buffer(
+        a.join("rock.tga"),
+        &[100, 150, 200].repeat(16),
+        4,
+        4,
+        image::ColorType::Rgb8,
+    )
+    .unwrap();
+    write_mask(&a.join("rock_matid.png"), 4, 4, |x, _| x < 2);
+    let before = std::fs::read(a.join("rock.png")).unwrap();
+    let (code, out, err) = run(&[&s(&a), "--out", &s(&a), "--overwrite"]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(!out.contains("wrote"), "{out}");
+    assert_eq!(std::fs::read(a.join("rock.png")).unwrap(), before);
+    assert!(
+        err.contains("rock.png") && err.contains("rock.tga"),
+        "{err}"
+    );
+
+    let b = d.path().join("b");
+    write_png(&b.join("rock.png"), 4, 4, 3, 8, &[10, 20, 30].repeat(16));
+    write_png(
+        &b.join("backup").join("rock.png"),
+        4,
+        4,
+        3,
+        8,
+        &[60, 70, 80].repeat(16),
+    );
+    write_mask(&b.join("rock_matid.png"), 4, 4, |x, _| x < 2);
+    write_mask(&b.join("backup").join("rock_matid.png"), 4, 4, |x, _| x < 2);
+    let before = std::fs::read(b.join("rock.png")).unwrap();
+    let (code, out, err) = run(&[&s(&b), "--recursive", "--out", &s(&b), "--overwrite"]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(!out.contains("wrote"), "{out}");
+    assert_eq!(std::fs::read(b.join("rock.png")).unwrap(), before);
+}
+
+/// Note HS10: the explicit `--mask` file counts as an input too.
+#[test]
+fn an_output_that_would_replace_the_mask_file_is_refused() {
+    let d = dir();
+    let (a, b) = (d.path().join("a"), d.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    image::save_buffer(
+        a.join("m.tga"),
+        &[100, 150, 200].repeat(16),
+        4,
+        4,
+        image::ColorType::Rgb8,
+    )
+    .unwrap();
+    write_mask(&b.join("m.png"), 4, 4, |x, _| x < 2);
+    let before = std::fs::read(b.join("m.png")).unwrap();
+    let (code, out, err) = run(&[
+        &s(&a.join("m.tga")),
+        "--mask",
+        &s(&b.join("m.png")),
+        "--out",
+        &s(&b),
+        "--overwrite",
+    ]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(!out.contains("wrote"), "{out}");
+    assert_eq!(std::fs::read(b.join("m.png")).unwrap(), before);
+}

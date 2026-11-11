@@ -6,7 +6,7 @@ use engine::api::EngineError;
 use engine::config::{Category, Subtype, Target};
 use engine::presets::{AlphaContent, PresetRegistry};
 use engine::suggest::{suggest, SuggestContext};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 macro_rules! out {
@@ -249,7 +249,12 @@ fn dest_of(src: &Path, a: &DilateArgs) -> PathBuf {
 }
 
 /// One input. `Err((code, message))`: 1 nothing written for this input, 3 the write failed.
-fn process(src: &Path, a: &DilateArgs, reg: &PresetRegistry) -> Result<String, (i32, String)> {
+fn process(
+    src: &Path,
+    a: &DilateArgs,
+    reg: &PresetRegistry,
+    inputs: &HashSet<PathBuf>,
+) -> Result<String, (i32, String)> {
     let skip = |m: String| (1, format!("{}: {m}", src.display()));
     let (img, info) = engine::load::load_image(src).map_err(|e| (1, e.to_string()))?;
     if info.is_float || !matches!(info.bit_depth, 8 | 16) {
@@ -301,8 +306,12 @@ fn process(src: &Path, a: &DilateArgs, reg: &PresetRegistry) -> Result<String, (
             dest.display()
         )));
     }
-    if std::fs::canonicalize(&dest).ok() == std::fs::canonicalize(src).ok() && dest.exists() {
-        return Err(skip("the output would replace the input".into()));
+    // Note HS10: no output replaces any input of the run (or the explicit mask), `--overwrite` or not.
+    if std::fs::canonicalize(&dest).is_ok_and(|d| inputs.contains(&d)) {
+        return Err(skip(format!(
+            "the output {} would replace an input of this run",
+            dest.display()
+        )));
     }
     let (kind, what) = kind_of(&stem, reg);
 
@@ -399,6 +408,11 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
         )));
     }
     let reg = PresetRegistry::builtin().map_err(|e| EngineError::Fatal(e.to_string()))?;
+    let inputs: HashSet<PathBuf> = found
+        .iter()
+        .chain(a.mask.as_ref())
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
     let mut code = i32::from(missed);
     // The first input written to an output path keeps it; a later one is refused, `--overwrite` or not.
     let mut claimed: std::collections::HashMap<String, PathBuf> = Default::default();
@@ -414,7 +428,7 @@ pub fn run(a: DilateArgs) -> Result<i32, EngineError> {
             code = code.max(1);
             continue;
         }
-        match process(&src, &a, &reg) {
+        match process(&src, &a, &reg, &inputs) {
             Ok(line) => {
                 claimed.insert(key, src.clone());
                 out!("{line}");
