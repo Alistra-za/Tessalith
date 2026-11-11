@@ -1060,12 +1060,22 @@ impl SetsDoc {
                 t.insert("renamed_from", toml_edit::value(original));
             }
         }
-        let order: Vec<String> = self
-            .order()
-            .into_iter()
-            .map(|o| if same_id(&o, from) { to.to_string() } else { o })
-            .collect();
-        if !order.is_empty() {
+        self.rename_refs(from, to);
+        self.f.touch();
+    }
+
+    /// Note HS13: every reference to set `from` becomes `to`: the order list (one place for `to`, the first), other
+    /// entries' borrows and group membership.
+    fn rename_refs(&mut self, from: &str, to: &str) {
+        let before = self.order();
+        let mut order: Vec<String> = vec![];
+        for o in &before {
+            let o = if same_id(o, from) { to } else { o.as_str() };
+            if !order.iter().any(|p| same_id(p, o)) {
+                order.push(o.to_string());
+            }
+        }
+        if !order.is_empty() && order != before {
             self.set_order(&order);
         }
         for e in self.parse_entries() {
@@ -1076,7 +1086,6 @@ impl SetsDoc {
             }
         }
         self.rename_in_groups(from, to);
-        self.f.touch();
     }
 
     /// GUI tweaks G1: the automatic set `from` is now named `to` by the engine (its members were given new input
@@ -1113,9 +1122,9 @@ impl SetsDoc {
             .iter()
             .any(|e| (e.created || e.renamed_from.is_some()) && same_id(&e.id, from))
         {
-            // Note HF4: membership follows the automatic set even when no entry moved (none to move, or one already at
-            // `to`), so the set never silently leaves its group.
-            self.rename_in_groups(from, to);
+            // Notes HF4, HS13: order, borrows and membership follow the automatic set even when no entry moved (none to
+            // move, or one already at `to`), so the set never silently leaves its group or the order.
+            self.rename_refs(from, to);
         }
     }
 
