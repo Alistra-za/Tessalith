@@ -59,7 +59,8 @@ pub fn target_file(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
     // set reads `steel` beside the rows that read `steel_rmaos R`.
     let any = || {
         stems().next().map(|s| {
-            let tail = super::sets::member_tail(s, tails).len();
+            // Planned output stems are already canonical: no aliases to read.
+            let tail = super::sets::member_tail(s, tails, &std::collections::BTreeMap::new()).len();
             &s[..s.len() - tail]
         })
     };

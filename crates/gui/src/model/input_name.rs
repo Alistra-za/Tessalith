@@ -102,7 +102,7 @@ impl AppModel {
         };
         let j = self.item(item)?.job.as_ref()?;
         let full = no_ext(&j.game_path);
-        let tail = member_tail(split_path(full).1, v.tails());
+        let tail = member_tail(split_path(full).1, v.tails(), &self.suffix_aliases);
         let name = &full[..full.len() - tail.len()];
         Some((name.to_string(), tail.to_string()))
     }
@@ -179,7 +179,7 @@ impl AppModel {
             let cur = current(k);
             let (_, name) = split_path(&cur);
             let (stem, ext) = split_ext(name);
-            let tail = member_tail(stem, v.tails());
+            let tail = member_tail(stem, v.tails(), &self.suffix_aliases);
             d.keys.push(k.clone());
             d.typed.insert(k.clone(), format!("{new_base}{tail}.{ext}"));
         }
@@ -247,8 +247,8 @@ impl AppModel {
         let cur = self
             .read_as_of(diffuse)
             .map_or_else(|| diffuse.to_string(), |a| a.replace('\\', "/"));
-        let old_out = lower(no_ext(&input_output(&cur)));
-        let new_out = lower(no_ext(&input_output(new)));
+        let old_out = lower(no_ext(&input_output(&cur, &self.suffix_aliases)));
+        let new_out = lower(no_ext(&input_output(new, &self.suffix_aliases)));
         let mut old_auto = fold_id(&engine::sets::set_id(&self.sets_root(), set_key));
         // A renamed set's automatic id is its `renamed_from`, not the user's name (Note FO1).
         let renamed = self.sets_doc.as_ref().and_then(|d| {

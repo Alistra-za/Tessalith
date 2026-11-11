@@ -164,8 +164,8 @@ const PACKED: &str = "skipped (a packed output has no file of its own)";
 const LOCKED: &str = "skipped (locked)";
 
 /// The tail a name ends in, as the kind column shows it: `_n`, `_normal`, a skin set's `_wet`, or "colour".
-fn role_of(stem: &str, tails: Tails) -> String {
-    match member_tail(stem, tails) {
+fn role_of(stem: &str, tails: Tails, aliases: &BTreeMap<String, String>) -> String {
+    match member_tail(stem, tails, aliases) {
         "" => "colour".into(),
         t => t.to_string(),
     }
@@ -189,8 +189,8 @@ pub(super) fn lower(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
 }
 
-/// The output path the engine gives a file read as `rel` (Skyrim suffix names applied).
-pub(crate) fn input_output(rel: &str) -> String {
+/// The output path the engine gives a file read as `rel` (Skyrim suffix names and the preset's `aliases` applied).
+pub(crate) fn input_output(rel: &str, aliases: &BTreeMap<String, String>) -> String {
     let mut f = [InputFile {
         path: PathBuf::from(rel),
         rel: PathBuf::from(rel),
@@ -199,7 +199,7 @@ pub(crate) fn input_output(rel: &str) -> String {
         kind: InputKind::Image,
         real_rel: None,
     }];
-    canonicalise_outputs(&mut f, &BTreeMap::new());
+    canonicalise_outputs(&mut f, aliases);
     f[0].output.to_string_lossy().replace('\\', "/")
 }
 
@@ -327,7 +327,7 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
         let real_ext = split_ext(split_path(key).1).1.to_string();
         let (dir, name) = split_path(&current);
         let stem = split_ext(name).0;
-        let tail = member_tail(stem, tails);
+        let tail = member_tail(stem, tails, &m.suffix_aliases);
         let base = &stem[..stem.len() - tail.len()];
         let new = match d.typed.get(key) {
             Some(t) => {
@@ -355,8 +355,12 @@ fn input_rows(m: &AppModel, d: &RenameDialog, re: Option<&Regex>) -> Vec<RenameR
             r.matched = true;
         }
         let new_stem = split_ext(split_path(&new).1).0.to_string();
-        r.kind = Some((role_of(stem, tails), role_of(&new_stem, tails)));
-        r.output = input_output(&new);
+        let aliases = &m.suffix_aliases;
+        r.kind = Some((
+            role_of(stem, tails, aliases),
+            role_of(&new_stem, tails, aliases),
+        ));
+        r.output = input_output(&new, aliases);
         r.problem = input_problem(&new, &real_ext);
         if r.problem.is_none() && r.kind.as_ref().is_some_and(|(a, b)| a != b) {
             let (a, b) = r.kind.clone().unwrap_or_default();

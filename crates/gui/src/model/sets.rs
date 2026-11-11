@@ -1546,8 +1546,8 @@ impl<'a> DefaultOutputs<'a> {
     }
 }
 /// What follows the base name of a member `stem` of a set: its Skyrim suffix or exporter term (`_n`, `_roughness`),
-/// and the joined `_wet`, `_detail_n`, `_detail` and `_detailnorm` of the sets that take them ([`Tails`]), as the engine reads them (`group::member_split`). `""` for the colour member.
-pub fn member_tail(stem: &str, tails: Tails) -> &str {
+/// and the joined `_wet`, `_detail_n`, `_detail` and `_detailnorm` of the sets that take them ([`Tails`]), as the engine reads them (`group::member_split`, with the preset's suffix `aliases`). `""` for the colour member.
+pub fn member_tail<'a>(stem: &'a str, tails: Tails, aliases: &BTreeMap<String, String>) -> &'a str {
     use engine::group::{member_split, TextureSet, DETAIL_SPELLINGS, SKIN_DETAIL, SKIN_WET};
     // `member_split` reads only the set's suffixes: a skin set may hold every joined member.
     let mut suffixes: BTreeSet<String> = BTreeSet::new();
@@ -1567,7 +1567,7 @@ pub fn member_tail(stem: &str, tails: Tails) -> &str {
         shared_skin: false,
         shares: vec![],
     };
-    let base = member_split(stem, &set, &BTreeMap::new()).base;
+    let base = member_split(stem, &set, aliases).base;
     // The base is a prefix of `stem`, so the cut is on a char boundary.
     &stem[base.len().min(stem.len())..]
 }
@@ -1580,7 +1580,7 @@ pub fn renamed_output(job_key: &str, name: &str, tails: Tails) -> Option<PathBuf
     let stem = p.file_stem()?.to_string_lossy();
     // Everything after the base stays: a Skyrim suffix, or an exporter term an output keeps (`_roughness` on a
     // target that packs nothing), so two members never land on one name.
-    let file = format!("{name}{}.dds", member_tail(&stem, tails));
+    let file = format!("{name}{}.dds", member_tail(&stem, tails, &BTreeMap::new()));
     Some(match p.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.join(file),
         _ => PathBuf::from(file),

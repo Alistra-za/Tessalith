@@ -341,7 +341,7 @@ fn tile_tag(model: &AppModel, v: &SetView, key: &str, kind: Option<SlotKind>) ->
         .map(|s| s.to_string_lossy())
         .unwrap_or_default();
     let fills = item.helper.as_ref().map(|h| h.fills.as_slice());
-    tag_text(fills, member_tail(&stem, v.tails()))
+    tag_text(fills, member_tail(&stem, v.tails(), &model.suffix_aliases))
 }
 
 /// `tile_tag` for a member with no slot: a helper's first fill, or "unused" with none; any other member's tail, or "—".
