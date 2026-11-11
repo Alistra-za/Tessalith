@@ -16,14 +16,13 @@ use crate::events::{EventKind, Reporter, Stage};
 use crate::image::Rgba32F;
 use crate::load::load_image_as;
 use crate::manifest::{
-    dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, sha256_file,
-    EncoderVersions, Manifest, ManifestRecord, PresetRef, SourceRef, BC1_ENCODE_ID, ENGINE_VERSION,
-    MANIFEST_SCHEMA,
+    dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, recorded_sources,
+    sha256_file, EncoderVersions, Manifest, ManifestRecord, PresetRef, BC1_ENCODE_ID,
+    ENGINE_VERSION, MANIFEST_SCHEMA,
 };
 use crate::mips::build_chain_with;
 use crate::ops::{preprocess_with, Domain, SourceTransfer};
 use crate::pack::assemble::assemble;
-use crate::pack::invert_of;
 use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
@@ -508,58 +507,7 @@ pub fn process_file(
         prepare_then(job, cancel, tracker, Keep::Encode, detail, || {
             let source_sha256 =
                 sha256_file(&job.input).map_err(|e| fail(Stage::Load)(e.to_string()))?;
-            // Spec §6.4 "Provenance": a packed output records every source (its first source is `job.input`, Note M8).
-            let mut sources: Vec<SourceRef> = match &job.pack {
-                Some(pk) => pk
-                    .sources
-                    .iter()
-                    .map(|s| {
-                        Ok(SourceRef {
-                            fill: Some(crate::pack::source_fill(pk, s)),
-                            ..SourceRef::of_pack(&s.path, s.role, invert_of(pk, &s.path))?
-                        })
-                    })
-                    .collect::<std::io::Result<_>>()
-                    .map_err(|e| fail(Stage::Load)(e.to_string()))?,
-                None => vec![],
-            };
-            // Note CN12: a derived output records every file it read, with its slots and the job's identity.
-            if let Some(dj) = &job.derive {
-                let identity = dj.identity_sha256();
-                for s in &dj.sources {
-                    sources.push(
-                        SourceRef::of_derive(&s.path, &s.role, identity.clone())
-                            .map_err(|e| fail(Stage::Load)(format!("{}: {e}", s.path.display())))?,
-                    );
-                }
-            }
-            // DECISIONS DS8: a six-file cube records every face, in face order (`source_sha256` covers a one-file cube).
-            for s in job
-                .cube
-                .iter()
-                .filter(|c| c.sources.len() > 1)
-                .flat_map(|c| &c.sources)
-            {
-                sources.push(
-                    SourceRef::of_cube(&s.path, s.face.unwrap_or(0))
-                        .map_err(|e| fail(Stage::Load)(format!("{}: {e}", s.path.display())))?,
-                );
-            }
-            // DECISIONS R12: the baked `_n`, with the identity of its decode settings.
-            if let Some(b) = &job.bake {
-                sources.push(
-                    SourceRef::of_bake(&b.normal, b.identity_sha256())
-                        .map_err(|e| fail(Stage::Load)(format!("{}: {e}", b.normal.display())))?,
-                );
-            }
-            // Note DY: the helper that fills the alpha, with its read and invert, so `if-changed` re-encodes on either.
-            if let Some(f) = &job.fill {
-                sources.push(
-                    SourceRef::of_fill(&f.source.path, f.identity()).map_err(|e| {
-                        fail(Stage::Load)(format!("{}: {e}", f.source.path.display()))
-                    })?,
-                );
-            }
+            let sources = recorded_sources(job).map_err(fail(Stage::Load))?;
             Ok((source_sha256, sources))
         })?;
     let low_detail = flagged(&prep);

@@ -269,6 +269,58 @@ impl SourceRef {
     }
 }
 
+/// Every recorded source of `job`, in record order: the pack sources, a derived job's sources, a six-file cube's
+/// faces, the baked `_n`, then the helper that fills the alpha. `process_file` records this list and `if-changed`
+/// compares against it (`api::current_sources`), so the two never drift. Empty for an ordinary file; the error is
+/// `"<path>: <io error>"` for the first source that cannot be hashed.
+pub(crate) fn recorded_sources(job: &crate::policy::ResolvedJob) -> Result<Vec<SourceRef>, String> {
+    fn at(p: &Path) -> impl FnOnce(io::Error) -> String + '_ {
+        move |e| format!("{}: {e}", p.display())
+    }
+    // Spec §6.4 "Provenance": a packed output records every source (its first source is `job.input`, Note M8).
+    let mut sources = match &job.pack {
+        Some(pk) => pk
+            .sources
+            .iter()
+            .map(|s| {
+                let invert = crate::pack::invert_of(pk, &s.path);
+                Ok(SourceRef {
+                    fill: Some(crate::pack::source_fill(pk, s)),
+                    ..SourceRef::of_pack(&s.path, s.role, invert).map_err(at(&s.path))?
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        None => vec![],
+    };
+    // Note CN12: a derived output records every file it read, with its slots and the job's identity.
+    if let Some(dj) = &job.derive {
+        let identity = dj.identity_sha256();
+        for s in &dj.sources {
+            sources.push(
+                SourceRef::of_derive(&s.path, &s.role, identity.clone()).map_err(at(&s.path))?,
+            );
+        }
+    }
+    // DECISIONS DS8: a six-file cube records every face, in face order (`source_sha256` covers a one-file cube).
+    for s in job
+        .cube
+        .iter()
+        .filter(|c| c.sources.len() > 1)
+        .flat_map(|c| &c.sources)
+    {
+        sources.push(SourceRef::of_cube(&s.path, s.face.unwrap_or(0)).map_err(at(&s.path))?);
+    }
+    // DECISIONS R12: the baked `_n`, with the identity of its decode settings.
+    if let Some(b) = &job.bake {
+        sources.push(SourceRef::of_bake(&b.normal, b.identity_sha256()).map_err(at(&b.normal))?);
+    }
+    // Note DY: the helper that fills the alpha, with its read and invert, so `if-changed` re-encodes on either.
+    if let Some(f) = &job.fill {
+        sources.push(SourceRef::of_fill(&f.source.path, f.identity()).map_err(at(&f.source.path))?);
+    }
+    Ok(sources)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ManifestRecord {
     pub schema: u32,

@@ -16,8 +16,8 @@ use crate::group::{
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
 use crate::manifest::{
-    encode_version, output_key, profile_sha256, sha256_file, EncoderVersions, Manifest,
-    ManifestEntry, PresetRef, BC1_ENCODE_ID,
+    encode_version, output_key, profile_sha256, recorded_sources, sha256_file, EncoderVersions,
+    Manifest, ManifestEntry, PresetRef, BC1_ENCODE_ID,
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
@@ -873,60 +873,17 @@ fn unresolved_code(job: &ResolvedJob) -> Code {
 /// (SHA-256, bake identity, derive identity, fill identity) of one recorded source.
 type SourceKey = (String, Option<String>, Option<String>, Option<String>);
 
-/// Every recorded source of `job` now, in record order: the pack sources, then the baked `_n` (DECISIONS R12), as
-/// `SourceKey`s. Empty for an ordinary file that does not bake; `None` when a source cannot be hashed (then the
-/// output is not up to date).
+/// Every recorded source of `job` now, as `SourceKey`s in record order: the pack sources, a derived job's sources,
+/// a six-file cube's faces, the baked `_n` and the helper that fills the alpha (`manifest::recorded_sources`, the
+/// list `process_file` records). Empty for an ordinary file; `None` when a source cannot be hashed (then the output
+/// is not up to date).
 fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
-    let mut v = vec![];
-    if let Some(pk) = &job.pack {
-        for s in &pk.sources {
-            v.push((
-                sha256_file(&s.path).ok()?,
-                None,
-                None,
-                Some(pack::source_fill(pk, s)),
-            ));
-        }
-    }
-    // Note CN12: a derived job's sources, each with the job's identity, so a changed setting re-encodes.
-    if let Some(dj) = &job.derive {
-        let identity = dj.identity_sha256();
-        for s in &dj.sources {
-            v.push((
-                sha256_file(&s.path).ok()?,
-                None,
-                Some(identity.clone()),
-                None,
-            ));
-        }
-    }
-    // DECISIONS DS8: a six-file cube's faces in face order; a one-file cube is `source_sha256` alone.
-    for s in job
-        .cube
-        .iter()
-        .filter(|c| c.sources.len() > 1)
-        .flat_map(|c| &c.sources)
-    {
-        v.push((sha256_file(&s.path).ok()?, None, None, None));
-    }
-    if let Some(b) = &job.bake {
-        v.push((
-            sha256_file(&b.normal).ok()?,
-            Some(b.identity_sha256()),
-            None,
-            None,
-        ));
-    }
-    // Note DY: the helper that fills the alpha, last, as `process_file` records it.
-    if let Some(f) = &job.fill {
-        v.push((
-            sha256_file(&f.source.path).ok()?,
-            None,
-            None,
-            Some(f.identity()),
-        ));
-    }
-    Some(v)
+    let now = recorded_sources(job).ok()?;
+    Some(
+        now.into_iter()
+            .map(|r| (r.sha256, r.bake, r.derive, r.fill))
+            .collect(),
+    )
 }
 
 /// A packed job's sources fill the same roles, inverted the same way, as the record's (DECISIONS N7). A schema-1
