@@ -1688,6 +1688,7 @@ fn a_failed_rmaos_recipe_leaves_a_pbr_set_out_of_also() {
         notes.iter().map(|n| &n.why).collect::<Vec<_>>()
     );
     for f in ["x_metallic.png", "x_roughness.png"] {
-        assert!(drop.iter().any(|p| p.ends_with(f)), "{f}: {drop:?}");
+        // The absolute path the Also phases compare against, not just a file name.
+        assert!(drop.contains(&arm.join(f)), "{f}: {drop:?}");
     }
 }

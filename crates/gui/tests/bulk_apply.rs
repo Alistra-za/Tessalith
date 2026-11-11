@@ -636,6 +636,57 @@ fn copy_settings_lands_a_whole_unlock_chain() {
     assert!(!report.contains("locked"), "{report}");
 }
 
+/// Note HS8 (final review Issue 4): a field unlocked by a field that is itself unlocked by the copy lands even when it
+/// is ticked first: the BC1 format unlocks 1-bit alpha, which makes the blend policy cutout and unlocks the
+/// threshold, so the threshold needs a second pass.
+#[test]
+fn copy_settings_lands_a_two_step_unlock_ticked_in_reverse() {
+    use engine::config::Format;
+    use engine::policy::allowed_encodings;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let both = strings(&[LEAF, ROCK]);
+    m.apply_bulk_edit(&both, "subtype", BulkOp::Set(json!("diffuse")));
+    idle(&mut m);
+    m.set_field(ROCK, "format", json!("bc7"));
+    idle(&mut m);
+    let allowed = |m: &AppModel, k: &str| {
+        let st = m.item(k).unwrap().job.as_ref().unwrap().profile.subtype;
+        allowed_encodings(st, m.target)
+    };
+    let rock = allowed(&m, ROCK);
+    let (f, t) = *allowed(&m, LEAF)
+        .iter()
+        .find(|e| e.0 == Format::Bc1 && rock.contains(e))
+        .expect("fixture: a BC1 pair both allow");
+    assert!(!is_cutout(&m, ROCK), "precondition: ROCK is not cutout");
+    m.set_format(LEAF, f, t);
+    idle(&mut m);
+    m.set_field(LEAF, "encoder.bc1_alpha", json!(true));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.policy", json!("blend"));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.threshold", json!(90));
+    idle(&mut m);
+    m.apply_copy_settings(
+        LEAF,
+        &strings(&[ROCK]),
+        &[
+            "alpha.threshold".into(),
+            "encoder.bc1_alpha".into(),
+            "format".into(),
+            "color.tag".into(),
+            "alpha.policy".into(),
+        ],
+    );
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "encoder.bc1_alpha"), Some(json!(true)));
+    assert_eq!(file(&m, ROCK, "alpha.policy"), Some(json!("blend")));
+    assert_eq!(file(&m, ROCK, "alpha.threshold"), Some(json!(90)));
+    let report = m.bulk.report.clone().unwrap();
+    assert!(!report.contains("locked"), "{report}");
+}
+
 /// Note HS8 guard (pin of existing behaviour): a field nothing in the copy unlocks is still skipped and reported.
 #[test]
 fn copy_settings_still_skips_a_field_nothing_in_the_copy_unlocks() {

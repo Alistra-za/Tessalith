@@ -4352,7 +4352,8 @@ fn a_path_typed_without_enter_survives_a_click_on_a_later_control() {
     );
 }
 
-/// Note HS15: the same slot's Fix clicked while a path is typed is dropped (the typed path wins), never a Conflict.
+/// Note HS15 (pin: it passed before the fix too, and fails if the `same_slot` drop is removed): the same slot's Fix
+/// clicked while a path is typed is dropped (the typed path wins), never a Conflict.
 #[test]
 fn a_same_slot_fix_while_a_path_is_typed_is_dropped() {
     let mut m = direct(scenes::shared_alpha_and_set());

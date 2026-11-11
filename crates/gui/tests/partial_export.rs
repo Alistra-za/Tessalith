@@ -1033,14 +1033,23 @@ fn a_scoped_export_with_a_tick_checks_the_pbr_folder_it_writes() {
         "{}",
         notes(&m)
     );
-    // The PBR folder is the source mod: refused, not written in place.
-    let d2 = tempfile::tempdir().unwrap();
-    let mut m = also_project(d2.path());
-    m.set_also_location(&d2.path().join("mods"));
+}
+
+/// Note HS7: a scoped export whose PBR folder is the source mod is refused, not written in place.
+#[test]
+fn a_scoped_export_with_a_tick_never_writes_into_the_source_mod() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = also_project(d.path());
+    m.set_also_location(&d.path().join("mods"));
     idle(&mut m);
     m.set_also_settings(|c| c.names.pbr = Some("Mod".into()));
     idle(&mut m);
     scoped_cup_export(&mut m);
+    let cup = d.path().join("mods/Mod/textures/clutter/cup.dds");
+    assert!(
+        !cup.exists(),
+        "written into the source mod: {}",
+        cup.display()
+    );
     assert!(matches!(m.dialog, Some(Dialog::Error(_))), "{:?}", m.dialog);
-    assert!(!d2.path().join("mods/Mod/textures/clutter/cup.dds").exists());
 }

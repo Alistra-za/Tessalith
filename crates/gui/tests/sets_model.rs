@@ -489,7 +489,8 @@ fn rename_refuses_the_name_of_an_automatic_set_emptied_by_a_move() {
         .expect("odd's set")
         .id
         .clone();
-    assert!(m.rename_set(&odd_set, "landscape/leaf").is_err());
+    let e = m.rename_set(&odd_set, "landscape/leaf").unwrap_err();
+    assert!(e.contains("automatic set of a file"), "{e}");
 }
 
 /// Note HS11 (final review Issue 3): a file's automatic set follows its input name, so the name it was read under

@@ -58,7 +58,7 @@ impl AppModel {
             .collect()
     }
 
-    /// Task 9 (Z11): keep the sub-types before this plan chain, compared when it settles.
+    /// DECISIONS Z11: keep the sub-types before this plan chain, compared when it settles.
     pub(super) fn keep_type_base(&mut self) {
         if self.type_base.is_none() {
             self.type_base = Some(self.subtypes());

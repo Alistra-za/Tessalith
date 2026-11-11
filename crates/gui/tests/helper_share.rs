@@ -657,6 +657,16 @@ fn a_fill_on_a_sharing_sets_packed_output_reaches_the_engine() {
     );
 }
 
+/// Note HS11 with HS2: the sharing set's packed item `a/slab_rmaos` names no file's automatic set, so it does not
+/// block renaming a set to `a/slab`.
+#[test]
+fn a_shared_packed_item_does_not_block_a_rename() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_roughness(d.path());
+    assert!(m.item("a/slab_rmaos").is_some(), "precondition");
+    assert_eq!(m.rename_set(A, "a/slab"), Ok(()));
+}
+
 /// Final review Issue 2: both sets' packed outputs export, each to its own set's folder, with no collision row and no
 /// Review block.
 #[test]
