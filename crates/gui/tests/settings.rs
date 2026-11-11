@@ -31,6 +31,26 @@ fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     assert!(err.is_some());
 }
 
+/// Note HV2: the analysis cache limit is 500 MB until one is set, and an unset limit is not written to the file.
+#[test]
+fn the_analysis_cache_limit_is_500_mb_until_set() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    let mut s = GuiSettings::default();
+    assert_eq!(s.analysis_cache_bytes(), 500 * 1024 * 1024);
+    s.save(&p).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(!text.contains("analysis_cache_mb"), "{text}");
+    s.analysis_cache_mb = Some(800);
+    s.save(&p).unwrap();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(800));
+    assert_eq!(back.analysis_cache_bytes(), 800 * 1024 * 1024);
+    // The largest value the file can hold does not overflow.
+    s.analysis_cache_mb = Some(u32::MAX);
+    assert_eq!(s.analysis_cache_bytes(), u64::from(u32::MAX) << 20);
+}
+
 #[test]
 fn recent_keeps_ten() {
     let mut s = GuiSettings::default();

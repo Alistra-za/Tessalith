@@ -19,6 +19,7 @@ fn build_model() -> AppModel {
                 std::env::var_os("LOCALAPPDATA")
                     .as_deref()
                     .map(std::path::Path::new),
+                s.analysis_cache_bytes(),
             );
             let mut m = AppModel::new(s, path, Arc::new(session));
             m.user_config = engine::presets::user_config_path();

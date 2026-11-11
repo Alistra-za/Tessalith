@@ -270,6 +270,12 @@ impl AppModel {
         self.save_settings();
     }
 
+    /// Note HV2: the analysis disk cache's limit, saved now and applied when the app next starts.
+    pub fn set_analysis_cache_mb(&mut self, mb: u32) {
+        self.settings.analysis_cache_mb = Some(mb);
+        self.save_settings();
+    }
+
     /// Recompute the check maps when a plan landed, the sets document changed or a switch moved; then every
     /// view-keyed cache rebuilds. Its key never includes `items_rev`, so its own `invalidate_views` cannot re-run it.
     pub(super) fn refresh_checks(&mut self) -> bool {

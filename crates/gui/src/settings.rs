@@ -24,6 +24,8 @@ pub struct GuiSettings {
     /// The 3D view's settings window (TruePBR settings…) is open (AG132).
     pub set_settings_open: bool,
     pub advanced_open: bool,
+    /// Note HV2: the most the analysis disk cache may hold, in MB; unset means [`ANALYSIS_CACHE_MB`]. Read at start.
+    pub analysis_cache_mb: Option<u32>,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.
     pub meshes: MeshesSettings,
     /// The window and arrangement the app comes back to, `[layout]` in the file (DECISIONS AG3).
@@ -42,6 +44,9 @@ pub struct GuiSettings {
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub group_collapsed: std::collections::BTreeSet<String>,
 }
+
+/// The analysis disk cache's limit when `analysis_cache_mb` is unset (Note HV2), in MB.
+pub const ANALYSIS_CACHE_MB: u32 = 500;
 
 /// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +154,10 @@ impl GuiSettings {
         let kept = self.save(path)?;
         *base = Some((self.clone(), engine::policy::SourceStamp::of(path)));
         Ok(kept)
+    }
+    /// The analysis disk cache's limit in bytes (Note HV2). A MB here is 1024 x 1024 bytes.
+    pub fn analysis_cache_bytes(&self) -> u64 {
+        u64::from(self.analysis_cache_mb.unwrap_or(ANALYSIS_CACHE_MB)) * 1024 * 1024
     }
     pub fn push_recent(&mut self, p: PathBuf) {
         self.recent.retain(|r| r != &p);

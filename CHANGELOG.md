@@ -2,6 +2,7 @@
 
 ## 3.0.0 (Unreleased)
 
+- The analysis cache holds about five times as many textures: its limit is 500 MB (was 200 MB), and each entry's thumbnail is stored compressed, which about halves an entry. You can change the limit with **Analysis cache limit** under Advanced → Cache (`analysis_cache_mb` in `gui.toml`); a new limit applies the next time Tessalith starts. Entries an older version wrote still read. See docs/wiki/Installation.md#where-tessalith-keeps-its-files.
 - The analysis cache's size prune keeps the entries you use: opening a folder whose entry is more than a day old refreshes that entry's time, so the prune deletes the ones nothing has read for longest.
 - A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Under `if-changed`, every diffuse, PBR albedo, UI/sky and skin albedo output is written again once; only resized cutouts change.
 - The line shown when the toast's Undo comes too late (the restored edits were already undone or edited over) now says: press Ctrl+Z to undo or Ctrl+Y to redo.

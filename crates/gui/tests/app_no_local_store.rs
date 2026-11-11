@@ -65,15 +65,19 @@ fn with_analysis_cache_stores_under_the_given_folder_only() {
 
     // No LOCALAPPDATA: no store, nothing written.
     plan_once(
-        &sdc_gui::with_analysis_cache(new(), None),
+        &sdc_gui::with_analysis_cache(new(), None, u64::MAX),
         &textures,
         out.path(),
     );
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
 
     // With a base folder the entries land under <base>\sdc\analysis-cache.
-    let s = sdc_gui::with_analysis_cache(new(), Some(base.path()));
+    let s = sdc_gui::with_analysis_cache(new(), Some(base.path()), u64::MAX);
     plan_once(&s, &textures, out.path());
     let dir = base.path().join("sdc").join("analysis-cache");
-    assert!(std::fs::read_dir(dir).unwrap().count() > 0);
+    assert!(std::fs::read_dir(&dir).unwrap().count() > 0);
+
+    // Note HV2: the limit it is given is the size the folder is pruned to at start.
+    let _s = sdc_gui::with_analysis_cache(new(), Some(base.path()), 0);
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
 }

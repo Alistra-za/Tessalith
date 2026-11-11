@@ -96,7 +96,7 @@ fn one_edit_settles() {
     // 2. Open the copy (the analysis disk cache in scratch: a cold open), then wait.
     let session = engine::session::Session::new()
         .unwrap()
-        .with_disk_cache(tmp.path().join("analysis-cache"));
+        .with_disk_cache(tmp.path().join("analysis-cache"), u64::MAX);
     let export = tmp.path().join("export");
     // `SDC_REPLAN_GUI_TOML`: a copy of the owner's `gui.toml` (read only, never saved: no settings path). Its export
     // folder and Meshes source are replaced, so nothing outside the tempdir is written or scanned; the accept mode
