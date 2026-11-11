@@ -2641,10 +2641,7 @@ impl AppModel {
     fn apply_plan(&mut self, view: PlanView) {
         // A plan landed: any blame on `sdc.toml` is settled, so a later failure must not unblame it (review I1 of #9).
         self.ignored_by_plan = false;
-        // Task 9 (Z11): the sub-types before this plan chain, compared when it settles.
-        if self.type_base.is_none() {
-            self.type_base = Some(self.subtypes());
-        }
+        self.keep_type_base();
         // Look the expanded item's set up before the items are replaced: if the item vanishes, its set is the
         // fallback selection (Review Focus 1).
         let expanded_set = self
@@ -2730,8 +2727,10 @@ impl AppModel {
 
     /// Fast re-plan (R2 §5): splice a partial plan of the `scope` sets into the last full plan's items and sets.
     /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
-    /// `last_inputs`); the full plan lands behind it and replaces everything.
+    /// `last_inputs`); the full plan lands behind it and replaces everything. It keeps the sub-types before the chain
+    /// (`keep_type_base`), since the partial can be the first plan after an edit.
     fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+        self.keep_type_base();
         let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));
         let expanded_in_scope = self
             .expanded

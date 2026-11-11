@@ -763,3 +763,52 @@ fn a_global_edit_sends_no_partial() {
     let (_, full) = collect(&mut m, 1, 1);
     finish(&mut m, full);
 }
+
+#[test]
+fn subtype_edit_on_the_fast_path_clears_an_invalid_format() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    m.hold_plan_results = false;
+    let normal = engine::policy::allowed_encodings_for(Subtype::Normal, m.target, false);
+    let pair = engine::policy::allowed_encodings_for(Subtype::Diffuse, m.target, false)
+        .into_iter()
+        .find(|p| !normal.contains(p))
+        .expect("a diffuse encoding a normal map does not allow");
+    m.set_format(LEAF, pair.0, pair.1);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(LEAF, "format")
+        .is_some());
+    assert!(m.encoding_note.is_none());
+    let steps = m.history.undo.len();
+    m.hold_plan_results = true;
+    m.set_field(LEAF, "subtype", json!(Subtype::Normal));
+    let (partials, full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "the fast path ran"
+    );
+    deliver(&mut m, partials);
+    finish(&mut m, full);
+    let p = m.project.as_ref().unwrap();
+    assert_eq!(p.file_value(LEAF, "format"), None);
+    assert_eq!(p.file_value(LEAF, "color.tag"), None);
+    let (line, _) = m.encoding_note.clone().expect("a note");
+    assert!(line.contains("format reset to the default"), "{line}");
+    assert_eq!(
+        m.history.undo.len(),
+        steps + 1,
+        "folded into the edit's step"
+    );
+    m.undo();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(LEAF, "format")
+        .is_some());
+}
