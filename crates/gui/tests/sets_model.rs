@@ -492,6 +492,20 @@ fn rename_refuses_the_name_of_an_automatic_set_emptied_by_a_move() {
     assert!(m.rename_set(&odd_set, "landscape/leaf").is_err());
 }
 
+/// Note HS11 (final review Issue 3): a file's automatic set follows its input name, so the name it was read under
+/// before is free.
+#[test]
+fn rename_may_take_an_automatic_name_an_input_name_left() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.set_input_name("landscape/rock01", "textures/landscape/stone")
+        .unwrap();
+    idle(&mut m);
+    assert!(set_views(&m).iter().any(|s| s.id == "landscape/stone"));
+    assert_eq!(m.rename_set("landscape/leaf", "landscape/rock01"), Ok(()));
+}
+
 /// A set the user created makes no automatic set, so it may take a hidden automatic name.
 #[test]
 fn a_created_set_may_take_a_hidden_automatic_name() {

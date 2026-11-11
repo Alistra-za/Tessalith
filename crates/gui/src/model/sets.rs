@@ -2721,15 +2721,17 @@ impl AppModel {
         }
         // Note HS11: the engine still makes a file's automatic set, card or not (deleted, or emptied by a move), when
         // it applies the rename, so it refuses the rename and the set's entry is left naming no files. A created set's
-        // rename is not sent to the engine as a Rename.
+        // rename is not sent to the engine as a Rename. A file's id follows its input name (`[inputs] read_as`).
         // shortcut: the id is predicted with `base_of` (no preset aliases, no `_detail` join); upgrade to
         // `engine::group::group_sets_with` over the file list if it mis-predicts.
         if !own_original
             && !v.created
-            && self
-                .items
-                .iter()
-                .any(|i| i.kind != ItemKind::Packed && same_id(&auto_id(&i.key), &new_id))
+            && self.items.iter().any(|i| {
+                let read = self
+                    .read_as_of(&i.key)
+                    .map_or_else(|| i.key.clone(), |a| a.replace('\\', "/"));
+                i.kind != ItemKind::Packed && same_id(&auto_id(&read), &new_id)
+            })
         {
             return Err(format!(
                 "{new_id} is still the automatic set of a file; pick another name"
