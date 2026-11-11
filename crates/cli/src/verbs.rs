@@ -483,7 +483,8 @@ struct Mip0Alpha {
     speck: bool,
 }
 
-/// Mip-0 alpha, for formats that carry alpha (`None` for others and on decode errors).
+/// Mip-0 alpha, for formats that carry alpha (`None` for others and on decode errors). A cube's `min` is the
+/// lowest over all six faces' mip 0 (Note DS12: the marker keeps alpha 0 in faces 1-5); `speck` is face 0's.
 fn mip0_alpha(file: &DdsFile) -> Option<Mip0Alpha> {
     if !carries_alpha(file.format) {
         return None;
@@ -494,12 +495,28 @@ fn mip0_alpha(file: &DdsFile) -> Option<Mip0Alpha> {
             let low = |i: usize| engine::analyse::is_low_alpha(f32::from(px[i][3]) / 255.0);
             let n_low = (0..px.len()).filter(|&i| low(i)).count() as u64;
             let (w, h) = (*w as usize, *h as usize);
-            Some(Mip0Alpha {
+            let mut a = Mip0Alpha {
                 min: alpha_stats(&px).min,
                 speck: n_low > 0
                     && px.len() == w * h
                     && engine::analyse::low_alpha_is_speck_noise(w, h, n_low, low),
-            })
+            };
+            // `levels` is non-empty here, so the step is never 0.
+            for (fw, fh, fr) in file
+                .surfaces()
+                .into_iter()
+                .step_by(file.levels.len())
+                .skip(1)
+            {
+                if let Some(Ok(Decoded::Ldr(f))) = file
+                    .data
+                    .get(fr)
+                    .map(|d| decode_level(file.format, fw, fh, d))
+                {
+                    a.min = a.min.min(alpha_stats(&f).min);
+                }
+            }
+            Some(a)
         }
         _ => None,
     }
