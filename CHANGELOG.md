@@ -15,6 +15,7 @@
 - **Export set**, **Export n sets** and **Export group** with an Also tick check the PBR folder they write, not the export folder. Before, such an export could be refused for an export folder it does not write to, and wrote a PBR folder the whole-project export would refuse.
 - Changing a set's input name also renames the set in the project order and in other sets' borrows when the set has no entry of its own in `sdc-project.toml`. Before, both kept the old name.
 - Dragging a group's first set down onto a card drops the group where the insertion line shows, not further down, and dropping it on a set of its own group does nothing.
+- A texture whose alpha a helper fills is checked on the filled image: its warnings and readouts see the filled alpha, not the source's own.
 - Copy settings also writes a field that another ticked field unlocks on the target, such as the alpha threshold copied with a cutout policy, the mip edge with a Tent filter, or BC1 1-bit alpha with a BC1 format. Before, such a field was skipped as locked.
 - Clicking a centre tab commits the text field being edited before switching. Before, the typed value was lost and later shown as if it were stored.
 - **Rename inputs** and the input name box read a preset's suffix aliases, so a member named by an alias (for example `_zz9` read as `_n`) keeps its suffix and shows the right output.

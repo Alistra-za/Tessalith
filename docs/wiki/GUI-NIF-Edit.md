@@ -56,7 +56,7 @@ While an edit is open, a right-click on the 3D view (a click, not a drag) opens 
 
 ### Changing the export folder
 
-Open edits stay in memory and the next save goes to the new folder. If that folder already holds saved edits for the NIF, your open edit wins: the old saved edits are moved aside to `<name>.<seconds>.toml` beside them, never overwritten, and Messages names the file. If the new folder's edit document can't be opened, the edit stays blocked and saves go to the autosave in `%LOCALAPPDATA%\sdc\nif-edits` until you pick a folder that works.
+Open edits stay in memory and the next save goes to the new folder. If that folder already holds saved edits for the NIF, your open edit wins: the old saved edits are moved aside to `<name>.<seconds>.toml` beside them, never overwritten, and Messages names the file. If the new folder's edit document can't be opened, the edit stays blocked and saves go to the autosave in `%LOCALAPPDATA%\sdc\nif-edits` until you pick a folder that works. Once the NIF is edited, a folder that holds the mesh the edit applies to is refused, so an export never replaces its source: the folder is not taken, and the NIF's row is blocked with the reason until you pick another one. <!-- D:HS12 -->
 
 ### After an export
 
