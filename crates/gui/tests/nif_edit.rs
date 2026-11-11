@@ -5277,6 +5277,47 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     assert_eq!(std::fs::read(nif_doc(&old)).unwrap(), before);
 }
 
+/// Note HS12: a touched edit never takes as its export folder the folder holding its source copy (an export there
+/// would replace the source); the row is blocked as GD12's, in any spelling of that folder.
+#[test]
+fn an_export_folder_holding_the_source_copy_is_not_taken() {
+    let (d, mut m) = export_session();
+    m.set_nif_export_root(None);
+    m.open_edit();
+    let src = d.path().join(r"mods\A");
+    assert_eq!(
+        m.edit.as_ref().unwrap().source_copy.origin,
+        "A",
+        "precondition: the source is A's copy"
+    );
+    let before = std::fs::read(src.join(r"meshes\x.nif")).unwrap();
+    gloss(&mut m, 12.5);
+    // Review Focus 5: the same folder in another case and with a trailing separator
+    let other = std::path::PathBuf::from(format!("{}\\", d.path().join(r"MODS\a").display()));
+    for root in [src.clone(), other] {
+        m.set_nif_export_root(Some(root.clone()));
+        assert_eq!(m.nif_export_root, None, "{} is not taken", root.display());
+        let e = m.edit.as_ref().unwrap();
+        assert_ne!(e.export_path, src.join(r"meshes\x.nif"));
+        let why = review_row(&m).blocked.expect("the row is blocked");
+        assert!(why.contains(&root.display().to_string()), "{why}");
+        assert!(why.contains("holds the mesh"), "{why}");
+        export_fails(&mut m, "holds the mesh");
+    }
+    assert_eq!(std::fs::read(src.join(r"meshes\x.nif")).unwrap(), before);
+    assert!(!nif_doc(&src).exists());
+    gloss(&mut m, 13.5);
+    assert_eq!(
+        load(&autosave(&d)).unwrap().unwrap().ops.len(),
+        2,
+        "the work is kept in the autosave meanwhile"
+    );
+    let good = d.path().join(r"mods\Good");
+    m.set_nif_export_root(Some(good.clone()));
+    assert_eq!(m.nif_export_root.as_deref(), Some(good.as_path()));
+    assert_eq!(review_row(&m).blocked, None);
+}
+
 /// Note GD20: a failed folder change reads the new folder's document once, not each frame; a change to the file (its
 /// length or time) reads it again.
 #[test]

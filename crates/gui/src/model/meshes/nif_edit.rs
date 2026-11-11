@@ -1170,13 +1170,26 @@ impl NifEdit {
     /// Note GD5 (a), (b), (d): the export folder changed while this edit is touched (GD13). The document stays in
     /// memory and moves to `root` (or to `autosave` with none) unsaved: the switch writes nothing, the next save writes there.
     /// It takes the export record of `root`'s saved document (that record describes `root`'s file). Returns the
-    /// lines for Messages; Err (nothing moved) when `root`'s saved document does not load, so it is never overwritten.
+    /// lines for Messages; Err (nothing moved, the reason as the row shows it) when `root`'s saved document does not
+    /// load, so it is never overwritten, or when `root` holds the source copy (Note HS12).
     pub fn retarget(&mut self, root: Option<&Path>) -> Result<Vec<String>, String> {
+        // Note HS12: an export there would replace the source copy (pick_source skips that folder as well)
+        if let Some(r) = root.filter(|r| same_dir(Path::new(&self.source_copy.root), r)) {
+            return Err(format!(
+                "{} holds the mesh this edit applies to ({}); an export there would replace it. Choose another \
+                 export folder.",
+                r.display(),
+                self.source_copy.origin
+            ));
+        }
+        let cannot = |r: &Path, e: String| {
+            format!("could not open the edit document in {}: {e}", r.display())
+        };
         let (edit_mod, doc_path, export_path) = match root {
             Some(r) => (
                 r.to_path_buf(),
-                edit_doc::doc_path(r, &self.data_path)?,
-                edit_doc::export_path(r, &self.data_path)?,
+                edit_doc::doc_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
+                edit_doc::export_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
             ),
             None => (
                 PathBuf::new(),
@@ -1185,7 +1198,7 @@ impl NifEdit {
             ),
         };
         let theirs = match root {
-            Some(_) => edit_doc::load(&doc_path)?,
+            Some(r) => edit_doc::load(&doc_path).map_err(|e| cannot(r, e))?,
             None => None,
         };
         let mut lines = vec![];
@@ -2471,10 +2484,8 @@ impl MeshesModel {
                     e.retarget_fail = None;
                     e.refresh_blocked();
                 }
-                Err(err) => {
+                Err(why) => {
                     e.retarget_fail = key;
-                    let folder = root.as_deref().unwrap_or(Path::new("")).display();
-                    let why = format!("could not open the edit document in {folder}: {err}");
                     if e.retarget_error.as_ref() != Some(&why) {
                         e.retarget_error = Some(why);
                         e.refresh_blocked();
