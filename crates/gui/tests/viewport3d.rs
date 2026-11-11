@@ -164,7 +164,7 @@ fn wait_idle(v: &mut Viewport3d) {
 }
 
 /// Renders the winning femalebody_1.nif through the viewport's worker at 1600×900 (forward), prints the frame times
-/// and writes the sRGB-encoded frame to %TEMP%. Needs SDC_ACHERUS. `cargo test -p sdc-gui --release --test viewport3d -- --ignored --nocapture`.
+/// and writes the sRGB-encoded frame to %TEMP%. Needs SDC_ACHERUS. `cargo test -p sdc-gui --release --test it viewport3d:: -- --ignored --nocapture`.
 #[test]
 #[ignore = "needs the owner's MO2 instance, CS install and a D3D11 device"]
 fn femalebody_1600x900_frame_times() {
@@ -904,7 +904,7 @@ fn the_spinner_needs_300_ms_of_continuous_work_and_resets_when_idle() {
 
 /// v2 B3 perf gate (spec §6.3): a playback frame (new clock time + a cbuffer SetMaterial per shape + the Render) stays
 /// under 33.3 ms (30 fps) at 1600×900 and the Meshes default size, deferred (the default look) and forward.
-/// `cargo test -p sdc-gui --release --offline --test viewport3d -- --ignored --nocapture femalebody_playback`
+/// `cargo test -p sdc-gui --release --offline --test it viewport3d::femalebody_playback -- --ignored --nocapture`
 #[test]
 #[ignore = "needs the owner's MO2 instance, CS install and a D3D11 device"]
 fn femalebody_playback_holds_30_fps() {

@@ -650,7 +650,7 @@ fn a_problems_click_on_a_helper_opens_the_group() {
 }
 
 /// Review pictures of the Textures column at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a GPU and
-/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test helpers_list -- --ignored shots`.
+/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helpers_list::shots -- --ignored`.
 #[test]
 #[ignore]
 fn shots() {

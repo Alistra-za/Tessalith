@@ -524,7 +524,7 @@ fn meshes_settings_round_trip_in_gui_toml() {
 
 /// Headless stand-in for the owner's manual check (plan step 5): scans the owner's MO2 instance read-only through
 /// the model and the worker, with the database in %TEMP%, and prints what the view would show. No asserts on the
-/// machine's data. `cargo test --release -p sdc-gui --test meshes_view owner_meshes_view -- --ignored --nocapture`
+/// machine's data. `cargo test --release -p sdc-gui --test it meshes_view::owner_meshes_view -- --ignored --nocapture`
 #[test]
 #[ignore]
 fn owner_meshes_view() {

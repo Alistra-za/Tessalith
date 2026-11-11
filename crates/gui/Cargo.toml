@@ -6,6 +6,8 @@ license.workspace = true
 publish.workspace = true
 # eframe 0.36.2's floor.
 rust-version.workspace = true
+# Note HU1: the test files are modules of one binary, `tests/it/main.rs`. Only the targets listed below are built.
+autotests = false
 
 [lib]
 name = "sdc_gui"
@@ -14,6 +16,47 @@ path = "src/lib.rs"
 [[bin]]
 name = "tessalith"
 path = "src/main.rs"
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+
+# Each file below changes process-wide state, so it stays a process of its own (Note HU2).
+# These six point %LOCALAPPDATA% or %APPDATA% at a temp folder.
+[[test]]
+name = "app_no_local_store"
+path = "tests/app_no_local_store.rs"
+
+[[test]]
+name = "doc_shots"
+path = "tests/doc_shots.rs"
+
+[[test]]
+name = "meshes_header"
+path = "tests/meshes_header.rs"
+
+[[test]]
+name = "nif_edit"
+path = "tests/nif_edit.rs"
+
+[[test]]
+name = "replan_timing"
+path = "tests/replan_timing.rs"
+
+[[test]]
+name = "ui_proof"
+path = "tests/ui_proof.rs"
+
+# Installs the panic hook.
+[[test]]
+name = "crash_recovery"
+path = "tests/crash_recovery.rs"
+
+# Sets the device-lost flag, which nothing clears: the next `SdcApp` frame in the process would open the restart
+# dialog, wait for a click, then start the test exe again and exit.
+[[test]]
+name = "device_lost"
+path = "tests/device_lost.rs"
 
 [[test]]
 name = "ui_drive"

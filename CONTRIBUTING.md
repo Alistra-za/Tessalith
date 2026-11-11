@@ -104,6 +104,7 @@ After you change anything under `crates\encoders-sys\vendor`, run `.\tools\hash-
 - Design decisions are recorded in [.claude/DECISIONS.md](.claude/DECISIONS.md) as numbered notes. A change that alters behaviour adds or amends a note, and updates the wiki pages it touches.
 - Output changes: a change that alters written bytes needs a line in [CHANGELOG.md](CHANGELOG.md) (and [docs/presets-changelog.md](docs/presets-changelog.md) for presets).
 - A pub item in `sdc-gui` (or a counter it reads) that only tests use goes behind `#[cfg(feature = "test-hooks")]`; the crate's own dev-dependency turns the feature on for tests, and a release build never does.
+- A new GUI test file, `crates/gui/tests/<name>.rs`, gets its `#[path]` and `mod` lines in `crates/gui/tests/it/main.rs`. That file's header says when a test file needs a `[[test]]` entry in `crates/gui/Cargo.toml` instead.
 - No game assets in PRs: no `.dds`, `.nif`, `.bsa`, `.esp` or textures from Skyrim or from mods you do not own. Make small test fixtures yourself.
 
 ## Design records

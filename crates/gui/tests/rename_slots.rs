@@ -958,7 +958,7 @@ fn a_shared_helpers_recipe_follows_the_sharing_set() {
 }
 
 /// Review pictures of the Outputs dialog with Whole path ticked at 1100, 1280 and 1600 px (egui-ui-rules step 5).
-/// Needs a GPU and `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test rename_slots -- --ignored shots`.
+/// Needs a GPU and `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it rename_slots::shots -- --ignored`.
 #[test]
 #[ignore]
 fn shots() {
@@ -988,7 +988,7 @@ fn shots() {
 }
 
 /// The JSON editor and the set editor at 1280 px on a renamed set with two matches (final review 13). Needs a GPU and
-/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test rename_slots -- --ignored matching_shots`.
+/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it rename_slots::matching_shots -- --ignored`.
 #[test]
 #[ignore]
 fn matching_shots() {

@@ -1,6 +1,6 @@
 //! v2 artist checks, Task 2 Step 6: how often each check fires on the owner's 10k test set (thresholds are tuned
 //! against warning spam). Owner data: `#[ignore]`, gated on `SDC_TEXTURES_10K`. Run with
-//! `cargo test -p sdc-gui --release --test checks_corpus -- --ignored --nocapture`.
+//! `cargo test -p sdc-gui --release --test it checks_corpus:: -- --ignored --nocapture`.
 use engine::api::*;
 use engine::config::{Category, Subtype, Target};
 use engine::events::*;
