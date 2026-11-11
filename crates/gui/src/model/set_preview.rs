@@ -521,7 +521,7 @@ pub fn encode(
         Source::Job(job) if mode == PreviewMode::Source => {
             let r = session
                 .preview_source_stored(job, cap, cancel)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(|e| e.to_string())?;
             uncompressed_dds(
                 &as_sampled(r.levels, job.profile.format),
                 job.profile.format.is_hdr(),
@@ -534,7 +534,7 @@ pub fn encode(
         Source::Job(job) => {
             let r = session
                 .preview(job, cap, cancel)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(|e| e.to_string())?;
             let (width, height) = r.source.dims[r.source.first_level];
             let desc = DdsDesc {
                 width,

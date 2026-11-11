@@ -374,7 +374,7 @@ pub fn spawn_source(
                 session
                     .preview_source_face(&job, face, max, &cancel)
                     .map(Arc::new)
-                    .map_err(|e| format!("{e:?}"))
+                    .map_err(|e| e.to_string())
             },
             |e| WorkerMsg::Source {
                 token,
@@ -414,7 +414,7 @@ pub fn spawn_encode(
                             .decode_if_cpu_path(),
                         )
                     })
-                    .map_err(|e| format!("{e:?}"))
+                    .map_err(|e| e.to_string())
             },
             |e| WorkerMsg::Encoded {
                 token,
