@@ -138,7 +138,7 @@ fn member_write(
         (Some(p), _) => p.clone(),
         (None, Some((base, defaults))) => {
             let (dir, stem) = base.rsplit_once('/')?;
-            let named = renamed_output(&defaults.key(item)?, stem, v.tails())?;
+            let named = renamed_output(&defaults.key(item, &v.members)?, stem, v.tails())?;
             format!("{dir}/{}", named.file_name()?.to_string_lossy())
         }
         (None, None) => return None,

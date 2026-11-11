@@ -843,7 +843,7 @@ fn the_default_output_matches_the_plan_when_nothing_moves_it() {
         .filter(|i| i.job.is_some() && !i.job_key.is_empty())
     {
         assert_eq!(
-            defaults.key(it).as_deref(),
+            defaults.key(it, &[]).as_deref(),
             Some(it.job_key.as_str()),
             "{}",
             it.key

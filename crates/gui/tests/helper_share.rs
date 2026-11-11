@@ -657,6 +657,51 @@ fn a_fill_on_a_sharing_sets_packed_output_reaches_the_engine() {
     );
 }
 
+/// Final review Issue 2: both sets' packed outputs export, each to its own set's folder, with no collision row and no
+/// Review block.
+#[test]
+fn a_shared_roughness_exports_both_packed_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_roughness(d.path());
+    m.export_clicked();
+    assert!(m.review.is_none(), "no Review block");
+    assert!(m.dialog.is_none(), "{:?}", m.dialog);
+    idle(&mut m);
+    let written = files_under(&m.export_root());
+    for tail in ["a/rock_rmaos.dds", "c/slab_rmaos.dds"] {
+        assert!(written.iter().any(|p| p.ends_with(tail)), "{written:?}");
+    }
+    assert!(
+        sdc_gui::model::pbr_export::path_collisions(&m).is_empty(),
+        "{:?}",
+        sdc_gui::model::pbr_export::path_collisions(&m)
+    );
+}
+
+/// Final review Issue 2: a sharing set's packed output is named after the set (`DefaultOutputs::key`), so an output
+/// name moves it to `c/maple_m`, not to the helper's folder under the helper's name.
+#[test]
+fn an_output_name_on_a_sharing_set_names_its_packed_output() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_roughness(d.path());
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    complex_material(&mut m, "c/slab");
+    complex_material(&mut m, "a/rock");
+    seed_output_name(&mut m, "c/slab", "maple");
+    seed_output_name(&mut m, A, "boulder");
+    let paths = sdc_gui::model::sets::engine_inputs(&m).1;
+    let packed = |set: &str| {
+        paths
+            .iter()
+            .find(|(k, _)| matches!(k, engine::sets::OutputKey::Packed { set: s, .. } if s == set))
+            .map(|(_, p)| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| panic!("no packed path for {set}: {paths:?}"))
+    };
+    assert!(packed("c/slab").ends_with("c/maple_m.dds"), "{paths:?}");
+    assert!(packed(A).ends_with("a/boulder_m.dds"), "{paths:?}");
+}
+
 // ---- the UI ----
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {

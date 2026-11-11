@@ -1470,7 +1470,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             }
             // Note HG: the default output of the file as it is now, never the last plan's `job_key`, which a record
             // mapping or an earlier name may have moved.
-            let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
+            let Some(from) = defaults.as_ref().and_then(|d| d.key(item, &v.members)) else {
                 continue;
             };
             let Some(rel) = renamed_output(&from, name, v.tails()) else {
@@ -1496,7 +1496,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
 /// Note HG: the default output key (`/`, lower case, relative to the export root) of every file when no output path
 /// is sent for it, from what is true now and as the engine accepts it: one `apply_read_as` over all the project's
 /// files with the project's `[inputs]` (so a refused alias leaves its file as it is, as in the plan), then
-/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input`. No output
+/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input` (a shared
+/// or joined helper's after the set member it stands in for). No output
 /// name or record mapping can reach it. Built once per `output_name_paths` pass.
 pub struct DefaultOutputs<'a> {
     out_root: &'a Path,
@@ -1544,15 +1545,28 @@ impl<'a> DefaultOutputs<'a> {
         })
     }
 
-    /// `item`'s default output key; `None` for a packed output without a job or a known first source.
-    pub fn key(&self, item: &TextureItem) -> Option<String> {
+    /// `item`'s default output key, `members` being its set's; `None` for a packed output without a job or a known
+    /// first source.
+    pub fn key(&self, item: &TextureItem, members: &[String]) -> Option<String> {
+        use engine::pack::plan::{files_stem, virtual_input, virtual_stem};
         let output = if item.kind == ItemKind::Packed {
-            let pk = item.job.as_ref()?.pack.as_ref()?;
+            let job = item.job.as_ref()?;
+            let pk = job.pack.as_ref()?;
             let first = pk.sources.first()?.path.strip_prefix(self.root).ok()?;
             let first = self
                 .files
                 .get(first.to_string_lossy().replace('\\', "/").as_str())?;
-            engine::pack::plan::virtual_input(first, pk.kind).output
+            // Note HS2: a shared or joined helper stands in for the set's member its output is named after (Note
+            // HH2), so the output takes that member's folder and name, not the helper's.
+            let stem = files_stem(job, pk.kind).to_lowercase();
+            let named = |f: &&engine::discover::InputFile| {
+                virtual_stem(&f.rel, pk.kind).to_lowercase() == stem
+            };
+            let anchor = Some(first)
+                .filter(named)
+                .or_else(|| members.iter().filter_map(|k| self.files.get(k)).find(named))
+                .unwrap_or(first);
+            virtual_input(anchor, pk.kind).output
         } else {
             self.files.get(&item.key)?.output.clone()
         };
