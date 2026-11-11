@@ -1,7 +1,8 @@
 //! The on-disk side of [`crate::session::AnalysisCache`] (DECISIONS Note DZ): each source's (or packed image's)
 //! analysis, source info and thumbnail, kept between sessions so an unchanged image is not decoded again.
 //!
-//! One file per entry, named by the sha256 of its key: a JSON header line, then the thumbnail's RGBA8 bytes. The
+//! One file per entry, named by the sha256 of its key: a JSON header line, then the thumbnail's RGBA8 bytes,
+//! deflated when that makes them smaller (Note HV1). The
 //! key holds everything an entry's meaning depends on, and the header repeats it, so a lookup trusts only an entry
 //! whose stored key equals the wanted one. Every failure is a miss: the cache is an optimisation, never an error.
 use crate::analyse::{AnalyseHints, Analysis};
@@ -40,6 +41,34 @@ struct Head {
     non_gray: Vec<PathBuf>,
     /// Width and height of the RGBA8 bytes after the header line.
     thumb: Option<(u32, u32)>,
+}
+
+/// A thumbnail's bytes as an entry holds them (Note HV1): zlib-deflated when that is smaller, else as they are. The
+/// two never have the same length, so a reader needs no flag.
+fn pack_thumb(rgba: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    use std::io::Write as _;
+    // Fast: level 6 saves 2% more of the raw size for several times the work (measured on 600 real entries).
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    match z.write_all(rgba).and_then(|()| z.finish()) {
+        Ok(packed) if packed.len() < rgba.len() => packed.into(),
+        _ => rgba.into(),
+    }
+}
+
+/// The `len` thumbnail bytes behind `stored`: `stored` itself when it has that length (not deflated, or written
+/// before Note HV), else its inflated bytes. `None` unless exactly `len` bytes come out of a whole, valid stream.
+fn unpack_thumb(stored: &[u8], len: usize) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    if stored.len() == len {
+        return Some(stored.to_vec());
+    }
+    // `len` is from the file: the reservation is capped, and one byte past `len` is read to catch a longer stream.
+    let mut out = Vec::with_capacity(len.min(1 << 18));
+    flate2::read::ZlibDecoder::new(stored)
+        .take(len as u64 + 1)
+        .read_to_end(&mut out)
+        .ok()?;
+    (out.len() == len).then_some(out)
 }
 
 impl AnalysisStore {
@@ -86,22 +115,20 @@ impl AnalysisStore {
         if head.id != id {
             return None;
         }
-        let rgba = &bytes[nl + 1..];
+        let stored = &bytes[nl + 1..];
         let thumb = match head.thumb {
-            Some((width, height))
-                if (width as usize)
+            Some((width, height)) => {
+                let len = (width as usize)
                     .checked_mul(height as usize)
-                    .and_then(|n| n.checked_mul(4))
-                    == Some(rgba.len()) =>
-            {
+                    .and_then(|n| n.checked_mul(4))?;
                 Some(Arc::new(Thumbnail {
                     width,
                     height,
-                    rgba: rgba.to_vec(),
+                    rgba: unpack_thumb(stored, len)?,
                 }))
             }
-            None if rgba.is_empty() => None,
-            _ => return None,
+            None if stored.is_empty() => None,
+            None => return None,
         };
         if modified.is_some_and(|m| m.elapsed().is_ok_and(|age| age > TOUCH_AFTER)) {
             // A failed touch (read-only entry, share lock) is still a hit.
@@ -124,7 +151,7 @@ impl AnalysisStore {
         }
         bytes.push(b'\n');
         if let Some(t) = thumb {
-            bytes.extend_from_slice(&t.rgba);
+            bytes.extend_from_slice(&pack_thumb(&t.rgba));
         }
         let _ = write_atomic(&self.path_of(&head.id), &bytes);
     }
@@ -252,6 +279,121 @@ mod tests {
         assert_eq!((a2, i2, t2.as_deref()), (a.clone(), info, Some(&thumb)));
         let other = AnalysisStore::new(dir.path().into()).with_version(ANALYSIS_VERSION + 1);
         assert!(other.get_file(p, STAMP, h).is_none());
+    }
+
+    /// 64 x 64 texels of two ramps: bytes that repeat, as a real thumbnail's do.
+    fn ramp_thumb() -> Thumbnail {
+        Thumbnail {
+            width: 64,
+            height: 64,
+            rgba: (0..64 * 64)
+                .flat_map(|i| [(i % 64) as u8, (i / 64) as u8, 128, 255])
+                .collect(),
+        }
+    }
+    /// The one entry file in `dir`, and where its thumbnail bytes start.
+    fn only_entry(dir: &Path) -> (PathBuf, Vec<u8>, usize) {
+        let path = std::fs::read_dir(dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let bytes = std::fs::read(&path).unwrap();
+        let at = bytes.iter().position(|&b| b == b'\n').unwrap() + 1;
+        (path, bytes, at)
+    }
+    fn zlib(data: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(vec![], flate2::Compression::fast());
+        z.write_all(data).unwrap();
+        z.finish().unwrap()
+    }
+
+    /// Note HV1: the thumbnail is stored deflated and reads back byte for byte.
+    #[test]
+    fn a_thumbnail_is_stored_compressed_and_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let thumb = ramp_thumb();
+        let (p, h) = (Path::new("a.png"), AnalyseHints::default());
+        let s = AnalysisStore::new(dir.path().into());
+        s.put_file(p, STAMP, h, &a, info, Some(&thumb));
+        let (_, bytes, at) = only_entry(dir.path());
+        let stored = bytes.len() - at;
+        assert!(
+            stored < thumb.rgba.len() / 2,
+            "{stored} bytes stored for a thumbnail of {}",
+            thumb.rgba.len()
+        );
+        let (_, _, t) = s.get_file(p, STAMP, h).unwrap();
+        assert_eq!(t.as_deref(), Some(&thumb));
+    }
+
+    /// HV1: an entry written before thumbnails were compressed holds the bytes as they are, and still reads.
+    #[test]
+    fn an_entry_with_an_uncompressed_thumbnail_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let thumb = ramp_thumb();
+        let (p, h) = (Path::new("a.png"), AnalyseHints::default());
+        let s = AnalysisStore::new(dir.path().into());
+        s.put_file(p, STAMP, h, &a, info, Some(&thumb));
+        let (path, mut bytes, at) = only_entry(dir.path());
+        bytes.truncate(at);
+        bytes.extend_from_slice(&thumb.rgba);
+        std::fs::write(&path, bytes).unwrap();
+        let (_, _, t) = s.get_file(p, STAMP, h).unwrap();
+        assert_eq!(t.as_deref(), Some(&thumb));
+    }
+
+    /// HV1: a thumbnail deflate cannot shrink is stored as it is, so the length alone says which form an entry holds.
+    #[test]
+    fn a_thumbnail_that_does_not_shrink_is_stored_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let thumb = Thumbnail {
+            width: 1,
+            height: 2,
+            rgba: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        assert!(zlib(&thumb.rgba).len() >= thumb.rgba.len());
+        let (p, h) = (Path::new("a.png"), AnalyseHints::default());
+        AnalysisStore::new(dir.path().into()).put_file(p, STAMP, h, &a, info, Some(&thumb));
+        let (_, bytes, at) = only_entry(dir.path());
+        assert_eq!(bytes[at..], thumb.rgba);
+    }
+
+    /// A compressed thumbnail that is cut, changed, or longer than its header says is a miss, never a wrong picture.
+    #[test]
+    fn a_damaged_compressed_thumbnail_is_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let thumb = ramp_thumb();
+        let (p, h) = (Path::new("a.png"), AnalyseHints::default());
+        let s = AnalysisStore::new(dir.path().into());
+        s.put_file(p, STAMP, h, &a, info, Some(&thumb));
+        let (path, good, at) = only_entry(dir.path());
+        assert!(s.get_file(p, STAMP, h).is_some());
+
+        let mut cut = good.clone();
+        cut.truncate(good.len() - 5);
+        let mut changed = good.clone();
+        let mid = at + (good.len() - at) / 2;
+        changed[mid] ^= 0x55;
+        let mut longer = good[..at].to_vec();
+        longer.extend(zlib(&[thumb.rgba.clone(), thumb.rgba.clone()].concat()));
+        let mut shorter = good[..at].to_vec();
+        shorter.extend(zlib(&thumb.rgba[..thumb.rgba.len() / 2]));
+        for (name, bytes) in [
+            ("cut", cut),
+            ("changed", changed),
+            ("longer", longer),
+            ("shorter", shorter),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(s.get_file(p, STAMP, h).is_none(), "{name}");
+        }
     }
 
     #[test]
