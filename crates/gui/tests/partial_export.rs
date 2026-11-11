@@ -10,7 +10,7 @@ use sdc_gui::model::cs_pbr::Kind;
 use sdc_gui::model::review::JsonKind;
 use sdc_gui::model::set_groups::GroupTarget;
 use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome};
-use sdc_gui::model::{Answer, AppModel};
+use sdc_gui::model::{Answer, AppModel, Dialog};
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -1007,4 +1007,40 @@ fn a_scoped_set_gone_after_the_folder_change_does_not_stop_the_others() {
     assert!(export2.join("textures/g/w.dds").is_file(), "{}", notes(&m));
     assert!(!export2.join("textures/g/x.dds").exists());
     assert!(m.dialog.is_none(), "{:?}", m.dialog);
+}
+
+// ---- Note HS7: a scoped export with a tick checks the PBR folder ----
+
+fn scoped_cup_export(m: &mut AppModel) {
+    let cup = id_ending(m, "clutter/cup");
+    let k = keys(m, &[&cup]);
+    m.export_sets(k, "Export set clutter/cup".into());
+    idle(m);
+}
+
+#[test]
+fn a_scoped_export_with_a_tick_checks_the_pbr_folder_it_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = also_project(d.path());
+    m.set_export_folder(d.path().join("mods"));
+    idle(&mut m);
+    scoped_cup_export(&mut m);
+    assert!(m.dialog.is_none(), "{:?}", m.dialog);
+    let pbr = d.path().join("mods/Mod PBR");
+    assert_eq!(m.also_folders()[0], pbr);
+    assert!(
+        pbr.join("textures/clutter/cup.dds").is_file(),
+        "{}",
+        notes(&m)
+    );
+    // The PBR folder is the source mod: refused, not written in place.
+    let d2 = tempfile::tempdir().unwrap();
+    let mut m = also_project(d2.path());
+    m.set_also_location(&d2.path().join("mods"));
+    idle(&mut m);
+    m.set_also_settings(|c| c.names.pbr = Some("Mod".into()));
+    idle(&mut m);
+    scoped_cup_export(&mut m);
+    assert!(matches!(m.dialog, Some(Dialog::Error(_))), "{:?}", m.dialog);
+    assert!(!d2.path().join("mods/Mod/textures/clutter/cup.dds").exists());
 }

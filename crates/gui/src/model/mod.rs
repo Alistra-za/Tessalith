@@ -1995,9 +1995,11 @@ impl AppModel {
         if self.plan_unsettled() {
             return true;
         }
-        // P14: with a tick on, Review's gate checks the location and the three folders instead (TA19).
+        // With a tick on, Review's gate checks the location and the three folders instead (TA19). A run that skips
+        // that gate (a scoped export) writes under `output_root()`, the PBR folder, so that is the one checked
+        // (Note HS7).
         if let Some(problem) = (!self.also_runs())
-            .then(|| export::export_folder_problem(&root, &self.export_root()))
+            .then(|| export::export_folder_problem(&root, &self.output_root()))
             .flatten()
         {
             self.dialog = Some(Dialog::Error(problem));
