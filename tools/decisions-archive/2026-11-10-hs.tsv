@@ -1,0 +1,7 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+GQ5	GQ		back	HS5		partial	2026-11-10		goes: only a newly blocked member pushes the scene (HS5: one that stops being blocked pushes it too); stays: the swap-in sync and the same-frame push
+IB11	IB		back	HS10		partial	2026-11-10		goes: only an output replacing its own input is refused (HS10: any input of the run or the --mask file, --overwrite or not); stays: name, folder, layout, exit codes
+HF4	HF		back	HS13		partial	2026-11-10		goes: rename_set and retarget_auto carry membership only (HS13: order, borrows and membership); stays: the rest of the group rules
+Digest¶- A filled output records its helper last as a source with `fill`	Digest		back	HS3		partial	2026-11-10		goes: a packed source records ch:<rgba> only (HS3: plus ,inv:<rgba> when mixed); stays: the rest of the fill record
+Digest¶- Save, header Export and Review's Export blur a focused text field	Digest		back	HS9		partial	2026-11-10		goes: the list of controls that commit on press (HS9 adds the centre tab strip); stays: the rule and Ctrl+S
+Digest¶- Edit source and documents: `pick_source` compares roots	Digest		back	HS12		partial	2026-11-10		goes: nothing (HS12 adds the export-folder refusal of a touched edit); stays: the whole line; an older wording is archived, so --apply skips the row and Task 11 archived this wording by hand
