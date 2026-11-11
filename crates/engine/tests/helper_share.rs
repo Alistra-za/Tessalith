@@ -539,3 +539,36 @@ fn a_shared_roughness_makes_a_cs_set_pbr() {
     // The share is no member.
     assert_eq!(resolved(&ev, &c).0, ["slab.png"]);
 }
+
+/// Note HS2: the sharing set's packed output is keyed in the helper's folder under its own name, as policy reads it.
+#[test]
+fn a_files_key_on_a_shared_output_is_not_reported_unmatched() {
+    let d = fixture(&[
+        "textures/a/rock.png",
+        "textures/a/rock_roughness.png",
+        "textures/c/slab.png",
+    ]);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.\"textures/a/slab_rmaos\"]\npacking.fill.ao = 200\n",
+    )
+    .unwrap();
+    let (p, ev) = plan_req(request(
+        &d,
+        vec![share("textures/a/rock_roughness.png", "textures/c/slab")],
+        &[],
+    ));
+    // Precondition: policy reads the key.
+    assert_eq!(
+        packed(&p, "slab_rmaos.dds").pack.as_ref().unwrap().channels[2],
+        ChannelSource::Fill {
+            role: engine::config::RawMap::Ao,
+            code: 200
+        }
+    );
+    let unmatched: Vec<_> = ev
+        .iter()
+        .filter(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::CfgFileUnmatched))
+        .collect();
+    assert!(unmatched.is_empty(), "{unmatched:#?}");
+}

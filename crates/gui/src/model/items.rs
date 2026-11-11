@@ -9,7 +9,7 @@ use engine::helper::report::HelperReport;
 use engine::helper::FillTarget;
 use engine::manifest::output_key;
 use engine::overrides::project_rel;
-use engine::pack::plan::virtual_stem;
+use engine::pack::plan::files_stem;
 use engine::pack::RecipeKind;
 use engine::policy::{near_binary, JobStatus, Need, ResolvedJob, SourceStamp};
 use engine::session::{Session, Thumbnail};
@@ -123,14 +123,14 @@ pub(crate) fn key_of(root: &Path, path: &Path) -> String {
     project_rel(root, &f).unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
 }
 
-/// A packed job's key: its first source's folder plus the virtual stem from the first source's name, without
-/// extension (as the engine scopes `[files]`; an output path does not change it).
+/// A packed job's key: its first source's folder plus the stem of its own output name (`files_stem`, Note HS2),
+/// without extension (as the engine scopes `[files]`; an output path does not change it).
 fn packed_key(root: &Path, job: &ResolvedJob, kind: RecipeKind) -> String {
     let src = key_of(root, &job.input);
     let dir = src
         .rsplit_once('/')
         .map_or(String::new(), |(d, _)| format!("{d}/"));
-    format!("{dir}{}", virtual_stem(&job.input, kind))
+    format!("{dir}{}", files_stem(job, kind))
 }
 
 pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
@@ -414,8 +414,11 @@ impl PlanView {
         items.retain(|i| seen.insert(i.key.clone()));
         items.sort_by_key(|i| i.key.to_lowercase());
 
-        let by_input: BTreeMap<String, Vec<String>> =
-            items.iter().fold(BTreeMap::new(), |mut m, i| {
+        // Note HS2: not packed items: two sets' packed outputs can share a first source; each joins by `set_key` below.
+        let by_input: BTreeMap<String, Vec<String>> = items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Packed)
+            .fold(BTreeMap::new(), |mut m, i| {
                 m.entry(i.input.to_string_lossy().replace('\\', "/"))
                     .or_default()
                     .push(i.key.clone());

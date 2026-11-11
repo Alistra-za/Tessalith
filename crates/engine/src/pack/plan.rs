@@ -109,11 +109,29 @@ pub(crate) fn virtual_input_as(first: &InputFile, suffix: &str) -> InputFile {
 }
 
 /// The packed output's stem, from its first source's name: `<base>_<suffix>` (`rock01_roughness` → `rock01_rmaos`,
-/// and `rock01_rmaos` → `rock01_rmaos` for a source that already carries a §6.1 suffix, audit 08a-4). Its `[files]`
-/// key is this stem in the first source's folder, wherever an output path puts the file.
+/// and `rock01_rmaos` → `rock01_rmaos` for a source that already carries a §6.1 suffix, audit 08a-4). A shared or
+/// joined helper's output takes its set's name instead; [`files_stem`] gives the stem its `[files]` key uses.
 /// The base is `group::base_of`, which carries the alias `shortcut:`.
 pub fn virtual_stem(first_source: &Path, kind: RecipeKind) -> String {
     virtual_stem_as(first_source, kind.suffix())
+}
+
+/// Note HS2: the stem of a packed job's `[files]` key, as policy reads it (the key is this stem in the first source's
+/// folder, wherever an output path puts the file): the stem of the job's own output name (`game_path`), so a shared
+/// helper's output in another set (`slab_rmaos` from `rock_roughness`) and a joined helper's (`x_rmaos` from
+/// `x_mask`) key under their set's name. [`virtual_stem`] when the two agree but for letter case, so existing keys
+/// keep theirs.
+pub fn files_stem(job: &ResolvedJob, kind: RecipeKind) -> String {
+    let own = virtual_stem(&job.input, kind);
+    let named = Path::new(&job.game_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if named.is_empty() || own.to_lowercase() == named {
+        own
+    } else {
+        named
+    }
 }
 
 pub(crate) fn virtual_stem_as(first_source: &Path, suffix: &str) -> String {

@@ -6,9 +6,10 @@ use eframe::egui;
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use engine::config::RawMap;
 use engine::pack::ChannelSource;
 use image::{ImageBuffer, Luma, Rgb};
-use sdc_gui::model::items::{helper_target_text, ItemStatus};
+use sdc_gui::model::items::{helper_target_text, ItemKind, ItemStatus};
 use sdc_gui::model::pack_fills::channel_helpers;
 use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome, SetView, SlotKind};
 use sdc_gui::model::{AppModel, Selection};
@@ -576,6 +577,83 @@ fn the_helper_row_says_where_it_goes() {
         matches!(i.status, ItemStatus::PackedInto(_)),
         "{:?}",
         i.status
+    );
+}
+
+/// `a`'s roughness shared into `c/slab`: both sets pack an `_rmaos` from it.
+fn shared_roughness(dir: &Path) -> AppModel {
+    let rough = "a/rock_roughness.png";
+    let mut m = fixture(dir, &["a/rock.png", rough, "c/slab.png"], "");
+    assert_eq!(
+        m.drop_choice(rough, "c/slab", DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    m
+}
+
+/// The packed job writing `name`, whatever its item key.
+fn packed_job<'a>(m: &'a AppModel, name: &str) -> &'a engine::policy::ResolvedJob {
+    m.items
+        .iter()
+        .filter_map(|i| i.job.as_ref())
+        .find(|j| j.pack.is_some() && j.output.ends_with(name))
+        .unwrap_or_else(|| panic!("no packed job writes {name}"))
+}
+
+/// Note HS2: each set's packed output is its own item, keyed in the helper's folder under the set's name.
+#[test]
+fn a_shared_roughness_gives_each_set_its_own_packed_item() {
+    let d = tempfile::tempdir().unwrap();
+    let m = shared_roughness(d.path());
+    let out = |key: &str| {
+        let i = m.item(key).unwrap_or_else(|| panic!("no item {key}"));
+        assert_eq!(i.kind, ItemKind::Packed, "{key}");
+        i.job.as_ref().unwrap().output.clone()
+    };
+    assert!(out("a/rock_rmaos").ends_with("a/rock_rmaos.dds"));
+    let slab = out("a/slab_rmaos");
+    assert!(slab.ends_with("c/slab_rmaos.dds"), "{slab:?}");
+    let members = |id: &str| view(&m, id).members;
+    assert!(
+        members(A).iter().any(|k| k == "a/rock_rmaos"),
+        "{:?}",
+        members(A)
+    );
+    assert!(
+        !members(A).iter().any(|k| k == "a/slab_rmaos"),
+        "{:?}",
+        members(A)
+    );
+    assert!(
+        members("c/slab").iter().any(|k| k == "a/slab_rmaos"),
+        "{:?}",
+        members("c/slab")
+    );
+    assert!(
+        !members("c/slab").iter().any(|k| k == "a/rock_rmaos"),
+        "{:?}",
+        members("c/slab")
+    );
+}
+
+/// Guard: a fill written under the sharing set's packed key reaches that set's job.
+#[test]
+fn a_fill_on_a_sharing_sets_packed_output_reaches_the_engine() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_roughness(d.path());
+    m.set_pack_fill("a/slab_rmaos", RawMap::Ao, Some(200));
+    idle(&mut m);
+    assert_eq!(
+        packed_job(&m, "c/slab_rmaos.dds")
+            .pack
+            .as_ref()
+            .unwrap()
+            .channels[2],
+        ChannelSource::Fill {
+            role: RawMap::Ao,
+            code: 200
+        }
     );
 }
 

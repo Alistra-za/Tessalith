@@ -2698,11 +2698,11 @@ impl Engine {
                 project_rel(root, &f)
             };
             for j in &jobs {
-                // A packed output, or a derived `_m` (TA15, Note CN19): the folder of its first source plus the
-                // virtual stem (e.g. `rock01_rmaos`, from the first source's name, whatever output path it has),
+                // A packed output, or a derived `_m` (TA15, Note CN19): the folder of its first source plus its
+                // stem (e.g. `rock01_rmaos`; a packed output's own name, Note HS2, whatever output path it has),
                 // compared with the extension-less key. A packed output's raw sources count too.
                 let stem = match (&j.pack, &j.derive) {
-                    (Some(pk), _) => Some(crate::pack::plan::virtual_stem(&j.input, pk.kind)),
+                    (Some(pk), _) => Some(crate::pack::plan::files_stem(j, pk.kind)),
                     (None, Some(dj)) => dj
                         .kind
                         .suffix()

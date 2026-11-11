@@ -829,3 +829,54 @@ fn a_jobless_image_keeps_the_tick() {
     assert!(ticked(&h));
     h.get_by_role_and_label(Role::ComboBox, "Helper role");
 }
+
+const MASK_ROUGHNESS: &str = "[files.\"x_mask.png\"]\nhelper.role = \"roughness\"\n";
+
+fn packed_keys(m: &AppModel) -> Vec<String> {
+    m.items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Packed)
+        .map(|i| i.key.clone())
+        .collect()
+}
+
+/// Note HS2: a joined helper's packed output is keyed as the engine reads it, under the set's name.
+#[test]
+fn a_joined_helpers_packed_output_is_keyed_as_the_set() {
+    let d = tempfile::tempdir().unwrap();
+    let m = fixture(
+        d.path(),
+        &["x.png", "x_ao.png", "x_mask.png"],
+        MASK_ROUGHNESS,
+    );
+    assert!(m.item("x_rmaos").is_some(), "{:?}", packed_keys(&m));
+    assert!(m.item("x_mask_rmaos").is_none());
+}
+
+/// Note HS2 (Review Focus 3): a helper whose name differs from the set's in letter case keeps one packed item, and a
+/// fill under its key reaches the job.
+#[test]
+fn a_joined_helper_differing_in_case_keeps_one_item() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(
+        d.path(),
+        &["X.png", "X_ao.png", "x_mask.png"],
+        MASK_ROUGHNESS,
+    );
+    let keys = packed_keys(&m);
+    assert_eq!(keys.len(), 1, "{keys:?}");
+    m.set_pack_fill(&keys[0], engine::config::RawMap::Metallic, Some(77));
+    idle(&mut m);
+    let job = m
+        .item(&keys[0])
+        .and_then(|i| i.job.as_ref())
+        .expect("the job");
+    assert_eq!(
+        job.pack.as_ref().unwrap().channels[1],
+        engine::pack::ChannelSource::Fill {
+            role: engine::config::RawMap::Metallic,
+            code: 77
+        },
+        "{keys:?}"
+    );
+}
