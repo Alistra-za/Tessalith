@@ -491,6 +491,43 @@ fn if_changed_sees_a_packed_channel_move() {
     assert_eq!(run(Some("\"rmaos.a\"")), (0, 1));
 }
 
+/// Note HS3: a glossiness in R (inverted) and A (plain) stays mixed when `helper.invert` flips both, so only the
+/// recorded inverted channels tell the two apart.
+#[test]
+fn if_changed_sees_an_invert_toggle_on_a_mixed_source() {
+    let d = tempfile::tempdir().unwrap();
+    gray(d.path(), "x_glossiness.png");
+    let run = |invert: bool| {
+        let mut toml =
+            "[files.\"x_glossiness\"]\nhelper.fills = [\"rmaos.r\", \"rmaos.a\"]\n".to_string();
+        if invert {
+            toml.push_str("helper.invert = true\n");
+        }
+        std::fs::write(d.path().join("in/sdc.toml"), toml).unwrap();
+        let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+        r.recursive = true;
+        r.on_existing = OnExisting::IfChanged;
+        let rep = Reporter::new(Arc::new(NullSink), "helper-packed");
+        let e = Engine::new().unwrap();
+        let p = e.plan(r, &rep, &CancelToken::default()).unwrap();
+        let s = e.run(p, &rep, &CancelToken::default()).unwrap();
+        (s.converted, s.up_to_date)
+    };
+    assert_eq!(run(false), (1, 0));
+    assert_eq!(run(false), (0, 1));
+    // Precondition: the glossiness feeds R inverted and A plain.
+    let p = plan(d.path(), Target::Cs);
+    let ch = &packed(&p, "x_rmaos.dds").pack.as_ref().unwrap().channels;
+    let gloss = |c: &ChannelSource, inv: bool| {
+        matches!(c, ChannelSource::Source { path, invert, .. }
+            if *invert == inv && path.ends_with("x_glossiness.png"))
+    };
+    assert!(gloss(&ch[0], true) && gloss(&ch[3], false), "{ch:?}");
+    assert_eq!(run(true), (1, 0), "the toggle flips R and A");
+    assert_eq!(run(true), (0, 1));
+    assert_eq!(run(false), (1, 0), "and back");
+}
+
 /// Final re-review I2: two hand-set sources of one role (both `orm`) swap a channel; every slot either way holds a
 /// source its role could fill, so only the exact channel list tells the layouts apart.
 #[test]

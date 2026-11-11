@@ -948,7 +948,7 @@
           ]
         },
         "fill": {
-          "description": "Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed\nsource's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`). Absent on\nevery other source.",
+          "description": "Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed\nsource's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`), with the\ninverted ones when only some are (`ch:ra,inv:r`, Note HS3). Absent on every other source.",
           "type": [
             "string",
             "null"
