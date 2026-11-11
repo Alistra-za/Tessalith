@@ -404,7 +404,7 @@ fn enter_in_pattern_box_adds() {
     );
 }
 /// Task 7 Step 4: the card at 1100, 1280 and 1600 px wide, for checking against egui-ui-rules groups 2 and 3. Needs
-/// a GPU; writes `xpmf-card-<w>-{top,bottom}.png` into `XPMF_SHOTS`: `cargo test -p sdc-gui --test xpmf_card -- --ignored`.
+/// a GPU; writes `xpmf-card-<w>-{top,bottom}.png` into `XPMF_SHOTS`: `cargo test -p sdc-gui --test it xpmf_card:: -- --ignored`.
 #[test]
 #[ignore]
 fn xpmf_card_screenshots() {

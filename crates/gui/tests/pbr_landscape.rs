@@ -399,7 +399,7 @@ fn an_old_project_with_a_texture_set_block_exports_the_same_files() {
 }
 
 /// Note BM: renders the PBR Landscape card (a template, EDIDs and a material object filled in) to
-/// `SDC_PBR_LANDSCAPE_PNG` for the owner. Needs a GPU: `cargo test -p sdc-gui --test pbr_landscape -- --ignored`.
+/// `SDC_PBR_LANDSCAPE_PNG` for the owner. Needs a GPU: `cargo test -p sdc-gui --test it pbr_landscape:: -- --ignored`.
 #[test]
 #[ignore]
 fn render_the_card() {

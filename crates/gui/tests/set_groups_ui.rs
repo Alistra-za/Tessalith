@@ -879,7 +879,7 @@ fn a_read_only_project_disables_with_the_reason() {
 // ---- Screenshots ----
 
 /// Renders the Sets column with groups at 1100, 1280 and 1600 px wide into `SDC_GROUP_SHOTS` (a folder), for the
-/// review against the egui-ui-rules. Needs a GPU: `cargo test -p sdc-gui --test set_groups_ui -- --ignored render_`.
+/// review against the egui-ui-rules. Needs a GPU: `cargo test -p sdc-gui --test it set_groups_ui::render_ -- --ignored`.
 #[test]
 #[ignore]
 fn render_the_groups() {

@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU
 
 ## Digest
 
@@ -1370,3 +1370,9 @@ Source: the owner's plan to move the UV-island check out of the GUI (Tessalith i
 
 - **HT1 Every JSON finisher writes through `json_finish::guarded_write` (agent ruling).** CS PBR and XPMF call it as complex material and CS skin do, so the never-overwrite order (drop the own case twin, `may_replace`, atomic write, record the hash) has one copy; notes and files are unchanged (extends FW2). Two pins came with it: `presets_creator::a_new_preset_is_not_saved_over_a_file_that_did_not_load` (AM8) and `cm_json::without_a_cm_phase_the_cm_json_follows_the_pbr_phase` (the fall-back of FW1).
 - **HT2 A per-crate test run adds `-p sdc` (owner, 2026-11-10).** `cargo test -p <crate> -p sdc ...` resolves features as `--workspace` does, so the gate reuses its build. Measured with `cargo tree`: `-p engine` alone builds 15 packages under other features and `-p sdc-gui` alone 3; with `-p sdc` added, none. For this the CLI's dev-dependency on `sdc-gui` turns on `test-hooks` (no CLI test reads a GUI hook). It amends the Gates rule of 2026-10-29 in CLAUDE.md.
+
+## Note HU — one GUI test binary (main team, 2026-11-10)
+
+- **HU1 The GUI test files are modules of one test binary, `it` (owner, 2026-11-10).** `crates/gui/tests/it/main.rs` names each `tests/<name>.rs` with `#[path]`, so no file moved and each keeps its own `mod support;` (the binary allows `clippy::duplicate_mod` for that, and nothing else). `crates/gui/Cargo.toml` sets `autotests = false`: only the targets it lists are built. A test is named `<file>::<test>`, and one file runs with `cargo test -p sdc-gui -p sdc --test it <file>::`. Measured for the 154 merged files: 19.9 GB of exes and PDBs became 0.23 GB, and building the GUI and CLI test binaries went from 454 s to 180 s. The gate's `render_` filter still selects GPU tests only, because no test file has `render_` in its name; a file named so would move all its tests to the GPU step.
+- **HU2 A test file that changes process-wide state stays its own `[[test]]` target (agent ruling).** Eight do. `app_no_local_store`, `doc_shots`, `meshes_header`, `nif_edit`, `replan_timing` and `ui_proof` point `%LOCALAPPDATA%` or `%APPDATA%` at a temp folder. `crash_recovery` installs the panic hook. `device_lost` sets the device-lost flag, which nothing clears: the next `SdcApp` frame in the process would open the restart dialog of FC4 and wait for a click. A trial run with `nif_edit` and `meshes_header` merged hung for hours and its log ends with the restart's `--after-device-loss`. `ui_drive` keeps its own harness.
+- **HU3 `it::every_test_file_is_built` fails when a top-level test file is in neither place, or in both (agent ruling).** With `autotests = false` a forgotten file is never compiled, and its tests would pass by not running. A file in both places would run a second time beside tests it can disturb.

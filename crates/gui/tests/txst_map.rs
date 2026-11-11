@@ -990,7 +990,7 @@ fn no_fill_round_trips() {
     let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
     assert!(!text.contains("no_fill"), "{text}");
 }
-/// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test txst_map -- --ignored render_`: the card and the editor of the
+/// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test it txst_map::render_ -- --ignored`: the card and the editor of the
 /// shared set at 1100, 1280 and 1600 px wide.
 #[test]
 #[ignore]
