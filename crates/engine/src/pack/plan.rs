@@ -127,7 +127,8 @@ pub fn files_stem(job: &ResolvedJob, kind: RecipeKind) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if named.is_empty() || own.to_lowercase() == named {
+    // Both sides folded alike: `game_path` may be folded for ASCII only (`discover::game_path`).
+    if named.is_empty() || own.to_lowercase() == named.to_lowercase() {
         own
     } else {
         named
@@ -1373,4 +1374,56 @@ pub fn finish_recipe(
     }
     job.pack = Some(c.job.clone());
     job
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Subtype;
+
+    fn job(input: &str, game_path: &str) -> ResolvedJob {
+        ResolvedJob {
+            input: input.into(),
+            output: PathBuf::new(),
+            game_path: game_path.into(),
+            set_key: String::new(),
+            profile: crate::presets::PresetRegistry::builtin()
+                .unwrap()
+                .base_profile(Target::Cs, Subtype::Diffuse),
+            provenance: Default::default(),
+            suggestions: vec![],
+            warnings: vec![],
+            status: JobStatus::Ready,
+            suffix_alias: None,
+            source: None,
+            pack: None,
+            bake: None,
+            derive: None,
+            shader: None,
+            cube: None,
+            fill: None,
+            unknown_suffix: false,
+        }
+    }
+
+    /// Note HS2: the own stem when the names agree but for letter case (ASCII or not), else the job's own name.
+    #[test]
+    fn files_stem_keeps_the_own_case_and_takes_a_set_name() {
+        let stem =
+            |input: &str, game_path: &str| files_stem(&job(input, game_path), RecipeKind::Rmaos);
+        assert_eq!(
+            stem("a/Rock_roughness.png", "textures/a/rock_rmaos.png"),
+            "Rock_rmaos"
+        );
+        // `discover::game_path` folds ASCII only.
+        assert_eq!(
+            stem("a/ÄRMEL.png", "textures/a/Ärmel_rmaos.png"),
+            "ÄRMEL_rmaos"
+        );
+        assert_eq!(
+            stem("a/rock_roughness.png", "textures/c/slab_rmaos.png"),
+            "slab_rmaos"
+        );
+        assert_eq!(stem("a/Rock_roughness.png", ""), "Rock_rmaos");
+    }
 }

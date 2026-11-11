@@ -637,7 +637,7 @@ fn a_shared_roughness_gives_each_set_its_own_packed_item() {
     );
 }
 
-/// Guard: a fill written under the sharing set's packed key reaches that set's job.
+/// Note HS2 regression: a fill written under the sharing set's packed key reaches that set's job.
 #[test]
 fn a_fill_on_a_sharing_sets_packed_output_reaches_the_engine() {
     let d = tempfile::tempdir().unwrap();
