@@ -445,6 +445,67 @@ fn rename_refuses_names_in_use_and_bad_names() {
         .all(|e| !matches!(e, engine::sets::SetEdit::Rename { .. })));
 }
 
+/// Note HS11: the engine still makes a deleted automatic set (it renames before it moves files out), so its name
+/// stays refused to a rename.
+#[test]
+fn rename_refuses_the_name_of_a_deleted_automatic_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    idle(&mut m);
+    assert!(m.delete_set("landscape/leaf"));
+    idle(&mut m);
+    assert!(!set_views(&m).iter().any(|s| s.id == "landscape/leaf"));
+    assert!(m.rename_set("landscape/rock01", "landscape/leaf").is_err());
+    idle(&mut m);
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    let rock = entries
+        .iter()
+        .find(|e| e.id == "landscape/rock01")
+        .expect("rock01's entry");
+    assert_eq!(rock.shader, Some(engine::shader::Shader::Pbr));
+    assert!(entries.iter().all(|e| e.renamed_from.is_none()));
+    assert!(!set_views(&m).iter().any(|s| s.id == "landscape/leaf"));
+    assert!(engine_inputs(&m)
+        .0
+        .iter()
+        .all(|e| !matches!(e, engine::sets::SetEdit::Rename { .. })));
+}
+
+#[test]
+fn rename_refuses_the_name_of_an_automatic_set_emptied_by_a_move() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    let leaf = key_of(&m, "leaf.png");
+    m.drop_replace(&leaf, "landscape/rock01", DropChoice::Move)
+        .unwrap();
+    idle(&mut m);
+    let v = set_views(&m);
+    assert!(!v.iter().any(|s| s.id == "landscape/leaf"), "no leaf card");
+    let odd = key_of(&m, "odd.png");
+    let odd_set = v
+        .iter()
+        .find(|s| s.members.contains(&odd))
+        .expect("odd's set")
+        .id
+        .clone();
+    assert!(m.rename_set(&odd_set, "landscape/leaf").is_err());
+}
+
+/// A set the user created makes no automatic set, so it may take a hidden automatic name.
+#[test]
+fn a_created_set_may_take_a_hidden_automatic_name() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    idle(&mut m);
+    assert!(m.delete_set("landscape/leaf"));
+    idle(&mut m);
+    let odd = key_of(&m, "odd.png");
+    let id = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    assert_eq!(m.rename_set(&id, "landscape/leaf"), Ok(()));
+}
+
 #[test]
 fn delete_set_deletes_a_created_set() {
     let d = tempfile::tempdir().unwrap();

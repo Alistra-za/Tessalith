@@ -769,6 +769,20 @@ fn dir_of(key: &str) -> &str {
     key.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
+/// The automatic set id file `item_key` takes from its name: its folder and base name (`a/rock01_n.png` → `a/rock01`).
+fn auto_id(item_key: &str) -> String {
+    let stem = Path::new(item_key)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let (dir, base) = (dir_of(item_key), base_of(&stem));
+    if dir.is_empty() {
+        base
+    } else {
+        format!("{dir}/{base}")
+    }
+}
+
 /// The stem the diffuse's output has when it mirrors its source (DECISIONS N2): the source stem, without a colour
 /// term (`rock01_albedo` → `rock01`, as Discover names the output). Taken from the source, never from the plan's
 /// output, which an output path has already moved under the prefix.
@@ -2399,11 +2413,7 @@ impl AppModel {
         // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
         // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
         // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
-        let stem = Path::new(item)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
-        let automatic = format!("{}/{}", dir_of(item), base_of(&stem));
+        let automatic = auto_id(item);
         let own = match self.set_of_item(item) {
             Some(f) => f.id == target.id,
             None => self.is_no_set(item) && same_id(&automatic, &target.id),
@@ -2546,18 +2556,7 @@ impl AppModel {
             return Err(PACKED_MOVE.into());
         }
         self.leaves_locked(item)?;
-        let stem = Path::new(item)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        let base = base_of(&stem);
-        let dir = dir_of(item);
-        let first = if dir.is_empty() {
-            base
-        } else {
-            format!("{dir}/{base}")
-        };
+        let first = auto_id(item);
         let taken = self.taken_ids();
         let mut id = first.clone();
         let mut n = 2;
@@ -2705,6 +2704,22 @@ impl AppModel {
         });
         if !own_original && self.taken_ids().contains(&fold_id(&new_id)) {
             return Err(format!("a set {new_id} already exists"));
+        }
+        // Note HS11: the engine still makes a file's automatic set, card or not (deleted, or emptied by a move), when
+        // it applies the rename, so it refuses the rename and the set's entry is left naming no files. A created set's
+        // rename is not sent to the engine as a Rename.
+        // shortcut: the id is predicted with `base_of` (no preset aliases, no `_detail` join); upgrade to
+        // `engine::group::group_sets_with` over the file list if it mis-predicts.
+        if !own_original
+            && !v.created
+            && self
+                .items
+                .iter()
+                .any(|i| i.kind != ItemKind::Packed && same_id(&auto_id(&i.key), &new_id))
+        {
+            return Err(format!(
+                "{new_id} is still the automatic set of a file; pick another name"
+            ));
         }
         let (a, b) = (v.id.clone(), new_id);
         // TA31: the Also export opt-out (`[export] skip`, set ids) follows, in the same step.
