@@ -397,6 +397,12 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         }
     };
     let dims: Vec<(u32, u32)> = f.levels.iter().map(|(w, h, _)| (*w, *h)).collect();
+    // DT22: a cube's cross is 4 faces wide, so its face gets a quarter of the cap.
+    let max = if f.is_cubemap {
+        cube_cross::face_cap(max)
+    } else {
+        max
+    };
     let first_level = engine::session::first_level_within(&dims, max);
     // `first_level_within` falls back to the last mip; a short chain can end above the limit (trace-debug #16).
     if let Some(&(w, h)) = dims.get(first_level).filter(|(w, h)| *w.max(h) > max) {
