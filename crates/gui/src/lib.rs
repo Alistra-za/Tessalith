@@ -16,15 +16,19 @@ pub mod settings;
 pub mod ui;
 pub mod worker;
 
-/// Turns on the analysis disk cache (DECISIONS Note DZ): `<local_app_data>\sdc\analysis-cache`, pruned now to
-/// `max_bytes` (Note HV2). `None` (no `LOCALAPPDATA`) means no store. Only `main` reads the variable and passes it in.
+/// Turns on the analysis disk cache (DECISIONS Note DZ): `<local_app_data>\sdc\analysis-cache`, pruned now to the
+/// limit in `settings` (Note HV2). `None` (no `LOCALAPPDATA`) means no store. Only `main` reads the variable and
+/// passes it in.
 pub fn with_analysis_cache(
     session: engine::session::Session,
     local_app_data: Option<&std::path::Path>,
-    max_bytes: u64,
+    settings: &settings::GuiSettings,
 ) -> engine::session::Session {
     match local_app_data {
-        Some(base) => session.with_disk_cache(base.join("sdc").join("analysis-cache"), max_bytes),
+        Some(base) => session.with_disk_cache(
+            base.join("sdc").join("analysis-cache"),
+            settings.analysis_cache_bytes(),
+        ),
         None => session,
     }
 }

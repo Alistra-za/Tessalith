@@ -9,7 +9,7 @@ use crate::analyse::{AnalyseHints, Analysis};
 use crate::dds::write_atomic;
 use crate::image::SourceInfo;
 use crate::policy::SourceStamp;
-use crate::session::{PackEntry, Thumbnail};
+use crate::session::{PackEntry, Thumbnail, THUMB_MAX};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ struct Head {
     info: SourceInfo,
     #[serde(default)]
     non_gray: Vec<PathBuf>,
-    /// Width and height of the RGBA8 bytes after the header line.
+    /// Width and height of the RGBA8 thumbnail after the header line (stored as `pack_thumb` leaves it).
     thumb: Option<(u32, u32)>,
 }
 
@@ -56,19 +56,20 @@ fn pack_thumb(rgba: &[u8]) -> std::borrow::Cow<'_, [u8]> {
 }
 
 /// The `len` thumbnail bytes behind `stored`: `stored` itself when it has that length (not deflated, or written
-/// before Note HV), else its inflated bytes. `None` unless exactly `len` bytes come out of a whole, valid stream.
+/// before Note HV), else its inflated bytes. `None` unless `stored` is one whole zlib stream, with its checksum and
+/// nothing after it, that inflates to exactly `len` bytes. The caller bounds `len`; no more than that is reserved.
 fn unpack_thumb(stored: &[u8], len: usize) -> Option<Vec<u8>> {
-    use std::io::Read as _;
     if stored.len() == len {
         return Some(stored.to_vec());
     }
-    // `len` is from the file: the reservation is capped, and one byte past `len` is read to catch a longer stream.
-    let mut out = Vec::with_capacity(len.min(1 << 18));
-    flate2::read::ZlibDecoder::new(stored)
-        .take(len as u64 + 1)
-        .read_to_end(&mut out)
+    // `decompress_vec` fills the reserved room only, so a longer stream does not end and is a miss.
+    let mut out = Vec::with_capacity(len);
+    let mut z = flate2::Decompress::new(true);
+    let end = z
+        .decompress_vec(stored, &mut out, flate2::FlushDecompress::Finish)
         .ok()?;
-    (out.len() == len).then_some(out)
+    let whole = end == flate2::Status::StreamEnd && z.total_in() == stored.len() as u64;
+    (whole && out.len() == len).then_some(out)
 }
 
 impl AnalysisStore {
@@ -117,10 +118,10 @@ impl AnalysisStore {
         }
         let stored = &bytes[nl + 1..];
         let thumb = match head.thumb {
-            Some((width, height)) => {
-                let len = (width as usize)
-                    .checked_mul(height as usize)
-                    .and_then(|n| n.checked_mul(4))?;
+            // No thumbnail is larger than `THUMB_MAX` a side: a header that says so is damaged, and its size is not
+            // reserved.
+            Some((width, height)) if width.max(height) <= THUMB_MAX => {
+                let len = width as usize * height as usize * 4;
                 Some(Arc::new(Thumbnail {
                     width,
                     height,
@@ -128,7 +129,7 @@ impl AnalysisStore {
                 }))
             }
             None if stored.is_empty() => None,
-            None => return None,
+            _ => return None,
         };
         if modified.is_some_and(|m| m.elapsed().is_ok_and(|age| age > TOUCH_AFTER)) {
             // A failed touch (read-only entry, share lock) is still a hit.
@@ -364,6 +365,37 @@ mod tests {
         assert_eq!(bytes[at..], thumb.rgba);
     }
 
+    /// HV1: what `pack_thumb` returns is the input itself or strictly shorter, so no deflated thumbnail has the
+    /// length of its texels, which is all a reader goes by. The inputs are noise followed by a growing run of zeros,
+    /// so their deflated length passes their own length; at least one must land exactly on it.
+    #[test]
+    fn a_packed_thumbnail_never_has_the_length_of_its_texels() {
+        let mut x = 1u32;
+        let mut data: Vec<u8> = (0..64)
+            .map(|_| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (x >> 24) as u8
+            })
+            .collect();
+        let mut ties = 0;
+        for _ in 0..200 {
+            data.push(0);
+            let packed = pack_thumb(&data);
+            assert!(
+                *packed == *data || packed.len() < data.len(),
+                "{} bytes packed to {}",
+                data.len(),
+                packed.len()
+            );
+            assert_eq!(unpack_thumb(&packed, data.len()).as_deref(), Some(&*data));
+            ties += usize::from(zlib(&data).len() == data.len());
+        }
+        assert!(
+            ties > 0,
+            "no input deflates to its own length: this test pins nothing"
+        );
+    }
+
     /// A compressed thumbnail that is cut, changed, or longer than its header says is a miss, never a wrong picture.
     #[test]
     fn a_damaged_compressed_thumbnail_is_a_miss() {
@@ -385,11 +417,21 @@ mod tests {
         longer.extend(zlib(&[thumb.rgba.clone(), thumb.rgba.clone()].concat()));
         let mut shorter = good[..at].to_vec();
         shorter.extend(zlib(&thumb.rgba[..thumb.rgba.len() / 2]));
+        // The last four bytes are the stream's checksum: every texel comes out without them.
+        let mut no_checksum = good.clone();
+        no_checksum.truncate(good.len() - 4);
+        let mut bad_checksum = good.clone();
+        *bad_checksum.last_mut().unwrap() ^= 1;
+        let mut trailing = good.clone();
+        trailing.push(0);
         for (name, bytes) in [
             ("cut", cut),
             ("changed", changed),
             ("longer", longer),
             ("shorter", shorter),
+            ("no checksum", no_checksum),
+            ("bad checksum", bad_checksum),
+            ("trailing", trailing),
         ] {
             std::fs::write(&path, bytes).unwrap();
             assert!(s.get_file(p, STAMP, h).is_none(), "{name}");
@@ -521,6 +563,25 @@ mod tests {
         s.put(head, None);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
         assert!(s.get_file(p, STAMP, h).is_none());
+    }
+
+    /// A thumbnail of the largest size reads; a header that names a larger one is a miss, whatever follows it, so a
+    /// damaged header never sizes the buffer its thumbnail is inflated into.
+    #[test]
+    fn a_thumbnail_larger_than_any_made_is_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, info) = sample();
+        let (p, h) = (Path::new("a.png"), AnalyseHints::default());
+        let s = AnalysisStore::new(dir.path().into());
+        for (width, hit) in [(THUMB_MAX, true), (THUMB_MAX + 1, false)] {
+            let thumb = Thumbnail {
+                width,
+                height: 1,
+                rgba: vec![7; width as usize * 4],
+            };
+            s.put_file(p, STAMP, h, &a, info, Some(&thumb));
+            assert_eq!(s.get_file(p, STAMP, h).is_some(), hit, "{width} wide");
+        }
     }
 
     #[test]

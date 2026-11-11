@@ -164,6 +164,27 @@ fn a_hand_edit_made_while_running_survives_the_next_save() {
     assert_eq!(m.settings, back, "the app now holds what it wrote");
 }
 
+/// Note HV2: a cache limit typed into gui.toml while the app runs survives the app's next save, and a limit set in
+/// the app replaces it.
+#[test]
+fn a_hand_edited_cache_limit_survives_the_next_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    GuiSettings::default().save(&p).unwrap();
+    let (s, _) = GuiSettings::load(&p);
+    let mut m = sdc_gui::model::AppModel::new(s, Some(p.clone()), support::session());
+    let mut hand = GuiSettings::load(&p).0;
+    hand.analysis_cache_mb = Some(1000);
+    hand.save(&p).unwrap();
+    m.settings.live_encode = true;
+    m.save_settings();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(1000), "the hand edit is kept");
+    assert!(back.live_encode);
+    m.set_analysis_cache_mb(800);
+    assert_eq!(GuiSettings::load(&p).0.analysis_cache_mb, Some(800));
+}
+
 /// Audit 2026-10-15 item 9: a failed gui.toml write is a warning toast, once per distinct error.
 #[test]
 fn a_failed_settings_save_warns_once() {

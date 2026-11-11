@@ -62,22 +62,31 @@ fn with_analysis_cache_stores_under_the_given_folder_only() {
     let out = tempfile::tempdir().unwrap();
     let textures = support::mod_folder(src.path());
     let new = || engine::session::Session::new().unwrap();
+    let settings = sdc_gui::settings::GuiSettings::default();
 
     // No LOCALAPPDATA: no store, nothing written.
     plan_once(
-        &sdc_gui::with_analysis_cache(new(), None, u64::MAX),
+        &sdc_gui::with_analysis_cache(new(), None, &settings),
         &textures,
         out.path(),
     );
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
 
     // With a base folder the entries land under <base>\sdc\analysis-cache.
-    let s = sdc_gui::with_analysis_cache(new(), Some(base.path()), u64::MAX);
+    let s = sdc_gui::with_analysis_cache(new(), Some(base.path()), &settings);
     plan_once(&s, &textures, out.path());
     let dir = base.path().join("sdc").join("analysis-cache");
-    assert!(std::fs::read_dir(&dir).unwrap().count() > 0);
+    let count = || std::fs::read_dir(&dir).unwrap().count();
+    let stored = count();
+    assert!(stored > 0);
 
-    // Note HV2: the limit it is given is the size the folder is pruned to at start.
-    let _s = sdc_gui::with_analysis_cache(new(), Some(base.path()), 0);
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    // Note HV2: the folder is pruned at start to the limit in the settings; the default limit keeps these.
+    let _s = sdc_gui::with_analysis_cache(new(), Some(base.path()), &settings);
+    assert_eq!(count(), stored);
+    let none = sdc_gui::settings::GuiSettings {
+        analysis_cache_mb: Some(0),
+        ..settings
+    };
+    let _s = sdc_gui::with_analysis_cache(new(), Some(base.path()), &none);
+    assert_eq!(count(), 0);
 }

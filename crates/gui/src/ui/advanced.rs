@@ -376,8 +376,9 @@ pub(super) fn held_value(
     (r, out)
 }
 
-/// The limits the cache box offers, in MB. A value typed into gui.toml outside them is shown and kept as it is.
-const CACHE_MB: std::ops::RangeInclusive<f64> = 50.0..=20_000.0;
+/// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
+/// opens: 5,000 MB is about 150,000 entries.
+const CACHE_MB: (f64, f64) = (50.0, 5_000.0);
 
 /// The analysis disk cache's limit (Note HV2): one number box, in MB. The cache is pruned at start only, so the
 /// hover says when a new limit applies.
@@ -403,19 +404,23 @@ fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
         };
         ui.horizontal(|ui| {
             // The number box first, as the recipe rows: in a narrow drawer the text is cut, never the box.
+            let mut shown = now;
             let (r, done) = held_value(ui, "analysis-cache-mb", now, |ui, x| {
-                ui.add(
+                let r = ui.add(
                     egui::DragValue::new(x)
                         .speed(10.0)
-                        .range(CACHE_MB)
-                        .clamp_existing_to_range(false)
+                        // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the
+                        // box, or leaving it, never changes it.
+                        .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
                         .max_decimals(0)
                         .suffix(" MB")
                         .update_while_editing(false),
-                )
+                );
+                shown = *x;
+                r
             });
             r.widget_info(|| {
-                let mut i = egui::WidgetInfo::drag_value(true, now);
+                let mut i = egui::WidgetInfo::drag_value(true, shown);
                 i.label = Some(NAME.to_string());
                 i
             });

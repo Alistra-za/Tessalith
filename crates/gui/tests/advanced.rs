@@ -510,6 +510,15 @@ fn the_cache_limit_box_saves_a_typed_limit() {
     assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
     assert!(!toml.exists(), "drawing saves nothing");
 
+    // Entering the box and leaving it with Enter, nothing typed, keeps the out-of-range limit too.
+    spin(&h).focus();
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
+    assert!(!toml.exists(), "leaving the box saves nothing");
+
     spin(&h).focus();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);

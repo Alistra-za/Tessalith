@@ -22,7 +22,7 @@ The exes aren't code-signed, so SmartScreen warns on the first run. Click **More
 |---|---|---|
 | `%APPDATA%\sdc\config.toml` | Your user config: default target, preset and overrides for every project. | Yes, you lose those defaults. |
 | `%APPDATA%\sdc\presets\*.toml` | Your own presets. Both programs load them on every run, and skip a file that fails to load. | Yes, you lose the presets. |
-| `%APPDATA%\sdc\gui.toml` | Window and column layout, recent folders, the default export folder, Textures filters, 3D view controls, the scan source, the analysis cache limit. | Yes, the window resets. |
+| `%APPDATA%\sdc\gui.toml` | Window and column layout, recent folders, the default export folder, Textures filters, 3D view controls, the scan source, the analysis cache limit. | Yes, the window and the cache limit reset. |
 | `%LOCALAPPDATA%\sdc\scan.db` | The mesh and plugin scan. | Yes, with Tessalith closed. The next scan rebuilds it. |
 | `%LOCALAPPDATA%\sdc\analysis-cache\` | What the GUI learned about each image, so a folder you opened before doesn't decode again. At start it is pruned to the **Analysis cache limit** under Advanced → Cache: 500 MB unless you change it, about 15,000 textures. The entries unused for longest go first, and a new limit applies the next time Tessalith starts. | Yes. |
 | `%LOCALAPPDATA%\sdc\shader-cache\` | The 3D preview's compiled shaders. | Yes. |
