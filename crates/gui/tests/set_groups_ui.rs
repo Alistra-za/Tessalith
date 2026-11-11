@@ -610,6 +610,26 @@ fn dropping_a_set_on_a_header_joins() {
     assert_eq!(stored(h.state())[0].sets, s(&["g/a", "g/b", "g/d"]));
 }
 
+/// Note HS14: a group's first member dragged down onto a card lands just after it, where the line is drawn.
+#[test]
+fn a_group_dragged_down_lands_just_after_the_card_it_is_dropped_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = sets_named(d.path(), &["a", "b", "c", "d", "e"]);
+    group(&mut m, "Armor", &["g/b", "g/c"]);
+    let ids = |m: &AppModel| -> Vec<String> { set_views(m).into_iter().map(|v| v.id).collect() };
+    let before = ids(&m);
+    assert_eq!(before, s(&["g/a", "g/b", "g/c", "g/d", "g/e"]));
+    let mut h = harness(m);
+    h.run();
+    let to = card_rect(&h, "g/d").center();
+    drag_set_to(&mut h, "g/b", to);
+    idle(h.state_mut());
+    h.run();
+    let after = ids(h.state());
+    assert_ne!(after, before, "the drop on a card was picked up");
+    assert_eq!(after, s(&["g/a", "g/d", "g/b", "g/c", "g/e"]));
+}
+
 #[test]
 fn dropping_a_texture_on_a_header_does_nothing() {
     use sdc_gui::ui::sets_column::DragItem;

@@ -1784,7 +1784,7 @@ pub fn draw(
     let ids: Vec<&str> = views.iter().map(|v| v.id.as_str()).collect();
     if editing.reorder {
         let (dropped, target) = dropped.unzip();
-        if let Some((id, to)) = reorder_target(dropped.as_deref(), target, &ids) {
+        if let Some((id, to)) = reorder_target(dropped.as_deref(), target, &ids, &grouped) {
             acts.push(Act::Reorder(id, to));
         }
     }
@@ -2084,14 +2084,34 @@ fn item_zone(
 }
 
 /// Where a dragged set goes: `released` is the set let go this frame, `hovered` the index of the pill it was let go
-/// on. Nothing happens when there is no target or the set is dropped on itself.
+/// on, `grouped` each id's group (empty without groups). Nothing happens when there is no target or the set is
+/// dropped on itself.
 fn reorder_target(
     released: Option<&str>,
     hovered: Option<usize>,
     ids: &[&str],
+    grouped: &[Option<usize>],
 ) -> Option<(String, usize)> {
-    let (id, to) = (released?, hovered?);
-    (*ids.get(to)? != id).then(|| (id.to_string(), to))
+    let (id, mut to) = (released?, hovered?);
+    if *ids.get(to)? == id {
+        return None;
+    }
+    let from = ids.iter().position(|i| *i == id)?;
+    // Note HS14: a group's first member takes its block along, and `moved_order` counts `to` without the block.
+    let g = grouped.get(from).copied().flatten();
+    let first = g.is_some() && (from == 0 || grouped[from - 1] != g);
+    let rest = if first {
+        grouped[from + 1..].iter().take_while(|x| **x == g).count()
+    } else {
+        0
+    };
+    if to > from {
+        if to <= from + rest {
+            return None;
+        }
+        to -= rest;
+    }
+    Some((id.to_string(), to))
 }
 
 /// What a pill reports back: the set dropped on it this frame (R1: detected on the target, since the source card
@@ -3879,11 +3899,11 @@ mod tests {
     fn a_released_handle_over_another_pill_reorders_to_its_index() {
         let v = ["a", "b", "c"];
         assert_eq!(
-            reorder_target(Some("a"), Some(2), &v),
+            reorder_target(Some("a"), Some(2), &v, &[]),
             Some(("a".to_string(), 2))
         );
         assert_eq!(
-            reorder_target(Some("c"), Some(0), &v),
+            reorder_target(Some("c"), Some(0), &v, &[]),
             Some(("c".to_string(), 0))
         );
     }
@@ -3937,9 +3957,26 @@ mod tests {
     #[test]
     fn no_release_no_target_or_a_drop_on_itself_does_nothing() {
         let v = ["a", "b"];
-        assert_eq!(reorder_target(None, Some(1), &v), None);
-        assert_eq!(reorder_target(Some("a"), None, &v), None);
-        assert_eq!(reorder_target(Some("a"), Some(0), &v), None);
-        assert_eq!(reorder_target(Some("a"), Some(9), &v), None);
+        assert_eq!(reorder_target(None, Some(1), &v, &[]), None);
+        assert_eq!(reorder_target(Some("a"), None, &v, &[]), None);
+        assert_eq!(reorder_target(Some("a"), Some(0), &v, &[]), None);
+        assert_eq!(reorder_target(Some("a"), Some(9), &v, &[]), None);
+    }
+
+    #[test]
+    fn a_groups_first_member_dropped_below_counts_without_its_block() {
+        let v = ["a", "b", "c", "x", "d", "e"];
+        let g = [None, Some(0), Some(0), Some(0), None, None];
+        let t = |id, to| reorder_target(Some(id), Some(to), &v, &g);
+        assert_eq!(t("b", 4), Some(("b".to_string(), 2)));
+        assert_eq!(t("b", 2), None, "a drop on its own block does nothing");
+        assert_eq!(t("b", 3), None, "a drop on its own block does nothing");
+        assert_eq!(t("b", 0), Some(("b".to_string(), 0)));
+        assert_eq!(
+            t("c", 4),
+            Some(("c".to_string(), 4)),
+            "a later member moves alone"
+        );
+        assert_eq!(t("a", 4), Some(("a".to_string(), 4)));
     }
 }
