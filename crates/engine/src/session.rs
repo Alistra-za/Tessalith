@@ -380,10 +380,11 @@ impl Session {
             skeleton: Mutex::new(None),
         })
     }
-    /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to about 200 MB.
-    pub fn with_disk_cache(mut self, dir: PathBuf) -> Session {
+    /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to `max_bytes` (Note HV2: the caller's
+    /// limit; the GUI's is a setting).
+    pub fn with_disk_cache(mut self, dir: PathBuf, max_bytes: u64) -> Session {
         let store = AnalysisStore::new(dir);
-        store.prune(200 * 1024 * 1024);
+        store.prune(max_bytes);
         self.cache.disk = Some(store);
         self
     }

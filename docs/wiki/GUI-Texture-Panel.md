@@ -89,7 +89,7 @@ Unsaved edits put a dot in the window title until you **Save** (**Ctrl+S**); Exp
 
 ## Advanced drawer
 
-The drawer at the right edge holds what isn't per texture or is rarely needed: the preset inspector ([Presets and targets](Presets-and-Targets.md)), **Live encode**, a few advanced texture fields, the artist checks ([Texture types](Texture-Types.md#artist-checks)), the Also export recipe ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)) and **Unmatched [files] entries**, with **Remove**, for entries that name no file. It edits one texture at a time, also with several selected. With a set open in 2D it is the set editor's last tab.
+The drawer at the right edge holds what isn't per texture or is rarely needed: the preset inspector ([Presets and targets](Presets-and-Targets.md)), **Live encode**, a few advanced texture fields, the artist checks ([Texture types](Texture-Types.md#artist-checks)), the **Analysis cache limit** ([Installation](Installation.md#where-tessalith-keeps-its-files)), the Also export recipe ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)) and **Unmatched [files] entries**, with **Remove**, for entries that name no file. It edits one texture at a time, also with several selected. With a set open in 2D it is the set editor's last tab.
 
 ![The Advanced drawer with the preset inspector.](../img/gui/GUI-Texture-Panel/advanced-drawer.png)
 

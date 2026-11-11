@@ -1059,6 +1059,12 @@ impl AppModel {
         }
     }
 
+    /// Note HV2: the analysis disk cache's limit, saved now and applied when the app next starts.
+    pub fn set_analysis_cache_mb(&mut self, mb: u32) {
+        self.settings.analysis_cache_mb = Some(mb);
+        self.save_settings();
+    }
+
     /// The output root the current sets were planned with (their keys are under it), else `export_root`'s (Note HQ1:
     /// inside the export folder, below the root's own `textures` folders).
     pub fn sets_root(&self) -> PathBuf {

@@ -26,6 +26,8 @@ hex.workspace = true
 globset.workspace = true
 walkdir.workspace = true
 humantime.workspace = true
+# The analysis cache's thumbnails are stored deflated (Note HV); already in the lock through esp.
+flate2.workspace = true
 
 [features]
 # Env-driven test hooks (SDC_TEST_PANIC_ON, SDC_TEST_PANIC_ON_PLAN, SDC_TEST_FAIL_VALIDATION, SDC_TEST_CANCEL_ON, SDC_TEST_ENCODE_INPUT_DIR). Off by default and never enabled by a
@@ -35,6 +37,4 @@ test-hooks = []
 
 [dev-dependencies]
 tempfile.workspace = true
-# Tests build a zlib-compressed fixture (helper_fill_run).
-flate2.workspace = true
 engine = { path = ".", features = ["test-hooks"] }

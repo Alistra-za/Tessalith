@@ -27,6 +27,7 @@ enum Action {
     RemoveUnmatched(String),
     Live(bool),
     Checks(ChecksSettings),
+    CacheMb(u32),
     AlsoRecipe(LegacyParams),
 }
 
@@ -78,6 +79,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     inspector(ui, model, state);
     preview_settings(ui, model, &mut actions);
     checks(ui, model, &mut actions);
+    cache(ui, model, &mut actions);
     also_recipe(ui, model, &mut actions);
     mipmaps(ui, model, &mut actions);
     texture_fields(ui, model, &mut actions);
@@ -89,6 +91,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::Live(on) => model.set_live(on),
             Action::Checks(c) => model.set_checks(c),
+            Action::CacheMb(mb) => model.set_analysis_cache_mb(mb),
             Action::AlsoRecipe(p) => model.set_also_settings(|c| c.legacy = p),
         }
     }
@@ -371,6 +374,63 @@ pub(super) fn held_value(
 ) -> (egui::Response, Option<f64>) {
     let (out, r) = held(ui, egui::Id::new(id), current, false, false, add);
     (r, out)
+}
+
+/// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
+/// opens: 5,000 MB is about 150,000 entries.
+const CACHE_MB: (f64, f64) = (50.0, 5_000.0);
+
+/// The analysis disk cache's limit (Note HV2): one number box, in MB. The cache is pruned at start only, so the
+/// hover says when a new limit applies.
+fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
+    const NAME: &str = "Analysis cache limit";
+    section(ui, "Cache", |ui| {
+        let now = f64::from(
+            model
+                .settings
+                .analysis_cache_mb
+                .unwrap_or(crate::settings::ANALYSIS_CACHE_MB),
+        );
+        // Built only while hovered (ui-rules 9.3).
+        let tip = |ui: &mut egui::Ui| {
+            ui.label(
+                "The most disk space the saved analyses and thumbnails of your textures may use \
+                 (%LOCALAPPDATA%\\sdc\\analysis-cache). They let a folder open without reading every image again. \
+                 Over the limit, the ones unused for longest are deleted when Tessalith starts.",
+            );
+            ui.label(
+                "A new limit applies the next time Tessalith starts. (gui.toml analysis_cache_mb)",
+            );
+        };
+        ui.horizontal(|ui| {
+            // The number box first, as the recipe rows: in a narrow drawer the text is cut, never the box.
+            let mut shown = now;
+            let (r, done) = held_value(ui, "analysis-cache-mb", now, |ui, x| {
+                let r = ui.add(
+                    egui::DragValue::new(x)
+                        .speed(10.0)
+                        // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the
+                        // box, or leaving it, never changes it.
+                        .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
+                        .max_decimals(0)
+                        .suffix(" MB")
+                        .update_while_editing(false),
+                );
+                shown = *x;
+                r
+            });
+            r.widget_info(|| {
+                let mut i = egui::WidgetInfo::drag_value(true, shown);
+                i.label = Some(NAME.to_string());
+                i
+            });
+            r.on_hover_ui(tip);
+            ui.label(NAME).on_hover_ui(tip);
+            if let Some(mb) = done {
+                actions.push(Action::CacheMb(mb.round() as u32));
+            }
+        });
+    });
 }
 
 const OPEN_RECIPE: &str = "advanced-open-recipe";

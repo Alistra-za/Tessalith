@@ -31,6 +31,26 @@ fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     assert!(err.is_some());
 }
 
+/// Note HV2: the analysis cache limit is 500 MB until one is set, and an unset limit is not written to the file.
+#[test]
+fn the_analysis_cache_limit_is_500_mb_until_set() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    let mut s = GuiSettings::default();
+    assert_eq!(s.analysis_cache_bytes(), 500 * 1024 * 1024);
+    s.save(&p).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(!text.contains("analysis_cache_mb"), "{text}");
+    s.analysis_cache_mb = Some(800);
+    s.save(&p).unwrap();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(800));
+    assert_eq!(back.analysis_cache_bytes(), 800 * 1024 * 1024);
+    // The largest value the file can hold does not overflow.
+    s.analysis_cache_mb = Some(u32::MAX);
+    assert_eq!(s.analysis_cache_bytes(), u64::from(u32::MAX) << 20);
+}
+
 #[test]
 fn recent_keeps_ten() {
     let mut s = GuiSettings::default();
@@ -142,6 +162,27 @@ fn a_hand_edit_made_while_running_survives_the_next_save() {
         "both changed: the app wins"
     );
     assert_eq!(m.settings, back, "the app now holds what it wrote");
+}
+
+/// Note HV2: a cache limit typed into gui.toml while the app runs survives the app's next save, and a limit set in
+/// the app replaces it.
+#[test]
+fn a_hand_edited_cache_limit_survives_the_next_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    GuiSettings::default().save(&p).unwrap();
+    let (s, _) = GuiSettings::load(&p);
+    let mut m = sdc_gui::model::AppModel::new(s, Some(p.clone()), support::session());
+    let mut hand = GuiSettings::load(&p).0;
+    hand.analysis_cache_mb = Some(1000);
+    hand.save(&p).unwrap();
+    m.settings.live_encode = true;
+    m.save_settings();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(1000), "the hand edit is kept");
+    assert!(back.live_encode);
+    m.set_analysis_cache_mb(800);
+    assert_eq!(GuiSettings::load(&p).0.analysis_cache_mb, Some(800));
 }
 
 /// Audit 2026-10-15 item 9: a failed gui.toml write is a warning toast, once per distinct error.
