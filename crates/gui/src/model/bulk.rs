@@ -657,6 +657,42 @@ fn textures(n: usize) -> String {
 /// One ticked field of a copy: its id, the value, and the plan over the targets.
 type CopyWrite = (String, Value, Vec<(String, Change)>);
 
+/// Note HS8: `job` as the copy's `landed` writes leave it. Each value is set at its field's path in the serialised
+/// profile (a format pair sets `format` and `color.tag`); one the profile cannot hold is left out.
+// shortcut: a copied sub-type projects only `subtype`, not the preset values it brings; upgrade if a lock that reads
+// those values skips a field copied with a sub-type.
+fn projected(job: &ResolvedJob, landed: &[(&str, &Value)]) -> ResolvedJob {
+    let mut pj = job.clone();
+    for &(field, v) in landed {
+        let sets = match encoding_of(field, v) {
+            Some((f, t)) => vec![
+                ("format", serde_json::json!(f)),
+                ("color.tag", serde_json::json!(t)),
+            ],
+            None => vec![(field, v.clone())],
+        };
+        let Ok(mut doc) = serde_json::to_value(&pj.profile) else {
+            continue;
+        };
+        for (f, v) in sets {
+            // A leaf the profile skips while default (`unset_default`) is inserted; `resize*` sit in the root.
+            let (parent, leaf) = f.rsplit_once('.').unwrap_or(("", f));
+            let ptr = if parent.is_empty() {
+                String::new()
+            } else {
+                format!("/{}", parent.replace('.', "/"))
+            };
+            if let Some(o) = doc.pointer_mut(&ptr).and_then(Value::as_object_mut) {
+                o.insert(leaf.to_string(), v);
+            }
+        }
+        if let Ok(p) = serde_json::from_value(doc) {
+            pj.profile = p;
+        }
+    }
+    pj
+}
+
 /// "Format: written to 9 of 12; locked on 3 of 12: BC1 only".
 fn report(label: &str, plan: &[(String, Change)]) -> String {
     let n = plan.len();
@@ -756,7 +792,7 @@ impl AppModel {
         // A source with a tag but no format of its own copies the tag alone (F3a ledger R15, DECISIONS AF5).
         let pair = fields.iter().any(|f| f == "format") && p.file_value(from, "format").is_some();
         let from_job = self.item(from).and_then(|i| i.job.as_ref());
-        let writes: Vec<CopyWrite> = fields
+        let mut writes: Vec<CopyWrite> = fields
             .iter()
             .filter(|f| !(pair && *f == "color.tag"))
             .filter_map(|f| {
@@ -771,6 +807,47 @@ impl AppModel {
                 Some((f.clone(), v, plan))
             })
             .collect();
+        // Note HS8: a skipped field is planned again against the target as the copy's written fields leave it.
+        // A pass only flips Skip to Write, never back, so the loop ends.
+        let locked = locked_items(self);
+        loop {
+            let mut flipped = false;
+            for (n, k) in to.iter().enumerate() {
+                let Some(job) = self
+                    .item(k)
+                    .and_then(|i| i.job.as_ref())
+                    .filter(|_| !locked.contains_key(k))
+                else {
+                    continue;
+                };
+                for i in 0..writes.len() {
+                    // shortcut: BC7 weighting is not planned again (its row value is not a profile value); upgrade
+                    // if a copy that changes the format to BC7 should carry it.
+                    let (f, v, plan) = &writes[i];
+                    let retry =
+                        f != WEIGHTING && matches!(&plan[n].1, Change::Skip(r) if r != INVALID);
+                    if !retry {
+                        continue;
+                    }
+                    let landed: Vec<(&str, &Value)> = writes
+                        .iter()
+                        .filter(|w| w.2[n].1 == Change::Write)
+                        .map(|w| (w.0.as_str(), &w.1))
+                        .collect();
+                    let pj = projected(job, &landed);
+                    let view = field_view(self.target, &pj, f);
+                    let op = BulkOp::Set(v.clone());
+                    if skip_of(Some(&pj), view.as_ref(), f, Some(&op), None, self.target).is_none()
+                    {
+                        writes[i].2[n].1 = Change::Write;
+                        flipped = true;
+                    }
+                }
+            }
+            if !flipped {
+                break;
+            }
+        }
         let name = self.item(from).map_or(from.to_string(), |i| i.name.clone());
         self.batch_edit(&format!("Copy settings from {name}"), |m| {
             for (f, v, plan) in &writes {
