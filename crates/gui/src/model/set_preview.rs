@@ -406,7 +406,7 @@ pub struct Encoder {
     /// A/B is in use: the user has flipped the mode once this session (kept across sets). Until then only the
     /// shown mode encodes.
     ab: bool,
-    /// A member failed since the last drain, or `sync` newly blocked one: the scene must be pushed again so the game's
+    /// A member failed since the last drain, or `sync` newly blocked or unblocked one (Note HS5): the scene must be pushed again so the game's
     /// copy of its texture comes back (a Fresh result needs no push, it is swapped in).
     pub scene_dirty: bool,
     tx: Sender<EncDone>,
@@ -703,8 +703,8 @@ impl Encoder {
                     mem.slot = slot
                 }
                 Some(mem) => {
-                    // Newly blocked: no bytes to swap in, the game's copy must come back (Note GQ5).
-                    if blocked.is_some() && !matches!(mem.state, EncState::Blocked(_)) {
+                    // Newly blocked or unblocked (Note HS5): a blocked member has no bytes and changes the existence check, so push the scene.
+                    if blocked.is_some() != matches!(mem.state, EncState::Blocked(_)) {
                         self.scene_dirty = true;
                     }
                     if let Some(c) = mem.cancel.take() {
@@ -1100,7 +1100,7 @@ pub fn tex_key(entry: &Value, default: &Value) -> Option<(TexKey, Option<String>
 pub struct Delta {
     /// Another set, or the set switched between simulated and plain (D3): everything again.
     pub set: bool,
-    /// A member's bytes change: encode it again and swap it in (a newly blocked member pushes the scene, Note GQ5).
+    /// A member's bytes change: encode it again and swap it in (a newly blocked or unblocked member pushes the scene, Notes GQ5, HS5).
     pub encode: bool,
     /// The match key or `nif_filter` changed: query the meshes again (and reload).
     pub requery: bool,
@@ -1980,7 +1980,7 @@ impl SetPreview {
         }
         self.entry = fp.entry.as_ref().map(|e| entry_node(e).to_value());
         self.enc.sync(m, fp.members.clone(), now, d.set);
-        // A re-encoded member is swapped in when it lands (`sync_textures`); a newly blocked one needs the push now.
+        // A re-encoded member is swapped in when it lands (`sync_textures`); a newly blocked or unblocked one (Note HS5) needs the push now.
         let blocked = std::mem::take(&mut self.enc.scene_dirty);
         self.fp = Some(fp);
         if d.set || d.requery {

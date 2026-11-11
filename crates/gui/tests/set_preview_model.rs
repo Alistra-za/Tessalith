@@ -1875,6 +1875,77 @@ fn an_edit_that_blocks_a_member_pushes_the_scene() {
     assert!(loads(&drain(&t)) >= 1, "the scene was pushed");
 }
 
+/// Note HS5: a member that stops being Blocked pushes the scene too, so pgpsim re-simulates the rows.
+#[test]
+fn a_member_that_stops_being_blocked_pushes_the_scene_and_clears_the_skip() {
+    let mut t = live();
+    drain(&t);
+    assert!(
+        matches!(t.s.rows[0].outcome, Outcome::Patched { .. }),
+        "{:?}",
+        t.s.rows[0].outcome
+    );
+    let item = diffuse_item(&t.s);
+    let old =
+        t.m.items
+            .iter()
+            .find(|i| i.key == item)
+            .unwrap()
+            .status
+            .clone();
+    t.m.items.iter_mut().find(|i| i.key == item).unwrap().status = ItemStatus::Error(vec![]);
+    t.m.invalidate_views();
+    poll_once(&mut t.s, &t.m);
+    assert!(matches!(
+        t.s.enc.members[&SlotKind::Diffuse].state,
+        EncState::Blocked(_)
+    ));
+    poll_once(&mut t.s, &t.m);
+    t.s.v3.request_frame(64, 64);
+    assert!(
+        t.s.rows[0].text().contains("will be skipped"),
+        "{}",
+        t.s.rows[0].text()
+    );
+    drain(&t);
+    t.m.items.iter_mut().find(|i| i.key == item).unwrap().status = old;
+    t.m.invalidate_views();
+    let now = Instant::now();
+    t.s.shown = true;
+    t.s.input = true;
+    t.s.poll_at(&t.m, now);
+    assert!(
+        matches!(
+            t.s.enc.members[&SlotKind::Diffuse].state,
+            EncState::Stale(None)
+        ),
+        "{:?}",
+        t.s.enc.members[&SlotKind::Diffuse].state
+    );
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    let tok = t.s.enc.token_of(SlotKind::Diffuse);
+    assert_ne!(tok, 0, "the member encodes again");
+    t.s.enc.inject(SlotKind::Diffuse, tok, DEFAULT_CAP, fake());
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    t.s.shown = true;
+    t.s.poll_at(&t.m, now + DEBOUNCE);
+    t.s.v3.request_frame(64, 64);
+    let c = drain(&t);
+    assert!(
+        matches!(t.s.rows[0].outcome, Outcome::Patched { .. }),
+        "{:?}",
+        t.s.rows[0].outcome
+    );
+    assert!(
+        !t.s.rows[0].text().contains("will be skipped"),
+        "{}",
+        t.s.rows[0].text()
+    );
+    assert!(loads(&c) >= 1, "the scene was pushed");
+}
+
 #[test]
 fn a_failed_encode_still_pushes_the_scene_so_the_games_texture_comes_back() {
     let mut t = live();
