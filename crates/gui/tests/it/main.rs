@@ -2,13 +2,13 @@
 //! instead of one per file. Each `tests/<name>.rs` is a module here, so a test is named `<name>::<test>`. Run one file
 //! with `cargo test -p sdc-gui -p sdc --test it <name>::`.
 //!
-//! A new test file gets a `mod` line below. A file that changes process-wide state (an environment variable, the
+//! A new test file gets its two lines below. A file that changes process-wide state (an environment variable, the
 //! panic hook, the device-lost flag) gets a `[[test]]` entry in `crates/gui/Cargo.toml` instead: here it would
 //! change what the tests on the other threads see. `every_test_file_is_built` fails when a file is in neither place
 //! or in both.
 
-// Every file declares `mod support;` for itself, and a few a fixture builder of another crate, as each did as its
-// own binary.
+// Every file declares `mod support;` for itself, as it did as its own binary. A few also declare the fixture builder
+// of another crate (`nif`, `esp`, `modscan`) the same way. So those files are loaded as a module more than once.
 #![allow(clippy::duplicate_mod)]
 
 #[path = "../advanced.rs"]
@@ -324,25 +324,35 @@ mod xpmf_json;
 /// and its tests would pass by not running. A file that is both runs twice, once beside tests it can disturb.
 #[test]
 fn every_test_file_is_built() {
-    let modules = include_str!("main.rs");
-    let manifest = include_str!("../../Cargo.toml");
+    // Without the CRs of a Windows checkout, so a whole line can be matched.
+    let modules = include_str!("main.rs").replace('\r', "");
+    let manifest = include_str!("../../Cargo.toml").replace('\r', "");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut wrong = Vec::new();
+    let (mut unbuilt, mut twice) = (Vec::new(), Vec::new());
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let module = modules.contains(&format!("\nmod {name};"));
-        let target = manifest.contains(&format!("path = \"tests/{name}.rs\""));
-        if module == target {
-            wrong.push(name);
+        // A folder with a `main.rs` is a target of its own, as `it` is; the other folders hold shared modules.
+        let (file, module) = if path.join("main.rs").is_file() {
+            (format!("{name}/main.rs"), false)
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let lines = format!("\n#[path = \"../{name}.rs\"]\nmod {name};\n");
+            (format!("{name}.rs"), modules.contains(&lines))
+        } else {
+            continue;
+        };
+        let target = manifest.contains(&format!("\npath = \"tests/{file}\"\n"));
+        match (module, target) {
+            (false, false) => unbuilt.push(file),
+            (true, true) => twice.push(file),
+            _ => {}
         }
     }
-    wrong.sort();
+    unbuilt.sort();
+    twice.sort();
     assert!(
-        wrong.is_empty(),
-        "each of these needs a `mod` line in tests/it/main.rs or a [[test]] entry in Cargo.toml, not both: {wrong:?}"
+        unbuilt.is_empty() && twice.is_empty(),
+        "never built (each needs its two lines in tests/it/main.rs, or a [[test]] entry in Cargo.toml): {unbuilt:?}; \
+         built twice (keep one of the two): {twice:?}"
     );
 }

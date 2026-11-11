@@ -22,7 +22,7 @@ name = "it"
 path = "tests/it/main.rs"
 
 # Each file below changes process-wide state, so it stays a process of its own (Note HU2).
-# These five point %LOCALAPPDATA% or %APPDATA% at a temp folder.
+# These six point %LOCALAPPDATA% or %APPDATA% at a temp folder.
 [[test]]
 name = "app_no_local_store"
 path = "tests/app_no_local_store.rs"
@@ -53,7 +53,7 @@ name = "crash_recovery"
 path = "tests/crash_recovery.rs"
 
 # Sets the device-lost flag, which nothing clears: the next `SdcApp` frame in the process would open the restart
-# dialog and wait for a click.
+# dialog, wait for a click, then start the test exe again and exit.
 [[test]]
 name = "device_lost"
 path = "tests/device_lost.rs"
