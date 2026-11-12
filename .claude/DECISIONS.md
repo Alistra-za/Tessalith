@@ -29,7 +29,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW
 
@@ -1407,3 +1407,10 @@ The trace-debug report of 2026-11-10 (I1 to I20) and two quality-audit items (QA
 
 - **HW1 The workspace version is 3.0.0.** The 2.1 work never shipped on its own, so it ships in 3.0 (Note DM8: MAJOR, because v3 removes features). The `encode_version` arms that read `ENGINE_VERSION` (the 2.1.0 and HR6 arms) now name 3.0.0, so their types re-encode once against a 2.0.0 record, as before. `RELEASED_ENGINE_VERSION` stays 2.0.0 until the release commit sets it.
 - **HW2 The engine is GPL-3.0-or-later.** From 3.0, `engine` and `encoders-sys` take the workspace licence like every other crate; their MPL-2.0 `LICENSE` files are gone. This supersedes the 1.x digest line from DC41 (dropped). Code already released under MPL-2.0 (2.0.0 and earlier) stays available under it. The vendored encoders keep their own licences (`THIRD_PARTY_NOTICES.md`). Not legal advice.
+
+## Note IC — Envmap cube orientation (NIF team, 2026-11-11)
+
+Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube's −Z face, against DS13 (cube +Z = world up, measured in game). Probed with the installed CS shaders; no code change. Test `crates/render3d/tests/envmap.rs`.
+
+- **IC1 render3d reads cube +Z as world up.** A black type 1 sphere (envmap scale 1, glossiness 1, white ambient, no direct light) with +Z red and −Z blue reads red on its upper half and blue on its lower half from the side, red at the centre from above and blue from below. render3d's world, camera and CS's envmap lookup all agree with DS13. Test `render_envmap_reads_cube_plus_z_as_up`.
+- **IC2 The spike's flip was a byte-order slip.** `Format::Rgba8` UNORM is DXGI 87, B8G8R8A8 (Note S4), so `dds_bytes_cube` expects BGRA texels. The spike passed RGBA, which swaps red and blue, so a red +Z face showed as blue. Pack BGRA for `Format::Rgba8`; the test builds its cube that way and first checks that an all-red cube draws red. Packed RGBA, as in the spike, the all-red cube draws blue and the test fails.
