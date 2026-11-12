@@ -54,15 +54,17 @@ pub struct ProjectedLayer {
     pub glint: Option<Glint>,
 }
 
-/// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not parallax (3), FaceGen (4, 5),
-/// MLP (11) or sparkle snow (14), whose `PROJECTED_UV` branches differ (Lighting.hlsl:1740-1748), and not a vanilla
-/// SLSF2.24 (MLP). A PBR SLSF2.24 is the coat (TwoLayer), and CS projects onto it (Note GZ1).
+/// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not FaceGen (4, 5) or sparkle
+/// snow (14), and on a vanilla shape not parallax (3), MLP (11) or SLSF2.24 (MLP), whose `PROJECTED_UV` branches
+/// differ (Lighting.hlsl:1740-1748). TruePBR drops the parallax and MLP techniques, so a PBR shape of type 3 or 11
+/// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, GZ3).
 /// Also not eye (16) or model-space normals (SLSF1.12): those permutations do not compile with `PROJECTED_UV` (EYE
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).
 pub fn projected_eligible(m: &MaterialState) -> bool {
+    let pbr = m.is_pbr();
     !m.skinned
-        && !matches!(m.shader_type, 3 | 4 | 5 | 11 | 14 | 16)
-        && (m.is_pbr() || !bit(m.slsf2, 24))
+        && !matches!(m.shader_type, 4 | 5 | 14 | 16)
+        && (pbr || (!matches!(m.shader_type, 3 | 11) && !bit(m.slsf2, 24)))
         && !bit(m.slsf1, 12)
 }
 
