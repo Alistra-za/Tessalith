@@ -36,7 +36,7 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 | Wet hide (hydrated collagen) | 1.43 | 0.031 | Co |
 | Fluorite | 1.434 | 0.032 | G |
 | Kerosene (lamp oil) | 1.44 | 0.033 | W |
-| Beeswax (candle wax) | 1.440–1.449 | 0.033–0.034 | C* |
+| Beeswax (candle wax) | 1.440–1.449 | 0.033–0.034 | C |
 | Paraffin wax | 1.442–1.448 | 0.033 | C* |
 | Opal | 1.370–1.520 | 0.024–0.043 | G |
 | Fused silica glass | 1.458 | 0.035 | W |
@@ -61,10 +61,11 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 | Plastic (PVC) | 1.542 | 0.045 | PB |
 | Amber (gem table) | 1.539–1.545 | 0.045–0.046 | G |
 | Salt | 1.5441 | 0.046 | PB |
+| Pine wood cell wall (S2 layer) | 1.538–1.555 | 0.045–0.047 | D |
 | Amethyst, citrine, rose and smoky quartz | 1.544–1.553 | 0.046–0.047 | G |
 | Hair, fur | 1.55 | 0.047 | F |
 | Ivory | 1.535–1.570 | 0.045–0.049 | G |
-| Feather (keratin); nearest for horn, hoof, claw, nail | 1.548–1.569 | 0.046–0.049 | K* |
+| Feather (keratin); nearest for horn, hoof, claw, nail | 1.548–1.569 | 0.046–0.049 | K |
 | Linen (flax fibre) | 1.52–1.60 | 0.043–0.053 | X |
 | Fabric | 1.5–1.62 | 0.040–0.056 | F |
 | Cellulose (wood fibre) | 1.5312–1.5956 | 0.044–0.053 | N |
@@ -78,7 +79,7 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 | Plastic (PC) | 1.5848 | 0.051 | PB |
 | Muscovite mica | 1.552–1.618 | 0.047–0.056 | G |
 | Asphalt (Fresh), Plastic (PUR), Polystyrene (Foam) | 1.6 | 0.053 | PB |
-| Wood (lignin) | 1.596–1.604 | 0.053–0.054 | D* |
+| Wood (lignin) | 1.596–1.604 | 0.053–0.054 | D |
 | Pearl (gem table) | 1.520–1.690 | 0.043–0.066 | G |
 | Flint glass (lead crystal) | 1.60–1.62 | 0.053–0.056 | W |
 | Nephrite jade | 1.600–1.627 | 0.053–0.057 | G |
@@ -102,8 +103,8 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 
 - **Many physicallybased.info rows share exactly IOR 1.5:** brick, cardboard, concrete, grass, sand and the foods among them.
 - **The `L` row is a default, not a measurement.** A search found no index for bark, cork or humus. For soil it found one estimate, a natural clay mix at 1.5–1.7 (IAA Granada scattering database, https://scattering.iaa.csic.es/en/node/152, from a search excerpt). For leaves it found one figure, a wet cell wall at 1.415 at 800 nm (Woolley 1975, from a search excerpt). Whole rock has no single index: use its minerals. The quartz, feldspar and mica rows span IOR 1.518–1.618, F0 0.042–0.056.
-- **Src ending in `*`:** the value was read from a search-result excerpt. The page itself was not opened (CAMEO and Optica were blocked).
-- **Organic rows are the clean, dry material** unless the name says wet. Horn, hoof, claw and nail are keratin; no direct measurement was found, so the feather row stands in. The wax excerpts give no temperature.
+- **Src ending in `*`:** the value was read from a search-result excerpt. The page itself was not opened.
+- **Organic rows are the clean, dry material** unless the name says wet. Horn, hoof, claw and nail are keratin; no direct measurement was found, so the feather row stands in. The wax figures come with no temperature.
 - **A wet surface** reflects from its water film: use Water.
 
 ## Metals
@@ -167,10 +168,11 @@ A metal's F0 is its albedo colour. Paint the sRGB value into the albedo and set 
 - **G:** International Gem Society, refractive index table (https://www.gemsociety.org/article/table-refractive-index-double-refraction-gems/)
 - **W:** Wikipedia, List of refractive indices (https://en.wikipedia.org/wiki/List_of_refractive_indices)
 - **N:** Niskanen et al. 2011, J. Wood Science: quotes cellulose's ordinary and extraordinary index at the sodium D line and 1.557 as its effective value; the paper's own pine measurement was not read (https://link.springer.com/article/10.1007/s10086-011-1222-x)
-- **D*:** Donaldson 1985, NZ J. Forestry Science 15: 349–360: lignin in the S2 wall layer and in the middle lamella (https://www.scionresearch.com/__data/assets/pdf_file/0006/59712/NZJFS1531985DONALDSON349_360.pdf)
+- **D:** Donaldson 1985, NZ J. Forestry Science 15: 349–360, Pinus radiata at 546 nm: lignin in the S2 wall layer and in the middle lamella; whole-wood S2 wall of 15 specimens, Table 1 (https://www.scionresearch.com/__data/assets/pdf_file/0006/59712/NZJFS1531985DONALDSON349_360.pdf)
 - **Co:** Wang et al. 1996, J. Biomedical Optics 1(2): 212–216: type I collagen films, group index at 850 nm, ±0.02 (https://doi.org/10.1117/12.227699)
 - **S:** PLoS ONE 2012, "Sexual Dichromatism of the Damselfly Calopteryx japonica...": insect chitin is about 1.55; 1.61 at 400 nm to 1.54 at 700 nm (https://pmc.ncbi.nlm.nih.gov/articles/PMC3502265/)
-- **K*:** Leertouwer, Wilts and Stavenga 2011, Optics Express 19(24): goose feather keratin, 1.569, 1.556 and 1.548 at 400, 500 and 600 nm
+- **K:** Leertouwer, Wilts and Stavenga 2011, Optics Express 19(24): goose feather keratin, 1.569, 1.556 and 1.548 at 400, 500 and 600 nm (abstract: https://pubmed.ncbi.nlm.nih.gov/22109431/; paper: https://doi.org/10.1364/OE.19.024061)
 - **X:** MicrolabNW gallery, Flax, citing DuPont Technical Bulletin X-156 (1961): index across and along the fibre (https://microlabgallery.com/gallery/Flax3Ac)
-- **C*:** CAMEO, Museum of Fine Arts Boston, Beeswax and Paraffin wax pages (https://cameo.mfa.org/wiki/Beeswax)
+- **C:** CAMEO, Museum of Fine Arts Boston, Beeswax (https://cameo.mfa.org/wiki/Beeswax)
+- **C*:** CAMEO, Paraffin wax (https://cameo.mfa.org/wiki/Paraffin_wax)
 - **L:** Lagarde's rule, not a measurement: F0 0.04 when there is no reference; non-gem dielectrics stay within F0 0.02–0.05 (https://seblagarde.wordpress.com/2011/08/17/feeding-a-physical-based-lighting-mode/)
