@@ -13,7 +13,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 
 | Group | What you set |
 |---|---|
-| Material | Specular level, Roughness scale, and Displacement scale while Parallax is on. |
+| Material | Specular level ([F0 by material](Specular-Reference.md)), Roughness scale, and Displacement scale while Parallax is on. |
 | Features | Emissive, Parallax, Hair, Multilayer (coat), Glint, Fuzz. |
 | Coat | Coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. Shown while Multilayer is on. |
 | Subsurface | **Off / Standard / Foliage**, then colour and opacity. |

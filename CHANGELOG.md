@@ -3,6 +3,7 @@
 ## 3.0.0 (Unreleased)
 
 - Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own. The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.
+- New wiki page, Specular reference: the F0 of 80 non-metal materials and the albedo colour of 39 metals, for setting **Specular level** on a True PBR set.
 - The analysis cache holds about five times as many textures: its limit is 500 MB (was 200 MB), and each entry's thumbnail is stored compressed, which about halves an entry. You can change the limit with **Analysis cache limit** under Advanced → Cache (`analysis_cache_mb` in `gui.toml`); a new limit applies the next time Tessalith starts. Entries an older version wrote still read. See docs/wiki/Installation.md#where-tessalith-keeps-its-files.
 - A cube DDS opened as a source previews its whole cross within the preview limit: each face gets a quarter of it, as for a cube made from faces, so a large cube no longer decodes and uploads several GB first. A cube DDS with no mip that small is not previewed and says so.
 - Changing a texture's sub-type clears a format and DDS tag the new type does not allow, with its note, also when the change takes the quick re-plan. Before, the old pair could stay in `sdc.toml`.
