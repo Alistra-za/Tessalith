@@ -16,6 +16,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # The encoder byte-identity tests pass on some runners and fail on others for the same tree; the CPU name tells
+      # the two kinds of runner apart.
+      - name: Runner CPU
+        run: (Get-CimInstance Win32_Processor).Name
       - run: python -I tools/doc-dupes.py
       - run: tools/doc-markers.ps1
       # Installs the channel, target and components pinned in rust-toolchain.toml (rustup 1.28+ no longer does this on `rustup show`).
