@@ -1,6 +1,6 @@
 schema_version = 1
 id = "vanilla-compact"
-version = "2.0.0"
+version = "3.0.0"
 base = "vanilla-quality"
 target = "vanilla"
 description = "Vanilla – Compact: perceptual BC1 for opaque colour, every other map except emissive and sky at half size (larger side above 512)."

@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.0 (Unreleased)
+## 3.0.0
 
 - Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own. The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.
 - New wiki page, Specular reference: the F0 of 81 non-metal materials and the albedo colour of 39 metals, for setting **Specular level** on a True PBR set.

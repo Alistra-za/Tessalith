@@ -1,6 +1,6 @@
 schema_version = 1
 id = "fast-preview"
-version = "2.0.0"
+version = "3.0.0"
 base = "sdc-base"
 description = "Fast preview: bc7e fast, smallest-mip validation only. For checking a mod quickly, not for release."
 

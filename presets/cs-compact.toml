@@ -1,6 +1,6 @@
 schema_version = 1
 id = "cs-compact"
-version = "2.0.0"
+version = "3.0.0"
 base = "cs-quality"
 target = "cs"
 description = "CS – Compact: BC1 for opaque colour, every other map except emissive and sky at half size (larger side above 512)."

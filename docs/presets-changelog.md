@@ -3,6 +3,14 @@
 One entry per built-in preset version. A version changes when anything the preset resolves to changes; the workspace
 version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
 
+## 2026-11-12 — sdc 3.0.0 (every preset 3.0.0)
+
+- All six built-in presets move to 3.0.0. The version alone re-encodes nothing: `if-changed` compares an output's
+  resolved profile and its sub-type's encode version, not the preset's version.
+- New sub-type in `sdc-base`: `skin_detail` (alpha `data`), the detail normal of a `cs` Advanced skin set.
+- `cs-compact` and `vanilla-compact` halve `skin_detail` like the other data maps, with
+  `resize_relative_to = "slot1"`.
+
 ## 2026-11-03 — sdc 2.0.0 (every preset 2.0.0)
 
 - All six built-in presets move to 2.0.0 and every output re-encodes once under `if-changed` (engine version 2.0.0).

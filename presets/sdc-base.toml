@@ -1,6 +1,6 @@
 schema_version = 1
 id = "sdc-base"
-version = "2.0.0"
+version = "3.0.0"
 hidden = true
 description = "Per-sub-type defaults from spec §4.1/§4.2. Not selectable; every preset inherits it."
 
