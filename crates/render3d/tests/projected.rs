@@ -72,6 +72,29 @@ fn eligible_shapes() {
     let mut coat = pbr();
     coat.slsf2 |= 1 << 24;
     assert!(projected_eligible(&coat));
+    // CS drops the parallax and MLP techniques under TruePBR, so a PBR shape of type 3 or 11 (a coat or fuzz shape
+    // keeps type 11 for its MultiLayer floats) gets the layer; FaceGen, sparkle and eye keep their technique.
+    for (t, slsf2_24) in [(3, false), (3, true), (11, false), (11, true)] {
+        let mut m = pbr();
+        m.slsf2 |= u32::from(slsf2_24) << 24;
+        let type0 = m.clone();
+        m.shader_type = t;
+        assert!(projected_eligible(&m), "PBR type {t}");
+        for stage in [Stage::Vertex, Stage::Pixel] {
+            let with_layer = |m: &MaterialState| {
+                let mut pm = perm_material(m);
+                pm.projected = true;
+                defines(&pm, stage, &[], false)
+            };
+            // The same program as a type 0 PBR shape with the layer.
+            assert_eq!(with_layer(&m), with_layer(&type0), "type {t} {stage:?}");
+        }
+    }
+    for t in [4, 5, 14, 16] {
+        let mut m = pbr();
+        m.shader_type = t;
+        assert!(!projected_eligible(&m), "PBR type {t}");
+    }
     // Model-space normals: the PS has no tbnTr for the projection's triplanar weights.
     let mut msn = MaterialState::builtin_default();
     msn.slsf1 |= 1 << 12;
@@ -609,9 +632,15 @@ fn render_projected_rotated_static_and_coat() {
         (0..3).all(|c| (up[c] as i32 - rotated[c] as i32).abs() <= 2),
         "{up:?} vs {rotated:?}"
     );
+    let mut coat11 = coat.clone();
+    coat11.shader_type = 11;
     let (off, on) = off_on(up_quad(0, coat));
     println!("coat off {off:?} on {on:?}");
     assert!(on[0] > off[0] && on[0] > on[2], "{off:?} → {on:?}");
+    // A type 11 coat (its MultiLayer floats load only for type 11; Note GZ3) draws the same.
+    let (off11, on11) = off_on(up_quad(0, coat11));
+    println!("type 11 coat off {off11:?} on {on11:?}");
+    assert_eq!((off11, on11), (off, on));
 }
 
 #[test]
