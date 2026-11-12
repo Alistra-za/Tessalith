@@ -42,4 +42,4 @@ Settings, caches and logs: [where Tessalith keeps its files](Installation.md#whe
 
 ## Licence
 
-GPL-3.0-or-later. The engine (the `engine` and `encoders-sys` crates) is MPL-2.0, and the vendored encoders keep their own licences: see [THIRD_PARTY_NOTICES.md](https://github.com/Alistra-za/Tessalith/blob/main/THIRD_PARTY_NOTICES.md).
+GPL-3.0-or-later, the engine included. The vendored encoders keep their own licences: see [THIRD_PARTY_NOTICES.md](https://github.com/Alistra-za/Tessalith/blob/main/THIRD_PARTY_NOTICES.md).

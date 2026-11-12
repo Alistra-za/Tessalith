@@ -9,10 +9,10 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW
 
 ## Digest
 
@@ -65,7 +65,6 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Game-path keys (meshes, scan, BSA) fold ASCII only; set ids and `[files]` keys fold Unicode. [BF1]
 - Files the user edits and DDS outputs are written with `engine::dds::write_atomic`, which flushes before the rename. [BC10, AV item 13]
 - One rule for replacing an existing file; never overwrite a file Tessalith did not write. [BV3, BC2]
-- The engine is MPL-2.0 (with `encoders-sys`); no commit may call it MIT. [DC41]
 - The workspace version is the engine version; it follows semantic versioning (MAJOR breaks use, MINOR adds features, PATCH fixes). [DM8, DB1]
 - Engine 2.0.0 has one encode version for every type; a 1.x record is a stale baseline and re-encodes once. [FM9, DM1]
 - Removed config keys and values are errors that name the fix; the old-version upgrade code is gone, newer-version refusals stay. [FM10, FM13, T9]
@@ -1402,3 +1401,8 @@ The trace-debug report of 2026-11-10 (I1 to I20) and two quality-audit items (QA
 - **HS14 A dragged set lands where its insertion line is drawn (agent ruling).** (I11) Dragging a group's first member down past its block subtracts the block (`reorder_target`), and a drop on a member of its own block does nothing. Before, the group landed (group size − 1) cards past the line, and a drop inside its own block moved it. Extends HF5. Tests `sets_column::tests::a_groups_first_member_dropped_below_counts_without_its_block`, `set_groups_ui::a_group_dragged_down_lands_just_after_the_card_it_is_dropped_on`.
 - **HS15 A typed texture path is committed by any click that ends the typing (agent ruling, owner confirmed 2026-11-10).** (I19) In the Meshes edit panel the path commit has its own slot (`Act.path`), applied before the click's own edit, and a tab click draws the old tab once more so its field commits. When the click is that same slot's own Fix, the Fix is dropped (the typed path wins, as before), so no Conflict is created (owner, 2026-11-10). A click that ends the typing and makes its own edit is two undo steps. Tests `nif_edit::a_path_typed_without_enter_survives_a_tab_click`, `a_path_typed_without_enter_survives_a_click_on_a_later_control`, `a_same_slot_fix_while_a_path_is_typed_is_dropped`.
 - **No ruling** for I1 (DT22's quarter cap now also holds for a cube DDS preview), I2 (restores Z11 on the fast re-plan: `apply_partial` keeps `type_base` as `apply_plan` does; a full plan that fails after a partial landed leaves the cleanup to the next settled plan), I12 (FM31: a filled job reads the filled image's analysis), I15 (rename and the input name read preset suffix aliases), I18 (DS12: `sdc validate` reads the alpha of every cube face), QA2 (`FileError` and a failed preview read as text) and QA6 (one list of recorded sources).
+
+## Note HW — Tessalith 3.0: version 3.0.0 and one licence (owner, 2026-11-11)
+
+- **HW1 The workspace version is 3.0.0.** The 2.1 work never shipped on its own, so it ships in 3.0 (Note DM8: MAJOR, because v3 removes features). The `encode_version` arms that read `ENGINE_VERSION` (the 2.1.0 and HR6 arms) now name 3.0.0, so their types re-encode once against a 2.0.0 record, as before. `RELEASED_ENGINE_VERSION` stays 2.0.0 until the release commit sets it.
+- **HW2 The engine is GPL-3.0-or-later.** From 3.0, `engine` and `encoders-sys` take the workspace licence like every other crate; their MPL-2.0 `LICENSE` files are gone. This supersedes the 1.x digest line from DC41 (dropped). Code already released under MPL-2.0 (2.0.0 and earlier) stays available under it. The vendored encoders keep their own licences (`THIRD_PARTY_NOTICES.md`). Not legal advice.

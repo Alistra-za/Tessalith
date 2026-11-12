@@ -21,7 +21,7 @@ pub const RELEASED_ENGINE_VERSION: &str = "2.0.0";
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
-/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0, and with Note HR6
+/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
 /// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`. No `_` arm: a new `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -57,10 +57,10 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
             ENGINE_VERSION
         }
-        // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
-        // A new sub-type in 2.1.0.
+        // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
+        // A new sub-type in 3.0.0.
         Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
-        // 2.1.0: the variance bake adds nothing to mip 0 (Note HD1).
+        // 3.0.0: the variance bake adds nothing to mip 0 (Note HD1).
         Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => ENGINE_VERSION,
     }
 }
