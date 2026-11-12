@@ -37,7 +37,7 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 | Fluorite | 1.434 | 0.032 | G |
 | Kerosene (lamp oil) | 1.44 | 0.033 | W |
 | Beeswax (candle wax) | 1.440–1.449 | 0.033–0.034 | C |
-| Paraffin wax | 1.442–1.448 | 0.033 | C* |
+| Paraffin wax | 1.442–1.448 | 0.033 | C |
 | Opal | 1.370–1.520 | 0.024–0.043 | G |
 | Fused silica glass | 1.458 | 0.035 | W |
 | Plastic (PLA) | 1.4586 | 0.035 | PB |
@@ -103,7 +103,6 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 
 - **Many physicallybased.info rows share exactly IOR 1.5:** brick, cardboard, concrete, grass, sand and the foods among them.
 - **The `L` row is a default, not a measurement.** A search found no index for bark, cork or humus. For soil it found one estimate, a natural clay mix at 1.5–1.7 (IAA Granada scattering database, https://scattering.iaa.csic.es/en/node/152, from a search excerpt). For leaves it found one figure, a wet cell wall at 1.415 at 800 nm (Woolley 1975, from a search excerpt). Whole rock has no single index: use its minerals. The quartz, feldspar and mica rows span IOR 1.518–1.618, F0 0.042–0.056.
-- **Src ending in `*`:** the value was read from a search-result excerpt. The page itself was not opened.
 - **Organic rows are the clean, dry material** unless the name says wet. Horn, hoof, claw and nail are keratin; no direct measurement was found, so the feather row stands in. The wax figures come with no temperature.
 - **A wet surface** reflects from its water film: use Water.
 
@@ -173,6 +172,5 @@ A metal's F0 is its albedo colour. Paint the sRGB value into the albedo and set 
 - **S:** PLoS ONE 2012, "Sexual Dichromatism of the Damselfly Calopteryx japonica...": insect chitin is about 1.55; 1.61 at 400 nm to 1.54 at 700 nm (https://pmc.ncbi.nlm.nih.gov/articles/PMC3502265/)
 - **K:** Leertouwer, Wilts and Stavenga 2011, Optics Express 19(24): goose feather keratin, 1.569, 1.556 and 1.548 at 400, 500 and 600 nm (abstract: https://pubmed.ncbi.nlm.nih.gov/22109431/; paper: https://doi.org/10.1364/OE.19.024061)
 - **X:** MicrolabNW gallery, Flax, citing DuPont Technical Bulletin X-156 (1961): index across and along the fibre (https://microlabgallery.com/gallery/Flax3Ac)
-- **C:** CAMEO, Museum of Fine Arts Boston, Beeswax (https://cameo.mfa.org/wiki/Beeswax)
-- **C*:** CAMEO, Paraffin wax (https://cameo.mfa.org/wiki/Paraffin_wax)
+- **C:** CAMEO, Museum of Fine Arts Boston: Beeswax (https://cameo.mfa.org/wiki/Beeswax) and Paraffin wax, which credits the CRC Handbook, 1980 (https://cameo.mfa.org/wiki/Paraffin_wax)
 - **L:** Lagarde's rule, not a measurement: F0 0.04 when there is no reference; non-gem dielectrics stay within F0 0.02–0.05 (https://seblagarde.wordpress.com/2011/08/17/feeding-a-physical-based-lighting-mode/)
